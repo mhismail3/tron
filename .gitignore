@@ -1,0 +1,78 @@
+# Dependencies
+node_modules/
+.pnp
+.pnp.js
+
+# Build outputs
+dist/
+*.tsbuildinfo
+.turbo/
+
+# Test coverage
+coverage/
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+pnpm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Runtime data
+pids/
+*.pid
+*.seed
+*.pid.lock
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Environment files
+.env
+.env.local
+.env.*.local
+
+# Tron agent data (user-specific, don't commit)
+.tron/sessions/
+.tron/memory/episodic.db
+.tron/memory/learnings/
+.tron/inbox/processed/
+.tron/auth.json
+
+# Session-scoped thoughts (don't commit)
+thoughts/ledgers/
+thoughts/shared/handoffs/
+thoughts/shared/plans/
+
+# Keep the structure
+!.tron/.gitkeep
+!.tron/skills/
+!thoughts/.gitkeep
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+
+# Crash reports
+*.dump
+
+# Lock files (use npm/pnpm lock only)
+yarn.lock
+package-lock.json
+!pnpm-lock.yaml
+
+# Debug
+.debug/
+
+# Research docs (kept in repo for reference)
+!*.md

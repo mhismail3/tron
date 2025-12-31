@@ -1,0 +1,41 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "lib": ["ES2022"],
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "declaration": true,
+    "declarationMap": true,
+    "sourceMap": true,
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noImplicitReturns": true,
+    "noFallthroughCasesInSwitch": true,
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true,
+    "composite": true,
+    "incremental": true,
+    "baseUrl": ".",
+    "paths": {
+      "@tron/core": ["packages/core/src"],
+      "@tron/core/*": ["packages/core/src/*"],
+      "@tron/server": ["packages/server/src"],
+      "@tron/server/*": ["packages/server/src/*"],
+      "@tron/tui": ["packages/tui/src"],
+      "@tron/tui/*": ["packages/tui/src/*"]
+    }
+  },
+  "references": [
+    { "path": "packages/core" },
+    { "path": "packages/server" },
+    { "path": "packages/tui" },
+    { "path": "packages/chat-web" }
+  ],
+  "exclude": ["node_modules", "**/dist", "**/coverage"]
+}
