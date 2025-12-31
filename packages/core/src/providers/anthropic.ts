@@ -201,8 +201,26 @@ export class AnthropicProvider {
       let accumulatedThinking = '';
       let accumulatedArgs = '';
 
+      // Track usage from streaming events (more reliable than finalMessage)
+      let inputTokens = 0;
+      let outputTokens = 0;
+
       for await (const event of stream) {
         switch (event.type) {
+          case 'message_start':
+            // Capture input tokens from message_start
+            if ('message' in event && event.message?.usage) {
+              inputTokens = event.message.usage.input_tokens ?? 0;
+            }
+            break;
+
+          case 'message_delta':
+            // Capture output tokens from message_delta
+            if ('usage' in event && event.usage) {
+              outputTokens = (event.usage as { output_tokens?: number }).output_tokens ?? 0;
+            }
+            break;
+
           case 'content_block_start':
             if (event.content_block.type === 'text') {
               currentBlockType = 'text';
@@ -262,14 +280,48 @@ export class AnthropicProvider {
             break;
 
           case 'message_stop':
-            // Get final message
-            const finalMessage = stream.finalMessage();
-            const assistantMessage = this.convertResponse(finalMessage);
-            yield {
-              type: 'done',
-              message: assistantMessage,
-              stopReason: finalMessage.stop_reason ?? 'end_turn',
-            };
+            // Get final message - wrap in try/catch as finalMessage() can throw
+            try {
+              const finalMessage = stream.finalMessage();
+              if (finalMessage) {
+                const assistantMessage = this.convertResponse(finalMessage);
+                // Override usage with streamed values if they're more complete
+                if (inputTokens > 0 || outputTokens > 0) {
+                  assistantMessage.usage = {
+                    inputTokens: inputTokens || assistantMessage.usage?.inputTokens || 0,
+                    outputTokens: outputTokens || assistantMessage.usage?.outputTokens || 0,
+                  };
+                }
+                yield {
+                  type: 'done',
+                  message: assistantMessage,
+                  stopReason: finalMessage.stop_reason ?? 'end_turn',
+                };
+              } else {
+                // If no final message, emit done with accumulated content and streamed usage
+                yield {
+                  type: 'done',
+                  message: {
+                    role: 'assistant' as const,
+                    content: [],
+                    usage: { inputTokens, outputTokens },
+                  },
+                  stopReason: 'end_turn',
+                };
+              }
+            } catch (err) {
+              logger.warn('Could not get final message', err);
+              // Use streamed usage values in fallback
+              yield {
+                type: 'done',
+                message: {
+                  role: 'assistant' as const,
+                  content: [],
+                  usage: { inputTokens, outputTokens },
+                },
+                stopReason: 'end_turn',
+              };
+            }
             break;
         }
       }
@@ -377,7 +429,18 @@ export class AnthropicProvider {
   ): AssistantMessage {
     const content: (TextContent | ThinkingContent | ToolCall)[] = [];
 
-    for (const block of response.content) {
+    // Handle case where response or content might be malformed
+    if (!response) {
+      return {
+        role: 'assistant',
+        content: [],
+        usage: { inputTokens: 0, outputTokens: 0 },
+      };
+    }
+
+    // Handle case where content might not be iterable
+    const blocks = Array.isArray(response.content) ? response.content : [];
+    for (const block of blocks) {
       if (block.type === 'text') {
         content.push({ type: 'text', text: block.text });
       } else if (block.type === 'tool_use') {
@@ -394,8 +457,8 @@ export class AnthropicProvider {
       role: 'assistant',
       content,
       usage: {
-        inputTokens: response.usage.input_tokens,
-        outputTokens: response.usage.output_tokens,
+        inputTokens: response.usage?.input_tokens ?? 0,
+        outputTokens: response.usage?.output_tokens ?? 0,
       },
       stopReason: response.stop_reason as AssistantMessage['stopReason'],
     };

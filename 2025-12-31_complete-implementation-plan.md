@@ -1,9 +1,5 @@
 # Complete Implementation Plan: Persistent Dual-Interface Coding Agent
 
-**Date:** 2025-12-31
-**Status:** published
-**Tags:** implementation-plan, tdd, architecture, coding-agent, dual-interface, memory, always-on
-
 ## Executive Summary
 
 This document provides a **complete, test-driven implementation plan** for building a persistent, dual-interface coding agent that combines the best of pi-mono's architecture with advanced memory management and productivity features.
@@ -2776,55 +2772,7 @@ export async function* agentLoop(
 
   yield { type: 'agent_end' };
 }
-```
-
----
-
-## Migration from Existing Systems
-
-### From clauset
-
-```bash
-#!/bin/bash
-# scripts/migrate-from-clauset.sh
-
-# Copy session logs if available
-if [ -d "$HOME/.claude/projects" ]; then
-  echo "Migrating Claude Code sessions..."
-  cp -r "$HOME/.claude/projects" ".agent/sessions-backup"
-fi
-
-# Convert settings
-if [ -f "$HOME/.claude/settings.json" ]; then
-  echo "Converting settings..."
-  # Custom logic to map settings
-fi
-
-echo "Migration complete. Review .agent/ directory."
-```
-
-### From pi
-
-```bash
-#!/bin/bash
-# scripts/migrate-from-pi.sh
-
-# Copy sessions
-if [ -d "$HOME/.pi/agent/sessions" ]; then
-  echo "Migrating pi sessions..."
-  cp -r "$HOME/.pi/agent/sessions" ".agent/sessions-backup"
-fi
-
-# Copy skills
-if [ -d "$HOME/.pi/agent/skills" ]; then
-  echo "Migrating skills..."
-  cp -r "$HOME/.pi/agent/skills" ".agent/skills"
-fi
-
-echo "Migration complete."
-```
-
----
+``
 
 ## Conclusion
 

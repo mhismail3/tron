@@ -21,6 +21,7 @@ import type {
   Context,
   StreamEvent,
   ToolCall,
+  TextContent,
 } from '../types/index.js';
 import { AnthropicProvider } from '../providers/anthropic.js';
 import { HookEngine } from '../hooks/engine.js';
@@ -203,6 +204,8 @@ export class TronAgent {
       // Stream response
       let assistantMessage: AssistantMessage | undefined;
       let toolCalls: ToolCall[] = [];
+      let accumulatedText = '';
+      let stopReason: string | undefined;
 
       for await (const event of this.provider.stream(context, {
         maxTokens: this.config.maxTokens,
@@ -217,6 +220,7 @@ export class TronAgent {
 
         // Emit stream events
         if (event.type === 'text_delta') {
+          accumulatedText += event.delta;
           this.emit({
             type: 'message_update',
             sessionId: this.sessionId,
@@ -225,12 +229,22 @@ export class TronAgent {
           });
         }
 
+        // Capture tool calls as they complete (more reliable than final message)
+        if (event.type === 'toolcall_end') {
+          toolCalls.push(event.toolCall);
+        }
+
         if (event.type === 'done') {
           assistantMessage = event.message;
-          // Extract tool calls
+          stopReason = event.stopReason;
+
+          // Also check final message for any tool calls we might have missed
           for (const content of assistantMessage.content) {
             if (content.type === 'tool_use') {
-              toolCalls.push(content);
+              // Only add if not already captured via streaming
+              if (!toolCalls.some(tc => tc.id === content.id)) {
+                toolCalls.push(content);
+              }
             }
           }
         }
@@ -242,6 +256,22 @@ export class TronAgent {
 
       if (!assistantMessage) {
         throw new Error('No response received');
+      }
+
+      // Rebuild assistant message content if it was empty but we have accumulated data
+      if (assistantMessage.content.length === 0 && (accumulatedText || toolCalls.length > 0)) {
+        const rebuiltContent: (TextContent | ToolCall)[] = [];
+        if (accumulatedText) {
+          rebuiltContent.push({ type: 'text', text: accumulatedText });
+        }
+        for (const tc of toolCalls) {
+          rebuiltContent.push(tc);
+        }
+        assistantMessage = {
+          ...assistantMessage,
+          content: rebuiltContent,
+          stopReason: stopReason as AssistantMessage['stopReason'],
+        };
       }
 
       // Update token usage
@@ -343,8 +373,9 @@ export class TronAgent {
         };
       }
 
-      // Check if we should stop
-      if (lastResult.stopReason === 'end_turn' || lastResult.toolCallsExecuted === 0) {
+      // Continue to next turn if we executed tools (LLM needs to see results)
+      // Stop if no tools were called (either pure text response or final answer)
+      if (lastResult.toolCallsExecuted === 0) {
         break;
       }
     }

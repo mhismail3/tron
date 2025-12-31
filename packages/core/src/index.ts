@@ -31,6 +31,12 @@ export * from './hooks/index.js';
 // Re-export agent
 export * from './agent/index.js';
 
+// Re-export RPC
+export * from './rpc/index.js';
+
+// Re-export session
+export * from './session/index.js';
+
 // Version info
 export const VERSION = '0.1.0';
 export const NAME = 'tron';
