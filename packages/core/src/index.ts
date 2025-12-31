@@ -22,6 +22,9 @@ export * from './providers/index.js';
 // Re-export tools
 export * from './tools/index.js';
 
+// Re-export memory
+export * from './memory/index.js';
+
 // Version info
 export const VERSION = '0.1.0';
 export const NAME = 'tron';
