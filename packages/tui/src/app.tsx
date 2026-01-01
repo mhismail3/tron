@@ -144,8 +144,29 @@ export function App({ config, auth }: AppProps): React.ReactElement {
   const { exit } = useApp();
   const agentRef = useRef<TronAgent | null>(null);
   const messageIdRef = useRef(0);
-  const currentAssistantIdRef = useRef<string | null>(null);
   const currentToolInputRef = useRef<string | null>(null);
+  // Track streaming content in a ref for synchronous access in event handler
+  const streamingContentRef = useRef<string>('');
+
+  /**
+   * Finalize any pending streaming content as an assistant message.
+   * This ensures text appears before tool calls in the correct order.
+   */
+  const finalizeStreamingContent = useCallback(() => {
+    if (streamingContentRef.current.trim()) {
+      dispatch({
+        type: 'ADD_MESSAGE',
+        payload: {
+          id: `msg_${messageIdRef.current++}`,
+          role: 'assistant',
+          content: streamingContentRef.current.trim(),
+          timestamp: new Date().toISOString(),
+        },
+      });
+      streamingContentRef.current = '';
+      dispatch({ type: 'CLEAR_STREAMING' });
+    }
+  }, []);
 
   // Handle agent events for streaming
   const handleAgentEvent = useCallback((event: TronEvent) => {
@@ -156,14 +177,19 @@ export function App({ config, auth }: AppProps): React.ReactElement {
         break;
 
       case 'message_update':
-        // Stream text deltas
+        // Stream text deltas - track in both ref (for sync access) and state (for display)
         if ('content' in event && event.content) {
+          streamingContentRef.current += event.content;
           dispatch({ type: 'APPEND_STREAMING_CONTENT', payload: event.content });
         }
         break;
 
       case 'tool_execution_start':
         if ('toolName' in event) {
+          // CRITICAL: Finalize any pending streaming content BEFORE showing the tool
+          // This ensures text appears in chronological order (text first, then tool)
+          finalizeStreamingContent();
+
           const toolInput = formatToolInput(
             event.toolName,
             'arguments' in event ? event.arguments as Record<string, unknown> : undefined
@@ -197,10 +223,14 @@ export function App({ config, auth }: AppProps): React.ReactElement {
         break;
 
       case 'turn_end':
-        // Finalize the streaming content as a message
+        // Finalize any remaining streaming content at end of turn
+        // This handles cases where text comes after tool calls
+        finalizeStreamingContent();
         break;
 
       case 'agent_end':
+        // Finalize any remaining streaming content before ending
+        finalizeStreamingContent();
         dispatch({ type: 'SET_STREAMING', payload: false });
         if ('error' in event && event.error) {
           dispatch({ type: 'SET_ERROR', payload: event.error });
@@ -210,7 +240,7 @@ export function App({ config, auth }: AppProps): React.ReactElement {
         }
         break;
     }
-  }, []);
+  }, [finalizeStreamingContent]);
 
   // Initialize agent
   useEffect(() => {
@@ -283,6 +313,7 @@ export function App({ config, auth }: AppProps): React.ReactElement {
     dispatch({ type: 'SET_PROCESSING', payload: true });
     dispatch({ type: 'SET_ERROR', payload: null });
     dispatch({ type: 'CLEAR_STREAMING' });
+    streamingContentRef.current = ''; // Reset the ref as well
 
     // Add user message
     dispatch({
@@ -298,35 +329,13 @@ export function App({ config, auth }: AppProps): React.ReactElement {
     try {
       dispatch({ type: 'SET_STATUS', payload: 'Thinking' });
 
-      currentAssistantIdRef.current = `msg_${messageIdRef.current++}`;
-
       // Run agent (events are streamed via onEvent handler)
+      // Messages are added incrementally via event handlers:
+      // - message_update → streams to display, accumulates in ref
+      // - tool_execution_start → finalizes pending text, shows tool
+      // - tool_execution_end → adds tool result message
+      // - turn_end/agent_end → finalizes any remaining text
       const result = await agentRef.current.run(prompt);
-
-      // Finalize: add the streamed content as an assistant message
-      if (state.streamingContent || result.messages.length > 0) {
-        // Find the final assistant response
-        let finalContent = '';
-        for (const message of result.messages) {
-          if (message.role === 'assistant') {
-            for (const block of message.content) {
-              if ('text' in block && typeof block.text === 'string') {
-                finalContent += block.text + '\n';
-              }
-            }
-          }
-        }
-
-        dispatch({
-          type: 'ADD_MESSAGE',
-          payload: {
-            id: currentAssistantIdRef.current,
-            role: 'assistant',
-            content: finalContent.trim(),
-            timestamp: new Date().toISOString(),
-          },
-        });
-      }
 
       // Update token usage
       dispatch({
@@ -337,8 +346,9 @@ export function App({ config, auth }: AppProps): React.ReactElement {
         },
       });
 
-      // Clear streaming state
+      // Clear streaming state (should already be clear from agent_end)
       dispatch({ type: 'CLEAR_STREAMING' });
+      streamingContentRef.current = '';
 
       if (!result.success) {
         dispatch({ type: 'SET_ERROR', payload: result.error ?? 'Unknown error' });
@@ -356,8 +366,9 @@ export function App({ config, auth }: AppProps): React.ReactElement {
       dispatch({ type: 'SET_PROCESSING', payload: false });
       dispatch({ type: 'SET_ACTIVE_TOOL', payload: null });
       dispatch({ type: 'CLEAR_STREAMING' });
+      streamingContentRef.current = '';
     }
-  }, [state.input, state.isProcessing, state.streamingContent]);
+  }, [state.input, state.isProcessing]);
 
   // Handle keyboard input
   useInput((input, key) => {
