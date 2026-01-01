@@ -3,7 +3,7 @@
  *
  * Types for session lifecycle, persistence, and state management.
  */
-import type { Message, ToolCall, TokenUsage } from '../types/index.js';
+import type { Message, TokenUsage } from '../types/index.js';
 
 // =============================================================================
 // Session State
@@ -21,6 +21,8 @@ export interface Session {
   model: string;
   /** Provider for the model */
   provider: string;
+  /** Custom system prompt for the session */
+  systemPrompt?: string;
   /** All messages in the session */
   messages: Message[];
   /** Creation timestamp */
@@ -88,6 +90,8 @@ export interface CreateSessionOptions {
   model?: string;
   /** Provider to use (defaults to anthropic) */
   provider?: string;
+  /** Custom system prompt */
+  systemPrompt?: string;
   /** Initial title */
   title?: string;
   /** Initial tags */
@@ -187,6 +191,7 @@ export interface SessionStartEntry {
   workingDirectory: string;
   model: string;
   provider: string;
+  systemPrompt?: string;
   metadata: SessionMetadata;
 }
 

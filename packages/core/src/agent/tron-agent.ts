@@ -12,14 +12,12 @@
 import { randomUUID } from 'crypto';
 import type {
   Message,
-  UserMessage,
   AssistantMessage,
   ToolResultMessage,
   TronTool,
   TronEvent,
   TronToolResult,
   Context,
-  StreamEvent,
   ToolCall,
   TextContent,
 } from '../types/index.js';
@@ -47,11 +45,11 @@ export class TronAgent {
   private hookEngine: HookEngine;
   private messages: Message[];
   private currentTurn: number;
-  private tokenUsage: { input: number; output: number };
+  private tokenUsage: { inputTokens: number; outputTokens: number };
   private isRunning: boolean;
   private abortController: AbortController | null;
   private eventListeners: ((event: TronEvent) => void)[];
-  private workingDirectory: string;
+  readonly workingDirectory: string;
 
   constructor(config: AgentConfig, options: AgentOptions = {}) {
     this.sessionId = options.sessionId ?? `sess_${randomUUID().replace(/-/g, '').slice(0, 12)}`;
@@ -72,7 +70,7 @@ export class TronAgent {
     this.hookEngine = new HookEngine();
     this.messages = [];
     this.currentTurn = 0;
-    this.tokenUsage = { input: 0, output: 0 };
+    this.tokenUsage = { inputTokens: 0, outputTokens: 0 };
     this.isRunning = false;
     this.abortController = null;
     this.eventListeners = [];
@@ -276,8 +274,8 @@ export class TronAgent {
 
       // Update token usage
       if (assistantMessage.usage) {
-        this.tokenUsage.input += assistantMessage.usage.inputTokens;
-        this.tokenUsage.output += assistantMessage.usage.outputTokens;
+        this.tokenUsage.inputTokens += assistantMessage.usage.inputTokens;
+        this.tokenUsage.outputTokens += assistantMessage.usage.outputTokens;
       }
 
       // Add assistant message to history
@@ -451,10 +449,20 @@ export class TronAgent {
       toolCallId: request.toolCallId,
     });
 
-    // Execute tool
+    // Execute tool - handle both old (params) and new (toolCallId, params, signal) signatures
     let result: TronToolResult;
     try {
-      result = await tool.execute(args);
+      if (tool.execute.length >= 3) {
+        // New signature: (toolCallId, params, signal, onProgress)
+        result = await (tool.execute as (id: string, p: Record<string, unknown>, s: AbortSignal) => Promise<TronToolResult>)(
+          request.toolCallId,
+          args,
+          this.abortController?.signal ?? new AbortController().signal
+        );
+      } else {
+        // Old signature: (params)
+        result = await (tool.execute as (p: Record<string, unknown>) => Promise<TronToolResult>)(args);
+      }
     } catch (error) {
       result = {
         content: `Tool execution error: ${error instanceof Error ? error.message : String(error)}`,
@@ -463,6 +471,11 @@ export class TronAgent {
     }
 
     const duration = Date.now() - startTime;
+
+    // Convert content to string for compatibility
+    const contentString = typeof result.content === 'string'
+      ? result.content
+      : result.content.map(c => c.type === 'text' ? c.text : '[image]').join('\n');
 
     this.emit({
       type: 'tool_execution_end',
@@ -491,9 +504,9 @@ export class TronAgent {
     return {
       toolCallId: request.toolCallId,
       result: {
-        content: result.content,
+        content: contentString,
         isError: result.isError ?? false,
-        details: result.details,
+        details: result.details as Record<string, unknown> | undefined,
       },
       duration,
     };

@@ -12,18 +12,7 @@ import type { TextContent, ImageContent } from './messages.js';
 // =============================================================================
 
 /**
- * JSON Schema-like parameter definition
- */
-export interface ToolParameterSchema {
-  type: 'object' | 'string' | 'number' | 'boolean' | 'array';
-  properties?: Record<string, ToolParameterProperty>;
-  required?: string[];
-  items?: ToolParameterProperty;
-  description?: string;
-}
-
-/**
- * Individual parameter property
+ * Individual parameter property - JSON Schema compatible
  */
 export interface ToolParameterProperty {
   type: 'string' | 'number' | 'boolean' | 'array' | 'object';
@@ -32,6 +21,21 @@ export interface ToolParameterProperty {
   default?: unknown;
   items?: ToolParameterProperty;
   properties?: Record<string, ToolParameterProperty>;
+  /** Allow additional JSON Schema properties */
+  [key: string]: unknown;
+}
+
+/**
+ * JSON Schema-like parameter definition
+ */
+export interface ToolParameterSchema {
+  type: 'object' | 'string' | 'number' | 'boolean' | 'array';
+  properties?: Record<string, ToolParameterProperty>;
+  required?: string[];
+  items?: ToolParameterProperty;
+  description?: string;
+  /** Allow additional JSON Schema properties */
+  [key: string]: unknown;
 }
 
 // =============================================================================
@@ -58,9 +62,10 @@ export type ToolResultContentType = TextContent | ImageContent;
 
 /**
  * Result from tool execution
+ * Content can be either a string (for simple text) or structured content
  */
 export interface TronToolResult<TDetails = unknown> {
-  content: ToolResultContentType[];
+  content: string | ToolResultContentType[];
   details?: TDetails;
   isError?: boolean;
 }
@@ -72,12 +77,11 @@ export type ToolProgressCallback = (update: string) => void;
 
 /**
  * Tool execution function signature
+ * Supports multiple call patterns for flexibility
  */
-export type ToolExecuteFunction<TParams = unknown, TDetails = unknown> = (
-  toolCallId: string,
-  params: TParams,
-  signal: AbortSignal,
-  onProgress?: ToolProgressCallback
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export type ToolExecuteFunction<_TParams = unknown, TDetails = unknown> = (
+  ...args: any[]
 ) => Promise<TronToolResult<TDetails>>;
 
 /**
@@ -87,10 +91,11 @@ export interface TronTool<TParams = unknown, TDetails = unknown> extends Tool {
   /**
    * Human-readable label for UI display
    */
-  label: string;
+  label?: string;
 
   /**
    * Execute the tool with the given parameters
+   * Supports both (params) and (toolCallId, params, signal, onProgress) signatures
    */
   execute: ToolExecuteFunction<TParams, TDetails>;
 

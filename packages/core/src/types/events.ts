@@ -118,7 +118,8 @@ export type StreamEvent =
  */
 export interface BaseTronEvent {
   sessionId: string;
-  timestamp: number;
+  /** ISO 8601 timestamp */
+  timestamp: string;
 }
 
 /**
@@ -130,6 +131,8 @@ export interface AgentStartEvent extends BaseTronEvent {
 
 export interface AgentEndEvent extends BaseTronEvent {
   type: 'agent_end';
+  /** Error message if agent ended due to error */
+  error?: string;
 }
 
 /**
@@ -137,10 +140,16 @@ export interface AgentEndEvent extends BaseTronEvent {
  */
 export interface TurnStartEvent extends BaseTronEvent {
   type: 'turn_start';
+  /** Turn number */
+  turn: number;
 }
 
 export interface TurnEndEvent extends BaseTronEvent {
   type: 'turn_end';
+  /** Turn number */
+  turn: number;
+  /** Duration in milliseconds */
+  duration: number;
 }
 
 /**
@@ -148,7 +157,10 @@ export interface TurnEndEvent extends BaseTronEvent {
  */
 export interface MessageUpdateEvent extends BaseTronEvent {
   type: 'message_update';
-  event: StreamEvent;
+  /** The content delta */
+  content: string;
+  /** Optional stream event for additional context */
+  event?: StreamEvent;
 }
 
 /**
@@ -157,8 +169,10 @@ export interface MessageUpdateEvent extends BaseTronEvent {
 export interface ToolExecutionStartEvent extends BaseTronEvent {
   type: 'tool_execution_start';
   toolCallId: string;
-  name: string;
-  arguments: Record<string, unknown>;
+  /** Tool name */
+  toolName: string;
+  /** Tool arguments (optional) */
+  arguments?: Record<string, unknown>;
 }
 
 export interface ToolExecutionUpdateEvent extends BaseTronEvent {
@@ -170,7 +184,14 @@ export interface ToolExecutionUpdateEvent extends BaseTronEvent {
 export interface ToolExecutionEndEvent extends BaseTronEvent {
   type: 'tool_execution_end';
   toolCallId: string;
-  result: TronToolResult;
+  /** Tool name */
+  toolName: string;
+  /** Duration in milliseconds */
+  duration: number;
+  /** Whether the tool execution resulted in error */
+  isError?: boolean;
+  /** Optional detailed result */
+  result?: TronToolResult;
 }
 
 /**
@@ -278,7 +299,7 @@ export function isToolExecutionEvent(
 export function createBaseEvent(sessionId: string): BaseTronEvent {
   return {
     sessionId,
-    timestamp: Date.now(),
+    timestamp: new Date().toISOString(),
   };
 }
 

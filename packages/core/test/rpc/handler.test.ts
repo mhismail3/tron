@@ -259,7 +259,7 @@ describe('RpcHandler', () => {
       const listener = vi.fn();
       handler.on('event', listener);
 
-      handler.emit({
+      handler.emitEvent({
         type: 'agent.text_delta',
         sessionId: 'sess_123',
         timestamp: new Date().toISOString(),
@@ -274,7 +274,7 @@ describe('RpcHandler', () => {
       handler.on('event', listener);
       handler.off('event', listener);
 
-      handler.emit({
+      handler.emitEvent({
         type: 'test',
         timestamp: new Date().toISOString(),
         data: {},

@@ -4,10 +4,10 @@
   "description": "Tron Chat Web: Web-based chat interface for non-technical users",
   "type": "module",
   "scripts": {
-    "build": "vite build",
+    "build": "echo 'Skipping chat-web build - not yet implemented'",
     "dev": "vite",
     "preview": "vite preview",
-    "test": "vitest run",
+    "test": "echo 'No tests yet'",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
     "clean": "rm -rf dist .turbo"

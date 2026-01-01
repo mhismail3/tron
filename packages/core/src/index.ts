@@ -37,6 +37,15 @@ export * from './rpc/index.js';
 // Re-export session
 export * from './session/index.js';
 
+// Re-export productivity
+export * from './productivity/index.js';
+
+// Re-export skills
+export * from './skills/index.js';
+
+// Re-export commands
+export * from './commands/index.js';
+
 // Version info
 export const VERSION = '0.1.0';
 export const NAME = 'tron';

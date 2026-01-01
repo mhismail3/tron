@@ -32,7 +32,7 @@ import type {
   AgentGetStateParams,
   AgentGetStateResult,
   MemorySearchParams,
-  MemorySearchResult,
+  RpcMemorySearchResult,
   MemoryAddEntryParams,
   MemoryAddEntryResult,
   MemoryGetHandoffsParams,
@@ -145,7 +145,7 @@ export class RpcHandler extends EventEmitter {
   /**
    * Emit an event to all listeners
    */
-  emit(event: RpcEvent): boolean {
+  emitEvent(event: RpcEvent): boolean {
     return super.emit('event', event);
   }
 
@@ -174,6 +174,7 @@ export class RpcHandler extends EventEmitter {
     // Wrap with middleware in reverse order
     for (let i = this.middleware.length - 1; i >= 0; i--) {
       const middleware = this.middleware[i];
+      if (!middleware) continue;
       const next = chain;
       chain = (req) => middleware(req, next);
     }
@@ -384,7 +385,7 @@ export class RpcHandler extends EventEmitter {
 
     const searchResult = await this.context.memoryStore.searchEntries(params);
 
-    const result: MemorySearchResult = {
+    const result: RpcMemorySearchResult = {
       entries: searchResult.entries.map((e: unknown) => {
         const entry = e as Record<string, unknown>;
         return {

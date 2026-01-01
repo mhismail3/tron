@@ -1,0 +1,353 @@
+#!/usr/bin/env node
+/**
+ * @fileoverview Tron CLI Entry Point
+ *
+ * Main entry point for the Tron terminal interface.
+ */
+import { render } from 'ink';
+import React from 'react';
+import { parseArgs } from 'util';
+import { App } from './app.js';
+import type { CliConfig } from './types.js';
+import { getAuth, login, logout } from './auth/index.js';
+
+// =============================================================================
+// Argument Parsing
+// =============================================================================
+
+interface ParsedArgs extends CliConfig {
+  command?: 'login' | 'logout' | 'auth-status';
+}
+
+function parseCliArgs(): ParsedArgs {
+  const { values, positionals } = parseArgs({
+    options: {
+      model: { type: 'string', short: 'm' },
+      provider: { type: 'string', short: 'p' },
+      resume: { type: 'string', short: 'r' },
+      server: { type: 'boolean', short: 's' },
+      'ws-port': { type: 'string' },
+      'health-port': { type: 'string' },
+      verbose: { type: 'boolean', short: 'v' },
+      help: { type: 'boolean', short: 'h' },
+      version: { type: 'boolean' },
+      prompt: { type: 'string' },
+      'api-key': { type: 'string' },
+    },
+    allowPositionals: true,
+    strict: false,
+  });
+
+  // Check for subcommands
+  const firstArg = positionals[0];
+  let command: ParsedArgs['command'] = undefined;
+  let remainingPositionals = positionals;
+
+  if (firstArg === 'login') {
+    command = 'login';
+    remainingPositionals = positionals.slice(1);
+  } else if (firstArg === 'logout') {
+    command = 'logout';
+    remainingPositionals = positionals.slice(1);
+  } else if (firstArg === 'auth' || firstArg === 'auth-status') {
+    command = 'auth-status';
+    remainingPositionals = positionals.slice(1);
+  }
+
+  // Handle help
+  if (values.help) {
+    printHelp();
+    process.exit(0);
+  }
+
+  // Handle version
+  if (values.version) {
+    console.log('tron v0.1.0');
+    process.exit(0);
+  }
+
+  // Get working directory from positionals or cwd
+  const workingDirectory = remainingPositionals[0]
+    ? (remainingPositionals[0].startsWith('/') ? remainingPositionals[0] : `${process.cwd()}/${remainingPositionals[0]}`)
+    : process.cwd();
+
+  return {
+    command,
+    workingDirectory,
+    model: values.model as string | undefined,
+    provider: values.provider as string | undefined,
+    resumeSession: values.resume as string | undefined,
+    serverMode: values.server as boolean,
+    wsPort: values['ws-port'] ? parseInt(values['ws-port'] as string, 10) : undefined,
+    healthPort: values['health-port'] ? parseInt(values['health-port'] as string, 10) : undefined,
+    verbose: values.verbose as boolean,
+    nonInteractive: !!values.prompt,
+    initialPrompt: values.prompt as string | undefined,
+  };
+}
+
+function printHelp(): void {
+  console.log(`
+Tron - Persistent Dual-Interface Coding Agent
+
+USAGE:
+  tron [command] [directory] [options]
+  tron [options] [directory]
+
+COMMANDS:
+  login             Authenticate with Anthropic (OAuth for Claude Max)
+  logout            Clear stored authentication
+  auth              Show current authentication status
+
+ARGUMENTS:
+  [directory]       Working directory for the session (default: current directory)
+
+OPTIONS:
+  -m, --model <model>       Model to use (default: claude-sonnet-4-20250514)
+  -p, --provider <provider> Provider to use (default: anthropic)
+  -r, --resume <session>    Resume a specific session by ID
+  -s, --server              Start in server mode (WebSocket + health endpoints)
+  --ws-port <port>          WebSocket server port (default: 8080)
+  --health-port <port>      Health check port (default: 8081)
+  --api-key <key>           Set API key for authentication
+  -v, --verbose             Enable verbose logging
+  --prompt <text>           Run a single prompt and exit (non-interactive)
+  -h, --help                Show this help message
+  --version                 Show version number
+
+EXAMPLES:
+  # Authenticate with Claude Max
+  tron login
+
+  # Start interactive session in current directory
+  tron
+
+  # Start session in a specific project
+  tron ~/projects/my-app
+
+  # Resume the most recent session
+  tron -r latest
+
+  # Run a single prompt
+  tron --prompt "List all TypeScript files"
+
+  # Start as a server
+  tron --server --ws-port 8080
+
+KEYBOARD SHORTCUTS:
+  Ctrl+C    Exit the session
+  Ctrl+L    Clear the screen
+  Up/Down   Navigate history
+
+For more information, visit: https://github.com/your-org/tron
+`);
+}
+
+// =============================================================================
+// Main
+// =============================================================================
+
+async function main(): Promise<void> {
+  const config = parseCliArgs();
+
+  // Handle auth commands
+  if (config.command === 'login') {
+    await runLogin();
+    return;
+  }
+
+  if (config.command === 'logout') {
+    await runLogout();
+    return;
+  }
+
+  if (config.command === 'auth-status') {
+    await runAuthStatus();
+    return;
+  }
+
+  // Non-interactive mode
+  if (config.nonInteractive && config.initialPrompt) {
+    await runNonInteractive(config);
+    return;
+  }
+
+  // Server mode
+  if (config.serverMode) {
+    await runServerMode(config);
+    return;
+  }
+
+  // Interactive TUI mode
+  await runInteractive(config);
+}
+
+async function runLogin(): Promise<void> {
+  console.log('\n🔐 Tron Authentication\n');
+
+  const existingAuth = await getAuth();
+  if (existingAuth) {
+    console.log('You are already authenticated.');
+    const authType = existingAuth.type === 'oauth' ? 'Claude Max (OAuth)' : 'API Key';
+    console.log(`Current auth type: ${authType}\n`);
+    return;
+  }
+
+  try {
+    await login();
+  } catch (error) {
+    console.error(`Authentication failed: ${error instanceof Error ? error.message : error}`);
+    process.exit(1);
+  }
+}
+
+async function runLogout(): Promise<void> {
+  await logout();
+}
+
+async function runAuthStatus(): Promise<void> {
+  console.log('\n🔐 Tron Authentication Status\n');
+
+  const auth = await getAuth();
+  if (!auth) {
+    console.log('Not authenticated.\n');
+    console.log('Run "tron login" to authenticate with Claude Max,');
+    console.log('or set ANTHROPIC_API_KEY environment variable.\n');
+    return;
+  }
+
+  if (auth.type === 'api_key') {
+    const masked = auth.apiKey.slice(0, 8) + '...' + auth.apiKey.slice(-4);
+    console.log(`Auth type: API Key`);
+    console.log(`Key: ${masked}\n`);
+  } else {
+    const expiresIn = Math.floor((auth.expiresAt - Date.now()) / 1000 / 60);
+    console.log(`Auth type: Claude Max (OAuth)`);
+    console.log(`Token expires in: ${expiresIn} minutes\n`);
+  }
+}
+
+async function runInteractive(config: CliConfig): Promise<void> {
+  // Check authentication
+  const auth = await getAuth();
+  if (!auth) {
+    console.log('\n⚠️  Not authenticated.\n');
+    console.log('Run "tron login" to authenticate with Claude Max,');
+    console.log('or set ANTHROPIC_API_KEY environment variable.\n');
+    process.exit(1);
+  }
+
+  const { waitUntilExit } = render(
+    React.createElement(App, { config, auth })
+  );
+
+  await waitUntilExit();
+}
+
+async function runNonInteractive(config: CliConfig): Promise<void> {
+  // Check authentication
+  const auth = await getAuth();
+  if (!auth) {
+    console.log('\n⚠️  Not authenticated.\n');
+    console.log('Run "tron login" to authenticate with Claude Max,');
+    console.log('or set ANTHROPIC_API_KEY environment variable.\n');
+    process.exit(1);
+  }
+
+  const {
+    TronAgent,
+    ReadTool,
+    WriteTool,
+    EditTool,
+    BashTool,
+  } = await import('@tron/core');
+
+  // Create tools
+  const tools = [
+    new ReadTool({ workingDirectory: config.workingDirectory }),
+    new WriteTool({ workingDirectory: config.workingDirectory }),
+    new EditTool({ workingDirectory: config.workingDirectory }),
+    new BashTool({ workingDirectory: config.workingDirectory }),
+  ];
+
+  // Create agent with auth
+  const agent = new TronAgent({
+    provider: {
+      model: config.model ?? 'claude-sonnet-4-20250514',
+      auth,
+    },
+    tools,
+    maxTurns: 50,
+  }, {
+    workingDirectory: config.workingDirectory,
+  });
+
+  console.log(`\n🤖 Processing: ${config.initialPrompt}\n`);
+
+  // Run agent
+  const result = await agent.run(config.initialPrompt!);
+
+  if (result.success) {
+    // Find the last assistant message and display it
+    const lastAssistantMsg = [...result.messages].reverse().find(m => m.role === 'assistant');
+    if (lastAssistantMsg && 'content' in lastAssistantMsg) {
+      const content = lastAssistantMsg.content;
+      if (Array.isArray(content)) {
+        for (const block of content) {
+          if (block.type === 'text') {
+            console.log('\n📝 Response:\n');
+            console.log(block.text);
+          }
+        }
+      } else if (typeof content === 'string') {
+        console.log('\n📝 Response:\n');
+        console.log(content);
+      }
+    }
+    console.log('\n✅ Done\n');
+    console.log(`Turns: ${result.turns}`);
+    console.log(`Tokens: ${result.totalTokenUsage.inputTokens} in / ${result.totalTokenUsage.outputTokens} out`);
+  } else {
+    console.error(`\n❌ Error: ${result.error}\n`);
+    process.exit(1);
+  }
+}
+
+async function runServerMode(config: CliConfig): Promise<void> {
+  // Dynamic import to avoid loading server in interactive mode
+  const { TronServer } = await import('@tron/server');
+
+  const server = new TronServer({
+    wsPort: config.wsPort ?? 8080,
+    healthPort: config.healthPort ?? 8081,
+    defaultModel: config.model,
+    defaultProvider: config.provider,
+  });
+
+  // Handle shutdown
+  const shutdown = async (signal: string) => {
+    console.log(`\nReceived ${signal}, shutting down...`);
+    await server.stop();
+    process.exit(0);
+  };
+
+  process.on('SIGINT', () => shutdown('SIGINT'));
+  process.on('SIGTERM', () => shutdown('SIGTERM'));
+
+  await server.start();
+
+  console.log(`
+🚀 Tron Server Started
+
+WebSocket: ws://localhost:${config.wsPort ?? 8080}/ws
+Health:    http://localhost:${config.healthPort ?? 8081}/health
+
+Press Ctrl+C to stop.
+`);
+}
+
+// Run
+main().catch((error) => {
+  console.error('Error:', error.message);
+  process.exit(1);
+});

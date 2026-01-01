@@ -22,11 +22,11 @@ export class WriteTool implements TronTool {
     type: 'object' as const,
     properties: {
       file_path: {
-        type: 'string',
+        type: 'string' as const,
         description: 'The absolute or relative path to the file to write',
       },
       content: {
-        type: 'string',
+        type: 'string' as const,
         description: 'The content to write to the file',
       },
     },

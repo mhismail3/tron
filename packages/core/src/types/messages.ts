@@ -8,6 +8,8 @@
  * - Type-safe with discriminated unions
  */
 
+import type { Tool } from './tools.js';
+
 // =============================================================================
 // Content Types
 // =============================================================================
@@ -145,14 +147,9 @@ export interface Context {
   tools?: Tool[];
 }
 
-/**
- * Basic tool definition (for context)
- */
-export interface Tool {
-  name: string;
-  description: string;
-  parameters: Record<string, unknown>;
-}
+// Tool and ToolInputSchema are re-exported from ./tools.js
+// to maintain backward compatibility
+export type { Tool, ToolParameterSchema as ToolInputSchema } from './tools.js';
 
 // =============================================================================
 // Type Guards

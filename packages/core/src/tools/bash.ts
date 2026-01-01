@@ -38,15 +38,15 @@ export class BashTool implements TronTool {
     type: 'object' as const,
     properties: {
       command: {
-        type: 'string',
+        type: 'string' as const,
         description: 'The shell command to execute',
       },
       timeout: {
-        type: 'number',
+        type: 'number' as const,
         description: 'Timeout in milliseconds (max 600000)',
       },
       description: {
-        type: 'string',
+        type: 'string' as const,
         description: 'Brief description of what this command does',
       },
     },

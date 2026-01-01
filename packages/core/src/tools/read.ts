@@ -25,15 +25,15 @@ export class ReadTool implements TronTool {
     type: 'object' as const,
     properties: {
       file_path: {
-        type: 'string',
+        type: 'string' as const,
         description: 'The absolute or relative path to the file to read',
       },
       offset: {
-        type: 'number',
+        type: 'number' as const,
         description: 'Line number to start reading from (0-indexed)',
       },
       limit: {
-        type: 'number',
+        type: 'number' as const,
         description: 'Maximum number of lines to read',
       },
     },

@@ -22,19 +22,19 @@ export class EditTool implements TronTool {
     type: 'object' as const,
     properties: {
       file_path: {
-        type: 'string',
+        type: 'string' as const,
         description: 'The absolute or relative path to the file to edit',
       },
       old_string: {
-        type: 'string',
+        type: 'string' as const,
         description: 'The exact string to search for and replace',
       },
       new_string: {
-        type: 'string',
+        type: 'string' as const,
         description: 'The string to replace old_string with',
       },
       replace_all: {
-        type: 'boolean',
+        type: 'boolean' as const,
         description: 'Replace all occurrences (default: false)',
         default: false,
       },

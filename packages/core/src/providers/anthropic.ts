@@ -282,7 +282,7 @@ export class AnthropicProvider {
           case 'message_stop':
             // Get final message - wrap in try/catch as finalMessage() can throw
             try {
-              const finalMessage = stream.finalMessage();
+              const finalMessage = await stream.finalMessage();
               if (finalMessage) {
                 const assistantMessage = this.convertResponse(finalMessage);
                 // Override usage with streamed values if they're more complete
@@ -310,7 +310,8 @@ export class AnthropicProvider {
                 };
               }
             } catch (err) {
-              logger.warn('Could not get final message', err);
+              const errMsg = err instanceof Error ? err.message : String(err);
+              logger.warn('Could not get final message', { error: errMsg });
               // Use streamed usage values in fallback
               yield {
                 type: 'done',

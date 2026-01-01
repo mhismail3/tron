@@ -25,7 +25,6 @@ import type {
   ForkSessionResult,
   RewindSessionOptions,
   RewindSessionResult,
-  SessionEvent,
 } from './types.js';
 
 const logger = createLogger('session-manager');
@@ -74,10 +73,11 @@ export class SessionManager extends EventEmitter {
       workingDirectory: options.workingDirectory,
       model: options.model ?? this.config.defaultModel,
       provider: options.provider ?? this.config.defaultProvider,
+      systemPrompt: options.systemPrompt,
       messages: [],
       createdAt: now,
       lastActivityAt: now,
-      tokenUsage: { input: 0, output: 0 },
+      tokenUsage: { inputTokens: 0, outputTokens: 0 },
       currentTurn: 0,
       isActive: true,
       activeFiles: [],
@@ -99,6 +99,7 @@ export class SessionManager extends EventEmitter {
       workingDirectory: session.workingDirectory,
       model: session.model,
       provider: session.provider,
+      systemPrompt: session.systemPrompt,
       metadata: session.metadata,
     };
 
@@ -203,9 +204,10 @@ export class SessionManager extends EventEmitter {
       order: 'desc',
     });
 
-    if (sessions.length === 0) return null;
+    const firstSession = sessions[0];
+    if (!firstSession) return null;
 
-    return this.getSession(sessions[0].id);
+    return this.getSession(firstSession.id);
   }
 
   // ===========================================================================
@@ -232,8 +234,8 @@ export class SessionManager extends EventEmitter {
     session.lastActivityAt = now;
 
     if (tokenUsage) {
-      session.tokenUsage.input += tokenUsage.input;
-      session.tokenUsage.output += tokenUsage.output;
+      session.tokenUsage.inputTokens += tokenUsage.inputTokens;
+      session.tokenUsage.outputTokens += tokenUsage.outputTokens;
     }
 
     // Append to file
@@ -362,6 +364,7 @@ export class SessionManager extends EventEmitter {
       workingDirectory: original.workingDirectory,
       model: original.model,
       provider: original.provider,
+      systemPrompt: original.systemPrompt,
       title: options.title ?? `Fork of ${original.metadata.title ?? original.id}`,
     });
 
@@ -473,10 +476,11 @@ export class SessionManager extends EventEmitter {
               workingDirectory: entry.workingDirectory,
               model: entry.model,
               provider: entry.provider,
+              systemPrompt: entry.systemPrompt,
               messages: [],
               createdAt: entry.timestamp,
               lastActivityAt: entry.timestamp,
-              tokenUsage: { input: 0, output: 0 },
+              tokenUsage: { inputTokens: 0, outputTokens: 0 },
               currentTurn: 0,
               isActive: true,
               activeFiles: [],
@@ -489,8 +493,8 @@ export class SessionManager extends EventEmitter {
               session.messages.push(entry.message);
               session.lastActivityAt = entry.timestamp;
               if (entry.tokenUsage) {
-                session.tokenUsage.input += entry.tokenUsage.input;
-                session.tokenUsage.output += entry.tokenUsage.output;
+                session.tokenUsage.inputTokens += entry.tokenUsage.inputTokens;
+                session.tokenUsage.outputTokens += entry.tokenUsage.outputTokens;
               }
             }
             break;
@@ -578,6 +582,7 @@ export class SessionManager extends EventEmitter {
       workingDirectory: session.workingDirectory,
       model: session.model,
       provider: session.provider,
+      systemPrompt: session.systemPrompt,
       metadata: session.metadata,
     });
 
@@ -643,7 +648,8 @@ export class SessionManager extends EventEmitter {
   on(event: 'session_forked', listener: (data: { original: string; forked: string }) => void): this;
   on(event: 'session_rewound', listener: (data: { sessionId: string; toIndex: number }) => void): this;
   on(event: 'session_deleted', listener: (data: { sessionId: string }) => void): this;
-  on(event: string, listener: (...args: unknown[]) => void): this {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  on(event: string, listener: (...args: any[]) => void): this {
     return super.on(event, listener);
   }
 }

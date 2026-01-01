@@ -278,7 +278,7 @@ export interface MemorySearchParams {
   limit?: number;
 }
 
-export interface MemorySearchResult {
+export interface RpcMemorySearchResult {
   entries: Array<{
     id: string;
     type: string;
@@ -289,6 +289,9 @@ export interface MemorySearchResult {
   }>;
   totalCount: number;
 }
+
+/** Alias for backward compatibility */
+export type MemorySearchResultRpc = RpcMemorySearchResult;
 
 /** Add memory entry */
 export interface MemoryAddEntryParams {

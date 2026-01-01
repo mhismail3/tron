@@ -87,61 +87,121 @@ export class TronLogger {
   }
 
   /**
+   * Private constructor for child loggers - avoids creating new pino transport
+   */
+  private static fromPino(pinoLogger: pino.Logger, context: LogContext): TronLogger {
+    const logger = Object.create(TronLogger.prototype) as TronLogger;
+    logger.pino = pinoLogger;
+    logger.context = context;
+    return logger;
+  }
+
+  /**
    * Create a child logger with additional context
+   * Reuses the parent's pino transport to avoid adding exit listeners
    */
   child(context: LogContext): TronLogger {
-    const childLogger = new TronLogger({}, { ...this.context, ...context });
-    childLogger.pino = this.pino.child(context);
-    return childLogger;
+    const mergedContext = { ...this.context, ...context };
+    return TronLogger.fromPino(this.pino.child(context), mergedContext);
   }
 
   /**
    * Log at trace level
+   * Supports: (msg), (msg, data), and (data, msg) signatures
    */
-  trace(msg: string, data?: Record<string, unknown>): void {
-    this.pino.trace(data ?? {}, msg);
+  trace(msgOrData: string | Record<string, unknown>, msgOrDataSecond?: string | Record<string, unknown>): void {
+    if (typeof msgOrData === 'string') {
+      if (typeof msgOrDataSecond === 'object') {
+        this.pino.trace(msgOrDataSecond, msgOrData);
+      } else {
+        this.pino.trace(msgOrData);
+      }
+    } else {
+      this.pino.trace(msgOrData, typeof msgOrDataSecond === 'string' ? msgOrDataSecond : '');
+    }
   }
 
   /**
    * Log at debug level
+   * Supports: (msg), (msg, data), and (data, msg) signatures
    */
-  debug(msg: string, data?: Record<string, unknown>): void {
-    this.pino.debug(data ?? {}, msg);
+  debug(msgOrData: string | Record<string, unknown>, msgOrDataSecond?: string | Record<string, unknown>): void {
+    if (typeof msgOrData === 'string') {
+      if (typeof msgOrDataSecond === 'object') {
+        this.pino.debug(msgOrDataSecond, msgOrData);
+      } else {
+        this.pino.debug(msgOrData);
+      }
+    } else {
+      this.pino.debug(msgOrData, typeof msgOrDataSecond === 'string' ? msgOrDataSecond : '');
+    }
   }
 
   /**
    * Log at info level
+   * Supports: (msg), (msg, data), and (data, msg) signatures
    */
-  info(msg: string, data?: Record<string, unknown>): void {
-    this.pino.info(data ?? {}, msg);
+  info(msgOrData: string | Record<string, unknown>, msgOrDataSecond?: string | Record<string, unknown>): void {
+    if (typeof msgOrData === 'string') {
+      if (typeof msgOrDataSecond === 'object') {
+        this.pino.info(msgOrDataSecond, msgOrData);
+      } else {
+        this.pino.info(msgOrData);
+      }
+    } else {
+      this.pino.info(msgOrData, typeof msgOrDataSecond === 'string' ? msgOrDataSecond : '');
+    }
   }
 
   /**
    * Log at warn level
+   * Supports: (msg), (msg, data), and (data, msg) signatures
    */
-  warn(msg: string, data?: Record<string, unknown>): void {
-    this.pino.warn(data ?? {}, msg);
+  warn(msgOrData: string | Record<string, unknown>, msgOrDataSecond?: string | Record<string, unknown>): void {
+    if (typeof msgOrData === 'string') {
+      if (typeof msgOrDataSecond === 'object') {
+        this.pino.warn(msgOrDataSecond, msgOrData);
+      } else {
+        this.pino.warn(msgOrData);
+      }
+    } else {
+      this.pino.warn(msgOrData, typeof msgOrDataSecond === 'string' ? msgOrDataSecond : '');
+    }
   }
 
   /**
    * Log at error level
+   * Supports: (msg), (msg, data), (msg, error), and (data, msg) signatures
    */
-  error(msg: string, error?: Error | Record<string, unknown>): void {
-    if (error instanceof Error) {
-      this.pino.error({ err: error }, msg);
+  error(msgOrData: string | Record<string, unknown>, msgOrDataOrError?: string | Error | Record<string, unknown>): void {
+    if (typeof msgOrData === 'string') {
+      if (msgOrDataOrError instanceof Error) {
+        this.pino.error({ err: msgOrDataOrError }, msgOrData);
+      } else if (typeof msgOrDataOrError === 'object') {
+        this.pino.error(msgOrDataOrError, msgOrData);
+      } else {
+        this.pino.error(msgOrData);
+      }
     } else {
-      this.pino.error(error ?? {}, msg);
+      this.pino.error(msgOrData, typeof msgOrDataOrError === 'string' ? msgOrDataOrError : '');
     }
   }
 
   /**
    * Log at fatal level
+   * Supports: (msg), (msg, data), (msg, error), and (data, msg) signatures
    */
-  fatal(msg: string, error?: Error | Record<string, unknown>): void {
-    if (error instanceof Error) {
-      this.pino.fatal({ err: error }, msg);
+  fatal(msgOrData: string | Record<string, unknown>, msgOrDataOrError?: string | Error | Record<string, unknown>): void {
+    if (typeof msgOrData === 'string') {
+      if (msgOrDataOrError instanceof Error) {
+        this.pino.fatal({ err: msgOrDataOrError }, msgOrData);
+      } else if (typeof msgOrDataOrError === 'object') {
+        this.pino.fatal(msgOrDataOrError, msgOrData);
+      } else {
+        this.pino.fatal(msgOrData);
+      }
     } else {
-      this.pino.fatal(error ?? {}, msg);
+      this.pino.fatal(msgOrData, typeof msgOrDataOrError === 'string' ? msgOrDataOrError : '');
     }
   }
 
@@ -152,7 +212,7 @@ export class TronLogger {
     const start = performance.now();
     return () => {
       const duration = performance.now() - start;
-      this.debug(`${label} completed`, { durationMs: duration.toFixed(2) });
+      this.debug({ durationMs: duration.toFixed(2) }, `${label} completed`);
     };
   }
 
