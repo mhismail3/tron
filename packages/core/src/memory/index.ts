@@ -11,3 +11,11 @@ export {
   type Decision,
   type LedgerManagerConfig,
 } from './ledger-manager.js';
+export {
+  HandoffManager,
+  createHandoffManager,
+  type Handoff,
+  type CodeChange,
+  type HandoffSearchResult,
+  type HandoffManagerConfig,
+} from './handoff-manager.js';
