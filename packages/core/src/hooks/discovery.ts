@@ -181,7 +181,7 @@ function parseHookFilename(
   let cleanName = baseName;
 
   const priorityMatch = baseName.match(/^(\d+)-(.+)$/);
-  if (priorityMatch) {
+  if (priorityMatch && priorityMatch[1] && priorityMatch[2]) {
     priority = parseInt(priorityMatch[1], 10);
     cleanName = priorityMatch[2];
   }
@@ -380,7 +380,9 @@ export async function watchHooks(
   const hookDir = path.join(projectPath, DEFAULT_PROJECT_HOOK_DIR);
 
   try {
+    // fs.watch returns an FSWatcher which is also an AsyncIterable
     const watcher = fs.watch(hookDir, { recursive: true });
+    let closed = false;
 
     const listener = async () => {
       const discovered = await discoverHooks(config);
@@ -391,19 +393,23 @@ export async function watchHooks(
     (async () => {
       try {
         for await (const _event of watcher) {
+          if (closed) break;
           // Debounce by waiting a bit
           await new Promise(resolve => setTimeout(resolve, 100));
           await listener();
         }
       } catch {
-        // Watcher closed
+        // Watcher closed or error
       }
     })();
 
     logger.info('Watching for hook changes', { path: hookDir });
 
     return () => {
-      watcher.close();
+      closed = true;
+      // The FSWatcher returned by fs.watch has a close method
+      // Cast to access it since the async iterator type doesn't expose it
+      (watcher as unknown as { close: () => void }).close();
       logger.debug('Hook watcher closed');
     };
   } catch (error) {

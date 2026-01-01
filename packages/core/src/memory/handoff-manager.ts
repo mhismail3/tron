@@ -144,7 +144,7 @@ export class HandoffManager {
   async create(handoff: Omit<Handoff, 'id'>): Promise<string> {
     await this.initialize();
 
-    const id = handoff.id ?? `handoff_${randomUUID().replace(/-/g, '').slice(0, 12)}`;
+    const id = `handoff_${randomUUID().replace(/-/g, '').slice(0, 12)}`;
 
     const stmt = this.db.prepare(`
       INSERT INTO handoffs (id, session_id, timestamp, summary, code_changes, current_state, blockers, next_steps, patterns, metadata)

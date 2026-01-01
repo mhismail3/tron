@@ -316,7 +316,7 @@ function determineNextSteps(
  * Extract patterns from successful session
  */
 function extractPatterns(
-  context: SessionEndContext,
+  _context: SessionEndContext,
   ledger?: Ledger
 ): string[] {
   const patterns: string[] = [];
