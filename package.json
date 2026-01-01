@@ -9,7 +9,7 @@
   ],
   "scripts": {
     "build": "npm run build --workspaces",
-    "test": "vitest run",
+    "test": "vitest run && npm run test --workspace=@tron/chat-web",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "lint": "eslint packages/*/src --ext .ts,.tsx",
