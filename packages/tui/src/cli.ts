@@ -242,9 +242,12 @@ async function runAuthStatus(): Promise<void> {
     console.log(`Auth type: API Key`);
     console.log(`Key: ${masked}\n`);
   } else {
-    const expiresIn = Math.floor((auth.expiresAt - Date.now()) / 1000 / 60);
+    const expiresInMs = auth.expiresAt - Date.now();
+    const expiresInMinutes = Math.floor(expiresInMs / 1000 / 60);
+    const hours = Math.floor(expiresInMinutes / 60);
+    const minutes = expiresInMinutes % 60;
     console.log(`Auth type: Claude Max (OAuth)`);
-    console.log(`Token expires in: ${expiresIn} minutes\n`);
+    console.log(`Token valid for: ${hours}h ${minutes}m (auto-refreshes)\n`);
   }
 }
 

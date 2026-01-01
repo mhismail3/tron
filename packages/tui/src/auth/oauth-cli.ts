@@ -173,11 +173,11 @@ async function exchangeCodeForTokens(
     expires_in: number;
   };
 
-  // Subtract 5 minutes buffer for token expiry
+  // Store the actual expiry time (buffer applied only when checking)
   return {
     accessToken: data.access_token,
     refreshToken: data.refresh_token,
-    expiresAt: Date.now() + data.expires_in * 1000 - 5 * 60 * 1000,
+    expiresAt: Date.now() + data.expires_in * 1000,
   };
 }
 
@@ -208,11 +208,11 @@ async function refreshTokens(refreshToken: string): Promise<OAuthTokens> {
     expires_in: number;
   };
 
-  // Subtract 5 minutes buffer for token expiry
+  // Store the actual expiry time (buffer applied only when checking)
   return {
     accessToken: data.access_token,
     refreshToken: data.refresh_token,
-    expiresAt: Date.now() + data.expires_in * 1000 - 5 * 60 * 1000,
+    expiresAt: Date.now() + data.expires_in * 1000,
   };
 }
 

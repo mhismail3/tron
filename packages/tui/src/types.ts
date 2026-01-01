@@ -68,6 +68,10 @@ export interface AppState {
   isStreaming: boolean;
   /** Current thinking text (for extended thinking) */
   thinkingText: string;
+  /** Whether slash command menu is visible */
+  showSlashMenu: boolean;
+  /** Selected index in slash command menu */
+  slashMenuIndex: number;
 }
 
 export interface DisplayMessage {
@@ -103,7 +107,9 @@ export type AppAction =
   | { type: 'CLEAR_STREAMING' }
   | { type: 'SET_THINKING_TEXT'; payload: string }
   | { type: 'APPEND_THINKING_TEXT'; payload: string }
-  | { type: 'RESET' };
+  | { type: 'RESET' }
+  | { type: 'SHOW_SLASH_MENU'; payload: boolean }
+  | { type: 'SET_SLASH_MENU_INDEX'; payload: number };
 
 // =============================================================================
 // Component Props

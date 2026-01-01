@@ -17,6 +17,14 @@ import { Header } from './components/Header.js';
 import { MessageList } from './components/MessageList.js';
 import { InputArea } from './components/InputArea.js';
 import { StatusBar } from './components/StatusBar.js';
+import { SlashCommandMenu } from './components/SlashCommandMenu.js';
+import {
+  BUILT_IN_COMMANDS,
+  isSlashCommandInput,
+  parseSlashCommand,
+  filterCommands,
+  type SlashCommand,
+} from './commands/slash-commands.js';
 import { TuiSession } from './session/tui-session.js';
 import type { CliConfig, AppState, AppAction, AnthropicAuth, DisplayMessage } from './types.js';
 import * as os from 'os';
@@ -52,6 +60,8 @@ const initialState: AppState = {
   streamingContent: '',
   isStreaming: false,
   thinkingText: '',
+  showSlashMenu: false,
+  slashMenuIndex: 0,
 };
 
 function reducer(state: AppState, action: AppAction): AppState {
@@ -109,6 +119,10 @@ function reducer(state: AppState, action: AppAction): AppState {
         status: 'Ready',
         activeToolInput: null,
       };
+    case 'SHOW_SLASH_MENU':
+      return { ...state, showSlashMenu: action.payload, slashMenuIndex: 0 };
+    case 'SET_SLASH_MENU_INDEX':
+      return { ...state, slashMenuIndex: action.payload };
     default:
       return state;
   }
@@ -390,9 +404,16 @@ export function App({ config, auth }: AppProps): React.ReactElement {
     exit();
   }, [exit]);
 
-  // Handle input change
+  // Handle input change - detect slash commands
   const handleInputChange = useCallback((value: string) => {
     dispatch({ type: 'SET_INPUT', payload: value });
+
+    // Show/hide slash menu based on input
+    if (isSlashCommandInput(value)) {
+      dispatch({ type: 'SHOW_SLASH_MENU', payload: true });
+    } else {
+      dispatch({ type: 'SHOW_SLASH_MENU', payload: false });
+    }
   }, []);
 
   // Handle submit
@@ -478,6 +499,101 @@ export function App({ config, auth }: AppProps): React.ReactElement {
     }
   }, [state.input, state.isProcessing]);
 
+  // Execute a slash command
+  const executeSlashCommand = useCallback((command: SlashCommand) => {
+    dispatch({ type: 'SHOW_SLASH_MENU', payload: false });
+    dispatch({ type: 'CLEAR_INPUT' });
+
+    switch (command.name) {
+      case 'help':
+        dispatch({
+          type: 'ADD_MESSAGE',
+          payload: {
+            id: `msg_${messageIdRef.current++}`,
+            role: 'system',
+            content: `Available commands:\n${BUILT_IN_COMMANDS.map(c =>
+              `  /${c.name}${c.shortcut ? ` (${c.shortcut})` : ''} - ${c.description}`
+            ).join('\n')}\n\nKeyboard shortcuts:\n  Ctrl+C - Exit\n  Ctrl+L - Clear screen\n  ↑/↓ - Navigate command menu\n  Enter - Select command\n  Esc - Cancel`,
+            timestamp: new Date().toISOString(),
+          },
+        });
+        break;
+
+      case 'clear':
+        dispatch({ type: 'RESET' });
+        break;
+
+      case 'model':
+        dispatch({
+          type: 'ADD_MESSAGE',
+          payload: {
+            id: `msg_${messageIdRef.current++}`,
+            role: 'system',
+            content: `Current model: ${config.model ?? DEFAULT_MODEL}\n(Model switching will be available in a future update)`,
+            timestamp: new Date().toISOString(),
+          },
+        });
+        break;
+
+      case 'context':
+        dispatch({
+          type: 'ADD_MESSAGE',
+          payload: {
+            id: `msg_${messageIdRef.current++}`,
+            role: 'system',
+            content: `Context viewer coming soon. Working directory: ${config.workingDirectory}`,
+            timestamp: new Date().toISOString(),
+          },
+        });
+        break;
+
+      case 'session':
+        dispatch({
+          type: 'ADD_MESSAGE',
+          payload: {
+            id: `msg_${messageIdRef.current++}`,
+            role: 'system',
+            content: `Session ID: ${state.sessionId ?? 'N/A'}\nTokens used: ${state.tokenUsage.input} in / ${state.tokenUsage.output} out`,
+            timestamp: new Date().toISOString(),
+          },
+        });
+        break;
+
+      case 'history':
+        dispatch({
+          type: 'ADD_MESSAGE',
+          payload: {
+            id: `msg_${messageIdRef.current++}`,
+            role: 'system',
+            content: `${state.messages.length} messages in history`,
+            timestamp: new Date().toISOString(),
+          },
+        });
+        break;
+
+      case 'exit':
+        handleExit();
+        break;
+
+      default:
+        dispatch({
+          type: 'ADD_MESSAGE',
+          payload: {
+            id: `msg_${messageIdRef.current++}`,
+            role: 'system',
+            content: `Unknown command: /${command.name}`,
+            timestamp: new Date().toISOString(),
+          },
+        });
+    }
+  }, [config.model, config.workingDirectory, state.sessionId, state.tokenUsage, state.messages.length, handleExit]);
+
+  // Get filtered commands for menu
+  const getFilteredCommands = useCallback(() => {
+    const { commandName } = parseSlashCommand(state.input);
+    return filterCommands(BUILT_IN_COMMANDS, commandName);
+  }, [state.input]);
+
   // Handle keyboard input
   useInput((input, key) => {
     // Ctrl+C to exit (with proper session end)
@@ -488,6 +604,37 @@ export function App({ config, auth }: AppProps): React.ReactElement {
     // Ctrl+L to clear display
     if (input === 'l' && key.ctrl) {
       dispatch({ type: 'RESET' });
+    }
+
+    // Slash menu navigation
+    if (state.showSlashMenu && !state.isProcessing) {
+      const filteredCommands = getFilteredCommands();
+
+      if (key.upArrow) {
+        const newIndex = state.slashMenuIndex > 0
+          ? state.slashMenuIndex - 1
+          : filteredCommands.length - 1;
+        dispatch({ type: 'SET_SLASH_MENU_INDEX', payload: newIndex });
+      }
+
+      if (key.downArrow) {
+        const newIndex = state.slashMenuIndex < filteredCommands.length - 1
+          ? state.slashMenuIndex + 1
+          : 0;
+        dispatch({ type: 'SET_SLASH_MENU_INDEX', payload: newIndex });
+      }
+
+      if (key.return && filteredCommands.length > 0) {
+        const selectedCommand = filteredCommands[state.slashMenuIndex];
+        if (selectedCommand) {
+          executeSlashCommand(selectedCommand);
+        }
+      }
+
+      if (key.escape) {
+        dispatch({ type: 'SHOW_SLASH_MENU', payload: false });
+        dispatch({ type: 'CLEAR_INPUT' });
+      }
     }
   });
 
@@ -522,6 +669,21 @@ export function App({ config, auth }: AppProps): React.ReactElement {
           thinkingText={state.thinkingText}
         />
       </Box>
+
+      {/* Slash Command Menu */}
+      {state.showSlashMenu && !state.isProcessing && (
+        <SlashCommandMenu
+          commands={BUILT_IN_COMMANDS}
+          filter={parseSlashCommand(state.input).commandName}
+          selectedIndex={state.slashMenuIndex}
+          onSelect={executeSlashCommand}
+          onCancel={() => {
+            dispatch({ type: 'SHOW_SLASH_MENU', payload: false });
+            dispatch({ type: 'CLEAR_INPUT' });
+          }}
+          maxVisible={5}
+        />
+      )}
 
       {/* Input Area */}
       <InputArea
