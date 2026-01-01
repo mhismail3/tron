@@ -20,7 +20,7 @@ export function StatusBar({ status, error }: StatusBarProps): React.ReactElement
       {/* Error if present */}
       {error && (
         <Box>
-          <Text color="red">⚠ {error}</Text>
+          <Text color="red">! {error}</Text>
         </Box>
       )}
 

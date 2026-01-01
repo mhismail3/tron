@@ -8,18 +8,24 @@ import type { AppState, AppAction, DisplayMessage } from '../src/types.js';
 
 // Re-implement reducer for testing (mirrors app.tsx implementation)
 const initialState: AppState = {
+  isInitialized: false,
   input: '',
   isProcessing: false,
   sessionId: null,
   messages: [],
-  status: 'Ready',
+  status: 'Initializing',
   error: null,
   tokenUsage: { input: 0, output: 0 },
   activeTool: null,
+  streamingContent: '',
+  isStreaming: false,
+  thinkingText: '',
 };
 
 function reducer(state: AppState, action: AppAction): AppState {
   switch (action.type) {
+    case 'SET_INITIALIZED':
+      return { ...state, isInitialized: action.payload };
     case 'SET_INPUT':
       return { ...state, input: action.payload };
     case 'CLEAR_INPUT':
@@ -51,8 +57,23 @@ function reducer(state: AppState, action: AppAction): AppState {
       };
     case 'SET_ACTIVE_TOOL':
       return { ...state, activeTool: action.payload };
+    case 'APPEND_STREAMING_CONTENT':
+      return { ...state, streamingContent: state.streamingContent + action.payload };
+    case 'SET_STREAMING':
+      return { ...state, isStreaming: action.payload };
+    case 'CLEAR_STREAMING':
+      return { ...state, streamingContent: '', isStreaming: false, thinkingText: '' };
+    case 'SET_THINKING_TEXT':
+      return { ...state, thinkingText: action.payload };
+    case 'APPEND_THINKING_TEXT':
+      return { ...state, thinkingText: state.thinkingText + action.payload };
     case 'RESET':
-      return { ...initialState, sessionId: state.sessionId };
+      return {
+        ...initialState,
+        isInitialized: true,
+        sessionId: state.sessionId,
+        status: 'Ready',
+      };
     default:
       return state;
   }
@@ -67,7 +88,7 @@ describe('App Reducer', () => {
 
     it('should not affect other state', () => {
       const state = reducer(initialState, { type: 'SET_INPUT', payload: 'hello' });
-      expect(state.status).toBe('Ready');
+      expect(state.status).toBe('Initializing'); // Default is Initializing until Ready
       expect(state.isProcessing).toBe(false);
     });
   });
@@ -238,6 +259,7 @@ describe('App Reducer', () => {
   describe('RESET', () => {
     it('should reset to initial state but keep session ID', () => {
       const startState: AppState = {
+        isInitialized: true,
         input: 'some input',
         isProcessing: true,
         sessionId: 'sess_123',
@@ -246,6 +268,9 @@ describe('App Reducer', () => {
         error: 'An error',
         tokenUsage: { input: 100, output: 50 },
         activeTool: 'bash',
+        streamingContent: 'some content',
+        isStreaming: true,
+        thinkingText: 'thinking...',
       };
       const state = reducer(startState, { type: 'RESET' });
       expect(state.input).toBe('');
@@ -255,8 +280,93 @@ describe('App Reducer', () => {
       expect(state.error).toBeNull();
       expect(state.tokenUsage.input).toBe(0);
       expect(state.activeTool).toBeNull();
+      expect(state.streamingContent).toBe('');
+      expect(state.isStreaming).toBe(false);
+      expect(state.thinkingText).toBe('');
       // Session ID should be preserved
       expect(state.sessionId).toBe('sess_123');
+      // isInitialized should stay true
+      expect(state.isInitialized).toBe(true);
+    });
+  });
+
+  describe('SET_INITIALIZED', () => {
+    it('should set initialized to true', () => {
+      const state = reducer(initialState, { type: 'SET_INITIALIZED', payload: true });
+      expect(state.isInitialized).toBe(true);
+    });
+
+    it('should set initialized to false', () => {
+      const startState = { ...initialState, isInitialized: true };
+      const state = reducer(startState, { type: 'SET_INITIALIZED', payload: false });
+      expect(state.isInitialized).toBe(false);
+    });
+  });
+
+  describe('APPEND_STREAMING_CONTENT', () => {
+    it('should append content to empty string', () => {
+      const state = reducer(initialState, { type: 'APPEND_STREAMING_CONTENT', payload: 'Hello' });
+      expect(state.streamingContent).toBe('Hello');
+    });
+
+    it('should append content to existing content', () => {
+      const startState = { ...initialState, streamingContent: 'Hello ' };
+      const state = reducer(startState, { type: 'APPEND_STREAMING_CONTENT', payload: 'World' });
+      expect(state.streamingContent).toBe('Hello World');
+    });
+  });
+
+  describe('SET_STREAMING', () => {
+    it('should set streaming to true', () => {
+      const state = reducer(initialState, { type: 'SET_STREAMING', payload: true });
+      expect(state.isStreaming).toBe(true);
+    });
+
+    it('should set streaming to false', () => {
+      const startState = { ...initialState, isStreaming: true };
+      const state = reducer(startState, { type: 'SET_STREAMING', payload: false });
+      expect(state.isStreaming).toBe(false);
+    });
+  });
+
+  describe('CLEAR_STREAMING', () => {
+    it('should clear all streaming state', () => {
+      const startState = {
+        ...initialState,
+        streamingContent: 'some content',
+        isStreaming: true,
+        thinkingText: 'thinking...',
+      };
+      const state = reducer(startState, { type: 'CLEAR_STREAMING' });
+      expect(state.streamingContent).toBe('');
+      expect(state.isStreaming).toBe(false);
+      expect(state.thinkingText).toBe('');
+    });
+  });
+
+  describe('SET_THINKING_TEXT', () => {
+    it('should set thinking text', () => {
+      const state = reducer(initialState, { type: 'SET_THINKING_TEXT', payload: 'Analyzing...' });
+      expect(state.thinkingText).toBe('Analyzing...');
+    });
+
+    it('should replace thinking text', () => {
+      const startState = { ...initialState, thinkingText: 'Old thinking' };
+      const state = reducer(startState, { type: 'SET_THINKING_TEXT', payload: 'New thinking' });
+      expect(state.thinkingText).toBe('New thinking');
+    });
+  });
+
+  describe('APPEND_THINKING_TEXT', () => {
+    it('should append to empty thinking text', () => {
+      const state = reducer(initialState, { type: 'APPEND_THINKING_TEXT', payload: 'First ' });
+      expect(state.thinkingText).toBe('First ');
+    });
+
+    it('should append to existing thinking text', () => {
+      const startState = { ...initialState, thinkingText: 'First ' };
+      const state = reducer(startState, { type: 'APPEND_THINKING_TEXT', payload: 'Second' });
+      expect(state.thinkingText).toBe('First Second');
     });
   });
 });

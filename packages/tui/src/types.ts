@@ -40,6 +40,8 @@ export type { AnthropicAuth };
 // =============================================================================
 
 export interface AppState {
+  /** Whether app has initialized */
+  isInitialized: boolean;
   /** Current input text */
   input: string;
   /** Whether agent is processing */
@@ -56,6 +58,12 @@ export interface AppState {
   tokenUsage: { input: number; output: number };
   /** Active tool name if executing */
   activeTool: string | null;
+  /** Content currently being streamed */
+  streamingContent: string;
+  /** Whether text is actively streaming */
+  isStreaming: boolean;
+  /** Current thinking text (for extended thinking) */
+  thinkingText: string;
 }
 
 export interface DisplayMessage {
@@ -73,6 +81,7 @@ export interface DisplayMessage {
 // =============================================================================
 
 export type AppAction =
+  | { type: 'SET_INITIALIZED'; payload: boolean }
   | { type: 'SET_INPUT'; payload: string }
   | { type: 'CLEAR_INPUT' }
   | { type: 'SET_PROCESSING'; payload: boolean }
@@ -83,6 +92,11 @@ export type AppAction =
   | { type: 'SET_ERROR'; payload: string | null }
   | { type: 'UPDATE_TOKEN_USAGE'; payload: { input: number; output: number } }
   | { type: 'SET_ACTIVE_TOOL'; payload: string | null }
+  | { type: 'APPEND_STREAMING_CONTENT'; payload: string }
+  | { type: 'SET_STREAMING'; payload: boolean }
+  | { type: 'CLEAR_STREAMING' }
+  | { type: 'SET_THINKING_TEXT'; payload: string }
+  | { type: 'APPEND_THINKING_TEXT'; payload: string }
   | { type: 'RESET' };
 
 // =============================================================================

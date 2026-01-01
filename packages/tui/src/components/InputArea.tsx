@@ -27,7 +27,7 @@ export function InputArea({
       borderStyle="single"
       borderColor={isProcessing ? 'gray' : 'green'}
     >
-      <Text color={isProcessing ? 'gray' : 'green'}>❯ </Text>
+      <Text color={isProcessing ? 'gray' : 'green'}>&gt; </Text>
       {isProcessing ? (
         <Text color="gray">{value || 'Processing...'}</Text>
       ) : (

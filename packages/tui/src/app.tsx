@@ -2,14 +2,19 @@
  * @fileoverview Main Tron App Component
  *
  * The root React component for the Tron TUI.
+ * Features:
+ * - Streaming output from agent events
+ * - Animated thinking indicator
+ * - Proper initialization state to prevent double render
+ * - NO emojis
  */
 import React, { useReducer, useCallback, useEffect, useRef } from 'react';
-import { Box, useInput, useApp } from 'ink';
+import { Box, Text, useInput, useApp } from 'ink';
 import { Header } from './components/Header.js';
 import { MessageList } from './components/MessageList.js';
 import { InputArea } from './components/InputArea.js';
 import { StatusBar } from './components/StatusBar.js';
-import type { CliConfig, AppState, AppAction, AnthropicAuth } from './types.js';
+import type { CliConfig, AppState, AppAction, AnthropicAuth, DisplayMessage } from './types.js';
 import {
   TronAgent,
   ReadTool,
@@ -17,6 +22,7 @@ import {
   EditTool,
   BashTool,
   type AgentOptions,
+  type TronEvent,
 } from '@tron/core';
 
 // =============================================================================
@@ -24,18 +30,24 @@ import {
 // =============================================================================
 
 const initialState: AppState = {
+  isInitialized: false,
   input: '',
   isProcessing: false,
   sessionId: null,
   messages: [],
-  status: 'Ready',
+  status: 'Initializing',
   error: null,
   tokenUsage: { input: 0, output: 0 },
   activeTool: null,
+  streamingContent: '',
+  isStreaming: false,
+  thinkingText: '',
 };
 
 function reducer(state: AppState, action: AppAction): AppState {
   switch (action.type) {
+    case 'SET_INITIALIZED':
+      return { ...state, isInitialized: action.payload };
     case 'SET_INPUT':
       return { ...state, input: action.payload };
     case 'CLEAR_INPUT':
@@ -67,8 +79,23 @@ function reducer(state: AppState, action: AppAction): AppState {
       };
     case 'SET_ACTIVE_TOOL':
       return { ...state, activeTool: action.payload };
+    case 'APPEND_STREAMING_CONTENT':
+      return { ...state, streamingContent: state.streamingContent + action.payload };
+    case 'SET_STREAMING':
+      return { ...state, isStreaming: action.payload };
+    case 'CLEAR_STREAMING':
+      return { ...state, streamingContent: '', isStreaming: false, thinkingText: '' };
+    case 'SET_THINKING_TEXT':
+      return { ...state, thinkingText: action.payload };
+    case 'APPEND_THINKING_TEXT':
+      return { ...state, thinkingText: state.thinkingText + action.payload };
     case 'RESET':
-      return { ...initialState, sessionId: state.sessionId };
+      return {
+        ...initialState,
+        isInitialized: true,
+        sessionId: state.sessionId,
+        status: 'Ready',
+      };
     default:
       return state;
   }
@@ -88,6 +115,63 @@ export function App({ config, auth }: AppProps): React.ReactElement {
   const { exit } = useApp();
   const agentRef = useRef<TronAgent | null>(null);
   const messageIdRef = useRef(0);
+  const currentAssistantIdRef = useRef<string | null>(null);
+
+  // Handle agent events for streaming
+  const handleAgentEvent = useCallback((event: TronEvent) => {
+    switch (event.type) {
+      case 'turn_start':
+        dispatch({ type: 'SET_STATUS', payload: 'Thinking' });
+        dispatch({ type: 'SET_STREAMING', payload: true });
+        break;
+
+      case 'message_update':
+        // Stream text deltas
+        if ('content' in event && event.content) {
+          dispatch({ type: 'APPEND_STREAMING_CONTENT', payload: event.content });
+        }
+        break;
+
+      case 'tool_execution_start':
+        if ('toolName' in event) {
+          dispatch({ type: 'SET_ACTIVE_TOOL', payload: event.toolName });
+          dispatch({ type: 'SET_STATUS', payload: `Running ${event.toolName}` });
+        }
+        break;
+
+      case 'tool_execution_end':
+        if ('toolName' in event) {
+          // Add tool message to display
+          const toolMsg: DisplayMessage = {
+            id: `msg_${messageIdRef.current++}`,
+            role: 'tool',
+            content: '',
+            timestamp: new Date().toISOString(),
+            toolName: event.toolName,
+            toolStatus: event.isError ? 'error' : 'success',
+            duration: 'duration' in event ? event.duration : undefined,
+          };
+          dispatch({ type: 'ADD_MESSAGE', payload: toolMsg });
+          dispatch({ type: 'SET_ACTIVE_TOOL', payload: null });
+          dispatch({ type: 'SET_STATUS', payload: 'Thinking' });
+        }
+        break;
+
+      case 'turn_end':
+        // Finalize the streaming content as a message
+        break;
+
+      case 'agent_end':
+        dispatch({ type: 'SET_STREAMING', payload: false });
+        if ('error' in event && event.error) {
+          dispatch({ type: 'SET_ERROR', payload: event.error });
+          dispatch({ type: 'SET_STATUS', payload: 'Error' });
+        } else {
+          dispatch({ type: 'SET_STATUS', payload: 'Ready' });
+        }
+        break;
+    }
+  }, []);
 
   // Initialize agent
   useEffect(() => {
@@ -103,14 +187,22 @@ export function App({ config, auth }: AppProps): React.ReactElement {
       workingDirectory: config.workingDirectory,
     };
 
-    agentRef.current = new TronAgent({
-      provider: {
-        model: config.model ?? 'claude-sonnet-4-20250514',
-        auth,
+    const agent = new TronAgent(
+      {
+        provider: {
+          model: config.model ?? 'claude-sonnet-4-20250514',
+          auth,
+        },
+        tools,
+        maxTurns: 50,
       },
-      tools,
-      maxTurns: 50,
-    }, agentOptions);
+      agentOptions
+    );
+
+    // Subscribe to events for streaming
+    agent.onEvent(handleAgentEvent);
+
+    agentRef.current = agent;
 
     // Generate session ID
     const sessionId = `sess_${Date.now().toString(36)}`;
@@ -127,10 +219,14 @@ export function App({ config, auth }: AppProps): React.ReactElement {
       },
     });
 
+    // Mark as initialized - this fixes the double prompt box
+    dispatch({ type: 'SET_STATUS', payload: 'Ready' });
+    dispatch({ type: 'SET_INITIALIZED', payload: true });
+
     return () => {
       agentRef.current = null;
     };
-  }, [config, auth]);
+  }, [config, auth, handleAgentEvent]);
 
   // Handle input change
   const handleInputChange = useCallback((value: string) => {
@@ -147,6 +243,7 @@ export function App({ config, auth }: AppProps): React.ReactElement {
     dispatch({ type: 'CLEAR_INPUT' });
     dispatch({ type: 'SET_PROCESSING', payload: true });
     dispatch({ type: 'SET_ERROR', payload: null });
+    dispatch({ type: 'CLEAR_STREAMING' });
 
     // Add user message
     dispatch({
@@ -160,23 +257,37 @@ export function App({ config, auth }: AppProps): React.ReactElement {
     });
 
     try {
-      dispatch({ type: 'SET_STATUS', payload: 'Thinking...' });
+      dispatch({ type: 'SET_STATUS', payload: 'Thinking' });
 
-      const currentAssistantId = `msg_${messageIdRef.current++}`;
+      currentAssistantIdRef.current = `msg_${messageIdRef.current++}`;
 
-      // Add placeholder for assistant response
-      dispatch({
-        type: 'ADD_MESSAGE',
-        payload: {
-          id: currentAssistantId,
-          role: 'assistant',
-          content: '',
-          timestamp: new Date().toISOString(),
-        },
-      });
-
-      // Run agent
+      // Run agent (events are streamed via onEvent handler)
       const result = await agentRef.current.run(prompt);
+
+      // Finalize: add the streamed content as an assistant message
+      if (state.streamingContent || result.messages.length > 0) {
+        // Find the final assistant response
+        let finalContent = '';
+        for (const message of result.messages) {
+          if (message.role === 'assistant') {
+            for (const block of message.content) {
+              if ('text' in block && typeof block.text === 'string') {
+                finalContent += block.text + '\n';
+              }
+            }
+          }
+        }
+
+        dispatch({
+          type: 'ADD_MESSAGE',
+          payload: {
+            id: currentAssistantIdRef.current,
+            role: 'assistant',
+            content: finalContent.trim(),
+            timestamp: new Date().toISOString(),
+          },
+        });
+      }
 
       // Update token usage
       dispatch({
@@ -187,25 +298,8 @@ export function App({ config, auth }: AppProps): React.ReactElement {
         },
       });
 
-      // Build assistant content from messages
-      let assistantContent = '';
-      for (const message of result.messages) {
-        if (message.role === 'assistant') {
-          for (const block of message.content) {
-            if ('text' in block && typeof block.text === 'string') {
-              assistantContent += block.text + '\n';
-            }
-          }
-        }
-      }
-
-      dispatch({
-        type: 'UPDATE_MESSAGE',
-        payload: {
-          id: currentAssistantId,
-          updates: { content: assistantContent.trim() },
-        },
-      });
+      // Clear streaming state
+      dispatch({ type: 'CLEAR_STREAMING' });
 
       if (!result.success) {
         dispatch({ type: 'SET_ERROR', payload: result.error ?? 'Unknown error' });
@@ -222,8 +316,9 @@ export function App({ config, auth }: AppProps): React.ReactElement {
     } finally {
       dispatch({ type: 'SET_PROCESSING', payload: false });
       dispatch({ type: 'SET_ACTIVE_TOOL', payload: null });
+      dispatch({ type: 'CLEAR_STREAMING' });
     }
-  }, [state.input, state.isProcessing]);
+  }, [state.input, state.isProcessing, state.streamingContent]);
 
   // Handle keyboard input
   useInput((input, key) => {
@@ -232,11 +327,20 @@ export function App({ config, auth }: AppProps): React.ReactElement {
       exit();
     }
 
-    // Ctrl+L to clear (could reset messages)
+    // Ctrl+L to clear
     if (input === 'l' && key.ctrl) {
       dispatch({ type: 'RESET' });
     }
   });
+
+  // Don't render the full UI until initialized - fixes double prompt box
+  if (!state.isInitialized) {
+    return (
+      <Box flexDirection="column" padding={1}>
+        <Text color="gray">Initializing...</Text>
+      </Box>
+    );
+  }
 
   return (
     <Box flexDirection="column" height="100%">
@@ -249,11 +353,14 @@ export function App({ config, auth }: AppProps): React.ReactElement {
       />
 
       {/* Message List */}
-      <Box flexDirection="column" flexGrow={1} paddingX={1}>
+      <Box flexDirection="column" flexGrow={1} paddingX={1} overflow="hidden">
         <MessageList
           messages={state.messages}
           isProcessing={state.isProcessing}
           activeTool={state.activeTool}
+          streamingContent={state.streamingContent}
+          isStreaming={state.isStreaming}
+          thinkingText={state.thinkingText}
         />
       </Box>
 
