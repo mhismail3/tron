@@ -58,6 +58,8 @@ export interface AppState {
   tokenUsage: { input: number; output: number };
   /** Active tool name if executing */
   activeTool: string | null;
+  /** Active tool input/command being executed */
+  activeToolInput: string | null;
   /** Content currently being streamed */
   streamingContent: string;
   /** Whether text is actively streaming */
@@ -73,6 +75,7 @@ export interface DisplayMessage {
   timestamp: string;
   toolName?: string;
   toolStatus?: 'running' | 'success' | 'error';
+  toolInput?: string;
   duration?: number;
 }
 
@@ -92,6 +95,7 @@ export type AppAction =
   | { type: 'SET_ERROR'; payload: string | null }
   | { type: 'UPDATE_TOKEN_USAGE'; payload: { input: number; output: number } }
   | { type: 'SET_ACTIVE_TOOL'; payload: string | null }
+  | { type: 'SET_ACTIVE_TOOL_INPUT'; payload: string | null }
   | { type: 'APPEND_STREAMING_CONTENT'; payload: string }
   | { type: 'SET_STREAMING'; payload: boolean }
   | { type: 'CLEAR_STREAMING' }

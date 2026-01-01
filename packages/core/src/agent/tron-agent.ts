@@ -447,6 +447,7 @@ export class TronAgent {
       timestamp: new Date().toISOString(),
       toolName: request.toolName,
       toolCallId: request.toolCallId,
+      arguments: args,
     });
 
     // Execute tool - handle both old (params) and new (toolCallId, params, signal) signatures

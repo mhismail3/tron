@@ -39,6 +39,7 @@ const initialState: AppState = {
   error: null,
   tokenUsage: { input: 0, output: 0 },
   activeTool: null,
+  activeToolInput: null,
   streamingContent: '',
   isStreaming: false,
   thinkingText: '',
@@ -79,6 +80,8 @@ function reducer(state: AppState, action: AppAction): AppState {
       };
     case 'SET_ACTIVE_TOOL':
       return { ...state, activeTool: action.payload };
+    case 'SET_ACTIVE_TOOL_INPUT':
+      return { ...state, activeToolInput: action.payload };
     case 'APPEND_STREAMING_CONTENT':
       return { ...state, streamingContent: state.streamingContent + action.payload };
     case 'SET_STREAMING':
@@ -95,6 +98,7 @@ function reducer(state: AppState, action: AppAction): AppState {
         isInitialized: true,
         sessionId: state.sessionId,
         status: 'Ready',
+        activeToolInput: null,
       };
     default:
       return state;
@@ -110,12 +114,38 @@ interface AppProps {
   auth: AnthropicAuth;
 }
 
+/**
+ * Extract a display-friendly string from tool arguments
+ */
+function formatToolInput(toolName: string, args: Record<string, unknown> | undefined): string {
+  if (!args) return '';
+
+  switch (toolName.toLowerCase()) {
+    case 'bash':
+      return typeof args.command === 'string' ? args.command : '';
+    case 'read':
+      return typeof args.file_path === 'string' ? args.file_path : '';
+    case 'write':
+      return typeof args.file_path === 'string' ? args.file_path : '';
+    case 'edit':
+      return typeof args.file_path === 'string' ? args.file_path : '';
+    default:
+      // For other tools, try common argument names
+      if (typeof args.path === 'string') return args.path;
+      if (typeof args.file === 'string') return args.file;
+      if (typeof args.command === 'string') return args.command;
+      if (typeof args.query === 'string') return args.query;
+      return '';
+  }
+}
+
 export function App({ config, auth }: AppProps): React.ReactElement {
   const [state, dispatch] = useReducer(reducer, initialState);
   const { exit } = useApp();
   const agentRef = useRef<TronAgent | null>(null);
   const messageIdRef = useRef(0);
   const currentAssistantIdRef = useRef<string | null>(null);
+  const currentToolInputRef = useRef<string | null>(null);
 
   // Handle agent events for streaming
   const handleAgentEvent = useCallback((event: TronEvent) => {
@@ -134,14 +164,20 @@ export function App({ config, auth }: AppProps): React.ReactElement {
 
       case 'tool_execution_start':
         if ('toolName' in event) {
+          const toolInput = formatToolInput(
+            event.toolName,
+            'arguments' in event ? event.arguments as Record<string, unknown> : undefined
+          );
+          currentToolInputRef.current = toolInput;
           dispatch({ type: 'SET_ACTIVE_TOOL', payload: event.toolName });
+          dispatch({ type: 'SET_ACTIVE_TOOL_INPUT', payload: toolInput });
           dispatch({ type: 'SET_STATUS', payload: `Running ${event.toolName}` });
         }
         break;
 
       case 'tool_execution_end':
         if ('toolName' in event) {
-          // Add tool message to display
+          // Add tool message to display with the captured tool input
           const toolMsg: DisplayMessage = {
             id: `msg_${messageIdRef.current++}`,
             role: 'tool',
@@ -149,10 +185,13 @@ export function App({ config, auth }: AppProps): React.ReactElement {
             timestamp: new Date().toISOString(),
             toolName: event.toolName,
             toolStatus: event.isError ? 'error' : 'success',
+            toolInput: currentToolInputRef.current ?? undefined,
             duration: 'duration' in event ? event.duration : undefined,
           };
           dispatch({ type: 'ADD_MESSAGE', payload: toolMsg });
           dispatch({ type: 'SET_ACTIVE_TOOL', payload: null });
+          dispatch({ type: 'SET_ACTIVE_TOOL_INPUT', payload: null });
+          currentToolInputRef.current = null;
           dispatch({ type: 'SET_STATUS', payload: 'Thinking' });
         }
         break;
@@ -358,6 +397,7 @@ export function App({ config, auth }: AppProps): React.ReactElement {
           messages={state.messages}
           isProcessing={state.isProcessing}
           activeTool={state.activeTool}
+          activeToolInput={state.activeToolInput}
           streamingContent={state.streamingContent}
           isStreaming={state.isStreaming}
           thinkingText={state.thinkingText}

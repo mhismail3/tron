@@ -15,6 +15,8 @@ export interface MessageListProps {
   messages: DisplayMessage[];
   isProcessing: boolean;
   activeTool: string | null;
+  /** Active tool input/command being executed */
+  activeToolInput?: string | null;
   /** Content currently being streamed */
   streamingContent?: string;
   /** Whether text is actively streaming */
@@ -27,6 +29,7 @@ export function MessageList({
   messages,
   isProcessing,
   activeTool,
+  activeToolInput,
   streamingContent,
   isStreaming,
   thinkingText,
@@ -59,7 +62,11 @@ export function MessageList({
 
       {/* Tool execution indicator */}
       {activeTool && (
-        <ToolExecution toolName={activeTool} status="running" />
+        <ToolExecution
+          toolName={activeTool}
+          status="running"
+          toolInput={activeToolInput ?? undefined}
+        />
       )}
 
       {/* Streaming content */}
@@ -107,6 +114,7 @@ function MessageItem({ message }: MessageItemProps): React.ReactElement {
       <ToolExecution
         toolName={message.toolName ?? 'unknown'}
         status={status}
+        toolInput={message.toolInput}
         duration={message.duration}
         details={message.content.length > 0 ? truncate(message.content, 50) : undefined}
       />

@@ -18,15 +18,26 @@ export interface ToolExecutionProps {
   toolName: string;
   /** Current execution status */
   status: ToolStatus;
+  /** The command/input being executed (e.g., "ls -la" for Bash) */
+  toolInput?: string;
   /** Duration in milliseconds (for completed tools) */
   duration?: number;
   /** Optional additional details */
   details?: string;
 }
 
+/**
+ * Truncate tool input for display, preserving key info
+ */
+function truncateInput(input: string, maxLength: number = 60): string {
+  if (input.length <= maxLength) return input;
+  return input.slice(0, maxLength - 3) + '...';
+}
+
 export function ToolExecution({
   toolName,
   status,
+  toolInput,
   duration,
   details,
 }: ToolExecutionProps): React.ReactElement {
@@ -72,6 +83,9 @@ export function ToolExecution({
       <Text color={getStatusColor()} bold>
         {toolName}
       </Text>
+      {toolInput && (
+        <Text color="gray">{truncateInput(toolInput)}</Text>
+      )}
       {status === 'success' && duration !== undefined && (
         <Text color="gray">({duration}ms)</Text>
       )}

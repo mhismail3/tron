@@ -60,4 +60,34 @@ describe('ToolExecution Component', () => {
     // Check for common emojis
     expect(frame).not.toMatch(/[\u{1F300}-\u{1F9FF}]/u);
   });
+
+  it('should display tool input when provided', () => {
+    const { lastFrame } = render(
+      <ToolExecution toolName="bash" status="running" toolInput="ls -la /tmp" />
+    );
+    const frame = lastFrame() ?? '';
+    expect(frame).toContain('bash');
+    expect(frame).toContain('ls -la /tmp');
+  });
+
+  it('should truncate long tool input', () => {
+    const longInput = 'a'.repeat(100);
+    const { lastFrame } = render(
+      <ToolExecution toolName="bash" status="success" toolInput={longInput} duration={50} />
+    );
+    const frame = lastFrame() ?? '';
+    expect(frame).toContain('bash');
+    expect(frame).toContain('...');
+    expect(frame).not.toContain(longInput); // Full input should not be shown
+  });
+
+  it('should display tool input for completed tools', () => {
+    const { lastFrame } = render(
+      <ToolExecution toolName="read" status="success" toolInput="/path/to/file.txt" duration={25} />
+    );
+    const frame = lastFrame() ?? '';
+    expect(frame).toContain('read');
+    expect(frame).toContain('/path/to/file.txt');
+    expect(frame).toContain('25');
+  });
 });

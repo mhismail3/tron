@@ -17,6 +17,7 @@ const initialState: AppState = {
   error: null,
   tokenUsage: { input: 0, output: 0 },
   activeTool: null,
+  activeToolInput: null,
   streamingContent: '',
   isStreaming: false,
   thinkingText: '',
@@ -57,6 +58,8 @@ function reducer(state: AppState, action: AppAction): AppState {
       };
     case 'SET_ACTIVE_TOOL':
       return { ...state, activeTool: action.payload };
+    case 'SET_ACTIVE_TOOL_INPUT':
+      return { ...state, activeToolInput: action.payload };
     case 'APPEND_STREAMING_CONTENT':
       return { ...state, streamingContent: state.streamingContent + action.payload };
     case 'SET_STREAMING':
@@ -256,6 +259,19 @@ describe('App Reducer', () => {
     });
   });
 
+  describe('SET_ACTIVE_TOOL_INPUT', () => {
+    it('should set active tool input', () => {
+      const state = reducer(initialState, { type: 'SET_ACTIVE_TOOL_INPUT', payload: 'ls -la' });
+      expect(state.activeToolInput).toBe('ls -la');
+    });
+
+    it('should clear active tool input', () => {
+      const startState = { ...initialState, activeToolInput: 'ls -la' };
+      const state = reducer(startState, { type: 'SET_ACTIVE_TOOL_INPUT', payload: null });
+      expect(state.activeToolInput).toBeNull();
+    });
+  });
+
   describe('RESET', () => {
     it('should reset to initial state but keep session ID', () => {
       const startState: AppState = {
@@ -268,6 +284,7 @@ describe('App Reducer', () => {
         error: 'An error',
         tokenUsage: { input: 100, output: 50 },
         activeTool: 'bash',
+        activeToolInput: 'ls -la',
         streamingContent: 'some content',
         isStreaming: true,
         thinkingText: 'thinking...',
@@ -280,6 +297,7 @@ describe('App Reducer', () => {
       expect(state.error).toBeNull();
       expect(state.tokenUsage.input).toBe(0);
       expect(state.activeTool).toBeNull();
+      expect(state.activeToolInput).toBeNull();
       expect(state.streamingContent).toBe('');
       expect(state.isStreaming).toBe(false);
       expect(state.thinkingText).toBe('');
