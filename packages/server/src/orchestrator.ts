@@ -10,10 +10,15 @@ import {
   TronAgent,
   SessionManager,
   SQLiteMemoryStore,
+  HandoffManager,
   type Session,
   type AgentConfig,
   type TurnResult,
   type SessionManagerConfig,
+  type ForkSessionResult,
+  type RewindSessionResult,
+  type Handoff,
+  type CodeChange,
 } from '@tron/core';
 
 const logger = createLogger('orchestrator');
@@ -27,6 +32,8 @@ export interface OrchestratorConfig {
   sessionsDir: string;
   /** Memory database path */
   memoryDbPath: string;
+  /** Handoff database path (optional, defaults to same dir as memory) */
+  handoffDbPath?: string;
   /** Default model */
   defaultModel: string;
   /** Default provider */
@@ -55,6 +62,17 @@ export interface AgentEvent {
   data: unknown;
 }
 
+export interface CreateHandoffOptions {
+  sessionId: string;
+  summary: string;
+  codeChanges: CodeChange[];
+  currentState: string;
+  nextSteps: string[];
+  blockers: string[];
+  patterns: string[];
+  metadata?: Record<string, unknown>;
+}
+
 // =============================================================================
 // Session Orchestrator
 // =============================================================================
@@ -64,6 +82,7 @@ export class SessionOrchestrator extends EventEmitter {
   private activeSessions: Map<string, ActiveSession> = new Map();
   private sessionManager: SessionManager;
   private memoryStore: SQLiteMemoryStore;
+  private handoffManager: HandoffManager;
   private cleanupTimer: ReturnType<typeof setInterval> | null = null;
 
   constructor(config: OrchestratorConfig) {
@@ -81,6 +100,10 @@ export class SessionOrchestrator extends EventEmitter {
     // Initialize memory store
     this.memoryStore = new SQLiteMemoryStore({ dbPath: config.memoryDbPath });
 
+    // Initialize handoff manager
+    const handoffDbPath = config.handoffDbPath ?? config.memoryDbPath.replace('.db', '-handoffs.db');
+    this.handoffManager = new HandoffManager({ dbPath: handoffDbPath });
+
     // Forward session events
     this.sessionManager.on('session_created', (session) => {
       this.emit('session_created', session);
@@ -94,6 +117,8 @@ export class SessionOrchestrator extends EventEmitter {
    * Initialize the orchestrator
    */
   async initialize(): Promise<void> {
+    // Initialize handoff manager
+    await this.handoffManager.initialize();
     // SQLiteMemoryStore initializes in constructor, nothing else needed
     this.startCleanupTimer();
     logger.info('Orchestrator initialized');
@@ -116,6 +141,7 @@ export class SessionOrchestrator extends EventEmitter {
     this.activeSessions.clear();
 
     await this.memoryStore.close();
+    await this.handoffManager.close();
     logger.info('Orchestrator shutdown complete');
   }
 
@@ -270,6 +296,140 @@ export class SessionOrchestrator extends EventEmitter {
    */
   getActiveSession(sessionId: string): ActiveSession | undefined {
     return this.activeSessions.get(sessionId);
+  }
+
+  // ===========================================================================
+  // Session Fork & Rewind
+  // ===========================================================================
+
+  /**
+   * Fork a session, creating a new session with copied messages
+   *
+   * This enables cross-interface workflows where a user can:
+   * - Try a different approach from a specific point
+   * - Create parallel work branches
+   * - Experiment without losing original context
+   */
+  async forkSession(sessionId: string, fromIndex?: number): Promise<ForkSessionResult> {
+    const result = await this.sessionManager.forkSession({
+      sessionId,
+      fromIndex,
+    });
+
+    logger.info('Session forked via orchestrator', {
+      original: sessionId,
+      forked: result.newSessionId,
+      messageCount: result.messageCount,
+    });
+
+    return result;
+  }
+
+  /**
+   * Rewind a session to a previous state
+   *
+   * This enables error recovery workflows where a user can:
+   * - Undo recent messages after a bad approach
+   * - Return to a known good state
+   * - Continue with corrected instructions
+   */
+  async rewindSession(sessionId: string, toIndex: number): Promise<RewindSessionResult> {
+    const result = await this.sessionManager.rewindSession({
+      sessionId,
+      toIndex,
+    });
+
+    // If this is an active session, refresh the cached session
+    const active = this.activeSessions.get(sessionId);
+    if (active) {
+      const refreshed = await this.sessionManager.getSession(sessionId);
+      if (refreshed) {
+        active.session = refreshed;
+      }
+    }
+
+    logger.info('Session rewound via orchestrator', {
+      sessionId,
+      toIndex,
+      removedCount: result.removedCount,
+    });
+
+    return result;
+  }
+
+  // ===========================================================================
+  // Handoff Operations (Episodic Memory)
+  // ===========================================================================
+
+  /**
+   * Create a handoff record for a session
+   *
+   * Handoffs capture the state of a session for future context retrieval:
+   * - Summary of what was accomplished
+   * - Code changes made
+   * - Current state and next steps
+   * - Blockers and patterns learned
+   */
+  async createHandoff(options: CreateHandoffOptions): Promise<string> {
+    const handoffId = await this.handoffManager.create({
+      sessionId: options.sessionId,
+      timestamp: new Date(),
+      summary: options.summary,
+      codeChanges: options.codeChanges,
+      currentState: options.currentState,
+      nextSteps: options.nextSteps,
+      blockers: options.blockers,
+      patterns: options.patterns,
+      metadata: options.metadata,
+    });
+
+    logger.info('Handoff created', {
+      handoffId,
+      sessionId: options.sessionId,
+    });
+
+    return handoffId;
+  }
+
+  /**
+   * List recent handoffs
+   */
+  async listHandoffs(limit: number = 5): Promise<Handoff[]> {
+    return this.handoffManager.getRecent(limit);
+  }
+
+  /**
+   * Get handoffs for a specific session
+   */
+  async getSessionHandoffs(sessionId: string): Promise<Handoff[]> {
+    return this.handoffManager.getBySession(sessionId);
+  }
+
+  /**
+   * Search handoffs by content
+   */
+  async searchHandoffs(query: string, limit: number = 10): Promise<Handoff[]> {
+    const results = await this.handoffManager.search(query, limit);
+    // Search returns HandoffSearchResult, but we need full Handoff objects
+    // For now, return the search results as-is since they have the same core fields
+    return results.map((r) => ({
+      id: r.id,
+      sessionId: r.sessionId,
+      timestamp: r.timestamp,
+      summary: r.summary,
+      currentState: r.currentState,
+      codeChanges: [],
+      blockers: [],
+      nextSteps: [],
+      patterns: [],
+    }));
+  }
+
+  /**
+   * Get handoff manager for direct access
+   */
+  getHandoffManager(): HandoffManager {
+    return this.handoffManager;
   }
 
   // ===========================================================================

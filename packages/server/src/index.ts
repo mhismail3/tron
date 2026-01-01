@@ -68,13 +68,11 @@ function createRpcContext(orchestrator: SessionOrchestrator): RpcContext {
         await orchestrator.endSession(sessionId, 'completed');
         return true;
       },
-      async forkSession(_sessionId, _fromIndex) {
-        // Not implemented in orchestrator yet
-        throw new Error('Fork not implemented');
+      async forkSession(sessionId, fromIndex) {
+        return orchestrator.forkSession(sessionId, fromIndex);
       },
-      async rewindSession(_sessionId, _toIndex) {
-        // Not implemented in orchestrator yet
-        throw new Error('Rewind not implemented');
+      async rewindSession(sessionId, toIndex) {
+        return orchestrator.rewindSession(sessionId, toIndex);
       },
     },
     agentManager: {
@@ -138,9 +136,14 @@ function createRpcContext(orchestrator: SessionOrchestrator): RpcContext {
         });
         return { id };
       },
-      async listHandoffs(_workingDirectory, _limit) {
-        // Not directly supported by orchestrator
-        return [];
+      async listHandoffs(_workingDirectory, limit) {
+        const handoffs = await orchestrator.listHandoffs(limit ?? 10);
+        return handoffs.map((h) => ({
+          id: h.id,
+          sessionId: h.sessionId,
+          summary: h.summary,
+          createdAt: h.timestamp.toISOString(),
+        }));
       },
     },
   };

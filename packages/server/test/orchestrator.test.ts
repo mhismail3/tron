@@ -41,6 +41,16 @@ vi.mock('@tron/core', async (importOriginal) => {
       listSessions: vi.fn().mockResolvedValue([]),
       addMessage: vi.fn().mockResolvedValue(undefined),
       endSession: vi.fn().mockResolvedValue(undefined),
+      forkSession: vi.fn().mockResolvedValue({
+        newSessionId: 'sess_fork123',
+        forkedFrom: 'sess_test123',
+        messageCount: 0,
+      }),
+      rewindSession: vi.fn().mockResolvedValue({
+        sessionId: 'sess_test123',
+        newMessageCount: 0,
+        removedCount: 0,
+      }),
       on: vi.fn(),
       emit: vi.fn(),
     })),
@@ -50,6 +60,15 @@ vi.mock('@tron/core', async (importOriginal) => {
       searchEntries: vi.fn().mockResolvedValue({ entries: [], totalCount: 0 }),
       getEntry: vi.fn().mockResolvedValue(null),
       deleteEntry: vi.fn().mockResolvedValue(undefined),
+    })),
+    HandoffManager: vi.fn().mockImplementation(() => ({
+      initialize: vi.fn().mockResolvedValue(undefined),
+      create: vi.fn().mockResolvedValue('handoff_test123'),
+      get: vi.fn().mockResolvedValue(null),
+      getRecent: vi.fn().mockResolvedValue([]),
+      getBySession: vi.fn().mockResolvedValue([]),
+      search: vi.fn().mockResolvedValue([]),
+      close: vi.fn().mockResolvedValue(undefined),
     })),
     TronAgent: vi.fn().mockImplementation(() => ({
       run: vi.fn().mockResolvedValue({
