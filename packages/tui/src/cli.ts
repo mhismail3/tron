@@ -201,13 +201,18 @@ async function main(): Promise<void> {
 async function runLogin(): Promise<void> {
   console.log('\n🔐 Tron Authentication\n');
 
-  const existingAuth = await getAuth();
-  if (existingAuth) {
-    console.log('You are already authenticated.');
-    const authType = existingAuth.type === 'oauth' ? 'Claude Max (OAuth)' : 'API Key';
-    console.log(`Current auth type: ${authType}\n`);
+  // Check for environment variable - this takes precedence
+  if (process.env.ANTHROPIC_API_KEY) {
+    console.log('⚠️  ANTHROPIC_API_KEY environment variable is set.');
+    console.log('This takes precedence over stored OAuth tokens.');
+    console.log('\nTo use OAuth instead, run:');
+    console.log('  unset ANTHROPIC_API_KEY');
+    console.log('  tron login\n');
     return;
   }
+
+  // Clear any existing stored auth before OAuth login
+  await logout(true);
 
   try {
     await login();

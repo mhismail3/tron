@@ -7,8 +7,6 @@
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import * as os from 'os';
-import * as http from 'http';
-import { URL } from 'url';
 import { randomBytes } from 'crypto';
 import type { AnthropicAuth } from '@tron/core';
 
@@ -32,15 +30,22 @@ interface StoredAuth {
 // Configuration
 // =============================================================================
 
+// Using the official Claude Code CLI OAuth client ID
+// This enables Claude Max/Pro subscription users to authenticate
 const OAUTH_CONFIG = {
-  clientId: 'tron-cli',
-  authorizationEndpoint: 'https://console.anthropic.com/oauth/authorize',
-  tokenEndpoint: 'https://console.anthropic.com/oauth/token',
-  redirectUri: 'http://localhost:8976/callback',
-  scopes: ['chat'],
+  clientId: '9d1c250a-e61b-44d9-88ed-5944d1962f5e',
+  authorizationEndpoint: 'https://claude.ai/oauth/authorize',
+  tokenEndpoint: 'https://console.anthropic.com/v1/oauth/token',
+  // Use Anthropic's code callback page - displays code for user to copy/paste
+  // This avoids Cloudflare blocking issues with local callback servers
+  redirectUri: 'https://console.anthropic.com/oauth/code/callback',
+  scopes: 'org:create_api_key user:profile user:inference',
 };
 
 const AUTH_FILE_PATH = path.join(os.homedir(), '.tron', 'auth.json');
+
+// Import readline for prompting user
+import * as readline from 'readline';
 
 // =============================================================================
 // Token Storage
@@ -85,102 +90,73 @@ async function clearAuth(): Promise<void> {
 // =============================================================================
 
 /**
- * Generate PKCE challenge
+ * Base64url encode bytes
  */
-function generatePkce(): { codeVerifier: string; codeChallenge: string } {
-  const codeVerifier = randomBytes(32).toString('base64url');
-  // In a real implementation, we'd compute SHA256 hash
-  // For simplicity, using plain method here
-  const codeChallenge = codeVerifier;
+function base64urlEncode(buffer: Buffer): string {
+  return buffer.toString('base64')
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=/g, '');
+}
+
+/**
+ * Generate PKCE challenge with SHA-256
+ */
+async function generatePkce(): Promise<{ codeVerifier: string; codeChallenge: string }> {
+  const codeVerifier = base64urlEncode(randomBytes(32));
+
+  // Compute SHA-256 hash for code_challenge
+  const { createHash } = await import('crypto');
+  const hash = createHash('sha256').update(codeVerifier).digest();
+  const codeChallenge = base64urlEncode(hash);
+
   return { codeVerifier, codeChallenge };
 }
 
 /**
- * Start local server to receive OAuth callback
+ * Prompt user to paste the authorization code from the browser
  */
-function startCallbackServer(
-  state: string,
-  _codeVerifier: string
-): Promise<{ code: string; server: http.Server }> {
-  return new Promise((resolve, reject) => {
-    const server = http.createServer((req, res) => {
-      if (!req.url?.startsWith('/callback')) {
-        res.writeHead(404);
-        res.end('Not found');
-        return;
-      }
-
-      const url = new URL(req.url, 'http://localhost');
-      const code = url.searchParams.get('code');
-      const returnedState = url.searchParams.get('state');
-      const error = url.searchParams.get('error');
-
-      if (error) {
-        res.writeHead(400);
-        res.end(`Authentication error: ${error}`);
-        reject(new Error(`OAuth error: ${error}`));
-        return;
-      }
-
-      if (returnedState !== state) {
-        res.writeHead(400);
-        res.end('Invalid state parameter');
-        reject(new Error('Invalid OAuth state'));
-        return;
-      }
-
-      if (!code) {
-        res.writeHead(400);
-        res.end('Missing authorization code');
-        reject(new Error('Missing authorization code'));
-        return;
-      }
-
-      res.writeHead(200, { 'Content-Type': 'text/html' });
-      res.end(`
-        <html>
-          <body style="font-family: system-ui; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0;">
-            <div style="text-align: center;">
-              <h1>✅ Authentication Successful</h1>
-              <p>You can close this window and return to the terminal.</p>
-            </div>
-          </body>
-        </html>
-      `);
-
-      resolve({ code, server });
+function promptForAuthCode(): Promise<string> {
+  return new Promise((resolve) => {
+    const rl = readline.createInterface({
+      input: process.stdin,
+      output: process.stdout,
     });
 
-    server.listen(8976, 'localhost', () => {
-      // Server started
+    rl.question('\nPaste the authorization code: ', (answer) => {
+      rl.close();
+      resolve(answer.trim());
     });
-
-    server.on('error', reject);
-
-    // Timeout after 5 minutes
-    setTimeout(() => {
-      server.close();
-      reject(new Error('OAuth callback timeout'));
-    }, 5 * 60 * 1000);
   });
 }
 
 /**
  * Exchange authorization code for tokens
+ * The authCode from the browser is in format: code#state
  */
 async function exchangeCodeForTokens(
-  code: string,
+  authCode: string,
   codeVerifier: string
 ): Promise<OAuthTokens> {
+  // Parse the auth code - format is "code#state"
+  const splits = authCode.split('#');
+  const code = splits[0];
+  const state = splits[1];
+
+  if (!code) {
+    throw new Error('Invalid authorization code format. Expected format: code#state');
+  }
+
   const response = await fetch(OAUTH_CONFIG.tokenEndpoint, {
     method: 'POST',
     headers: {
-      'Content-Type': 'application/x-www-form-urlencoded',
+      'Content-Type': 'application/json',
     },
-    body: new URLSearchParams({
+    body: JSON.stringify({
       grant_type: 'authorization_code',
       client_id: OAUTH_CONFIG.clientId,
       code,
+      state,
       redirect_uri: OAUTH_CONFIG.redirectUri,
       code_verifier: codeVerifier,
     }),
@@ -197,10 +173,11 @@ async function exchangeCodeForTokens(
     expires_in: number;
   };
 
+  // Subtract 5 minutes buffer for token expiry
   return {
     accessToken: data.access_token,
     refreshToken: data.refresh_token,
-    expiresAt: Date.now() + data.expires_in * 1000,
+    expiresAt: Date.now() + data.expires_in * 1000 - 5 * 60 * 1000,
   };
 }
 
@@ -211,9 +188,9 @@ async function refreshTokens(refreshToken: string): Promise<OAuthTokens> {
   const response = await fetch(OAUTH_CONFIG.tokenEndpoint, {
     method: 'POST',
     headers: {
-      'Content-Type': 'application/x-www-form-urlencoded',
+      'Content-Type': 'application/json',
     },
-    body: new URLSearchParams({
+    body: JSON.stringify({
       grant_type: 'refresh_token',
       client_id: OAUTH_CONFIG.clientId,
       refresh_token: refreshToken,
@@ -231,10 +208,11 @@ async function refreshTokens(refreshToken: string): Promise<OAuthTokens> {
     expires_in: number;
   };
 
+  // Subtract 5 minutes buffer for token expiry
   return {
     accessToken: data.access_token,
     refreshToken: data.refresh_token,
-    expiresAt: Date.now() + data.expires_in * 1000,
+    expiresAt: Date.now() + data.expires_in * 1000 - 5 * 60 * 1000,
   };
 }
 
@@ -300,28 +278,29 @@ export async function getAuth(): Promise<AnthropicAuth | null> {
 
 /**
  * Start OAuth login flow
- * Opens browser and waits for callback
+ * Opens browser for user to authenticate, then prompts for code paste
  */
 export async function login(): Promise<AnthropicAuth> {
-  const state = randomBytes(16).toString('hex');
-  const { codeVerifier, codeChallenge } = generatePkce();
+  const { codeVerifier, codeChallenge } = await generatePkce();
 
   // Build authorization URL
-  const authUrl = new URL(OAUTH_CONFIG.authorizationEndpoint);
-  authUrl.searchParams.set('client_id', OAUTH_CONFIG.clientId);
-  authUrl.searchParams.set('redirect_uri', OAUTH_CONFIG.redirectUri);
-  authUrl.searchParams.set('response_type', 'code');
-  authUrl.searchParams.set('scope', OAUTH_CONFIG.scopes.join(' '));
-  authUrl.searchParams.set('state', state);
-  authUrl.searchParams.set('code_challenge', codeChallenge);
-  authUrl.searchParams.set('code_challenge_method', 'plain');
+  // Note: state is set to codeVerifier as per the working implementation
+  const authParams = new URLSearchParams({
+    code: 'true',
+    client_id: OAUTH_CONFIG.clientId,
+    response_type: 'code',
+    redirect_uri: OAUTH_CONFIG.redirectUri,
+    scope: OAUTH_CONFIG.scopes,
+    code_challenge: codeChallenge,
+    code_challenge_method: 'S256',
+    state: codeVerifier,
+  });
 
-  // Start callback server first
-  const callbackPromise = startCallbackServer(state, codeVerifier);
+  const authUrl = `${OAUTH_CONFIG.authorizationEndpoint}?${authParams.toString()}`;
 
   // Open browser
   console.log('\n🔐 Opening browser for authentication...');
-  console.log(`\nIf browser doesn't open, visit:\n${authUrl.toString()}\n`);
+  console.log(`\nIf browser doesn't open, visit:\n${authUrl}\n`);
 
   // Try to open browser (platform-specific)
   const { exec } = await import('child_process');
@@ -330,15 +309,18 @@ export async function login(): Promise<AnthropicAuth> {
     platform === 'darwin' ? 'open' :
     platform === 'win32' ? 'start' : 'xdg-open';
 
-  exec(`${openCommand} "${authUrl.toString()}"`);
+  exec(`${openCommand} "${authUrl}"`);
 
-  // Wait for callback
-  const { code, server } = await callbackPromise;
-  server.close();
+  // Prompt user to paste the authorization code from the browser
+  const authCode = await promptForAuthCode();
+
+  if (!authCode) {
+    throw new Error('No authorization code provided');
+  }
 
   // Exchange code for tokens
-  console.log('Exchanging authorization code...');
-  const tokens = await exchangeCodeForTokens(code, codeVerifier);
+  console.log('\nExchanging authorization code...');
+  const tokens = await exchangeCodeForTokens(authCode, codeVerifier);
 
   // Save tokens
   await saveAuth({
@@ -369,9 +351,11 @@ export async function setApiKey(apiKey: string): Promise<void> {
 /**
  * Logout and clear stored auth
  */
-export async function logout(): Promise<void> {
+export async function logout(silent = false): Promise<void> {
   await clearAuth();
-  console.log('✅ Logged out successfully\n');
+  if (!silent) {
+    console.log('✅ Logged out successfully\n');
+  }
 }
 
 /**
