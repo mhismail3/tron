@@ -4,7 +4,7 @@
   "description": "Tron Chat Web: Web-based chat interface for non-technical users",
   "type": "module",
   "scripts": {
-    "build": "echo 'Skipping chat-web build - not yet implemented'",
+    "build": "vite build",
     "dev": "vite",
     "preview": "vite preview",
     "test": "echo 'No tests yet'",

@@ -1,0 +1,156 @@
+/**
+ * Tron Chat Theme
+ * Warm dark theme inspired by retro terminal aesthetics
+ */
+
+:root {
+  /* Background layers */
+  --bg-base: #0d0d0d;
+  --bg-surface: #171615;
+  --bg-elevated: #1f1d1b;
+  --bg-overlay: #2a2725;
+
+  /* Text colors */
+  --text-primary: #f0ebe3;
+  --text-secondary: #d4cfc7;
+  --text-tertiary: #9a9590;
+  --text-muted: #5c5855;
+
+  /* Accent colors */
+  --accent: #c45b37;
+  --accent-hover: #d66b47;
+  --accent-active: #b04a28;
+  --accent-muted: rgba(196, 91, 55, 0.15);
+
+  /* Secondary accent */
+  --secondary: #2c8f7a;
+  --secondary-hover: #3aa08a;
+  --secondary-muted: rgba(44, 143, 122, 0.15);
+
+  /* Status colors */
+  --success: #4ade80;
+  --warning: #fbbf24;
+  --error: #ef4444;
+  --info: #60a5fa;
+
+  /* User message colors */
+  --user-bg: #9a4a2e;
+  --user-text: #f0ebe3;
+  --user-border: #6b3520;
+
+  /* Assistant message colors */
+  --assistant-bg: var(--bg-elevated);
+  --assistant-text: var(--text-primary);
+  --assistant-border: var(--bg-overlay);
+
+  /* Borders and shadows */
+  --border-subtle: rgba(255, 255, 255, 0.06);
+  --border-default: rgba(255, 255, 255, 0.1);
+  --shadow-sm: 2px 2px 0px rgba(0, 0, 0, 0.3);
+  --shadow-md: 3px 3px 0px rgba(0, 0, 0, 0.3);
+  --shadow-lg: 4px 4px 0px rgba(0, 0, 0, 0.4);
+
+  /* Spacing */
+  --space-xs: 4px;
+  --space-sm: 8px;
+  --space-md: 12px;
+  --space-lg: 16px;
+  --space-xl: 20px;
+  --space-2xl: 24px;
+
+  /* Border radius */
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --radius-full: 9999px;
+
+  /* Typography */
+  --font-mono: 'JetBrains Mono', ui-monospace, monospace;
+  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+
+  /* Font sizes */
+  --text-xs: 11px;
+  --text-sm: 13px;
+  --text-base: 15px;
+  --text-lg: 17px;
+  --text-xl: 20px;
+
+  /* Transitions */
+  --transition-fast: 0.1s ease;
+  --transition-normal: 0.15s ease;
+  --transition-slow: 0.25s ease;
+}
+
+/* Base styles */
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html, body, #root {
+  height: 100%;
+  width: 100%;
+}
+
+body {
+  font-family: var(--font-sans);
+  font-size: var(--text-base);
+  line-height: 1.5;
+  background: var(--bg-base);
+  color: var(--text-primary);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+code, pre, .mono {
+  font-family: var(--font-mono);
+}
+
+/* Scrollbar styling */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--bg-surface);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--bg-overlay);
+  border-radius: var(--radius-full);
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--text-muted);
+}
+
+/* Focus styles */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* Selection */
+::selection {
+  background: var(--accent-muted);
+  color: var(--text-primary);
+}
+
+/* Utility classes */
+.glass {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-subtle);
+  backdrop-filter: blur(8px);
+}
+
+.retro-shadow {
+  box-shadow: var(--shadow-md);
+}
+
+.truncate {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
