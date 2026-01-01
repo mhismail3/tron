@@ -46,6 +46,15 @@ export * from './skills/index.js';
 // Re-export commands
 export * from './commands/index.js';
 
+// Re-export tmux support
+export * from './tmux/index.js';
+
+// Re-export context loading
+export * from './context/index.js';
+
+// Re-export evaluation framework
+export * from './eval/index.js';
+
 // Version info
 export const VERSION = '0.1.0';
 export const NAME = 'tron';
