@@ -175,6 +175,7 @@ export type OpenAIModelId = keyof typeof OPENAI_MODELS;
 // =============================================================================
 
 export class OpenAIProvider {
+  readonly id = 'openai';
   private config: OpenAIConfig;
   private baseURL: string;
 
@@ -183,6 +184,35 @@ export class OpenAIProvider {
     this.baseURL = config.baseURL || 'https://api.openai.com/v1';
 
     logger.info('OpenAI provider initialized', { model: config.model });
+  }
+
+  /**
+   * Get the model ID
+   */
+  get model(): string {
+    return this.config.model;
+  }
+
+  /**
+   * Non-streaming completion
+   */
+  async complete(
+    context: Context,
+    options: OpenAIStreamOptions = {}
+  ): Promise<AssistantMessage> {
+    let result: AssistantMessage | null = null;
+
+    for await (const event of this.stream(context, options)) {
+      if (event.type === 'done') {
+        result = event.message;
+      }
+    }
+
+    if (!result) {
+      throw new Error('No response received from OpenAI');
+    }
+
+    return result;
   }
 
   /**

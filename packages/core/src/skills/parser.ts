@@ -60,6 +60,12 @@ function parseYaml(yaml: string): SkillFrontmatter {
         currentArray = [];
       }
 
+      // Push previous array item if any
+      if (inArrayItem && Object.keys(arrayItemContent).length > 0) {
+        currentArray.push(arrayItemContent);
+        arrayItemContent = {};
+      }
+
       const itemContent = trimmed.slice(2).trim();
 
       // Check if it's a simple value or object start
@@ -75,6 +81,7 @@ function parseYaml(yaml: string): SkillFrontmatter {
         }
       } else {
         // Simple value
+        inArrayItem = false;
         currentArray.push(parseValue(itemContent));
       }
       continue;

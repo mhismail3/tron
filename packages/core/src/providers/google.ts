@@ -131,6 +131,7 @@ export type GeminiModelId = keyof typeof GEMINI_MODELS;
 // =============================================================================
 
 export class GoogleProvider {
+  readonly id = 'google';
   private config: GoogleConfig;
   private baseURL: string;
 
@@ -139,6 +140,35 @@ export class GoogleProvider {
     this.baseURL = config.baseURL || 'https://generativelanguage.googleapis.com/v1beta';
 
     logger.info('Google provider initialized', { model: config.model });
+  }
+
+  /**
+   * Get the model ID
+   */
+  get model(): string {
+    return this.config.model;
+  }
+
+  /**
+   * Non-streaming completion
+   */
+  async complete(
+    context: Context,
+    options: GoogleStreamOptions = {}
+  ): Promise<AssistantMessage> {
+    let result: AssistantMessage | null = null;
+
+    for await (const event of this.stream(context, options)) {
+      if (event.type === 'done') {
+        result = event.message;
+      }
+    }
+
+    if (!result) {
+      throw new Error('No response received from Google');
+    }
+
+    return result;
   }
 
   /**

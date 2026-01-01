@@ -328,6 +328,7 @@ export class EvaluationFramework {
   private config: Required<Omit<EvaluationFrameworkConfig, 'providers'>> & {
     providers: Map<string, EvaluationProvider>;
   };
+  private customTasks: EvaluationTask[] = [];
 
   constructor(config: Partial<EvaluationFrameworkConfig> = {}) {
     this.config = {
@@ -338,6 +339,85 @@ export class EvaluationFramework {
       parallel: config.parallel ?? false,
       maxConcurrent: config.maxConcurrent ?? 5,
     };
+  }
+
+  /**
+   * Register a custom task
+   */
+  registerTask(task: EvaluationTask): void {
+    // Remove existing task with same ID if present
+    this.customTasks = this.customTasks.filter(t => t.id !== task.id);
+    this.customTasks.push(task);
+    logger.info('Task registered', { id: task.id, name: task.name });
+  }
+
+  /**
+   * Get all tasks (standard + custom)
+   */
+  getTasks(): EvaluationTask[] {
+    return [...STANDARD_TASKS, ...this.customTasks];
+  }
+
+  /**
+   * Evaluate a single task with a provider (public wrapper)
+   */
+  async evaluateTask(
+    provider: EvaluationProvider,
+    task: EvaluationTask,
+    options: Partial<EvaluationOptions> = {}
+  ): Promise<TaskResult> {
+    return this.runTask(provider, task, {
+      tasks: [task],
+      ...options,
+    });
+  }
+
+  /**
+   * Generate markdown report from evaluation results
+   */
+  generateReport(results: Array<{ modelId: string; tasks: TaskResult[] }>): string {
+    const lines: string[] = [
+      '# Model Evaluation Report',
+      '',
+      `Generated: ${new Date().toISOString()}`,
+      '',
+    ];
+
+    for (const result of results) {
+      lines.push(`## ${result.modelId}`);
+      lines.push('');
+      lines.push('| Task | Score | Latency (ms) | Tokens | Success |');
+      lines.push('|------|-------|--------------|--------|---------|');
+
+      for (const task of result.tasks) {
+        lines.push(
+          `| ${task.taskName} | ${(task.score * 100).toFixed(1)}% | ${task.latencyMs} | ${task.tokensUsed.total} | ${task.success ? '✓' : '✗'} |`
+        );
+      }
+
+      // Summary
+      const avgScore = result.tasks.reduce((a, t) => a + t.score, 0) / result.tasks.length;
+      const avgLatency = result.tasks.reduce((a, t) => a + t.latencyMs, 0) / result.tasks.length;
+      const totalTokens = result.tasks.reduce((a, t) => a + t.tokensUsed.total, 0);
+      const successRate = result.tasks.filter(t => t.success).length / result.tasks.length;
+
+      lines.push('');
+      lines.push('**Summary:**');
+      lines.push(`- Average Score: ${(avgScore * 100).toFixed(1)}%`);
+      lines.push(`- Average Latency: ${avgLatency.toFixed(0)}ms`);
+      lines.push(`- Total Tokens: ${totalTokens}`);
+      lines.push(`- Success Rate: ${(successRate * 100).toFixed(1)}%`);
+      lines.push('');
+    }
+
+    return lines.join('\n');
+  }
+
+  /**
+   * Export results as JSON
+   */
+  exportJson(results: Array<{ modelId: string; tasks?: TaskResult[] }>): string {
+    return JSON.stringify(results, null, 2);
   }
 
   /**
