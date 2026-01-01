@@ -110,6 +110,40 @@ interface OpenAIStreamChunk {
 // =============================================================================
 
 export const OPENAI_MODELS = {
+  // GPT-4.1 series (April 2025 - latest)
+  'gpt-4.1-2025-04-14': {
+    name: 'GPT-4.1',
+    contextWindow: 128000,
+    maxOutput: 32768,
+    supportsTools: true,
+    inputCostPer1k: 0.005,
+    outputCostPer1k: 0.015,
+  },
+  'gpt-4.1-mini-2025-04-14': {
+    name: 'GPT-4.1 Mini',
+    contextWindow: 128000,
+    maxOutput: 32768,
+    supportsTools: true,
+    inputCostPer1k: 0.00015,
+    outputCostPer1k: 0.0006,
+  },
+  'gpt-4.1-nano-2025-04-14': {
+    name: 'GPT-4.1 Nano',
+    contextWindow: 128000,
+    maxOutput: 16384,
+    supportsTools: true,
+    inputCostPer1k: 0.0001,
+    outputCostPer1k: 0.0004,
+  },
+  // GPT-4o series (still widely used)
+  'gpt-4o-2024-11-20': {
+    name: 'GPT-4o (Nov 2024)',
+    contextWindow: 128000,
+    maxOutput: 16384,
+    supportsTools: true,
+    inputCostPer1k: 0.005,
+    outputCostPer1k: 0.015,
+  },
   'gpt-4o': {
     name: 'GPT-4o',
     contextWindow: 128000,
@@ -126,30 +160,7 @@ export const OPENAI_MODELS = {
     inputCostPer1k: 0.00015,
     outputCostPer1k: 0.0006,
   },
-  'gpt-4-turbo': {
-    name: 'GPT-4 Turbo',
-    contextWindow: 128000,
-    maxOutput: 4096,
-    supportsTools: true,
-    inputCostPer1k: 0.01,
-    outputCostPer1k: 0.03,
-  },
-  'gpt-4': {
-    name: 'GPT-4',
-    contextWindow: 8192,
-    maxOutput: 4096,
-    supportsTools: true,
-    inputCostPer1k: 0.03,
-    outputCostPer1k: 0.06,
-  },
-  'gpt-3.5-turbo': {
-    name: 'GPT-3.5 Turbo',
-    contextWindow: 16385,
-    maxOutput: 4096,
-    supportsTools: true,
-    inputCostPer1k: 0.0005,
-    outputCostPer1k: 0.0015,
-  },
+  // o-series reasoning models
   'o1': {
     name: 'o1',
     contextWindow: 200000,
@@ -165,6 +176,15 @@ export const OPENAI_MODELS = {
     supportsTools: false,
     inputCostPer1k: 0.003,
     outputCostPer1k: 0.012,
+  },
+  // Legacy models
+  'gpt-4-turbo': {
+    name: 'GPT-4 Turbo',
+    contextWindow: 128000,
+    maxOutput: 4096,
+    supportsTools: true,
+    inputCostPer1k: 0.01,
+    outputCostPer1k: 0.03,
   },
 } as const;
 

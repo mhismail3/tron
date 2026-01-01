@@ -10,6 +10,8 @@ import { parseArgs } from 'util';
 import { App } from './app.js';
 import type { CliConfig } from './types.js';
 import { getAuth, login, logout } from './auth/index.js';
+import { initializeDebug, debugLog } from './debug/index.js';
+import { DEFAULT_MODEL } from '@tron/core';
 
 // =============================================================================
 // Argument Parsing
@@ -29,6 +31,7 @@ function parseCliArgs(): ParsedArgs {
       'ws-port': { type: 'string' },
       'health-port': { type: 'string' },
       verbose: { type: 'boolean', short: 'v' },
+      debug: { type: 'boolean', short: 'd' },
       help: { type: 'boolean', short: 'h' },
       version: { type: 'boolean' },
       prompt: { type: 'string' },
@@ -81,6 +84,7 @@ function parseCliArgs(): ParsedArgs {
     wsPort: values['ws-port'] ? parseInt(values['ws-port'] as string, 10) : undefined,
     healthPort: values['health-port'] ? parseInt(values['health-port'] as string, 10) : undefined,
     verbose: values.verbose as boolean,
+    debug: values.debug as boolean,
     nonInteractive: !!values.prompt,
     initialPrompt: values.prompt as string | undefined,
   };
@@ -103,7 +107,7 @@ ARGUMENTS:
   [directory]       Working directory for the session (default: current directory)
 
 OPTIONS:
-  -m, --model <model>       Model to use (default: claude-sonnet-4-20250514)
+  -m, --model <model>       Model to use (default: claude-opus-4-5-20250514)
   -p, --provider <provider> Provider to use (default: anthropic)
   -r, --resume <session>    Resume a specific session by ID
   -s, --server              Start in server mode (WebSocket + health endpoints)
@@ -111,6 +115,7 @@ OPTIONS:
   --health-port <port>      Health check port (default: 8081)
   --api-key <key>           Set API key for authentication
   -v, --verbose             Enable verbose logging
+  -d, --debug               Enable debug mode (full trace logs to stderr and ~/.tron/logs/)
   --prompt <text>           Run a single prompt and exit (non-interactive)
   -h, --help                Show this help message
   --version                 Show version number
@@ -149,6 +154,17 @@ For more information, visit: https://github.com/your-org/tron
 
 async function main(): Promise<void> {
   const config = parseCliArgs();
+
+  // Initialize debug mode if enabled
+  if (config.debug) {
+    initializeDebug(true);
+    debugLog.info('cli', 'Tron CLI starting', {
+      workingDirectory: config.workingDirectory,
+      model: config.model ?? DEFAULT_MODEL,
+      provider: config.provider ?? 'anthropic',
+      debug: true,
+    });
+  }
 
   // Handle auth commands
   if (config.command === 'login') {
@@ -228,6 +244,18 @@ async function runAuthStatus(): Promise<void> {
 }
 
 async function runInteractive(config: CliConfig): Promise<void> {
+  // Check if terminal supports raw mode (required for interactive input)
+  if (!process.stdin.isTTY) {
+    console.error('\nError: Interactive mode requires a TTY terminal.');
+    console.error('If you are using "tsx watch", use "tsx" instead (no watch mode).');
+    console.error('\nAlternatives:');
+    console.error('  npx tsx packages/tui/src/cli.ts     # Direct run');
+    console.error('  npm run dev:tui                      # Uses tsx without watch');
+    console.error('  tron --prompt "your query"           # Non-interactive mode');
+    console.error('  tron --server                        # Server mode (no TTY needed)\n');
+    process.exit(1);
+  }
+
   // Check authentication
   const auth = await getAuth();
   if (!auth) {
@@ -273,7 +301,7 @@ async function runNonInteractive(config: CliConfig): Promise<void> {
   // Create agent with auth
   const agent = new TronAgent({
     provider: {
-      model: config.model ?? 'claude-sonnet-4-20250514',
+      model: config.model ?? DEFAULT_MODEL,
       auth,
     },
     tools,

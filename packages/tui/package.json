@@ -10,7 +10,8 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
-    "dev": "tsx watch src/cli.ts",
+    "dev": "tsx src/cli.ts",
+    "dev:watch": "tsx watch --clear-screen=false src/cli.ts -- --server",
     "start": "node dist/cli.js",
     "test": "vitest run",
     "test:watch": "vitest",

@@ -8,3 +8,4 @@ export { StatusBar } from './StatusBar.js';
 export { Spinner } from './Spinner.js';
 export { StreamingContent } from './StreamingContent.js';
 export { ToolExecution } from './ToolExecution.js';
+export { ContextViewer } from './ContextViewer.js';

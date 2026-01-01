@@ -26,6 +26,8 @@ export interface CliConfig {
   healthPort?: number;
   /** Verbose logging */
   verbose?: boolean;
+  /** Debug mode - full trace logs */
+  debug?: boolean;
   /** Non-interactive mode (single prompt) */
   nonInteractive?: boolean;
   /** Initial prompt (for non-interactive mode) */

@@ -32,7 +32,7 @@ This guide covers all implemented features, commands, and workflows for the Tron
 ```bash
 # Clone and install
 git clone <repo>
-cd tron2
+cd tron
 npm install
 npm run build
 
@@ -1054,6 +1054,157 @@ DEBUG=tron:* tron
 # Log to file
 tron 2>&1 | tee session.log
 ```
+
+---
+
+## TUI Session Lifecycle
+
+The TUI uses `TuiSession` as a unified orchestrator that wires together all session, memory, and context subsystems.
+
+### Session Initialization
+
+When you start a TUI session, the following happens:
+
+```
+1. TuiSession.initialize()
+   │
+   ├── Create directories (~/.tron/sessions, ~/.tron/memory)
+   │
+   ├── Initialize managers:
+   │   ├── SessionManager (JSONL persistence)
+   │   ├── HandoffManager (SQLite + FTS5)
+   │   ├── LedgerManager (Markdown continuity)
+   │   └── ContextLoader (AGENTS.md hierarchy)
+   │
+   ├── Load context from AGENTS.md files
+   │
+   ├── Load current ledger state
+   │
+   ├── Load recent handoffs for context injection
+   │
+   ├── Create session in SessionManager
+   │
+   └── Build system prompt with all context sources
+```
+
+### Data Flow During Session
+
+```
+User Types Message
+      │
+      ▼
+┌─────────────────┐
+│ TuiSession.     │──▶ Persist user message to JSONL
+│ addMessage()    │──▶ Update token usage counters
+└────────┬────────┘
+         │
+         ▼
+┌─────────────────┐
+│ TuiSession.     │──▶ Update ledger.now with current work
+│ updateLedger()  │
+└────────┬────────┘
+         │
+         ▼
+┌─────────────────┐
+│ TronAgent.run() │──▶ Stream response, execute tools
+└────────┬────────┘
+         │
+    For each tool execution:
+         │
+         ▼
+┌─────────────────┐
+│ TuiSession.     │──▶ Track file in working files list
+│ addWorkingFile()│
+└────────┬────────┘
+         │
+         ▼
+    Persist all messages
+```
+
+### Session End
+
+When you press Ctrl+C or the session ends:
+
+```
+TuiSession.end()
+      │
+      ├── Check message count ≥ minMessagesForHandoff (default: 2)
+      │
+      ├── If enough messages, create handoff:
+      │   ├── Generate summary from ledger state
+      │   ├── Include next steps from ledger.next
+      │   ├── Include decisions from ledger.decisions
+      │   └── Store in SQLite with FTS5 indexing
+      │
+      ├── Write session_end entry to SessionManager
+      │
+      └── Return EndResult with handoff info
+```
+
+### TuiSession API
+
+```typescript
+import { TuiSession } from '@tron/tui';
+
+// Create session
+const session = new TuiSession({
+  workingDirectory: '/path/to/project',
+  tronDir: '~/.tron',           // Global Tron directory
+  model: 'claude-sonnet-4-20250514',
+  provider: 'anthropic',
+  minMessagesForHandoff: 2,     // Optional, default: 2
+});
+
+// Initialize (must call first)
+const initResult = await session.initialize();
+// initResult.sessionId: unique ID
+// initResult.context: loaded AGENTS.md content
+// initResult.ledger: current ledger state
+// initResult.handoffs: recent handoffs for context
+// initResult.systemPrompt: combined prompt with all context
+
+// Add messages
+await session.addMessage({ role: 'user', content: 'Hello' });
+await session.addMessage({ role: 'assistant', content: '...' }, tokenUsage);
+
+// Update ledger
+await session.updateLedger({ now: 'Implementing feature X' });
+await session.addWorkingFile('src/feature.ts');
+await session.addDecision('Use SQLite', 'Zero-config deployment');
+
+// Search handoffs
+const results = await session.searchHandoffs('OAuth implementation');
+
+// Get handoff by ID
+const handoff = await session.getHandoff('handoff_123');
+
+// End session (creates handoff if enough messages)
+const endResult = await session.end();
+// endResult.handoffCreated: boolean
+// endResult.handoffId: string if created
+// endResult.messageCount: total messages
+// endResult.tokenUsage: total token usage
+```
+
+### Global Data Storage
+
+All Tron data is stored in `~/.tron/`:
+
+```
+~/.tron/
+├── sessions/              # Session JSONL files
+│   ├── sess_abc123.jsonl
+│   └── sess_def456.jsonl
+├── memory/                # Continuity memory
+│   └── CONTINUITY.md      # Current ledger state
+├── memory-handoffs.db     # SQLite with FTS5 for handoff search
+└── AGENTS.md              # Global context (optional)
+```
+
+This global storage enables:
+- **Cross-project learning**: Handoffs from all projects are searchable
+- **Continuity across sessions**: Ledger persists goal/now/next state
+- **Context injection**: Recent handoffs inform new sessions
 
 ---
 

@@ -90,32 +90,59 @@ interface GeminiStreamChunk {
 // =============================================================================
 
 export const GEMINI_MODELS = {
-  'gemini-2.0-flash-exp': {
-    name: 'Gemini 2.0 Flash (Experimental)',
-    contextWindow: 1048576,
-    maxOutput: 8192,
-    supportsTools: true,
-    inputCostPer1k: 0.0,
-    outputCostPer1k: 0.0,
-  },
-  'gemini-1.5-pro': {
-    name: 'Gemini 1.5 Pro',
+  // Gemini 3 series (December 2025 - latest preview)
+  'gemini-3-pro-preview': {
+    name: 'Gemini 3 Pro (Preview)',
     contextWindow: 2097152,
-    maxOutput: 8192,
+    maxOutput: 16384,
     supportsTools: true,
     inputCostPer1k: 0.00125,
     outputCostPer1k: 0.005,
   },
-  'gemini-1.5-flash': {
-    name: 'Gemini 1.5 Flash',
+  'gemini-3-flash-preview': {
+    name: 'Gemini 3 Flash (Preview)',
+    contextWindow: 1048576,
+    maxOutput: 16384,
+    supportsTools: true,
+    inputCostPer1k: 0.000075,
+    outputCostPer1k: 0.0003,
+  },
+  // Gemini 2.5 series (stable production)
+  'gemini-2.5-pro': {
+    name: 'Gemini 2.5 Pro',
+    contextWindow: 2097152,
+    maxOutput: 16384,
+    supportsTools: true,
+    inputCostPer1k: 0.00125,
+    outputCostPer1k: 0.005,
+  },
+  'gemini-2.5-flash': {
+    name: 'Gemini 2.5 Flash',
+    contextWindow: 1048576,
+    maxOutput: 16384,
+    supportsTools: true,
+    inputCostPer1k: 0.000075,
+    outputCostPer1k: 0.0003,
+  },
+  'gemini-2.5-flash-lite': {
+    name: 'Gemini 2.5 Flash Lite',
+    contextWindow: 1048576,
+    maxOutput: 8192,
+    supportsTools: true,
+    inputCostPer1k: 0.0000375,
+    outputCostPer1k: 0.00015,
+  },
+  // Gemini 2.0 series
+  'gemini-2.0-flash': {
+    name: 'Gemini 2.0 Flash',
     contextWindow: 1048576,
     maxOutput: 8192,
     supportsTools: true,
     inputCostPer1k: 0.000075,
     outputCostPer1k: 0.0003,
   },
-  'gemini-1.5-flash-8b': {
-    name: 'Gemini 1.5 Flash 8B',
+  'gemini-2.0-flash-lite': {
+    name: 'Gemini 2.0 Flash Lite',
     contextWindow: 1048576,
     maxOutput: 8192,
     supportsTools: true,

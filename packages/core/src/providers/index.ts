@@ -5,6 +5,7 @@
 export {
   AnthropicProvider,
   CLAUDE_MODELS,
+  DEFAULT_MODEL,
   type AnthropicAuth,
   type AnthropicConfig,
   type StreamOptions,

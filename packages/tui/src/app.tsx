@@ -3,10 +3,13 @@
  *
  * The root React component for the Tron TUI.
  * Features:
+ * - Full session lifecycle management via TuiSession
+ * - Context loading from AGENTS.md files
+ * - Memory/handoff integration for cross-session learning
+ * - Ledger management for continuity
  * - Streaming output from agent events
  * - Animated thinking indicator
- * - Proper initialization state to prevent double render
- * - NO emojis
+ * - Proper session end with handoff creation
  */
 import React, { useReducer, useCallback, useEffect, useRef } from 'react';
 import { Box, Text, useInput, useApp } from 'ink';
@@ -14,16 +17,22 @@ import { Header } from './components/Header.js';
 import { MessageList } from './components/MessageList.js';
 import { InputArea } from './components/InputArea.js';
 import { StatusBar } from './components/StatusBar.js';
+import { TuiSession } from './session/tui-session.js';
 import type { CliConfig, AppState, AppAction, AnthropicAuth, DisplayMessage } from './types.js';
+import * as os from 'os';
+import * as path from 'path';
 import {
   TronAgent,
   ReadTool,
   WriteTool,
   EditTool,
   BashTool,
+  DEFAULT_MODEL,
   type AgentOptions,
   type TronEvent,
+  type Message,
 } from '@tron/core';
+import { debugLog } from './debug/index.js';
 
 // =============================================================================
 // State Management
@@ -143,10 +152,13 @@ export function App({ config, auth }: AppProps): React.ReactElement {
   const [state, dispatch] = useReducer(reducer, initialState);
   const { exit } = useApp();
   const agentRef = useRef<TronAgent | null>(null);
+  const tuiSessionRef = useRef<TuiSession | null>(null);
   const messageIdRef = useRef(0);
   const currentToolInputRef = useRef<string | null>(null);
   // Track streaming content in a ref for synchronous access in event handler
   const streamingContentRef = useRef<string>('');
+  // Track if we're exiting to prevent double-end
+  const isExitingRef = useRef(false);
 
   /**
    * Finalize any pending streaming content as an assistant message.
@@ -198,6 +210,14 @@ export function App({ config, auth }: AppProps): React.ReactElement {
           dispatch({ type: 'SET_ACTIVE_TOOL', payload: event.toolName });
           dispatch({ type: 'SET_ACTIVE_TOOL_INPUT', payload: toolInput });
           dispatch({ type: 'SET_STATUS', payload: `Running ${event.toolName}` });
+
+          // Track working files in ledger
+          if (tuiSessionRef.current && event.toolName.toLowerCase() !== 'bash') {
+            const filePath = toolInput;
+            if (filePath) {
+              tuiSessionRef.current.addWorkingFile(filePath).catch(() => {});
+            }
+          }
         }
         break;
 
@@ -242,60 +262,133 @@ export function App({ config, auth }: AppProps): React.ReactElement {
     }
   }, [finalizeStreamingContent]);
 
-  // Initialize agent
+  // Initialize session and agent
   useEffect(() => {
-    // Create tools
-    const tools = [
-      new ReadTool({ workingDirectory: config.workingDirectory }),
-      new WriteTool({ workingDirectory: config.workingDirectory }),
-      new EditTool({ workingDirectory: config.workingDirectory }),
-      new BashTool({ workingDirectory: config.workingDirectory }),
-    ];
+    const initializeSession = async () => {
+      // Create TuiSession for unified session management
+      const globalTronDir = path.join(os.homedir(), '.tron');
 
-    const agentOptions: AgentOptions = {
-      workingDirectory: config.workingDirectory,
+      const tuiSession = new TuiSession({
+        workingDirectory: config.workingDirectory,
+        tronDir: globalTronDir,
+        model: config.model ?? DEFAULT_MODEL,
+        provider: config.provider ?? 'anthropic',
+      });
+
+      debugLog.session('init', {
+        workingDirectory: config.workingDirectory,
+        model: config.model ?? DEFAULT_MODEL,
+        tronDir: globalTronDir,
+      });
+
+      tuiSessionRef.current = tuiSession;
+
+      // Initialize session (loads context, ledger, handoffs)
+      const initResult = await tuiSession.initialize();
+
+      // Create tools
+      const tools = [
+        new ReadTool({ workingDirectory: config.workingDirectory }),
+        new WriteTool({ workingDirectory: config.workingDirectory }),
+        new EditTool({ workingDirectory: config.workingDirectory }),
+        new BashTool({ workingDirectory: config.workingDirectory }),
+      ];
+
+      const agentOptions: AgentOptions = {
+        workingDirectory: config.workingDirectory,
+        sessionId: initResult.sessionId,
+      };
+
+      // Build system prompt with all context sources
+      const systemPrompt = tuiSession.buildSystemPrompt();
+
+      const agent = new TronAgent(
+        {
+          provider: {
+            model: config.model ?? DEFAULT_MODEL,
+            auth,
+          },
+          tools,
+          maxTurns: 50,
+          systemPrompt: systemPrompt || undefined,
+        },
+        agentOptions
+      );
+
+      debugLog.agent('created', {
+        sessionId: initResult.sessionId,
+        model: config.model ?? DEFAULT_MODEL,
+        toolCount: tools.length,
+        hasSystemPrompt: !!systemPrompt,
+      });
+
+      // Subscribe to events for streaming
+      agent.onEvent(handleAgentEvent);
+
+      agentRef.current = agent;
+
+      dispatch({ type: 'SET_SESSION', payload: initResult.sessionId });
+
+      // Welcome message with context info
+      let welcomeMsg = `Welcome to Tron! Working in: ${config.workingDirectory}`;
+
+      if (initResult.context?.files.length) {
+        welcomeMsg += `\nLoaded context from ${initResult.context.files.length} file(s)`;
+      }
+
+      if (initResult.ledger?.goal) {
+        welcomeMsg += `\nGoal: ${initResult.ledger.goal}`;
+      }
+
+      if (initResult.handoffs?.length) {
+        welcomeMsg += `\n${initResult.handoffs.length} previous session(s) available for context`;
+      }
+
+      dispatch({
+        type: 'ADD_MESSAGE',
+        payload: {
+          id: `msg_${messageIdRef.current++}`,
+          role: 'system',
+          content: welcomeMsg,
+          timestamp: new Date().toISOString(),
+        },
+      });
+
+      // Mark as initialized
+      dispatch({ type: 'SET_STATUS', payload: 'Ready' });
+      dispatch({ type: 'SET_INITIALIZED', payload: true });
     };
 
-    const agent = new TronAgent(
-      {
-        provider: {
-          model: config.model ?? 'claude-sonnet-4-20250514',
-          auth,
-        },
-        tools,
-        maxTurns: 50,
-      },
-      agentOptions
-    );
-
-    // Subscribe to events for streaming
-    agent.onEvent(handleAgentEvent);
-
-    agentRef.current = agent;
-
-    // Generate session ID
-    const sessionId = `sess_${Date.now().toString(36)}`;
-    dispatch({ type: 'SET_SESSION', payload: sessionId });
-
-    // Welcome message
-    dispatch({
-      type: 'ADD_MESSAGE',
-      payload: {
-        id: `msg_${messageIdRef.current++}`,
-        role: 'system',
-        content: `Welcome to Tron! Working in: ${config.workingDirectory}`,
-        timestamp: new Date().toISOString(),
-      },
+    initializeSession().catch((err) => {
+      dispatch({ type: 'SET_ERROR', payload: `Failed to initialize: ${err.message}` });
+      dispatch({ type: 'SET_STATUS', payload: 'Error' });
     });
-
-    // Mark as initialized - this fixes the double prompt box
-    dispatch({ type: 'SET_STATUS', payload: 'Ready' });
-    dispatch({ type: 'SET_INITIALIZED', payload: true });
 
     return () => {
       agentRef.current = null;
     };
   }, [config, auth, handleAgentEvent]);
+
+  // Handle graceful exit with session end
+  const handleExit = useCallback(async () => {
+    if (isExitingRef.current) return;
+    isExitingRef.current = true;
+
+    dispatch({ type: 'SET_STATUS', payload: 'Ending session...' });
+
+    if (tuiSessionRef.current) {
+      try {
+        const endResult = await tuiSessionRef.current.end();
+        if (endResult.handoffCreated) {
+          console.log(`\nSession handoff created: ${endResult.handoffId}`);
+        }
+      } catch (error) {
+        console.error('\nFailed to end session properly:', error);
+      }
+    }
+
+    exit();
+  }, [exit]);
 
   // Handle input change
   const handleInputChange = useCallback((value: string) => {
@@ -304,7 +397,7 @@ export function App({ config, auth }: AppProps): React.ReactElement {
 
   // Handle submit
   const handleSubmit = useCallback(async () => {
-    if (!state.input.trim() || state.isProcessing || !agentRef.current) {
+    if (!state.input.trim() || state.isProcessing || !agentRef.current || !tuiSessionRef.current) {
       return;
     }
 
@@ -313,9 +406,15 @@ export function App({ config, auth }: AppProps): React.ReactElement {
     dispatch({ type: 'SET_PROCESSING', payload: true });
     dispatch({ type: 'SET_ERROR', payload: null });
     dispatch({ type: 'CLEAR_STREAMING' });
-    streamingContentRef.current = ''; // Reset the ref as well
+    streamingContentRef.current = '';
 
-    // Add user message
+    // Create user message
+    const userMessage: Message = {
+      role: 'user',
+      content: prompt,
+    };
+
+    // Add user message to UI
     dispatch({
       type: 'ADD_MESSAGE',
       payload: {
@@ -326,16 +425,25 @@ export function App({ config, auth }: AppProps): React.ReactElement {
       },
     });
 
+    // Persist user message to session file
+    await tuiSessionRef.current.addMessage(userMessage);
+
+    // Update ledger with current work
+    await tuiSessionRef.current.updateLedger({
+      now: `Processing: ${prompt.slice(0, 50)}${prompt.length > 50 ? '...' : ''}`,
+    });
+
     try {
       dispatch({ type: 'SET_STATUS', payload: 'Thinking' });
 
-      // Run agent (events are streamed via onEvent handler)
-      // Messages are added incrementally via event handlers:
-      // - message_update → streams to display, accumulates in ref
-      // - tool_execution_start → finalizes pending text, shows tool
-      // - tool_execution_end → adds tool result message
-      // - turn_end/agent_end → finalizes any remaining text
+      // Run agent
       const result = await agentRef.current.run(prompt);
+
+      // Persist all messages from the agent result to session file
+      for (const msg of result.messages) {
+        if (msg.role === 'user') continue;
+        await tuiSessionRef.current.addMessage(msg, result.totalTokenUsage);
+      }
 
       // Update token usage
       dispatch({
@@ -346,7 +454,7 @@ export function App({ config, auth }: AppProps): React.ReactElement {
         },
       });
 
-      // Clear streaming state (should already be clear from agent_end)
+      // Clear streaming state
       dispatch({ type: 'CLEAR_STREAMING' });
       streamingContentRef.current = '';
 
@@ -372,18 +480,18 @@ export function App({ config, auth }: AppProps): React.ReactElement {
 
   // Handle keyboard input
   useInput((input, key) => {
-    // Ctrl+C to exit
+    // Ctrl+C to exit (with proper session end)
     if (input === 'c' && key.ctrl) {
-      exit();
+      handleExit();
     }
 
-    // Ctrl+L to clear
+    // Ctrl+L to clear display
     if (input === 'l' && key.ctrl) {
       dispatch({ type: 'RESET' });
     }
   });
 
-  // Don't render the full UI until initialized - fixes double prompt box
+  // Don't render the full UI until initialized
   if (!state.isInitialized) {
     return (
       <Box flexDirection="column" padding={1}>
@@ -398,7 +506,7 @@ export function App({ config, auth }: AppProps): React.ReactElement {
       <Header
         sessionId={state.sessionId}
         workingDirectory={config.workingDirectory}
-        model={config.model ?? 'claude-sonnet-4-20250514'}
+        model={config.model ?? DEFAULT_MODEL}
         tokenUsage={state.tokenUsage}
       />
 

@@ -62,6 +62,33 @@ export interface StreamOptions {
 // =============================================================================
 
 export const CLAUDE_MODELS = {
+  // Claude 4.5 models (latest - November 2025)
+  'claude-opus-4-5-20251101': {
+    name: 'Claude Opus 4.5',
+    contextWindow: 200000,
+    maxOutput: 16384,
+    supportsThinking: true,
+    inputCostPer1k: 0.015,
+    outputCostPer1k: 0.075,
+  },
+  'claude-sonnet-4-5-20250929': {
+    name: 'Claude Sonnet 4.5',
+    contextWindow: 200000,
+    maxOutput: 16384,
+    supportsThinking: true,
+    inputCostPer1k: 0.003,
+    outputCostPer1k: 0.015,
+  },
+  // Claude 4.1 models (August 2025)
+  'claude-opus-4-1-20250805': {
+    name: 'Claude Opus 4.1',
+    contextWindow: 200000,
+    maxOutput: 16384,
+    supportsThinking: true,
+    inputCostPer1k: 0.015,
+    outputCostPer1k: 0.075,
+  },
+  // Claude 4 models (May 2025)
   'claude-opus-4-20250514': {
     name: 'Claude Opus 4',
     contextWindow: 200000,
@@ -78,6 +105,16 @@ export const CLAUDE_MODELS = {
     inputCostPer1k: 0.003,
     outputCostPer1k: 0.015,
   },
+  // Claude 3.7 models (February 2025)
+  'claude-3-7-sonnet-20250219': {
+    name: 'Claude 3.7 Sonnet',
+    contextWindow: 200000,
+    maxOutput: 8192,
+    supportsThinking: true,
+    inputCostPer1k: 0.003,
+    outputCostPer1k: 0.015,
+  },
+  // Claude 3.5 models
   'claude-3-5-haiku-20241022': {
     name: 'Claude 3.5 Haiku',
     contextWindow: 200000,
@@ -87,6 +124,9 @@ export const CLAUDE_MODELS = {
     outputCostPer1k: 0.004,
   },
 } as const;
+
+/** Default model for new sessions */
+export const DEFAULT_MODEL = 'claude-opus-4-5-20251101' as ClaudeModelId;
 
 export type ClaudeModelId = keyof typeof CLAUDE_MODELS;
 
