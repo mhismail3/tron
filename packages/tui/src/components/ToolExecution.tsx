@@ -2,6 +2,7 @@
  * @fileoverview Tool Execution Component
  *
  * Displays tool execution status with animated spinner.
+ * Shows truncated output for completed tools.
  * NO emojis - uses ASCII/Unicode characters.
  */
 import React, { useState, useEffect } from 'react';
@@ -10,6 +11,11 @@ import { Text, Box } from 'ink';
 // Spinner frames for running state
 const SPINNER_FRAMES = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
 const FRAME_INTERVAL = 80;
+
+// Display configuration
+const MAX_INPUT_LENGTH = 60;
+const MAX_OUTPUT_LINES = 3;
+const MAX_OUTPUT_LINE_LENGTH = 80;
 
 export type ToolStatus = 'running' | 'success' | 'error';
 
@@ -22,16 +28,44 @@ export interface ToolExecutionProps {
   toolInput?: string;
   /** Duration in milliseconds (for completed tools) */
   duration?: number;
-  /** Optional additional details */
-  details?: string;
+  /** Tool output/result content */
+  output?: string;
+  /** Whether to show expanded output (more lines) */
+  expanded?: boolean;
 }
 
 /**
  * Truncate tool input for display, preserving key info
  */
-function truncateInput(input: string, maxLength: number = 60): string {
+function truncateInput(input: string, maxLength: number = MAX_INPUT_LENGTH): string {
   if (input.length <= maxLength) return input;
   return input.slice(0, maxLength - 3) + '...';
+}
+
+/**
+ * Truncate and format tool output for multi-line display
+ */
+function formatOutput(output: string, maxLines: number = MAX_OUTPUT_LINES): string[] {
+  if (!output || output.trim().length === 0) return [];
+
+  // Split into lines and filter empty ones
+  const lines = output.split('\n').filter(line => line.trim().length > 0);
+
+  // Take only maxLines, truncate each line if needed
+  const truncatedLines = lines.slice(0, maxLines).map(line => {
+    if (line.length > MAX_OUTPUT_LINE_LENGTH) {
+      return line.slice(0, MAX_OUTPUT_LINE_LENGTH - 3) + '...';
+    }
+    return line;
+  });
+
+  // Add indicator if there are more lines
+  if (lines.length > maxLines) {
+    const remaining = lines.length - maxLines;
+    truncatedLines.push(`... (${remaining} more line${remaining === 1 ? '' : 's'})`);
+  }
+
+  return truncatedLines;
 }
 
 export function ToolExecution({
@@ -39,7 +73,8 @@ export function ToolExecution({
   status,
   toolInput,
   duration,
-  details,
+  output,
+  expanded = false,
 }: ToolExecutionProps): React.ReactElement {
   const [frameIndex, setFrameIndex] = useState(0);
 
@@ -77,19 +112,36 @@ export function ToolExecution({
     }
   };
 
+  // Format output lines (more lines if expanded)
+  const outputLines = formatOutput(output ?? '', expanded ? 10 : MAX_OUTPUT_LINES);
+  const hasOutput = outputLines.length > 0;
+
   return (
-    <Box flexDirection="row" gap={1}>
-      {getStatusIndicator()}
-      <Text color={getStatusColor()} bold>
-        {toolName}
-      </Text>
-      {toolInput && (
-        <Text color="gray">{truncateInput(toolInput)}</Text>
+    <Box flexDirection="column">
+      {/* Main tool execution line */}
+      <Box flexDirection="row" gap={1}>
+        {getStatusIndicator()}
+        <Text color={getStatusColor()} bold>
+          {toolName}
+        </Text>
+        {toolInput && (
+          <Text color="gray">{truncateInput(toolInput)}</Text>
+        )}
+        {status === 'success' && duration !== undefined && (
+          <Text color="gray">({duration}ms)</Text>
+        )}
+      </Box>
+
+      {/* Output preview (indented under the tool) */}
+      {hasOutput && status !== 'running' && (
+        <Box flexDirection="column" marginLeft={2}>
+          {outputLines.map((line, index) => (
+            <Text key={index} color="gray" dimColor>
+              {line}
+            </Text>
+          ))}
+        </Box>
       )}
-      {status === 'success' && duration !== undefined && (
-        <Text color="gray">({duration}ms)</Text>
-      )}
-      {details && <Text color="gray">{details}</Text>}
     </Box>
   );
 }

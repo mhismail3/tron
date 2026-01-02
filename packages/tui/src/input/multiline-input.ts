@@ -135,13 +135,167 @@ export class MultilineInput {
   }
 
   /**
-   * Delete character at cursor.
+   * Delete character at cursor (forward delete).
    */
   delete(): void {
     if (this.cursor === this.value.length) {
       return;
     }
     this.value = this.value.slice(0, this.cursor) + this.value.slice(this.cursor + 1);
+  }
+
+  /**
+   * Delete word before cursor (Option/Alt+Backspace).
+   * Deletes whitespace first, then the word before cursor.
+   */
+  deleteWordBefore(): void {
+    if (this.cursor === 0) {
+      return;
+    }
+
+    // Find the start of the word before cursor
+    let wordStart = this.cursor;
+
+    // First, skip any whitespace
+    while (wordStart > 0 && /\s/.test(this.value[wordStart - 1] ?? '')) {
+      wordStart--;
+    }
+
+    // Then, skip the word characters
+    while (wordStart > 0 && !/\s/.test(this.value[wordStart - 1] ?? '')) {
+      wordStart--;
+    }
+
+    // Delete from wordStart to cursor
+    this.value = this.value.slice(0, wordStart) + this.value.slice(this.cursor);
+    this.cursor = wordStart;
+  }
+
+  /**
+   * Delete from cursor to start of line (Cmd/Ctrl+Backspace).
+   */
+  deleteToLineStart(): void {
+    if (this.cursor === 0) {
+      return;
+    }
+
+    // Find the start of the current line
+    const beforeCursor = this.value.slice(0, this.cursor);
+    const lastNewline = beforeCursor.lastIndexOf('\n');
+    const lineStart = lastNewline === -1 ? 0 : lastNewline + 1;
+
+    // Delete from lineStart to cursor
+    this.value = this.value.slice(0, lineStart) + this.value.slice(this.cursor);
+    this.cursor = lineStart;
+  }
+
+  /**
+   * Delete from cursor to end of line (Ctrl+K or Cmd+Delete on some systems).
+   */
+  deleteToLineEnd(): void {
+    if (this.cursor === this.value.length) {
+      return;
+    }
+
+    // Find the end of the current line
+    const afterCursor = this.value.slice(this.cursor);
+    const nextNewline = afterCursor.indexOf('\n');
+    const lineEnd = nextNewline === -1 ? this.value.length : this.cursor + nextNewline;
+
+    // Delete from cursor to lineEnd
+    this.value = this.value.slice(0, this.cursor) + this.value.slice(lineEnd);
+  }
+
+  /**
+   * Delete word after cursor (Option/Alt+Delete).
+   */
+  deleteWordAfter(): void {
+    if (this.cursor === this.value.length) {
+      return;
+    }
+
+    let wordEnd = this.cursor;
+
+    // First, skip any whitespace
+    while (wordEnd < this.value.length && /\s/.test(this.value[wordEnd] ?? '')) {
+      wordEnd++;
+    }
+
+    // Then, skip the word characters
+    while (wordEnd < this.value.length && !/\s/.test(this.value[wordEnd] ?? '')) {
+      wordEnd++;
+    }
+
+    // Delete from cursor to wordEnd
+    this.value = this.value.slice(0, this.cursor) + this.value.slice(wordEnd);
+  }
+
+  /**
+   * Move cursor to start of current line.
+   */
+  moveCursorToLineStart(): void {
+    const beforeCursor = this.value.slice(0, this.cursor);
+    const lastNewline = beforeCursor.lastIndexOf('\n');
+    this.cursor = lastNewline === -1 ? 0 : lastNewline + 1;
+  }
+
+  /**
+   * Move cursor to end of current line.
+   */
+  moveCursorToLineEnd(): void {
+    const afterCursor = this.value.slice(this.cursor);
+    const nextNewline = afterCursor.indexOf('\n');
+    if (nextNewline === -1) {
+      this.cursor = this.value.length;
+    } else {
+      this.cursor = this.cursor + nextNewline;
+    }
+  }
+
+  /**
+   * Move cursor one word to the left (Option/Alt+Left).
+   */
+  moveCursorWordLeft(): void {
+    if (this.cursor === 0) {
+      return;
+    }
+
+    let newCursor = this.cursor;
+
+    // Skip any whitespace first
+    while (newCursor > 0 && /\s/.test(this.value[newCursor - 1] ?? '')) {
+      newCursor--;
+    }
+
+    // Then skip the word characters
+    while (newCursor > 0 && !/\s/.test(this.value[newCursor - 1] ?? '')) {
+      newCursor--;
+    }
+
+    this.cursor = newCursor;
+  }
+
+  /**
+   * Move cursor one word to the right (Option/Alt+Right).
+   */
+  moveCursorWordRight(): void {
+    if (this.cursor === this.value.length) {
+      return;
+    }
+
+    let newCursor = this.cursor;
+
+    // Skip current word first
+    while (newCursor < this.value.length && !/\s/.test(this.value[newCursor] ?? '')) {
+      newCursor++;
+    }
+
+    // Then skip any whitespace
+    while (newCursor < this.value.length && /\s/.test(this.value[newCursor] ?? '')) {
+      newCursor++;
+    }
+
+    this.cursor = newCursor;
   }
 
   /**

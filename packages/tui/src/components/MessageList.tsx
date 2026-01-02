@@ -11,6 +11,58 @@ import { StreamingContent } from './StreamingContent.js';
 import { ToolExecution } from './ToolExecution.js';
 import type { DisplayMessage } from '../types.js';
 
+// Thinking display configuration
+const MAX_THINKING_LINES = 4;
+const MAX_THINKING_LINE_LENGTH = 80;
+
+/**
+ * Format thinking text for multi-line truncated display
+ */
+function formatThinkingText(text: string): string[] {
+  if (!text || text.trim().length === 0) return [];
+
+  // Split by newlines or sentences
+  const lines = text.split(/\n/).filter(l => l.trim());
+
+  // If no natural line breaks, create lines by wrapping
+  if (lines.length === 1 && text.length > MAX_THINKING_LINE_LENGTH) {
+    const words = text.split(' ');
+    const wrapped: string[] = [];
+    let currentLine = '';
+
+    for (const word of words) {
+      if ((currentLine + ' ' + word).length > MAX_THINKING_LINE_LENGTH) {
+        if (currentLine) wrapped.push(currentLine);
+        currentLine = word;
+      } else {
+        currentLine = currentLine ? currentLine + ' ' + word : word;
+      }
+      if (wrapped.length >= MAX_THINKING_LINES) break;
+    }
+    if (currentLine && wrapped.length < MAX_THINKING_LINES) {
+      wrapped.push(currentLine);
+    }
+    if (words.length > wrapped.join(' ').split(' ').length) {
+      wrapped.push('...');
+    }
+    return wrapped;
+  }
+
+  // Truncate each line and limit number of lines
+  const truncatedLines = lines.slice(0, MAX_THINKING_LINES).map(line => {
+    if (line.length > MAX_THINKING_LINE_LENGTH) {
+      return line.slice(0, MAX_THINKING_LINE_LENGTH - 3) + '...';
+    }
+    return line;
+  });
+
+  if (lines.length > MAX_THINKING_LINES) {
+    truncatedLines.push('...');
+  }
+
+  return truncatedLines;
+}
+
 export interface MessageListProps {
   messages: DisplayMessage[];
   isProcessing: boolean;
@@ -45,11 +97,12 @@ export function MessageList({
         <Box flexDirection="column">
           <Spinner label="Thinking" color="cyan" />
           {thinkingText.length > 0 && (
-            <Box marginLeft={2}>
-              <Text color="gray" dimColor>
-                {thinkingText.slice(0, 100)}
-                {thinkingText.length > 100 ? '...' : ''}
-              </Text>
+            <Box flexDirection="column" marginLeft={2}>
+              {formatThinkingText(thinkingText).map((line, index) => (
+                <Text key={index} color="gray" dimColor>
+                  {line}
+                </Text>
+              ))}
             </Box>
           )}
         </Box>
@@ -107,7 +160,7 @@ function MessageItem({ message }: MessageItemProps): React.ReactElement {
 
   const { prefix, color } = getRoleDisplay();
 
-  // For tool messages, show tool name and status
+  // For tool messages, show tool name and status with output
   if (message.role === 'tool') {
     const status = message.toolStatus ?? 'success';
     return (
@@ -116,7 +169,7 @@ function MessageItem({ message }: MessageItemProps): React.ReactElement {
         status={status}
         toolInput={message.toolInput}
         duration={message.duration}
-        details={message.content.length > 0 ? truncate(message.content, 50) : undefined}
+        output={message.content}
       />
     );
   }
@@ -134,7 +187,3 @@ function MessageItem({ message }: MessageItemProps): React.ReactElement {
   );
 }
 
-function truncate(text: string, maxLength: number): string {
-  if (text.length <= maxLength) return text;
-  return text.slice(0, maxLength) + '...';
-}

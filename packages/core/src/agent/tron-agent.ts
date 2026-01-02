@@ -487,7 +487,29 @@ export class TronAgent {
       toolCallId: request.toolCallId,
     };
 
+    const preHooks = this.hookEngine.getHooks('PreToolUse');
+    if (preHooks.length > 0) {
+      this.emit({
+        type: 'hook_triggered',
+        sessionId: this.sessionId,
+        timestamp: new Date().toISOString(),
+        hookName: preHooks.map(h => h.name).join(', '),
+        hookEvent: 'PreToolUse',
+      });
+    }
+
     const preResult = await this.hookEngine.execute('PreToolUse', preContext);
+
+    if (preHooks.length > 0) {
+      this.emit({
+        type: 'hook_completed',
+        sessionId: this.sessionId,
+        timestamp: new Date().toISOString(),
+        hookName: preHooks.map(h => h.name).join(', '),
+        hookEvent: 'PreToolUse',
+        result: preResult.action,
+      });
+    }
 
     if (preResult.action === 'block') {
       return {
@@ -565,7 +587,29 @@ export class TronAgent {
       duration,
     };
 
-    await this.hookEngine.execute('PostToolUse', postContext);
+    const postHooks = this.hookEngine.getHooks('PostToolUse');
+    if (postHooks.length > 0) {
+      this.emit({
+        type: 'hook_triggered',
+        sessionId: this.sessionId,
+        timestamp: new Date().toISOString(),
+        hookName: postHooks.map(h => h.name).join(', '),
+        hookEvent: 'PostToolUse',
+      });
+    }
+
+    const postResult = await this.hookEngine.execute('PostToolUse', postContext);
+
+    if (postHooks.length > 0) {
+      this.emit({
+        type: 'hook_completed',
+        sessionId: this.sessionId,
+        timestamp: new Date().toISOString(),
+        hookName: postHooks.map(h => h.name).join(', '),
+        hookEvent: 'PostToolUse',
+        result: postResult.action,
+      });
+    }
 
     return {
       toolCallId: request.toolCallId,

@@ -335,6 +335,31 @@ export function App({ config, auth }: AppProps): React.ReactElement {
         finalizeStreamingContent();
         break;
 
+      case 'hook_triggered':
+        if ('hookName' in event && 'hookEvent' in event) {
+          // Show hook execution in status
+          dispatch({ type: 'SET_STATUS', payload: `Hook: ${event.hookEvent}` });
+          debugLog.debug('hooks', `Hook triggered: ${event.hookName}`, { event: event.hookEvent });
+        }
+        break;
+
+      case 'hook_completed':
+        if ('hookName' in event && 'hookEvent' in event) {
+          // Add a system message for hook completion if blocked
+          const hookResult = 'result' in event ? event.result : 'continue';
+          if (hookResult === 'block') {
+            const hookMsg: DisplayMessage = {
+              id: `msg_${messageIdRef.current++}`,
+              role: 'system',
+              content: `Hook "${event.hookName}" blocked ${event.hookEvent}`,
+              timestamp: new Date().toISOString(),
+            };
+            dispatch({ type: 'ADD_MESSAGE', payload: hookMsg });
+          }
+          debugLog.debug('hooks', `Hook completed: ${event.hookName}`, { event: event.hookEvent, result: hookResult });
+        }
+        break;
+
       case 'agent_end':
         // Finalize any remaining streaming content before ending
         finalizeStreamingContent();
@@ -827,15 +852,8 @@ export function App({ config, auth }: AppProps): React.ReactElement {
         dispatch({ type: 'SHOW_SLASH_MENU', payload: false });
         dispatch({ type: 'CLEAR_INPUT' });
       }
-    } else if (!state.isProcessing) {
-      // History navigation when not in slash menu mode
-      if (key.upArrow) {
-        handleHistoryUp();
-      }
-      if (key.downArrow) {
-        handleHistoryDown();
-      }
     }
+    // Note: History navigation (up/down arrows) is now handled by InputArea/EnhancedInput
   });
 
   // Don't render the full UI until initialized
@@ -891,6 +909,8 @@ export function App({ config, auth }: AppProps): React.ReactElement {
         onChange={handleInputChange}
         onSubmit={handleSubmit}
         isProcessing={state.isProcessing}
+        onHistoryUp={handleHistoryUp}
+        onHistoryDown={handleHistoryDown}
       />
 
       {/* Status Bar */}
