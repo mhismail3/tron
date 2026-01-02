@@ -8,11 +8,17 @@
  * - Hook execution (SessionStart, SessionEnd, Pre/PostToolUse)
  * - Ledger management (continuity state)
  */
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import * as os from 'os';
-import { TuiSession, TuiSessionConfig, TuiSessionState } from '../../src/session/tui-session.js';
+import { TuiSession, TuiSessionConfig } from '../../src/session/tui-session.js';
+
+// Helper to create assistant messages with proper content format
+const assistantMessage = (text: string) => ({
+  role: 'assistant' as const,
+  content: [{ type: 'text' as const, text }],
+});
 
 // Test fixtures
 const TEST_DIR = path.join(os.tmpdir(), 'tron-tui-session-tests');
@@ -124,7 +130,7 @@ Follow the coding standards.`;
 
       // Simulate some work and create handoff
       await session1.addMessage({ role: 'user', content: 'Test message 1' });
-      await session1.addMessage({ role: 'assistant', content: 'Test response 1' });
+      await session1.addMessage(assistantMessage('Test response 1'));
       await session1.end();
 
       // Start new session - should see previous handoff
@@ -245,7 +251,7 @@ Implementing login flow
       await session.addMessage({ role: 'user', content: 'Message 1' });
       expect(session.getMessageCount()).toBe(1);
 
-      await session.addMessage({ role: 'assistant', content: 'Response 1' });
+      await session.addMessage(assistantMessage('Response 1'));
       expect(session.getMessageCount()).toBe(2);
     });
   });
@@ -262,7 +268,7 @@ Implementing login flow
       const session = new TuiSession(config);
       await session.initialize();
       await session.addMessage({ role: 'user', content: 'Test' });
-      await session.addMessage({ role: 'assistant', content: 'Response' });
+      await session.addMessage(assistantMessage('Response'));
 
       await session.end();
 
@@ -289,9 +295,9 @@ Implementing login flow
 
       // Add enough messages to trigger handoff
       await session.addMessage({ role: 'user', content: 'Please help me build a feature' });
-      await session.addMessage({ role: 'assistant', content: 'I will help you build the feature' });
+      await session.addMessage(assistantMessage('I will help you build the feature'));
       await session.addMessage({ role: 'user', content: 'Start with the database' });
-      await session.addMessage({ role: 'assistant', content: 'Created database schema' });
+      await session.addMessage(assistantMessage('Created database schema'));
 
       const endResult = await session.end();
 
@@ -336,7 +342,7 @@ Implementing login flow
       });
 
       await session.addMessage({ role: 'user', content: 'Test' });
-      await session.addMessage({ role: 'assistant', content: 'Response' });
+      await session.addMessage(assistantMessage('Response'));
       await session.end();
 
       // Ledger should persist
@@ -396,9 +402,9 @@ Working on login
       const session1 = new TuiSession(config);
       await session1.initialize();
       await session1.addMessage({ role: 'user', content: 'Build auth system' });
-      await session1.addMessage({ role: 'assistant', content: 'Starting auth implementation' });
+      await session1.addMessage(assistantMessage('Starting auth implementation'));
       await session1.addMessage({ role: 'user', content: 'Add JWT' });
-      await session1.addMessage({ role: 'assistant', content: 'Added JWT support' });
+      await session1.addMessage(assistantMessage('Added JWT support'));
       await session1.end();
 
       // Create second session
@@ -484,9 +490,9 @@ Working on login
       await session1.initialize();
       await session1.updateLedger({ goal: 'Implement authentication system' });
       await session1.addMessage({ role: 'user', content: 'Build OAuth integration' });
-      await session1.addMessage({ role: 'assistant', content: 'Implemented OAuth flow' });
+      await session1.addMessage(assistantMessage('Implemented OAuth flow'));
       await session1.addMessage({ role: 'user', content: 'Add token refresh' });
-      await session1.addMessage({ role: 'assistant', content: 'Added refresh token logic' });
+      await session1.addMessage(assistantMessage('Added refresh token logic'));
       await session1.end();
 
       // Search for it
@@ -625,7 +631,7 @@ Working on login
       await session.initialize();
 
       await session.addMessage({ role: 'user', content: 'Test' });
-      await session.addMessage({ role: 'assistant', content: 'Response' });
+      await session.addMessage(assistantMessage('Response'));
 
       // Check that no session files were created
       const sessionsDir = path.join(TRON_DIR, 'sessions');
@@ -647,9 +653,9 @@ Working on login
       await session.initialize();
 
       await session.addMessage({ role: 'user', content: 'Test 1' });
-      await session.addMessage({ role: 'assistant', content: 'Response 1' });
+      await session.addMessage(assistantMessage('Response 1'));
       await session.addMessage({ role: 'user', content: 'Test 2' });
-      await session.addMessage({ role: 'assistant', content: 'Response 2' });
+      await session.addMessage(assistantMessage('Response 2'));
 
       const result = await session.end();
       expect(result.handoffCreated).toBe(false);
@@ -761,10 +767,9 @@ Working on login
         role: 'user',
         content: 'A long message that contains many words to simulate token usage in a conversation',
       });
-      await session.addMessage({
-        role: 'assistant',
-        content: 'A response with additional content to push us over the token threshold limit',
-      });
+      await session.addMessage(
+        assistantMessage('A response with additional content to push us over the token threshold limit')
+      );
 
       expect(session.needsCompaction()).toBe(true);
     });
@@ -781,7 +786,7 @@ Working on login
       await session.initialize();
 
       await session.addMessage({ role: 'user', content: 'First' });
-      await session.addMessage({ role: 'assistant', content: 'Second' });
+      await session.addMessage(assistantMessage('Second'));
 
       const messages = session.getMessages();
       expect(messages.length).toBe(2);
@@ -806,18 +811,16 @@ Working on login
         role: 'user',
         content: 'First question about TypeScript and how it works in modern development',
       });
-      await session.addMessage({
-        role: 'assistant',
-        content: 'TypeScript is a typed superset of JavaScript that compiles to plain JS',
-      });
+      await session.addMessage(
+        assistantMessage('TypeScript is a typed superset of JavaScript that compiles to plain JS')
+      );
       await session.addMessage({
         role: 'user',
         content: 'Second question about interfaces and type definitions',
       });
-      await session.addMessage({
-        role: 'assistant',
-        content: 'Interfaces define contracts for objects and enable structural typing',
-      });
+      await session.addMessage(
+        assistantMessage('Interfaces define contracts for objects and enable structural typing')
+      );
 
       const result = await session.compactIfNeeded();
 

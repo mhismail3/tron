@@ -21,6 +21,11 @@ const initialState: AppState = {
   streamingContent: '',
   isStreaming: false,
   thinkingText: '',
+  showSlashMenu: false,
+  slashMenuIndex: 0,
+  promptHistory: [],
+  historyIndex: -1,
+  temporaryInput: '',
 };
 
 function reducer(state: AppState, action: AppAction): AppState {
@@ -76,7 +81,68 @@ function reducer(state: AppState, action: AppAction): AppState {
         isInitialized: true,
         sessionId: state.sessionId,
         status: 'Ready',
+        activeToolInput: null,
       };
+    case 'SHOW_SLASH_MENU':
+      return { ...state, showSlashMenu: action.payload, slashMenuIndex: 0 };
+    case 'SET_SLASH_MENU_INDEX':
+      return { ...state, slashMenuIndex: action.payload };
+    case 'ADD_TO_HISTORY': {
+      const trimmed = action.payload.trim();
+      if (!trimmed) return state;
+      if (state.promptHistory.length > 0 &&
+          state.promptHistory[state.promptHistory.length - 1] === trimmed) {
+        return { ...state, historyIndex: -1, temporaryInput: '' };
+      }
+      return {
+        ...state,
+        promptHistory: [...state.promptHistory, trimmed],
+        historyIndex: -1,
+        temporaryInput: '',
+      };
+    }
+    case 'HISTORY_UP': {
+      if (state.promptHistory.length === 0) return state;
+      if (state.historyIndex === -1) {
+        const newIndex = state.promptHistory.length - 1;
+        return {
+          ...state,
+          historyIndex: newIndex,
+          input: state.promptHistory[newIndex] ?? '',
+        };
+      } else if (state.historyIndex > 0) {
+        const newIndex = state.historyIndex - 1;
+        return {
+          ...state,
+          historyIndex: newIndex,
+          input: state.promptHistory[newIndex] ?? '',
+        };
+      }
+      return state;
+    }
+    case 'HISTORY_DOWN': {
+      if (state.promptHistory.length === 0 || state.historyIndex === -1) {
+        return state;
+      }
+      if (state.historyIndex < state.promptHistory.length - 1) {
+        const newIndex = state.historyIndex + 1;
+        return {
+          ...state,
+          historyIndex: newIndex,
+          input: state.promptHistory[newIndex] ?? '',
+        };
+      } else {
+        return {
+          ...state,
+          historyIndex: -1,
+          input: state.temporaryInput,
+        };
+      }
+    }
+    case 'SET_TEMPORARY_INPUT':
+      return { ...state, temporaryInput: action.payload };
+    case 'RESET_HISTORY_NAVIGATION':
+      return { ...state, historyIndex: -1 };
     default:
       return state;
   }
@@ -134,7 +200,7 @@ describe('App Reducer', () => {
       };
       const state = reducer(initialState, { type: 'ADD_MESSAGE', payload: message });
       expect(state.messages).toHaveLength(1);
-      expect(state.messages[0]).toEqual(message);
+      expect(state.messages[0]!).toEqual(message);
     });
 
     it('should append message to existing list', () => {
@@ -153,7 +219,7 @@ describe('App Reducer', () => {
       const startState = { ...initialState, messages: [existingMessage] };
       const state = reducer(startState, { type: 'ADD_MESSAGE', payload: newMessage });
       expect(state.messages).toHaveLength(2);
-      expect(state.messages[1]).toEqual(newMessage);
+      expect(state.messages[1]!).toEqual(newMessage);
     });
   });
 
@@ -170,7 +236,7 @@ describe('App Reducer', () => {
         type: 'UPDATE_MESSAGE',
         payload: { id: 'msg_1', updates: { content: 'Updated' } },
       });
-      expect(state.messages[0].content).toBe('Updated');
+      expect(state.messages[0]!.content).toBe('Updated');
     });
 
     it('should not update non-existent message', () => {
@@ -185,7 +251,7 @@ describe('App Reducer', () => {
         type: 'UPDATE_MESSAGE',
         payload: { id: 'msg_999', updates: { content: 'Updated' } },
       });
-      expect(state.messages[0].content).toBe('Original');
+      expect(state.messages[0]!.content).toBe('Original');
     });
 
     it('should preserve other message properties', () => {
@@ -200,8 +266,8 @@ describe('App Reducer', () => {
         type: 'UPDATE_MESSAGE',
         payload: { id: 'msg_1', updates: { content: 'Updated' } },
       });
-      expect(state.messages[0].role).toBe('assistant');
-      expect(state.messages[0].timestamp).toBe('2025-01-01T00:00:00Z');
+      expect(state.messages[0]!.role).toBe('assistant');
+      expect(state.messages[0]!.timestamp).toBe('2025-01-01T00:00:00Z');
     });
   });
 
@@ -288,6 +354,11 @@ describe('App Reducer', () => {
         streamingContent: 'some content',
         isStreaming: true,
         thinkingText: 'thinking...',
+        showSlashMenu: true,
+        slashMenuIndex: 2,
+        promptHistory: ['prev1', 'prev2'],
+        historyIndex: 1,
+        temporaryInput: 'temp',
       };
       const state = reducer(startState, { type: 'RESET' });
       expect(state.input).toBe('');

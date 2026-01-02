@@ -45,6 +45,7 @@ describe('TUI Types', () => {
   describe('AppState', () => {
     it('should define complete state structure', () => {
       const state: AppState = {
+        isInitialized: true,
         input: 'test input',
         isProcessing: false,
         sessionId: 'sess_123',
@@ -53,6 +54,15 @@ describe('TUI Types', () => {
         error: null,
         tokenUsage: { input: 100, output: 50 },
         activeTool: null,
+        activeToolInput: null,
+        streamingContent: '',
+        isStreaming: false,
+        thinkingText: '',
+        showSlashMenu: false,
+        slashMenuIndex: 0,
+        promptHistory: [],
+        historyIndex: -1,
+        temporaryInput: '',
       };
       expect(state.sessionId).toBe('sess_123');
       expect(state.tokenUsage.input).toBe(100);
@@ -60,6 +70,7 @@ describe('TUI Types', () => {
 
     it('should support processing state', () => {
       const state: AppState = {
+        isInitialized: true,
         input: '',
         isProcessing: true,
         sessionId: 'sess_123',
@@ -68,6 +79,15 @@ describe('TUI Types', () => {
         error: null,
         tokenUsage: { input: 0, output: 0 },
         activeTool: 'read',
+        activeToolInput: 'test.txt',
+        streamingContent: '',
+        isStreaming: true,
+        thinkingText: '',
+        showSlashMenu: false,
+        slashMenuIndex: 0,
+        promptHistory: [],
+        historyIndex: -1,
+        temporaryInput: '',
       };
       expect(state.isProcessing).toBe(true);
       expect(state.activeTool).toBe('read');

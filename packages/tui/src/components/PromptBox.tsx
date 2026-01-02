@@ -5,7 +5,7 @@
  * Design: Bordered box with responsive width handling.
  */
 import React from 'react';
-import { Box, Text, useStdout } from 'ink';
+import { Box, useStdout } from 'ink';
 import { MacOSInput } from './MacOSInput.js';
 import type { InputAreaProps } from '../types.js';
 
@@ -16,6 +16,7 @@ export function PromptBox({
   isProcessing,
   onUpArrow,
   onDownArrow,
+  onCtrlC,
 }: InputAreaProps): React.ReactElement {
   const { stdout } = useStdout();
   const terminalWidth = stdout?.columns ?? 80;
@@ -48,26 +49,21 @@ export function PromptBox({
       paddingY={0}
       marginX={1}
     >
-      <Box flexDirection="row">
-        <Text color={isProcessing ? 'gray' : 'green'} bold>&gt; </Text>
-        <Box flexGrow={1}>
-          {isProcessing ? (
-            <Text color="gray">{value || 'Processing...'}</Text>
-          ) : (
-            <MacOSInput
-              value={value}
-              onChange={onChange}
-              onSubmit={handleSubmit}
-              placeholder={placeholder}
-              onHistoryUp={onUpArrow}
-              onHistoryDown={onDownArrow}
-              maxVisibleLines={maxVisibleLines}
-              terminalWidth={inputWidth}
-              continuationPrefix="  "
-            />
-          )}
-        </Box>
-      </Box>
+      <MacOSInput
+        value={value}
+        onChange={onChange}
+        onSubmit={handleSubmit}
+        placeholder={placeholder}
+        onHistoryUp={onUpArrow}
+        onHistoryDown={onDownArrow}
+        onCtrlC={onCtrlC}
+        maxVisibleLines={maxVisibleLines}
+        terminalWidth={inputWidth}
+        promptPrefix="> "
+        promptColor="green"
+        continuationPrefix="  "
+        isProcessing={isProcessing}
+      />
     </Box>
   );
 }

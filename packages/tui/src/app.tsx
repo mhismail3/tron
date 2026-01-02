@@ -889,6 +889,7 @@ export function App({ config, auth }: AppProps): React.ReactElement {
         isProcessing={state.isProcessing}
         onUpArrow={handleHistoryUp}
         onDownArrow={handleHistoryDown}
+        onCtrlC={handleExit}
       />
 
       {/* Status Bar */}

@@ -31,7 +31,7 @@
  * - Ctrl+Y or Ctrl+Shift+Z: Redo
  */
 import React, { useState, useCallback, useEffect, useRef } from 'react';
-import { Box, Text, useInput } from 'ink';
+import { Box, Text, useInput, useStdin } from 'ink';
 import chalk from 'chalk';
 
 // =============================================================================
@@ -41,6 +41,79 @@ import chalk from 'chalk';
 interface UndoState {
   value: string;
   cursorOffset: number;
+}
+
+// =============================================================================
+// Kitty Keyboard Protocol Helpers
+// =============================================================================
+
+/**
+ * Parse Kitty keyboard protocol modifier bits
+ * Bit 0: Shift, Bit 1: Alt, Bit 2: Ctrl, Bit 3: Super
+ */
+function parseKittyModifier(modValue: number): { shift: boolean; alt: boolean; ctrl: boolean } {
+  const mod = modValue - 1; // Kitty uses 1-indexed modifiers
+  return {
+    shift: (mod & 1) !== 0,
+    alt: (mod & 2) !== 0,
+    ctrl: (mod & 4) !== 0,
+  };
+}
+
+/**
+ * Detect Shift+Enter in various terminal formats
+ */
+function isShiftEnterSequence(input: string): boolean {
+  if (!input) return false;
+  const normalized = input.startsWith('[') ? `\x1b${input}` : input;
+
+  // Kitty protocol: \x1b[13;2u (Enter with Shift)
+  const kittyMatch = normalized.match(/^\x1b\[(\d+);(\d+)u$/);
+  if (kittyMatch) {
+    const codepoint = Number(kittyMatch[1]);
+    const { shift, ctrl } = parseKittyModifier(Number(kittyMatch[2]));
+    return codepoint === 13 && shift && !ctrl;
+  }
+
+  // modifyOtherKeys format: \x1b[27;2;13~
+  const modifyOtherKeysMatch = normalized.match(/^\x1b\[27;(\d+);13~$/);
+  if (modifyOtherKeysMatch) {
+    const { shift } = parseKittyModifier(Number(modifyOtherKeysMatch[1]));
+    return shift;
+  }
+
+  // Legacy format: \x1b[13;2~
+  const legacyMatch = normalized.match(/^\x1b\[13;(\d+)~$/);
+  if (legacyMatch) {
+    const { shift } = parseKittyModifier(Number(legacyMatch[1]));
+    return shift;
+  }
+
+  return false;
+}
+
+/**
+ * Detect Ctrl+C in various terminal formats (for exit handling)
+ * With Kitty protocol enabled, Ctrl+C may come as an escape sequence
+ */
+function isCtrlCSequence(input: string): boolean {
+  if (!input) return false;
+
+  // Traditional Ctrl+C (ETX character)
+  if (input === '\x03') return true;
+
+  const normalized = input.startsWith('[') ? `\x1b${input}` : input;
+
+  // Kitty protocol: \x1b[99;5u (c=99 with Ctrl=modifier 5)
+  const kittyMatch = normalized.match(/^\x1b\[(\d+);(\d+)u$/);
+  if (kittyMatch) {
+    const codepoint = Number(kittyMatch[1]);
+    const { ctrl, shift, alt } = parseKittyModifier(Number(kittyMatch[2]));
+    // 99 = 'c', 67 = 'C'
+    return (codepoint === 99 || codepoint === 67) && ctrl && !shift && !alt;
+  }
+
+  return false;
 }
 
 export interface MacOSInputProps {
@@ -58,14 +131,22 @@ export interface MacOSInputProps {
   onHistoryUp?: () => void;
   /** Callback for history down (only when cursor at last line) */
   onHistoryDown?: () => void;
+  /** Callback when Ctrl+C is pressed (for exit handling) */
+  onCtrlC?: () => void;
   /** Maximum visible lines before scrolling (0 = unlimited) */
   maxVisibleLines?: number;
   /** Terminal width for wrapping calculation */
   terminalWidth?: number;
   /** Background color for the input area */
   backgroundColor?: 'gray' | 'black' | 'white' | 'red' | 'green' | 'yellow' | 'blue' | 'magenta' | 'cyan';
+  /** Prefix for the first line (e.g., "> " prompt) */
+  promptPrefix?: string;
+  /** Color for the prompt prefix */
+  promptColor?: 'green' | 'gray' | 'white' | 'red' | 'yellow' | 'blue' | 'magenta' | 'cyan';
   /** Prefix to add to continuation lines (lines after the first) for alignment */
   continuationPrefix?: string;
+  /** Whether input is in processing state (disables editing, shows gray) */
+  isProcessing?: boolean;
 }
 
 // =============================================================================
@@ -80,10 +161,17 @@ export function MacOSInput({
   focus = true,
   onHistoryUp,
   onHistoryDown,
+  onCtrlC,
   maxVisibleLines = 20,
   terminalWidth: _terminalWidth = 80,
-  continuationPrefix = '',
+  promptPrefix = '',
+  promptColor = 'green',
+  continuationPrefix: continuationPrefixProp,
+  isProcessing = false,
 }: MacOSInputProps): React.ReactElement {
+  const { internal_eventEmitter } = useStdin();
+  const continuationPrefix = continuationPrefixProp ?? (promptPrefix ? ' '.repeat(promptPrefix.length) : '');
+  const isEditable = focus && !isProcessing;
   // Cursor position (character index in the string)
   const [cursorOffset, setCursorOffset] = useState(value.length);
   // Selection anchor - null means no selection
@@ -95,6 +183,9 @@ export function MacOSInput({
   const redoStack = useRef<UndoState[]>([]);
   // Track if last change was from undo/redo to avoid pushing to stack
   const isUndoRedo = useRef(false);
+  // Track internal value changes to avoid resetting cursor
+  const isInternalChange = useRef(false);
+  const pendingCursorOffset = useRef<number | null>(null);
 
   // ==========================================================================
   // Cursor and Selection Helpers
@@ -110,10 +201,20 @@ export function MacOSInput({
     }
   }, [value, cursorOffset, selectionAnchor]);
 
-  // Reset cursor to end when value changes externally (e.g., history navigation)
-  // Only if not from undo/redo
+  // Handle cursor positioning when value changes
+  // - Internal changes (typing, newlines): use the pending cursor offset
+  // - Undo/redo: cursor is already set correctly
+  // - External changes (history navigation): reset to end
   useEffect(() => {
-    if (!isUndoRedo.current) {
+    if (isInternalChange.current) {
+      // Internal change: apply pending cursor position
+      if (pendingCursorOffset.current !== null) {
+        setCursorOffset(pendingCursorOffset.current);
+        pendingCursorOffset.current = null;
+      }
+      isInternalChange.current = false;
+    } else if (!isUndoRedo.current) {
+      // External change (e.g., history navigation): reset to end
       setCursorOffset(value.length);
       setSelectionAnchor(null);
     }
@@ -194,8 +295,11 @@ export function MacOSInput({
   const updateValue = useCallback(
     (newValue: string, newCursor: number) => {
       pushUndoState();
+      // Mark as internal change and store pending cursor position
+      // This prevents the useEffect from resetting cursor to end
+      isInternalChange.current = true;
+      pendingCursorOffset.current = Math.max(0, Math.min(newCursor, newValue.length));
       onChange(newValue);
-      setCursorOffset(Math.max(0, Math.min(newCursor, newValue.length)));
       clearSelection();
     },
     [onChange, clearSelection, pushUndoState]
@@ -207,6 +311,19 @@ export function MacOSInput({
     const newValue = value.slice(0, range.start) + value.slice(range.end);
     return { newValue, newCursor: range.start };
   }, [value, getSelectionRange]);
+
+  const insertNewline = useCallback(() => {
+    if (hasSelection()) {
+      const result = deleteSelection();
+      if (result) {
+        const newValue = result.newValue.slice(0, result.newCursor) + '\n' + result.newValue.slice(result.newCursor);
+        updateValue(newValue, result.newCursor + 1);
+      }
+    } else {
+      const newValue = value.slice(0, cursorOffset) + '\n' + value.slice(cursorOffset);
+      updateValue(newValue, cursorOffset + 1);
+    }
+  }, [hasSelection, deleteSelection, updateValue, value, cursorOffset]);
 
   // ==========================================================================
   // Word Boundary Helpers
@@ -304,10 +421,48 @@ export function MacOSInput({
   // Input Handler
   // ==========================================================================
 
+  const skipNextInputRef = useRef(false);
+
+  useEffect(() => {
+    if (!internal_eventEmitter) return;
+
+    const handleRawInput = (data: string) => {
+      if (typeof data !== 'string') return;
+
+      // Handle Ctrl+C (works even when processing)
+      if (isCtrlCSequence(data)) {
+        skipNextInputRef.current = true;
+        onCtrlC?.();
+        return;
+      }
+
+      // Only handle other special keys when editable
+      if (!isEditable) return;
+
+      // Handle Shift+Enter
+      if (isShiftEnterSequence(data)) {
+        skipNextInputRef.current = true;
+        insertNewline();
+        return;
+      }
+    };
+
+    internal_eventEmitter.on('input', handleRawInput);
+    return () => {
+      internal_eventEmitter.removeListener('input', handleRawInput);
+    };
+  }, [internal_eventEmitter, isEditable, insertNewline, onCtrlC]);
+
   useInput(
     (input, key) => {
-      // Ctrl+C - let it propagate for exit
+      if (skipNextInputRef.current) {
+        skipNextInputRef.current = false;
+        return;
+      }
+
+      // Ctrl+C - call callback for exit
       if (key.ctrl && input === 'c') {
+        onCtrlC?.();
         return;
       }
 
@@ -316,24 +471,15 @@ export function MacOSInput({
         return;
       }
 
-      // Enter - submit (without shift)
-      if (key.return && !key.shift) {
-        onSubmit?.();
+      const isShiftEnter = (key.return && key.shift) || isShiftEnterSequence(input);
+      if (isShiftEnter) {
+        insertNewline();
         return;
       }
 
-      // Shift+Enter - insert newline
-      if (key.return && key.shift) {
-        if (hasSelection()) {
-          const result = deleteSelection();
-          if (result) {
-            const newValue = result.newValue.slice(0, result.newCursor) + '\n' + result.newValue.slice(result.newCursor);
-            updateValue(newValue, result.newCursor + 1);
-          }
-        } else {
-          const newValue = value.slice(0, cursorOffset) + '\n' + value.slice(cursorOffset);
-          updateValue(newValue, cursorOffset + 1);
-        }
+      // Enter - submit (without shift)
+      if (key.return || input === '\r' || input === '\n') {
+        onSubmit?.();
         return;
       }
 
@@ -585,7 +731,7 @@ export function MacOSInput({
         }
       }
     },
-    { isActive: focus }
+    { isActive: isEditable }
   );
 
   // ==========================================================================
@@ -738,24 +884,45 @@ export function MacOSInput({
     return renderData;
   };
 
-  const renderData = buildRenderData();
+  const prefixColor = isProcessing ? 'gray' : promptColor;
+  const renderPrefix = (isFirstContentLine: boolean): React.ReactElement | null => {
+    const prefix = isFirstContentLine ? promptPrefix : continuationPrefix;
+    if (!prefix) return null;
+    if (isFirstContentLine) {
+      return (
+        <Text color={prefixColor} bold>
+          {prefix}
+        </Text>
+      );
+    }
+    return <Text>{prefix}</Text>;
+  };
 
-  // For single line, return simple Text
-  if (renderData.length === 1) {
-    return <Text>{renderData[0]!.content}</Text>;
+  if (isProcessing) {
+    const displayValue = value.length > 0 ? value : 'Processing...';
+    const lines = displayValue.split('\n');
+    return (
+      <Box flexDirection="column">
+        {lines.map((line, idx) => (
+          <Box key={idx} flexDirection="row">
+            {renderPrefix(idx === 0)}
+            <Text color="gray">{line || ' '}</Text>
+          </Box>
+        ))}
+      </Box>
+    );
   }
 
-  // For multiline, return Box with separate Text elements for each line
+  const renderData = buildRenderData();
+
+  // Return Box with separate Text elements for each line
   // This ensures proper Ink flex layout instead of relying on \n characters
   return (
     <Box flexDirection="column">
       {renderData.map((line, idx) => (
         <Box key={idx} flexDirection="row">
-          {/* First content line has no prefix (PromptBox provides "> ") */}
-          {/* Subsequent lines and indicators get continuation prefix for alignment */}
-          {!line.isFirstContentLine && continuationPrefix && (
-            <Text>{continuationPrefix}</Text>
-          )}
+          {/* First content line gets the prompt prefix; subsequent lines/indicators get continuation prefix */}
+          {renderPrefix(line.isFirstContentLine)}
           <Text>{line.content}</Text>
         </Box>
       ))}

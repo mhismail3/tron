@@ -267,6 +267,14 @@ async function runInteractive(config: CliConfig): Promise<void> {
     process.exit(1);
   }
 
+  const disableKittyKeyboard = () => {
+    process.stdout.write('\x1b[<u');
+  };
+
+  // Enable Kitty keyboard protocol for modified keys like Shift+Enter.
+  process.stdout.write('\x1b[>1u');
+  process.on('exit', disableKittyKeyboard);
+
   // Suppress pino logs unless in debug mode
   // This must be set BEFORE any @tron/core imports that create loggers
   if (!config.debug) {
@@ -292,7 +300,12 @@ async function runInteractive(config: CliConfig): Promise<void> {
     React.createElement(App, { config, auth })
   );
 
-  await waitUntilExit();
+  try {
+    await waitUntilExit();
+  } finally {
+    disableKittyKeyboard();
+    process.removeListener('exit', disableKittyKeyboard);
+  }
 }
 
 async function runNonInteractive(config: CliConfig): Promise<void> {

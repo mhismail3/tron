@@ -105,19 +105,19 @@ describe('Slash Commands', () => {
     it('should filter by prefix', () => {
       const filtered = filterCommands(testCommands, 'mo');
       expect(filtered).toHaveLength(1);
-      expect(filtered[0].name).toBe('model');
+      expect(filtered[0]!.name).toBe('model');
     });
 
     it('should filter by partial match', () => {
       const filtered = filterCommands(testCommands, 'cl');
       expect(filtered).toHaveLength(1); // clear
-      expect(filtered[0].name).toBe('clear');
+      expect(filtered[0]!.name).toBe('clear');
     });
 
     it('should be case insensitive', () => {
       const filtered = filterCommands(testCommands, 'MODEL');
       expect(filtered).toHaveLength(1);
-      expect(filtered[0].name).toBe('model');
+      expect(filtered[0]!.name).toBe('model');
     });
 
     it('should return empty array for no matches', () => {
@@ -128,7 +128,7 @@ describe('Slash Commands', () => {
     it('should match description as well', () => {
       const filtered = filterCommands(testCommands, 'screen');
       expect(filtered).toHaveLength(1);
-      expect(filtered[0].name).toBe('clear');
+      expect(filtered[0]!.name).toBe('clear');
     });
   });
 });

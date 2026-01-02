@@ -154,6 +154,8 @@ export interface InputAreaProps {
   onUpArrow?: () => void;
   /** Callback for down arrow (history navigation) */
   onDownArrow?: () => void;
+  /** Callback when Ctrl+C is pressed (for exit handling) */
+  onCtrlC?: () => void;
 }
 
 export interface StatusBarProps {
