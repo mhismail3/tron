@@ -13,11 +13,11 @@
  */
 import React, { useReducer, useCallback, useEffect, useRef } from 'react';
 import { Box, Text, useInput, useApp } from 'ink';
-import { Header } from './components/Header.js';
 import { MessageList } from './components/MessageList.js';
-import { InputArea } from './components/InputArea.js';
 import { StatusBar } from './components/StatusBar.js';
 import { SlashCommandMenu } from './components/SlashCommandMenu.js';
+import { WelcomeBox } from './components/WelcomeBox.js';
+import { PromptBox } from './components/PromptBox.js';
 import {
   BUILT_IN_COMMANDS,
   isSlashCommandInput,
@@ -442,27 +442,6 @@ export function App({ config, auth }: AppProps): React.ReactElement {
 
       dispatch({ type: 'SET_SESSION', payload: initResult.sessionId });
 
-      // Welcome message with context info
-      let welcomeMsg = `Welcome to Tron! Working in: ${config.workingDirectory}`;
-
-      if (initResult.context?.files.length) {
-        welcomeMsg += `\nLoaded context from ${initResult.context.files.length} file(s)`;
-      }
-
-      if (initResult.handoffs?.length) {
-        welcomeMsg += `\n${initResult.handoffs.length} previous session(s) available for context`;
-      }
-
-      dispatch({
-        type: 'ADD_MESSAGE',
-        payload: {
-          id: `msg_${messageIdRef.current++}`,
-          role: 'system',
-          content: welcomeMsg,
-          timestamp: new Date().toISOString(),
-        },
-      });
-
       // Mark as initialized
       dispatch({ type: 'SET_STATUS', payload: 'Ready' });
       dispatch({ type: 'SET_INITIALIZED', payload: true });
@@ -868,12 +847,10 @@ export function App({ config, auth }: AppProps): React.ReactElement {
 
   return (
     <Box flexDirection="column" height="100%">
-      {/* Header */}
-      <Header
-        sessionId={state.sessionId}
-        workingDirectory={config.workingDirectory}
+      {/* Welcome Box */}
+      <WelcomeBox
         model={config.model ?? DEFAULT_MODEL}
-        tokenUsage={state.tokenUsage}
+        workingDirectory={config.workingDirectory}
       />
 
       {/* Message List */}
@@ -904,8 +881,8 @@ export function App({ config, auth }: AppProps): React.ReactElement {
         />
       )}
 
-      {/* Input Area */}
-      <InputArea
+      {/* Prompt Box */}
+      <PromptBox
         value={state.input}
         onChange={handleInputChange}
         onSubmit={handleSubmit}

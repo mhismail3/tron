@@ -62,6 +62,8 @@ export interface MacOSInputProps {
   maxVisibleLines?: number;
   /** Terminal width for wrapping calculation */
   terminalWidth?: number;
+  /** Background color for the input area */
+  backgroundColor?: 'gray' | 'black' | 'white' | 'red' | 'green' | 'yellow' | 'blue' | 'magenta' | 'cyan';
 }
 
 // =============================================================================

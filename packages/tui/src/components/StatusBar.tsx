@@ -1,8 +1,8 @@
 /**
  * @fileoverview Status Bar Component
  *
- * Displays current status, token usage, cost estimate, and git info.
- * Design: Clean footer with essential session metrics.
+ * Displays metrics footer: model, token usage, cost, and git info.
+ * Design: Clean metrics line below the prompt box.
  */
 import React from 'react';
 import { Box, Text } from 'ink';
@@ -14,6 +14,7 @@ export interface StatusBarProps {
   model?: string;
   gitBranch?: string;
   gitWorktree?: string;
+  contextLimit?: number; // Max context tokens for the model
 }
 
 // Approximate cost per 1M tokens (rough estimates)
@@ -27,15 +28,16 @@ const COST_PER_MILLION: Record<string, { input: number; output: number }> = {
   'default': { input: 3, output: 15 },
 };
 
-function getStatusIcon(status: string): { icon: string; color: string } {
-  const s = status.toLowerCase();
-  if (s === 'ready') return { icon: '●', color: 'green' };
-  if (s.includes('thinking') || s.includes('processing')) return { icon: '◐', color: 'yellow' };
-  if (s.includes('running')) return { icon: '◑', color: 'blue' };
-  if (s.includes('error')) return { icon: '○', color: 'red' };
-  if (s.includes('hook')) return { icon: '◉', color: 'magenta' };
-  return { icon: '◌', color: 'gray' };
-}
+// Context limits per model (in tokens)
+const CONTEXT_LIMITS: Record<string, number> = {
+  'opus': 200000,
+  'sonnet': 200000,
+  'haiku': 200000,
+  'gpt-4o': 128000,
+  'gpt-4': 128000,
+  'gemini': 1000000,
+  'default': 200000,
+};
 
 function formatTokens(n: number): string {
   if (n >= 1000000) return `${(n / 1000000).toFixed(1)}M`;
@@ -44,7 +46,6 @@ function formatTokens(n: number): string {
 }
 
 function estimateCost(model: string, input: number, output: number): string {
-  // Find matching cost tier
   let tier = COST_PER_MILLION['default']!;
   const modelLower = model.toLowerCase();
   for (const [key, value] of Object.entries(COST_PER_MILLION)) {
@@ -56,7 +57,6 @@ function estimateCost(model: string, input: number, output: number): string {
 
   const cost = (input / 1000000) * tier.input + (output / 1000000) * tier.output;
   if (cost < 0.01) return '$0.00';
-  if (cost < 1) return `$${cost.toFixed(2)}`;
   return `$${cost.toFixed(2)}`;
 }
 
@@ -72,69 +72,70 @@ function formatModelShort(model: string): string {
   return model.slice(0, 12);
 }
 
+function getContextLimit(model: string): number {
+  const modelLower = model.toLowerCase();
+  for (const [key, limit] of Object.entries(CONTEXT_LIMITS)) {
+    if (modelLower.includes(key)) {
+      return limit;
+    }
+  }
+  return CONTEXT_LIMITS['default']!;
+}
+
 export function StatusBar({
-  status,
-  error,
   tokenUsage,
   model = '',
   gitBranch,
   gitWorktree,
+  contextLimit,
 }: StatusBarProps): React.ReactElement {
-  const { icon, color } = getStatusIcon(status);
-  const totalTokens = (tokenUsage?.input ?? 0) + (tokenUsage?.output ?? 0);
+  const totalInput = tokenUsage?.input ?? 0;
+  const totalOutput = tokenUsage?.output ?? 0;
+  const totalTokens = totalInput + totalOutput;
+  const limit = contextLimit ?? getContextLimit(model);
+  const usagePercent = limit > 0 ? Math.round((totalInput / limit) * 100) : 0;
 
   return (
-    <Box flexDirection="row" justifyContent="space-between" paddingX={1} marginTop={1}>
-      {/* Left: Status */}
-      <Box flexDirection="row" gap={2}>
-        <Box>
-          <Text color={color as any}>{icon}</Text>
-          <Text color="white"> {status}</Text>
-        </Box>
-
-        {/* Error if present */}
-        {error && (
-          <Text color="red"> │ {error.slice(0, 40)}{error.length > 40 ? '...' : ''}</Text>
-        )}
-      </Box>
-
-      {/* Right: Metrics */}
+    <Box flexDirection="row" justifyContent="space-between" paddingX={2} marginTop={0}>
+      {/* Left: Model, Tokens, Cost */}
       <Box flexDirection="row" gap={2}>
         {model && (
           <Text color="gray">{formatModelShort(model)}</Text>
         )}
 
-        {tokenUsage && totalTokens > 0 && (
+        {totalTokens > 0 ? (
           <>
-            <Text color="gray">│</Text>
-            <Text color="magenta">
-              {formatTokens(tokenUsage.input)}/{formatTokens(tokenUsage.output)}
+            <Text color="gray">
+              {formatTokens(totalInput)}/{formatTokens(totalOutput)}
             </Text>
-            <Text color="gray">│</Text>
+            <Text color="gray" dimColor>({usagePercent}%)</Text>
             <Text color="green">
-              {estimateCost(model, tokenUsage.input, tokenUsage.output)}
+              {estimateCost(model, totalInput, totalOutput)}
             </Text>
           </>
+        ) : (
+          <Text color="gray" dimColor>No usage yet</Text>
         )}
+      </Box>
 
+      {/* Right: Git Info */}
+      <Box flexDirection="row" gap={2}>
         {gitWorktree && (
-          <>
-            <Text color="gray">│</Text>
+          <Box flexDirection="row">
             <Text color="gray">Worktree: </Text>
             <Text color="blue">{gitWorktree}</Text>
-          </>
+          </Box>
         )}
 
         {gitBranch && (
-          <>
-            <Text color="gray">│</Text>
+          <Box flexDirection="row">
             <Text color="gray">Branch: </Text>
             <Text color="blue">{gitBranch}</Text>
-          </>
+          </Box>
         )}
 
-        {!gitBranch && !gitWorktree && !tokenUsage && (
-          <Text color="gray">Ctrl+C: exit │ Ctrl+L: clear</Text>
+        {!gitBranch && !gitWorktree && totalTokens === 0 && (
+          <Text color="gray" dimColor>Ctrl+C: exit</Text>
         )}
       </Box>
     </Box>

@@ -86,8 +86,18 @@ export function MessageList({
   isStreaming,
   thinkingText,
 }: MessageListProps): React.ReactElement {
+  // Show "Ready" indicator when no messages and not processing
+  const showReady = messages.length === 0 && !isProcessing && !streamingContent;
+
   return (
     <Box flexDirection="column" gap={1}>
+      {showReady && (
+        <Box flexDirection="row" gap={1}>
+          <Text color="green">●</Text>
+          <Text color="gray">Ready</Text>
+        </Box>
+      )}
+
       {messages.map((message) => (
         <MessageItem key={message.id} message={message} />
       ))}
