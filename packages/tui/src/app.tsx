@@ -494,6 +494,11 @@ export function App({ config, auth }: AppProps): React.ReactElement {
 
   // Handle submit
   const handleSubmit = useCallback(async () => {
+    // Don't submit if slash menu is open - the useInput hook handles Enter for that
+    if (state.showSlashMenu) {
+      return;
+    }
+
     if (!state.input.trim() || state.isProcessing || !agentRef.current || !tuiSessionRef.current) {
       return;
     }
@@ -574,7 +579,7 @@ export function App({ config, auth }: AppProps): React.ReactElement {
       dispatch({ type: 'CLEAR_STREAMING' });
       streamingContentRef.current = '';
     }
-  }, [state.input, state.isProcessing]);
+  }, [state.input, state.isProcessing, state.showSlashMenu]);
 
   // Execute a slash command
   const executeSlashCommand = useCallback((command: SlashCommand) => {
