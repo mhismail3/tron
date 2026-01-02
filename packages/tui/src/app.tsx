@@ -852,8 +852,15 @@ export function App({ config, auth }: AppProps): React.ReactElement {
         dispatch({ type: 'SHOW_SLASH_MENU', payload: false });
         dispatch({ type: 'CLEAR_INPUT' });
       }
+    } else if (!state.isProcessing) {
+      // History navigation when not in slash menu mode
+      if (key.upArrow) {
+        handleHistoryUp();
+      }
+      if (key.downArrow) {
+        handleHistoryDown();
+      }
     }
-    // Note: History navigation (up/down arrows) is now handled by InputArea/EnhancedInput
   });
 
   // Don't render the full UI until initialized
@@ -909,8 +916,6 @@ export function App({ config, auth }: AppProps): React.ReactElement {
         onChange={handleInputChange}
         onSubmit={handleSubmit}
         isProcessing={state.isProcessing}
-        onHistoryUp={handleHistoryUp}
-        onHistoryDown={handleHistoryDown}
       />
 
       {/* Status Bar */}

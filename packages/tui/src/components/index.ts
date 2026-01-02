@@ -4,7 +4,6 @@
 export { Header } from './Header.js';
 export { MessageList } from './MessageList.js';
 export { InputArea } from './InputArea.js';
-export { EnhancedInput } from './EnhancedInput.js';
 export { StatusBar } from './StatusBar.js';
 export { Spinner } from './Spinner.js';
 export { StreamingContent } from './StreamingContent.js';

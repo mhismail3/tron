@@ -1,14 +1,11 @@
 /**
  * @fileoverview Input Area Component
  *
- * Text input for user prompts with enhanced editing support.
- * Supports: Ctrl+W (delete word), Ctrl+U (delete to line start),
- * Ctrl+K (delete to line end), Ctrl+A/E (line navigation),
- * Cmd+Left/Right (line navigation on Mac), and more.
+ * Text input for user prompts.
  */
 import React from 'react';
 import { Box, Text } from 'ink';
-import { EnhancedInput } from './EnhancedInput.js';
+import TextInput from 'ink-text-input';
 import type { InputAreaProps } from '../types.js';
 
 export function InputArea({
@@ -16,8 +13,6 @@ export function InputArea({
   onChange,
   onSubmit,
   isProcessing,
-  onHistoryUp,
-  onHistoryDown,
 }: InputAreaProps): React.ReactElement {
   const handleSubmit = () => {
     if (value.trim() && !isProcessing) {
@@ -36,13 +31,11 @@ export function InputArea({
       {isProcessing ? (
         <Text color="gray">{value || 'Processing...'}</Text>
       ) : (
-        <EnhancedInput
+        <TextInput
           value={value}
           onChange={onChange}
           onSubmit={handleSubmit}
           placeholder="Enter your prompt..."
-          onHistoryUp={onHistoryUp}
-          onHistoryDown={onHistoryDown}
         />
       )}
     </Box>
