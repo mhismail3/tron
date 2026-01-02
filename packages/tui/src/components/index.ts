@@ -10,3 +10,4 @@ export { StreamingContent } from './StreamingContent.js';
 export { ToolExecution } from './ToolExecution.js';
 export { ContextViewer } from './ContextViewer.js';
 export { SlashCommandMenu } from './SlashCommandMenu.js';
+export { MacOSInput } from './MacOSInput.js';

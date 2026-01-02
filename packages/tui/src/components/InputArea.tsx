@@ -1,11 +1,11 @@
 /**
  * @fileoverview Input Area Component
  *
- * Text input for user prompts.
+ * Text input for user prompts with macOS keyboard shortcuts.
  */
 import React from 'react';
 import { Box, Text } from 'ink';
-import TextInput from 'ink-text-input';
+import { MacOSInput } from './MacOSInput.js';
 import type { InputAreaProps } from '../types.js';
 
 export function InputArea({
@@ -13,6 +13,8 @@ export function InputArea({
   onChange,
   onSubmit,
   isProcessing,
+  onUpArrow,
+  onDownArrow,
 }: InputAreaProps): React.ReactElement {
   const handleSubmit = () => {
     if (value.trim() && !isProcessing) {
@@ -31,11 +33,13 @@ export function InputArea({
       {isProcessing ? (
         <Text color="gray">{value || 'Processing...'}</Text>
       ) : (
-        <TextInput
+        <MacOSInput
           value={value}
           onChange={onChange}
           onSubmit={handleSubmit}
           placeholder="Enter your prompt..."
+          onUpArrow={onUpArrow}
+          onDownArrow={onDownArrow}
         />
       )}
     </Box>

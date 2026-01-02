@@ -142,16 +142,18 @@ export interface MessageListProps {
 }
 
 export interface InputAreaProps {
+  /** Current input value */
   value: string;
+  /** Callback when value changes */
   onChange: (value: string) => void;
+  /** Callback when input is submitted */
   onSubmit: () => void;
+  /** Whether a request is being processed */
   isProcessing: boolean;
   /** Callback for up arrow (history navigation) */
-  onHistoryUp?: () => void;
+  onUpArrow?: () => void;
   /** Callback for down arrow (history navigation) */
-  onHistoryDown?: () => void;
-  /** Whether input has multiple lines */
-  isMultiline?: boolean;
+  onDownArrow?: () => void;
 }
 
 export interface StatusBarProps {
