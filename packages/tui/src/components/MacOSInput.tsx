@@ -31,7 +31,7 @@
  * - Ctrl+Y or Ctrl+Shift+Z: Redo
  */
 import React, { useState, useCallback, useEffect, useRef } from 'react';
-import { Box, Text, useInput, useStdin } from 'ink';
+import { Box, Text, useInput } from 'ink';
 import chalk from 'chalk';
 
 // =============================================================================
@@ -87,6 +87,31 @@ function isShiftEnterSequence(input: string): boolean {
   if (legacyMatch) {
     const { shift } = parseKittyModifier(Number(legacyMatch[1]));
     return shift;
+  }
+
+  return false;
+}
+
+/**
+ * Detect Alt/Option+Enter in various terminal formats
+ * Fallback for terminals that don't support Kitty Shift+Enter
+ */
+function isAltEnterSequence(input: string): boolean {
+  if (!input) return false;
+
+  // Standard Alt+Enter: ESC followed by Enter
+  if (input === '\x1b\r' || input === '\x1b\n') return true;
+
+  const normalized = input.startsWith('[') ? `\x1b${input}` : input;
+
+  // Kitty protocol: \x1b[13;3u (Enter with Alt)
+  // Modifier 3 = (3-1) = 2 = 0b010, bit 1 is alt
+  const kittyMatch = normalized.match(/^\x1b\[(\d+);(\d+)u$/);
+  if (kittyMatch) {
+    const codepoint = Number(kittyMatch[1]);
+    const { alt, ctrl } = parseKittyModifier(Number(kittyMatch[2]));
+    // Alt+Enter (with or without shift, but not Ctrl)
+    return codepoint === 13 && alt && !ctrl;
   }
 
   return false;
@@ -169,7 +194,6 @@ export function MacOSInput({
   continuationPrefix: continuationPrefixProp,
   isProcessing = false,
 }: MacOSInputProps): React.ReactElement {
-  const { internal_eventEmitter } = useStdin();
   const continuationPrefix = continuationPrefixProp ?? (promptPrefix ? ' '.repeat(promptPrefix.length) : '');
   const isEditable = focus && !isProcessing;
   // Cursor position (character index in the string)
@@ -423,35 +447,83 @@ export function MacOSInput({
 
   const skipNextInputRef = useRef(false);
 
-  useEffect(() => {
-    if (!internal_eventEmitter) return;
+  // Use refs to avoid recreating the raw input handler on every render
+  const insertNewlineRef = useRef(insertNewline);
+  const onCtrlCRef = useRef(onCtrlC);
+  const isEditableRef = useRef(isEditable);
 
-    const handleRawInput = (data: string) => {
-      if (typeof data !== 'string') return;
+  useEffect(() => {
+    insertNewlineRef.current = insertNewline;
+  }, [insertNewline]);
+
+  useEffect(() => {
+    onCtrlCRef.current = onCtrlC;
+  }, [onCtrlC]);
+
+  useEffect(() => {
+    isEditableRef.current = isEditable;
+  }, [isEditable]);
+
+  // Listen to both 'data' and 'keypress' events for raw terminal sequences
+  // 'data' catches raw bytes before readline parsing
+  // 'keypress' catches parsed events from readline.emitKeypressEvents()
+  useEffect(() => {
+    // Handler for raw stdin data (catches Kitty protocol before readline parses it)
+    const handleData = (data: Buffer | string) => {
+      const str = typeof data === 'string' ? data : data.toString('utf8');
 
       // Handle Ctrl+C (works even when processing)
-      if (isCtrlCSequence(data)) {
+      if (isCtrlCSequence(str)) {
         skipNextInputRef.current = true;
-        onCtrlC?.();
+        onCtrlCRef.current?.();
         return;
       }
 
       // Only handle other special keys when editable
-      if (!isEditable) return;
+      if (!isEditableRef.current) return;
 
-      // Handle Shift+Enter
-      if (isShiftEnterSequence(data)) {
+      // Handle Shift+Enter or Alt+Enter from Kitty protocol
+      if (isShiftEnterSequence(str) || isAltEnterSequence(str)) {
         skipNextInputRef.current = true;
-        insertNewline();
+        insertNewlineRef.current();
         return;
       }
     };
 
-    internal_eventEmitter.on('input', handleRawInput);
-    return () => {
-      internal_eventEmitter.removeListener('input', handleRawInput);
+    // Handler for parsed keypress events (backup for terminals that understand Shift+Enter)
+    const handleKeypress = (char: string | undefined, key: { sequence?: string; name?: string; shift?: boolean; meta?: boolean } | undefined) => {
+      // Skip if already handled by data handler
+      if (skipNextInputRef.current) return;
+
+      const seq = key?.sequence || char || '';
+
+      // Handle Ctrl+C
+      if (isCtrlCSequence(seq) || (char === '\x03')) {
+        skipNextInputRef.current = true;
+        onCtrlCRef.current?.();
+        return;
+      }
+
+      // Only handle other special keys when editable
+      if (!isEditableRef.current) return;
+
+      // Handle Shift+Enter or Alt+Enter
+      const isShiftEnterKey = key?.name === 'return' && key?.shift;
+      const isAltEnterKey = key?.name === 'return' && key?.meta;
+      if (isShiftEnterSequence(seq) || isAltEnterSequence(seq) || isShiftEnterKey || isAltEnterKey) {
+        skipNextInputRef.current = true;
+        insertNewlineRef.current();
+        return;
+      }
     };
-  }, [internal_eventEmitter, isEditable, insertNewline, onCtrlC]);
+
+    process.stdin.on('data', handleData);
+    process.stdin.on('keypress', handleKeypress);
+    return () => {
+      process.stdin.removeListener('data', handleData);
+      process.stdin.removeListener('keypress', handleKeypress);
+    };
+  }, []);
 
   useInput(
     (input, key) => {
@@ -471,8 +543,11 @@ export function MacOSInput({
         return;
       }
 
+      // Shift+Enter or Alt+Enter inserts a newline
+      // Alt+Enter is the fallback for terminals that don't support Kitty protocol
       const isShiftEnter = (key.return && key.shift) || isShiftEnterSequence(input);
-      if (isShiftEnter) {
+      const isAltEnter = (key.return && key.meta) || isAltEnterSequence(input);
+      if (isShiftEnter || isAltEnter) {
         insertNewline();
         return;
       }
