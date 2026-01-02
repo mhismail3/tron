@@ -1,14 +1,10 @@
 /**
  * @fileoverview Command Router
  *
- * Routes slash commands to skills or built-in handlers.
+ * Routes slash commands to built-in handlers.
  */
 
 import { createLogger } from '../logging/index.js';
-import { createSkillRegistry } from '../skills/registry.js';
-import { createSkillLoader } from '../skills/loader.js';
-import { createSkillExecutor } from '../skills/executor.js';
-import type { ISkillRegistry } from '../skills/types.js';
 import type {
   ICommandRouter,
   ParsedCommand,
@@ -29,22 +25,16 @@ const log = createLogger('commands:router');
  * Command Router implementation
  */
 export class CommandRouter implements ICommandRouter {
-  private registry: ISkillRegistry;
-  private executor: ReturnType<typeof createSkillExecutor>;
-  private loader: ReturnType<typeof createSkillLoader>;
   private builtInCommands: Map<string, BuiltInCommand> = new Map();
   private initialized = false;
   private config: CommandRouterConfig;
 
   constructor(config: CommandRouterConfig = {}) {
     this.config = config;
-    this.registry = createSkillRegistry();
-    this.executor = createSkillExecutor();
-    this.loader = createSkillLoader(config.skillDirs || []);
   }
 
   /**
-   * Initialize the router - load skills and register commands
+   * Initialize the router - register commands
    */
   async initialize(): Promise<void> {
     if (this.initialized) {
@@ -52,12 +42,6 @@ export class CommandRouter implements ICommandRouter {
     }
 
     log.info('Initializing command router');
-
-    // Load and register skills
-    const skills = await this.loader.discover();
-    this.registry.registerAll(skills);
-
-    log.info({ skillCount: skills.length }, 'Skills loaded');
 
     // Register default built-in commands
     const defaultCommands = getDefaultBuiltInCommands({
@@ -119,7 +103,7 @@ export class CommandRouter implements ICommandRouter {
 
     log.debug({ command: commandName, args: parsed.rawArgs }, 'Executing command');
 
-    // Check built-in commands first
+    // Check built-in commands
     const builtIn = this.builtInCommands.get(commandName);
     if (builtIn) {
       try {
@@ -136,54 +120,13 @@ export class CommandRouter implements ICommandRouter {
       }
     }
 
-    // Look up skill by command
-    const skill = this.registry.getByCommand(commandName);
-    if (!skill) {
-      log.warn({ command: commandName }, 'Unknown command');
-      return {
-        success: false,
-        error: `Unknown command: ${formatCommand(commandName)}`,
-        requiresAgent: false,
-      };
-    }
-
-    // Execute the skill
-    try {
-      const executionResult = await this.executor.execute(skill, parsed.rawArgs, {
-        workingDirectory: context.workingDirectory,
-        sessionId: context.sessionId,
-        userId: context.userId,
-        ...context.metadata,
-      });
-
-      if (!executionResult.success) {
-        return {
-          success: false,
-          error: executionResult.error,
-          skill,
-          executionResult,
-          requiresAgent: false,
-        };
-      }
-
-      log.info({ command: commandName, skill: skill.id }, 'Skill executed');
-
-      return {
-        success: true,
-        prompt: executionResult.prompt,
-        skill,
-        executionResult,
-        requiresAgent: true, // Skill prompts need agent processing
-      };
-    } catch (error) {
-      log.error({ command: commandName, error }, 'Skill execution failed');
-      return {
-        success: false,
-        error: error instanceof Error ? error.message : 'Skill execution failed',
-        skill,
-        requiresAgent: false,
-      };
-    }
+    // Unknown command
+    log.warn({ command: commandName }, 'Unknown command');
+    return {
+      success: false,
+      error: `Unknown command: ${formatCommand(commandName)}`,
+      requiresAgent: false,
+    };
   }
 
   /**
@@ -219,12 +162,6 @@ export class CommandRouter implements ICommandRouter {
       return lines.join('\n');
     }
 
-    // Check skills
-    const skill = this.registry.getByCommand(normalized);
-    if (skill) {
-      return this.executor.getHelp(skill);
-    }
-
     return null;
   }
 
@@ -239,11 +176,6 @@ export class CommandRouter implements ICommandRouter {
       commands.add(cmd);
     }
 
-    // Add skill commands
-    for (const cmd of this.registry.getCommands()) {
-      commands.add(cmd);
-    }
-
     return Array.from(commands).sort();
   }
 
@@ -252,10 +184,7 @@ export class CommandRouter implements ICommandRouter {
    */
   hasCommand(command: string): boolean {
     const normalized = command.toLowerCase().replace(/^\//, '');
-    return (
-      this.builtInCommands.has(normalized) ||
-      this.registry.hasCommand(normalized)
-    );
+    return this.builtInCommands.has(normalized);
   }
 
   /**
@@ -264,13 +193,6 @@ export class CommandRouter implements ICommandRouter {
   getCompletions(partial: string): string[] {
     const allCommands = this.listCommands();
     return getCommandSuggestions(partial, allCommands);
-  }
-
-  /**
-   * Get the skill registry
-   */
-  getRegistry(): ISkillRegistry {
-    return this.registry;
   }
 }
 

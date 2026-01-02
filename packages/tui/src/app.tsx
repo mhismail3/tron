@@ -46,6 +46,8 @@ import { debugLog } from './debug/index.js';
 // State Management
 // =============================================================================
 
+const MAX_HISTORY = 100;
+
 const initialState: AppState = {
   isInitialized: false,
   input: '',
@@ -62,6 +64,9 @@ const initialState: AppState = {
   thinkingText: '',
   showSlashMenu: false,
   slashMenuIndex: 0,
+  promptHistory: [],
+  historyIndex: -1,
+  temporaryInput: '',
 };
 
 function reducer(state: AppState, action: AppAction): AppState {
@@ -123,6 +128,72 @@ function reducer(state: AppState, action: AppAction): AppState {
       return { ...state, showSlashMenu: action.payload, slashMenuIndex: 0 };
     case 'SET_SLASH_MENU_INDEX':
       return { ...state, slashMenuIndex: action.payload };
+    case 'ADD_TO_HISTORY': {
+      const trimmed = action.payload.trim();
+      if (!trimmed) return state;
+      // Don't add consecutive duplicates
+      if (state.promptHistory.length > 0 &&
+          state.promptHistory[state.promptHistory.length - 1] === trimmed) {
+        return { ...state, historyIndex: -1, temporaryInput: '' };
+      }
+      const newHistory = [...state.promptHistory, trimmed];
+      // Enforce max limit
+      const limitedHistory = newHistory.length > MAX_HISTORY
+        ? newHistory.slice(-MAX_HISTORY)
+        : newHistory;
+      return {
+        ...state,
+        promptHistory: limitedHistory,
+        historyIndex: -1,
+        temporaryInput: '',
+      };
+    }
+    case 'HISTORY_UP': {
+      if (state.promptHistory.length === 0) return state;
+      if (state.historyIndex === -1) {
+        // Start navigating from most recent
+        const newIndex = state.promptHistory.length - 1;
+        return {
+          ...state,
+          historyIndex: newIndex,
+          input: state.promptHistory[newIndex] ?? '',
+        };
+      } else if (state.historyIndex > 0) {
+        // Move to older entry
+        const newIndex = state.historyIndex - 1;
+        return {
+          ...state,
+          historyIndex: newIndex,
+          input: state.promptHistory[newIndex] ?? '',
+        };
+      }
+      return state; // Already at beginning
+    }
+    case 'HISTORY_DOWN': {
+      if (state.promptHistory.length === 0 || state.historyIndex === -1) {
+        return state;
+      }
+      if (state.historyIndex < state.promptHistory.length - 1) {
+        // Move to newer entry
+        const newIndex = state.historyIndex + 1;
+        return {
+          ...state,
+          historyIndex: newIndex,
+          input: state.promptHistory[newIndex] ?? '',
+        };
+      } else {
+        // Past end - restore temporary input
+        return {
+          ...state,
+          historyIndex: -1,
+          input: state.temporaryInput,
+        };
+      }
+    }
+    case 'SET_TEMPORARY_INPUT':
+      return { ...state, temporaryInput: action.payload };
+    case 'RESET_HISTORY_NAVIGATION':
+      return { ...state, historyIndex: -1 };
     default:
       return state;
   }
@@ -287,6 +358,7 @@ export function App({ config, auth }: AppProps): React.ReactElement {
         tronDir: globalTronDir,
         model: config.model ?? DEFAULT_MODEL,
         provider: config.provider ?? 'anthropic',
+        ephemeral: config.ephemeral,
       });
 
       debugLog.session('init', {
@@ -350,10 +422,6 @@ export function App({ config, auth }: AppProps): React.ReactElement {
         welcomeMsg += `\nLoaded context from ${initResult.context.files.length} file(s)`;
       }
 
-      if (initResult.ledger?.goal) {
-        welcomeMsg += `\nGoal: ${initResult.ledger.goal}`;
-      }
-
       if (initResult.handoffs?.length) {
         welcomeMsg += `\n${initResult.handoffs.length} previous session(s) available for context`;
       }
@@ -408,13 +476,21 @@ export function App({ config, auth }: AppProps): React.ReactElement {
   const handleInputChange = useCallback((value: string) => {
     dispatch({ type: 'SET_INPUT', payload: value });
 
+    // Reset history navigation when user types
+    if (state.historyIndex !== -1) {
+      dispatch({ type: 'RESET_HISTORY_NAVIGATION' });
+    }
+
+    // Save current input as temporary (for restoring after history navigation)
+    dispatch({ type: 'SET_TEMPORARY_INPUT', payload: value });
+
     // Show/hide slash menu based on input
     if (isSlashCommandInput(value)) {
       dispatch({ type: 'SHOW_SLASH_MENU', payload: true });
     } else {
       dispatch({ type: 'SHOW_SLASH_MENU', payload: false });
     }
-  }, []);
+  }, [state.historyIndex]);
 
   // Handle submit
   const handleSubmit = useCallback(async () => {
@@ -424,6 +500,7 @@ export function App({ config, auth }: AppProps): React.ReactElement {
 
     const prompt = state.input.trim();
     dispatch({ type: 'CLEAR_INPUT' });
+    dispatch({ type: 'ADD_TO_HISTORY', payload: prompt }); // Add to history
     dispatch({ type: 'SET_PROCESSING', payload: true });
     dispatch({ type: 'SET_ERROR', payload: null });
     dispatch({ type: 'CLEAR_STREAMING' });
@@ -595,6 +672,19 @@ export function App({ config, auth }: AppProps): React.ReactElement {
   }, [state.input]);
 
   // Handle keyboard input
+  // History navigation callbacks
+  const handleHistoryUp = useCallback(() => {
+    if (state.historyIndex === -1) {
+      // Save current input before starting navigation
+      dispatch({ type: 'SET_TEMPORARY_INPUT', payload: state.input });
+    }
+    dispatch({ type: 'HISTORY_UP' });
+  }, [state.historyIndex, state.input]);
+
+  const handleHistoryDown = useCallback(() => {
+    dispatch({ type: 'HISTORY_DOWN' });
+  }, []);
+
   useInput((input, key) => {
     // Ctrl+C to exit (with proper session end)
     if (input === 'c' && key.ctrl) {
@@ -634,6 +724,14 @@ export function App({ config, auth }: AppProps): React.ReactElement {
       if (key.escape) {
         dispatch({ type: 'SHOW_SLASH_MENU', payload: false });
         dispatch({ type: 'CLEAR_INPUT' });
+      }
+    } else if (!state.isProcessing) {
+      // History navigation when not in slash menu mode
+      if (key.upArrow) {
+        handleHistoryUp();
+      }
+      if (key.downArrow) {
+        handleHistoryDown();
       }
     }
   });

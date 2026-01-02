@@ -20,6 +20,7 @@ import type {
 } from '../types/index.js';
 import { createLogger } from '../logging/logger.js';
 import { shouldRefreshTokens, refreshOAuthToken, type OAuthTokens } from '../auth/oauth.js';
+import { parseError, formatError } from '../utils/errors.js';
 
 const logger = createLogger('anthropic');
 
@@ -131,6 +132,35 @@ export const DEFAULT_MODEL = 'claude-opus-4-5-20251101' as ClaudeModelId;
 export type ClaudeModelId = keyof typeof CLAUDE_MODELS;
 
 // =============================================================================
+// OAuth Constants
+// =============================================================================
+
+/**
+ * Headers required for OAuth authentication with Anthropic API.
+ * The oauth-2025-04-20 beta flag enables OAuth token support.
+ */
+const OAUTH_HEADERS = {
+  'accept': 'application/json',
+  'anthropic-dangerous-direct-browser-access': 'true',
+  'anthropic-beta': 'oauth-2025-04-20,interleaved-thinking-2025-05-14,fine-grained-tool-streaming-2025-05-14',
+};
+
+/**
+ * System prompt prefix required for OAuth authentication.
+ * Anthropic requires this identity statement for OAuth-authenticated requests.
+ */
+export const OAUTH_SYSTEM_PROMPT_PREFIX = 'You are Claude Code, Anthropic\'s official CLI for Claude.';
+
+/**
+ * System prompt content block type for OAuth (uses cache control)
+ */
+type SystemPromptBlock = {
+  type: 'text';
+  text: string;
+  cache_control?: { type: 'ephemeral' };
+};
+
+// =============================================================================
 // Provider Class
 // =============================================================================
 
@@ -138,9 +168,11 @@ export class AnthropicProvider {
   private client: Anthropic;
   private config: AnthropicConfig;
   private tokens?: OAuthTokens;
+  private isOAuth: boolean;
 
   constructor(config: AnthropicConfig) {
     this.config = config;
+    this.isOAuth = config.auth.type === 'oauth';
 
     // Initialize Anthropic client
     if (config.auth.type === 'api_key') {
@@ -154,14 +186,24 @@ export class AnthropicProvider {
         refreshToken: config.auth.refreshToken,
         expiresAt: config.auth.expiresAt,
       };
+      // OAuth requires: authToken, apiKey=null, and special beta headers
       this.client = new Anthropic({
-        apiKey: config.auth.accessToken, // SDK uses apiKey for auth
+        apiKey: null as unknown as string, // Must be null for OAuth
+        authToken: config.auth.accessToken,
         baseURL: config.baseURL,
-        dangerouslyAllowBrowser: true, // Required for OAuth tokens
+        dangerouslyAllowBrowser: true,
+        defaultHeaders: OAUTH_HEADERS,
       });
     }
 
-    logger.info('Anthropic provider initialized', { model: config.model });
+    logger.info('Anthropic provider initialized', { model: config.model, isOAuth: this.isOAuth });
+  }
+
+  /**
+   * Check if this provider is using OAuth authentication
+   */
+  get usingOAuth(): boolean {
+    return this.isOAuth;
   }
 
   /**
@@ -174,11 +216,13 @@ export class AnthropicProvider {
       logger.info('Refreshing expired OAuth tokens');
       this.tokens = await refreshOAuthToken(this.tokens.refreshToken);
 
-      // Recreate client with new token
+      // Recreate client with new token (OAuth requires special config)
       this.client = new Anthropic({
-        apiKey: this.tokens.accessToken,
+        apiKey: null as unknown as string,
+        authToken: this.tokens.accessToken,
         baseURL: this.config.baseURL,
         dangerouslyAllowBrowser: true,
+        defaultHeaders: OAUTH_HEADERS,
       });
     }
   }
@@ -209,12 +253,37 @@ export class AnthropicProvider {
       const messages = this.convertMessages(context.messages);
       const tools = context.tools ? this.convertTools(context.tools) : undefined;
 
+      // Build system prompt - OAuth requires structured format with Claude Code identity
+      let systemParam: string | SystemPromptBlock[] | undefined;
+
+      if (this.isOAuth) {
+        // OAuth: Use structured array format with cache_control (required by Anthropic)
+        const systemBlocks: SystemPromptBlock[] = [
+          {
+            type: 'text',
+            text: OAUTH_SYSTEM_PROMPT_PREFIX,
+            cache_control: { type: 'ephemeral' },
+          },
+        ];
+        if (context.systemPrompt) {
+          systemBlocks.push({
+            type: 'text',
+            text: context.systemPrompt,
+            cache_control: { type: 'ephemeral' },
+          });
+        }
+        systemParam = systemBlocks;
+      } else {
+        // API key: Use simple string format
+        systemParam = context.systemPrompt;
+      }
+
       // Build request parameters
       const params: Anthropic.Messages.MessageCreateParams = {
         model,
         max_tokens: maxTokens,
         messages,
-        system: context.systemPrompt,
+        system: systemParam,
         tools,
       };
 
@@ -367,8 +436,20 @@ export class AnthropicProvider {
         }
       }
     } catch (error) {
-      logger.error('Stream error', error instanceof Error ? error : new Error(String(error)));
-      yield { type: 'error', error: error instanceof Error ? error : new Error(String(error)) };
+      const parsed = parseError(error);
+      const friendlyMessage = formatError(error);
+      logger.error('Stream error', {
+        category: parsed.category,
+        message: parsed.message,
+        isRetryable: parsed.isRetryable,
+        rawError: error instanceof Error ? error.message : String(error),
+      });
+      // Create error with user-friendly message but preserve original error info
+      const streamError = new Error(friendlyMessage);
+      if (error instanceof Error) {
+        streamError.cause = error;
+      }
+      yield { type: 'error', error: streamError };
     }
   }
 

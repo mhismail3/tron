@@ -1,9 +1,10 @@
 /**
  * @fileoverview Memory module exports
+ *
+ * Simplified memory system with ledger, handoff, and memory store support.
  */
 
 export * from './types.js';
-export { SQLiteMemoryStore, type SQLiteStoreConfig } from './sqlite-store.js';
 export {
   LedgerManager,
   createLedgerManager,
@@ -19,3 +20,12 @@ export {
   type HandoffSearchResult,
   type HandoffManagerConfig,
 } from './handoff-manager.js';
+export {
+  SQLiteMemoryStore,
+  createMemoryStore,
+  type MemoryEntry,
+  type AddEntryOptions,
+  type SearchOptions,
+  type SearchResult,
+  type MemoryStoreConfig,
+} from './memory-store.js';

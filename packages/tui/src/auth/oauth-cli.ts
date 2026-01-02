@@ -328,7 +328,7 @@ export async function login(): Promise<AnthropicAuth> {
     lastUpdated: new Date().toISOString(),
   });
 
-  console.log('✅ Authentication successful!\n');
+  console.log('Authentication successful!\n');
 
   return {
     type: 'oauth',
@@ -354,7 +354,7 @@ export async function setApiKey(apiKey: string): Promise<void> {
 export async function logout(silent = false): Promise<void> {
   await clearAuth();
   if (!silent) {
-    console.log('✅ Logged out successfully\n');
+    console.log('Logged out successfully\n');
   }
 }
 

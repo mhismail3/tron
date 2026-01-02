@@ -32,6 +32,8 @@ export interface CliConfig {
   nonInteractive?: boolean;
   /** Initial prompt (for non-interactive mode) */
   initialPrompt?: string;
+  /** Ephemeral mode - no persistence */
+  ephemeral?: boolean;
 }
 
 /** Authentication credentials for the session */
@@ -72,6 +74,12 @@ export interface AppState {
   showSlashMenu: boolean;
   /** Selected index in slash command menu */
   slashMenuIndex: number;
+  /** Prompt history for navigation */
+  promptHistory: string[];
+  /** Current history navigation index (-1 = not navigating) */
+  historyIndex: number;
+  /** Temporary input stored during history navigation */
+  temporaryInput: string;
 }
 
 export interface DisplayMessage {
@@ -109,7 +117,12 @@ export type AppAction =
   | { type: 'APPEND_THINKING_TEXT'; payload: string }
   | { type: 'RESET' }
   | { type: 'SHOW_SLASH_MENU'; payload: boolean }
-  | { type: 'SET_SLASH_MENU_INDEX'; payload: number };
+  | { type: 'SET_SLASH_MENU_INDEX'; payload: number }
+  | { type: 'ADD_TO_HISTORY'; payload: string }
+  | { type: 'HISTORY_UP' }
+  | { type: 'HISTORY_DOWN' }
+  | { type: 'SET_TEMPORARY_INPUT'; payload: string }
+  | { type: 'RESET_HISTORY_NAVIGATION' };
 
 // =============================================================================
 // Component Props
@@ -133,6 +146,12 @@ export interface InputAreaProps {
   onChange: (value: string) => void;
   onSubmit: () => void;
   isProcessing: boolean;
+  /** Callback for up arrow (history navigation) */
+  onHistoryUp?: () => void;
+  /** Callback for down arrow (history navigation) */
+  onHistoryDown?: () => void;
+  /** Whether input has multiple lines */
+  isMultiline?: boolean;
 }
 
 export interface StatusBarProps {

@@ -8,10 +8,7 @@ describe('Command Router', () => {
   let router: CommandRouter;
 
   beforeEach(async () => {
-    router = createCommandRouter({
-      skillDirs: [],
-      includeBuiltInSkills: true,
-    });
+    router = createCommandRouter({});
     await router.initialize();
   });
 
@@ -24,11 +21,11 @@ describe('Command Router', () => {
     });
 
     it('should parse command with args', () => {
-      const parsed = router.parse('/commit --message "test"');
+      const parsed = router.parse('/status --verbose');
 
       expect(parsed.isCommand).toBe(true);
-      expect(parsed.command).toBe('commit');
-      expect(parsed.rawArgs).toBe('--message "test"');
+      expect(parsed.command).toBe('status');
+      expect(parsed.rawArgs).toBe('--verbose');
     });
 
     it('should reject non-commands', () => {
@@ -64,16 +61,6 @@ describe('Command Router', () => {
 
       expect(result.success).toBe(true);
       expect(result.output).toContain('test_session');
-    });
-
-    it('should execute skill command', async () => {
-      const parsed = router.parse('/commit');
-      const result = await router.execute(parsed);
-
-      expect(result.success).toBe(true);
-      expect(result.skill).toBeDefined();
-      expect(result.skill!.id).toBe('commit');
-      expect(result.requiresAgent).toBe(true);
     });
 
     it('should fail for unknown command', async () => {
@@ -118,15 +105,8 @@ describe('Command Router', () => {
       expect(help).toContain('/help');
     });
 
-    it('should return help for skill command', () => {
-      const help = router.getHelp('commit');
-
-      expect(help).toBeDefined();
-      expect(help).toContain('commit');
-    });
-
     it('should handle slash prefix', () => {
-      const help = router.getHelp('/commit');
+      const help = router.getHelp('/help');
 
       expect(help).toBeDefined();
     });
@@ -144,7 +124,6 @@ describe('Command Router', () => {
 
       expect(commands).toContain('help');
       expect(commands).toContain('version');
-      expect(commands).toContain('commit');
     });
 
     it('should return sorted list', () => {
@@ -158,7 +137,6 @@ describe('Command Router', () => {
   describe('hasCommand', () => {
     it('should return true for existing command', () => {
       expect(router.hasCommand('help')).toBe(true);
-      expect(router.hasCommand('commit')).toBe(true);
     });
 
     it('should return false for non-existing command', () => {
@@ -172,10 +150,9 @@ describe('Command Router', () => {
 
   describe('getCompletions', () => {
     it('should return matching commands', () => {
-      const completions = router.getCompletions('co');
+      const completions = router.getCompletions('he');
 
-      expect(completions).toContain('commit');
-      expect(completions).toContain('commands');
+      expect(completions).toContain('help');
     });
 
     it('should return all for empty input', () => {
@@ -188,7 +165,6 @@ describe('Command Router', () => {
   describe('custom built-in commands', () => {
     it('should register custom commands', async () => {
       const customRouter = createCommandRouter({
-        skillDirs: [],
         customCommands: [
           {
             name: 'custom',
@@ -209,15 +185,6 @@ describe('Command Router', () => {
 
       expect(result.success).toBe(true);
       expect(result.output).toBe('Custom output');
-    });
-  });
-
-  describe('getRegistry', () => {
-    it('should return skill registry', () => {
-      const registry = router.getRegistry();
-
-      expect(registry).toBeDefined();
-      expect(registry.get('commit')).toBeDefined();
     });
   });
 });

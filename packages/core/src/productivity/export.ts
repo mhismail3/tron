@@ -172,7 +172,7 @@ export function toMarkdown(
       lines.push(entry.content);
       lines.push('');
     } else if (entry.role === 'tool') {
-      lines.push(`#### ⚙️ Tool: ${entry.toolName ?? 'Unknown'}`);
+      lines.push(`#### Tool: ${entry.toolName ?? 'Unknown'}`);
       lines.push('');
       if (entry.toolArgs) {
         lines.push('```json');
@@ -189,7 +189,7 @@ export function toMarkdown(
         lines.push('');
       }
     } else if (entry.role === 'system') {
-      lines.push('### ℹ️ System');
+      lines.push('### System');
       lines.push('');
       lines.push(`*${entry.content}*`);
       lines.push('');
@@ -282,10 +282,10 @@ export function toHTML(
   // Messages
   for (const entry of transcript) {
     const roleLabel = {
-      user: '👤 User',
-      assistant: '🤖 Assistant',
-      tool: `⚙️ Tool${entry.toolName ? `: ${entry.toolName}` : ''}`,
-      system: 'ℹ️ System',
+      user: 'User',
+      assistant: 'Assistant',
+      tool: `Tool${entry.toolName ? `: ${entry.toolName}` : ''}`,
+      system: 'System',
     }[entry.role];
 
     lines.push(`  <div class="message ${entry.role}">`);

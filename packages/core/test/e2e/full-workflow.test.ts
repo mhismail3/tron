@@ -9,7 +9,6 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { SessionManager } from '../../src/session/manager.js';
 import { LedgerManager } from '../../src/memory/ledger-manager.js';
 import { HookEngine } from '../../src/hooks/engine.js';
-import { SkillLoader } from '../../src/skills/loader.js';
 import { CommandRouter } from '../../src/commands/router.js';
 import { ReadTool } from '../../src/tools/read.js';
 import { WriteTool } from '../../src/tools/write.js';
@@ -25,15 +24,12 @@ import * as os from 'os';
 describe('End-to-End Workflows', () => {
   let tempDir: string;
   let sessionDir: string;
-  let skillsDir: string;
 
   beforeEach(async () => {
     // Create temp directories
     tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'tron-e2e-'));
     sessionDir = path.join(tempDir, 'sessions');
-    skillsDir = path.join(tempDir, 'skills');
     await fs.mkdir(sessionDir, { recursive: true });
-    await fs.mkdir(skillsDir, { recursive: true });
   });
 
   afterEach(async () => {
@@ -245,71 +241,6 @@ describe('End-to-End Workflows', () => {
       });
       expect(blockedResult.action).toBe('block');
       expect(blockedResult.reason).toContain('blocked');
-    });
-  });
-
-  describe('Skill Loading', () => {
-    it('should discover and load skills from directory', async () => {
-      // Create skill files
-      const commitSkillDir = path.join(skillsDir, 'commit');
-      await fs.mkdir(commitSkillDir, { recursive: true });
-      await fs.writeFile(
-        path.join(commitSkillDir, 'SKILL.md'),
-        `---
-name: my-commit
-description: Create a git commit
-arguments:
-  - name: message
-    description: Commit message
-    required: false
----
-
-# Commit Skill
-
-Generate and execute a git commit.
-`
-      );
-
-      const loader = new SkillLoader({ skillDirs: [skillsDir], includeBuiltIn: false });
-      const skills = await loader.discover();
-
-      expect(skills.length).toBe(1);
-      expect(skills[0].name).toBe('my-commit');
-      expect(skills[0].description).toBe('Create a git commit');
-      expect(skills[0].arguments).toHaveLength(1);
-    });
-
-    it('should parse skill arguments correctly', async () => {
-      const skillDir = path.join(skillsDir, 'deploy');
-      await fs.mkdir(skillDir, { recursive: true });
-      await fs.writeFile(
-        path.join(skillDir, 'SKILL.md'),
-        `---
-name: deploy
-description: Deploy to environment
-arguments:
-  - name: env
-    description: Target environment
-    required: true
-  - name: version
-    description: Version to deploy
-    required: false
-    default: latest
----
-
-Deploy the application.
-`
-      );
-
-      const loader = new SkillLoader({ skillDirs: [skillsDir], includeBuiltIn: false });
-      const skills = await loader.discover();
-      const skill = skills.find(s => s.name === 'deploy');
-
-      expect(skill).toBeDefined();
-      expect(skill?.arguments).toHaveLength(2);
-      expect(skill?.arguments?.[0].required).toBe(true);
-      expect(skill?.arguments?.[1].required).toBe(false);
-      expect(skill?.arguments?.[1].default).toBe('latest');
     });
   });
 

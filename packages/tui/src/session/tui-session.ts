@@ -33,6 +33,8 @@ import {
   ContextLoader,
   ContextAudit,
   createContextAudit,
+  ContextCompactor,
+  createContextCompactor,
   type Message,
   type TokenUsage,
   type Ledger,
@@ -40,6 +42,7 @@ import {
   type LoadedContext,
   type HandoffSearchResult,
   type ContextAuditData,
+  type CompactResult,
 } from '@tron/core';
 
 // =============================================================================
@@ -59,6 +62,20 @@ export interface TuiSessionConfig {
   provider: string;
   /** Minimum messages for handoff creation (default: 2) */
   minMessagesForHandoff?: number;
+  /** Ephemeral mode - no persistence (default: false) */
+  ephemeral?: boolean;
+  /** Maximum tokens before compaction (default: 25000) */
+  compactionMaxTokens?: number;
+  /** Threshold ratio to trigger compaction (default: 0.85) */
+  compactionThreshold?: number;
+  /** Target tokens after compaction (default: 10000) */
+  compactionTargetTokens?: number;
+}
+
+export interface CompactionConfig {
+  maxTokens: number;
+  threshold: number;
+  targetTokens: number;
 }
 
 export interface InitializeResult {
@@ -114,11 +131,33 @@ export class TuiSession {
   private messageCount = 0;
   private totalTokenUsage: TokenUsage = { inputTokens: 0, outputTokens: 0 };
 
+  // Compaction
+  private compactor: ContextCompactor;
+  private messages: Message[] = [];
+
   constructor(config: TuiSessionConfig) {
     this.config = {
       minMessagesForHandoff: 2,
+      ephemeral: false,
+      compactionMaxTokens: 25000,
+      compactionThreshold: 0.85,
+      compactionTargetTokens: 10000,
       ...config,
     };
+
+    // Initialize compactor with config
+    this.compactor = createContextCompactor({
+      maxTokens: this.config.compactionMaxTokens,
+      compactionThreshold: this.config.compactionThreshold,
+      targetTokens: this.config.compactionTargetTokens,
+    });
+  }
+
+  /**
+   * Check if session is in ephemeral mode (no persistence)
+   */
+  isEphemeral(): boolean {
+    return this.config.ephemeral === true;
   }
 
   // ===========================================================================
@@ -173,15 +212,19 @@ export class TuiSession {
       }
     }
 
-    // Create session in session manager (uses its own ID generation)
-    const session = await this.sessionManager!.createSession({
-      workingDirectory: this.config.workingDirectory,
-      model: this.config.model,
-      provider: this.config.provider,
-    });
-
-    // Use the SessionManager's generated ID
-    this.sessionId = session.id;
+    // Create session - skip persistence in ephemeral mode
+    if (this.isEphemeral()) {
+      // Generate ID locally without persisting
+      this.sessionId = `sess_${crypto.randomUUID().slice(0, 12)}`;
+    } else {
+      // Create session in session manager (uses its own ID generation)
+      const session = await this.sessionManager!.createSession({
+        workingDirectory: this.config.workingDirectory,
+        model: this.config.model,
+        provider: this.config.provider,
+      });
+      this.sessionId = session.id;
+    }
 
     // Record session info in audit
     this.contextAudit.setSession({
@@ -225,20 +268,23 @@ export class TuiSession {
     let handoffCreated = false;
     let handoffId: string | undefined;
 
-    // Create handoff if enough messages
-    if (this.messageCount >= (this.config.minMessagesForHandoff ?? 2)) {
-      try {
-        handoffId = await this.createHandoff();
-        handoffCreated = true;
-      } catch (error) {
-        // Log but don't fail session end
-        console.error('Failed to create handoff:', error);
+    // Skip persistence in ephemeral mode
+    if (!this.isEphemeral()) {
+      // Create handoff if enough messages
+      if (this.messageCount >= (this.config.minMessagesForHandoff ?? 2)) {
+        try {
+          handoffId = await this.createHandoff();
+          handoffCreated = true;
+        } catch (error) {
+          // Log but don't fail session end
+          console.error('Failed to create handoff:', error);
+        }
       }
-    }
 
-    // Write session_end entry
-    if (this.sessionManager && this.sessionId) {
-      await this.sessionManager.endSession(this.sessionId, 'completed');
+      // Write session_end entry
+      if (this.sessionManager && this.sessionId) {
+        await this.sessionManager.endSession(this.sessionId, 'completed');
+      }
     }
 
     this.state = 'ended';
@@ -261,7 +307,13 @@ export class TuiSession {
   async addMessage(message: Message, tokenUsage?: TokenUsage): Promise<void> {
     this.ensureReady();
 
-    await this.sessionManager!.addMessage(this.sessionId, message, tokenUsage);
+    // Track message for compaction
+    this.messages.push(message);
+
+    // Skip persistence in ephemeral mode
+    if (!this.isEphemeral()) {
+      await this.sessionManager!.addMessage(this.sessionId, message, tokenUsage);
+    }
     this.messageCount++;
 
     if (tokenUsage) {
@@ -275,6 +327,88 @@ export class TuiSession {
    */
   getMessageCount(): number {
     return this.messageCount;
+  }
+
+  /**
+   * Get all tracked messages
+   */
+  getMessages(): Message[] {
+    return [...this.messages];
+  }
+
+  // ===========================================================================
+  // Compaction Methods
+  // ===========================================================================
+
+  /**
+   * Get compaction configuration
+   */
+  getCompactionConfig(): CompactionConfig {
+    return {
+      maxTokens: this.config.compactionMaxTokens ?? 25000,
+      threshold: this.config.compactionThreshold ?? 0.85,
+      targetTokens: this.config.compactionTargetTokens ?? 10000,
+    };
+  }
+
+  /**
+   * Get current token estimate for tracked messages
+   */
+  getTokenEstimate(): number {
+    return this.compactor.estimateTokens(this.messages);
+  }
+
+  /**
+   * Check if compaction is needed based on current message size
+   */
+  needsCompaction(): boolean {
+    return this.compactor.shouldCompact(this.messages);
+  }
+
+  /**
+   * Compact messages if needed
+   */
+  async compactIfNeeded(): Promise<CompactResult> {
+    if (!this.needsCompaction()) {
+      return {
+        compacted: false,
+        messages: this.messages,
+        summary: '',
+        originalTokens: this.getTokenEstimate(),
+        newTokens: this.getTokenEstimate(),
+      };
+    }
+
+    // Perform compaction
+    const result = await this.compactor.compact(this.messages);
+
+    if (result.compacted) {
+      // Update tracked messages with compacted version
+      this.messages = result.messages;
+
+      // Create a checkpoint handoff if not ephemeral
+      if (!this.isEphemeral() && this.handoffManager) {
+        const handoff: Omit<Handoff, 'id'> = {
+          sessionId: this.sessionId,
+          timestamp: new Date(),
+          summary: result.summary,
+          codeChanges: [],
+          currentState: 'Context compacted due to token limit',
+          blockers: [],
+          nextSteps: [],
+          patterns: [],
+          metadata: {
+            type: 'compaction_checkpoint',
+            originalTokens: result.originalTokens,
+            newTokens: result.newTokens,
+          },
+        };
+
+        await this.handoffManager.create(handoff);
+      }
+    }
+
+    return result;
   }
 
   // ===========================================================================
@@ -351,6 +485,13 @@ export class TuiSession {
    */
   async updateLedger(updates: Partial<Ledger>): Promise<Ledger> {
     this.ensureReady();
+
+    // Skip persistence in ephemeral mode - just update in memory
+    if (this.isEphemeral()) {
+      this.loadedLedger = { ...(this.loadedLedger ?? this.getEmptyLedger()), ...updates };
+      return this.loadedLedger;
+    }
+
     this.loadedLedger = await this.ledgerManager!.update(updates);
     return this.loadedLedger;
   }
@@ -360,6 +501,18 @@ export class TuiSession {
    */
   async addWorkingFile(filePath: string): Promise<Ledger> {
     this.ensureReady();
+
+    // Skip persistence in ephemeral mode
+    if (this.isEphemeral()) {
+      if (!this.loadedLedger) {
+        this.loadedLedger = this.getEmptyLedger();
+      }
+      if (!this.loadedLedger.workingFiles.includes(filePath)) {
+        this.loadedLedger.workingFiles.push(filePath);
+      }
+      return this.loadedLedger;
+    }
+
     return this.ledgerManager!.addWorkingFile(filePath);
   }
 
@@ -368,7 +521,29 @@ export class TuiSession {
    */
   async addDecision(choice: string, reason: string): Promise<Ledger> {
     this.ensureReady();
+
+    // Skip persistence in ephemeral mode
+    if (this.isEphemeral()) {
+      if (!this.loadedLedger) {
+        this.loadedLedger = this.getEmptyLedger();
+      }
+      this.loadedLedger.decisions.push({ choice, reason, timestamp: new Date().toISOString() });
+      return this.loadedLedger;
+    }
+
     return this.ledgerManager!.addDecision(choice, reason);
+  }
+
+  private getEmptyLedger(): Ledger {
+    return {
+      goal: '',
+      now: '',
+      next: [],
+      done: [],
+      constraints: [],
+      workingFiles: [],
+      decisions: [],
+    };
   }
 
   // ===========================================================================
@@ -574,10 +749,6 @@ export class TuiSession {
   private generateSummary(ledger: Ledger): string {
     const parts: string[] = [];
 
-    if (ledger.goal) {
-      parts.push(`Goal: ${ledger.goal}`);
-    }
-
     if (ledger.now) {
       parts.push(`Worked on: ${ledger.now}`);
     }
@@ -634,7 +805,6 @@ export class TuiSession {
 
   private buildLedgerContent(): string {
     const parts: string[] = [];
-    if (this.loadedLedger?.goal) parts.push(`Goal: ${this.loadedLedger.goal}`);
     if (this.loadedLedger?.now) parts.push(`Now: ${this.loadedLedger.now}`);
     if (this.loadedLedger?.next.length) parts.push(`Next: ${this.loadedLedger.next.join(', ')}`);
     return parts.join('\n');

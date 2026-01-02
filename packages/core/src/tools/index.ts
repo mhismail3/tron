@@ -6,3 +6,6 @@ export { ReadTool, type ReadToolConfig } from './read.js';
 export { WriteTool, type WriteToolConfig } from './write.js';
 export { EditTool, type EditToolConfig } from './edit.js';
 export { BashTool, type BashToolConfig } from './bash.js';
+export { GrepTool, type GrepToolConfig } from './grep.js';
+export { FindTool, type FindToolConfig } from './find.js';
+export { LsTool, type LsToolConfig } from './ls.js';

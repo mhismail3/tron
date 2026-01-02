@@ -136,9 +136,9 @@ describe('Export Module', () => {
 
       expect(html).toContain('<!DOCTYPE html>');
       expect(html).toContain('<html');
-      expect(html).toContain('👤 User');
+      expect(html).toContain('User');
       expect(html).toContain('Hello');
-      expect(html).toContain('🤖 Assistant');
+      expect(html).toContain('Assistant');
     });
 
     it('should escape HTML entities', () => {

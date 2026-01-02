@@ -36,6 +36,7 @@ function parseCliArgs(): ParsedArgs {
       version: { type: 'boolean' },
       prompt: { type: 'string' },
       'api-key': { type: 'string' },
+      ephemeral: { type: 'boolean', short: 'e' },
     },
     allowPositionals: true,
     strict: false,
@@ -87,6 +88,7 @@ function parseCliArgs(): ParsedArgs {
     debug: values.debug as boolean,
     nonInteractive: !!values.prompt,
     initialPrompt: values.prompt as string | undefined,
+    ephemeral: values.ephemeral as boolean,
   };
 }
 
@@ -114,6 +116,7 @@ OPTIONS:
   --ws-port <port>          WebSocket server port (default: 8080)
   --health-port <port>      Health check port (default: 8081)
   --api-key <key>           Set API key for authentication
+  -e, --ephemeral           Ephemeral mode - no persistence (no session files, handoffs, or ledger)
   -v, --verbose             Enable verbose logging
   -d, --debug               Enable debug mode (full trace logs to stderr and ~/.tron/logs/)
   --prompt <text>           Run a single prompt and exit (non-interactive)
@@ -199,11 +202,11 @@ async function main(): Promise<void> {
 }
 
 async function runLogin(): Promise<void> {
-  console.log('\n🔐 Tron Authentication\n');
+  console.log('\nTron Authentication\n');
 
   // Check for environment variable - this takes precedence
   if (process.env.ANTHROPIC_API_KEY) {
-    console.log('⚠️  ANTHROPIC_API_KEY environment variable is set.');
+    console.log('Warning: ANTHROPIC_API_KEY environment variable is set.');
     console.log('This takes precedence over stored OAuth tokens.');
     console.log('\nTo use OAuth instead, run:');
     console.log('  unset ANTHROPIC_API_KEY');
@@ -227,7 +230,7 @@ async function runLogout(): Promise<void> {
 }
 
 async function runAuthStatus(): Promise<void> {
-  console.log('\n🔐 Tron Authentication Status\n');
+  console.log('\nTron Authentication Status\n');
 
   const auth = await getAuth();
   if (!auth) {
@@ -267,7 +270,7 @@ async function runInteractive(config: CliConfig): Promise<void> {
   // Check authentication
   const auth = await getAuth();
   if (!auth) {
-    console.log('\n⚠️  Not authenticated.\n');
+    console.log('\nNot authenticated.\n');
     console.log('Run "tron login" to authenticate with Claude Max,');
     console.log('or set ANTHROPIC_API_KEY environment variable.\n');
     process.exit(1);
@@ -284,7 +287,7 @@ async function runNonInteractive(config: CliConfig): Promise<void> {
   // Check authentication
   const auth = await getAuth();
   if (!auth) {
-    console.log('\n⚠️  Not authenticated.\n');
+    console.log('\nNot authenticated.\n');
     console.log('Run "tron login" to authenticate with Claude Max,');
     console.log('or set ANTHROPIC_API_KEY environment variable.\n');
     process.exit(1);
@@ -318,7 +321,7 @@ async function runNonInteractive(config: CliConfig): Promise<void> {
     workingDirectory: config.workingDirectory,
   });
 
-  console.log(`\n🤖 Processing: ${config.initialPrompt}\n`);
+  console.log(`\nProcessing: ${config.initialPrompt}\n`);
 
   // Run agent
   const result = await agent.run(config.initialPrompt!);
@@ -331,20 +334,20 @@ async function runNonInteractive(config: CliConfig): Promise<void> {
       if (Array.isArray(content)) {
         for (const block of content) {
           if (block.type === 'text') {
-            console.log('\n📝 Response:\n');
+            console.log('\nResponse:\n');
             console.log(block.text);
           }
         }
       } else if (typeof content === 'string') {
-        console.log('\n📝 Response:\n');
+        console.log('\nResponse:\n');
         console.log(content);
       }
     }
-    console.log('\n✅ Done\n');
+    console.log('\nDone\n');
     console.log(`Turns: ${result.turns}`);
     console.log(`Tokens: ${result.totalTokenUsage.inputTokens} in / ${result.totalTokenUsage.outputTokens} out`);
   } else {
-    console.error(`\n❌ Error: ${result.error}\n`);
+    console.error(`\nError: ${result.error}\n`);
     process.exit(1);
   }
 }
@@ -373,7 +376,7 @@ async function runServerMode(config: CliConfig): Promise<void> {
   await server.start();
 
   console.log(`
-🚀 Tron Server Started
+Tron Server Started
 
 WebSocket: ws://localhost:${config.wsPort ?? 8080}/ws
 Health:    http://localhost:${config.healthPort ?? 8081}/health

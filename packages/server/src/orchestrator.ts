@@ -19,6 +19,7 @@ import {
   type RewindSessionResult,
   type Handoff,
   type CodeChange,
+  type MemoryEntry,
 } from '@tron/core';
 
 const logger = createLogger('orchestrator');
@@ -566,7 +567,7 @@ export class SessionOrchestrator extends EventEmitter {
       projectPath: options.workingDirectory,
     });
 
-    return results.entries.map((entry) => ({
+    return results.entries.map((entry: MemoryEntry) => ({
       id: entry.id,
       content: entry.content,
       score: 1.0, // Default score as interface doesn't have scores

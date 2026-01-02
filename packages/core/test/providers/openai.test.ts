@@ -343,7 +343,7 @@ describe('OpenAI Provider', () => {
     it('should indicate tool support for applicable models', () => {
       expect(OPENAI_MODELS['gpt-4o'].supportsTools).toBe(true);
       expect(OPENAI_MODELS['gpt-4-turbo'].supportsTools).toBe(true);
-      expect(OPENAI_MODELS['gpt-3.5-turbo'].supportsTools).toBe(true);
+      expect(OPENAI_MODELS['gpt-4o-mini'].supportsTools).toBe(true);
     });
 
     it('should indicate no tool support for o1 models', () => {

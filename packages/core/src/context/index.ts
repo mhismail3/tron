@@ -22,3 +22,12 @@ export {
   type HookModification,
   type ToolEntry,
 } from './audit.js';
+
+export {
+  ContextCompactor,
+  createContextCompactor,
+  type CompactorConfig,
+  type CompactResult,
+  type BeforeCompactInfo,
+  type AfterCompactInfo,
+} from './compactor.js';

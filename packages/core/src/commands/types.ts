@@ -4,8 +4,6 @@
  * Types for slash command parsing, routing, and execution.
  */
 
-import type { Skill, SkillExecutionResult } from '../skills/types.js';
-
 /**
  * Parsed slash command from user input
  */
@@ -46,10 +44,6 @@ export interface CommandResult {
   output?: string;
   /** Error message if failed */
   error?: string;
-  /** The skill that was executed (if any) */
-  skill?: Skill;
-  /** Detailed execution result */
-  executionResult?: SkillExecutionResult;
   /** Whether this command requires agent processing */
   requiresAgent: boolean;
 }
@@ -82,10 +76,6 @@ export interface BuiltInCommand {
  * Command router configuration
  */
 export interface CommandRouterConfig {
-  /** Directory paths to search for skills */
-  skillDirs?: string[];
-  /** Whether to include built-in skills */
-  includeBuiltInSkills?: boolean;
   /** Custom built-in commands */
   customCommands?: BuiltInCommand[];
 }
@@ -94,7 +84,7 @@ export interface CommandRouterConfig {
  * Command router interface
  */
 export interface ICommandRouter {
-  /** Initialize the router (load skills) */
+  /** Initialize the router */
   initialize(): Promise<void>;
 
   /** Parse user input into a command */

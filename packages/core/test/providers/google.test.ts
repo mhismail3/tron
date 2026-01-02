@@ -30,7 +30,7 @@ describe('Google Gemini Provider', () => {
     it('should accept valid configuration', () => {
       const config: GoogleConfig = {
         apiKey: 'test-api-key',
-        model: 'gemini-1.5-pro',
+        model: 'gemini-2.5-pro',
       };
 
       const provider = new GoogleProvider(config);
@@ -40,7 +40,7 @@ describe('Google Gemini Provider', () => {
     it('should accept optional temperature setting', () => {
       const config: GoogleConfig = {
         apiKey: 'test-key',
-        model: 'gemini-1.5-pro',
+        model: 'gemini-2.5-pro',
         temperature: 0.7,
       };
 
@@ -51,7 +51,7 @@ describe('Google Gemini Provider', () => {
     it('should accept optional max output tokens', () => {
       const config: GoogleConfig = {
         apiKey: 'test-key',
-        model: 'gemini-1.5-pro',
+        model: 'gemini-2.5-pro',
         maxTokens: 4096,
       };
 
@@ -62,16 +62,16 @@ describe('Google Gemini Provider', () => {
     it('should expose model property', () => {
       const provider = new GoogleProvider({
         apiKey: 'test-key',
-        model: 'gemini-1.5-pro',
+        model: 'gemini-2.5-pro',
       });
 
-      expect(provider.model).toBe('gemini-1.5-pro');
+      expect(provider.model).toBe('gemini-2.5-pro');
     });
 
     it('should support custom base URL', () => {
       const provider = new GoogleProvider({
         apiKey: 'test-key',
-        model: 'gemini-1.5-pro',
+        model: 'gemini-2.5-pro',
         baseURL: 'https://custom.googleapis.com',
       });
 
@@ -81,31 +81,31 @@ describe('Google Gemini Provider', () => {
 
   describe('Model Registry', () => {
     it('should define Gemini 1.5 Pro', () => {
-      expect(GEMINI_MODELS['gemini-1.5-pro']).toBeDefined();
-      expect(GEMINI_MODELS['gemini-1.5-pro'].contextWindow).toBe(2097152);
+      expect(GEMINI_MODELS['gemini-2.5-pro']).toBeDefined();
+      expect(GEMINI_MODELS['gemini-2.5-pro'].contextWindow).toBe(2097152);
     });
 
     it('should define Gemini 1.5 Flash', () => {
-      expect(GEMINI_MODELS['gemini-1.5-flash']).toBeDefined();
-      expect(GEMINI_MODELS['gemini-1.5-flash'].contextWindow).toBe(1048576);
+      expect(GEMINI_MODELS['gemini-2.5-flash']).toBeDefined();
+      expect(GEMINI_MODELS['gemini-2.5-flash'].contextWindow).toBe(1048576);
     });
 
     it('should define Gemini 2.0 models', () => {
-      expect(GEMINI_MODELS['gemini-2.0-flash-exp']).toBeDefined();
+      expect(GEMINI_MODELS['gemini-2.0-flash']).toBeDefined();
     });
 
-    it('should define Gemini 1.5 Flash 8B', () => {
-      expect(GEMINI_MODELS['gemini-1.5-flash-8b']).toBeDefined();
+    it('should define Gemini 2.5 Flash Lite', () => {
+      expect(GEMINI_MODELS['gemini-2.5-flash-lite']).toBeDefined();
     });
 
     it('should include cost information', () => {
-      const geminiPro = GEMINI_MODELS['gemini-1.5-pro'];
+      const geminiPro = GEMINI_MODELS['gemini-2.5-pro'];
       expect(geminiPro.inputCostPer1k).toBeDefined();
       expect(geminiPro.outputCostPer1k).toBeDefined();
     });
 
     it('should have large context windows', () => {
-      expect(GEMINI_MODELS['gemini-1.5-pro'].contextWindow).toBeGreaterThanOrEqual(
+      expect(GEMINI_MODELS['gemini-2.5-pro'].contextWindow).toBeGreaterThanOrEqual(
         1000000
       );
     });
@@ -130,8 +130,8 @@ describe('Google Gemini Provider', () => {
     });
 
     it('should indicate tool support', () => {
-      expect(GEMINI_MODELS['gemini-1.5-pro'].supportsTools).toBe(true);
-      expect(GEMINI_MODELS['gemini-1.5-flash'].supportsTools).toBe(true);
+      expect(GEMINI_MODELS['gemini-2.5-pro'].supportsTools).toBe(true);
+      expect(GEMINI_MODELS['gemini-2.5-flash'].supportsTools).toBe(true);
     });
   });
 
@@ -139,7 +139,7 @@ describe('Google Gemini Provider', () => {
     it('should define stream method', () => {
       const provider = new GoogleProvider({
         apiKey: 'test-key',
-        model: 'gemini-1.5-pro',
+        model: 'gemini-2.5-pro',
       });
 
       expect(typeof provider.stream).toBe('function');
@@ -148,7 +148,7 @@ describe('Google Gemini Provider', () => {
     it('should define complete method', () => {
       const provider = new GoogleProvider({
         apiKey: 'test-key',
-        model: 'gemini-1.5-pro',
+        model: 'gemini-2.5-pro',
       });
 
       expect(typeof provider.complete).toBe('function');
@@ -157,7 +157,7 @@ describe('Google Gemini Provider', () => {
     it('should have id property', () => {
       const provider = new GoogleProvider({
         apiKey: 'test-key',
-        model: 'gemini-1.5-pro',
+        model: 'gemini-2.5-pro',
       });
 
       expect(provider.id).toBe('google');
@@ -168,7 +168,7 @@ describe('Google Gemini Provider', () => {
     it('should stream text deltas', async () => {
       const provider = new GoogleProvider({
         apiKey: 'test-key',
-        model: 'gemini-1.5-pro',
+        model: 'gemini-2.5-pro',
       });
 
       // Mock Gemini streaming response format
@@ -211,7 +211,7 @@ describe('Google Gemini Provider', () => {
     it('should include message in done event', async () => {
       const provider = new GoogleProvider({
         apiKey: 'test-key',
-        model: 'gemini-1.5-pro',
+        model: 'gemini-2.5-pro',
       });
 
       const mockStreamData = [
@@ -258,7 +258,7 @@ describe('Google Gemini Provider', () => {
     it('should return AssistantMessage', async () => {
       const provider = new GoogleProvider({
         apiKey: 'test-key',
-        model: 'gemini-1.5-pro',
+        model: 'gemini-2.5-pro',
       });
 
       const mockStreamData = [
@@ -299,7 +299,7 @@ describe('Google Gemini Provider', () => {
     it('should accept tools in context', () => {
       const provider = new GoogleProvider({
         apiKey: 'test-key',
-        model: 'gemini-1.5-pro',
+        model: 'gemini-2.5-pro',
       });
 
       const tools = [

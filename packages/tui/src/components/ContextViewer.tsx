@@ -177,9 +177,6 @@ function renderLedger(audit: ContextAuditData): string[] {
 
   const ledger = audit.ledger;
 
-  if (ledger.goal) {
-    lines.push(`Goal: ${ledger.goal}`);
-  }
   if (ledger.now) {
     lines.push(`Working On: ${ledger.now}`);
   }
@@ -201,14 +198,14 @@ function renderLedger(audit: ContextAuditData): string[] {
     lines.push('');
     lines.push('Constraints:');
     for (const c of ledger.constraints) {
-      lines.push(`  ⚠ ${c}`);
+      lines.push(`  ! ${c}`);
     }
   }
   if (ledger.workingFiles && ledger.workingFiles.length > 0) {
     lines.push('');
     lines.push('Working Files:');
     for (const f of ledger.workingFiles) {
-      lines.push(`  📄 ${f}`);
+      lines.push(`  - ${f}`);
     }
   }
   if (ledger.decisions && ledger.decisions.length > 0) {

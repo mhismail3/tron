@@ -597,4 +597,232 @@ Working on login
       expect(session.getState()).toBe('ready');
     });
   });
+
+  describe('ephemeral sessions', () => {
+    it('should support ephemeral mode flag', async () => {
+      const config: TuiSessionConfig = {
+        workingDirectory: TEST_DIR,
+        tronDir: TRON_DIR,
+        model: 'claude-sonnet-4-20250514',
+        provider: 'anthropic',
+        ephemeral: true,
+      };
+
+      const session = new TuiSession(config);
+      expect(session.isEphemeral()).toBe(true);
+    });
+
+    it('should not persist session in ephemeral mode', async () => {
+      const config: TuiSessionConfig = {
+        workingDirectory: TEST_DIR,
+        tronDir: TRON_DIR,
+        model: 'claude-sonnet-4-20250514',
+        provider: 'anthropic',
+        ephemeral: true,
+      };
+
+      const session = new TuiSession(config);
+      await session.initialize();
+
+      await session.addMessage({ role: 'user', content: 'Test' });
+      await session.addMessage({ role: 'assistant', content: 'Response' });
+
+      // Check that no session files were created
+      const sessionsDir = path.join(TRON_DIR, 'sessions');
+      const files = await fs.readdir(sessionsDir);
+      const sessionFiles = files.filter(f => f.endsWith('.jsonl'));
+      expect(sessionFiles).toHaveLength(0);
+    });
+
+    it('should not create handoff in ephemeral mode', async () => {
+      const config: TuiSessionConfig = {
+        workingDirectory: TEST_DIR,
+        tronDir: TRON_DIR,
+        model: 'claude-sonnet-4-20250514',
+        provider: 'anthropic',
+        ephemeral: true,
+      };
+
+      const session = new TuiSession(config);
+      await session.initialize();
+
+      await session.addMessage({ role: 'user', content: 'Test 1' });
+      await session.addMessage({ role: 'assistant', content: 'Response 1' });
+      await session.addMessage({ role: 'user', content: 'Test 2' });
+      await session.addMessage({ role: 'assistant', content: 'Response 2' });
+
+      const result = await session.end();
+      expect(result.handoffCreated).toBe(false);
+    });
+
+    it('should still work normally in ephemeral mode', async () => {
+      const config: TuiSessionConfig = {
+        workingDirectory: TEST_DIR,
+        tronDir: TRON_DIR,
+        model: 'claude-sonnet-4-20250514',
+        provider: 'anthropic',
+        ephemeral: true,
+      };
+
+      const session = new TuiSession(config);
+      await session.initialize();
+
+      expect(session.getState()).toBe('ready');
+      expect(session.getSessionId()).toMatch(/^sess_/);
+
+      await session.addMessage({ role: 'user', content: 'Test' });
+      expect(session.getMessageCount()).toBe(1);
+    });
+
+    it('should not update ledger file in ephemeral mode', async () => {
+      const config: TuiSessionConfig = {
+        workingDirectory: TEST_DIR,
+        tronDir: TRON_DIR,
+        model: 'claude-sonnet-4-20250514',
+        provider: 'anthropic',
+        ephemeral: true,
+      };
+
+      // Start with empty ledger
+      const ledgerFile = path.join(TRON_DIR, 'memory', 'CONTINUITY.md');
+
+      const session = new TuiSession(config);
+      await session.initialize();
+
+      // Try to update ledger
+      await session.updateLedger({ now: 'Ephemeral work' });
+
+      // Ledger file should not exist or not contain the update
+      try {
+        const content = await fs.readFile(ledgerFile, 'utf-8');
+        expect(content).not.toContain('Ephemeral work');
+      } catch (error) {
+        // File doesn't exist - that's fine for ephemeral mode
+        const err = error as NodeJS.ErrnoException;
+        expect(err.code).toBe('ENOENT');
+      }
+    });
+  });
+
+  describe('context compaction', () => {
+    it('should support compaction configuration', async () => {
+      const config: TuiSessionConfig = {
+        workingDirectory: TEST_DIR,
+        tronDir: TRON_DIR,
+        model: 'claude-sonnet-4-20250514',
+        provider: 'anthropic',
+        compactionMaxTokens: 25000,
+        compactionThreshold: 0.85,
+        compactionTargetTokens: 10000,
+      };
+
+      const session = new TuiSession(config);
+      await session.initialize();
+
+      expect(session.getCompactionConfig().maxTokens).toBe(25000);
+      expect(session.getCompactionConfig().threshold).toBe(0.85);
+    });
+
+    it('should provide current token estimate', async () => {
+      const config: TuiSessionConfig = {
+        workingDirectory: TEST_DIR,
+        tronDir: TRON_DIR,
+        model: 'claude-sonnet-4-20250514',
+        provider: 'anthropic',
+      };
+
+      const session = new TuiSession(config);
+      await session.initialize();
+
+      await session.addMessage({ role: 'user', content: 'Test message' });
+
+      const estimate = session.getTokenEstimate();
+      expect(estimate).toBeGreaterThan(0);
+    });
+
+    it('should indicate when compaction is needed', async () => {
+      const config: TuiSessionConfig = {
+        workingDirectory: TEST_DIR,
+        tronDir: TRON_DIR,
+        model: 'claude-sonnet-4-20250514',
+        provider: 'anthropic',
+        compactionMaxTokens: 50, // Very low for testing
+        compactionThreshold: 0.5,
+      };
+
+      const session = new TuiSession(config);
+      await session.initialize();
+
+      // Initially no compaction needed
+      expect(session.needsCompaction()).toBe(false);
+
+      // Add messages to exceed threshold (50 * 0.5 = 25 tokens)
+      await session.addMessage({
+        role: 'user',
+        content: 'A long message that contains many words to simulate token usage in a conversation',
+      });
+      await session.addMessage({
+        role: 'assistant',
+        content: 'A response with additional content to push us over the token threshold limit',
+      });
+
+      expect(session.needsCompaction()).toBe(true);
+    });
+
+    it('should track messages for compaction', async () => {
+      const config: TuiSessionConfig = {
+        workingDirectory: TEST_DIR,
+        tronDir: TRON_DIR,
+        model: 'claude-sonnet-4-20250514',
+        provider: 'anthropic',
+      };
+
+      const session = new TuiSession(config);
+      await session.initialize();
+
+      await session.addMessage({ role: 'user', content: 'First' });
+      await session.addMessage({ role: 'assistant', content: 'Second' });
+
+      const messages = session.getMessages();
+      expect(messages.length).toBe(2);
+    });
+
+    it('should compact messages when triggered', async () => {
+      const config: TuiSessionConfig = {
+        workingDirectory: TEST_DIR,
+        tronDir: TRON_DIR,
+        model: 'claude-sonnet-4-20250514',
+        provider: 'anthropic',
+        compactionMaxTokens: 50,
+        compactionThreshold: 0.5,
+        compactionTargetTokens: 20,
+      };
+
+      const session = new TuiSession(config);
+      await session.initialize();
+
+      // Add messages to exceed threshold
+      await session.addMessage({
+        role: 'user',
+        content: 'First question about TypeScript and how it works in modern development',
+      });
+      await session.addMessage({
+        role: 'assistant',
+        content: 'TypeScript is a typed superset of JavaScript that compiles to plain JS',
+      });
+      await session.addMessage({
+        role: 'user',
+        content: 'Second question about interfaces and type definitions',
+      });
+      await session.addMessage({
+        role: 'assistant',
+        content: 'Interfaces define contracts for objects and enable structural typing',
+      });
+
+      const result = await session.compactIfNeeded();
+
+      expect(result.compacted).toBe(true);
+      expect(result.summary.length).toBeGreaterThan(0);
+    });
+  });
 });
