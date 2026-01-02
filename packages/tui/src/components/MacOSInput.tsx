@@ -31,7 +31,7 @@
  * - Ctrl+Y or Ctrl+Shift+Z: Redo
  */
 import React, { useState, useCallback, useEffect, useRef } from 'react';
-import { Text, useInput } from 'ink';
+import { Box, Text, useInput } from 'ink';
 import chalk from 'chalk';
 
 // =============================================================================
@@ -616,16 +616,71 @@ export function MacOSInput({
   // Render
   // ==========================================================================
 
-  const renderValue = (): string => {
+  /**
+   * Render a single line with cursor and selection highlighting
+   */
+  const renderLine = (
+    line: string,
+    lineStartPos: number,
+    _lineIdx: number,
+    _totalLines: number,
+    range: { start: number; end: number } | null
+  ): string => {
+    let renderedLine = '';
+
+    for (let i = 0; i < line.length; i++) {
+      const globalPos = lineStartPos + i;
+      const char = line[i] ?? '';
+      const isSelected = range && globalPos >= range.start && globalPos < range.end;
+      const isCursor = globalPos === cursorOffset;
+
+      if (isSelected) {
+        renderedLine += chalk.bgCyan.black(char);
+      } else if (isCursor) {
+        renderedLine += chalk.inverse(char);
+      } else {
+        renderedLine += char;
+      }
+    }
+
+    // Check if cursor is at end of this line
+    const endOfLinePos = lineStartPos + line.length;
+    if (cursorOffset === endOfLinePos) {
+      // Cursor at end of line (either before newline or at end of value)
+      renderedLine += chalk.inverse(' ');
+    }
+
+    return renderedLine;
+  };
+
+  /**
+   * Build the render data for multiline display
+   */
+  interface RenderLine {
+    content: string;
+    isIndicator: boolean; // true for scroll indicators
+    isFirstContentLine: boolean; // true for the first actual content line
+  }
+
+  const buildRenderData = (): RenderLine[] => {
     if (!focus) {
-      return value || chalk.gray(placeholder);
+      const content = value || chalk.gray(placeholder);
+      // For unfocused multiline, show all lines
+      if (value.includes('\n')) {
+        return value.split('\n').map((line, idx) => ({
+          content: line || ' ',
+          isIndicator: false,
+          isFirstContentLine: idx === 0,
+        }));
+      }
+      return [{ content, isIndicator: false, isFirstContentLine: true }];
     }
 
     if (value.length === 0) {
-      if (placeholder) {
-        return chalk.inverse(placeholder[0] ?? ' ') + chalk.gray(placeholder.slice(1));
-      }
-      return chalk.inverse(' ');
+      const content = placeholder
+        ? chalk.inverse(placeholder[0] ?? ' ') + chalk.gray(placeholder.slice(1))
+        : chalk.inverse(' ');
+      return [{ content, isIndicator: false, isFirstContentLine: true }];
     }
 
     const range = getSelectionRange();
@@ -636,70 +691,74 @@ export function MacOSInput({
     const startLine = maxVisibleLines > 0 ? scrollOffset : 0;
     const endLine = maxVisibleLines > 0 ? Math.min(startLine + maxVisibleLines, totalLines) : totalLines;
 
-    // Calculate character positions for visible region
+    // Calculate character position at start of visible region
     let charOffset = 0;
     for (let i = 0; i < startLine; i++) {
       charOffset += (lines[i]?.length ?? 0) + 1;
     }
 
-    const renderedLines: string[] = [];
+    const renderData: RenderLine[] = [];
     let currentCharPos = charOffset;
+    let isFirstContent = true;
 
+    // Add scroll-up indicator if needed
+    if (maxVisibleLines > 0 && scrollOffset > 0) {
+      renderData.push({
+        content: chalk.gray(`↑ ${scrollOffset} more line${scrollOffset > 1 ? 's' : ''}`),
+        isIndicator: true,
+        isFirstContentLine: false,
+      });
+    }
+
+    // Render each visible line
     for (let lineIdx = startLine; lineIdx < endLine; lineIdx++) {
       const line = lines[lineIdx] ?? '';
-      let renderedLine = '';
-
-      for (let i = 0; i < line.length; i++) {
-        const globalPos = currentCharPos + i;
-        const char = line[i] ?? '';
-        const isSelected = range && globalPos >= range.start && globalPos < range.end;
-        const isCursor = globalPos === cursorOffset;
-
-        if (isSelected) {
-          renderedLine += chalk.bgCyan.black(char);
-        } else if (isCursor) {
-          renderedLine += chalk.inverse(char);
-        } else {
-          renderedLine += char;
-        }
-      }
-
-      // Check if cursor is at end of this line (before newline or at end of value)
-      const endOfLinePos = currentCharPos + line.length;
-      if (cursorOffset === endOfLinePos && lineIdx < totalLines - 1) {
-        // Cursor at end of line (before newline)
-        renderedLine += chalk.inverse(' ');
-      } else if (cursorOffset === endOfLinePos && lineIdx === totalLines - 1) {
-        // Cursor at very end of value
-        renderedLine += chalk.inverse(' ');
-      }
-
-      renderedLines.push(renderedLine);
+      const rendered = renderLine(line, currentCharPos, lineIdx, totalLines, range);
+      renderData.push({
+        content: rendered || ' ', // Ensure empty lines still render
+        isIndicator: false,
+        isFirstContentLine: isFirstContent,
+      });
+      isFirstContent = false;
       currentCharPos += line.length + 1; // +1 for newline
     }
 
-    // Add continuation prefix to lines after the first (for alignment with prompt)
-    const prefixedLines = renderedLines.map((line, idx) => {
-      // First visible line doesn't get prefix (PromptBox adds "> ")
-      // Subsequent lines get the continuation prefix for alignment
-      if (idx === 0) return line;
-      return continuationPrefix + line;
-    });
-
-    // Add scroll indicators if needed
-    let result = prefixedLines.join('\n');
+    // Add scroll-down indicator if needed
     if (maxVisibleLines > 0 && totalLines > maxVisibleLines) {
-      if (scrollOffset > 0) {
-        result = chalk.gray(`${continuationPrefix}↑ ${scrollOffset} more line${scrollOffset > 1 ? 's' : ''}\n`) + result;
-      }
       const remaining = totalLines - endLine;
       if (remaining > 0) {
-        result += chalk.gray(`\n${continuationPrefix}↓ ${remaining} more line${remaining > 1 ? 's' : ''}`);
+        renderData.push({
+          content: chalk.gray(`↓ ${remaining} more line${remaining > 1 ? 's' : ''}`),
+          isIndicator: true,
+          isFirstContentLine: false,
+        });
       }
     }
 
-    return result;
+    return renderData;
   };
 
-  return <Text>{renderValue()}</Text>;
+  const renderData = buildRenderData();
+
+  // For single line, return simple Text
+  if (renderData.length === 1) {
+    return <Text>{renderData[0]!.content}</Text>;
+  }
+
+  // For multiline, return Box with separate Text elements for each line
+  // This ensures proper Ink flex layout instead of relying on \n characters
+  return (
+    <Box flexDirection="column">
+      {renderData.map((line, idx) => (
+        <Box key={idx} flexDirection="row">
+          {/* First content line has no prefix (PromptBox provides "> ") */}
+          {/* Subsequent lines and indicators get continuation prefix for alignment */}
+          {!line.isFirstContentLine && continuationPrefix && (
+            <Text>{continuationPrefix}</Text>
+          )}
+          <Text>{line.content}</Text>
+        </Box>
+      ))}
+    </Box>
+  );
 }
