@@ -27,3 +27,21 @@ export {
   type GoogleStreamOptions,
   type GeminiModelId,
 } from './google.js';
+
+// Unified provider factory and types
+export {
+  createProvider,
+  detectProviderFromModel,
+  getDefaultModel,
+  getModelInfo,
+  getModelsForProvider,
+  getModelCapabilities,
+  isModelSupported,
+  PROVIDER_MODELS,
+  type Provider,
+  type ProviderConfig,
+  type ProviderType,
+  type ProviderStreamOptions,
+  type UnifiedAuth,
+  type ModelCapabilities,
+} from './factory.js';

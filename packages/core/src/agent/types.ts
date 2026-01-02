@@ -11,24 +11,31 @@ import type {
   TronEvent,
   TokenUsage,
 } from '../types/index.js';
-import type { AnthropicConfig } from '../providers/index.js';
+import type { ProviderType, UnifiedAuth } from '../providers/index.js';
 
 // =============================================================================
 // Agent Configuration
 // =============================================================================
 
 /**
+ * Provider configuration for agent
+ */
+export interface AgentProviderConfig {
+  type?: ProviderType;
+  model: string;
+  auth: UnifiedAuth;
+  baseURL?: string;
+  // Anthropic-specific
+  thinkingBudget?: number;
+  // OpenAI-specific
+  organization?: string;
+}
+
+/**
  * Agent configuration
  */
 export interface AgentConfig {
-  provider: Omit<AnthropicConfig, 'auth'> & {
-    auth: { type: 'api_key'; apiKey: string } | {
-      type: 'oauth';
-      accessToken: string;
-      refreshToken: string;
-      expiresAt: number;
-    };
-  };
+  provider: AgentProviderConfig;
   tools: TronTool[];
   systemPrompt?: string;
   maxTokens?: number;

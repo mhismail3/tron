@@ -21,7 +21,12 @@ import type {
   ToolCall,
   TextContent,
 } from '../types/index.js';
-import { AnthropicProvider } from '../providers/anthropic.js';
+import {
+  createProvider,
+  detectProviderFromModel,
+  type Provider,
+  type ProviderType,
+} from '../providers/index.js';
 import { HookEngine } from '../hooks/engine.js';
 import type { HookDefinition, PreToolHookContext, PostToolHookContext } from '../hooks/types.js';
 import { createLogger } from '../logging/logger.js';
@@ -40,7 +45,8 @@ const logger = createLogger('agent');
 export class TronAgent {
   readonly sessionId: string;
   private config: AgentConfig;
-  private provider: AnthropicProvider;
+  private provider: Provider;
+  private providerType: ProviderType;
   private tools: Map<string, TronTool>;
   private hookEngine: HookEngine;
   private messages: Message[];
@@ -54,12 +60,20 @@ export class TronAgent {
   constructor(config: AgentConfig, options: AgentOptions = {}) {
     this.sessionId = options.sessionId ?? `sess_${randomUUID().replace(/-/g, '').slice(0, 12)}`;
     this.config = config;
-    this.provider = new AnthropicProvider({
+
+    // Detect provider type from model if not specified
+    this.providerType = config.provider.type ?? detectProviderFromModel(config.provider.model);
+
+    // Create provider using factory
+    this.provider = createProvider({
+      type: this.providerType,
       model: config.provider.model,
       auth: config.provider.auth,
       maxTokens: config.maxTokens,
       temperature: config.temperature,
       baseURL: config.provider.baseURL,
+      thinkingBudget: config.provider.thinkingBudget ?? config.thinkingBudget,
+      organization: config.provider.organization,
     });
 
     this.tools = new Map();
@@ -78,9 +92,60 @@ export class TronAgent {
 
     logger.info('TronAgent initialized', {
       sessionId: this.sessionId,
+      provider: this.providerType,
       model: config.provider.model,
       toolCount: this.tools.size,
     });
+  }
+
+  /**
+   * Get current provider type
+   */
+  getProviderType(): ProviderType {
+    return this.providerType;
+  }
+
+  /**
+   * Get current model
+   */
+  getModel(): string {
+    return this.provider.model;
+  }
+
+  /**
+   * Switch to a different model (preserves session context)
+   */
+  switchModel(model: string, providerType?: ProviderType): void {
+    if (this.isRunning) {
+      throw new Error('Cannot switch model while agent is running');
+    }
+
+    const newProviderType = providerType ?? detectProviderFromModel(model);
+
+    // Create new provider
+    this.provider = createProvider({
+      type: newProviderType,
+      model,
+      auth: this.config.provider.auth,
+      maxTokens: this.config.maxTokens,
+      temperature: this.config.temperature,
+      baseURL: this.config.provider.baseURL,
+      thinkingBudget: this.config.provider.thinkingBudget ?? this.config.thinkingBudget,
+      organization: this.config.provider.organization,
+    });
+
+    this.providerType = newProviderType;
+
+    logger.info('Model switched', {
+      sessionId: this.sessionId,
+      previousModel: this.config.provider.model,
+      newModel: model,
+      provider: newProviderType,
+    });
+
+    // Update config
+    this.config.provider.model = model;
+    this.config.provider.type = newProviderType;
   }
 
   /**

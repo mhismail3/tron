@@ -43,15 +43,28 @@ export const BUILT_IN_COMMANDS: SlashCommand[] = [
   },
   {
     name: 'context',
-    description: 'View loaded context and AGENTS.md files',
+    description: 'View loaded context, token counts, and AGENTS.md files',
   },
   {
     name: 'session',
-    description: 'Show current session information',
+    description: 'Show session info with token usage breakdown',
   },
   {
     name: 'history',
     description: 'View conversation history',
+  },
+  {
+    name: 'resume',
+    description: 'Resume a previous session',
+    shortcut: 'r',
+  },
+  {
+    name: 'rewind',
+    description: 'Rewind to a previous point in the session',
+  },
+  {
+    name: 'branch',
+    description: 'Branch/fork from a point in the session',
   },
   {
     name: 'exit',

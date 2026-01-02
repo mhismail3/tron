@@ -9,12 +9,19 @@ import { TronAgent } from '../../src/agent/tron-agent.js';
 import type { AgentConfig, TurnResult } from '../../src/agent/types.js';
 import type { TronTool, TronToolResult, TronEvent } from '../../src/types/index.js';
 
-// Mock provider
-vi.mock('../../src/providers/anthropic.js', () => ({
-  AnthropicProvider: vi.fn().mockImplementation(() => ({
-    stream: vi.fn(),
-  })),
-}));
+// Mock the provider factory - factory creates inline mock
+vi.mock('../../src/providers/index.js', async (importOriginal) => {
+  const actual = await importOriginal() as Record<string, unknown>;
+  return {
+    ...actual,
+    createProvider: vi.fn().mockImplementation(() => ({
+      id: 'anthropic',
+      model: 'claude-sonnet-4-20250514',
+      stream: vi.fn(),
+    })),
+    detectProviderFromModel: vi.fn().mockReturnValue('anthropic'),
+  };
+});
 
 describe('TronAgent', () => {
   let config: AgentConfig;

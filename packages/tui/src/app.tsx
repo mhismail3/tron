@@ -36,6 +36,8 @@ import {
   EditTool,
   BashTool,
   DEFAULT_MODEL,
+  formatError,
+  parseError,
   type AgentOptions,
   type TronEvent,
   type Message,
@@ -562,18 +564,49 @@ export function App({ config, auth }: AppProps): React.ReactElement {
       streamingContentRef.current = '';
 
       if (!result.success) {
-        dispatch({ type: 'SET_ERROR', payload: result.error ?? 'Unknown error' });
-        dispatch({ type: 'SET_STATUS', payload: 'Error' });
+        // Parse error for user-friendly message
+        const parsed = parseError(result.error ?? 'Unknown error');
+        const errorMessage = formatError(result.error ?? 'Unknown error');
+
+        // Add error message to chat for visibility
+        dispatch({
+          type: 'ADD_MESSAGE',
+          payload: {
+            id: `msg_${messageIdRef.current++}`,
+            role: 'system',
+            content: `❌ Error: ${errorMessage}${parsed.isRetryable ? '\n(This error may be temporary - try again)' : ''}`,
+            timestamp: new Date().toISOString(),
+          },
+        });
+
+        dispatch({ type: 'SET_ERROR', payload: errorMessage });
+        // Set status back to Ready so user can continue
+        dispatch({ type: 'SET_STATUS', payload: 'Ready' });
       } else {
+        dispatch({ type: 'SET_ERROR', payload: null }); // Clear any previous error
         dispatch({ type: 'SET_STATUS', payload: 'Ready' });
       }
     } catch (error) {
+      // Parse error for user-friendly message
+      const parsed = parseError(error);
+      const errorMessage = formatError(error);
+
+      // Add error message to chat for visibility
       dispatch({
-        type: 'SET_ERROR',
-        payload: error instanceof Error ? error.message : 'Unknown error',
+        type: 'ADD_MESSAGE',
+        payload: {
+          id: `msg_${messageIdRef.current++}`,
+          role: 'system',
+          content: `❌ Error: ${errorMessage}${parsed.isRetryable ? '\n(This error may be temporary - try again)' : ''}`,
+          timestamp: new Date().toISOString(),
+        },
       });
-      dispatch({ type: 'SET_STATUS', payload: 'Error' });
+
+      dispatch({ type: 'SET_ERROR', payload: errorMessage });
+      // Set status back to Ready so user can continue
+      dispatch({ type: 'SET_STATUS', payload: 'Ready' });
     } finally {
+      // Always clean up state so user can continue
       dispatch({ type: 'SET_PROCESSING', payload: false });
       dispatch({ type: 'SET_ACTIVE_TOOL', payload: null });
       dispatch({ type: 'CLEAR_STREAMING' });
@@ -605,41 +638,69 @@ export function App({ config, auth }: AppProps): React.ReactElement {
         dispatch({ type: 'RESET' });
         break;
 
-      case 'model':
+      case 'model': {
+        const agent = agentRef.current;
+        const currentModel = agent?.getModel() ?? config.model ?? DEFAULT_MODEL;
+        const currentProvider = agent?.getProviderType() ?? 'anthropic';
         dispatch({
           type: 'ADD_MESSAGE',
           payload: {
             id: `msg_${messageIdRef.current++}`,
             role: 'system',
-            content: `Current model: ${config.model ?? DEFAULT_MODEL}\n(Model switching will be available in a future update)`,
+            content: `Current model: ${currentModel}\nProvider: ${currentProvider}\n\nTo switch models, use: /model <model-id>\nExamples:\n  /model gpt-4o (OpenAI)\n  /model gemini-2.5-flash (Google)\n  /model claude-sonnet-4-20250514 (Anthropic)`,
             timestamp: new Date().toISOString(),
           },
         });
         break;
+      }
 
-      case 'context':
+      case 'context': {
+        const contextMarkdown = tuiSessionRef.current?.getContextAuditMarkdown() ?? 'No context audit available';
         dispatch({
           type: 'ADD_MESSAGE',
           payload: {
             id: `msg_${messageIdRef.current++}`,
             role: 'system',
-            content: `Context viewer coming soon. Working directory: ${config.workingDirectory}`,
+            content: contextMarkdown,
             timestamp: new Date().toISOString(),
           },
         });
         break;
+      }
 
-      case 'session':
+      case 'session': {
+        const session = tuiSessionRef.current;
+        const messageCount = session?.getMessageCount() ?? 0;
+        const tokenEstimate = session?.getTokenEstimate() ?? 0;
+        const compactionConfig = session?.getCompactionConfig();
+        const needsCompaction = session?.needsCompaction() ?? false;
+
+        const sessionInfo = [
+          `Session ID: ${state.sessionId ?? 'N/A'}`,
+          `Messages: ${messageCount}`,
+          '',
+          '**Token Usage**',
+          `  Input: ${state.tokenUsage.input.toLocaleString()} tokens`,
+          `  Output: ${state.tokenUsage.output.toLocaleString()} tokens`,
+          `  Total: ${(state.tokenUsage.input + state.tokenUsage.output).toLocaleString()} tokens`,
+          '',
+          '**Context Estimate**',
+          `  Current messages: ~${tokenEstimate.toLocaleString()} tokens`,
+          `  Compaction threshold: ${compactionConfig?.maxTokens?.toLocaleString() ?? 'N/A'} tokens`,
+          `  Needs compaction: ${needsCompaction ? 'Yes' : 'No'}`,
+        ].join('\n');
+
         dispatch({
           type: 'ADD_MESSAGE',
           payload: {
             id: `msg_${messageIdRef.current++}`,
             role: 'system',
-            content: `Session ID: ${state.sessionId ?? 'N/A'}\nTokens used: ${state.tokenUsage.input} in / ${state.tokenUsage.output} out`,
+            content: sessionInfo,
             timestamp: new Date().toISOString(),
           },
         });
         break;
+      }
 
       case 'history':
         dispatch({
@@ -648,6 +709,42 @@ export function App({ config, auth }: AppProps): React.ReactElement {
             id: `msg_${messageIdRef.current++}`,
             role: 'system',
             content: `${state.messages.length} messages in history`,
+            timestamp: new Date().toISOString(),
+          },
+        });
+        break;
+
+      case 'resume':
+        dispatch({
+          type: 'ADD_MESSAGE',
+          payload: {
+            id: `msg_${messageIdRef.current++}`,
+            role: 'system',
+            content: `Session resume functionality:\n\nTo resume a session, use:\n  tron --continue     # Resume most recent session\n  tron --resume <id>  # Resume specific session\n\nSession files are stored in ~/.tron/sessions/`,
+            timestamp: new Date().toISOString(),
+          },
+        });
+        break;
+
+      case 'rewind':
+        dispatch({
+          type: 'ADD_MESSAGE',
+          payload: {
+            id: `msg_${messageIdRef.current++}`,
+            role: 'system',
+            content: `Session rewind functionality (coming soon):\n\nThis will allow you to:\n  - Rewind to a specific message in the conversation\n  - Undo recent exchanges\n  - Create a checkpoint before experimental changes`,
+            timestamp: new Date().toISOString(),
+          },
+        });
+        break;
+
+      case 'branch':
+        dispatch({
+          type: 'ADD_MESSAGE',
+          payload: {
+            id: `msg_${messageIdRef.current++}`,
+            role: 'system',
+            content: `Session branching functionality (coming soon):\n\nThis will allow you to:\n  - Fork the session at any point\n  - Explore alternative approaches\n  - Compare different solutions`,
             timestamp: new Date().toISOString(),
           },
         });

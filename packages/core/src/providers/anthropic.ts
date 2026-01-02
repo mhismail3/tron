@@ -207,6 +207,13 @@ export class AnthropicProvider {
   }
 
   /**
+   * Get the current model ID
+   */
+  get model(): string {
+    return this.config.model;
+  }
+
+  /**
    * Ensure tokens are valid, refresh if needed
    */
   private async ensureValidTokens(): Promise<void> {
