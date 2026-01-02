@@ -92,7 +92,7 @@ export function MessageList({
   return (
     <Box flexDirection="column" gap={1}>
       {showReady && (
-        <Box flexDirection="row" gap={1}>
+        <Box flexDirection="row" gap={1} marginLeft={2}>
           <Text color="green">●</Text>
           <Text color="gray">Ready</Text>
         </Box>

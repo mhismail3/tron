@@ -64,6 +64,8 @@ export interface MacOSInputProps {
   terminalWidth?: number;
   /** Background color for the input area */
   backgroundColor?: 'gray' | 'black' | 'white' | 'red' | 'green' | 'yellow' | 'blue' | 'magenta' | 'cyan';
+  /** Prefix to add to continuation lines (lines after the first) for alignment */
+  continuationPrefix?: string;
 }
 
 // =============================================================================
@@ -80,6 +82,7 @@ export function MacOSInput({
   onHistoryDown,
   maxVisibleLines = 20,
   terminalWidth: _terminalWidth = 80,
+  continuationPrefix = '',
 }: MacOSInputProps): React.ReactElement {
   // Cursor position (character index in the string)
   const [cursorOffset, setCursorOffset] = useState(value.length);
@@ -675,15 +678,23 @@ export function MacOSInput({
       currentCharPos += line.length + 1; // +1 for newline
     }
 
+    // Add continuation prefix to lines after the first (for alignment with prompt)
+    const prefixedLines = renderedLines.map((line, idx) => {
+      // First visible line doesn't get prefix (PromptBox adds "> ")
+      // Subsequent lines get the continuation prefix for alignment
+      if (idx === 0) return line;
+      return continuationPrefix + line;
+    });
+
     // Add scroll indicators if needed
-    let result = renderedLines.join('\n');
+    let result = prefixedLines.join('\n');
     if (maxVisibleLines > 0 && totalLines > maxVisibleLines) {
       if (scrollOffset > 0) {
-        result = chalk.gray(`  ↑ ${scrollOffset} more line${scrollOffset > 1 ? 's' : ''}\n`) + result;
+        result = chalk.gray(`${continuationPrefix}↑ ${scrollOffset} more line${scrollOffset > 1 ? 's' : ''}\n`) + result;
       }
       const remaining = totalLines - endLine;
       if (remaining > 0) {
-        result += chalk.gray(`\n  ↓ ${remaining} more line${remaining > 1 ? 's' : ''}`);
+        result += chalk.gray(`\n${continuationPrefix}↓ ${remaining} more line${remaining > 1 ? 's' : ''}`);
       }
     }
 

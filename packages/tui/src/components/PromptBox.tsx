@@ -63,6 +63,7 @@ export function PromptBox({
               onHistoryDown={onDownArrow}
               maxVisibleLines={maxVisibleLines}
               terminalWidth={inputWidth}
+              continuationPrefix="  "
             />
           )}
         </Box>
