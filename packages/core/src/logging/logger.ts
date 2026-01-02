@@ -39,7 +39,9 @@ export interface LogContext {
  * Create a configured pino logger instance
  */
 function createPinoLogger(options: LoggerOptions = {}): pino.Logger {
-  const level = options.level ?? (process.env.LOG_LEVEL as LogLevel) ?? 'info';
+  // Default to 'warn' to avoid noisy INFO logs in interactive mode
+  // Use LOG_LEVEL=info or LOG_LEVEL=debug for verbose output
+  const level = options.level ?? (process.env.LOG_LEVEL as LogLevel) ?? 'warn';
   const pretty = options.pretty ?? process.env.NODE_ENV !== 'production';
 
   const pinoOptions: pino.LoggerOptions = {

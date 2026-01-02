@@ -915,7 +915,12 @@ export function App({ config, auth }: AppProps): React.ReactElement {
       />
 
       {/* Status Bar */}
-      <StatusBar status={state.status} error={state.error} />
+      <StatusBar
+        status={state.status}
+        error={state.error}
+        tokenUsage={state.tokenUsage}
+        model={config.model ?? DEFAULT_MODEL}
+      />
     </Box>
   );
 }

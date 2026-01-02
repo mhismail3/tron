@@ -1,47 +1,72 @@
 /**
- * @fileoverview macOS-compatible Text Input Component
+ * @fileoverview macOS-compatible Multiline Text Input Component
  *
- * Custom text input that supports standard macOS keyboard shortcuts:
+ * Full-featured text input with standard macOS keyboard shortcuts:
  *
  * Navigation:
  * - Left/Right: Move cursor by character
- * - Option+Left/Right: Move cursor by word
- * - Ctrl+A / Cmd+Left: Move to start of line
- * - Ctrl+E / Cmd+Right: Move to end of line
+ * - Up/Down: Move cursor between lines (or history if single line)
+ * - Option+Left/Right (or Esc+b/f): Move cursor by word
+ * - Ctrl+A / Home: Move to start of line
+ * - Ctrl+E / End: Move to end of line
  *
  * Selection (with Shift):
  * - Shift+Left/Right: Select character by character
+ * - Shift+Up/Down: Select line by line
  * - Shift+Option+Left/Right: Select word by word
- * - Shift+Ctrl+A / Shift+Cmd+Left: Select to start of line
- * - Shift+Ctrl+E / Shift+Cmd+Right: Select to end of line
+ * - Shift+Ctrl+A: Select to start of line
+ * - Shift+Ctrl+E: Select to end of line
+ * - Ctrl+Shift+A or Ctrl+A (when text exists): Select all
  *
- * Deletion:
+ * Editing:
  * - Backspace/Delete: Delete character (or selection)
- * - Option+Backspace: Delete word before cursor
- * - Ctrl+U / Cmd+Delete: Delete to start of line
+ * - Option+Backspace (or Esc+Backspace): Delete word before cursor
+ * - Ctrl+U: Delete to start of line
  * - Ctrl+K: Delete to end of line
  * - Ctrl+W: Delete word before cursor
+ * - Shift+Enter: Insert newline
+ *
+ * Undo/Redo:
+ * - Ctrl+Z: Undo
+ * - Ctrl+Y or Ctrl+Shift+Z: Redo
  */
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { Text, useInput } from 'ink';
 import chalk from 'chalk';
+
+// =============================================================================
+// Types
+// =============================================================================
+
+interface UndoState {
+  value: string;
+  cursorOffset: number;
+}
 
 export interface MacOSInputProps {
   /** Current input value */
   value: string;
   /** Callback when value changes */
   onChange: (value: string) => void;
-  /** Callback when Enter is pressed */
+  /** Callback when Enter is pressed (submit) */
   onSubmit?: () => void;
   /** Placeholder text when empty */
   placeholder?: string;
   /** Whether input is focused */
   focus?: boolean;
-  /** Callback for up arrow (history navigation) */
-  onUpArrow?: () => void;
-  /** Callback for down arrow (history navigation) */
-  onDownArrow?: () => void;
+  /** Callback for history up (only when cursor at first line) */
+  onHistoryUp?: () => void;
+  /** Callback for history down (only when cursor at last line) */
+  onHistoryDown?: () => void;
+  /** Maximum visible lines before scrolling (0 = unlimited) */
+  maxVisibleLines?: number;
+  /** Terminal width for wrapping calculation */
+  terminalWidth?: number;
 }
+
+// =============================================================================
+// Component
+// =============================================================================
 
 export function MacOSInput({
   value,
@@ -49,13 +74,26 @@ export function MacOSInput({
   onSubmit,
   placeholder = '',
   focus = true,
-  onUpArrow,
-  onDownArrow,
+  onHistoryUp,
+  onHistoryDown,
+  maxVisibleLines = 20,
+  terminalWidth: _terminalWidth = 80,
 }: MacOSInputProps): React.ReactElement {
-  // Cursor position
+  // Cursor position (character index in the string)
   const [cursorOffset, setCursorOffset] = useState(value.length);
-  // Selection anchor - null means no selection, otherwise it's where selection started
+  // Selection anchor - null means no selection
   const [selectionAnchor, setSelectionAnchor] = useState<number | null>(null);
+  // Scroll offset for multiline (which line is at the top)
+  const [scrollOffset, setScrollOffset] = useState(0);
+  // Undo/Redo stacks
+  const undoStack = useRef<UndoState[]>([]);
+  const redoStack = useRef<UndoState[]>([]);
+  // Track if last change was from undo/redo to avoid pushing to stack
+  const isUndoRedo = useRef(false);
+
+  // ==========================================================================
+  // Cursor and Selection Helpers
+  // ==========================================================================
 
   // Keep cursor in bounds when value changes externally
   useEffect(() => {
@@ -67,58 +105,97 @@ export function MacOSInput({
     }
   }, [value, cursorOffset, selectionAnchor]);
 
-  // Reset cursor to end when value is set externally (e.g., history navigation)
+  // Reset cursor to end when value changes externally (e.g., history navigation)
+  // Only if not from undo/redo
   useEffect(() => {
-    setCursorOffset(value.length);
-    setSelectionAnchor(null);
+    if (!isUndoRedo.current) {
+      setCursorOffset(value.length);
+      setSelectionAnchor(null);
+    }
+    isUndoRedo.current = false;
   }, [value]);
 
-  // Get selection range (start, end) - returns null if no selection
+  // Get selection range
   const getSelectionRange = useCallback((): { start: number; end: number } | null => {
-    if (selectionAnchor === null) return null;
-    if (selectionAnchor === cursorOffset) return null;
+    if (selectionAnchor === null || selectionAnchor === cursorOffset) return null;
     return {
       start: Math.min(selectionAnchor, cursorOffset),
       end: Math.max(selectionAnchor, cursorOffset),
     };
   }, [selectionAnchor, cursorOffset]);
 
-  // Check if there's an active selection
   const hasSelection = useCallback((): boolean => {
     return getSelectionRange() !== null;
   }, [getSelectionRange]);
 
-  // Clear selection
   const clearSelection = useCallback(() => {
     setSelectionAnchor(null);
   }, []);
 
-  // Start or extend selection
   const extendSelection = useCallback((newCursor: number) => {
     if (selectionAnchor === null) {
-      // Start new selection from current cursor position
       setSelectionAnchor(cursorOffset);
     }
-    setCursorOffset(newCursor);
-  }, [selectionAnchor, cursorOffset]);
+    setCursorOffset(Math.max(0, Math.min(newCursor, value.length)));
+  }, [selectionAnchor, cursorOffset, value.length]);
 
-  // Move cursor and clear selection
   const moveCursor = useCallback((newCursor: number) => {
     setCursorOffset(Math.max(0, Math.min(newCursor, value.length)));
     clearSelection();
   }, [value.length, clearSelection]);
 
-  // Update value and cursor, clearing selection
+  // ==========================================================================
+  // Undo/Redo
+  // ==========================================================================
+
+  const pushUndoState = useCallback(() => {
+    undoStack.current.push({ value, cursorOffset });
+    // Limit undo stack size
+    if (undoStack.current.length > 100) {
+      undoStack.current.shift();
+    }
+    // Clear redo stack on new action
+    redoStack.current = [];
+  }, [value, cursorOffset]);
+
+  const undo = useCallback(() => {
+    if (undoStack.current.length === 0) return;
+    // Save current state to redo
+    redoStack.current.push({ value, cursorOffset });
+    // Restore previous state
+    const prevState = undoStack.current.pop()!;
+    isUndoRedo.current = true;
+    onChange(prevState.value);
+    setCursorOffset(prevState.cursorOffset);
+    clearSelection();
+  }, [value, cursorOffset, onChange, clearSelection]);
+
+  const redo = useCallback(() => {
+    if (redoStack.current.length === 0) return;
+    // Save current state to undo
+    undoStack.current.push({ value, cursorOffset });
+    // Restore next state
+    const nextState = redoStack.current.pop()!;
+    isUndoRedo.current = true;
+    onChange(nextState.value);
+    setCursorOffset(nextState.cursorOffset);
+    clearSelection();
+  }, [value, cursorOffset, onChange, clearSelection]);
+
+  // ==========================================================================
+  // Value Update Helpers
+  // ==========================================================================
+
   const updateValue = useCallback(
     (newValue: string, newCursor: number) => {
+      pushUndoState();
       onChange(newValue);
       setCursorOffset(Math.max(0, Math.min(newCursor, newValue.length)));
       clearSelection();
     },
-    [onChange, clearSelection]
+    [onChange, clearSelection, pushUndoState]
   );
 
-  // Delete selection and return new value/cursor, or return null if no selection
   const deleteSelection = useCallback((): { newValue: string; newCursor: number } | null => {
     const range = getSelectionRange();
     if (!range) return null;
@@ -126,69 +203,154 @@ export function MacOSInput({
     return { newValue, newCursor: range.start };
   }, [value, getSelectionRange]);
 
-  // Find word boundary going left
-  const findWordBoundaryLeft = useCallback(
-    (pos: number): number => {
-      if (pos === 0) return 0;
-      let newPos = pos;
-      // Skip whitespace first
-      while (newPos > 0 && /\s/.test(value[newPos - 1] ?? '')) {
-        newPos--;
-      }
-      // Then skip word characters
-      while (newPos > 0 && !/\s/.test(value[newPos - 1] ?? '')) {
-        newPos--;
-      }
-      return newPos;
-    },
-    [value]
-  );
+  // ==========================================================================
+  // Word Boundary Helpers
+  // ==========================================================================
 
-  // Find word boundary going right
-  const findWordBoundaryRight = useCallback(
-    (pos: number): number => {
-      if (pos >= value.length) return value.length;
-      let newPos = pos;
-      // Skip current word first
-      while (newPos < value.length && !/\s/.test(value[newPos] ?? '')) {
-        newPos++;
-      }
-      // Then skip whitespace
-      while (newPos < value.length && /\s/.test(value[newPos] ?? '')) {
-        newPos++;
-      }
-      return newPos;
-    },
-    [value]
-  );
+  const findWordBoundaryLeft = useCallback((pos: number): number => {
+    if (pos === 0) return 0;
+    let newPos = pos;
+    // Skip whitespace first
+    while (newPos > 0 && /\s/.test(value[newPos - 1] ?? '')) {
+      newPos--;
+    }
+    // Then skip word characters
+    while (newPos > 0 && !/\s/.test(value[newPos - 1] ?? '')) {
+      newPos--;
+    }
+    return newPos;
+  }, [value]);
+
+  const findWordBoundaryRight = useCallback((pos: number): number => {
+    if (pos >= value.length) return value.length;
+    let newPos = pos;
+    // Skip current word first
+    while (newPos < value.length && !/\s/.test(value[newPos] ?? '')) {
+      newPos++;
+    }
+    // Then skip whitespace
+    while (newPos < value.length && /\s/.test(value[newPos] ?? '')) {
+      newPos++;
+    }
+    return newPos;
+  }, [value]);
+
+  // ==========================================================================
+  // Line Navigation Helpers
+  // ==========================================================================
+
+  const getLines = useCallback((): string[] => {
+    return value.split('\n');
+  }, [value]);
+
+  const getCursorLineAndColumn = useCallback((): { line: number; column: number } => {
+    const beforeCursor = value.slice(0, cursorOffset);
+    const lines = beforeCursor.split('\n');
+    return {
+      line: lines.length - 1,
+      column: lines[lines.length - 1]?.length ?? 0,
+    };
+  }, [value, cursorOffset]);
+
+  const getPositionFromLineColumn = useCallback((line: number, column: number): number => {
+    const lines = getLines();
+    let pos = 0;
+    for (let i = 0; i < line && i < lines.length; i++) {
+      pos += (lines[i]?.length ?? 0) + 1; // +1 for newline
+    }
+    const targetLine = lines[line] ?? '';
+    pos += Math.min(column, targetLine.length);
+    return Math.min(pos, value.length);
+  }, [value, getLines]);
+
+  const moveCursorVertically = useCallback((direction: 'up' | 'down'): boolean => {
+    const { line, column } = getCursorLineAndColumn();
+    const lines = getLines();
+    const newLine = direction === 'up' ? line - 1 : line + 1;
+
+    if (newLine < 0 || newLine >= lines.length) {
+      return false; // Can't move, at boundary
+    }
+
+    const newPos = getPositionFromLineColumn(newLine, column);
+    moveCursor(newPos);
+    return true;
+  }, [getCursorLineAndColumn, getLines, getPositionFromLineColumn, moveCursor]);
+
+  const extendSelectionVertically = useCallback((direction: 'up' | 'down'): boolean => {
+    const { line, column } = getCursorLineAndColumn();
+    const lines = getLines();
+    const newLine = direction === 'up' ? line - 1 : line + 1;
+
+    if (newLine < 0 || newLine >= lines.length) {
+      return false;
+    }
+
+    const newPos = getPositionFromLineColumn(newLine, column);
+    extendSelection(newPos);
+    return true;
+  }, [getCursorLineAndColumn, getLines, getPositionFromLineColumn, extendSelection]);
+
+  const isMultiline = value.includes('\n');
+  const isAtFirstLine = getCursorLineAndColumn().line === 0;
+  const isAtLastLine = getCursorLineAndColumn().line === getLines().length - 1;
+
+  // ==========================================================================
+  // Input Handler
+  // ==========================================================================
 
   useInput(
     (input, key) => {
-      // Handle Ctrl+C (let it propagate for exit)
+      // Ctrl+C - let it propagate for exit
       if (key.ctrl && input === 'c') {
         return;
       }
 
-      // Handle Tab (let it propagate)
+      // Tab - let it propagate
       if (key.tab) {
         return;
       }
 
-      // Handle Enter/Return
-      if (key.return) {
+      // Enter - submit (without shift)
+      if (key.return && !key.shift) {
         onSubmit?.();
         return;
       }
 
-      // Handle Up/Down arrows for history (only when no selection)
-      if (key.upArrow && !key.shift) {
-        clearSelection();
-        onUpArrow?.();
+      // Shift+Enter - insert newline
+      if (key.return && key.shift) {
+        if (hasSelection()) {
+          const result = deleteSelection();
+          if (result) {
+            const newValue = result.newValue.slice(0, result.newCursor) + '\n' + result.newValue.slice(result.newCursor);
+            updateValue(newValue, result.newCursor + 1);
+          }
+        } else {
+          const newValue = value.slice(0, cursorOffset) + '\n' + value.slice(cursorOffset);
+          updateValue(newValue, cursorOffset + 1);
+        }
         return;
       }
-      if (key.downArrow && !key.shift) {
-        clearSelection();
-        onDownArrow?.();
+
+      // === Undo/Redo ===
+
+      // Ctrl+Z - Undo
+      if (key.ctrl && input === 'z' && !key.shift) {
+        undo();
+        return;
+      }
+
+      // Ctrl+Y or Ctrl+Shift+Z - Redo
+      if ((key.ctrl && input === 'y') || (key.ctrl && key.shift && input === 'z')) {
+        redo();
+        return;
+      }
+
+      // === Select All ===
+      // Ctrl+Shift+A - Select all (avoiding conflict with Ctrl+A for start of line)
+      if (key.ctrl && key.shift && input === 'a') {
+        setSelectionAnchor(0);
+        setCursorOffset(value.length);
         return;
       }
 
@@ -206,15 +368,27 @@ export function MacOSInput({
         return;
       }
 
-      // Shift+Option+Left: Select word left
-      if (key.shift && key.meta && key.leftArrow) {
+      // Shift+Option+Left (also Shift+Esc+b): Select word left
+      if (key.shift && key.meta && (key.leftArrow || input === 'b' || input === 'B')) {
         extendSelection(findWordBoundaryLeft(cursorOffset));
         return;
       }
 
-      // Shift+Option+Right: Select word right
-      if (key.shift && key.meta && key.rightArrow) {
+      // Shift+Option+Right (also Shift+Esc+f): Select word right
+      if (key.shift && key.meta && (key.rightArrow || input === 'f' || input === 'F')) {
         extendSelection(findWordBoundaryRight(cursorOffset));
+        return;
+      }
+
+      // Shift+Up: Select line up
+      if (key.shift && key.upArrow) {
+        extendSelectionVertically('up');
+        return;
+      }
+
+      // Shift+Down: Select line down
+      if (key.shift && key.downArrow) {
+        extendSelectionVertically('down');
         return;
       }
 
@@ -234,19 +408,20 @@ export function MacOSInput({
         return;
       }
 
-      // === Navigation (non-shift) ===
+      // === Navigation ===
 
-      // Ctrl+U: Delete to start of line (Cmd+Delete in many terminals)
+      // Ctrl+U: Delete to start of line
       if (key.ctrl && input === 'u') {
-        // If there's a selection, delete it first
         if (hasSelection()) {
           const result = deleteSelection();
-          if (result) {
-            updateValue(result.newValue, result.newCursor);
-          }
+          if (result) updateValue(result.newValue, result.newCursor);
         } else {
-          const newValue = value.slice(cursorOffset);
-          updateValue(newValue, 0);
+          // Find start of current line
+          const beforeCursor = value.slice(0, cursorOffset);
+          const lastNewline = beforeCursor.lastIndexOf('\n');
+          const lineStart = lastNewline === -1 ? 0 : lastNewline + 1;
+          const newValue = value.slice(0, lineStart) + value.slice(cursorOffset);
+          updateValue(newValue, lineStart);
         }
         return;
       }
@@ -255,25 +430,35 @@ export function MacOSInput({
       if (key.ctrl && input === 'k') {
         if (hasSelection()) {
           const result = deleteSelection();
-          if (result) {
-            updateValue(result.newValue, result.newCursor);
-          }
+          if (result) updateValue(result.newValue, result.newCursor);
         } else {
-          const newValue = value.slice(0, cursorOffset);
+          // Find end of current line
+          const afterCursor = value.slice(cursorOffset);
+          const nextNewline = afterCursor.indexOf('\n');
+          const lineEnd = nextNewline === -1 ? value.length : cursorOffset + nextNewline;
+          const newValue = value.slice(0, cursorOffset) + value.slice(lineEnd);
           updateValue(newValue, cursorOffset);
         }
         return;
       }
 
-      // Ctrl+A: Move to start of line (Cmd+Left in many terminals)
+      // Ctrl+A: Move to start of line
       if (key.ctrl && input === 'a') {
-        moveCursor(0);
+        // Find start of current line
+        const beforeCursor = value.slice(0, cursorOffset);
+        const lastNewline = beforeCursor.lastIndexOf('\n');
+        const lineStart = lastNewline === -1 ? 0 : lastNewline + 1;
+        moveCursor(lineStart);
         return;
       }
 
-      // Ctrl+E: Move to end of line (Cmd+Right in many terminals)
+      // Ctrl+E: Move to end of line
       if (key.ctrl && input === 'e') {
-        moveCursor(value.length);
+        // Find end of current line
+        const afterCursor = value.slice(cursorOffset);
+        const nextNewline = afterCursor.indexOf('\n');
+        const lineEnd = nextNewline === -1 ? value.length : cursorOffset + nextNewline;
+        moveCursor(lineEnd);
         return;
       }
 
@@ -281,9 +466,7 @@ export function MacOSInput({
       if (key.ctrl && input === 'w') {
         if (hasSelection()) {
           const result = deleteSelection();
-          if (result) {
-            updateValue(result.newValue, result.newCursor);
-          }
+          if (result) updateValue(result.newValue, result.newCursor);
         } else {
           const wordStart = findWordBoundaryLeft(cursorOffset);
           const newValue = value.slice(0, wordStart) + value.slice(cursorOffset);
@@ -292,25 +475,23 @@ export function MacOSInput({
         return;
       }
 
-      // Option+Left: Move cursor word left
-      if (key.meta && key.leftArrow) {
+      // Option+Left (also Esc+b): Move cursor word left
+      if (key.meta && (key.leftArrow || input === 'b')) {
         moveCursor(findWordBoundaryLeft(cursorOffset));
         return;
       }
 
-      // Option+Right: Move cursor word right
-      if (key.meta && key.rightArrow) {
+      // Option+Right (also Esc+f): Move cursor word right
+      if (key.meta && (key.rightArrow || input === 'f')) {
         moveCursor(findWordBoundaryRight(cursorOffset));
         return;
       }
 
-      // Option+Backspace or Option+Delete: Delete word before cursor
+      // Option+Backspace (also Esc+Backspace): Delete word before cursor
       if (key.meta && (key.backspace || key.delete)) {
         if (hasSelection()) {
           const result = deleteSelection();
-          if (result) {
-            updateValue(result.newValue, result.newCursor);
-          }
+          if (result) updateValue(result.newValue, result.newCursor);
         } else {
           const wordStart = findWordBoundaryLeft(cursorOffset);
           const newValue = value.slice(0, wordStart) + value.slice(cursorOffset);
@@ -319,51 +500,67 @@ export function MacOSInput({
         return;
       }
 
-      // Regular left arrow - move cursor or collapse selection
+      // Up arrow
+      if (key.upArrow) {
+        if (isMultiline && !isAtFirstLine) {
+          // Navigate within multiline text
+          moveCursorVertically('up');
+        } else {
+          // At first line or single line - trigger history
+          clearSelection();
+          onHistoryUp?.();
+        }
+        return;
+      }
+
+      // Down arrow
+      if (key.downArrow) {
+        if (isMultiline && !isAtLastLine) {
+          // Navigate within multiline text
+          moveCursorVertically('down');
+        } else {
+          // At last line or single line - trigger history
+          clearSelection();
+          onHistoryDown?.();
+        }
+        return;
+      }
+
+      // Left arrow
       if (key.leftArrow) {
         if (hasSelection()) {
-          // Collapse selection to the left side
           const range = getSelectionRange();
-          if (range) {
-            moveCursor(range.start);
-          }
+          if (range) moveCursor(range.start);
         } else {
           moveCursor(cursorOffset - 1);
         }
         return;
       }
 
-      // Regular right arrow - move cursor or collapse selection
+      // Right arrow
       if (key.rightArrow) {
         if (hasSelection()) {
-          // Collapse selection to the right side
           const range = getSelectionRange();
-          if (range) {
-            moveCursor(range.end);
-          }
+          if (range) moveCursor(range.end);
         } else {
           moveCursor(cursorOffset + 1);
         }
         return;
       }
 
-      // Regular backspace/delete
+      // Backspace/Delete
       if (key.backspace || key.delete) {
         if (hasSelection()) {
-          // Delete selection
           const result = deleteSelection();
-          if (result) {
-            updateValue(result.newValue, result.newCursor);
-          }
+          if (result) updateValue(result.newValue, result.newCursor);
         } else if (cursorOffset > 0) {
-          const newValue =
-            value.slice(0, cursorOffset - 1) + value.slice(cursorOffset);
+          const newValue = value.slice(0, cursorOffset - 1) + value.slice(cursorOffset);
           updateValue(newValue, cursorOffset - 1);
         }
         return;
       }
 
-      // Escape key - clear selection
+      // Escape - clear selection
       if (key.escape) {
         clearSelection();
         return;
@@ -372,15 +569,13 @@ export function MacOSInput({
       // Regular character input
       if (input && !key.ctrl && !key.meta) {
         if (hasSelection()) {
-          // Replace selection with typed character
           const range = getSelectionRange();
           if (range) {
             const newValue = value.slice(0, range.start) + input + value.slice(range.end);
             updateValue(newValue, range.start + input.length);
           }
         } else {
-          const newValue =
-            value.slice(0, cursorOffset) + input + value.slice(cursorOffset);
+          const newValue = value.slice(0, cursorOffset) + input + value.slice(cursorOffset);
           updateValue(newValue, cursorOffset + input.length);
         }
       }
@@ -388,10 +583,37 @@ export function MacOSInput({
     { isActive: focus }
   );
 
-  // Render the input with cursor and selection highlighting
+  // ==========================================================================
+  // Scroll Management
+  // ==========================================================================
+
+  useEffect(() => {
+    if (maxVisibleLines <= 0) return;
+
+    const { line } = getCursorLineAndColumn();
+    const totalLines = getLines().length;
+
+    // Adjust scroll to keep cursor visible
+    if (line < scrollOffset) {
+      setScrollOffset(line);
+    } else if (line >= scrollOffset + maxVisibleLines) {
+      setScrollOffset(line - maxVisibleLines + 1);
+    }
+
+    // Ensure scroll doesn't exceed bounds
+    const maxScroll = Math.max(0, totalLines - maxVisibleLines);
+    if (scrollOffset > maxScroll) {
+      setScrollOffset(maxScroll);
+    }
+  }, [cursorOffset, value, maxVisibleLines, scrollOffset, getCursorLineAndColumn, getLines]);
+
+  // ==========================================================================
+  // Render
+  // ==========================================================================
+
   const renderValue = (): string => {
     if (!focus) {
-      return value || placeholder;
+      return value || chalk.gray(placeholder);
     }
 
     if (value.length === 0) {
@@ -402,30 +624,68 @@ export function MacOSInput({
     }
 
     const range = getSelectionRange();
+    const lines = getLines();
+    const totalLines = lines.length;
 
-    let rendered = '';
-    for (let i = 0; i < value.length; i++) {
-      const char = value[i] ?? '';
-      const isSelected = range && i >= range.start && i < range.end;
-      const isCursor = i === cursorOffset;
+    // Determine visible lines
+    const startLine = maxVisibleLines > 0 ? scrollOffset : 0;
+    const endLine = maxVisibleLines > 0 ? Math.min(startLine + maxVisibleLines, totalLines) : totalLines;
 
-      if (isSelected) {
-        // Selected text - use cyan background
-        rendered += chalk.bgCyan.black(char);
-      } else if (isCursor) {
-        // Cursor position - inverse
-        rendered += chalk.inverse(char);
-      } else {
-        rendered += char;
+    // Calculate character positions for visible region
+    let charOffset = 0;
+    for (let i = 0; i < startLine; i++) {
+      charOffset += (lines[i]?.length ?? 0) + 1;
+    }
+
+    const renderedLines: string[] = [];
+    let currentCharPos = charOffset;
+
+    for (let lineIdx = startLine; lineIdx < endLine; lineIdx++) {
+      const line = lines[lineIdx] ?? '';
+      let renderedLine = '';
+
+      for (let i = 0; i < line.length; i++) {
+        const globalPos = currentCharPos + i;
+        const char = line[i] ?? '';
+        const isSelected = range && globalPos >= range.start && globalPos < range.end;
+        const isCursor = globalPos === cursorOffset;
+
+        if (isSelected) {
+          renderedLine += chalk.bgCyan.black(char);
+        } else if (isCursor) {
+          renderedLine += chalk.inverse(char);
+        } else {
+          renderedLine += char;
+        }
+      }
+
+      // Check if cursor is at end of this line (before newline or at end of value)
+      const endOfLinePos = currentCharPos + line.length;
+      if (cursorOffset === endOfLinePos && lineIdx < totalLines - 1) {
+        // Cursor at end of line (before newline)
+        renderedLine += chalk.inverse(' ');
+      } else if (cursorOffset === endOfLinePos && lineIdx === totalLines - 1) {
+        // Cursor at very end of value
+        renderedLine += chalk.inverse(' ');
+      }
+
+      renderedLines.push(renderedLine);
+      currentCharPos += line.length + 1; // +1 for newline
+    }
+
+    // Add scroll indicators if needed
+    let result = renderedLines.join('\n');
+    if (maxVisibleLines > 0 && totalLines > maxVisibleLines) {
+      if (scrollOffset > 0) {
+        result = chalk.gray(`  ↑ ${scrollOffset} more line${scrollOffset > 1 ? 's' : ''}\n`) + result;
+      }
+      const remaining = totalLines - endLine;
+      if (remaining > 0) {
+        result += chalk.gray(`\n  ↓ ${remaining} more line${remaining > 1 ? 's' : ''}`);
       }
     }
 
-    // If cursor is at the end, show cursor after last character
-    if (cursorOffset === value.length) {
-      rendered += chalk.inverse(' ');
-    }
-
-    return rendered;
+    return result;
   };
 
   return <Text>{renderValue()}</Text>;

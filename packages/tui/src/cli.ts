@@ -267,6 +267,18 @@ async function runInteractive(config: CliConfig): Promise<void> {
     process.exit(1);
   }
 
+  // Suppress pino logs unless in debug mode
+  // This must be set BEFORE any @tron/core imports that create loggers
+  if (!config.debug) {
+    process.env.LOG_LEVEL = 'silent';
+  }
+
+  // Clear terminal and move cursor to top-left
+  // \x1b[2J = clear entire screen
+  // \x1b[H = move cursor to home position (0,0)
+  // \x1b[3J = clear scrollback buffer (optional, works in most modern terminals)
+  process.stdout.write('\x1b[2J\x1b[H\x1b[3J');
+
   // Check authentication
   const auth = await getAuth();
   if (!auth) {
