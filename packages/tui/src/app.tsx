@@ -248,6 +248,8 @@ export function App({ config, auth }: AppProps): React.ReactElement {
   const streamingContentRef = useRef<string>('');
   // Track if we're exiting to prevent double-end
   const isExitingRef = useRef(false);
+  // Track processing state in ref for useInput callback (avoids stale closure)
+  const isProcessingRef = useRef(false);
 
   /**
    * Finalize any pending streaming content as an assistant message.
@@ -469,6 +471,11 @@ export function App({ config, auth }: AppProps): React.ReactElement {
     };
   }, [config, auth, handleAgentEvent]);
 
+  // Keep isProcessingRef in sync with state for useInput callback
+  useEffect(() => {
+    isProcessingRef.current = state.isProcessing;
+  }, [state.isProcessing]);
+
   // Handle graceful exit with session end
   const handleExit = useCallback(async () => {
     if (isExitingRef.current) return;
@@ -525,6 +532,9 @@ export function App({ config, auth }: AppProps): React.ReactElement {
     dispatch({ type: 'CLEAR_INPUT' });
     dispatch({ type: 'ADD_TO_HISTORY', payload: prompt }); // Add to history
     dispatch({ type: 'SET_PROCESSING', payload: true });
+    // CRITICAL: Set ref immediately (before async operation starts)
+    // The useEffect sync happens after render, which may be too late
+    isProcessingRef.current = true;
     dispatch({ type: 'SET_ERROR', payload: null });
     dispatch({ type: 'CLEAR_STREAMING' });
     streamingContentRef.current = '';
@@ -628,6 +638,7 @@ export function App({ config, auth }: AppProps): React.ReactElement {
     } finally {
       // Always clean up state so user can continue
       dispatch({ type: 'SET_PROCESSING', payload: false });
+      isProcessingRef.current = false; // Sync ref immediately
       dispatch({ type: 'SET_ACTIVE_TOOL', payload: null });
       dispatch({ type: 'CLEAR_STREAMING' });
       streamingContentRef.current = '';
@@ -809,10 +820,14 @@ export function App({ config, auth }: AppProps): React.ReactElement {
   }, []);
 
   // Handle interrupt - abort agent execution
+  // Uses refs instead of state to avoid stale closures in useInput
   const handleInterrupt = useCallback(() => {
-    if (!state.isProcessing || !agentRef.current) {
+    // Use ref for current processing state (avoids stale closure)
+    if (!isProcessingRef.current || !agentRef.current) {
       return;
     }
+
+    debugLog.debug('interrupt', 'Esc pressed - interrupting agent execution');
 
     // Abort the agent
     agentRef.current.abort();
@@ -844,13 +859,14 @@ export function App({ config, auth }: AppProps): React.ReactElement {
 
     // Reset processing state
     dispatch({ type: 'SET_PROCESSING', payload: false });
+    isProcessingRef.current = false; // Sync ref immediately
     dispatch({ type: 'SET_ACTIVE_TOOL', payload: null });
     dispatch({ type: 'SET_ACTIVE_TOOL_INPUT', payload: null });
     dispatch({ type: 'CLEAR_STREAMING' });
     dispatch({ type: 'SET_STATUS', payload: 'Ready' });
 
     debugLog.debug('interrupt', 'Agent execution interrupted by user');
-  }, [state.isProcessing]);
+  }, []); // No dependencies - uses refs for current values
 
   useInput((input, key) => {
     // Ctrl+C to exit (with proper session end)
@@ -863,14 +879,14 @@ export function App({ config, auth }: AppProps): React.ReactElement {
       dispatch({ type: 'RESET' });
     }
 
-    // Escape to interrupt processing
-    if (key.escape && state.isProcessing) {
+    // Escape to interrupt processing (use ref for current state)
+    if (key.escape && isProcessingRef.current) {
       handleInterrupt();
       return;
     }
 
-    // Slash menu navigation
-    if (state.showSlashMenu && !state.isProcessing) {
+    // Slash menu navigation (only when not processing)
+    if (state.showSlashMenu && !isProcessingRef.current) {
       const filteredCommands = getFilteredCommands();
 
       if (key.upArrow) {
