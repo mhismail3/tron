@@ -76,14 +76,16 @@ export function ThinkingIndicator({
 
   return (
     <Box flexDirection="row" gap={1} alignItems="flex-end">
-      <Box flexDirection="row">
+      <Box flexDirection="row" alignItems="flex-end">
         {barHeights.map((height, idx) => (
           <Text key={idx} color={color}>
             {thinkingBars.chars[height] ?? thinkingBars.chars[0]}
           </Text>
         ))}
       </Box>
-      <Text color={inkColors.label}>{label}</Text>
+      <Box alignSelf="flex-end">
+        <Text color={inkColors.label}>{label}</Text>
+      </Box>
     </Box>
   );
 }

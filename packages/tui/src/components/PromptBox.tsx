@@ -35,15 +35,16 @@ export function PromptBox({
     }
   };
 
-  // Responsive line limit
-  const maxVisibleLines = terminalWidth < 50 ? 10 : 20;
+  // Responsive breakpoints
+  const isNarrow = terminalWidth < 50;
+  const maxVisibleLines = isNarrow ? 10 : 20;
 
   // Calculate available width for input
   // Account for: border (2) + paddingX (2) + marginX (2) + prompt "> " (2) = 8
   const inputWidth = Math.max(20, terminalWidth - 8);
 
-  // Placeholder text - keep it simple
-  const placeholder = 'Type here...';
+  // Simple placeholder text
+  const placeholder = 'Type here';
 
   return (
     <Box

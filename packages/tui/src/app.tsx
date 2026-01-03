@@ -859,7 +859,7 @@ export function App({ config, auth }: AppProps): React.ReactElement {
       payload: {
         id: `msg_${messageIdRef.current++}`,
         role: 'system',
-        content: '⏸ Interrupted - tell Tron what to do instead',
+        content: 'Interrupted - tell Tron what to do instead',
         timestamp: new Date().toISOString(),
       },
     });
