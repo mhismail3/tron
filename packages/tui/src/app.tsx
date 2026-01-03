@@ -49,6 +49,7 @@ import {
 } from '@tron/core';
 import { debugLog } from './debug/index.js';
 import { inkColors } from './theme.js';
+import { formatToolOutput } from './utils/tool-output-formatter.js';
 
 const execAsync = promisify(exec);
 
@@ -410,11 +411,35 @@ export function App({ config, auth }: AppProps): React.ReactElement {
 
       case 'tool_execution_end':
         if ('toolName' in event) {
+          // Extract and format tool output for display
+          let formattedContent = '';
+          if ('result' in event && event.result) {
+            const resultContent = typeof event.result.content === 'string'
+              ? event.result.content
+              : event.result.content.map(c => c.type === 'text' ? c.text : '[image]').join('\n');
+
+            const formatted = formatToolOutput(
+              event.toolName,
+              resultContent,
+              { isError: event.isError }
+            );
+
+            // Build display content: summary + preview lines
+            const parts: string[] = [formatted.summary];
+            if (formatted.preview.length > 0) {
+              parts.push(...formatted.preview);
+            }
+            if (formatted.truncated) {
+              parts.push(`... (${formatted.totalLines - formatted.preview.length} more lines)`);
+            }
+            formattedContent = parts.join('\n');
+          }
+
           // Add tool message to display with the captured tool input
           const toolMsg: DisplayMessage = {
             id: `msg_${messageIdRef.current++}`,
             role: 'tool',
-            content: '',
+            content: formattedContent,
             timestamp: new Date().toISOString(),
             toolName: event.toolName,
             toolStatus: event.isError ? 'error' : 'success',

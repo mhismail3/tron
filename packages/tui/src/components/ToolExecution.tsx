@@ -2,16 +2,90 @@
  * @fileoverview Tool Execution Component
  *
  * Displays tool execution status with elegant Unicode icons.
- * Shows truncated output for completed tools.
+ * Shows truncated output for completed tools with diff highlighting.
  */
 import React from 'react';
 import { Text, Box } from 'ink';
-import { inkColors, icons } from '../theme.js';
+import { inkColors, icons, palette } from '../theme.js';
 
 // Display configuration
 const MAX_INPUT_LENGTH = 60;
-const MAX_OUTPUT_LINES = 3;
-const MAX_OUTPUT_LINE_LENGTH = 80;
+const MAX_OUTPUT_LINES = 8;
+const MAX_OUTPUT_LINE_LENGTH = 100;
+
+/**
+ * Detect if a line is part of a unified diff and return its type
+ */
+function getDiffLineType(line: string): 'added' | 'removed' | 'hunk' | 'context' | 'normal' {
+  // Check for diff-specific patterns
+  if (line.startsWith('@@') && line.includes('@@')) {
+    return 'hunk';
+  }
+  // Added line (+ but not ++ header)
+  if (line.startsWith('+') && !line.startsWith('++')) {
+    return 'added';
+  }
+  // Removed line (- but not -- header)
+  if (line.startsWith('-') && !line.startsWith('--')) {
+    return 'removed';
+  }
+  // Context line in diff (starts with space, common in unified diff)
+  if (line.startsWith(' ') && line.length > 1) {
+    return 'context';
+  }
+  return 'normal';
+}
+
+/**
+ * Check if output contains diff content
+ */
+function containsDiff(lines: string[]): boolean {
+  return lines.some(line =>
+    line.startsWith('@@') ||
+    (line.startsWith('+') && !line.startsWith('++')) ||
+    (line.startsWith('-') && !line.startsWith('--'))
+  );
+}
+
+/**
+ * Render a single diff line with appropriate coloring
+ */
+function DiffLine({ line, index }: { line: string; index: number }): React.ReactElement {
+  const lineType = getDiffLineType(line);
+
+  switch (lineType) {
+    case 'added':
+      return (
+        <Text key={index} color={palette.success}>
+          {line}
+        </Text>
+      );
+    case 'removed':
+      return (
+        <Text key={index} color={palette.error}>
+          {line}
+        </Text>
+      );
+    case 'hunk':
+      return (
+        <Text key={index} color={palette.info}>
+          {line}
+        </Text>
+      );
+    case 'context':
+      return (
+        <Text key={index} color={inkColors.dim}>
+          {line}
+        </Text>
+      );
+    default:
+      return (
+        <Text key={index} color={inkColors.dim}>
+          {line}
+        </Text>
+      );
+  }
+}
 
 export type ToolStatus = 'running' | 'success' | 'error';
 
@@ -100,8 +174,11 @@ export function ToolExecution({
   };
 
   // Format output lines (more lines if expanded)
-  const outputLines = formatOutput(output ?? '', expanded ? 10 : MAX_OUTPUT_LINES);
+  const outputLines = formatOutput(output ?? '', expanded ? 15 : MAX_OUTPUT_LINES);
   const hasOutput = outputLines.length > 0;
+
+  // Check if output contains diff content for syntax highlighting
+  const isDiffOutput = hasOutput && containsDiff(outputLines);
 
   return (
     <Box flexDirection="column">
@@ -122,11 +199,19 @@ export function ToolExecution({
       {/* Output preview (indented under the tool) */}
       {hasOutput && status !== 'running' && (
         <Box flexDirection="column" marginLeft={2}>
-          {outputLines.map((line, index) => (
-            <Text key={index} color={inkColors.dim} dimColor>
-              {line}
-            </Text>
-          ))}
+          {isDiffOutput ? (
+            // Render diff with syntax highlighting
+            outputLines.map((line, index) => (
+              <DiffLine key={index} line={line} index={index} />
+            ))
+          ) : (
+            // Regular output - all dim
+            outputLines.map((line, index) => (
+              <Text key={index} color={inkColors.dim}>
+                {line}
+              </Text>
+            ))
+          )}
         </Box>
       )}
     </Box>

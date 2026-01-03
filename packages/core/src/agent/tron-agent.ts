@@ -672,6 +672,7 @@ export class TronAgent {
       toolCallId: request.toolCallId,
       duration,
       isError: result.isError,
+      result,
     });
 
     // Execute PostToolUse hooks

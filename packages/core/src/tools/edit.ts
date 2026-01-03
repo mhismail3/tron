@@ -2,12 +2,84 @@
  * @fileoverview Edit tool for file editing
  *
  * Performs search and replace operations on files.
+ * Returns unified diff output showing exactly what changed.
  */
 
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import type { TronTool, TronToolResult } from '../types/index.js';
 import { createLogger } from '../logging/logger.js';
+
+/**
+ * Generate a unified diff between old and new strings.
+ * Shows context around the change with +/- prefixes.
+ */
+function generateUnifiedDiff(
+  oldStr: string,
+  newStr: string,
+  contextLines: number = 3
+): string {
+  const oldLines = oldStr.split('\n');
+  const newLines = newStr.split('\n');
+
+  const diffLines: string[] = [];
+
+  // Find the first differing line
+  let firstDiff = 0;
+  while (
+    firstDiff < oldLines.length &&
+    firstDiff < newLines.length &&
+    oldLines[firstDiff] === newLines[firstDiff]
+  ) {
+    firstDiff++;
+  }
+
+  // Find the last differing line (from the end)
+  let oldEnd = oldLines.length - 1;
+  let newEnd = newLines.length - 1;
+  while (
+    oldEnd > firstDiff &&
+    newEnd > firstDiff &&
+    oldLines[oldEnd] === newLines[newEnd]
+  ) {
+    oldEnd--;
+    newEnd--;
+  }
+
+  // Calculate context boundaries
+  const contextStart = Math.max(0, firstDiff - contextLines);
+  const oldContextEnd = Math.min(oldLines.length - 1, oldEnd + contextLines);
+
+  // Add hunk header
+  const oldStart = contextStart + 1;
+  const oldCount = oldEnd - contextStart + 1 + Math.min(contextLines, oldLines.length - oldEnd - 1);
+  const newStart = contextStart + 1;
+  const newCount = newEnd - contextStart + 1 + Math.min(contextLines, newLines.length - newEnd - 1);
+  diffLines.push(`@@ -${oldStart},${oldCount} +${newStart},${newCount} @@`);
+
+  // Add context before
+  for (let i = contextStart; i < firstDiff; i++) {
+    diffLines.push(` ${oldLines[i]}`);
+  }
+
+  // Add removed lines
+  for (let i = firstDiff; i <= oldEnd; i++) {
+    diffLines.push(`-${oldLines[i]}`);
+  }
+
+  // Add added lines
+  for (let i = firstDiff; i <= newEnd; i++) {
+    diffLines.push(`+${newLines[i]}`);
+  }
+
+  // Add context after
+  const afterStart = oldEnd + 1;
+  for (let i = afterStart; i <= oldContextEnd; i++) {
+    diffLines.push(` ${oldLines[i]}`);
+  }
+
+  return diffLines.join('\n');
+}
 
 const logger = createLogger('tool:edit');
 
@@ -108,14 +180,25 @@ export class EditTool implements TronTool {
         replacements,
       });
 
+      // Generate unified diff for display
+      const diff = generateUnifiedDiff(oldString, newString, 2);
+
+      // Build result content with diff
+      const resultContent = [
+        `Successfully replaced ${replacements} occurrence${replacements > 1 ? 's' : ''} in ${filePath}`,
+        '',
+        diff,
+      ].join('\n');
+
       return {
-        content: `Successfully replaced ${replacements} occurrence${replacements > 1 ? 's' : ''} in ${filePath}`,
+        content: resultContent,
         isError: false,
         details: {
           filePath,
           replacements,
           oldStringPreview: this.truncate(oldString, 50),
           newStringPreview: this.truncate(newString, 50),
+          diff,
         },
       };
     } catch (error) {
