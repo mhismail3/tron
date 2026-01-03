@@ -18,6 +18,7 @@ export function PromptBox({
   onUpArrow,
   onDownArrow,
   onCtrlC,
+  onEscape,
 }: InputAreaProps): React.ReactElement {
   const { stdout } = useStdout();
   const terminalWidth = stdout?.columns ?? 80;
@@ -64,6 +65,7 @@ export function PromptBox({
         onHistoryUp={onUpArrow}
         onHistoryDown={onDownArrow}
         onCtrlC={onCtrlC}
+        onEscape={onEscape}
         maxVisibleLines={maxVisibleLines}
         terminalWidth={inputWidth}
         promptPrefix={`${icons.prompt} `}

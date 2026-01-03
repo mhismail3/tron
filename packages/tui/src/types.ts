@@ -156,6 +156,8 @@ export interface InputAreaProps {
   onDownArrow?: () => void;
   /** Callback when Ctrl+C is pressed (for exit handling) */
   onCtrlC?: () => void;
+  /** Callback when Escape is pressed during processing (for interrupt) */
+  onEscape?: () => void;
 }
 
 export interface StatusBarProps {

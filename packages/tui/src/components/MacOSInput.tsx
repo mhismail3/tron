@@ -136,6 +136,31 @@ function isCtrlCSequence(input: string): boolean {
   return false;
 }
 
+/**
+ * Detect Escape key in various terminal formats
+ * Must detect standalone Escape vs Escape as prefix for other sequences
+ */
+function isEscapeKey(input: string): boolean {
+  if (!input) return false;
+
+  // Raw Escape byte (must be standalone, not part of a sequence)
+  // A standalone Escape is just '\x1b' with no following characters
+  if (input === '\x1b') return true;
+
+  // Kitty protocol: \x1b[27u (Escape = codepoint 27)
+  if (input === '\x1b[27u') return true;
+
+  // Kitty protocol with modifiers: \x1b[27;Nu
+  const kittyMatch = input.match(/^\x1b\[27;(\d+)u$/);
+  if (kittyMatch) {
+    // Accept Escape with no modifiers (modifier 1 = no modifiers in Kitty)
+    const mod = Number(kittyMatch[1]);
+    return mod === 1; // No modifiers
+  }
+
+  return false;
+}
+
 export interface MacOSInputProps {
   /** Current input value (may contain paste indicators) */
   value: string;
@@ -153,6 +178,8 @@ export interface MacOSInputProps {
   onHistoryDown?: () => void;
   /** Callback when Ctrl+C is pressed (for exit handling) */
   onCtrlC?: () => void;
+  /** Callback when Escape is pressed during processing (for interrupt handling) */
+  onEscape?: () => void;
   /** Maximum visible lines before scrolling (0 = unlimited) */
   maxVisibleLines?: number;
   /** Terminal width for wrapping calculation */
@@ -182,6 +209,7 @@ export function MacOSInput({
   onHistoryUp,
   onHistoryDown,
   onCtrlC,
+  onEscape,
   maxVisibleLines = 20,
   terminalWidth = 80,
   promptPrefix = '',
@@ -566,7 +594,9 @@ export function MacOSInput({
   const insertPasteRef = useRef(insertPaste);
   const deleteWordLeftRef = useRef(deleteWordLeft);
   const onCtrlCRef = useRef(onCtrlC);
+  const onEscapeRef = useRef(onEscape);
   const isEditableRef = useRef(isEditable);
+  const isProcessingRef = useRef(isProcessing);
 
   useEffect(() => {
     insertNewlineRef.current = insertNewline;
@@ -585,8 +615,16 @@ export function MacOSInput({
   }, [onCtrlC]);
 
   useEffect(() => {
+    onEscapeRef.current = onEscape;
+  }, [onEscape]);
+
+  useEffect(() => {
     isEditableRef.current = isEditable;
   }, [isEditable]);
+
+  useEffect(() => {
+    isProcessingRef.current = isProcessing;
+  }, [isProcessing]);
 
   // Refs for paste buffering used in handleData
   const pasteBufferRef = useRef<string>('');
@@ -613,6 +651,14 @@ export function MacOSInput({
       if (isCtrlCSequence(str)) {
         skipNextInputRef.current = true;
         onCtrlCRef.current?.();
+        return;
+      }
+
+      // Handle Escape during processing (for interrupt)
+      // This MUST work even when the component is not editable
+      if (isEscapeKey(str) && isProcessingRef.current) {
+        skipNextInputRef.current = true;
+        onEscapeRef.current?.();
         return;
       }
 

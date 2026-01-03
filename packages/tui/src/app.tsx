@@ -973,6 +973,7 @@ export function App({ config, auth }: AppProps): React.ReactElement {
         onUpArrow={handleHistoryUp}
         onDownArrow={handleHistoryDown}
         onCtrlC={handleExit}
+        onEscape={handleInterrupt}
       />
 
       {/* Status Bar */}
