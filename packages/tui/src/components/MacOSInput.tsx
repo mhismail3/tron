@@ -62,19 +62,32 @@ function parseKittyModifier(modValue: number): { shift: boolean; alt: boolean; c
 }
 
 /**
- * Detect newline shortcut (Shift+Enter, Ctrl+Enter, or Alt+Enter) in various terminal formats
+ * Detect newline shortcut in various terminal formats.
+ * Supports: Shift+Enter, Ctrl+Enter, Alt+Enter
+ *
+ * Terminal behavior varies significantly:
+ * - Most terminals: Alt+Enter sends ESC followed by CR/LF (\x1b\r or \x1b\n)
+ * - Kitty protocol: Sends \x1b[13;Nu where N encodes the modifier
+ * - Many terminals: Shift+Enter is indistinguishable from plain Enter
+ *
+ * This is why we support multiple shortcuts for the same action.
  */
-function isShiftEnterSequence(input: string): boolean {
+function isModifiedEnterSequence(input: string): boolean {
   if (!input) return false;
+
+  // Standard Alt+Enter: ESC followed by Enter (most common in non-Kitty terminals)
+  // This is the most reliable way to detect modifier+Enter in standard terminals
+  if (input === '\x1b\r' || input === '\x1b\n') return true;
+
   const normalized = input.startsWith('[') ? `\x1b${input}` : input;
 
   // Kitty protocol: \x1b[13;Nu (Enter with modifier)
-  // modifier 2 = Shift, 5 = Ctrl, 3 = Alt
+  // modifier 2 = Shift, 3 = Alt, 5 = Ctrl, 6 = Shift+Ctrl, etc.
   const kittyMatch = normalized.match(/^\x1b\[(\d+);(\d+)u$/);
   if (kittyMatch) {
     const codepoint = Number(kittyMatch[1]);
     const { shift, ctrl, alt } = parseKittyModifier(Number(kittyMatch[2]));
-    // Accept Enter (13) with Shift, Ctrl, or Alt as newline trigger
+    // Accept Enter (13) with any modifier as newline trigger
     return codepoint === 13 && (shift || ctrl || alt);
   }
 
@@ -85,7 +98,7 @@ function isShiftEnterSequence(input: string): boolean {
     return shift || ctrl || alt;
   }
 
-  // Legacy format: \x1b[13;N~
+  // Legacy xterm format: \x1b[13;N~
   const legacyMatch = normalized.match(/^\x1b\[13;(\d+)~$/);
   if (legacyMatch) {
     const { shift, ctrl, alt } = parseKittyModifier(Number(legacyMatch[1]));
@@ -94,6 +107,9 @@ function isShiftEnterSequence(input: string): boolean {
 
   return false;
 }
+
+// Alias for backward compatibility
+const isShiftEnterSequence = isModifiedEnterSequence;
 
 
 /**
@@ -603,7 +619,7 @@ export function MacOSInput({
       // Only handle other special keys when editable
       if (!isEditableRef.current) return;
 
-      // Handle Shift+Enter from Kitty protocol (only Shift+Enter for newline)
+      // Handle modified Enter (Shift/Ctrl/Alt+Enter) for newline insertion
       if (isShiftEnterSequence(str)) {
         skipNextInputRef.current = true;
         insertNewlineRef.current();
@@ -666,9 +682,10 @@ export function MacOSInput({
       // Only handle other special keys when editable
       if (!isEditableRef.current) return;
 
-      // Handle Shift+Enter (only Shift+Enter for newline)
-      const isShiftEnterKey = key?.name === 'return' && key?.shift;
-      if (isShiftEnterSequence(seq) || isShiftEnterKey) {
+      // Handle modified Enter (Shift/Alt+Enter) for newline
+      // Note: keypress events don't expose ctrl, but Ctrl+Enter is handled via sequence detection
+      const isModifiedEnterKey = key?.name === 'return' && (key?.shift || key?.meta);
+      if (isShiftEnterSequence(seq) || isModifiedEnterKey) {
         skipNextInputRef.current = true;
         insertNewlineRef.current();
         return;
