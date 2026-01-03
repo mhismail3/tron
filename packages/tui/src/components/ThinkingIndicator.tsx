@@ -6,7 +6,7 @@
  */
 import React, { useState, useEffect, useRef } from 'react';
 import { Text, Box } from 'ink';
-import { inkColors, thinkingBars, icons } from '../theme.js';
+import { inkColors, thinkingBars } from '../theme.js';
 
 // =============================================================================
 // Types
@@ -76,7 +76,6 @@ export function ThinkingIndicator({
 
   return (
     <Box flexDirection="row" gap={1}>
-      <Text color={inkColors.dim}>{icons.thinking}</Text>
       <Box flexDirection="row">
         {barHeights.map((height, idx) => (
           <Text key={idx} color={color}>

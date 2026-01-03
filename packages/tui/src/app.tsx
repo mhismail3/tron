@@ -97,12 +97,13 @@ function reducer(state: AppState, action: AppAction): AppState {
       return { ...state, status: action.payload };
     case 'SET_ERROR':
       return { ...state, error: action.payload };
-    case 'UPDATE_TOKEN_USAGE':
+    case 'SET_TOKEN_USAGE':
+      // Set token usage directly (payload is cumulative total from agent)
       return {
         ...state,
         tokenUsage: {
-          input: state.tokenUsage.input + action.payload.input,
-          output: state.tokenUsage.output + action.payload.output,
+          input: action.payload.input,
+          output: action.payload.output,
         },
       };
     case 'SET_ACTIVE_TOOL':
@@ -277,10 +278,10 @@ export function App({ config, auth }: AppProps): React.ReactElement {
         break;
 
       case 'message_update':
-        // Stream text deltas - track in both ref (for sync access) and state (for display)
+        // Accumulate text deltas in ref only - don't stream to display
+        // Content will be shown as complete message after turn_end
         if ('content' in event && event.content) {
           streamingContentRef.current += event.content;
-          dispatch({ type: 'APPEND_STREAMING_CONTENT', payload: event.content });
         }
         break;
 
@@ -555,9 +556,9 @@ export function App({ config, auth }: AppProps): React.ReactElement {
         await tuiSessionRef.current.addMessage(msg, result.totalTokenUsage);
       }
 
-      // Update token usage
+      // Set token usage (cumulative total from agent)
       dispatch({
-        type: 'UPDATE_TOKEN_USAGE',
+        type: 'SET_TOKEN_USAGE',
         payload: {
           input: result.totalTokenUsage.inputTokens,
           output: result.totalTokenUsage.outputTokens,
@@ -631,9 +632,9 @@ export function App({ config, auth }: AppProps): React.ReactElement {
           payload: {
             id: `msg_${messageIdRef.current++}`,
             role: 'system',
-            content: `Available commands:\n${BUILT_IN_COMMANDS.map(c =>
-              `  /${c.name}${c.shortcut ? ` (${c.shortcut})` : ''} - ${c.description}`
-            ).join('\n')}\n\nKeyboard shortcuts:\n  Ctrl+C - Exit\n  Ctrl+L - Clear screen\n  ↑/↓ - Navigate command menu\n  Enter - Select command\n  Esc - Cancel`,
+            content: `## Commands\n${BUILT_IN_COMMANDS.map(c =>
+              `- \`/${c.name}\`${c.shortcut ? ` *(${c.shortcut})*` : ''} - ${c.description}`
+            ).join('\n')}\n\n## Keyboard Shortcuts\n- \`Ctrl+C\` - Exit\n- \`Ctrl+L\` - Clear screen\n- \`↑/↓\` - Navigate history or menu\n- \`Enter\` - Submit or select\n- \`Esc\` - Cancel\n- \`Shift+Enter\` - New line`,
             timestamp: new Date().toISOString(),
           },
         });
@@ -652,7 +653,7 @@ export function App({ config, auth }: AppProps): React.ReactElement {
           payload: {
             id: `msg_${messageIdRef.current++}`,
             role: 'system',
-            content: `Current model: ${currentModel}\nProvider: ${currentProvider}\n\nTo switch models, use: /model <model-id>\nExamples:\n  /model gpt-4o (OpenAI)\n  /model gemini-2.5-flash (Google)\n  /model claude-sonnet-4-20250514 (Anthropic)`,
+            content: `## Model Info\n- **Current**: \`${currentModel}\`\n- **Provider**: ${currentProvider}\n\n## Switch Models\nUse \`/model <model-id>\`\n- \`gpt-4o\` (OpenAI)\n- \`gemini-2.5-flash\` (Google)\n- \`claude-sonnet-4-20250514\` (Anthropic)`,
             timestamp: new Date().toISOString(),
           },
         });
@@ -681,18 +682,19 @@ export function App({ config, auth }: AppProps): React.ReactElement {
         const needsCompaction = session?.needsCompaction() ?? false;
 
         const sessionInfo = [
-          `Session ID: ${state.sessionId ?? 'N/A'}`,
-          `Messages: ${messageCount}`,
+          `## Session`,
+          `- **ID**: \`${state.sessionId ?? 'N/A'}\``,
+          `- **Messages**: ${messageCount}`,
           '',
-          '**Token Usage**',
-          `  Input: ${state.tokenUsage.input.toLocaleString()} tokens`,
-          `  Output: ${state.tokenUsage.output.toLocaleString()} tokens`,
-          `  Total: ${(state.tokenUsage.input + state.tokenUsage.output).toLocaleString()} tokens`,
+          '## Token Usage',
+          `- **Input**: ${state.tokenUsage.input.toLocaleString()} tokens`,
+          `- **Output**: ${state.tokenUsage.output.toLocaleString()} tokens`,
+          `- **Total**: ${(state.tokenUsage.input + state.tokenUsage.output).toLocaleString()} tokens`,
           '',
-          '**Context Estimate**',
-          `  Current messages: ~${tokenEstimate.toLocaleString()} tokens`,
-          `  Compaction threshold: ${compactionConfig?.maxTokens?.toLocaleString() ?? 'N/A'} tokens`,
-          `  Needs compaction: ${needsCompaction ? 'Yes' : 'No'}`,
+          '## Context',
+          `- **Estimate**: ~${tokenEstimate.toLocaleString()} tokens`,
+          `- **Threshold**: ${compactionConfig?.maxTokens?.toLocaleString() ?? 'N/A'} tokens`,
+          `- **Needs compaction**: ${needsCompaction ? 'Yes' : 'No'}`,
         ].join('\n');
 
         dispatch({
@@ -725,7 +727,7 @@ export function App({ config, auth }: AppProps): React.ReactElement {
           payload: {
             id: `msg_${messageIdRef.current++}`,
             role: 'system',
-            content: `Session resume functionality:\n\nTo resume a session, use:\n  tron --continue     # Resume most recent session\n  tron --resume <id>  # Resume specific session\n\nSession files are stored in ~/.tron/sessions/`,
+            content: `## Resume Session\n- \`tron --continue\` - Resume most recent session\n- \`tron --resume <id>\` - Resume specific session\n\nSession files are stored in \`~/.tron/sessions/\``,
             timestamp: new Date().toISOString(),
           },
         });
@@ -737,7 +739,7 @@ export function App({ config, auth }: AppProps): React.ReactElement {
           payload: {
             id: `msg_${messageIdRef.current++}`,
             role: 'system',
-            content: `Session rewind functionality (coming soon):\n\nThis will allow you to:\n  - Rewind to a specific message in the conversation\n  - Undo recent exchanges\n  - Create a checkpoint before experimental changes`,
+            content: `## Rewind *(coming soon)*\n- Rewind to a specific message\n- Undo recent exchanges\n- Create checkpoints before changes`,
             timestamp: new Date().toISOString(),
           },
         });
@@ -749,7 +751,7 @@ export function App({ config, auth }: AppProps): React.ReactElement {
           payload: {
             id: `msg_${messageIdRef.current++}`,
             role: 'system',
-            content: `Session branching functionality (coming soon):\n\nThis will allow you to:\n  - Fork the session at any point\n  - Explore alternative approaches\n  - Compare different solutions`,
+            content: `## Branch *(coming soon)*\n- Fork session at any point\n- Explore alternative approaches\n- Compare different solutions`,
             timestamp: new Date().toISOString(),
           },
         });

@@ -49,73 +49,52 @@ interface UndoState {
 
 /**
  * Parse Kitty keyboard protocol modifier bits
- * Bit 0: Shift, Bit 1: Alt, Bit 2: Ctrl, Bit 3: Super
+ * Bit 0: Shift, Bit 1: Alt/Option, Bit 2: Ctrl, Bit 3: Super/Cmd
  */
-function parseKittyModifier(modValue: number): { shift: boolean; alt: boolean; ctrl: boolean } {
+function parseKittyModifier(modValue: number): { shift: boolean; alt: boolean; ctrl: boolean; super: boolean } {
   const mod = modValue - 1; // Kitty uses 1-indexed modifiers
   return {
     shift: (mod & 1) !== 0,
     alt: (mod & 2) !== 0,
     ctrl: (mod & 4) !== 0,
+    super: (mod & 8) !== 0,
   };
 }
 
 /**
- * Detect Shift+Enter in various terminal formats
+ * Detect newline shortcut (Shift+Enter, Ctrl+Enter, or Alt+Enter) in various terminal formats
  */
 function isShiftEnterSequence(input: string): boolean {
   if (!input) return false;
   const normalized = input.startsWith('[') ? `\x1b${input}` : input;
 
-  // Kitty protocol: \x1b[13;2u (Enter with Shift)
+  // Kitty protocol: \x1b[13;Nu (Enter with modifier)
+  // modifier 2 = Shift, 5 = Ctrl, 3 = Alt
   const kittyMatch = normalized.match(/^\x1b\[(\d+);(\d+)u$/);
   if (kittyMatch) {
     const codepoint = Number(kittyMatch[1]);
-    const { shift, ctrl } = parseKittyModifier(Number(kittyMatch[2]));
-    return codepoint === 13 && shift && !ctrl;
+    const { shift, ctrl, alt } = parseKittyModifier(Number(kittyMatch[2]));
+    // Accept Enter (13) with Shift, Ctrl, or Alt as newline trigger
+    return codepoint === 13 && (shift || ctrl || alt);
   }
 
-  // modifyOtherKeys format: \x1b[27;2;13~
+  // modifyOtherKeys format: \x1b[27;N;13~
   const modifyOtherKeysMatch = normalized.match(/^\x1b\[27;(\d+);13~$/);
   if (modifyOtherKeysMatch) {
-    const { shift } = parseKittyModifier(Number(modifyOtherKeysMatch[1]));
-    return shift;
+    const { shift, ctrl, alt } = parseKittyModifier(Number(modifyOtherKeysMatch[1]));
+    return shift || ctrl || alt;
   }
 
-  // Legacy format: \x1b[13;2~
+  // Legacy format: \x1b[13;N~
   const legacyMatch = normalized.match(/^\x1b\[13;(\d+)~$/);
   if (legacyMatch) {
-    const { shift } = parseKittyModifier(Number(legacyMatch[1]));
-    return shift;
+    const { shift, ctrl, alt } = parseKittyModifier(Number(legacyMatch[1]));
+    return shift || ctrl || alt;
   }
 
   return false;
 }
 
-/**
- * Detect Alt/Option+Enter in various terminal formats
- * Fallback for terminals that don't support Kitty Shift+Enter
- */
-function isAltEnterSequence(input: string): boolean {
-  if (!input) return false;
-
-  // Standard Alt+Enter: ESC followed by Enter
-  if (input === '\x1b\r' || input === '\x1b\n') return true;
-
-  const normalized = input.startsWith('[') ? `\x1b${input}` : input;
-
-  // Kitty protocol: \x1b[13;3u (Enter with Alt)
-  // Modifier 3 = (3-1) = 2 = 0b010, bit 1 is alt
-  const kittyMatch = normalized.match(/^\x1b\[(\d+);(\d+)u$/);
-  if (kittyMatch) {
-    const codepoint = Number(kittyMatch[1]);
-    const { alt, ctrl } = parseKittyModifier(Number(kittyMatch[2]));
-    // Alt+Enter (with or without shift, but not Ctrl)
-    return codepoint === 13 && alt && !ctrl;
-  }
-
-  return false;
-}
 
 /**
  * Detect Ctrl+C in various terminal formats (for exit handling)
@@ -188,13 +167,15 @@ export function MacOSInput({
   onHistoryDown,
   onCtrlC,
   maxVisibleLines = 20,
-  terminalWidth: _terminalWidth = 80,
+  terminalWidth = 80,
   promptPrefix = '',
   promptColor = inkColors.promptPrefix,
   continuationPrefix: continuationPrefixProp,
   isProcessing = false,
 }: MacOSInputProps): React.ReactElement {
   const continuationPrefix = continuationPrefixProp ?? (promptPrefix ? ' '.repeat(promptPrefix.length) : '');
+  // Width available for text content (after prefix)
+  const contentWidth = Math.max(10, terminalWidth - promptPrefix.length);
   const isEditable = focus && !isProcessing;
   // Cursor position (character index in the string)
   const [cursorOffset, setCursorOffset] = useState(value.length);
@@ -352,18 +333,58 @@ export function MacOSInput({
   }, [hasSelection, deleteSelection, updateValue, value, cursorOffset]);
 
   /**
+   * URL-decode a string (handles %20, %E2%80%AF, etc.)
+   */
+  const urlDecode = (str: string): string => {
+    try {
+      return decodeURIComponent(str);
+    } catch {
+      // If decoding fails, return original
+      return str;
+    }
+  };
+
+  /**
    * Format pasted content as a bracketed indicator and store mapping
    */
   const formatPasteIndicator = useCallback((content: string): string => {
     const charCount = content.length;
     const lineCount = content.split('\n').length;
+    const trimmed = content.trim();
 
-    // Create display text
+    // Detect image file paths FIRST (common extensions) - supersedes file:// check
+    const imageExtensions = /\.(png|jpg|jpeg|gif|webp|svg|bmp|ico|tiff|heic|heif)$/i;
+    if (imageExtensions.test(trimmed)) {
+      // Handle file:// URLs
+      let pathStr = trimmed;
+      if (pathStr.startsWith('file://')) {
+        pathStr = pathStr.replace('file://', '');
+      }
+      const pathParts = pathStr.split('/');
+      const rawFilename = pathParts[pathParts.length - 1] || 'image';
+      const filename = urlDecode(rawFilename);
+      const displayText = `[image: ${filename}]`;
+      pasteContentMap.current.set(displayText, content);
+      return displayText;
+    }
+
+    // Detect file:// URLs (non-image files)
+    if (trimmed.startsWith('file://')) {
+      // Extract filename from path
+      const pathParts = trimmed.replace('file://', '').split('/');
+      const rawFilename = pathParts[pathParts.length - 1] || 'file';
+      const filename = urlDecode(rawFilename);
+      const displayText = `[file: ${filename}]`;
+      pasteContentMap.current.set(displayText, content);
+      return displayText;
+    }
+
+    // Create display text for regular text
     let displayText: string;
     if (lineCount > 1) {
-      displayText = `⌈text: ${charCount.toLocaleString()} chars, ${lineCount} lines⌋`;
+      displayText = `[text: ${charCount.toLocaleString()} chars, ${lineCount} lines]`;
     } else {
-      displayText = `⌈text: ${charCount.toLocaleString()} chars⌋`;
+      displayText = `[text: ${charCount.toLocaleString()} chars]`;
     }
 
     // Store mapping for later expansion
@@ -396,7 +417,8 @@ export function MacOSInput({
   const expandPasteIndicators = useCallback((text: string): string => {
     let result = text;
     // Find all paste indicators and replace with actual content
-    const pastePattern = /⌈text: [\d,]+ chars(?:, \d+ lines)?⌋/g;
+    // Matches [text: X chars], [text: X chars, Y lines], [image: filename], [file: filename]
+    const pastePattern = /\[(text: [\d,]+ chars(?:, \d+ lines)?|image: [^\]]+|file: [^\]]+)\]/g;
     const matches = text.match(pastePattern);
 
     if (matches) {
@@ -442,6 +464,20 @@ export function MacOSInput({
     }
     return newPos;
   }, [value]);
+
+  /**
+   * Delete word before cursor (Option+Backspace / Ctrl+W)
+   */
+  const deleteWordLeft = useCallback(() => {
+    if (hasSelection()) {
+      const result = deleteSelection();
+      if (result) updateValue(result.newValue, result.newCursor);
+    } else if (cursorOffset > 0) {
+      const wordStart = findWordBoundaryLeft(cursorOffset);
+      const newValue = value.slice(0, wordStart) + value.slice(cursorOffset);
+      updateValue(newValue, wordStart);
+    }
+  }, [hasSelection, deleteSelection, updateValue, cursorOffset, findWordBoundaryLeft, value]);
 
   // ==========================================================================
   // Line Navigation Helpers
@@ -512,6 +548,7 @@ export function MacOSInput({
   // Use refs to avoid recreating the raw input handler on every render
   const insertNewlineRef = useRef(insertNewline);
   const insertPasteRef = useRef(insertPaste);
+  const deleteWordLeftRef = useRef(deleteWordLeft);
   const onCtrlCRef = useRef(onCtrlC);
   const isEditableRef = useRef(isEditable);
 
@@ -524,6 +561,10 @@ export function MacOSInput({
   }, [insertPaste]);
 
   useEffect(() => {
+    deleteWordLeftRef.current = deleteWordLeft;
+  }, [deleteWordLeft]);
+
+  useEffect(() => {
     onCtrlCRef.current = onCtrlC;
   }, [onCtrlC]);
 
@@ -531,10 +572,23 @@ export function MacOSInput({
     isEditableRef.current = isEditable;
   }, [isEditable]);
 
+  // Refs for paste buffering used in handleData
+  const pasteBufferRef = useRef<string>('');
+  const pasteTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   // Listen to both 'data' and 'keypress' events for raw terminal sequences
   // 'data' catches raw bytes before readline parsing
   // 'keypress' catches parsed events from readline.emitKeypressEvents()
   useEffect(() => {
+    // Flush buffered paste content
+    const flushPasteBuffer = () => {
+      if (pasteBufferRef.current.length > 0) {
+        insertPasteRef.current(pasteBufferRef.current);
+        pasteBufferRef.current = '';
+      }
+      pasteTimeoutRef.current = null;
+    };
+
     // Handler for raw stdin data (catches Kitty protocol before readline parses it)
     const handleData = (data: Buffer | string) => {
       const str = typeof data === 'string' ? data : data.toString('utf8');
@@ -549,11 +603,31 @@ export function MacOSInput({
       // Only handle other special keys when editable
       if (!isEditableRef.current) return;
 
-      // Handle Shift+Enter or Alt+Enter from Kitty protocol
-      if (isShiftEnterSequence(str) || isAltEnterSequence(str)) {
+      // Handle Shift+Enter from Kitty protocol (only Shift+Enter for newline)
+      if (isShiftEnterSequence(str)) {
         skipNextInputRef.current = true;
         insertNewlineRef.current();
         return;
+      }
+
+      // Option+Backspace: Various terminal formats for deleting word before cursor
+      // - ESC followed by DEL (0x7f) or Backspace (0x08)
+      // - Kitty protocol: \x1b[127;3u (backspace with Alt)
+      // - Some terminals send \x17 (Ctrl+W equivalent)
+      if (str === '\x1b\x7f' || str === '\x1b\x08') {
+        skipNextInputRef.current = true;
+        deleteWordLeftRef.current();
+        return;
+      }
+      // Kitty protocol for Option+Backspace
+      const kittyBackspaceMatch = str.match(/^\x1b\[127;(\d+)u$/);
+      if (kittyBackspaceMatch) {
+        const { alt } = parseKittyModifier(Number(kittyBackspaceMatch[1]));
+        if (alt) {
+          skipNextInputRef.current = true;
+          deleteWordLeftRef.current();
+          return;
+        }
       }
 
       // Detect paste: multiple printable characters arriving at once
@@ -564,7 +638,13 @@ export function MacOSInput({
 
       if (isPrintable) {
         skipNextInputRef.current = true;
-        insertPasteRef.current(str);
+        // Buffer paste chunks - large pastes may arrive in multiple data events
+        pasteBufferRef.current += str;
+        // Reset the timeout on each chunk
+        if (pasteTimeoutRef.current) {
+          clearTimeout(pasteTimeoutRef.current);
+        }
+        pasteTimeoutRef.current = setTimeout(flushPasteBuffer, 50);
         return;
       }
     };
@@ -586,10 +666,9 @@ export function MacOSInput({
       // Only handle other special keys when editable
       if (!isEditableRef.current) return;
 
-      // Handle Shift+Enter or Alt+Enter
+      // Handle Shift+Enter (only Shift+Enter for newline)
       const isShiftEnterKey = key?.name === 'return' && key?.shift;
-      const isAltEnterKey = key?.name === 'return' && key?.meta;
-      if (isShiftEnterSequence(seq) || isAltEnterSequence(seq) || isShiftEnterKey || isAltEnterKey) {
+      if (isShiftEnterSequence(seq) || isShiftEnterKey) {
         skipNextInputRef.current = true;
         insertNewlineRef.current();
         return;
@@ -622,16 +701,19 @@ export function MacOSInput({
         return;
       }
 
-      // Shift+Enter or Alt+Enter inserts a newline
-      // Alt+Enter is the fallback for terminals that don't support Kitty protocol
-      const isShiftEnter = (key.return && key.shift) || isShiftEnterSequence(input);
-      const isAltEnter = (key.return && key.meta) || isAltEnterSequence(input);
-      if (isShiftEnter || isAltEnter) {
+      // Newline insertion: Shift+Enter, Ctrl+Enter, or Alt+Enter
+      // Many terminals don't reliably report Shift+Enter, so we support alternatives
+      const isNewlineShortcut =
+        (key.return && key.shift) ||
+        (key.return && key.ctrl) ||
+        (key.return && key.meta) ||
+        isShiftEnterSequence(input);
+      if (isNewlineShortcut) {
         insertNewline();
         return;
       }
 
-      // Enter - submit (without shift)
+      // Enter - submit (without modifiers)
       if (key.return || input === '\r' || input === '\n') {
         // Expand paste indicators before submitting
         const expandedContent = expandPasteIndicators(value);
@@ -937,27 +1019,30 @@ export function MacOSInput({
       const isSelected = range && globalPos >= range.start && globalPos < range.end;
       const isCursor = globalPos === cursorOffset;
 
-      // Track if we're in a paste indicator
-      if (char === '⌈') inPasteIndicator = true;
+      // Track if we're in a paste indicator (detect [text:, [image:, [file:)
+      if (char === '[') {
+        const remaining = line.slice(i);
+        if (remaining.match(/^\[(text:|image:|file:)/)) {
+          inPasteIndicator = true;
+        }
+      }
 
       if (isSelected) {
         renderedLine += styled.selection(char);
       } else if (isCursor) {
         renderedLine += styled.cursor(char);
       } else if (inPasteIndicator) {
-        // Style paste indicators with the paste color
         renderedLine += styled.pasteIndicator(char);
       } else {
         renderedLine += char;
       }
 
-      if (char === '⌋') inPasteIndicator = false;
+      if (inPasteIndicator && char === ']') inPasteIndicator = false;
     }
 
     // Check if cursor is at end of this line
     const endOfLinePos = lineStartPos + line.length;
     if (cursorOffset === endOfLinePos) {
-      // Cursor at end of line (either before newline or at end of value)
       renderedLine += styled.cursor(' ');
     }
 
@@ -966,50 +1051,117 @@ export function MacOSInput({
 
   /**
    * Build the render data for multiline display
+   * Handles both explicit newlines and soft wrapping at terminal width
    */
   interface RenderLine {
     content: string;
     isIndicator: boolean; // true for scroll indicators
     isFirstContentLine: boolean; // true for the first actual content line
+    isSoftWrap: boolean; // true for lines created by soft wrap (vs explicit newline)
   }
+
+  /**
+   * Wrap a single logical line into multiple display lines based on contentWidth
+   * Returns array of { text, startPos } for each wrapped segment
+   */
+  const wrapLine = (line: string, startPos: number): Array<{ text: string; startPos: number }> => {
+    if (line.length <= contentWidth) {
+      return [{ text: line, startPos }];
+    }
+
+    const segments: Array<{ text: string; startPos: number }> = [];
+    let remaining = line;
+    let pos = startPos;
+
+    while (remaining.length > 0) {
+      const chunk = remaining.slice(0, contentWidth);
+      segments.push({ text: chunk, startPos: pos });
+      pos += chunk.length;
+      remaining = remaining.slice(contentWidth);
+    }
+
+    return segments;
+  };
 
   const buildRenderData = (): RenderLine[] => {
     if (!focus) {
-      const content = value || styled.placeholder(placeholder);
-      // For unfocused multiline, show all lines
-      if (value.includes('\n')) {
-        return value.split('\n').map((line, idx) => ({
-          content: line || ' ',
-          isIndicator: false,
-          isFirstContentLine: idx === 0,
-        }));
+      // For unfocused state, show value or placeholder (with wrapping)
+      if (value.length === 0) {
+        // Show placeholder when unfocused and empty
+        return [{ content: styled.placeholder(placeholder), isIndicator: false, isFirstContentLine: true, isSoftWrap: false }];
       }
-      return [{ content, isIndicator: false, isFirstContentLine: true }];
+      if (value.includes('\n')) {
+        const result: RenderLine[] = [];
+        let charPos = 0;
+        let isFirst = true;
+        for (const line of value.split('\n')) {
+          const wrapped = wrapLine(line, charPos);
+          for (let i = 0; i < wrapped.length; i++) {
+            result.push({
+              content: wrapped[i]?.text || ' ',
+              isIndicator: false,
+              isFirstContentLine: isFirst,
+              isSoftWrap: i > 0,
+            });
+            isFirst = false;
+          }
+          charPos += line.length + 1; // +1 for newline
+        }
+        return result;
+      }
+      // Single line - wrap if needed
+      const wrapped = wrapLine(value, 0);
+      return wrapped.map((seg, idx) => ({
+        content: seg.text || ' ',
+        isIndicator: false,
+        isFirstContentLine: idx === 0,
+        isSoftWrap: idx > 0,
+      }));
     }
 
     if (value.length === 0) {
       const content = placeholder
         ? styled.cursor(placeholder[0] ?? ' ') + styled.placeholder(placeholder.slice(1))
         : styled.cursor(' ');
-      return [{ content, isIndicator: false, isFirstContentLine: true }];
+      return [{ content, isIndicator: false, isFirstContentLine: true, isSoftWrap: false }];
     }
 
     const range = getSelectionRange();
     const lines = getLines();
-    const totalLines = lines.length;
+
+    // Build all display lines (with soft wrapping)
+    interface DisplayLine {
+      text: string;
+      startPos: number;
+      isExplicitNewline: boolean; // true if this line ends with explicit \n
+    }
+
+    const allDisplayLines: DisplayLine[] = [];
+    let charPos = 0;
+
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i] ?? '';
+      const wrapped = wrapLine(line, charPos);
+
+      for (let j = 0; j < wrapped.length; j++) {
+        const seg = wrapped[j]!;
+        allDisplayLines.push({
+          text: seg.text,
+          startPos: seg.startPos,
+          isExplicitNewline: j === wrapped.length - 1, // last segment of logical line
+        });
+      }
+
+      charPos += line.length + 1; // +1 for newline
+    }
+
+    const totalDisplayLines = allDisplayLines.length;
 
     // Determine visible lines
     const startLine = maxVisibleLines > 0 ? scrollOffset : 0;
-    const endLine = maxVisibleLines > 0 ? Math.min(startLine + maxVisibleLines, totalLines) : totalLines;
-
-    // Calculate character position at start of visible region
-    let charOffset = 0;
-    for (let i = 0; i < startLine; i++) {
-      charOffset += (lines[i]?.length ?? 0) + 1;
-    }
+    const endLine = maxVisibleLines > 0 ? Math.min(startLine + maxVisibleLines, totalDisplayLines) : totalDisplayLines;
 
     const renderData: RenderLine[] = [];
-    let currentCharPos = charOffset;
     let isFirstContent = true;
 
     // Add scroll-up indicator if needed
@@ -1018,30 +1170,37 @@ export function MacOSInput({
         content: styled.dim(`↑ ${scrollOffset} more line${scrollOffset > 1 ? 's' : ''}`),
         isIndicator: true,
         isFirstContentLine: false,
+        isSoftWrap: false,
       });
     }
 
     // Render each visible line
     for (let lineIdx = startLine; lineIdx < endLine; lineIdx++) {
-      const line = lines[lineIdx] ?? '';
-      const rendered = renderLine(line, currentCharPos, lineIdx, totalLines, range);
+      const displayLine = allDisplayLines[lineIdx];
+      if (!displayLine) continue;
+
+      const rendered = renderLine(displayLine.text, displayLine.startPos, lineIdx, totalDisplayLines, range);
+      const prevLine = lineIdx > 0 ? allDisplayLines[lineIdx - 1] : null;
+      const isSoftWrap = prevLine ? !prevLine.isExplicitNewline : false;
+
       renderData.push({
-        content: rendered || ' ', // Ensure empty lines still render
+        content: rendered || ' ',
         isIndicator: false,
         isFirstContentLine: isFirstContent,
+        isSoftWrap: isSoftWrap,
       });
       isFirstContent = false;
-      currentCharPos += line.length + 1; // +1 for newline
     }
 
     // Add scroll-down indicator if needed
-    if (maxVisibleLines > 0 && totalLines > maxVisibleLines) {
-      const remaining = totalLines - endLine;
+    if (maxVisibleLines > 0 && totalDisplayLines > maxVisibleLines) {
+      const remaining = totalDisplayLines - endLine;
       if (remaining > 0) {
         renderData.push({
           content: styled.dim(`↓ ${remaining} more line${remaining > 1 ? 's' : ''}`),
           isIndicator: true,
           isFirstContentLine: false,
+          isSoftWrap: false,
         });
       }
     }
@@ -1050,7 +1209,10 @@ export function MacOSInput({
   };
 
   const prefixColor = isProcessing ? inkColors.dim : promptColor;
-  const renderPrefix = (isFirstContentLine: boolean): React.ReactElement | null => {
+  const renderPrefix = (isFirstContentLine: boolean, isSoftWrap: boolean = false): React.ReactElement | null => {
+    // First content line gets the prompt prefix
+    // Soft-wrapped lines (continuation within a logical line) get continuation prefix
+    // Explicit newlines (new logical lines) also get continuation prefix
     const prefix = isFirstContentLine ? promptPrefix : continuationPrefix;
     if (!prefix) return null;
     if (isFirstContentLine) {
@@ -1060,18 +1222,32 @@ export function MacOSInput({
         </Text>
       );
     }
-    return <Text>{prefix}</Text>;
+    // Use dimmer color for soft-wrapped continuation to visually distinguish
+    return <Text color={isSoftWrap ? inkColors.dim : undefined}>{prefix}</Text>;
   };
 
   if (isProcessing) {
     const displayValue = value.length > 0 ? value : 'Processing...';
-    const lines = displayValue.split('\n');
+    // Handle wrapping for processing state too
+    const result: Array<{ text: string; isFirst: boolean; isSoftWrap: boolean }> = [];
+    let isFirst = true;
+    for (const line of displayValue.split('\n')) {
+      const wrapped = wrapLine(line, 0);
+      for (let i = 0; i < wrapped.length; i++) {
+        result.push({
+          text: wrapped[i]?.text || ' ',
+          isFirst: isFirst,
+          isSoftWrap: i > 0,
+        });
+        isFirst = false;
+      }
+    }
     return (
       <Box flexDirection="column">
-        {lines.map((line, idx) => (
+        {result.map((line, idx) => (
           <Box key={idx} flexDirection="row">
-            {renderPrefix(idx === 0)}
-            <Text color={inkColors.dim}>{line || ' '}</Text>
+            {renderPrefix(line.isFirst, line.isSoftWrap)}
+            <Text color={inkColors.dim}>{line.text}</Text>
           </Box>
         ))}
       </Box>
@@ -1086,8 +1262,8 @@ export function MacOSInput({
     <Box flexDirection="column">
       {renderData.map((line, idx) => (
         <Box key={idx} flexDirection="row">
-          {/* First content line gets the prompt prefix; subsequent lines/indicators get continuation prefix */}
-          {renderPrefix(line.isFirstContentLine)}
+          {/* First content line gets the prompt prefix; subsequent lines get continuation prefix */}
+          {renderPrefix(line.isFirstContentLine, line.isSoftWrap)}
           <Text>{line.content}</Text>
         </Box>
       ))}

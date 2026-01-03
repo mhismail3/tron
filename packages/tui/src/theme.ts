@@ -64,8 +64,8 @@ export const icons = {
   system: '◇',               // System message (outline diamond)
 
   // Tool execution states
-  toolRunning: '⬡',          // Tool in progress (hexagon outline)
-  toolSuccess: '⬢',          // Tool completed (filled hexagon)
+  toolRunning: '◇',          // Tool in progress (outline diamond)
+  toolSuccess: '◆',          // Tool completed (filled diamond)
   toolError: '◈',            // Tool error (diamond with center)
 
   // Status indicators

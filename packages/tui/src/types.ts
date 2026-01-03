@@ -107,7 +107,7 @@ export type AppAction =
   | { type: 'UPDATE_MESSAGE'; payload: { id: string; updates: Partial<DisplayMessage> } }
   | { type: 'SET_STATUS'; payload: string }
   | { type: 'SET_ERROR'; payload: string | null }
-  | { type: 'UPDATE_TOKEN_USAGE'; payload: { input: number; output: number } }
+  | { type: 'SET_TOKEN_USAGE'; payload: { input: number; output: number } }
   | { type: 'SET_ACTIVE_TOOL'; payload: string | null }
   | { type: 'SET_ACTIVE_TOOL_INPUT'; payload: string | null }
   | { type: 'APPEND_STREAMING_CONTENT'; payload: string }

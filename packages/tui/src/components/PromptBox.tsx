@@ -45,7 +45,7 @@ export function PromptBox({
   // Placeholder text based on width
   const placeholder = isNarrow
     ? 'Type here...'
-    : 'Write your prompt... (Shift+Enter or Option+Enter for new line)';
+    : 'Write your prompt... (Ctrl+Enter for new line)';
 
   return (
     <Box

@@ -20,11 +20,12 @@ interface MarkdownTextProps {
 }
 
 interface ParsedLine {
-  type: 'header' | 'code-block-start' | 'code-block-end' | 'code-block-content' | 'list-item' | 'hr' | 'paragraph';
+  type: 'header' | 'code-block-start' | 'code-block-end' | 'code-block-content' | 'list-item' | 'hr' | 'paragraph' | 'table-row' | 'table-separator';
   level?: number;      // For headers (1-6)
   content: string;
   language?: string;   // For code blocks
   indent?: number;     // For nested lists
+  cells?: string[];    // For table rows
 }
 
 // =============================================================================
@@ -161,6 +162,17 @@ function parseLine(line: string, inCodeBlock: boolean): ParsedLine {
     };
   }
 
+  // Table separator row (|---|---|)
+  if (/^\|[\s\-:]+\|/.test(line) && /^[\|\s\-:]+$/.test(line)) {
+    return { type: 'table-separator', content: line };
+  }
+
+  // Table row (| cell | cell |)
+  if (/^\|.+\|$/.test(line.trim())) {
+    const cells = line.trim().slice(1, -1).split('|').map(c => c.trim());
+    return { type: 'table-row', content: line, cells };
+  }
+
   // Regular paragraph
   return { type: 'paragraph', content: line };
 }
@@ -254,6 +266,31 @@ export function MarkdownText({ content, color }: MarkdownTextProps): React.React
         );
         break;
       }
+
+      case 'table-row':
+        if (parsed.cells) {
+          elements.push(
+            <Box key={keyIndex++} flexDirection="row">
+              <Text color={inkColors.dim}>│ </Text>
+              {parsed.cells.map((cell, i) => (
+                <React.Fragment key={i}>
+                  <Text color={color}>{parseInlineFormatting(cell, color)}</Text>
+                  <Text color={inkColors.dim}> │ </Text>
+                </React.Fragment>
+              ))}
+            </Box>
+          );
+        }
+        break;
+
+      case 'table-separator':
+        // Render a simple horizontal line for table separator
+        elements.push(
+          <Box key={keyIndex++}>
+            <Text color={inkColors.dim}>├{'─'.repeat(38)}┤</Text>
+          </Box>
+        );
+        break;
 
       case 'paragraph':
         if (parsed.content.trim()) {
