@@ -59,7 +59,25 @@ export class BashTool implements TronTool {
     this.config = config;
   }
 
-  async execute(args: Record<string, unknown>): Promise<TronToolResult> {
+  async execute(
+    toolCallIdOrArgs: string | Record<string, unknown>,
+    argsOrSignal?: Record<string, unknown> | AbortSignal,
+    signal?: AbortSignal
+  ): Promise<TronToolResult> {
+    // Handle both old and new signatures
+    let args: Record<string, unknown>;
+    let abortSignal: AbortSignal | undefined;
+
+    if (typeof toolCallIdOrArgs === 'string') {
+      // New signature: (toolCallId, params, signal)
+      args = argsOrSignal as Record<string, unknown>;
+      abortSignal = signal;
+    } else {
+      // Old signature: (params)
+      args = toolCallIdOrArgs;
+      abortSignal = argsOrSignal instanceof AbortSignal ? argsOrSignal : undefined;
+    }
+
     const command = args.command as string;
     const timeout = Math.min(
       (args.timeout as number) ?? this.config.defaultTimeout ?? DEFAULT_TIMEOUT,
@@ -68,6 +86,15 @@ export class BashTool implements TronTool {
     const description = args.description as string | undefined;
 
     logger.debug('Executing command', { command, timeout, description });
+
+    // Check if already aborted
+    if (abortSignal?.aborted) {
+      return {
+        content: 'Command execution was interrupted before it started',
+        isError: true,
+        details: { command, interrupted: true },
+      };
+    }
 
     // Check for dangerous commands
     const dangerCheck = this.checkDangerous(command);
@@ -83,8 +110,39 @@ export class BashTool implements TronTool {
     const startTime = Date.now();
 
     try {
-      const result = await this.runCommand(command, timeout);
+      const result = await this.runCommand(command, timeout, abortSignal);
       const durationMs = Date.now() - startTime;
+
+      // Handle interrupted command
+      if (result.interrupted) {
+        logger.info('Command interrupted by user', { command, durationMs });
+
+        // Combine any partial output
+        let output = '';
+        if (result.stdout) output += result.stdout;
+        if (result.stderr) {
+          output += output ? '\n' : '';
+          output += result.stderr;
+        }
+
+        // Truncate if needed
+        if (output.length > MAX_OUTPUT_LENGTH) {
+          output = output.substring(0, MAX_OUTPUT_LENGTH) + '\n... [output truncated]';
+        }
+
+        return {
+          content: output
+            ? `Command interrupted. Partial output:\n${output}`
+            : 'Command interrupted (no output captured)',
+          isError: true,
+          details: {
+            command,
+            exitCode: result.exitCode,
+            durationMs,
+            interrupted: true,
+          },
+        };
+      }
 
       logger.debug('Command completed', {
         command,
@@ -152,12 +210,14 @@ export class BashTool implements TronTool {
 
   private runCommand(
     command: string,
-    timeout: number
-  ): Promise<{ stdout: string; stderr: string; exitCode: number }> {
+    timeout: number,
+    signal?: AbortSignal
+  ): Promise<{ stdout: string; stderr: string; exitCode: number; interrupted?: boolean }> {
     return new Promise((resolve, reject) => {
       let stdout = '';
       let stderr = '';
       let timedOut = false;
+      let interrupted = false;
 
       const proc = spawn('bash', ['-c', command], {
         cwd: this.config.workingDirectory,
@@ -174,6 +234,21 @@ export class BashTool implements TronTool {
         }, 1000);
       }, timeout);
 
+      // Handle abort signal
+      const abortHandler = () => {
+        interrupted = true;
+        proc.kill('SIGTERM');
+        setTimeout(() => {
+          if (!proc.killed) {
+            proc.kill('SIGKILL');
+          }
+        }, 500); // Shorter grace period for user interrupt
+      };
+
+      if (signal) {
+        signal.addEventListener('abort', abortHandler, { once: true });
+      }
+
       proc.stdout.on('data', (data: Buffer) => {
         stdout += data.toString();
       });
@@ -184,9 +259,23 @@ export class BashTool implements TronTool {
 
       proc.on('close', (code: number | null) => {
         clearTimeout(timeoutId);
+        if (signal) {
+          signal.removeEventListener('abort', abortHandler);
+        }
 
         if (timedOut) {
           reject(new Error(`Command timed out after ${timeout}ms`));
+          return;
+        }
+
+        if (interrupted) {
+          // Return partial output with interrupted flag
+          resolve({
+            stdout,
+            stderr,
+            exitCode: code ?? 130, // 130 = terminated by Ctrl+C
+            interrupted: true,
+          });
           return;
         }
 
@@ -199,6 +288,9 @@ export class BashTool implements TronTool {
 
       proc.on('error', (err: Error) => {
         clearTimeout(timeoutId);
+        if (signal) {
+          signal.removeEventListener('abort', abortHandler);
+        }
         reject(err);
       });
     });

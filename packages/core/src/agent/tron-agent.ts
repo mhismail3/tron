@@ -56,6 +56,10 @@ export class TronAgent {
   private abortController: AbortController | null;
   private eventListeners: ((event: TronEvent) => void)[];
   readonly workingDirectory: string;
+  /** Tracks partial content during streaming for interrupt recovery */
+  private streamingContent: string = '';
+  /** Tracks the currently executing tool for interrupt reporting */
+  private activeTool: string | null = null;
 
   constructor(config: AgentConfig, options: AgentOptions = {}) {
     this.sessionId = options.sessionId ?? `sess_${randomUUID().replace(/-/g, '').slice(0, 12)}`;
@@ -222,13 +226,44 @@ export class TronAgent {
 
   /**
    * Abort the current run
+   * Emits agent_interrupted event and preserves partial content
    */
   abort(): void {
     if (this.abortController) {
       this.abortController.abort();
     }
+
+    // Emit interrupted event with context
+    this.emit({
+      type: 'agent_interrupted',
+      sessionId: this.sessionId,
+      timestamp: new Date().toISOString(),
+      turn: this.currentTurn,
+      partialContent: this.streamingContent || undefined,
+      activeTool: this.activeTool || undefined,
+    });
+
     this.isRunning = false;
-    logger.info('Agent aborted', { sessionId: this.sessionId });
+    logger.info('Agent aborted', {
+      sessionId: this.sessionId,
+      turn: this.currentTurn,
+      hasPartialContent: !!this.streamingContent,
+      activeTool: this.activeTool,
+    });
+  }
+
+  /**
+   * Check if the agent was interrupted
+   */
+  isInterrupted(): boolean {
+    return this.abortController?.signal.aborted ?? false;
+  }
+
+  /**
+   * Get partial streaming content (useful after interrupt)
+   */
+  getPartialContent(): string {
+    return this.streamingContent;
   }
 
   /**
@@ -242,6 +277,8 @@ export class TronAgent {
     this.isRunning = true;
     this.currentTurn++;
     this.abortController = new AbortController();
+    this.streamingContent = ''; // Reset streaming content for new turn
+    this.activeTool = null;
 
     const turnStartTime = Date.now();
 
@@ -284,6 +321,7 @@ export class TronAgent {
         // Emit stream events
         if (event.type === 'text_delta') {
           accumulatedText += event.delta;
+          this.streamingContent += event.delta; // Track for interrupt recovery
           this.emit({
             type: 'message_update',
             sessionId: this.sessionId,
@@ -389,7 +427,28 @@ export class TronAgent {
       };
     } catch (error) {
       this.isRunning = false;
+      this.activeTool = null;
       const errorMessage = error instanceof Error ? error.message : String(error);
+
+      // Check if this was an intentional abort/interrupt
+      const wasInterrupted = errorMessage === 'Aborted' || this.abortController?.signal.aborted;
+
+      if (wasInterrupted) {
+        logger.info('Turn interrupted', {
+          sessionId: this.sessionId,
+          turn: this.currentTurn,
+          hasPartialContent: !!this.streamingContent,
+        });
+
+        return {
+          success: false,
+          error: 'Interrupted by user',
+          tokenUsage: this.tokenUsage,
+          interrupted: true,
+          partialContent: this.streamingContent || undefined,
+        };
+      }
+
       logger.error('Turn failed', { error: errorMessage, sessionId: this.sessionId });
 
       return {
@@ -420,6 +479,20 @@ export class TronAgent {
       lastResult = await this.turn();
 
       if (!lastResult.success) {
+        // Check if interrupted
+        if (lastResult.interrupted) {
+          // Don't emit agent_end here - abort() already emitted agent_interrupted
+          return {
+            success: false,
+            messages: this.messages,
+            turns: this.currentTurn,
+            totalTokenUsage: this.tokenUsage,
+            error: lastResult.error,
+            interrupted: true,
+            partialContent: lastResult.partialContent,
+          };
+        }
+
         this.emit({
           type: 'agent_end',
           sessionId: this.sessionId,
@@ -464,6 +537,7 @@ export class TronAgent {
   private async executeTool(request: ToolExecutionRequest): Promise<ToolExecutionResponse> {
     const startTime = Date.now();
     const tool = this.tools.get(request.toolName);
+    this.activeTool = request.toolName; // Track for interrupt reporting
 
     if (!tool) {
       return {
@@ -610,6 +684,8 @@ export class TronAgent {
         result: postResult.action,
       });
     }
+
+    this.activeTool = null; // Clear after execution
 
     return {
       toolCallId: request.toolCallId,

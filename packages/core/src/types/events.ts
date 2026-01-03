@@ -136,6 +136,19 @@ export interface AgentEndEvent extends BaseTronEvent {
 }
 
 /**
+ * Agent interrupted event - emitted when user aborts execution
+ */
+export interface AgentInterruptedEvent extends BaseTronEvent {
+  type: 'agent_interrupted';
+  /** Turn number when interrupted */
+  turn: number;
+  /** Partial content captured before interruption */
+  partialContent?: string;
+  /** Tool that was running when interrupted (if any) */
+  activeTool?: string;
+}
+
+/**
  * Turn events (one turn = one LLM call + tool executions)
  */
 export interface TurnStartEvent extends BaseTronEvent {
@@ -248,6 +261,7 @@ export interface TronErrorEvent extends BaseTronEvent {
 export type TronEvent =
   | AgentStartEvent
   | AgentEndEvent
+  | AgentInterruptedEvent
   | TurnStartEvent
   | TurnEndEvent
   | MessageUpdateEvent

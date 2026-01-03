@@ -362,6 +362,16 @@ export function App({ config, auth }: AppProps): React.ReactElement {
         }
         break;
 
+      case 'agent_interrupted':
+        // Handle interrupt event from agent
+        // Note: Most cleanup is done in handleInterrupt, this is for logging
+        debugLog.debug('agent', 'Agent interrupted event received', {
+          turn: 'turn' in event ? event.turn : undefined,
+          hasPartialContent: 'partialContent' in event && !!event.partialContent,
+          activeTool: 'activeTool' in event ? event.activeTool : undefined,
+        });
+        break;
+
       case 'agent_end':
         // Finalize any remaining streaming content before ending
         finalizeStreamingContent();
@@ -638,7 +648,7 @@ export function App({ config, auth }: AppProps): React.ReactElement {
             role: 'system',
             content: `## Commands\n${BUILT_IN_COMMANDS.map(c =>
               `- \`/${c.name}\`${c.shortcut ? ` *(${c.shortcut})*` : ''} - ${c.description}`
-            ).join('\n')}\n\n## Keyboard Shortcuts\n- \`Ctrl+C\` - Exit\n- \`Ctrl+L\` - Clear screen\n- \`↑/↓\` - Navigate history or menu\n- \`Enter\` - Submit or select\n- \`Esc\` - Cancel\n- \`Shift+Enter\` - New line`,
+            ).join('\n')}\n\n## Keyboard Shortcuts\n- \`Ctrl+C\` - Exit\n- \`Ctrl+L\` - Clear screen\n- \`↑/↓\` - Navigate history or menu\n- \`Enter\` - Submit or select\n- \`Esc\` - Interrupt execution / Cancel menu\n- \`Shift+Enter\` - New line`,
             timestamp: new Date().toISOString(),
           },
         });
@@ -798,6 +808,50 @@ export function App({ config, auth }: AppProps): React.ReactElement {
     dispatch({ type: 'HISTORY_DOWN' });
   }, []);
 
+  // Handle interrupt - abort agent execution
+  const handleInterrupt = useCallback(() => {
+    if (!state.isProcessing || !agentRef.current) {
+      return;
+    }
+
+    // Abort the agent
+    agentRef.current.abort();
+
+    // Finalize any streaming content as a partial message
+    if (streamingContentRef.current.trim()) {
+      dispatch({
+        type: 'ADD_MESSAGE',
+        payload: {
+          id: `msg_${messageIdRef.current++}`,
+          role: 'assistant',
+          content: streamingContentRef.current.trim() + '\n\n*(interrupted)*',
+          timestamp: new Date().toISOString(),
+        },
+      });
+      streamingContentRef.current = '';
+    }
+
+    // Add system message indicating interruption
+    dispatch({
+      type: 'ADD_MESSAGE',
+      payload: {
+        id: `msg_${messageIdRef.current++}`,
+        role: 'system',
+        content: '⏸ Execution interrupted. You can continue or start a new request.',
+        timestamp: new Date().toISOString(),
+      },
+    });
+
+    // Reset processing state
+    dispatch({ type: 'SET_PROCESSING', payload: false });
+    dispatch({ type: 'SET_ACTIVE_TOOL', payload: null });
+    dispatch({ type: 'SET_ACTIVE_TOOL_INPUT', payload: null });
+    dispatch({ type: 'CLEAR_STREAMING' });
+    dispatch({ type: 'SET_STATUS', payload: 'Ready' });
+
+    debugLog.debug('interrupt', 'Agent execution interrupted by user');
+  }, [state.isProcessing]);
+
   useInput((input, key) => {
     // Ctrl+C to exit (with proper session end)
     if (input === 'c' && key.ctrl) {
@@ -807,6 +861,12 @@ export function App({ config, auth }: AppProps): React.ReactElement {
     // Ctrl+L to clear display
     if (input === 'l' && key.ctrl) {
       dispatch({ type: 'RESET' });
+    }
+
+    // Escape to interrupt processing
+    if (key.escape && state.isProcessing) {
+      handleInterrupt();
+      return;
     }
 
     // Slash menu navigation

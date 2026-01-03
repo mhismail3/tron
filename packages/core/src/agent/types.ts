@@ -71,6 +71,10 @@ export interface TurnResult {
   toolCallsExecuted?: number;
   tokenUsage?: TokenUsage;
   stopReason?: string;
+  /** True if the turn was interrupted by abort */
+  interrupted?: boolean;
+  /** Partial streaming content captured before interruption */
+  partialContent?: string;
 }
 
 /**
@@ -83,6 +87,10 @@ export interface RunResult {
   totalTokenUsage: TokenUsage;
   error?: string;
   stoppedReason?: string;
+  /** True if the run was interrupted by abort */
+  interrupted?: boolean;
+  /** Partial streaming content captured before interruption */
+  partialContent?: string;
 }
 
 // =============================================================================

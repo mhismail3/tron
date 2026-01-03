@@ -71,6 +71,7 @@ export type {
   TronEventType,
   AgentStartEvent,
   AgentEndEvent,
+  AgentInterruptedEvent,
   TurnStartEvent,
   TurnEndEvent,
   MessageUpdateEvent,
