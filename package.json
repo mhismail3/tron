@@ -9,15 +9,27 @@
   ],
   "scripts": {
     "build": "npm run build --workspaces",
+    "build:prod": "./scripts/build.sh prod",
+    "build:public": "./scripts/build.sh public",
     "test": "vitest run && npm run test --workspace=@tron/chat-web",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "lint": "eslint packages/*/src --ext .ts,.tsx",
     "typecheck": "tsc --noEmit",
     "clean": "rm -rf packages/*/dist packages/*/.turbo node_modules/.cache",
+    "dev": "./scripts/dev.sh",
     "dev:server": "npm run dev --workspace=@tron/server",
     "dev:tui": "npm run dev --workspace=@tron/tui",
-    "dev:chat": "npm run dev --workspace=@tron/chat-web"
+    "dev:chat": "npm run dev --workspace=@tron/chat-web",
+    "deploy": "./scripts/deploy.sh prod install",
+    "deploy:prod": "./scripts/deploy.sh prod install",
+    "deploy:uninstall": "./scripts/deploy.sh prod uninstall",
+    "server:start": "./scripts/deploy.sh prod start",
+    "server:stop": "./scripts/deploy.sh prod stop",
+    "server:status": "./scripts/deploy.sh prod status",
+    "server:logs": "./scripts/deploy.sh prod logs",
+    "release": "./scripts/build.sh public",
+    "manage": "./scripts/tron-manage"
   },
   "devDependencies": {
     "@types/node": "^22.10.1",

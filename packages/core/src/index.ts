@@ -13,6 +13,9 @@ export * from './types/index.js';
 // Re-export settings (must be early for other modules to use)
 export * from './settings/index.js';
 
+// Re-export feature flags
+export * from './features/index.js';
+
 // Re-export logging
 export * from './logging/index.js';
 
