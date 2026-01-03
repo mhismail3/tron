@@ -320,13 +320,22 @@ export class AnthropicProvider {
       // Track usage from streaming events (more reliable than finalMessage)
       let inputTokens = 0;
       let outputTokens = 0;
+      let cacheCreationTokens = 0;
+      let cacheReadTokens = 0;
 
       for await (const event of stream) {
         switch (event.type) {
           case 'message_start':
-            // Capture input tokens from message_start
+            // Capture input and cache tokens from message_start
             if ('message' in event && event.message?.usage) {
-              inputTokens = event.message.usage.input_tokens ?? 0;
+              const usage = event.message.usage as {
+                input_tokens?: number;
+                cache_creation_input_tokens?: number;
+                cache_read_input_tokens?: number;
+              };
+              inputTokens = usage.input_tokens ?? 0;
+              cacheCreationTokens = usage.cache_creation_input_tokens ?? 0;
+              cacheReadTokens = usage.cache_read_input_tokens ?? 0;
             }
             break;
 
@@ -406,6 +415,8 @@ export class AnthropicProvider {
                   assistantMessage.usage = {
                     inputTokens: inputTokens || assistantMessage.usage?.inputTokens || 0,
                     outputTokens: outputTokens || assistantMessage.usage?.outputTokens || 0,
+                    cacheCreationTokens: cacheCreationTokens || assistantMessage.usage?.cacheCreationTokens,
+                    cacheReadTokens: cacheReadTokens || assistantMessage.usage?.cacheReadTokens,
                   };
                 }
                 yield {
@@ -420,7 +431,7 @@ export class AnthropicProvider {
                   message: {
                     role: 'assistant' as const,
                     content: [],
-                    usage: { inputTokens, outputTokens },
+                    usage: { inputTokens, outputTokens, cacheCreationTokens, cacheReadTokens },
                   },
                   stopReason: 'end_turn',
                 };
@@ -434,7 +445,7 @@ export class AnthropicProvider {
                 message: {
                   role: 'assistant' as const,
                   content: [],
-                  usage: { inputTokens, outputTokens },
+                  usage: { inputTokens, outputTokens, cacheCreationTokens, cacheReadTokens },
                 },
                 stopReason: 'end_turn',
               };
@@ -582,12 +593,22 @@ export class AnthropicProvider {
       }
     }
 
+    // Extract cache tokens from usage (Anthropic's extended usage object)
+    const usageWithCache = response.usage as {
+      input_tokens?: number;
+      output_tokens?: number;
+      cache_creation_input_tokens?: number;
+      cache_read_input_tokens?: number;
+    } | undefined;
+
     return {
       role: 'assistant',
       content,
       usage: {
-        inputTokens: response.usage?.input_tokens ?? 0,
-        outputTokens: response.usage?.output_tokens ?? 0,
+        inputTokens: usageWithCache?.input_tokens ?? 0,
+        outputTokens: usageWithCache?.output_tokens ?? 0,
+        cacheCreationTokens: usageWithCache?.cache_creation_input_tokens,
+        cacheReadTokens: usageWithCache?.cache_read_input_tokens,
       },
       stopReason: response.stop_reason as AssistantMessage['stopReason'],
     };

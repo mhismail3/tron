@@ -551,12 +551,15 @@ export function App({ config, auth }: AppProps): React.ReactElement {
       const result = await agentRef.current.run(prompt);
 
       // Persist all messages from the agent result to session file
+      // NOTE: We pass undefined for tokenUsage here - usage is tracked separately
+      // to avoid the multiplication bug where cumulative totals get added per-message
       for (const msg of result.messages) {
         if (msg.role === 'user') continue;
-        await tuiSessionRef.current.addMessage(msg, result.totalTokenUsage);
+        await tuiSessionRef.current.addMessage(msg);
       }
 
       // Set token usage (cumulative total from agent)
+      // Update both the UI state and the session's internal tracking
       dispatch({
         type: 'SET_TOKEN_USAGE',
         payload: {
@@ -564,6 +567,7 @@ export function App({ config, auth }: AppProps): React.ReactElement {
           output: result.totalTokenUsage.outputTokens,
         },
       });
+      tuiSessionRef.current.setTokenUsage(result.totalTokenUsage);
 
       // Clear streaming state
       dispatch({ type: 'CLEAR_STREAMING' });

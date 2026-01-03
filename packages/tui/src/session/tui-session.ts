@@ -336,6 +336,14 @@ export class TuiSession {
     return [...this.messages];
   }
 
+  /**
+   * Set the total token usage (cumulative from agent)
+   * Use this instead of adding per-message to avoid multiplication bugs
+   */
+  setTokenUsage(usage: TokenUsage): void {
+    this.totalTokenUsage = { ...usage };
+  }
+
   // ===========================================================================
   // Compaction Methods
   // ===========================================================================

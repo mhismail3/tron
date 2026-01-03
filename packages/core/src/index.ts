@@ -52,6 +52,9 @@ export * from './context/index.js';
 // Re-export utilities (error handling, clipboard, etc.)
 export * from './utils/index.js';
 
+// Re-export usage tracking (tokens, costs)
+export * from './usage/index.js';
+
 // Version info
 export const VERSION = '0.1.0';
 export const NAME = 'tron';
