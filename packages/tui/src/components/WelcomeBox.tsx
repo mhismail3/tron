@@ -14,10 +14,11 @@ export interface WelcomeBoxProps {
   gitBranch?: string;
 }
 
-// TRON logo using solid and half-height blocks (2 lines)
+// TRON logo using solid and half-height blocks (3 lines)
 const TRON_LOGO = [
   '▀█▀ █▀▄ █▀█ █▄ █',
-  ' █  █▀▄ █▄█ █ ▀█',
+  ' █  ██▀ █ █ █ ▀█',
+  ' █  █ █ █▄█ █  █',
 ];
 
 /**
