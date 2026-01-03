@@ -5,6 +5,7 @@
  */
 import React from 'react';
 import { Text, Box } from 'ink';
+import { inkColors } from '../theme.js';
 
 export interface StreamingContentProps {
   /** The content to display */
@@ -28,7 +29,7 @@ export function StreamingContent({
     <Box flexDirection="column">
       <Text color={color}>
         {content}
-        {isStreaming && <Text color="gray">█</Text>}
+        {isStreaming && <Text color={inkColors.streamingCursor}>█</Text>}
       </Text>
     </Box>
   );

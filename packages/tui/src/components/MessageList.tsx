@@ -10,6 +10,7 @@ import { Spinner } from './Spinner.js';
 import { StreamingContent } from './StreamingContent.js';
 import { ToolExecution } from './ToolExecution.js';
 import type { DisplayMessage } from '../types.js';
+import { inkColors } from '../theme.js';
 
 // Thinking display configuration
 const MAX_THINKING_LINES = 4;
@@ -93,8 +94,8 @@ export function MessageList({
     <Box flexDirection="column" gap={1}>
       {showReady && (
         <Box flexDirection="row" gap={1} marginLeft={2}>
-          <Text color="green">●</Text>
-          <Text color="gray">Ready</Text>
+          <Text color={inkColors.statusReady}>●</Text>
+          <Text color={inkColors.label}>Ready</Text>
         </Box>
       )}
 
@@ -105,11 +106,11 @@ export function MessageList({
       {/* Thinking indicator - only show when thinking and no streaming yet */}
       {isProcessing && thinkingText && !streamingContent && (
         <Box flexDirection="column">
-          <Spinner label="Thinking" color="cyan" />
+          <Spinner label="Thinking" color={inkColors.statusThinking} />
           {thinkingText.length > 0 && (
             <Box flexDirection="column" marginLeft={2}>
               {formatThinkingText(thinkingText).map((line, index) => (
-                <Text key={index} color="gray" dimColor>
+                <Text key={index} color={inkColors.dim}>
                   {line}
                 </Text>
               ))}
@@ -120,7 +121,7 @@ export function MessageList({
 
       {/* Show spinner when processing but not yet streaming or thinking */}
       {isProcessing && !streamingContent && !thinkingText && !activeTool && (
-        <Spinner label="Thinking" color="yellow" />
+        <Spinner label="Thinking" color={inkColors.spinner} />
       )}
 
       {/* Tool execution indicator */}
@@ -136,7 +137,7 @@ export function MessageList({
       {streamingContent && (
         <Box flexDirection="column">
           <Box flexDirection="row" gap={1}>
-            <Text color="green" bold>*</Text>
+            <Text color={inkColors.roleAssistant} bold>*</Text>
             <StreamingContent
               content={streamingContent}
               isStreaming={isStreaming ?? false}
@@ -156,15 +157,15 @@ function MessageItem({ message }: MessageItemProps): React.ReactElement {
   const getRoleDisplay = () => {
     switch (message.role) {
       case 'user':
-        return { prefix: '>', color: 'cyan' as const };
+        return { prefix: '>', color: inkColors.roleUser };
       case 'assistant':
-        return { prefix: '*', color: 'green' as const };
+        return { prefix: '*', color: inkColors.roleAssistant };
       case 'system':
-        return { prefix: '-', color: 'gray' as const };
+        return { prefix: '-', color: inkColors.roleSystem };
       case 'tool':
-        return { prefix: '+', color: 'yellow' as const };
+        return { prefix: '+', color: inkColors.roleTool };
       default:
-        return { prefix: '?', color: 'white' as const };
+        return { prefix: '?', color: inkColors.value };
     }
   };
 

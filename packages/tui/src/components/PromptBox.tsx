@@ -8,6 +8,7 @@ import React from 'react';
 import { Box, useStdout } from 'ink';
 import { MacOSInput } from './MacOSInput.js';
 import type { InputAreaProps } from '../types.js';
+import { inkColors } from '../theme.js';
 
 export function PromptBox({
   value,
@@ -44,7 +45,7 @@ export function PromptBox({
     <Box
       flexDirection="column"
       borderStyle="round"
-      borderColor="gray"
+      borderColor={inkColors.border}
       paddingX={1}
       paddingY={0}
       marginX={1}
@@ -60,7 +61,7 @@ export function PromptBox({
         maxVisibleLines={maxVisibleLines}
         terminalWidth={inputWidth}
         promptPrefix="> "
-        promptColor="green"
+        promptColor={inkColors.promptPrefix}
         continuationPrefix="  "
         isProcessing={isProcessing}
       />

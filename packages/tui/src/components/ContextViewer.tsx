@@ -9,6 +9,7 @@
 import React, { useState, useMemo } from 'react';
 import { Box, Text, useInput } from 'ink';
 import type { ContextAuditData } from '@tron/core';
+import { inkColors } from '../theme.js';
 
 interface ContextViewerProps {
   audit: ContextAuditData;
@@ -63,20 +64,20 @@ export function ContextViewer({ audit, onClose }: ContextViewerProps): React.Rea
   const visibleLines = content.slice(scrollOffset, scrollOffset + 20);
 
   return (
-    <Box flexDirection="column" borderStyle="round" borderColor="blue" padding={1}>
+    <Box flexDirection="column" borderStyle="round" borderColor={inkColors.border} padding={1}>
       {/* Header */}
       <Box marginBottom={1}>
-        <Text bold color="cyan">Context Audit</Text>
-        <Text dimColor> - Session {audit.session.id.slice(0, 8)}</Text>
+        <Text bold color={inkColors.accent}>Context Audit</Text>
+        <Text color={inkColors.dim}> - Session {audit.session.id.slice(0, 8)}</Text>
       </Box>
 
       {/* Tab bar */}
       <Box marginBottom={1}>
         {tabs.map((tab, idx) => (
           <React.Fragment key={tab}>
-            {idx > 0 && <Text dimColor> | </Text>}
+            {idx > 0 && <Text color={inkColors.dim}> | </Text>}
             <Text
-              color={activeTab === tab ? 'green' : undefined}
+              color={activeTab === tab ? inkColors.menuSelected : inkColors.label}
               bold={activeTab === tab}
             >
               {tab.charAt(0).toUpperCase() + tab.slice(1)}
@@ -88,15 +89,15 @@ export function ContextViewer({ audit, onClose }: ContextViewerProps): React.Rea
       {/* Content */}
       <Box flexDirection="column" height={20}>
         {visibleLines.map((line, idx) => (
-          <Text key={idx}>{line}</Text>
+          <Text key={idx} color={inkColors.value}>{line}</Text>
         ))}
-        {content.length === 0 && <Text dimColor>No data available</Text>}
+        {content.length === 0 && <Text color={inkColors.dim}>No data available</Text>}
       </Box>
 
       {/* Scroll indicator */}
       {content.length > 20 && (
         <Box marginTop={1}>
-          <Text dimColor>
+          <Text color={inkColors.dim}>
             Lines {scrollOffset + 1}-{Math.min(scrollOffset + 20, content.length)} of {content.length}
           </Text>
         </Box>
@@ -104,7 +105,7 @@ export function ContextViewer({ audit, onClose }: ContextViewerProps): React.Rea
 
       {/* Help */}
       <Box marginTop={1}>
-        <Text dimColor>←/→ switch tabs | ↑/↓ scroll | q/ESC close</Text>
+        <Text color={inkColors.dim}>←/→ switch tabs | ↑/↓ scroll | q/ESC close</Text>
       </Box>
     </Box>
   );

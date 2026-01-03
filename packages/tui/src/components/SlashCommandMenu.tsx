@@ -7,6 +7,7 @@
 import React, { useMemo } from 'react';
 import { Box, Text } from 'ink';
 import { SlashCommand, filterCommands } from '../commands/slash-commands.js';
+import { inkColors } from '../theme.js';
 
 // =============================================================================
 // Types
@@ -62,10 +63,10 @@ export function SlashCommandMenu({
       <Box
         flexDirection="column"
         borderStyle="round"
-        borderColor="gray"
+        borderColor={inkColors.border}
         paddingX={1}
       >
-        <Text color="gray" dimColor>No matching commands</Text>
+        <Text color={inkColors.dim}>No matching commands</Text>
       </Box>
     );
   }
@@ -75,16 +76,16 @@ export function SlashCommandMenu({
   const hasMoreBelow = visibleRange.end < filteredCommands.length;
 
   return (
-    <Box flexDirection="column" borderStyle="round" borderColor="cyan" paddingX={1}>
+    <Box flexDirection="column" borderStyle="round" borderColor={inkColors.menuBorder} paddingX={1}>
       {/* Header */}
       <Box marginBottom={0}>
-        <Text color="cyan" bold>Commands</Text>
-        <Text color="gray"> ({selectedIndex + 1}/{filteredCommands.length})</Text>
+        <Text color={inkColors.menuHeader} bold>Commands</Text>
+        <Text color={inkColors.label}> ({selectedIndex + 1}/{filteredCommands.length})</Text>
       </Box>
 
       {/* Scroll up indicator */}
       {hasMoreAbove && (
-        <Text color="gray" dimColor>  ↑ more</Text>
+        <Text color={inkColors.dim}>  ↑ more</Text>
       )}
 
       {/* Command list */}
@@ -94,17 +95,17 @@ export function SlashCommandMenu({
 
         return (
           <Box key={cmd.name} flexDirection="row">
-            <Text color={isSelected ? 'cyan' : 'gray'}>
+            <Text color={isSelected ? inkColors.menuSelected : inkColors.label}>
               {isSelected ? '> ' : '  '}
             </Text>
-            <Text color={isSelected ? 'cyan' : 'white'} bold={isSelected}>
+            <Text color={isSelected ? inkColors.menuSelected : inkColors.menuItem} bold={isSelected}>
               /{cmd.name}
             </Text>
             {cmd.shortcut && (
-              <Text color="gray" dimColor> ({cmd.shortcut})</Text>
+              <Text color={inkColors.dim}> ({cmd.shortcut})</Text>
             )}
-            <Text color="gray"> - </Text>
-            <Text color={isSelected ? 'white' : 'gray'} dimColor={!isSelected}>
+            <Text color={inkColors.label}> - </Text>
+            <Text color={isSelected ? inkColors.value : inkColors.dim}>
               {cmd.description}
             </Text>
           </Box>
@@ -113,12 +114,12 @@ export function SlashCommandMenu({
 
       {/* Scroll down indicator */}
       {hasMoreBelow && (
-        <Text color="gray" dimColor>  ↓ more</Text>
+        <Text color={inkColors.dim}>  ↓ more</Text>
       )}
 
       {/* Keyboard hints */}
-      <Box marginTop={0} borderStyle="single" borderTop borderBottom={false} borderLeft={false} borderRight={false} borderColor="gray">
-        <Text color="gray" dimColor>↑↓ navigate  Enter select  Esc cancel</Text>
+      <Box marginTop={0} borderStyle="single" borderTop borderBottom={false} borderLeft={false} borderRight={false} borderColor={inkColors.border}>
+        <Text color={inkColors.dim}>↑↓ navigate  Enter select  Esc cancel</Text>
       </Box>
     </Box>
   );

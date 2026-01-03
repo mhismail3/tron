@@ -6,6 +6,7 @@
  */
 import React from 'react';
 import { Box, Text } from 'ink';
+import { inkColors } from '../theme.js';
 
 export interface StatusIndicatorProps {
   status: string;
@@ -14,13 +15,13 @@ export interface StatusIndicatorProps {
 
 function getStatusIcon(status: string): { icon: string; color: string } {
   const s = status.toLowerCase();
-  if (s === 'ready') return { icon: '○', color: 'green' };
-  if (s.includes('thinking') || s.includes('processing')) return { icon: '◐', color: 'yellow' };
-  if (s.includes('running')) return { icon: '◑', color: 'blue' };
-  if (s.includes('error')) return { icon: '○', color: 'red' };
-  if (s.includes('hook')) return { icon: '◉', color: 'magenta' };
-  if (s.includes('initializing')) return { icon: '◌', color: 'gray' };
-  return { icon: '◌', color: 'gray' };
+  if (s === 'ready') return { icon: '○', color: inkColors.statusReady };
+  if (s.includes('thinking') || s.includes('processing')) return { icon: '◐', color: inkColors.statusThinking };
+  if (s.includes('running')) return { icon: '◑', color: inkColors.statusRunning };
+  if (s.includes('error')) return { icon: '○', color: inkColors.statusError };
+  if (s.includes('hook')) return { icon: '◉', color: inkColors.statusHook };
+  if (s.includes('initializing')) return { icon: '◌', color: inkColors.statusInit };
+  return { icon: '◌', color: inkColors.statusInit };
 }
 
 export function StatusIndicator({
@@ -31,10 +32,10 @@ export function StatusIndicator({
 
   return (
     <Box flexDirection="row" paddingX={2} marginY={0}>
-      <Text color={color as any}>{icon}</Text>
-      <Text color="white"> {status}</Text>
+      <Text color={color}>{icon}</Text>
+      <Text color={inkColors.value}> {status}</Text>
       {error && (
-        <Text color="red"> - {error.slice(0, 50)}{error.length > 50 ? '...' : ''}</Text>
+        <Text color={inkColors.error}> - {error.slice(0, 50)}{error.length > 50 ? '...' : ''}</Text>
       )}
     </Box>
   );

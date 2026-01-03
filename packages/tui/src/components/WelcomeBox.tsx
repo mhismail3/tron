@@ -6,6 +6,7 @@
  */
 import React from 'react';
 import { Box, Text, useStdout } from 'ink';
+import { inkColors } from '../theme.js';
 
 export interface WelcomeBoxProps {
   model: string;
@@ -87,16 +88,16 @@ export function WelcomeBox({
       <Box
         flexDirection="column"
         borderStyle="round"
-        borderColor="gray"
+        borderColor={inkColors.border}
         paddingX={1}
         paddingY={0}
         marginX={1}
       >
         <Box flexDirection="row" gap={2}>
-          <Text color="cyan" bold>TRON</Text>
-          <Text color="yellow">{displayModel}</Text>
+          <Text color={inkColors.logo} bold>TRON</Text>
+          <Text color={inkColors.accent}>{displayModel}</Text>
         </Box>
-        <Text color="green">{displayPath}</Text>
+        <Text color={inkColors.value}>{displayPath}</Text>
       </Box>
     );
   }
@@ -106,7 +107,7 @@ export function WelcomeBox({
     <Box
       flexDirection="row"
       borderStyle="round"
-      borderColor="gray"
+      borderColor={inkColors.border}
       paddingX={1}
       paddingY={0}
       marginX={1}
@@ -114,19 +115,19 @@ export function WelcomeBox({
       {/* Left: TRON Block Logo */}
       <Box flexDirection="column" marginRight={2} justifyContent="center">
         {TRON_LOGO.map((line, i) => (
-          <Text key={i} color="cyan">{line}</Text>
+          <Text key={i} color={inkColors.logo}>{line}</Text>
         ))}
       </Box>
 
       {/* Right: Session info */}
       <Box flexDirection="column" flexGrow={1} justifyContent="center">
         <Box flexDirection="row">
-          <Text color="gray">Model: </Text>
-          <Text color="yellow">{displayModel}</Text>
+          <Text color={inkColors.label}>Model: </Text>
+          <Text color={inkColors.accent}>{displayModel}</Text>
         </Box>
         <Box flexDirection="row">
-          <Text color="gray">Directory: </Text>
-          <Text color="green">{displayPath}</Text>
+          <Text color={inkColors.label}>Directory: </Text>
+          <Text color={inkColors.value}>{displayPath}</Text>
         </Box>
       </Box>
     </Box>

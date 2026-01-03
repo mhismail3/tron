@@ -43,6 +43,7 @@ import {
   type Message,
 } from '@tron/core';
 import { debugLog } from './debug/index.js';
+import { inkColors } from './theme.js';
 
 // =============================================================================
 // State Management
@@ -840,7 +841,7 @@ export function App({ config, auth }: AppProps): React.ReactElement {
   if (!state.isInitialized) {
     return (
       <Box flexDirection="column" padding={1}>
-        <Text color="gray">Initializing...</Text>
+        <Text color={inkColors.dim}>Initializing...</Text>
       </Box>
     );
   }

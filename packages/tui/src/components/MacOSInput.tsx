@@ -32,7 +32,7 @@
  */
 import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { Box, Text, useInput } from 'ink';
-import chalk from 'chalk';
+import { styled, inkColors } from '../theme.js';
 
 // =============================================================================
 // Types
@@ -166,8 +166,8 @@ export interface MacOSInputProps {
   backgroundColor?: 'gray' | 'black' | 'white' | 'red' | 'green' | 'yellow' | 'blue' | 'magenta' | 'cyan';
   /** Prefix for the first line (e.g., "> " prompt) */
   promptPrefix?: string;
-  /** Color for the prompt prefix */
-  promptColor?: 'green' | 'gray' | 'white' | 'red' | 'yellow' | 'blue' | 'magenta' | 'cyan';
+  /** Color for the prompt prefix (supports hex colors) */
+  promptColor?: string;
   /** Prefix to add to continuation lines (lines after the first) for alignment */
   continuationPrefix?: string;
   /** Whether input is in processing state (disables editing, shows gray) */
@@ -190,7 +190,7 @@ export function MacOSInput({
   maxVisibleLines = 20,
   terminalWidth: _terminalWidth = 80,
   promptPrefix = '',
-  promptColor = 'green',
+  promptColor = inkColors.promptPrefix,
   continuationPrefix: continuationPrefixProp,
   isProcessing = false,
 }: MacOSInputProps): React.ReactElement {
@@ -856,9 +856,9 @@ export function MacOSInput({
       const isCursor = globalPos === cursorOffset;
 
       if (isSelected) {
-        renderedLine += chalk.bgCyan.black(char);
+        renderedLine += styled.selection(char);
       } else if (isCursor) {
-        renderedLine += chalk.inverse(char);
+        renderedLine += styled.cursor(char);
       } else {
         renderedLine += char;
       }
@@ -868,7 +868,7 @@ export function MacOSInput({
     const endOfLinePos = lineStartPos + line.length;
     if (cursorOffset === endOfLinePos) {
       // Cursor at end of line (either before newline or at end of value)
-      renderedLine += chalk.inverse(' ');
+      renderedLine += styled.cursor(' ');
     }
 
     return renderedLine;
@@ -885,7 +885,7 @@ export function MacOSInput({
 
   const buildRenderData = (): RenderLine[] => {
     if (!focus) {
-      const content = value || chalk.gray(placeholder);
+      const content = value || styled.placeholder(placeholder);
       // For unfocused multiline, show all lines
       if (value.includes('\n')) {
         return value.split('\n').map((line, idx) => ({
@@ -899,8 +899,8 @@ export function MacOSInput({
 
     if (value.length === 0) {
       const content = placeholder
-        ? chalk.inverse(placeholder[0] ?? ' ') + chalk.gray(placeholder.slice(1))
-        : chalk.inverse(' ');
+        ? styled.cursor(placeholder[0] ?? ' ') + styled.placeholder(placeholder.slice(1))
+        : styled.cursor(' ');
       return [{ content, isIndicator: false, isFirstContentLine: true }];
     }
 
@@ -925,7 +925,7 @@ export function MacOSInput({
     // Add scroll-up indicator if needed
     if (maxVisibleLines > 0 && scrollOffset > 0) {
       renderData.push({
-        content: chalk.gray(`↑ ${scrollOffset} more line${scrollOffset > 1 ? 's' : ''}`),
+        content: styled.dim(`↑ ${scrollOffset} more line${scrollOffset > 1 ? 's' : ''}`),
         isIndicator: true,
         isFirstContentLine: false,
       });
@@ -949,7 +949,7 @@ export function MacOSInput({
       const remaining = totalLines - endLine;
       if (remaining > 0) {
         renderData.push({
-          content: chalk.gray(`↓ ${remaining} more line${remaining > 1 ? 's' : ''}`),
+          content: styled.dim(`↓ ${remaining} more line${remaining > 1 ? 's' : ''}`),
           isIndicator: true,
           isFirstContentLine: false,
         });
@@ -959,7 +959,7 @@ export function MacOSInput({
     return renderData;
   };
 
-  const prefixColor = isProcessing ? 'gray' : promptColor;
+  const prefixColor = isProcessing ? inkColors.dim : promptColor;
   const renderPrefix = (isFirstContentLine: boolean): React.ReactElement | null => {
     const prefix = isFirstContentLine ? promptPrefix : continuationPrefix;
     if (!prefix) return null;
@@ -981,7 +981,7 @@ export function MacOSInput({
         {lines.map((line, idx) => (
           <Box key={idx} flexDirection="row">
             {renderPrefix(idx === 0)}
-            <Text color="gray">{line || ' '}</Text>
+            <Text color={inkColors.dim}>{line || ' '}</Text>
           </Box>
         ))}
       </Box>

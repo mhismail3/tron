@@ -6,6 +6,7 @@
  */
 import React, { useState, useEffect } from 'react';
 import { Text } from 'ink';
+import { inkColors } from '../theme.js';
 
 // Braille spinner frames (smooth animation)
 const SPINNER_FRAMES = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
@@ -18,7 +19,7 @@ export interface SpinnerProps {
   color?: string;
 }
 
-export function Spinner({ label = 'Thinking', color = 'yellow' }: SpinnerProps): React.ReactElement {
+export function Spinner({ label = 'Thinking', color = inkColors.spinner }: SpinnerProps): React.ReactElement {
   const [frameIndex, setFrameIndex] = useState(0);
 
   useEffect(() => {
@@ -34,7 +35,7 @@ export function Spinner({ label = 'Thinking', color = 'yellow' }: SpinnerProps):
   return (
     <Text>
       <Text color={color}>{frame}</Text>
-      <Text color="gray"> {label}</Text>
+      <Text color={inkColors.label}> {label}</Text>
     </Text>
   );
 }

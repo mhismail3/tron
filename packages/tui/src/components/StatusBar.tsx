@@ -6,6 +6,7 @@
  */
 import React from 'react';
 import { Box, Text } from 'ink';
+import { inkColors } from '../theme.js';
 
 export interface StatusBarProps {
   status: string;
@@ -100,21 +101,21 @@ export function StatusBar({
       {/* Left: Model, Tokens, Cost */}
       <Box flexDirection="row" gap={2}>
         {model && (
-          <Text color="gray">{formatModelShort(model)}</Text>
+          <Text color={inkColors.label}>{formatModelShort(model)}</Text>
         )}
 
         {totalTokens > 0 ? (
           <>
-            <Text color="gray">
+            <Text color={inkColors.value}>
               {formatTokens(totalInput)}/{formatTokens(totalOutput)}
             </Text>
-            <Text color="gray" dimColor>({usagePercent}%)</Text>
-            <Text color="green">
+            <Text color={inkColors.dim}>({usagePercent}%)</Text>
+            <Text color={inkColors.accent}>
               {estimateCost(model, totalInput, totalOutput)}
             </Text>
           </>
         ) : (
-          <Text color="gray" dimColor>No usage yet</Text>
+          <Text color={inkColors.dim}>No usage yet</Text>
         )}
       </Box>
 
@@ -122,20 +123,20 @@ export function StatusBar({
       <Box flexDirection="row" gap={2}>
         {gitWorktree && (
           <Box flexDirection="row">
-            <Text color="gray">Worktree: </Text>
-            <Text color="blue">{gitWorktree}</Text>
+            <Text color={inkColors.label}>Worktree: </Text>
+            <Text color={inkColors.value}>{gitWorktree}</Text>
           </Box>
         )}
 
         {gitBranch && (
           <Box flexDirection="row">
-            <Text color="gray">Branch: </Text>
-            <Text color="blue">{gitBranch}</Text>
+            <Text color={inkColors.label}>Branch: </Text>
+            <Text color={inkColors.value}>{gitBranch}</Text>
           </Box>
         )}
 
         {!gitBranch && !gitWorktree && totalTokens === 0 && (
-          <Text color="gray" dimColor>Ctrl+C: exit</Text>
+          <Text color={inkColors.dim}>Ctrl+C: exit</Text>
         )}
       </Box>
     </Box>

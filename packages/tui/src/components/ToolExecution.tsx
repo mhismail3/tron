@@ -7,6 +7,7 @@
  */
 import React, { useState, useEffect } from 'react';
 import { Text, Box } from 'ink';
+import { inkColors } from '../theme.js';
 
 // Spinner frames for running state
 const SPINNER_FRAMES = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
@@ -92,23 +93,23 @@ export function ToolExecution({
     switch (status) {
       case 'running':
         return (
-          <Text color="yellow">{SPINNER_FRAMES[frameIndex] ?? SPINNER_FRAMES[0]}</Text>
+          <Text color={inkColors.toolRunning}>{SPINNER_FRAMES[frameIndex] ?? SPINNER_FRAMES[0]}</Text>
         );
       case 'success':
-        return <Text color="green">+</Text>;
+        return <Text color={inkColors.toolSuccess}>+</Text>;
       case 'error':
-        return <Text color="red">!</Text>;
+        return <Text color={inkColors.toolError}>!</Text>;
     }
   };
 
   const getStatusColor = () => {
     switch (status) {
       case 'running':
-        return 'yellow';
+        return inkColors.toolRunning;
       case 'success':
-        return 'green';
+        return inkColors.toolSuccess;
       case 'error':
-        return 'red';
+        return inkColors.toolError;
     }
   };
 
@@ -125,10 +126,10 @@ export function ToolExecution({
           {toolName}
         </Text>
         {toolInput && (
-          <Text color="gray">{truncateInput(toolInput)}</Text>
+          <Text color={inkColors.dim}>{truncateInput(toolInput)}</Text>
         )}
         {status === 'success' && duration !== undefined && (
-          <Text color="gray">({duration}ms)</Text>
+          <Text color={inkColors.dim}>({duration}ms)</Text>
         )}
       </Box>
 
@@ -136,7 +137,7 @@ export function ToolExecution({
       {hasOutput && status !== 'running' && (
         <Box flexDirection="column" marginLeft={2}>
           {outputLines.map((line, index) => (
-            <Text key={index} color="gray" dimColor>
+            <Text key={index} color={inkColors.dim} dimColor>
               {line}
             </Text>
           ))}
