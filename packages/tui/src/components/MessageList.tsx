@@ -105,11 +105,15 @@ export function MessageList({
       ))}
 
       {/* Thinking indicator - pulsing bars */}
+      {/* Aligned with text after prompt prefix (> ) - marginLeft=1 + 2 spaces for "> " */}
       {isProcessing && thinkingText && !streamingContent && (
         <Box flexDirection="column" marginLeft={1}>
-          <ThinkingIndicator label="Thinking" color={inkColors.statusThinking} />
+          <Box flexDirection="row">
+            <Text>  </Text>
+            <ThinkingIndicator label="Thinking" color={inkColors.statusThinking} />
+          </Box>
           {thinkingText.length > 0 && (
-            <Box flexDirection="column" marginLeft={3}>
+            <Box flexDirection="column" marginLeft={5}>
               {formatThinkingText(thinkingText).map((line, index) => (
                 <Text key={index} color={inkColors.dim}>
                   {line}
@@ -121,8 +125,10 @@ export function MessageList({
       )}
 
       {/* Show thinking indicator when processing but not yet streaming or thinking */}
+      {/* Aligned with text after prompt prefix (> ) */}
       {isProcessing && !streamingContent && !thinkingText && !activeTool && (
-        <Box marginLeft={1}>
+        <Box marginLeft={1} flexDirection="row">
+          <Text>  </Text>
           <ThinkingIndicator label="Thinking" color={inkColors.spinner} />
         </Box>
       )}
@@ -162,19 +168,29 @@ function MessageItem({ message }: MessageItemProps): React.ReactElement {
   const getRoleDisplay = () => {
     switch (message.role) {
       case 'user':
-        return { prefix: icons.user, color: inkColors.roleUser };
+        return { prefix: icons.user, color: inkColors.roleUser, content: message.content };
       case 'assistant':
-        return { prefix: icons.assistant, color: inkColors.roleAssistant };
-      case 'system':
-        return { prefix: icons.system, color: inkColors.roleSystem };
+        return { prefix: icons.assistant, color: inkColors.roleAssistant, content: message.content };
+      case 'system': {
+        // Check if message starts with an emoji icon (like ⏸) - use it as the prefix
+        const iconMatch = message.content.match(/^([\u{1F300}-\u{1F9FF}]|[\u{2300}-\u{23FF}]|[\u{25A0}-\u{25FF}]|[\u{2600}-\u{26FF}]|[\u{2700}-\u{27BF}]|⏸)/u);
+        if (iconMatch) {
+          return {
+            prefix: iconMatch[0],
+            color: inkColors.roleSystem,
+            content: message.content.slice(iconMatch[0].length).trimStart(),
+          };
+        }
+        return { prefix: icons.system, color: inkColors.roleSystem, content: message.content };
+      }
       case 'tool':
-        return { prefix: icons.toolSuccess, color: inkColors.roleTool };
+        return { prefix: icons.toolSuccess, color: inkColors.roleTool, content: message.content };
       default:
-        return { prefix: '?', color: inkColors.value };
+        return { prefix: '?', color: inkColors.value, content: message.content };
     }
   };
 
-  const { prefix, color } = getRoleDisplay();
+  const { prefix, color, content } = getRoleDisplay();
 
   // For tool messages, show tool name and status with output
   if (message.role === 'tool') {
@@ -197,7 +213,19 @@ function MessageItem({ message }: MessageItemProps): React.ReactElement {
     return (
       <Box flexDirection="row" marginLeft={1}>
         <Text color={color}>{prefix} </Text>
-        <Text wrap="wrap">{message.content}</Text>
+        <Text wrap="wrap">{content}</Text>
+      </Box>
+    );
+  }
+
+  // System messages - simple display (content may have been modified to extract icon)
+  if (message.role === 'system') {
+    return (
+      <Box flexDirection="row" marginLeft={1}>
+        <Text color={color}>{prefix} </Text>
+        <Box flexDirection="column" flexShrink={1}>
+          <MarkdownText content={content} />
+        </Box>
       </Box>
     );
   }
@@ -208,7 +236,7 @@ function MessageItem({ message }: MessageItemProps): React.ReactElement {
     <Box flexDirection="row" marginLeft={1}>
       <Text color={color}>{prefix} </Text>
       <Box flexDirection="column" flexShrink={1}>
-        <MarkdownText content={message.content} />
+        <MarkdownText content={content} />
       </Box>
     </Box>
   );
