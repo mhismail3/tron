@@ -14,11 +14,13 @@ export interface WelcomeBoxProps {
   gitBranch?: string;
 }
 
-// TRON logo using solid and half-height blocks (3 lines)
+// TRON logo using block characters (5 lines)
 const TRON_LOGO = [
-  '▀█▀ █▀▄ █▀█ █▄ █',
-  ' █  ██▀ █ █ █ ▀█',
-  ' █  █ █ █▄█ █  █',
+  '████████╗██████╗  ██████╗ ███╗   ██╗',
+  '╚══██╔══╝██╔══██╗██╔═══██╗████╗  ██║',
+  '   ██║   ██████╔╝██║   ██║██╔██╗ ██║',
+  '   ██║   ██╔══██╗██║   ██║██║╚██╗██║',
+  '   ╚═╝   ╚═╝  ╚═╝╚██████╔╝╚═╝ ╚███╔╝',
 ];
 
 /**
@@ -43,8 +45,8 @@ export function WelcomeBox({
   const { stdout } = useStdout();
   const terminalWidth = stdout?.columns ?? 80;
 
-  // Responsive breakpoint
-  const isNarrow = terminalWidth < 50;
+  // Responsive breakpoint - logo is ~36 chars wide
+  const isNarrow = terminalWidth < 60;
   const maxPathLen = isNarrow ? 25 : Math.floor(terminalWidth * 0.4);
   const displayPath = formatPath(workingDirectory, maxPathLen);
 
