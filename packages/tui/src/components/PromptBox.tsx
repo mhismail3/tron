@@ -19,6 +19,7 @@ export function PromptBox({
   onDownArrow,
   onCtrlC,
   onEscape,
+  menuOpen = false,
 }: InputAreaProps): React.ReactElement {
   const { stdout } = useStdout();
   const terminalWidth = stdout?.columns ?? 80;
@@ -70,6 +71,7 @@ export function PromptBox({
         promptColor={inkColors.promptPrefix}
         continuationPrefix="  "
         isProcessing={isProcessing}
+        menuOpen={menuOpen}
       />
     </Box>
   );

@@ -58,11 +58,11 @@ describe('TUI Types', () => {
         streamingContent: '',
         isStreaming: false,
         thinkingText: '',
-        showSlashMenu: false,
-        slashMenuIndex: 0,
+        menuStack: [],
         promptHistory: [],
         historyIndex: -1,
         temporaryInput: '',
+        currentModel: 'claude-sonnet-4-20250514',
       };
       expect(state.sessionId).toBe('sess_123');
       expect(state.tokenUsage.input).toBe(100);
@@ -83,11 +83,11 @@ describe('TUI Types', () => {
         streamingContent: '',
         isStreaming: true,
         thinkingText: '',
-        showSlashMenu: false,
-        slashMenuIndex: 0,
+        menuStack: [{ id: 'slash-menu', index: 0 }],
         promptHistory: [],
         historyIndex: -1,
         temporaryInput: '',
+        currentModel: 'claude-sonnet-4-20250514',
       };
       expect(state.isProcessing).toBe(true);
       expect(state.activeTool).toBe('read');
@@ -198,13 +198,15 @@ describe('TUI Types', () => {
       expect(action.payload).toBe('An error occurred');
     });
 
-    it('should define UPDATE_TOKEN_USAGE action', () => {
+    it('should define SET_TOKEN_USAGE action', () => {
       const action: AppAction = {
-        type: 'UPDATE_TOKEN_USAGE',
+        type: 'SET_TOKEN_USAGE',
         payload: { input: 100, output: 50 },
       };
-      expect(action.type).toBe('UPDATE_TOKEN_USAGE');
-      expect(action.payload.input).toBe(100);
+      expect(action.type).toBe('SET_TOKEN_USAGE');
+      if (action.type === 'SET_TOKEN_USAGE') {
+        expect(action.payload.input).toBe(100);
+      }
     });
 
     it('should define SET_ACTIVE_TOOL action', () => {

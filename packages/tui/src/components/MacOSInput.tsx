@@ -14,6 +14,7 @@
  * - Shift+Left/Right: Select character by character
  * - Shift+Up/Down: Select line by line
  * - Shift+Option+Left/Right: Select word by word
+ * - Shift+Cmd+Left/Right: Select to start/end of line
  * - Shift+Ctrl+A: Select to start of line
  * - Shift+Ctrl+E: Select to end of line
  * - Ctrl+Shift+A or Ctrl+A (when text exists): Select all
@@ -588,6 +589,20 @@ export function MacOSInput({
   const isAtFirstLine = getCursorLineAndColumn().line === 0;
   const isAtLastLine = getCursorLineAndColumn().line === getLines().length - 1;
 
+  // Find start of current line (position after the preceding newline)
+  const findLineStart = useCallback((pos: number): number => {
+    const beforePos = value.slice(0, pos);
+    const lastNewline = beforePos.lastIndexOf('\n');
+    return lastNewline === -1 ? 0 : lastNewline + 1;
+  }, [value]);
+
+  // Find end of current line (position before the next newline or end of string)
+  const findLineEnd = useCallback((pos: number): number => {
+    const afterPos = value.slice(pos);
+    const nextNewline = afterPos.indexOf('\n');
+    return nextNewline === -1 ? value.length : pos + nextNewline;
+  }, [value]);
+
   // ==========================================================================
   // Input Handler
   // ==========================================================================
@@ -603,6 +618,10 @@ export function MacOSInput({
   const isEditableRef = useRef(isEditable);
   const isProcessingRef = useRef(isProcessing);
   const menuOpenRef = useRef(menuOpen);
+  const findLineStartRef = useRef(findLineStart);
+  const findLineEndRef = useRef(findLineEnd);
+  const extendSelectionRef = useRef(extendSelection);
+  const cursorOffsetRef = useRef(cursorOffset);
 
   useEffect(() => {
     insertNewlineRef.current = insertNewline;
@@ -635,6 +654,22 @@ export function MacOSInput({
   useEffect(() => {
     menuOpenRef.current = menuOpen;
   }, [menuOpen]);
+
+  useEffect(() => {
+    findLineStartRef.current = findLineStart;
+  }, [findLineStart]);
+
+  useEffect(() => {
+    findLineEndRef.current = findLineEnd;
+  }, [findLineEnd]);
+
+  useEffect(() => {
+    extendSelectionRef.current = extendSelection;
+  }, [extendSelection]);
+
+  useEffect(() => {
+    cursorOffsetRef.current = cursorOffset;
+  }, [cursorOffset]);
 
   // Refs for paste buffering used in handleData
   const pasteBufferRef = useRef<string>('');
@@ -710,6 +745,34 @@ export function MacOSInput({
           skipNextInputRef.current = true;
           deleteWordLeftRef.current();
           return;
+        }
+      }
+
+      // Detect Shift+Cmd+Arrow for line selection
+      // Standard terminal format: \x1b[1;ND where N encodes modifiers
+      // Shift+Cmd (Super): 1 + 1 (Shift) + 8 (Super) = 10
+      // Kitty protocol: \x1b[1;Nu format with modifier encoding
+      const arrowMatch = str.match(/^\x1b\[1;(\d+)([A-D])$/);
+      if (arrowMatch && isEditableRef.current) {
+        const mod = Number(arrowMatch[1]);
+        const arrowKey = arrowMatch[2];
+        // Modifier 10 = Shift (1) + Super/Cmd (8) + base (1)
+        const { shift, super: superKey } = parseKittyModifier(mod);
+        if (shift && superKey) {
+          if (arrowKey === 'D') {
+            // Shift+Cmd+Left: Select to start of line
+            skipNextInputRef.current = true;
+            const lineStart = findLineStartRef.current(cursorOffsetRef.current);
+            extendSelectionRef.current(lineStart);
+            return;
+          }
+          if (arrowKey === 'C') {
+            // Shift+Cmd+Right: Select to end of line
+            skipNextInputRef.current = true;
+            const lineEnd = findLineEndRef.current(cursorOffsetRef.current);
+            extendSelectionRef.current(lineEnd);
+            return;
+          }
         }
       }
 

@@ -4,7 +4,12 @@
  * Tests for the TUI state reducer logic.
  */
 import { describe, it, expect } from 'vitest';
-import type { AppState, AppAction, DisplayMessage } from '../src/types.js';
+import type { AppState, AppAction, DisplayMessage, MenuStackEntry } from '../src/types.js';
+
+// Helper function to get current menu from stack
+function getCurrentMenu(stack: MenuStackEntry[]): MenuStackEntry | null {
+  return stack.length > 0 ? stack[stack.length - 1]! : null;
+}
 
 // Re-implement reducer for testing (mirrors app.tsx implementation)
 const initialState: AppState = {
@@ -21,11 +26,11 @@ const initialState: AppState = {
   streamingContent: '',
   isStreaming: false,
   thinkingText: '',
-  showSlashMenu: false,
-  slashMenuIndex: 0,
+  menuStack: [],
   promptHistory: [],
   historyIndex: -1,
   temporaryInput: '',
+  currentModel: 'claude-sonnet-4-20250514',
 };
 
 function reducer(state: AppState, action: AppAction): AppState {
@@ -53,12 +58,12 @@ function reducer(state: AppState, action: AppAction): AppState {
       return { ...state, status: action.payload };
     case 'SET_ERROR':
       return { ...state, error: action.payload };
-    case 'UPDATE_TOKEN_USAGE':
+    case 'SET_TOKEN_USAGE':
       return {
         ...state,
         tokenUsage: {
-          input: state.tokenUsage.input + action.payload.input,
-          output: state.tokenUsage.output + action.payload.output,
+          input: action.payload.input,
+          output: action.payload.output,
         },
       };
     case 'SET_ACTIVE_TOOL':
@@ -83,10 +88,38 @@ function reducer(state: AppState, action: AppAction): AppState {
         status: 'Ready',
         activeToolInput: null,
       };
-    case 'SHOW_SLASH_MENU':
-      return { ...state, showSlashMenu: action.payload, slashMenuIndex: 0 };
-    case 'SET_SLASH_MENU_INDEX':
-      return { ...state, slashMenuIndex: action.payload };
+    // Menu stack actions
+    case 'PUSH_MENU': {
+      const { id, index = 0, saveInput = false } = action.payload;
+      const currentMenu = getCurrentMenu(state.menuStack);
+      if (currentMenu?.id === id) return state;
+      const newEntry: MenuStackEntry = {
+        id,
+        index,
+        savedInput: saveInput ? state.input : undefined,
+      };
+      return { ...state, menuStack: [...state.menuStack, newEntry] };
+    }
+    case 'POP_MENU': {
+      if (state.menuStack.length === 0) return state;
+      const newStack = state.menuStack.slice(0, -1);
+      const newTop = getCurrentMenu(newStack);
+      const restoredInput = newTop?.savedInput;
+      return {
+        ...state,
+        menuStack: newStack,
+        input: restoredInput !== undefined ? restoredInput : state.input,
+      };
+    }
+    case 'SET_MENU_INDEX': {
+      if (state.menuStack.length === 0) return state;
+      const updatedStack = [...state.menuStack];
+      const topIndex = updatedStack.length - 1;
+      updatedStack[topIndex] = { ...updatedStack[topIndex]!, index: action.payload };
+      return { ...state, menuStack: updatedStack };
+    }
+    case 'CLOSE_ALL_MENUS':
+      return { ...state, menuStack: [], input: '' };
     case 'ADD_TO_HISTORY': {
       const trimmed = action.payload.trim();
       if (!trimmed) return state;
@@ -143,6 +176,8 @@ function reducer(state: AppState, action: AppAction): AppState {
       return { ...state, temporaryInput: action.payload };
     case 'RESET_HISTORY_NAVIGATION':
       return { ...state, historyIndex: -1 };
+    case 'SET_CURRENT_MODEL':
+      return { ...state, currentModel: action.payload };
     default:
       return state;
   }
@@ -291,21 +326,21 @@ describe('App Reducer', () => {
     });
   });
 
-  describe('UPDATE_TOKEN_USAGE', () => {
-    it('should add to token usage', () => {
+  describe('SET_TOKEN_USAGE', () => {
+    it('should set token usage', () => {
       const state = reducer(initialState, {
-        type: 'UPDATE_TOKEN_USAGE',
+        type: 'SET_TOKEN_USAGE',
         payload: { input: 100, output: 50 },
       });
       expect(state.tokenUsage.input).toBe(100);
       expect(state.tokenUsage.output).toBe(50);
     });
 
-    it('should accumulate token usage', () => {
+    it('should replace token usage (cumulative from agent)', () => {
       const startState = { ...initialState, tokenUsage: { input: 100, output: 50 } };
       const state = reducer(startState, {
-        type: 'UPDATE_TOKEN_USAGE',
-        payload: { input: 200, output: 100 },
+        type: 'SET_TOKEN_USAGE',
+        payload: { input: 300, output: 150 },
       });
       expect(state.tokenUsage.input).toBe(300);
       expect(state.tokenUsage.output).toBe(150);
@@ -354,11 +389,11 @@ describe('App Reducer', () => {
         streamingContent: 'some content',
         isStreaming: true,
         thinkingText: 'thinking...',
-        showSlashMenu: true,
-        slashMenuIndex: 2,
+        menuStack: [{ id: 'slash-menu', index: 2 }],
         promptHistory: ['prev1', 'prev2'],
         historyIndex: 1,
         temporaryInput: 'temp',
+        currentModel: 'claude-sonnet-4-20250514',
       };
       const state = reducer(startState, { type: 'RESET' });
       expect(state.input).toBe('');
@@ -372,6 +407,7 @@ describe('App Reducer', () => {
       expect(state.streamingContent).toBe('');
       expect(state.isStreaming).toBe(false);
       expect(state.thinkingText).toBe('');
+      expect(state.menuStack).toHaveLength(0);
       // Session ID should be preserved
       expect(state.sessionId).toBe('sess_123');
       // isInitialized should stay true
@@ -456,6 +492,147 @@ describe('App Reducer', () => {
       const startState = { ...initialState, thinkingText: 'First ' };
       const state = reducer(startState, { type: 'APPEND_THINKING_TEXT', payload: 'Second' });
       expect(state.thinkingText).toBe('First Second');
+    });
+  });
+});
+
+describe('Menu Stack', () => {
+  describe('PUSH_MENU', () => {
+    it('should push a menu onto empty stack', () => {
+      const state = reducer(initialState, {
+        type: 'PUSH_MENU',
+        payload: { id: 'slash-menu' },
+      });
+      expect(state.menuStack).toHaveLength(1);
+      expect(state.menuStack[0]!.id).toBe('slash-menu');
+      expect(state.menuStack[0]!.index).toBe(0);
+    });
+
+    it('should push a submenu onto existing stack', () => {
+      const startState = {
+        ...initialState,
+        menuStack: [{ id: 'slash-menu', index: 2 }],
+        input: '/model',
+      };
+      const state = reducer(startState, {
+        type: 'PUSH_MENU',
+        payload: { id: 'model-switcher', index: 3, saveInput: true },
+      });
+      expect(state.menuStack).toHaveLength(2);
+      expect(state.menuStack[0]!.id).toBe('slash-menu');
+      expect(state.menuStack[1]!.id).toBe('model-switcher');
+      expect(state.menuStack[1]!.index).toBe(3);
+      expect(state.menuStack[1]!.savedInput).toBe('/model');
+    });
+
+    it('should not push duplicate menu at top', () => {
+      const startState = {
+        ...initialState,
+        menuStack: [{ id: 'slash-menu', index: 2 }],
+      };
+      const state = reducer(startState, {
+        type: 'PUSH_MENU',
+        payload: { id: 'slash-menu' },
+      });
+      expect(state.menuStack).toHaveLength(1);
+    });
+  });
+
+  describe('POP_MENU', () => {
+    it('should pop menu from stack', () => {
+      const startState = {
+        ...initialState,
+        menuStack: [{ id: 'slash-menu', index: 2 }],
+      };
+      const state = reducer(startState, { type: 'POP_MENU' });
+      expect(state.menuStack).toHaveLength(0);
+    });
+
+    it('should restore input when popping to parent with savedInput', () => {
+      const startState = {
+        ...initialState,
+        input: '',
+        menuStack: [
+          { id: 'slash-menu', index: 2, savedInput: '/model' },
+          { id: 'model-switcher', index: 0 },
+        ],
+      };
+      const state = reducer(startState, { type: 'POP_MENU' });
+      expect(state.menuStack).toHaveLength(1);
+      expect(state.menuStack[0]!.id).toBe('slash-menu');
+      expect(state.input).toBe('/model');
+    });
+
+    it('should not change state when stack is empty', () => {
+      const state = reducer(initialState, { type: 'POP_MENU' });
+      expect(state).toBe(initialState);
+    });
+  });
+
+  describe('SET_MENU_INDEX', () => {
+    it('should update index of top menu', () => {
+      const startState = {
+        ...initialState,
+        menuStack: [{ id: 'slash-menu', index: 0 }],
+      };
+      const state = reducer(startState, { type: 'SET_MENU_INDEX', payload: 3 });
+      expect(state.menuStack[0]!.index).toBe(3);
+    });
+
+    it('should not change state when stack is empty', () => {
+      const state = reducer(initialState, { type: 'SET_MENU_INDEX', payload: 3 });
+      expect(state.menuStack).toHaveLength(0);
+    });
+  });
+
+  describe('CLOSE_ALL_MENUS', () => {
+    it('should clear entire stack and input', () => {
+      const startState = {
+        ...initialState,
+        input: '/model',
+        menuStack: [
+          { id: 'slash-menu', index: 2 },
+          { id: 'model-switcher', index: 0 },
+        ],
+      };
+      const state = reducer(startState, { type: 'CLOSE_ALL_MENUS' });
+      expect(state.menuStack).toHaveLength(0);
+      expect(state.input).toBe('');
+    });
+  });
+
+  describe('Hierarchical Navigation Flow', () => {
+    it('should support full hierarchical menu navigation', () => {
+      // Start fresh
+      let state = initialState;
+
+      // User types "/" - push slash menu
+      state = reducer(state, { type: 'SET_INPUT', payload: '/' });
+      state = reducer(state, { type: 'PUSH_MENU', payload: { id: 'slash-menu' } });
+      expect(state.menuStack).toHaveLength(1);
+      expect(state.input).toBe('/');
+
+      // User navigates to model
+      state = reducer(state, { type: 'SET_INPUT', payload: '/model' });
+      state = reducer(state, { type: 'SET_MENU_INDEX', payload: 2 }); // index of model
+
+      // User selects model - push model switcher
+      state = reducer(state, {
+        type: 'PUSH_MENU',
+        payload: { id: 'model-switcher', index: 0, saveInput: true },
+      });
+      expect(state.menuStack).toHaveLength(2);
+      expect(state.menuStack[1]!.savedInput).toBe('/model');
+
+      // User presses Escape - pop model switcher, restore input
+      state = reducer(state, { type: 'POP_MENU' });
+      expect(state.menuStack).toHaveLength(1);
+      expect(state.menuStack[0]!.id).toBe('slash-menu');
+      expect(state.input).toBe('/model');
+
+      // User presses Escape again - pop slash menu
+      state = reducer(state, { type: 'POP_MENU' });
+      expect(state.menuStack).toHaveLength(0);
     });
   });
 });

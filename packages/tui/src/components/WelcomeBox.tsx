@@ -11,6 +11,7 @@ import { inkColors } from '../theme.js';
 export interface WelcomeBoxProps {
   model: string;
   workingDirectory: string;
+  gitBranch?: string;
 }
 
 // TRON logo using solid and half-height blocks (2 lines)
@@ -18,39 +19,6 @@ const TRON_LOGO = [
   '▀█▀ █▀▄ █▀█ █▄ █',
   ' █  █▀▄ █▄█ █ ▀█',
 ];
-
-/**
- * Format model name for display
- */
-function formatModelName(m: string): string {
-  if (m.includes('claude')) {
-    if (m.includes('opus-4-5')) return 'Claude Opus 4.5';
-    if (m.includes('opus-4')) return 'Claude Opus 4';
-    if (m.includes('sonnet-4')) return 'Claude Sonnet 4';
-    if (m.includes('sonnet')) return 'Claude Sonnet';
-    if (m.includes('haiku')) return 'Claude Haiku';
-    return 'Claude';
-  }
-  if (m.includes('gpt-4o')) return 'GPT-4o';
-  if (m.includes('gpt-4')) return 'GPT-4';
-  if (m.includes('gemini')) return 'Gemini';
-  return m;
-}
-
-/**
- * Format model name for narrow displays
- */
-function formatModelNameShort(m: string): string {
-  if (m.includes('opus-4-5')) return 'Opus 4.5';
-  if (m.includes('opus-4')) return 'Opus 4';
-  if (m.includes('sonnet-4')) return 'Sonnet 4';
-  if (m.includes('sonnet')) return 'Sonnet';
-  if (m.includes('haiku')) return 'Haiku';
-  if (m.includes('gpt-4o')) return 'GPT-4o';
-  if (m.includes('gpt-4')) return 'GPT-4';
-  if (m.includes('gemini')) return 'Gemini';
-  return m.slice(0, 10);
-}
 
 /**
  * Format path for display with ~ substitution
@@ -68,19 +36,21 @@ function formatPath(p: string, maxLen: number): string {
 }
 
 export function WelcomeBox({
-  model,
   workingDirectory,
+  gitBranch,
 }: WelcomeBoxProps): React.ReactElement {
   const { stdout } = useStdout();
   const terminalWidth = stdout?.columns ?? 80;
 
   // Responsive breakpoint
   const isNarrow = terminalWidth < 50;
-
-  // Choose appropriate display values based on width
-  const displayModel = isNarrow ? formatModelNameShort(model) : formatModelName(model);
   const maxPathLen = isNarrow ? 25 : Math.floor(terminalWidth * 0.4);
   const displayPath = formatPath(workingDirectory, maxPathLen);
+
+  // Format directory with optional git branch
+  const directoryDisplay = gitBranch
+    ? `${displayPath} (${gitBranch})`
+    : displayPath;
 
   // Narrow mode: no logo, minimal layout
   if (isNarrow) {
@@ -93,16 +63,18 @@ export function WelcomeBox({
         paddingY={0}
         marginX={1}
       >
-        <Box flexDirection="row" gap={2}>
+        <Box flexDirection="row" justifyContent="flex-end">
           <Text color={inkColors.logo} bold>TRON</Text>
-          <Text color={inkColors.accent}>{displayModel}</Text>
         </Box>
-        <Text color={inkColors.value}>{displayPath}</Text>
+        <Box flexDirection="row" justifyContent="flex-end">
+          <Text color={inkColors.label}>Directory: </Text>
+          <Text color={inkColors.value}>{directoryDisplay}</Text>
+        </Box>
       </Box>
     );
   }
 
-  // Standard mode: TRON block logo + info
+  // Standard mode: TRON block logo + directory (right-aligned, vertically centered)
   return (
     <Box
       flexDirection="row"
@@ -119,15 +91,11 @@ export function WelcomeBox({
         ))}
       </Box>
 
-      {/* Right: Session info */}
-      <Box flexDirection="column" flexGrow={1} justifyContent="center">
-        <Box flexDirection="row">
-          <Text color={inkColors.label}>Model: </Text>
-          <Text color={inkColors.accent}>{displayModel}</Text>
-        </Box>
+      {/* Right: Directory info - right-aligned and vertically centered */}
+      <Box flexDirection="column" flexGrow={1} justifyContent="center" alignItems="flex-end">
         <Box flexDirection="row">
           <Text color={inkColors.label}>Directory: </Text>
-          <Text color={inkColors.value}>{displayPath}</Text>
+          <Text color={inkColors.value}>{directoryDisplay}</Text>
         </Box>
       </Box>
     </Box>

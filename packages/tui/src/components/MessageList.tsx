@@ -230,14 +230,29 @@ function MessageItem({ message }: MessageItemProps): React.ReactElement {
     );
   }
 
+  // Format token usage if available
+  const formatTokenUsage = (usage: { inputTokens: number; outputTokens: number } | undefined) => {
+    if (!usage) return null;
+    return `(${usage.inputTokens.toLocaleString()}/${usage.outputTokens.toLocaleString()})`;
+  };
+
   // Assistant messages - render markdown with proper indentation
   // The icon is on its own, content starts on same line and wraps underneath
   return (
-    <Box flexDirection="row" marginLeft={1}>
-      <Text color={color}>{prefix} </Text>
-      <Box flexDirection="column" flexShrink={1}>
-        <MarkdownText content={content} />
+    <Box flexDirection="column" marginLeft={1}>
+      <Box flexDirection="row">
+        <Text color={color}>{prefix} </Text>
+        <Box flexDirection="column" flexShrink={1}>
+          <MarkdownText content={content} />
+        </Box>
       </Box>
+      {message.tokenUsage && (
+        <Box marginLeft={2}>
+          <Text color={inkColors.dim}>
+            {formatTokenUsage(message.tokenUsage)} tokens in/out
+          </Text>
+        </Box>
+      )}
     </Box>
   );
 }

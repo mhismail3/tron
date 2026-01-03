@@ -45,3 +45,19 @@ export {
   type UnifiedAuth,
   type ModelCapabilities,
 } from './factory.js';
+
+// Model catalog with rich metadata
+export {
+  ANTHROPIC_MODELS,
+  ANTHROPIC_MODEL_CATEGORIES,
+  getModelById,
+  getRecommendedModel,
+  getTierIcon,
+  getTierLabel,
+  formatContextWindow,
+  formatModelPricing,
+  getAllModels,
+  isValidModelId,
+  type ModelInfo,
+  type ModelCategory,
+} from './models.js';

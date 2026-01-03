@@ -8,6 +8,7 @@ export { StreamingContent } from './StreamingContent.js';
 export { ToolExecution } from './ToolExecution.js';
 export { ContextViewer } from './ContextViewer.js';
 export { SlashCommandMenu } from './SlashCommandMenu.js';
+export { ModelSwitcher } from './ModelSwitcher.js';
 export { MacOSInput } from './MacOSInput.js';
 export { WelcomeBox } from './WelcomeBox.js';
 export { PromptBox } from './PromptBox.js';

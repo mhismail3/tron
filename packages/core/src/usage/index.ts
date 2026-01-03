@@ -30,10 +30,11 @@ export interface PricingTier {
 }
 
 export const CLAUDE_PRICING: Record<string, PricingTier> = {
-  // Claude 4.5 models (November 2025)
+  // Claude 4.5 models (Current Generation)
+  // Source: https://platform.claude.com/docs/en/about-claude/models/overview
   'claude-opus-4-5-20251101': {
-    inputPerMillion: 15,
-    outputPerMillion: 75,
+    inputPerMillion: 5,
+    outputPerMillion: 25,
     cacheWriteMultiplier: 1.25,
     cacheReadMultiplier: 0.1,
   },
@@ -43,14 +44,20 @@ export const CLAUDE_PRICING: Record<string, PricingTier> = {
     cacheWriteMultiplier: 1.25,
     cacheReadMultiplier: 0.1,
   },
-  // Claude 4.1 models (August 2025)
+  'claude-haiku-4-5-20251001': {
+    inputPerMillion: 1,
+    outputPerMillion: 5,
+    cacheWriteMultiplier: 1.25,
+    cacheReadMultiplier: 0.1,
+  },
+  // Claude 4.1 models (Legacy - August 2025)
   'claude-opus-4-1-20250805': {
     inputPerMillion: 15,
     outputPerMillion: 75,
     cacheWriteMultiplier: 1.25,
     cacheReadMultiplier: 0.1,
   },
-  // Claude 4 models (May 2025)
+  // Claude 4 models (Legacy - May 2025)
   'claude-opus-4-20250514': {
     inputPerMillion: 15,
     outputPerMillion: 75,
@@ -63,17 +70,17 @@ export const CLAUDE_PRICING: Record<string, PricingTier> = {
     cacheWriteMultiplier: 1.25,
     cacheReadMultiplier: 0.1,
   },
-  // Claude 3.7 Sonnet (February 2025)
+  // Claude 3.7 Sonnet (Legacy - February 2025)
   'claude-3-7-sonnet-20250219': {
     inputPerMillion: 3,
     outputPerMillion: 15,
     cacheWriteMultiplier: 1.25,
     cacheReadMultiplier: 0.1,
   },
-  // Claude 3.5 Haiku
-  'claude-3-5-haiku-20241022': {
-    inputPerMillion: 0.8,
-    outputPerMillion: 4,
+  // Claude 3 Haiku (Legacy)
+  'claude-3-haiku-20240307': {
+    inputPerMillion: 0.25,
+    outputPerMillion: 1.25,
     cacheWriteMultiplier: 1.25,
     cacheReadMultiplier: 0.1,
   },
@@ -185,8 +192,11 @@ export function getPricingTier(model: string): PricingTier {
   if (modelLower.includes('sonnet')) {
     return CLAUDE_PRICING['claude-sonnet-4-20250514']!;
   }
+  if (modelLower.includes('haiku-4-5') || modelLower.includes('haiku-4.5')) {
+    return CLAUDE_PRICING['claude-haiku-4-5-20251001']!;
+  }
   if (modelLower.includes('haiku')) {
-    return CLAUDE_PRICING['claude-3-5-haiku-20241022']!;
+    return CLAUDE_PRICING['claude-3-haiku-20240307']!;
   }
   if (modelLower.includes('gpt-4o-mini')) {
     return OPENAI_PRICING['gpt-4o-mini']!;
@@ -344,16 +354,21 @@ export function getUsageDelta(
 // =============================================================================
 
 export const CONTEXT_LIMITS: Record<string, number> = {
+  // Claude 4.5 models
   'claude-opus-4-5-20251101': 200_000,
   'claude-sonnet-4-5-20250929': 200_000,
+  'claude-haiku-4-5-20251001': 200_000,
+  // Legacy Claude models
   'claude-opus-4-1-20250805': 200_000,
   'claude-opus-4-20250514': 200_000,
   'claude-sonnet-4-20250514': 200_000,
   'claude-3-7-sonnet-20250219': 200_000,
-  'claude-3-5-haiku-20241022': 200_000,
+  'claude-3-haiku-20240307': 200_000,
+  // OpenAI
   'gpt-4o': 128_000,
   'gpt-4o-mini': 128_000,
   'gpt-4-turbo': 128_000,
+  // Google
   'gemini-2.5-pro': 1_000_000,
   'gemini-2.5-flash': 1_000_000,
   'gemini-2.0-flash': 1_000_000,

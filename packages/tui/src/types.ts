@@ -40,6 +40,27 @@ export interface CliConfig {
 export type { AnthropicAuth };
 
 // =============================================================================
+// Menu Stack (Hierarchical Menu Navigation)
+// =============================================================================
+
+/** Well-known menu identifiers */
+export type MenuId = 'slash-menu' | 'model-switcher' | string;
+
+/**
+ * Entry in the menu stack representing an open menu.
+ * The stack enables hierarchical navigation where Escape closes
+ * only the innermost menu, returning to the parent.
+ */
+export interface MenuStackEntry {
+  /** Unique menu identifier */
+  id: MenuId;
+  /** Current selection index within the menu */
+  index: number;
+  /** Input value when this menu was opened (for restoration on pop) */
+  savedInput?: string;
+}
+
+// =============================================================================
 // App State
 // =============================================================================
 
@@ -70,16 +91,22 @@ export interface AppState {
   isStreaming: boolean;
   /** Current thinking text (for extended thinking) */
   thinkingText: string;
-  /** Whether slash command menu is visible */
-  showSlashMenu: boolean;
-  /** Selected index in slash command menu */
-  slashMenuIndex: number;
+  /**
+   * Stack of open menus for hierarchical navigation.
+   * Last entry is the currently active menu.
+   * Escape pops the stack, returning to the parent menu.
+   */
+  menuStack: MenuStackEntry[];
   /** Prompt history for navigation */
   promptHistory: string[];
   /** Current history navigation index (-1 = not navigating) */
   historyIndex: number;
   /** Temporary input stored during history navigation */
   temporaryInput: string;
+  /** Current model ID */
+  currentModel: string;
+  /** Git branch name for the working directory */
+  gitBranch: string | null;
 }
 
 export interface DisplayMessage {
@@ -91,6 +118,11 @@ export interface DisplayMessage {
   toolStatus?: 'running' | 'success' | 'error';
   toolInput?: string;
   duration?: number;
+  /** Token usage for this message (if it represents a model call) */
+  tokenUsage?: {
+    inputTokens: number;
+    outputTokens: number;
+  };
 }
 
 // =============================================================================
@@ -116,13 +148,19 @@ export type AppAction =
   | { type: 'SET_THINKING_TEXT'; payload: string }
   | { type: 'APPEND_THINKING_TEXT'; payload: string }
   | { type: 'RESET' }
-  | { type: 'SHOW_SLASH_MENU'; payload: boolean }
-  | { type: 'SET_SLASH_MENU_INDEX'; payload: number }
+  // Menu stack actions for hierarchical navigation
+  | { type: 'PUSH_MENU'; payload: { id: MenuId; index?: number; saveInput?: boolean } }
+  | { type: 'POP_MENU' }
+  | { type: 'SET_MENU_INDEX'; payload: number }
+  | { type: 'CLOSE_ALL_MENUS' }
   | { type: 'ADD_TO_HISTORY'; payload: string }
   | { type: 'HISTORY_UP' }
   | { type: 'HISTORY_DOWN' }
   | { type: 'SET_TEMPORARY_INPUT'; payload: string }
-  | { type: 'RESET_HISTORY_NAVIGATION' };
+  | { type: 'RESET_HISTORY_NAVIGATION' }
+  | { type: 'SET_CURRENT_MODEL'; payload: string }
+  | { type: 'SET_GIT_BRANCH'; payload: string | null }
+  | { type: 'UPDATE_LAST_ASSISTANT_TOKENS'; payload: { inputTokens: number; outputTokens: number } };
 
 // =============================================================================
 // Component Props
@@ -158,6 +196,8 @@ export interface InputAreaProps {
   onCtrlC?: () => void;
   /** Callback when Escape is pressed during processing (for interrupt) */
   onEscape?: () => void;
+  /** Whether a menu/submenu is open and capturing input */
+  menuOpen?: boolean;
 }
 
 export interface StatusBarProps {

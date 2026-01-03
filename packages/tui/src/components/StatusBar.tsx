@@ -81,7 +81,7 @@ export function StatusBar({
           <Text color={inkColors.statusBar}>{formatModelShort(model)}</Text>
         )}
 
-        {totalTokens > 0 ? (
+        {totalTokens > 0 && (
           <>
             <Text color={inkColors.statusBar}>
               {formatTokens(totalInput)}/{formatTokens(totalOutput)}
@@ -91,8 +91,6 @@ export function StatusBar({
               {cost ? formatCost(cost) : '$0.00'}
             </Text>
           </>
-        ) : (
-          <Text color={inkColors.statusBar}>—</Text>
         )}
       </Box>
 
