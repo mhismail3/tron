@@ -24,6 +24,12 @@
  * ```
  */
 import type { Message } from '../types/index.js';
+import { getSettings } from '../settings/index.js';
+
+// Get compactor settings (loaded lazily on first access)
+function getCompactorSettings() {
+  return getSettings().context.compactor;
+}
 
 // =============================================================================
 // Types
@@ -75,13 +81,17 @@ export interface CompactResult {
 // Default Configuration
 // =============================================================================
 
-const DEFAULT_CONFIG: CompactorConfig = {
-  maxTokens: 25000,
-  compactionThreshold: 0.85,
-  targetTokens: 10000,
-  preserveRecentCount: 2,
-  charsPerToken: 4,
-};
+/** Get default compactor config from settings */
+function getDefaultConfig(): CompactorConfig {
+  const settings = getCompactorSettings();
+  return {
+    maxTokens: settings.maxTokens,
+    compactionThreshold: settings.compactionThreshold,
+    targetTokens: settings.targetTokens,
+    preserveRecentCount: settings.preserveRecentCount,
+    charsPerToken: settings.charsPerToken,
+  };
+}
 
 // =============================================================================
 // ContextCompactor Class
@@ -91,7 +101,7 @@ export class ContextCompactor {
   private config: CompactorConfig;
 
   constructor(config: Partial<CompactorConfig> = {}) {
-    this.config = { ...DEFAULT_CONFIG, ...config };
+    this.config = { ...getDefaultConfig(), ...config };
   }
 
   /**

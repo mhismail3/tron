@@ -28,8 +28,14 @@ import * as path from 'path';
 import { spawn } from 'child_process';
 import type { HookDefinition, HookType, AnyHookContext, HookResult } from './types.js';
 import { createLogger } from '../logging/logger.js';
+import { getSettings } from '../settings/index.js';
 
 const logger = createLogger('hooks:discovery');
+
+// Get hook settings (loaded lazily on first access)
+function getHookSettings() {
+  return getSettings().hooks;
+}
 
 /**
  * Discovered hook information
@@ -66,15 +72,22 @@ export interface DiscoveryConfig {
 }
 
 /**
- * Default hook directory names
+ * Get default hook directory names from settings
  */
-const DEFAULT_PROJECT_HOOK_DIR = '.agent/hooks';
-const DEFAULT_USER_HOOK_DIR = '.config/tron/hooks';
+function getDefaultProjectHookDir(): string {
+  return getHookSettings().projectDir;
+}
+
+function getDefaultUserHookDir(): string {
+  return getHookSettings().userDir;
+}
 
 /**
- * Default file extensions
+ * Get default file extensions from settings
  */
-const DEFAULT_EXTENSIONS = ['.ts', '.js', '.mjs', '.sh'];
+function getDefaultExtensions(): string[] {
+  return getHookSettings().extensions;
+}
 
 /**
  * Map filename patterns to hook types
@@ -105,19 +118,19 @@ export async function discoverHooks(
     userHome = process.env.HOME ?? '',
     additionalPaths = [],
     includeUserHooks = true,
-    extensions = DEFAULT_EXTENSIONS,
+    extensions = getDefaultExtensions(),
   } = config;
 
   const discovered: DiscoveredHook[] = [];
   const searchPaths: Array<{ path: string; source: 'project' | 'user' | 'custom' }> = [];
 
   // 1. Project-level hooks
-  const projectHookPath = path.join(projectPath, DEFAULT_PROJECT_HOOK_DIR);
+  const projectHookPath = path.join(projectPath, getDefaultProjectHookDir());
   searchPaths.push({ path: projectHookPath, source: 'project' });
 
   // 2. User-level hooks
   if (includeUserHooks && userHome) {
-    const userHookPath = path.join(userHome, DEFAULT_USER_HOOK_DIR);
+    const userHookPath = path.join(userHome, getDefaultUserHookDir());
     searchPaths.push({ path: userHookPath, source: 'user' });
   }
 
@@ -257,6 +270,7 @@ async function executeShellHook(
   context: AnyHookContext
 ): Promise<HookResult> {
   return new Promise((resolve) => {
+    const settings = getHookSettings();
     const child = spawn(scriptPath, [], {
       env: {
         ...process.env,
@@ -264,7 +278,7 @@ async function executeShellHook(
         HOOK_TYPE: context.hookType,
         HOOK_SESSION_ID: context.sessionId,
       },
-      timeout: 10000, // 10 second timeout
+      timeout: settings.discoveryTimeoutMs,
     });
 
     let stdout = '';
@@ -377,7 +391,7 @@ export async function watchHooks(
   onChange: (hooks: DiscoveredHook[]) => void
 ): Promise<() => void> {
   const { projectPath = process.cwd() } = config;
-  const hookDir = path.join(projectPath, DEFAULT_PROJECT_HOOK_DIR);
+  const hookDir = path.join(projectPath, getDefaultProjectHookDir());
 
   try {
     // fs.watch returns an FSWatcher which is also an AsyncIterable

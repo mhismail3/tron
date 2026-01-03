@@ -12,10 +12,14 @@ import type {
   AnyHookContext,
 } from './types.js';
 import { createLogger } from '../logging/logger.js';
+import { getSettings } from '../settings/index.js';
 
 const logger = createLogger('hooks:engine');
 
-const DEFAULT_TIMEOUT = 5000; // 5 seconds
+// Get hook settings (loaded lazily on first access)
+function getHookSettings() {
+  return getSettings().hooks;
+}
 
 export class HookEngine {
   private hooks: Map<string, RegisteredHook> = new Map();
@@ -162,7 +166,8 @@ export class HookEngine {
     hook: RegisteredHook,
     context: AnyHookContext
   ): Promise<HookResult> {
-    const timeout = hook.timeout ?? DEFAULT_TIMEOUT;
+    const settings = getHookSettings();
+    const timeout = hook.timeout ?? settings.defaultTimeoutMs;
 
     const timeoutPromise = new Promise<HookResult>((_, reject) => {
       setTimeout(() => {

@@ -22,8 +22,19 @@ import { createLogger } from '../logging/logger.js';
 import { shouldRefreshTokens, refreshOAuthToken, type OAuthTokens } from '../auth/oauth.js';
 import { parseError, formatError } from '../utils/errors.js';
 import { calculateBackoffDelay, type RetryConfig } from '../utils/retry.js';
+import { getSettings } from '../settings/index.js';
 
 const logger = createLogger('anthropic');
+
+// Get settings (loaded lazily on first access)
+function getAnthropicSettings() {
+  const settings = getSettings();
+  return {
+    api: settings.api.anthropic,
+    models: settings.models,
+    retry: settings.retry,
+  };
+}
 
 // =============================================================================
 // Types
@@ -54,13 +65,16 @@ export interface AnthropicConfig {
 // Retry Defaults
 // =============================================================================
 
-/** Default retry configuration for API calls */
-const DEFAULT_RETRY_CONFIG: Required<Omit<RetryConfig, 'onRetry' | 'signal'>> = {
-  maxRetries: 5,
-  baseDelayMs: 1000,
-  maxDelayMs: 60000,
-  jitterFactor: 0.2,
-};
+/** Get default retry configuration from settings */
+function getDefaultRetryConfig(): Required<Omit<RetryConfig, 'onRetry' | 'signal'>> {
+  const { retry } = getAnthropicSettings();
+  return {
+    maxRetries: retry.maxRetries,
+    baseDelayMs: retry.baseDelayMs,
+    maxDelayMs: retry.maxDelayMs,
+    jitterFactor: retry.jitterFactor,
+  };
+}
 
 /**
  * Options for streaming requests
@@ -150,7 +164,13 @@ export const CLAUDE_MODELS = {
   },
 } as const;
 
-/** Default model for new sessions */
+/** Get default model from settings */
+export function getDefaultModel(): ClaudeModelId {
+  const { models } = getAnthropicSettings();
+  return models.default as ClaudeModelId;
+}
+
+/** Default model for new sessions (for backwards compatibility) */
 export const DEFAULT_MODEL = 'claude-opus-4-5-20251101' as ClaudeModelId;
 
 export type ClaudeModelId = keyof typeof CLAUDE_MODELS;
@@ -160,20 +180,31 @@ export type ClaudeModelId = keyof typeof CLAUDE_MODELS;
 // =============================================================================
 
 /**
- * Headers required for OAuth authentication with Anthropic API.
- * The oauth-2025-04-20 beta flag enables OAuth token support.
+ * Get OAuth headers from settings
  */
-const OAUTH_HEADERS = {
-  'accept': 'application/json',
-  'anthropic-dangerous-direct-browser-access': 'true',
-  'anthropic-beta': 'oauth-2025-04-20,interleaved-thinking-2025-05-14,fine-grained-tool-streaming-2025-05-14',
-};
+function getOAuthHeaders() {
+  const { api } = getAnthropicSettings();
+  return {
+    'accept': 'application/json',
+    'anthropic-dangerous-direct-browser-access': 'true',
+    'anthropic-beta': api.oauthBetaHeaders,
+  };
+}
+
+/**
+ * Get system prompt prefix from settings
+ */
+export function getOAuthSystemPromptPrefix(): string {
+  const { api } = getAnthropicSettings();
+  return api.systemPromptPrefix;
+}
 
 /**
  * System prompt prefix required for OAuth authentication.
  * Anthropic requires this identity statement for OAuth-authenticated requests.
+ * @deprecated Use getOAuthSystemPromptPrefix() instead
  */
-export const OAUTH_SYSTEM_PROMPT_PREFIX = 'You are Claude Code, Anthropic\'s official CLI for Claude.';
+export const OAUTH_SYSTEM_PROMPT_PREFIX = "You are Claude Code, Anthropic's official CLI for Claude.";
 
 /**
  * System prompt content block type for OAuth (uses cache control)
@@ -199,7 +230,7 @@ export class AnthropicProvider {
     this.config = config;
     this.isOAuth = config.auth.type === 'oauth';
     this.retryConfig = {
-      ...DEFAULT_RETRY_CONFIG,
+      ...getDefaultRetryConfig(),
       ...config.retry,
     };
 
@@ -226,7 +257,7 @@ export class AnthropicProvider {
         authToken: config.auth.accessToken,
         baseURL: config.baseURL,
         dangerouslyAllowBrowser: true,
-        defaultHeaders: OAUTH_HEADERS,
+        defaultHeaders: getOAuthHeaders(),
         maxRetries: sdkMaxRetries,
       });
     }
@@ -268,7 +299,7 @@ export class AnthropicProvider {
         authToken: this.tokens.accessToken,
         baseURL: this.config.baseURL,
         dangerouslyAllowBrowser: true,
-        defaultHeaders: OAUTH_HEADERS,
+        defaultHeaders: getOAuthHeaders(),
       });
     }
   }
@@ -285,8 +316,9 @@ export class AnthropicProvider {
   ): AsyncGenerator<StreamEvent> {
     await this.ensureValidTokens();
 
+    const { models } = getAnthropicSettings();
     const model = this.config.model;
-    const maxTokens = options.maxTokens ?? this.config.maxTokens ?? 4096;
+    const maxTokens = options.maxTokens ?? this.config.maxTokens ?? models.defaultMaxTokens;
 
     logger.debug('Starting stream', {
       model,
@@ -309,7 +341,7 @@ export class AnthropicProvider {
       const systemBlocks: SystemPromptBlock[] = [
         {
           type: 'text',
-          text: OAUTH_SYSTEM_PROMPT_PREFIX,
+          text: getOAuthSystemPromptPrefix(),
           cache_control: { type: 'ephemeral' },
         },
       ];
@@ -339,7 +371,7 @@ export class AnthropicProvider {
     if (options.enableThinking) {
       (params as unknown as { thinking: { type: string; budget_tokens: number } }).thinking = {
         type: 'enabled',
-        budget_tokens: options.thinkingBudget ?? 2048,
+        budget_tokens: options.thinkingBudget ?? models.defaultThinkingBudget,
       };
     }
 

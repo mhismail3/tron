@@ -5,10 +5,15 @@
  */
 import * as path from 'path';
 import * as os from 'os';
-import { createLogger, type RpcContext } from '@tron/core';
+import { createLogger, getSettings, type RpcContext } from '@tron/core';
 import { TronWebSocketServer, type WebSocketServerConfig } from './websocket.js';
 import { SessionOrchestrator, type OrchestratorConfig } from './orchestrator.js';
 import { HealthServer, type HealthServerConfig } from './health.js';
+
+// Get server settings (loaded lazily on first access)
+function getServerSettings() {
+  return getSettings().server;
+}
 
 const logger = createLogger('server');
 
@@ -326,20 +331,22 @@ export class TronServer {
 // =============================================================================
 
 async function main(): Promise<void> {
+  const settings = getServerSettings();
+
   const config: TronServerConfig = {
-    wsPort: parseInt(process.env.TRON_WS_PORT ?? '8080', 10),
-    healthPort: parseInt(process.env.TRON_HEALTH_PORT ?? '8081', 10),
-    host: process.env.TRON_HOST,
-    sessionsDir: process.env.TRON_SESSIONS_DIR,
-    memoryDbPath: process.env.TRON_MEMORY_DB,
-    defaultModel: process.env.TRON_DEFAULT_MODEL,
-    defaultProvider: process.env.TRON_DEFAULT_PROVIDER,
+    wsPort: parseInt(process.env.TRON_WS_PORT ?? String(settings.wsPort), 10),
+    healthPort: parseInt(process.env.TRON_HEALTH_PORT ?? String(settings.healthPort), 10),
+    host: process.env.TRON_HOST ?? settings.host,
+    sessionsDir: process.env.TRON_SESSIONS_DIR ?? settings.sessionsDir,
+    memoryDbPath: process.env.TRON_MEMORY_DB ?? settings.memoryDbPath,
+    defaultModel: process.env.TRON_DEFAULT_MODEL ?? settings.defaultModel,
+    defaultProvider: process.env.TRON_DEFAULT_PROVIDER ?? settings.defaultProvider,
     maxConcurrentSessions: process.env.TRON_MAX_SESSIONS
       ? parseInt(process.env.TRON_MAX_SESSIONS, 10)
-      : undefined,
+      : settings.maxConcurrentSessions,
     heartbeatInterval: process.env.TRON_HEARTBEAT_INTERVAL
       ? parseInt(process.env.TRON_HEARTBEAT_INTERVAL, 10)
-      : undefined,
+      : settings.heartbeatIntervalMs,
   };
 
   const server = new TronServer(config);

@@ -11,7 +11,10 @@ import { App } from './app.js';
 import type { CliConfig } from './types.js';
 import { getAuth, login, logout } from './auth/index.js';
 import { initializeDebug, debugLog } from './debug/index.js';
-import { DEFAULT_MODEL } from '@tron/core';
+import { DEFAULT_MODEL, preloadSettings } from '@tron/core';
+
+// Start settings preload immediately (runs in parallel with arg parsing)
+const settingsPromise = preloadSettings();
 
 // =============================================================================
 // Argument Parsing
@@ -287,8 +290,8 @@ async function runInteractive(config: CliConfig): Promise<void> {
   // \x1b[3J = clear scrollback buffer (optional, works in most modern terminals)
   process.stdout.write('\x1b[2J\x1b[H\x1b[3J');
 
-  // Check authentication
-  const auth = await getAuth();
+  // Ensure settings are loaded before render (runs in parallel with auth check)
+  const [auth] = await Promise.all([getAuth(), settingsPromise]);
   if (!auth) {
     console.log('\nNot authenticated.\n');
     console.log('Run "tron login" to authenticate with Claude Max,');

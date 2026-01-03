@@ -7,24 +7,24 @@
 import { spawn } from 'child_process';
 import type { TronTool, TronToolResult } from '../types/index.js';
 import { createLogger } from '../logging/logger.js';
+import { getSettings } from '../settings/index.js';
 
 const logger = createLogger('tool:bash');
 
-const DEFAULT_TIMEOUT = 120000; // 2 minutes
-const MAX_OUTPUT_LENGTH = 30000;
+// Get settings (loaded lazily on first access)
+function getBashSettings() {
+  return getSettings().tools.bash;
+}
 
-// Dangerous command patterns
-const DANGEROUS_PATTERNS = [
-  /^rm\s+(-rf?|--force)\s+\/\s*$/i,
-  /^rm\s+-rf?\s+\/\s*$/i,
-  /rm\s+-rf?\s+\//i,
-  /^sudo\s+/i,
-  /^chmod\s+777\s+\/\s*$/i,
-  /^mkfs\./i,
-  /^dd\s+if=.*of=\/dev\//i,
-  />\s*\/dev\/sd[a-z]/i,
-  /^:\(\)\s*\{\s*:\|\s*:\s*&\s*\}\s*;\s*:/,  // Fork bomb
-];
+// Compile dangerous patterns from settings (cached after first call)
+let compiledPatterns: RegExp[] | null = null;
+function getDangerousPatterns(): RegExp[] {
+  if (!compiledPatterns) {
+    const settings = getBashSettings();
+    compiledPatterns = settings.dangerousPatterns.map(p => new RegExp(p, 'i'));
+  }
+  return compiledPatterns;
+}
 
 export interface BashToolConfig {
   workingDirectory: string;
@@ -79,9 +79,10 @@ export class BashTool implements TronTool {
     }
 
     const command = args.command as string;
+    const settings = getBashSettings();
     const timeout = Math.min(
-      (args.timeout as number) ?? this.config.defaultTimeout ?? DEFAULT_TIMEOUT,
-      600000
+      (args.timeout as number) ?? this.config.defaultTimeout ?? settings.defaultTimeoutMs,
+      settings.maxTimeoutMs
     );
     const description = args.description as string | undefined;
 
@@ -126,8 +127,9 @@ export class BashTool implements TronTool {
         }
 
         // Truncate if needed
-        if (output.length > MAX_OUTPUT_LENGTH) {
-          output = output.substring(0, MAX_OUTPUT_LENGTH) + '\n... [output truncated]';
+        const maxOutput = settings.maxOutputLength;
+        if (output.length > maxOutput) {
+          output = output.substring(0, maxOutput) + '\n... [output truncated]';
         }
 
         return {
@@ -162,8 +164,9 @@ export class BashTool implements TronTool {
 
       // Truncate if too long
       let truncated = false;
-      if (output.length > MAX_OUTPUT_LENGTH) {
-        output = output.substring(0, MAX_OUTPUT_LENGTH) + '\n... [output truncated]';
+      const maxOutput = settings.maxOutputLength;
+      if (output.length > maxOutput) {
+        output = output.substring(0, maxOutput) + '\n... [output truncated]';
         truncated = true;
       }
 
@@ -200,7 +203,8 @@ export class BashTool implements TronTool {
   }
 
   private checkDangerous(command: string): string | null {
-    for (const pattern of DANGEROUS_PATTERNS) {
+    const patterns = getDangerousPatterns();
+    for (const pattern of patterns) {
       if (pattern.test(command)) {
         return `Potentially destructive command pattern detected`;
       }

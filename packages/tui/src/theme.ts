@@ -3,8 +3,37 @@
  *
  * Unified color theme based on forest green #123524.
  * Uses chalk for terminal color support with hex colors.
+ * Theme values are loaded from settings for customization.
+ *
+ * PERFORMANCE: All UI settings are loaded once and cached.
+ * Call preloadSettings() at app startup for best performance.
  */
 import chalk from 'chalk';
+import { getSettings, type UiSettings } from '@tron/core';
+
+// =============================================================================
+// Unified Settings Cache (single load, all UI settings)
+// =============================================================================
+
+/**
+ * Single cached UI settings object - loads all settings at once
+ * This avoids multiple separate getSettings() calls
+ */
+let cachedUiSettings: UiSettings | null = null;
+
+function getUiSettings(): UiSettings {
+  if (!cachedUiSettings) {
+    cachedUiSettings = getSettings().ui;
+  }
+  return cachedUiSettings;
+}
+
+// Direct property accessors (no separate caches needed)
+function getPalette() { return getUiSettings().palette; }
+function getIcons() { return getUiSettings().icons; }
+function getThinkingAnimation() { return getUiSettings().thinkingAnimation; }
+function getInputSettings() { return getUiSettings().input; }
+function getMenuSettings() { return getUiSettings().menu; }
 
 // =============================================================================
 // Base Color Palette
@@ -12,89 +41,93 @@ import chalk from 'chalk';
 
 /**
  * Core color values derived from the primary forest green #123524
+ * Now loads from settings for user customization
  */
 export const palette = {
   // Primary forest green family
-  primary: '#123524',        // Base forest green
-  primaryLight: '#1a4a32',   // Lighter forest green
-  primaryBright: '#2d7a4e',  // Bright forest green for emphasis
-  primaryVivid: '#34d399',   // Vivid green for highlights (emerald-400)
+  get primary() { return getPalette().primary; },
+  get primaryLight() { return getPalette().primaryLight; },
+  get primaryBright() { return getPalette().primaryBright; },
+  get primaryVivid() { return getPalette().primaryVivid; },
 
   // Extended green palette for variety
-  emerald: '#10b981',        // Emerald for accents
-  mint: '#6ee7b7',           // Mint for soft highlights
-  sage: '#86efac',           // Sage for very light accents
+  get emerald() { return getPalette().emerald; },
+  get mint() { return getPalette().mint; },
+  get sage() { return getPalette().sage; },
 
   // Neutral tones with green undertones
-  dark: '#0a1f15',           // Very dark green-black
-  muted: '#1f3d2c',          // Muted forest
-  subtle: '#2d5a40',         // Subtle green for borders
+  get dark() { return getPalette().dark; },
+  get muted() { return getPalette().muted; },
+  get subtle() { return getPalette().subtle; },
 
   // Text colors
-  textBright: '#ecfdf5',     // Almost white with green tint
-  textPrimary: '#d1fae5',    // Light green-white for main text
-  textSecondary: '#a7f3d0',  // Softer green for secondary text
-  textMuted: '#6b8f7a',      // Muted green-gray for less important text
-  textDim: '#4a6b58',        // Dim green-gray
+  get textBright() { return getPalette().textBright; },
+  get textPrimary() { return getPalette().textPrimary; },
+  get textSecondary() { return getPalette().textSecondary; },
+  get textMuted() { return getPalette().textMuted; },
+  get textDim() { return getPalette().textDim; },
 
   // Status bar (uniform, 10% darker than accent)
-  statusBarText: '#2eb888',  // ~10% darker emerald for status bar items
+  get statusBarText() { return getPalette().statusBarText; },
 
   // Semantic colors (kept distinct for UX clarity)
-  success: '#22c55e',        // Green (fits theme)
-  warning: '#f59e0b',        // Amber (kept for visibility)
-  error: '#ef4444',          // Red (kept for safety)
-  info: '#38bdf8',           // Sky blue (kept for distinction)
+  get success() { return getPalette().success; },
+  get warning() { return getPalette().warning; },
+  get error() { return getPalette().error; },
+  get info() { return getPalette().info; },
 } as const;
 
 // =============================================================================
 // UI Icons - Elegant Unicode Characters
 // =============================================================================
 
+
 /**
  * Consistent icon system for different UI states and elements
+ * Now loads from settings for user customization
  */
 export const icons = {
   // Prompt/Input
-  prompt: '›',               // User input prompt
+  get prompt() { return getIcons().prompt; },
 
   // Message roles
-  user: '›',                 // User message prefix
-  assistant: '◆',            // Assistant response (filled diamond)
-  system: '◇',               // System message (outline diamond)
+  get user() { return getIcons().user; },
+  get assistant() { return getIcons().assistant; },
+  get system() { return getIcons().system; },
 
   // Tool execution states
-  toolRunning: '◇',          // Tool in progress (outline diamond)
-  toolSuccess: '◆',          // Tool completed (filled diamond)
-  toolError: '◈',            // Tool error (diamond with center)
+  get toolRunning() { return getIcons().toolRunning; },
+  get toolSuccess() { return getIcons().toolSuccess; },
+  get toolError() { return getIcons().toolError; },
 
   // Status indicators
-  ready: '◆',                // Ready state
-  thinking: '◇',             // Thinking/processing
-  streaming: '◆',            // Streaming response
+  get ready() { return getIcons().ready; },
+  get thinking() { return getIcons().thinking; },
+  get streaming() { return getIcons().streaming; },
 
   // List markers
-  bullet: '•',               // Standard bullet
-  arrow: '→',                // Arrow for navigation
-  check: '✓',                // Success/completed
+  get bullet() { return getIcons().bullet; },
+  get arrow() { return getIcons().arrow; },
+  get check() { return getIcons().check; },
 
   // Bracketed paste indicators
-  pasteOpen: '⌈',            // Opening bracket for paste
-  pasteClose: '⌋',           // Closing bracket for paste
+  get pasteOpen() { return getIcons().pasteOpen; },
+  get pasteClose() { return getIcons().pasteClose; },
 } as const;
 
 // =============================================================================
 // Thinking Indicator Bars
 // =============================================================================
 
+
 /**
  * Bar characters for pulsing thinking animation
- * Arranged from shortest to tallest for wave effect
+ * Now loads from settings for user customization
  */
 export const thinkingBars = {
-  chars: ['▁', '▂', '▃', '▄', '▅'] as const,
-  width: 4,                  // Number of bars to show
-  intervalMs: 120,           // Animation speed
+  get chars() { return getThinkingAnimation().chars; },
+  get width() { return getThinkingAnimation().width; },
+  get intervalMs() { return getThinkingAnimation().intervalMs; },
 } as const;
 
 // =============================================================================
@@ -363,8 +396,59 @@ export function formatFilePaste(filename: string, type: 'image' | 'file' = 'file
   return styled.pasteIndicator(`[${type}: ${filename}]`);
 }
 
+
 /**
  * Check if input looks like a paste (multiple chars at once)
- * Threshold: more than 3 characters arriving at once
+ * Threshold loaded from settings for customization
+ */
+export function getPasteThreshold(): number {
+  return getInputSettings().pasteThreshold;
+}
+
+/**
+ * @deprecated Use getPasteThreshold() instead. This constant is kept for backwards compatibility.
  */
 export const PASTE_THRESHOLD = 3;
+
+/**
+ * Get max history entries for prompt input
+ */
+export function getMaxHistory(): number {
+  return getInputSettings().maxHistory;
+}
+
+/**
+ * Get default terminal width fallback
+ */
+export function getDefaultTerminalWidth(): number {
+  return getInputSettings().defaultTerminalWidth;
+}
+
+/**
+ * Get narrow mode threshold
+ */
+export function getNarrowThreshold(): number {
+  return getInputSettings().narrowThreshold;
+}
+
+/**
+ * Get visible lines for narrow mode
+ */
+export function getNarrowVisibleLines(): number {
+  return getInputSettings().narrowVisibleLines;
+}
+
+/**
+ * Get visible lines for normal mode
+ */
+export function getNormalVisibleLines(): number {
+  return getInputSettings().normalVisibleLines;
+}
+
+
+/**
+ * Get maximum visible commands in slash menu
+ */
+export function getMaxVisibleCommands(): number {
+  return getMenuSettings().maxVisibleCommands;
+}

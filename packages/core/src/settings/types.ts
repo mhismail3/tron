@@ -1,0 +1,433 @@
+/**
+ * @fileoverview Settings Type Definitions
+ *
+ * Comprehensive type definitions for all Tron configurable settings.
+ * These types define the structure of ~/.tron/settings.json.
+ */
+
+// =============================================================================
+// API Settings
+// =============================================================================
+
+/**
+ * Anthropic API configuration
+ */
+export interface AnthropicApiSettings {
+  /** OAuth authorization URL */
+  authUrl: string;
+  /** OAuth token exchange URL */
+  tokenUrl: string;
+  /** OAuth client ID */
+  clientId: string;
+  /** OAuth scopes */
+  scopes: string[];
+  /** System prompt prefix required for OAuth */
+  systemPromptPrefix: string;
+  /** Beta headers for OAuth requests */
+  oauthBetaHeaders: string;
+  /** Token expiry buffer in seconds (refresh before actual expiry) */
+  tokenExpiryBufferSeconds: number;
+}
+
+/**
+ * API settings container
+ */
+export interface ApiSettings {
+  anthropic: AnthropicApiSettings;
+}
+
+// =============================================================================
+// Model Settings
+// =============================================================================
+
+/**
+ * Model configuration
+ */
+export interface ModelSettings {
+  /** Default model ID */
+  default: string;
+  /** Default max output tokens */
+  defaultMaxTokens: number;
+  /** Default thinking budget tokens */
+  defaultThinkingBudget: number;
+}
+
+// =============================================================================
+// Retry Settings
+// =============================================================================
+
+/**
+ * Retry configuration for API calls
+ */
+export interface RetrySettings {
+  /** Maximum number of retry attempts */
+  maxRetries: number;
+  /** Base delay between retries in milliseconds */
+  baseDelayMs: number;
+  /** Maximum delay between retries in milliseconds */
+  maxDelayMs: number;
+  /** Jitter factor to prevent thundering herd (0-1) */
+  jitterFactor: number;
+}
+
+// =============================================================================
+// Tool Settings
+// =============================================================================
+
+/**
+ * Bash tool configuration
+ */
+export interface BashToolSettings {
+  /** Default command timeout in milliseconds */
+  defaultTimeoutMs: number;
+  /** Maximum allowed timeout in milliseconds */
+  maxTimeoutMs: number;
+  /** Maximum output length in characters */
+  maxOutputLength: number;
+  /** Dangerous command patterns (regex strings) */
+  dangerousPatterns: string[];
+}
+
+/**
+ * Read tool configuration
+ */
+export interface ReadToolSettings {
+  /** Default number of lines to read */
+  defaultLimitLines: number;
+  /** Maximum line length before truncation */
+  maxLineLength: number;
+}
+
+/**
+ * Find tool configuration
+ */
+export interface FindToolSettings {
+  /** Default maximum results */
+  defaultMaxResults: number;
+  /** Default maximum directory depth */
+  defaultMaxDepth: number;
+}
+
+/**
+ * Grep tool configuration
+ */
+export interface GrepToolSettings {
+  /** Default maximum results */
+  defaultMaxResults: number;
+  /** Maximum file size to search in bytes */
+  maxFileSizeBytes: number;
+  /** Binary file extensions to skip */
+  binaryExtensions: string[];
+  /** Directories to skip during search */
+  skipDirectories: string[];
+}
+
+/**
+ * All tool settings
+ */
+export interface ToolSettings {
+  bash: BashToolSettings;
+  read: ReadToolSettings;
+  find: FindToolSettings;
+  grep: GrepToolSettings;
+}
+
+// =============================================================================
+// Context Settings
+// =============================================================================
+
+/**
+ * Context compactor configuration
+ */
+export interface CompactorSettings {
+  /** Maximum tokens before compaction is triggered */
+  maxTokens: number;
+  /** Threshold ratio to trigger compaction (0-1) */
+  compactionThreshold: number;
+  /** Target token count after compaction */
+  targetTokens: number;
+  /** Number of recent message pairs to preserve */
+  preserveRecentCount: number;
+  /** Characters per token estimate */
+  charsPerToken: number;
+}
+
+/**
+ * Memory store configuration
+ */
+export interface MemorySettings {
+  /** Maximum entries in memory cache */
+  maxEntries: number;
+}
+
+/**
+ * Context settings container
+ */
+export interface ContextSettings {
+  compactor: CompactorSettings;
+  memory: MemorySettings;
+}
+
+// =============================================================================
+// Hook Settings
+// =============================================================================
+
+/**
+ * Hook system configuration
+ */
+export interface HookSettings {
+  /** Default hook execution timeout in milliseconds */
+  defaultTimeoutMs: number;
+  /** Hook discovery timeout in milliseconds */
+  discoveryTimeoutMs: number;
+  /** Project-level hooks directory (relative to project root) */
+  projectDir: string;
+  /** User-level hooks directory (relative to home) */
+  userDir: string;
+  /** Supported hook file extensions */
+  extensions: string[];
+}
+
+// =============================================================================
+// Server Settings
+// =============================================================================
+
+/**
+ * Server configuration
+ */
+export interface ServerSettings {
+  /** WebSocket server port */
+  wsPort: number;
+  /** Health check server port */
+  healthPort: number;
+  /** Server host binding */
+  host: string;
+  /** WebSocket heartbeat interval in milliseconds */
+  heartbeatIntervalMs: number;
+  /** Session inactivity timeout in milliseconds */
+  sessionTimeoutMs: number;
+  /** Maximum concurrent sessions */
+  maxConcurrentSessions: number;
+  /** Sessions storage directory (relative to ~/.tron) */
+  sessionsDir: string;
+  /** Memory database path (relative to ~/.tron) */
+  memoryDbPath: string;
+  /** Default model for server sessions */
+  defaultModel: string;
+  /** Default provider */
+  defaultProvider: string;
+}
+
+// =============================================================================
+// Tmux Settings
+// =============================================================================
+
+/**
+ * Tmux integration configuration
+ */
+export interface TmuxSettings {
+  /** Command execution timeout in milliseconds */
+  commandTimeoutMs: number;
+  /** Polling interval in milliseconds */
+  pollingIntervalMs: number;
+}
+
+// =============================================================================
+// Session Settings
+// =============================================================================
+
+/**
+ * Session configuration
+ */
+export interface SessionSettings {
+  /** Git worktree command timeout in milliseconds */
+  worktreeTimeoutMs: number;
+}
+
+// =============================================================================
+// UI Theme Settings
+// =============================================================================
+
+/**
+ * Color palette for the UI
+ */
+export interface PaletteSettings {
+  /** Primary forest green */
+  primary: string;
+  /** Lighter forest green */
+  primaryLight: string;
+  /** Bright forest green for emphasis */
+  primaryBright: string;
+  /** Vivid green for highlights */
+  primaryVivid: string;
+  /** Emerald for accents */
+  emerald: string;
+  /** Mint for soft highlights */
+  mint: string;
+  /** Sage for very light accents */
+  sage: string;
+  /** Very dark green-black */
+  dark: string;
+  /** Muted forest */
+  muted: string;
+  /** Subtle green for borders */
+  subtle: string;
+  /** Almost white with green tint */
+  textBright: string;
+  /** Light green-white for main text */
+  textPrimary: string;
+  /** Softer green for secondary text */
+  textSecondary: string;
+  /** Muted green-gray for less important text */
+  textMuted: string;
+  /** Dim green-gray */
+  textDim: string;
+  /** Status bar text color */
+  statusBarText: string;
+  /** Success color */
+  success: string;
+  /** Warning color */
+  warning: string;
+  /** Error color */
+  error: string;
+  /** Info color */
+  info: string;
+}
+
+/**
+ * UI icon characters
+ */
+export interface IconSettings {
+  /** User input prompt */
+  prompt: string;
+  /** User message prefix */
+  user: string;
+  /** Assistant response */
+  assistant: string;
+  /** System message */
+  system: string;
+  /** Tool in progress */
+  toolRunning: string;
+  /** Tool completed */
+  toolSuccess: string;
+  /** Tool error */
+  toolError: string;
+  /** Ready state */
+  ready: string;
+  /** Thinking/processing */
+  thinking: string;
+  /** Streaming response */
+  streaming: string;
+  /** Standard bullet */
+  bullet: string;
+  /** Arrow for navigation */
+  arrow: string;
+  /** Success/completed */
+  check: string;
+  /** Opening bracket for paste */
+  pasteOpen: string;
+  /** Closing bracket for paste */
+  pasteClose: string;
+}
+
+/**
+ * Thinking animation configuration
+ */
+export interface ThinkingAnimationSettings {
+  /** Animation bar characters */
+  chars: string[];
+  /** Number of bars to display */
+  width: number;
+  /** Animation frame interval in milliseconds */
+  intervalMs: number;
+}
+
+/**
+ * Input configuration
+ */
+export interface InputSettings {
+  /** Characters threshold to detect paste */
+  pasteThreshold: number;
+  /** Maximum prompt history entries */
+  maxHistory: number;
+  /** Default terminal width fallback */
+  defaultTerminalWidth: number;
+  /** Terminal width threshold for narrow mode */
+  narrowThreshold: number;
+  /** Maximum visible lines in narrow mode */
+  narrowVisibleLines: number;
+  /** Maximum visible lines in normal mode */
+  normalVisibleLines: number;
+}
+
+/**
+ * Menu configuration
+ */
+export interface MenuSettings {
+  /** Maximum visible commands in slash menu */
+  maxVisibleCommands: number;
+}
+
+/**
+ * UI settings container
+ */
+export interface UiSettings {
+  /** Theme name (reserved for future use) */
+  theme: string;
+  /** Color palette */
+  palette: PaletteSettings;
+  /** Icon characters */
+  icons: IconSettings;
+  /** Thinking animation */
+  thinkingAnimation: ThinkingAnimationSettings;
+  /** Input configuration */
+  input: InputSettings;
+  /** Menu configuration */
+  menu: MenuSettings;
+}
+
+// =============================================================================
+// Root Settings
+// =============================================================================
+
+/**
+ * Complete Tron settings structure
+ */
+export interface TronSettings {
+  /** Settings schema version */
+  version: string;
+  /** Application name */
+  name: string;
+  /** API configuration */
+  api: ApiSettings;
+  /** Model configuration */
+  models: ModelSettings;
+  /** Retry configuration */
+  retry: RetrySettings;
+  /** Tool configuration */
+  tools: ToolSettings;
+  /** Context configuration */
+  context: ContextSettings;
+  /** Hook configuration */
+  hooks: HookSettings;
+  /** Server configuration */
+  server: ServerSettings;
+  /** Tmux configuration */
+  tmux: TmuxSettings;
+  /** Session configuration */
+  session: SessionSettings;
+  /** UI configuration */
+  ui: UiSettings;
+}
+
+/**
+ * Deep partial type for settings overrides
+ */
+export type DeepPartial<T> = {
+  [P in keyof T]?: T[P] extends object ? DeepPartial<T[P]> : T[P];
+};
+
+/**
+ * User settings override (partial version of TronSettings)
+ */
+export type UserSettings = DeepPartial<TronSettings>;

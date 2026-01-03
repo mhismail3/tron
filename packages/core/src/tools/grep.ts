@@ -9,23 +9,32 @@ import * as fs from 'fs/promises';
 import * as path from 'path';
 import type { TronTool, TronToolResult } from '../types/index.js';
 import { createLogger } from '../logging/logger.js';
+import { getSettings } from '../settings/index.js';
 
 const logger = createLogger('tool:grep');
 
-const DEFAULT_MAX_RESULTS = 100;
-const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
+// Get grep tool settings (loaded lazily on first access)
+function getGrepSettings() {
+  return getSettings().tools.grep;
+}
 
-// Binary file extensions to skip
-const BINARY_EXTENSIONS = new Set([
-  '.png', '.jpg', '.jpeg', '.gif', '.bmp', '.ico', '.webp', '.svg',
-  '.pdf', '.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx',
-  '.zip', '.tar', '.gz', '.rar', '.7z',
-  '.exe', '.dll', '.so', '.dylib',
-  '.woff', '.woff2', '.ttf', '.eot',
-  '.mp3', '.mp4', '.avi', '.mov', '.wav',
-  '.o', '.a', '.lib', '.obj',
-  '.pyc', '.class', '.jar',
-]);
+// Cache binary extensions set (built from settings on first access)
+let binaryExtensionsSet: Set<string> | null = null;
+function getBinaryExtensions(): Set<string> {
+  if (!binaryExtensionsSet) {
+    binaryExtensionsSet = new Set(getGrepSettings().binaryExtensions);
+  }
+  return binaryExtensionsSet;
+}
+
+// Cache skip directories set (built from settings on first access)
+let skipDirectoriesSet: Set<string> | null = null;
+function getSkipDirectories(): Set<string> {
+  if (!skipDirectoriesSet) {
+    skipDirectoriesSet = new Set(getGrepSettings().skipDirectories);
+  }
+  return skipDirectoriesSet;
+}
 
 export interface GrepToolConfig {
   workingDirectory: string;
@@ -79,12 +88,13 @@ export class GrepTool implements TronTool {
   }
 
   async execute(args: Record<string, unknown>): Promise<TronToolResult> {
+    const settings = getGrepSettings();
     const pattern = args.pattern as string;
     const searchPath = this.resolvePath((args.path as string) || '.');
     const globPattern = args.glob as string | undefined;
     const ignoreCase = (args.ignoreCase as boolean) ?? false;
     const contextLines = (args.context as number) ?? 0;
-    const maxResults = (args.maxResults as number) ?? DEFAULT_MAX_RESULTS;
+    const maxResults = (args.maxResults as number) ?? settings.defaultMaxResults;
 
     logger.debug('Grep search', { pattern, searchPath, globPattern, ignoreCase });
 
@@ -157,8 +167,9 @@ export class GrepTool implements TronTool {
     }
 
     try {
+      const settings = getGrepSettings();
       const stat = await fs.stat(filePath);
-      if (stat.size > MAX_FILE_SIZE) {
+      if (stat.size > settings.maxFileSizeBytes) {
         logger.debug('Skipping large file', { filePath, size: stat.size });
         return;
       }
@@ -216,11 +227,8 @@ export class GrepTool implements TronTool {
 
       // Skip hidden directories and common non-code directories
       if (entry.isDirectory()) {
-        if (entry.name.startsWith('.') ||
-            entry.name === 'node_modules' ||
-            entry.name === '__pycache__' ||
-            entry.name === 'dist' ||
-            entry.name === 'build') {
+        const skipDirs = getSkipDirectories();
+        if (entry.name.startsWith('.') || skipDirs.has(entry.name)) {
           continue;
         }
         await this.searchDirectory(fullPath, regex, matches, maxResults, globPattern, contextLines);
@@ -244,7 +252,7 @@ export class GrepTool implements TronTool {
 
   private isBinaryFile(filePath: string): boolean {
     const ext = path.extname(filePath).toLowerCase();
-    return BINARY_EXTENSIONS.has(ext);
+    return getBinaryExtensions().has(ext);
   }
 
   private formatMatches(matches: GrepMatch[], hasContext: boolean): string {

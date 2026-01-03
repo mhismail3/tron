@@ -7,8 +7,14 @@
 
 import crypto from 'crypto';
 import { createLogger } from '../logging/logger.js';
+import { getSettings } from '../settings/index.js';
 
 const logger = createLogger('oauth');
+
+// Get OAuth settings (loaded lazily on first access)
+function getOAuthSettings() {
+  return getSettings().api.anthropic;
+}
 
 // =============================================================================
 // Types
@@ -46,22 +52,33 @@ export class OAuthError extends Error {
 }
 
 // =============================================================================
-// Constants
+// Settings Accessors
 // =============================================================================
 
-// Anthropic OAuth endpoints
-const ANTHROPIC_AUTH_URL = 'https://claude.ai/oauth/authorize';
-const ANTHROPIC_TOKEN_URL = 'https://console.anthropic.com/v1/oauth/token';
+/** Get Anthropic auth URL from settings */
+function getAuthUrl(): string {
+  return getOAuthSettings().authUrl;
+}
 
-// Client ID for Tron (public client, no secret required)
-// This would be registered with Anthropic for production use
-const TRON_CLIENT_ID = process.env.ANTHROPIC_CLIENT_ID ?? 'tron-agent';
+/** Get Anthropic token URL from settings */
+function getTokenUrl(): string {
+  return getOAuthSettings().tokenUrl;
+}
 
-// OAuth scopes
-const OAUTH_SCOPES = ['user:inference', 'user:profile'];
+/** Get OAuth client ID from settings (env var takes precedence) */
+function getClientId(): string {
+  return process.env.ANTHROPIC_CLIENT_ID ?? getOAuthSettings().clientId;
+}
 
-// Token expiry buffer (5 minutes) - refresh before actual expiry
-const EXPIRY_BUFFER_SECONDS = 300;
+/** Get OAuth scopes from settings */
+function getScopes(): string[] {
+  return getOAuthSettings().scopes;
+}
+
+/** Get token expiry buffer from settings */
+function getExpiryBuffer(): number {
+  return getOAuthSettings().tokenExpiryBufferSeconds;
+}
 
 // =============================================================================
 // PKCE Functions
@@ -101,20 +118,24 @@ export function generatePKCE(): PKCEPair {
  * @returns Full authorization URL to open in browser
  */
 export function getAuthorizationUrl(challenge: string): string {
+  const clientId = getClientId();
+  const scopes = getScopes();
+  const authUrl = getAuthUrl();
+
   const params = new URLSearchParams({
-    client_id: TRON_CLIENT_ID,
+    client_id: clientId,
     redirect_uri: 'urn:ietf:wg:oauth:2.0:oob', // OOB for CLI apps
     response_type: 'code',
-    scope: OAUTH_SCOPES.join(' '),
+    scope: scopes.join(' '),
     code_challenge: challenge,
     code_challenge_method: 'S256',
   });
 
-  const url = `${ANTHROPIC_AUTH_URL}?${params.toString()}`;
+  const url = `${authUrl}?${params.toString()}`;
 
   logger.debug('Generated authorization URL', {
-    clientId: TRON_CLIENT_ID,
-    scopes: OAUTH_SCOPES,
+    clientId,
+    scopes,
   });
 
   return url;
@@ -138,14 +159,18 @@ export async function exchangeCodeForTokens(
 ): Promise<OAuthTokens> {
   logger.info('Exchanging authorization code for tokens');
 
+  const clientId = getClientId();
+  const tokenUrl = getTokenUrl();
+  const expiryBuffer = getExpiryBuffer();
+
   const body = new URLSearchParams({
     grant_type: 'authorization_code',
     code,
     code_verifier: verifier,
-    client_id: TRON_CLIENT_ID,
+    client_id: clientId,
   });
 
-  const response = await fetch(ANTHROPIC_TOKEN_URL, {
+  const response = await fetch(tokenUrl, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/x-www-form-urlencoded',
@@ -174,7 +199,7 @@ export async function exchangeCodeForTokens(
   };
 
   // Calculate expiry with buffer (refresh before actual expiry)
-  const expiresAt = Date.now() + (data.expires_in - EXPIRY_BUFFER_SECONDS) * 1000;
+  const expiresAt = Date.now() + (data.expires_in - expiryBuffer) * 1000;
 
   logger.info('Token exchange successful', {
     expiresIn: data.expires_in,
@@ -202,13 +227,17 @@ export async function exchangeCodeForTokens(
 export async function refreshOAuthToken(refreshToken: string): Promise<OAuthTokens> {
   logger.info('Refreshing OAuth token');
 
+  const clientId = getClientId();
+  const tokenUrl = getTokenUrl();
+  const expiryBuffer = getExpiryBuffer();
+
   const body = new URLSearchParams({
     grant_type: 'refresh_token',
     refresh_token: refreshToken,
-    client_id: TRON_CLIENT_ID,
+    client_id: clientId,
   });
 
-  const response = await fetch(ANTHROPIC_TOKEN_URL, {
+  const response = await fetch(tokenUrl, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/x-www-form-urlencoded',
@@ -236,7 +265,7 @@ export async function refreshOAuthToken(refreshToken: string): Promise<OAuthToke
     expires_in: number;
   };
 
-  const expiresAt = Date.now() + (data.expires_in - EXPIRY_BUFFER_SECONDS) * 1000;
+  const expiresAt = Date.now() + (data.expires_in - expiryBuffer) * 1000;
 
   logger.info('Token refresh successful', {
     expiresIn: data.expires_in,

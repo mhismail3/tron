@@ -9,11 +9,14 @@ import * as fs from 'fs/promises';
 import * as path from 'path';
 import type { TronTool, TronToolResult } from '../types/index.js';
 import { createLogger } from '../logging/logger.js';
+import { getSettings } from '../settings/index.js';
 
 const logger = createLogger('tool:find');
 
-const DEFAULT_MAX_RESULTS = 100;
-const DEFAULT_MAX_DEPTH = 10;
+// Get find tool settings (loaded lazily on first access)
+function getFindSettings() {
+  return getSettings().tools.find;
+}
 
 export interface FindToolConfig {
   workingDirectory: string;
@@ -79,14 +82,15 @@ export class FindTool implements TronTool {
   }
 
   async execute(args: Record<string, unknown>): Promise<TronToolResult> {
+    const settings = getFindSettings();
     const pattern = args.pattern as string;
     const searchPath = this.resolvePath((args.path as string) || '.');
     const typeFilter = (args.type as 'file' | 'directory' | 'all') ?? 'all';
-    const maxDepth = (args.maxDepth as number) ?? DEFAULT_MAX_DEPTH;
+    const maxDepth = (args.maxDepth as number) ?? settings.defaultMaxDepth;
     const excludePatterns = (args.exclude as string[]) ?? [];
     const showSize = (args.showSize as boolean) ?? false;
     const sortByTime = (args.sortByTime as boolean) ?? false;
-    const maxResults = (args.maxResults as number) ?? DEFAULT_MAX_RESULTS;
+    const maxResults = (args.maxResults as number) ?? settings.defaultMaxResults;
 
     logger.debug('Find search', { pattern, searchPath, typeFilter, maxDepth });
 

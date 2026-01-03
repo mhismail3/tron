@@ -8,11 +8,14 @@ import * as fs from 'fs/promises';
 import * as path from 'path';
 import type { TronTool, TronToolResult } from '../types/index.js';
 import { createLogger } from '../logging/logger.js';
+import { getSettings } from '../settings/index.js';
 
 const logger = createLogger('tool:read');
 
-const MAX_LINE_LENGTH = 2000;
-const DEFAULT_LIMIT = 2000;
+// Get read tool settings (loaded lazily on first access)
+function getReadSettings() {
+  return getSettings().tools.read;
+}
 
 export interface ReadToolConfig {
   workingDirectory: string;
@@ -47,9 +50,10 @@ export class ReadTool implements TronTool {
   }
 
   async execute(args: Record<string, unknown>): Promise<TronToolResult> {
+    const settings = getReadSettings();
     const filePath = this.resolvePath(args.file_path as string);
     const offset = (args.offset as number | undefined) ?? 0;
-    const limit = (args.limit as number | undefined) ?? DEFAULT_LIMIT;
+    const limit = (args.limit as number | undefined) ?? settings.defaultLimitLines;
 
     logger.debug('Reading file', { filePath, offset, limit });
 
@@ -64,10 +68,11 @@ export class ReadTool implements TronTool {
       const selectedLines = lines.slice(startLine, endLine);
 
       // Format with line numbers and truncate long lines
+      const maxLineLength = settings.maxLineLength;
       const formatted = selectedLines.map((line, idx) => {
         const lineNum = startLine + idx + 1;
-        const truncatedLine = line.length > MAX_LINE_LENGTH
-          ? line.substring(0, MAX_LINE_LENGTH) + '... [truncated]'
+        const truncatedLine = line.length > maxLineLength
+          ? line.substring(0, maxLineLength) + '... [truncated]'
           : line;
         return `${String(lineNum).padStart(6)}→${truncatedLine}`;
       }).join('\n');
