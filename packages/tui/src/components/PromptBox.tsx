@@ -8,7 +8,7 @@ import React from 'react';
 import { Box, useStdout } from 'ink';
 import { MacOSInput } from './MacOSInput.js';
 import type { InputAreaProps } from '../types.js';
-import { inkColors } from '../theme.js';
+import { inkColors, icons } from '../theme.js';
 
 export function PromptBox({
   value,
@@ -22,8 +22,14 @@ export function PromptBox({
   const { stdout } = useStdout();
   const terminalWidth = stdout?.columns ?? 80;
 
-  const handleSubmit = () => {
-    if (value.trim() && !isProcessing) {
+  const handleSubmit = (expandedContent?: string) => {
+    // Use expanded content if provided (contains actual paste content)
+    const contentToSubmit = expandedContent ?? value;
+    if (contentToSubmit.trim() && !isProcessing) {
+      // Update the value to the expanded content before submitting
+      if (expandedContent && expandedContent !== value) {
+        onChange(expandedContent);
+      }
       onSubmit();
     }
   };
@@ -60,7 +66,7 @@ export function PromptBox({
         onCtrlC={onCtrlC}
         maxVisibleLines={maxVisibleLines}
         terminalWidth={inputWidth}
-        promptPrefix="> "
+        promptPrefix={`${icons.prompt} `}
         promptColor={inkColors.promptPrefix}
         continuationPrefix="  "
         isProcessing={isProcessing}

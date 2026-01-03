@@ -2,15 +2,16 @@
  * @fileoverview Message List Component
  *
  * Displays the conversation messages with streaming support.
- * NO emojis - uses ASCII/Unicode characters only.
+ * Uses elegant Unicode icons and markdown rendering.
  */
 import React from 'react';
 import { Box, Text } from 'ink';
-import { Spinner } from './Spinner.js';
+import { ThinkingIndicator } from './ThinkingIndicator.js';
 import { StreamingContent } from './StreamingContent.js';
 import { ToolExecution } from './ToolExecution.js';
+import { MarkdownText } from './MarkdownText.js';
 import type { DisplayMessage } from '../types.js';
-import { inkColors } from '../theme.js';
+import { inkColors, icons } from '../theme.js';
 
 // Thinking display configuration
 const MAX_THINKING_LINES = 4;
@@ -93,8 +94,8 @@ export function MessageList({
   return (
     <Box flexDirection="column" gap={1}>
       {showReady && (
-        <Box flexDirection="row" gap={1} marginLeft={2}>
-          <Text color={inkColors.statusReady}>●</Text>
+        <Box flexDirection="row" gap={1} marginLeft={1}>
+          <Text color={inkColors.statusReady}>{icons.ready}</Text>
           <Text color={inkColors.label}>Ready</Text>
         </Box>
       )}
@@ -103,12 +104,12 @@ export function MessageList({
         <MessageItem key={message.id} message={message} />
       ))}
 
-      {/* Thinking indicator - only show when thinking and no streaming yet */}
+      {/* Thinking indicator - pulsing bars */}
       {isProcessing && thinkingText && !streamingContent && (
-        <Box flexDirection="column">
-          <Spinner label="Thinking" color={inkColors.statusThinking} />
+        <Box flexDirection="column" marginLeft={1}>
+          <ThinkingIndicator label="Thinking" color={inkColors.statusThinking} />
           {thinkingText.length > 0 && (
-            <Box flexDirection="column" marginLeft={2}>
+            <Box flexDirection="column" marginLeft={3}>
               {formatThinkingText(thinkingText).map((line, index) => (
                 <Text key={index} color={inkColors.dim}>
                   {line}
@@ -119,25 +120,29 @@ export function MessageList({
         </Box>
       )}
 
-      {/* Show spinner when processing but not yet streaming or thinking */}
+      {/* Show thinking indicator when processing but not yet streaming or thinking */}
       {isProcessing && !streamingContent && !thinkingText && !activeTool && (
-        <Spinner label="Thinking" color={inkColors.spinner} />
+        <Box marginLeft={1}>
+          <ThinkingIndicator label="Thinking" color={inkColors.spinner} />
+        </Box>
       )}
 
       {/* Tool execution indicator */}
       {activeTool && (
-        <ToolExecution
-          toolName={activeTool}
-          status="running"
-          toolInput={activeToolInput ?? undefined}
-        />
+        <Box marginLeft={1}>
+          <ToolExecution
+            toolName={activeTool}
+            status="running"
+            toolInput={activeToolInput ?? undefined}
+          />
+        </Box>
       )}
 
       {/* Streaming content */}
       {streamingContent && (
-        <Box flexDirection="column">
-          <Box flexDirection="row" gap={1}>
-            <Text color={inkColors.roleAssistant} bold>*</Text>
+        <Box flexDirection="row" marginLeft={1}>
+          <Text color={inkColors.roleAssistant}>{icons.streaming} </Text>
+          <Box flexShrink={1}>
             <StreamingContent
               content={streamingContent}
               isStreaming={isStreaming ?? false}
@@ -157,13 +162,13 @@ function MessageItem({ message }: MessageItemProps): React.ReactElement {
   const getRoleDisplay = () => {
     switch (message.role) {
       case 'user':
-        return { prefix: '>', color: inkColors.roleUser };
+        return { prefix: icons.user, color: inkColors.roleUser };
       case 'assistant':
-        return { prefix: '*', color: inkColors.roleAssistant };
+        return { prefix: icons.assistant, color: inkColors.roleAssistant };
       case 'system':
-        return { prefix: '-', color: inkColors.roleSystem };
+        return { prefix: icons.system, color: inkColors.roleSystem };
       case 'tool':
-        return { prefix: '+', color: inkColors.roleTool };
+        return { prefix: icons.toolSuccess, color: inkColors.roleTool };
       default:
         return { prefix: '?', color: inkColors.value };
     }
@@ -175,24 +180,35 @@ function MessageItem({ message }: MessageItemProps): React.ReactElement {
   if (message.role === 'tool') {
     const status = message.toolStatus ?? 'success';
     return (
-      <ToolExecution
-        toolName={message.toolName ?? 'unknown'}
-        status={status}
-        toolInput={message.toolInput}
-        duration={message.duration}
-        output={message.content}
-      />
+      <Box marginLeft={1}>
+        <ToolExecution
+          toolName={message.toolName ?? 'unknown'}
+          status={status}
+          toolInput={message.toolInput}
+          duration={message.duration}
+          output={message.content}
+        />
+      </Box>
     );
   }
 
-  // Regular message - show full content (no truncation for better readability)
-  return (
-    <Box flexDirection="column">
-      <Box flexDirection="row" gap={1}>
-        <Text color={color} bold>
-          {prefix}
-        </Text>
+  // User messages - simple display
+  if (message.role === 'user') {
+    return (
+      <Box flexDirection="row" marginLeft={1}>
+        <Text color={color}>{prefix} </Text>
         <Text wrap="wrap">{message.content}</Text>
+      </Box>
+    );
+  }
+
+  // Assistant messages - render markdown with proper indentation
+  // The icon is on its own, content starts on same line and wraps underneath
+  return (
+    <Box flexDirection="row" marginLeft={1}>
+      <Text color={color}>{prefix} </Text>
+      <Box flexDirection="column" flexShrink={1}>
+        <MarkdownText content={message.content} />
       </Box>
     </Box>
   );

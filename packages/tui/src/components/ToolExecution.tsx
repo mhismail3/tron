@@ -1,17 +1,12 @@
 /**
  * @fileoverview Tool Execution Component
  *
- * Displays tool execution status with animated spinner.
+ * Displays tool execution status with elegant Unicode icons.
  * Shows truncated output for completed tools.
- * NO emojis - uses ASCII/Unicode characters.
  */
-import React, { useState, useEffect } from 'react';
+import React from 'react';
 import { Text, Box } from 'ink';
-import { inkColors } from '../theme.js';
-
-// Spinner frames for running state
-const SPINNER_FRAMES = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
-const FRAME_INTERVAL = 80;
+import { inkColors, icons } from '../theme.js';
 
 // Display configuration
 const MAX_INPUT_LENGTH = 60;
@@ -77,28 +72,19 @@ export function ToolExecution({
   output,
   expanded = false,
 }: ToolExecutionProps): React.ReactElement {
-  const [frameIndex, setFrameIndex] = useState(0);
-
-  useEffect(() => {
-    if (status !== 'running') return;
-
-    const timer = setInterval(() => {
-      setFrameIndex((current) => (current + 1) % SPINNER_FRAMES.length);
-    }, FRAME_INTERVAL);
-
-    return () => clearInterval(timer);
-  }, [status]);
 
   const getStatusIndicator = () => {
     switch (status) {
       case 'running':
         return (
-          <Text color={inkColors.toolRunning}>{SPINNER_FRAMES[frameIndex] ?? SPINNER_FRAMES[0]}</Text>
+          <Text color={inkColors.toolRunning}>
+            {icons.toolRunning}
+          </Text>
         );
       case 'success':
-        return <Text color={inkColors.toolSuccess}>+</Text>;
+        return <Text color={inkColors.toolSuccess}>{icons.toolSuccess}</Text>;
       case 'error':
-        return <Text color={inkColors.toolError}>!</Text>;
+        return <Text color={inkColors.toolError}>{icons.toolError}</Text>;
     }
   };
 

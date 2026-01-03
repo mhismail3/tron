@@ -98,45 +98,39 @@ export function StatusBar({
 
   return (
     <Box flexDirection="row" justifyContent="space-between" paddingX={2} marginTop={0}>
-      {/* Left: Model, Tokens, Cost */}
+      {/* Left: Model, Tokens, Cost - all uniform color */}
       <Box flexDirection="row" gap={2}>
         {model && (
-          <Text color={inkColors.label}>{formatModelShort(model)}</Text>
+          <Text color={inkColors.statusBar}>{formatModelShort(model)}</Text>
         )}
 
         {totalTokens > 0 ? (
           <>
-            <Text color={inkColors.value}>
+            <Text color={inkColors.statusBar}>
               {formatTokens(totalInput)}/{formatTokens(totalOutput)}
             </Text>
-            <Text color={inkColors.dim}>({usagePercent}%)</Text>
-            <Text color={inkColors.accent}>
+            <Text color={inkColors.statusBar}>({usagePercent}%)</Text>
+            <Text color={inkColors.statusBar}>
               {estimateCost(model, totalInput, totalOutput)}
             </Text>
           </>
         ) : (
-          <Text color={inkColors.dim}>No usage yet</Text>
+          <Text color={inkColors.statusBar}>—</Text>
         )}
       </Box>
 
-      {/* Right: Git Info */}
+      {/* Right: Git Info - same uniform color */}
       <Box flexDirection="row" gap={2}>
         {gitWorktree && (
-          <Box flexDirection="row">
-            <Text color={inkColors.label}>Worktree: </Text>
-            <Text color={inkColors.value}>{gitWorktree}</Text>
-          </Box>
+          <Text color={inkColors.statusBar}>{gitWorktree}</Text>
         )}
 
         {gitBranch && (
-          <Box flexDirection="row">
-            <Text color={inkColors.label}>Branch: </Text>
-            <Text color={inkColors.value}>{gitBranch}</Text>
-          </Box>
+          <Text color={inkColors.statusBar}>{gitBranch}</Text>
         )}
 
         {!gitBranch && !gitWorktree && totalTokens === 0 && (
-          <Text color={inkColors.dim}>Ctrl+C: exit</Text>
+          <Text color={inkColors.statusBar}>Ctrl+C: exit</Text>
         )}
       </Box>
     </Box>

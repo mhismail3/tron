@@ -37,11 +37,64 @@ export const palette = {
   textMuted: '#6b8f7a',      // Muted green-gray for less important text
   textDim: '#4a6b58',        // Dim green-gray
 
+  // Status bar (uniform, 10% darker than accent)
+  statusBarText: '#2eb888',  // ~10% darker emerald for status bar items
+
   // Semantic colors (kept distinct for UX clarity)
   success: '#22c55e',        // Green (fits theme)
   warning: '#f59e0b',        // Amber (kept for visibility)
   error: '#ef4444',          // Red (kept for safety)
   info: '#38bdf8',           // Sky blue (kept for distinction)
+} as const;
+
+// =============================================================================
+// UI Icons - Elegant Unicode Characters
+// =============================================================================
+
+/**
+ * Consistent icon system for different UI states and elements
+ */
+export const icons = {
+  // Prompt/Input
+  prompt: '›',               // User input prompt
+
+  // Message roles
+  user: '›',                 // User message prefix
+  assistant: '◆',            // Assistant response (filled diamond)
+  system: '◇',               // System message (outline diamond)
+
+  // Tool execution states
+  toolRunning: '⬡',          // Tool in progress (hexagon outline)
+  toolSuccess: '⬢',          // Tool completed (filled hexagon)
+  toolError: '◈',            // Tool error (diamond with center)
+
+  // Status indicators
+  ready: '◆',                // Ready state
+  thinking: '◇',             // Thinking/processing
+  streaming: '◆',            // Streaming response
+
+  // List markers
+  bullet: '•',               // Standard bullet
+  arrow: '→',                // Arrow for navigation
+  check: '✓',                // Success/completed
+
+  // Bracketed paste indicators
+  pasteOpen: '⌈',            // Opening bracket for paste
+  pasteClose: '⌋',           // Closing bracket for paste
+} as const;
+
+// =============================================================================
+// Thinking Indicator Bars
+// =============================================================================
+
+/**
+ * Bar characters for pulsing thinking animation
+ * Arranged from shortest to tallest for wave effect
+ */
+export const thinkingBars = {
+  chars: ['▁', '▂', '▃', '▄', '▅'] as const,
+  width: 4,                  // Number of bars to show
+  intervalMs: 120,           // Animation speed
 } as const;
 
 // =============================================================================
@@ -107,6 +160,13 @@ export const theme = {
 
   // Streaming
   streamingCursor: palette.emerald,
+
+  // Status bar (uniform color for all items)
+  statusBar: palette.statusBarText,
+
+  // Bracketed paste
+  pasteIndicator: palette.emerald,
+  pasteText: palette.textMuted,
 } as const;
 
 // =============================================================================
@@ -162,6 +222,13 @@ export const styled = {
 
   // Spinner
   spinner: chalk.hex(theme.spinner),
+
+  // Status bar
+  statusBar: chalk.hex(theme.statusBar),
+
+  // Paste indicators
+  pasteIndicator: chalk.hex(theme.pasteIndicator),
+  pasteText: chalk.hex(theme.pasteText),
 } as const;
 
 // =============================================================================
@@ -207,6 +274,7 @@ export const inkColors = {
   accent: theme.accent,
   highlight: theme.highlight,
   dim: theme.dim,
+  mint: palette.mint,
 
   // Menu
   menuBorder: theme.menuBorder,
@@ -226,6 +294,13 @@ export const inkColors = {
 
   // Streaming
   streamingCursor: theme.streamingCursor,
+
+  // Status bar
+  statusBar: theme.statusBar,
+
+  // Paste indicators
+  pasteIndicator: theme.pasteIndicator,
+  pasteText: theme.pasteText,
 
   // Semantic (keep these standard for clarity)
   success: palette.success,
@@ -265,3 +340,31 @@ export function getRoleColor(role: string): string {
     default: return inkColors.value;
   }
 }
+
+/**
+ * Format pasted content as a bracketed indicator
+ * Returns the formatted string (already styled)
+ */
+export function formatPastedContent(content: string): string {
+  const charCount = content.length;
+  const lineCount = content.split('\n').length;
+
+  // Format: [text: XXX chars, Y lines] or just [text: XXX chars]
+  if (lineCount > 1) {
+    return styled.pasteIndicator(`[text: ${charCount.toLocaleString()} chars, ${lineCount} lines]`);
+  }
+  return styled.pasteIndicator(`[text: ${charCount.toLocaleString()} chars]`);
+}
+
+/**
+ * Format a file/image paste indicator
+ */
+export function formatFilePaste(filename: string, type: 'image' | 'file' = 'file'): string {
+  return styled.pasteIndicator(`[${type}: ${filename}]`);
+}
+
+/**
+ * Check if input looks like a paste (multiple chars at once)
+ * Threshold: more than 3 characters arriving at once
+ */
+export const PASTE_THRESHOLD = 3;

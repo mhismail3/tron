@@ -32,7 +32,7 @@
  */
 import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { Box, Text, useInput } from 'ink';
-import { styled, inkColors } from '../theme.js';
+import { styled, inkColors, PASTE_THRESHOLD } from '../theme.js';
 
 // =============================================================================
 // Types
@@ -142,12 +142,12 @@ function isCtrlCSequence(input: string): boolean {
 }
 
 export interface MacOSInputProps {
-  /** Current input value */
+  /** Current input value (may contain paste indicators) */
   value: string;
   /** Callback when value changes */
   onChange: (value: string) => void;
-  /** Callback when Enter is pressed (submit) */
-  onSubmit?: () => void;
+  /** Callback when Enter is pressed (submit) - receives expanded content */
+  onSubmit?: (expandedContent?: string) => void;
   /** Placeholder text when empty */
   placeholder?: string;
   /** Whether input is focused */
@@ -210,6 +210,8 @@ export function MacOSInput({
   // Track internal value changes to avoid resetting cursor
   const isInternalChange = useRef(false);
   const pendingCursorOffset = useRef<number | null>(null);
+  // Track paste content - maps from display text to actual content
+  const pasteContentMap = useRef<Map<string, string>>(new Map());
 
   // ==========================================================================
   // Cursor and Selection Helpers
@@ -349,6 +351,66 @@ export function MacOSInput({
     }
   }, [hasSelection, deleteSelection, updateValue, value, cursorOffset]);
 
+  /**
+   * Format pasted content as a bracketed indicator and store mapping
+   */
+  const formatPasteIndicator = useCallback((content: string): string => {
+    const charCount = content.length;
+    const lineCount = content.split('\n').length;
+
+    // Create display text
+    let displayText: string;
+    if (lineCount > 1) {
+      displayText = `⌈text: ${charCount.toLocaleString()} chars, ${lineCount} lines⌋`;
+    } else {
+      displayText = `⌈text: ${charCount.toLocaleString()} chars⌋`;
+    }
+
+    // Store mapping for later expansion
+    pasteContentMap.current.set(displayText, content);
+
+    return displayText;
+  }, []);
+
+  /**
+   * Insert pasted content as a bracketed indicator
+   */
+  const insertPaste = useCallback((content: string) => {
+    const indicator = formatPasteIndicator(content);
+
+    if (hasSelection()) {
+      const range = getSelectionRange();
+      if (range) {
+        const newValue = value.slice(0, range.start) + indicator + value.slice(range.end);
+        updateValue(newValue, range.start + indicator.length);
+      }
+    } else {
+      const newValue = value.slice(0, cursorOffset) + indicator + value.slice(cursorOffset);
+      updateValue(newValue, cursorOffset + indicator.length);
+    }
+  }, [formatPasteIndicator, hasSelection, getSelectionRange, updateValue, value, cursorOffset]);
+
+  /**
+   * Expand all paste indicators in the value back to their original content
+   */
+  const expandPasteIndicators = useCallback((text: string): string => {
+    let result = text;
+    // Find all paste indicators and replace with actual content
+    const pastePattern = /⌈text: [\d,]+ chars(?:, \d+ lines)?⌋/g;
+    const matches = text.match(pastePattern);
+
+    if (matches) {
+      for (const match of matches) {
+        const actualContent = pasteContentMap.current.get(match);
+        if (actualContent) {
+          result = result.replace(match, actualContent);
+        }
+      }
+    }
+
+    return result;
+  }, []);
+
   // ==========================================================================
   // Word Boundary Helpers
   // ==========================================================================
@@ -449,12 +511,17 @@ export function MacOSInput({
 
   // Use refs to avoid recreating the raw input handler on every render
   const insertNewlineRef = useRef(insertNewline);
+  const insertPasteRef = useRef(insertPaste);
   const onCtrlCRef = useRef(onCtrlC);
   const isEditableRef = useRef(isEditable);
 
   useEffect(() => {
     insertNewlineRef.current = insertNewline;
   }, [insertNewline]);
+
+  useEffect(() => {
+    insertPasteRef.current = insertPaste;
+  }, [insertPaste]);
 
   useEffect(() => {
     onCtrlCRef.current = onCtrlC;
@@ -486,6 +553,18 @@ export function MacOSInput({
       if (isShiftEnterSequence(str) || isAltEnterSequence(str)) {
         skipNextInputRef.current = true;
         insertNewlineRef.current();
+        return;
+      }
+
+      // Detect paste: multiple printable characters arriving at once
+      // Filter out escape sequences and control characters
+      const isPrintable = str.length > PASTE_THRESHOLD &&
+        !str.startsWith('\x1b') &&
+        !/^[\x00-\x1f]+$/.test(str);
+
+      if (isPrintable) {
+        skipNextInputRef.current = true;
+        insertPasteRef.current(str);
         return;
       }
     };
@@ -554,7 +633,9 @@ export function MacOSInput({
 
       // Enter - submit (without shift)
       if (key.return || input === '\r' || input === '\n') {
-        onSubmit?.();
+        // Expand paste indicators before submitting
+        const expandedContent = expandPasteIndicators(value);
+        onSubmit?.(expandedContent);
         return;
       }
 
@@ -848,6 +929,7 @@ export function MacOSInput({
     range: { start: number; end: number } | null
   ): string => {
     let renderedLine = '';
+    let inPasteIndicator = false;
 
     for (let i = 0; i < line.length; i++) {
       const globalPos = lineStartPos + i;
@@ -855,13 +937,21 @@ export function MacOSInput({
       const isSelected = range && globalPos >= range.start && globalPos < range.end;
       const isCursor = globalPos === cursorOffset;
 
+      // Track if we're in a paste indicator
+      if (char === '⌈') inPasteIndicator = true;
+
       if (isSelected) {
         renderedLine += styled.selection(char);
       } else if (isCursor) {
         renderedLine += styled.cursor(char);
+      } else if (inPasteIndicator) {
+        // Style paste indicators with the paste color
+        renderedLine += styled.pasteIndicator(char);
       } else {
         renderedLine += char;
       }
+
+      if (char === '⌋') inPasteIndicator = false;
     }
 
     // Check if cursor is at end of this line
