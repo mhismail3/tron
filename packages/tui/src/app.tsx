@@ -594,24 +594,31 @@ export function App({ config, auth }: AppProps): React.ReactElement {
       streamingContentRef.current = '';
 
       if (!result.success) {
-        // Parse error for user-friendly message
-        const parsed = parseError(result.error ?? 'Unknown error');
-        const errorMessage = formatError(result.error ?? 'Unknown error');
+        // Check if this was an interrupt (not an error)
+        if (result.interrupted) {
+          // Interrupt was already handled by handleInterrupt - just clean up
+          dispatch({ type: 'SET_ERROR', payload: null });
+          dispatch({ type: 'SET_STATUS', payload: 'Ready' });
+        } else {
+          // Parse error for user-friendly message
+          const parsed = parseError(result.error ?? 'Unknown error');
+          const errorMessage = formatError(result.error ?? 'Unknown error');
 
-        // Add error message to chat for visibility
-        dispatch({
-          type: 'ADD_MESSAGE',
-          payload: {
-            id: `msg_${messageIdRef.current++}`,
-            role: 'system',
-            content: `❌ Error: ${errorMessage}${parsed.isRetryable ? '\n(This error may be temporary - try again)' : ''}`,
-            timestamp: new Date().toISOString(),
-          },
-        });
+          // Add error message to chat for visibility
+          dispatch({
+            type: 'ADD_MESSAGE',
+            payload: {
+              id: `msg_${messageIdRef.current++}`,
+              role: 'system',
+              content: `❌ Error: ${errorMessage}${parsed.isRetryable ? '\n(This error may be temporary - try again)' : ''}`,
+              timestamp: new Date().toISOString(),
+            },
+          });
 
-        dispatch({ type: 'SET_ERROR', payload: errorMessage });
-        // Set status back to Ready so user can continue
-        dispatch({ type: 'SET_STATUS', payload: 'Ready' });
+          dispatch({ type: 'SET_ERROR', payload: errorMessage });
+          // Set status back to Ready so user can continue
+          dispatch({ type: 'SET_STATUS', payload: 'Ready' });
+        }
       } else {
         dispatch({ type: 'SET_ERROR', payload: null }); // Clear any previous error
         dispatch({ type: 'SET_STATUS', payload: 'Ready' });
