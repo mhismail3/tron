@@ -194,6 +194,8 @@ export interface MacOSInputProps {
   continuationPrefix?: string;
   /** Whether input is in processing state (disables editing, shows gray) */
   isProcessing?: boolean;
+  /** Whether a menu is open and capturing keyboard input (disables this component's input handling) */
+  menuOpen?: boolean;
 }
 
 // =============================================================================
@@ -216,10 +218,13 @@ export function MacOSInput({
   promptColor = inkColors.promptPrefix,
   continuationPrefix: continuationPrefixProp,
   isProcessing = false,
+  menuOpen = false,
 }: MacOSInputProps): React.ReactElement {
   const continuationPrefix = continuationPrefixProp ?? (promptPrefix ? ' '.repeat(promptPrefix.length) : '');
   // Width available for text content (after prefix)
   const contentWidth = Math.max(10, terminalWidth - promptPrefix.length);
+  // Input is editable when focused and not processing
+  // Note: menuOpen doesn't block character input - only navigation keys are delegated to parent
   const isEditable = focus && !isProcessing;
   // Cursor position (character index in the string)
   const [cursorOffset, setCursorOffset] = useState(value.length);
@@ -597,6 +602,7 @@ export function MacOSInput({
   const onEscapeRef = useRef(onEscape);
   const isEditableRef = useRef(isEditable);
   const isProcessingRef = useRef(isProcessing);
+  const menuOpenRef = useRef(menuOpen);
 
   useEffect(() => {
     insertNewlineRef.current = insertNewline;
@@ -626,6 +632,10 @@ export function MacOSInput({
     isProcessingRef.current = isProcessing;
   }, [isProcessing]);
 
+  useEffect(() => {
+    menuOpenRef.current = menuOpen;
+  }, [menuOpen]);
+
   // Refs for paste buffering used in handleData
   const pasteBufferRef = useRef<string>('');
   const pasteTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -654,12 +664,23 @@ export function MacOSInput({
         return;
       }
 
-      // Handle Escape during processing (for interrupt)
+      // Handle Escape key in special cases:
+      // 1. During processing: interrupt the agent
+      // 2. When menu is open: close the menu (handled by parent via onEscape)
       // This MUST work even when the component is not editable
-      if (isEscapeKey(str) && isProcessingRef.current) {
-        skipNextInputRef.current = true;
-        onEscapeRef.current?.();
-        return;
+      if (isEscapeKey(str)) {
+        if (isProcessingRef.current) {
+          // Interrupt processing
+          skipNextInputRef.current = true;
+          onEscapeRef.current?.();
+          return;
+        }
+        if (menuOpenRef.current) {
+          // Close the menu - let parent handle it
+          skipNextInputRef.current = true;
+          onEscapeRef.current?.();
+          return;
+        }
       }
 
       // Only handle other special keys when editable
@@ -777,7 +798,11 @@ export function MacOSInput({
       }
 
       // Enter - submit (without modifiers)
+      // When menuOpen, let parent handle Enter for command selection
       if (key.return || input === '\r' || input === '\n') {
+        if (menuOpen) {
+          return; // Parent handles Enter for menu selection
+        }
         // Expand paste indicators before submitting
         const expandedContent = expandPasteIndicators(value);
         onSubmit?.(expandedContent);
@@ -953,7 +978,11 @@ export function MacOSInput({
       }
 
       // Up arrow
+      // When menuOpen, let parent handle Up for menu navigation
       if (key.upArrow) {
+        if (menuOpen) {
+          return; // Parent handles Up for menu navigation
+        }
         if (isMultiline && !isAtFirstLine) {
           // Navigate within multiline text
           moveCursorVertically('up');
@@ -966,7 +995,11 @@ export function MacOSInput({
       }
 
       // Down arrow
+      // When menuOpen, let parent handle Down for menu navigation
       if (key.downArrow) {
+        if (menuOpen) {
+          return; // Parent handles Down for menu navigation
+        }
         if (isMultiline && !isAtLastLine) {
           // Navigate within multiline text
           moveCursorVertically('down');
@@ -1012,8 +1045,12 @@ export function MacOSInput({
         return;
       }
 
-      // Escape - clear selection
+      // Escape - close menu or clear selection
       if (key.escape) {
+        if (menuOpen) {
+          onEscape?.(); // Close menu via parent
+          return;
+        }
         clearSelection();
         return;
       }
