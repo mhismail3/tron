@@ -16,6 +16,7 @@ import { Box, Text, useInput, useApp } from 'ink';
 import { MessageList } from './components/MessageList.js';
 import { StatusBar } from './components/StatusBar.js';
 import { SlashCommandMenu } from './components/SlashCommandMenu.js';
+import { ModelSwitcher } from './components/ModelSwitcher.js';
 import { WelcomeBox } from './components/WelcomeBox.js';
 import { PromptBox } from './components/PromptBox.js';
 import {
@@ -26,9 +27,11 @@ import {
   type SlashCommand,
 } from './commands/slash-commands.js';
 import { TuiSession } from './session/tui-session.js';
-import type { CliConfig, AppState, AppAction, AnthropicAuth, DisplayMessage } from './types.js';
+import type { CliConfig, AppState, AppAction, AnthropicAuth, DisplayMessage, MenuStackEntry } from './types.js';
 import * as os from 'os';
 import * as path from 'path';
+import { exec } from 'child_process';
+import { promisify } from 'util';
 import {
   TronAgent,
   ReadTool,
@@ -36,14 +39,31 @@ import {
   EditTool,
   BashTool,
   DEFAULT_MODEL,
+  ANTHROPIC_MODELS,
   formatError,
   parseError,
   type AgentOptions,
   type TronEvent,
   type Message,
+  type ModelInfo,
 } from '@tron/core';
 import { debugLog } from './debug/index.js';
 import { inkColors } from './theme.js';
+
+const execAsync = promisify(exec);
+
+/**
+ * Get the git branch name for a directory
+ */
+async function getGitBranch(cwd: string): Promise<string | null> {
+  try {
+    const { stdout } = await execAsync('git rev-parse --abbrev-ref HEAD', { cwd });
+    const branch = stdout.trim();
+    return branch || null;
+  } catch {
+    return null;
+  }
+}
 
 // =============================================================================
 // State Management
@@ -65,12 +85,33 @@ const initialState: AppState = {
   streamingContent: '',
   isStreaming: false,
   thinkingText: '',
-  showSlashMenu: false,
-  slashMenuIndex: 0,
+  menuStack: [],
   promptHistory: [],
   historyIndex: -1,
   temporaryInput: '',
+  currentModel: DEFAULT_MODEL,
+  gitBranch: null,
 };
+
+// =============================================================================
+// Menu Stack Helpers
+// =============================================================================
+
+/** Get the currently active menu (top of stack) */
+function getCurrentMenu(stack: MenuStackEntry[]): MenuStackEntry | null {
+  return stack.length > 0 ? stack[stack.length - 1]! : null;
+}
+
+/** Check if a specific menu is active (at top of stack) */
+function isMenuActive(stack: MenuStackEntry[], menuId: string): boolean {
+  const current = getCurrentMenu(stack);
+  return current?.id === menuId;
+}
+
+/** Check if any menu is open */
+function isAnyMenuOpen(stack: MenuStackEntry[]): boolean {
+  return stack.length > 0;
+}
 
 function reducer(state: AppState, action: AppAction): AppState {
   switch (action.type) {
@@ -128,10 +169,47 @@ function reducer(state: AppState, action: AppAction): AppState {
         status: 'Ready',
         activeToolInput: null,
       };
-    case 'SHOW_SLASH_MENU':
-      return { ...state, showSlashMenu: action.payload, slashMenuIndex: 0 };
-    case 'SET_SLASH_MENU_INDEX':
-      return { ...state, slashMenuIndex: action.payload };
+
+    // Menu stack actions for hierarchical navigation
+    case 'PUSH_MENU': {
+      const { id, index = 0, saveInput = false } = action.payload;
+      // Don't push if this menu is already at the top
+      const currentMenu = getCurrentMenu(state.menuStack);
+      if (currentMenu?.id === id) {
+        return state;
+      }
+      const newEntry: MenuStackEntry = {
+        id,
+        index,
+        savedInput: saveInput ? state.input : undefined,
+      };
+      return { ...state, menuStack: [...state.menuStack, newEntry] };
+    }
+
+    case 'POP_MENU': {
+      if (state.menuStack.length === 0) return state;
+      const newStack = state.menuStack.slice(0, -1);
+      // Check if we should restore input from the new top of stack
+      const newTop = getCurrentMenu(newStack);
+      const restoredInput = newTop?.savedInput;
+      return {
+        ...state,
+        menuStack: newStack,
+        // Restore input if the new top has saved input
+        input: restoredInput !== undefined ? restoredInput : state.input,
+      };
+    }
+
+    case 'SET_MENU_INDEX': {
+      if (state.menuStack.length === 0) return state;
+      const updatedStack = [...state.menuStack];
+      const topIndex = updatedStack.length - 1;
+      updatedStack[topIndex] = { ...updatedStack[topIndex]!, index: action.payload };
+      return { ...state, menuStack: updatedStack };
+    }
+
+    case 'CLOSE_ALL_MENUS':
+      return { ...state, menuStack: [], input: '' };
     case 'ADD_TO_HISTORY': {
       const trimmed = action.payload.trim();
       if (!trimmed) return state;
@@ -198,6 +276,22 @@ function reducer(state: AppState, action: AppAction): AppState {
       return { ...state, temporaryInput: action.payload };
     case 'RESET_HISTORY_NAVIGATION':
       return { ...state, historyIndex: -1 };
+    case 'SET_CURRENT_MODEL':
+      return { ...state, currentModel: action.payload };
+    case 'SET_GIT_BRANCH':
+      return { ...state, gitBranch: action.payload };
+    case 'UPDATE_LAST_ASSISTANT_TOKENS': {
+      // Find the last assistant message and update its tokenUsage
+      const messages = [...state.messages];
+      for (let i = messages.length - 1; i >= 0; i--) {
+        const msg = messages[i];
+        if (msg && msg.role === 'assistant') {
+          messages[i] = { ...msg, tokenUsage: action.payload };
+          break;
+        }
+      }
+      return { ...state, messages };
+    }
     default:
       return state;
   }
@@ -250,6 +344,8 @@ export function App({ config, auth }: AppProps): React.ReactElement {
   const isExitingRef = useRef(false);
   // Track processing state in ref for useInput callback (avoids stale closure)
   const isProcessingRef = useRef(false);
+  // Track menu stack in ref for raw stdin escape handler
+  const menuStackRef = useRef<MenuStackEntry[]>([]);
 
   /**
    * Finalize any pending streaming content as an assistant message.
@@ -337,6 +433,13 @@ export function App({ config, auth }: AppProps): React.ReactElement {
         // Finalize any remaining streaming content at end of turn
         // This handles cases where text comes after tool calls
         finalizeStreamingContent();
+        // Apply token usage to the last assistant message if available
+        if ('tokenUsage' in event && event.tokenUsage) {
+          dispatch({
+            type: 'UPDATE_LAST_ASSISTANT_TOKENS',
+            payload: event.tokenUsage,
+          });
+        }
         break;
 
       case 'hook_triggered':
@@ -372,6 +475,21 @@ export function App({ config, auth }: AppProps): React.ReactElement {
           hasPartialContent: 'partialContent' in event && !!event.partialContent,
           activeTool: 'activeTool' in event ? event.activeTool : undefined,
         });
+        break;
+
+      case 'api_retry':
+        // Handle retry event - show status to user
+        if ('attempt' in event && 'delayMs' in event) {
+          const delaySec = Math.round(event.delayMs / 1000);
+          dispatch({
+            type: 'SET_STATUS',
+            payload: `Rate limited - retrying in ${delaySec}s (${event.attempt}/${event.maxRetries})`,
+          });
+          debugLog.info('retry', `API retry: attempt ${event.attempt}/${event.maxRetries}, delay ${delaySec}s`, {
+            errorCategory: event.errorCategory,
+            errorMessage: event.errorMessage,
+          });
+        }
         break;
 
       case 'agent_end':
@@ -456,6 +574,13 @@ export function App({ config, auth }: AppProps): React.ReactElement {
 
       dispatch({ type: 'SET_SESSION', payload: initResult.sessionId });
 
+      // Set current model from config
+      dispatch({ type: 'SET_CURRENT_MODEL', payload: config.model ?? DEFAULT_MODEL });
+
+      // Detect git branch for working directory
+      const gitBranch = await getGitBranch(config.workingDirectory);
+      dispatch({ type: 'SET_GIT_BRANCH', payload: gitBranch });
+
       // Mark as initialized
       dispatch({ type: 'SET_STATUS', payload: 'Ready' });
       dispatch({ type: 'SET_INITIALIZED', payload: true });
@@ -475,6 +600,11 @@ export function App({ config, auth }: AppProps): React.ReactElement {
   useEffect(() => {
     isProcessingRef.current = state.isProcessing;
   }, [state.isProcessing]);
+
+  // Keep menu stack ref in sync with state for raw stdin escape handler
+  useEffect(() => {
+    menuStackRef.current = state.menuStack;
+  }, [state.menuStack]);
 
   // Handle graceful exit with session end
   const handleExit = useCallback(async () => {
@@ -509,18 +639,27 @@ export function App({ config, auth }: AppProps): React.ReactElement {
     // Save current input as temporary (for restoring after history navigation)
     dispatch({ type: 'SET_TEMPORARY_INPUT', payload: value });
 
-    // Show/hide slash menu based on input
+    // Show/hide slash menu based on input (only when no submenu is open)
+    const currentMenu = getCurrentMenu(state.menuStack);
+    const isSubMenuOpen = currentMenu !== null && currentMenu.id !== 'slash-menu';
+
     if (isSlashCommandInput(value)) {
-      dispatch({ type: 'SHOW_SLASH_MENU', payload: true });
-    } else {
-      dispatch({ type: 'SHOW_SLASH_MENU', payload: false });
+      // Push slash menu if not already in stack (and no submenu is open)
+      if (!isSubMenuOpen && !isMenuActive(state.menuStack, 'slash-menu')) {
+        dispatch({ type: 'PUSH_MENU', payload: { id: 'slash-menu', saveInput: false } });
+      }
+    } else if (!isSubMenuOpen) {
+      // Close menus when input no longer starts with '/' (unless submenu is open)
+      if (state.menuStack.length > 0) {
+        dispatch({ type: 'CLOSE_ALL_MENUS' });
+      }
     }
-  }, [state.historyIndex]);
+  }, [state.historyIndex, state.menuStack]);
 
   // Handle submit
   const handleSubmit = useCallback(async () => {
-    // Don't submit if slash menu is open - the useInput hook handles Enter for that
-    if (state.showSlashMenu) {
+    // Don't submit if any menu is open - the useInput hook handles Enter for that
+    if (isAnyMenuOpen(state.menuStack)) {
       return;
     }
 
@@ -650,12 +789,33 @@ export function App({ config, auth }: AppProps): React.ReactElement {
       dispatch({ type: 'CLEAR_STREAMING' });
       streamingContentRef.current = '';
     }
-  }, [state.input, state.isProcessing, state.showSlashMenu]);
+  }, [state.input, state.isProcessing, state.menuStack]);
+
+  // Get sorted models for model switcher
+  // Must match the sorting in ModelSwitcher component
+  const getSortedModels = useCallback(() => {
+    const tierOrder = { opus: 0, sonnet: 1, haiku: 2 };
+    return [...ANTHROPIC_MODELS].sort((a, b) => {
+      // First: non-legacy before legacy
+      const legacyDiff = (a.legacy ? 1 : 0) - (b.legacy ? 1 : 0);
+      if (legacyDiff !== 0) return legacyDiff;
+      // Then: by tier (opus, sonnet, haiku)
+      const tierDiff = tierOrder[a.tier] - tierOrder[b.tier];
+      if (tierDiff !== 0) return tierDiff;
+      // Within same tier and legacy status, sort by release date (newest first)
+      return b.releaseDate.localeCompare(a.releaseDate);
+    });
+  }, []);
 
   // Execute a slash command
   const executeSlashCommand = useCallback((command: SlashCommand) => {
-    dispatch({ type: 'SHOW_SLASH_MENU', payload: false });
-    dispatch({ type: 'CLEAR_INPUT' });
+    // For most commands, close all menus and clear input
+    // For submenu commands (like 'model'), we push onto the stack instead
+    const isSubmenuCommand = command.name === 'model';
+
+    if (!isSubmenuCommand) {
+      dispatch({ type: 'CLOSE_ALL_MENUS' });
+    }
 
     switch (command.name) {
       case 'help':
@@ -666,7 +826,7 @@ export function App({ config, auth }: AppProps): React.ReactElement {
             role: 'system',
             content: `## Commands\n${BUILT_IN_COMMANDS.map(c =>
               `- \`/${c.name}\`${c.shortcut ? ` *(${c.shortcut})*` : ''} - ${c.description}`
-            ).join('\n')}\n\n## Keyboard Shortcuts\n- \`Ctrl+C\` - Exit\n- \`Ctrl+L\` - Clear screen\n- \`↑/↓\` - Navigate history or menu\n- \`Enter\` - Submit or select\n- \`Esc\` - Interrupt execution / Cancel menu\n- \`Shift+Enter\` - New line`,
+            ).join('\n')}\n\n## Keyboard Shortcuts\n- \`Ctrl+C\` - Exit\n- \`Ctrl+L\` - Clear screen\n- \`↑/↓\` - Navigate history or menu\n- \`Enter\` - Submit or select\n- \`Esc\` - Interrupt execution / Back to previous menu\n- \`Shift+Enter\` - New line`,
             timestamp: new Date().toISOString(),
           },
         });
@@ -677,17 +837,13 @@ export function App({ config, auth }: AppProps): React.ReactElement {
         break;
 
       case 'model': {
-        const agent = agentRef.current;
-        const currentModel = agent?.getModel() ?? config.model ?? DEFAULT_MODEL;
-        const currentProvider = agent?.getProviderType() ?? 'anthropic';
+        // Push model switcher as submenu (preserving slash menu in stack)
+        const sortedModels = getSortedModels();
+        const currentIndex = Math.max(0, sortedModels.findIndex(m => m.id === state.currentModel));
+        // Push model-switcher, saving the current input for restoration on Escape
         dispatch({
-          type: 'ADD_MESSAGE',
-          payload: {
-            id: `msg_${messageIdRef.current++}`,
-            role: 'system',
-            content: `## Model Info\n- **Current**: \`${currentModel}\`\n- **Provider**: ${currentProvider}\n\n## Switch Models\nUse \`/model <model-id>\`\n- \`gpt-4o\` (OpenAI)\n- \`gemini-2.5-flash\` (Google)\n- \`claude-sonnet-4-20250514\` (Anthropic)`,
-            timestamp: new Date().toISOString(),
-          },
+          type: 'PUSH_MENU',
+          payload: { id: 'model-switcher', index: currentIndex, saveInput: true },
         });
         break;
       }
@@ -804,7 +960,82 @@ export function App({ config, auth }: AppProps): React.ReactElement {
           },
         });
     }
-  }, [config.model, config.workingDirectory, state.sessionId, state.tokenUsage, state.messages.length, handleExit]);
+  }, [config.model, config.workingDirectory, state.sessionId, state.tokenUsage, state.messages.length, state.currentModel, getSortedModels, handleExit]);
+
+  // Handle model selection from model switcher
+  const handleModelSelect = useCallback((model: ModelInfo) => {
+    // Close all menus when a model is selected
+    dispatch({ type: 'CLOSE_ALL_MENUS' });
+
+    const agent = agentRef.current;
+    if (!agent) {
+      dispatch({
+        type: 'ADD_MESSAGE',
+        payload: {
+          id: `msg_${messageIdRef.current++}`,
+          role: 'system',
+          content: 'Cannot switch model: Agent not initialized',
+          timestamp: new Date().toISOString(),
+        },
+      });
+      return;
+    }
+
+    const previousModel = agent.getModel();
+
+    // Check if already on this model
+    if (model.id === previousModel) {
+      dispatch({
+        type: 'ADD_MESSAGE',
+        payload: {
+          id: `msg_${messageIdRef.current++}`,
+          role: 'system',
+          content: `Already using **${model.name}**`,
+          timestamp: new Date().toISOString(),
+        },
+      });
+      return;
+    }
+
+    try {
+      // Switch the model on the agent (preserves context)
+      agent.switchModel(model.id);
+
+      // Update state
+      dispatch({ type: 'SET_CURRENT_MODEL', payload: model.id });
+
+      // Show success message with model details
+      const thinkingNote = model.supportsThinking ? ' (extended thinking enabled)' : '';
+      dispatch({
+        type: 'ADD_MESSAGE',
+        payload: {
+          id: `msg_${messageIdRef.current++}`,
+          role: 'system',
+          content: [
+            `Switched to **${model.name}**${thinkingNote}`,
+            '',
+            `${model.description}`,
+            '',
+            `Context: ${(model.contextWindow / 1000).toFixed(0)}K tokens | Max output: ${model.maxOutput.toLocaleString()} tokens`,
+          ].join('\n'),
+          timestamp: new Date().toISOString(),
+        },
+      });
+
+      debugLog.info('model', `Model switched from ${previousModel} to ${model.id}`);
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      dispatch({
+        type: 'ADD_MESSAGE',
+        payload: {
+          id: `msg_${messageIdRef.current++}`,
+          role: 'system',
+          content: `Failed to switch model: ${errorMessage}`,
+          timestamp: new Date().toISOString(),
+        },
+      });
+    }
+  }, []);
 
   // Get filtered commands for menu
   const getFilteredCommands = useCallback(() => {
@@ -875,6 +1106,23 @@ export function App({ config, auth }: AppProps): React.ReactElement {
     debugLog.debug('interrupt', 'Agent execution interrupted by user');
   }, []); // No dependencies - uses refs for current values
 
+  // Unified escape key handler - pops menu stack or interrupts processing
+  // Called from raw stdin handler in MacOSInput, uses refs to avoid stale closures
+  const handleEscapeKey = useCallback(() => {
+    // Priority 1: Pop the menu stack if any menu is open
+    if (menuStackRef.current.length > 0) {
+      dispatch({ type: 'POP_MENU' });
+      // Note: Don't sync ref here - let useEffect do it to avoid race conditions
+      return;
+    }
+
+    // Priority 2: Interrupt processing if running
+    if (isProcessingRef.current) {
+      handleInterrupt();
+      return;
+    }
+  }, [handleInterrupt]); // Only depends on handleInterrupt which is stable
+
   useInput((input, key) => {
     // Ctrl+C to exit (with proper session end)
     if (input === 'c' && key.ctrl) {
@@ -886,44 +1134,77 @@ export function App({ config, auth }: AppProps): React.ReactElement {
       dispatch({ type: 'RESET' });
     }
 
-    // Escape to interrupt processing (use ref for current state)
-    if (key.escape && isProcessingRef.current) {
-      handleInterrupt();
-      return;
+    // Escape to interrupt processing or close menus
+    if (key.escape) {
+      if (isAnyMenuOpen(state.menuStack)) {
+        dispatch({ type: 'POP_MENU' });
+        return;
+      }
+      if (isProcessingRef.current) {
+        handleInterrupt();
+        return;
+      }
     }
 
-    // Slash menu navigation (only when not processing)
-    if (state.showSlashMenu && !isProcessingRef.current) {
-      const filteredCommands = getFilteredCommands();
+    // Get current menu state
+    const currentMenu = getCurrentMenu(state.menuStack);
+    const currentMenuIndex = currentMenu?.index ?? 0;
+
+    // Model switcher navigation (only when active and not processing)
+    if (isMenuActive(state.menuStack, 'model-switcher') && !isProcessingRef.current) {
+      const sortedModels = getSortedModels();
 
       if (key.upArrow) {
-        const newIndex = state.slashMenuIndex > 0
-          ? state.slashMenuIndex - 1
-          : filteredCommands.length - 1;
-        dispatch({ type: 'SET_SLASH_MENU_INDEX', payload: newIndex });
+        const newIndex = currentMenuIndex > 0
+          ? currentMenuIndex - 1
+          : sortedModels.length - 1;
+        dispatch({ type: 'SET_MENU_INDEX', payload: newIndex });
       }
 
       if (key.downArrow) {
-        const newIndex = state.slashMenuIndex < filteredCommands.length - 1
-          ? state.slashMenuIndex + 1
+        const newIndex = currentMenuIndex < sortedModels.length - 1
+          ? currentMenuIndex + 1
           : 0;
-        dispatch({ type: 'SET_SLASH_MENU_INDEX', payload: newIndex });
+        dispatch({ type: 'SET_MENU_INDEX', payload: newIndex });
+      }
+
+      if (key.return && sortedModels.length > 0) {
+        const selectedModel = sortedModels[currentMenuIndex];
+        if (selectedModel) {
+          handleModelSelect(selectedModel);
+        }
+      }
+
+      return; // Don't process other input while model switcher is open
+    }
+
+    // Slash menu navigation (only when active and not processing)
+    if (isMenuActive(state.menuStack, 'slash-menu') && !isProcessingRef.current) {
+      const filteredCommands = getFilteredCommands();
+
+      if (key.upArrow) {
+        const newIndex = currentMenuIndex > 0
+          ? currentMenuIndex - 1
+          : filteredCommands.length - 1;
+        dispatch({ type: 'SET_MENU_INDEX', payload: newIndex });
+      }
+
+      if (key.downArrow) {
+        const newIndex = currentMenuIndex < filteredCommands.length - 1
+          ? currentMenuIndex + 1
+          : 0;
+        dispatch({ type: 'SET_MENU_INDEX', payload: newIndex });
       }
 
       if (key.return && filteredCommands.length > 0) {
-        const selectedCommand = filteredCommands[state.slashMenuIndex];
+        const selectedCommand = filteredCommands[currentMenuIndex];
         if (selectedCommand) {
           executeSlashCommand(selectedCommand);
         }
       }
 
-      if (key.escape) {
-        dispatch({ type: 'SHOW_SLASH_MENU', payload: false });
-        dispatch({ type: 'CLEAR_INPUT' });
-      }
+      return; // Don't process other input while slash menu is open
     }
-    // Note: History navigation (up/down arrows) is now handled by MacOSInput component
-    // when not in slash menu mode
   });
 
   // Don't render the full UI until initialized
@@ -941,6 +1222,7 @@ export function App({ config, auth }: AppProps): React.ReactElement {
       <WelcomeBox
         model={config.model ?? DEFAULT_MODEL}
         workingDirectory={config.workingDirectory}
+        gitBranch={state.gitBranch ?? undefined}
       />
 
       {/* Message List */}
@@ -956,18 +1238,26 @@ export function App({ config, auth }: AppProps): React.ReactElement {
         />
       </Box>
 
-      {/* Slash Command Menu */}
-      {state.showSlashMenu && !state.isProcessing && (
+      {/* Slash Command Menu - visible when active */}
+      {isMenuActive(state.menuStack, 'slash-menu') && !state.isProcessing && (
         <SlashCommandMenu
           commands={BUILT_IN_COMMANDS}
           filter={parseSlashCommand(state.input).commandName}
-          selectedIndex={state.slashMenuIndex}
+          selectedIndex={getCurrentMenu(state.menuStack)?.index ?? 0}
           onSelect={executeSlashCommand}
-          onCancel={() => {
-            dispatch({ type: 'SHOW_SLASH_MENU', payload: false });
-            dispatch({ type: 'CLEAR_INPUT' });
-          }}
+          onCancel={() => dispatch({ type: 'POP_MENU' })}
           maxVisible={5}
+        />
+      )}
+
+      {/* Model Switcher Submenu - visible when active */}
+      {isMenuActive(state.menuStack, 'model-switcher') && !state.isProcessing && (
+        <ModelSwitcher
+          currentModel={state.currentModel}
+          selectedIndex={getCurrentMenu(state.menuStack)?.index ?? 0}
+          onSelect={handleModelSelect}
+          onCancel={() => dispatch({ type: 'POP_MENU' })}
+          maxVisible={6}
         />
       )}
 
@@ -980,7 +1270,8 @@ export function App({ config, auth }: AppProps): React.ReactElement {
         onUpArrow={handleHistoryUp}
         onDownArrow={handleHistoryDown}
         onCtrlC={handleExit}
-        onEscape={handleInterrupt}
+        onEscape={handleEscapeKey}
+        menuOpen={isAnyMenuOpen(state.menuStack)}
       />
 
       {/* Status Bar */}
@@ -988,7 +1279,8 @@ export function App({ config, auth }: AppProps): React.ReactElement {
         status={state.status}
         error={state.error}
         tokenUsage={state.tokenUsage}
-        model={config.model ?? DEFAULT_MODEL}
+        model={state.currentModel}
+        gitBranch={state.gitBranch ?? undefined}
       />
     </Box>
   );

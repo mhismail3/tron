@@ -353,6 +353,27 @@ export class TronAgent {
         if (event.type === 'error') {
           throw event.error;
         }
+
+        // Handle retry events - emit for TUI to display status
+        if (event.type === 'retry') {
+          logger.info('Retrying after rate limit', {
+            attempt: event.attempt,
+            maxRetries: event.maxRetries,
+            delayMs: event.delayMs,
+            category: event.error.category,
+          });
+          // Emit proper retry event for TUI handling
+          this.emit({
+            type: 'api_retry',
+            sessionId: this.sessionId,
+            timestamp: new Date().toISOString(),
+            attempt: event.attempt,
+            maxRetries: event.maxRetries,
+            delayMs: event.delayMs,
+            errorCategory: event.error.category,
+            errorMessage: event.error.message,
+          });
+        }
       }
 
       if (!assistantMessage) {
@@ -414,6 +435,10 @@ export class TronAgent {
         timestamp: new Date().toISOString(),
         turn: this.currentTurn,
         duration: turnDuration,
+        tokenUsage: assistantMessage.usage ? {
+          inputTokens: assistantMessage.usage.inputTokens,
+          outputTokens: assistantMessage.usage.outputTokens,
+        } : undefined,
       });
 
       this.isRunning = false;

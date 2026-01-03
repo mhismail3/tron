@@ -93,6 +93,25 @@ export interface ErrorEvent {
 }
 
 /**
+ * Retry event - emitted when a retryable error occurs and we're about to retry
+ */
+export interface RetryEvent {
+  type: 'retry';
+  /** Current attempt number (1-based) */
+  attempt: number;
+  /** Maximum number of retries configured */
+  maxRetries: number;
+  /** Delay before next retry in milliseconds */
+  delayMs: number;
+  /** Parsed error that triggered the retry */
+  error: {
+    category: string;
+    message: string;
+    isRetryable: boolean;
+  };
+}
+
+/**
  * Union of all LLM stream events
  */
 export type StreamEvent =
@@ -107,7 +126,8 @@ export type StreamEvent =
   | ToolCallDeltaEvent
   | ToolCallEndEvent
   | DoneEvent
-  | ErrorEvent;
+  | ErrorEvent
+  | RetryEvent;
 
 // =============================================================================
 // Tron Agent Events
@@ -163,6 +183,11 @@ export interface TurnEndEvent extends BaseTronEvent {
   turn: number;
   /** Duration in milliseconds */
   duration: number;
+  /** Token usage for this turn */
+  tokenUsage?: {
+    inputTokens: number;
+    outputTokens: number;
+  };
 }
 
 /**
@@ -256,6 +281,23 @@ export interface TronErrorEvent extends BaseTronEvent {
 }
 
 /**
+ * Retry event - emitted when a retryable error occurs (rate limit, network, etc.)
+ */
+export interface TronRetryEvent extends BaseTronEvent {
+  type: 'api_retry';
+  /** Current attempt number (1-based) */
+  attempt: number;
+  /** Maximum number of retries configured */
+  maxRetries: number;
+  /** Delay before next retry in milliseconds */
+  delayMs: number;
+  /** Error category that triggered the retry */
+  errorCategory: string;
+  /** Human-readable error message */
+  errorMessage: string;
+}
+
+/**
  * Union of all Tron agent events
  */
 export type TronEvent =
@@ -273,7 +315,8 @@ export type TronEvent =
   | SessionSavedEvent
   | SessionLoadedEvent
   | ContextWarningEvent
-  | TronErrorEvent;
+  | TronErrorEvent
+  | TronRetryEvent;
 
 /**
  * All Tron event types as a union
@@ -289,7 +332,7 @@ export function isStreamEvent(event: StreamEvent | TronEvent): event is StreamEv
     'start', 'text_start', 'text_delta', 'text_end',
     'thinking_start', 'thinking_delta', 'thinking_end',
     'toolcall_start', 'toolcall_delta', 'toolcall_end',
-    'done', 'error'
+    'done', 'error', 'retry'
   ].includes(event.type);
 }
 
