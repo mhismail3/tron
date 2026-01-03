@@ -223,9 +223,7 @@ function MessageItem({ message }: MessageItemProps): React.ReactElement {
     return (
       <Box flexDirection="row" marginLeft={1}>
         <Text color={color}>{prefix} </Text>
-        <Box flexDirection="column" flexShrink={1}>
-          <MarkdownText content={content} />
-        </Box>
+        <Text wrap="wrap">{content}</Text>
       </Box>
     );
   }

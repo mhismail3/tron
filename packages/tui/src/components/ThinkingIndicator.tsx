@@ -75,7 +75,7 @@ export function ThinkingIndicator({
   }, [barCount]);
 
   return (
-    <Box flexDirection="row" gap={1}>
+    <Box flexDirection="row" gap={1} alignItems="flex-end">
       <Box flexDirection="row">
         {barHeights.map((height, idx) => (
           <Text key={idx} color={color}>
