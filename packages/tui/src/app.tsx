@@ -1327,12 +1327,14 @@ export function App({ config, auth }: AppProps): React.ReactElement {
 
       {/* Welcome Box - Static so it renders once at the very top of scrollback */}
       <Static items={['welcome']}>
-        {() => (
-          <WelcomeBox
-            model={config.model ?? DEFAULT_MODEL}
-            workingDirectory={config.workingDirectory}
-            gitBranch={state.gitBranch ?? undefined}
-          />
+        {(item) => (
+          <Box key={item}>
+            <WelcomeBox
+              model={config.model ?? DEFAULT_MODEL}
+              workingDirectory={config.workingDirectory}
+              gitBranch={state.gitBranch ?? undefined}
+            />
+          </Box>
         )}
       </Static>
 
