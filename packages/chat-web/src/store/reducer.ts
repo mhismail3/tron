@@ -12,7 +12,7 @@ import type { AppState, AppAction, MenuStackEntry } from './types.js';
 // =============================================================================
 
 const MAX_HISTORY = 100;
-const DEFAULT_MODEL = 'claude-sonnet-4-20250514';
+const DEFAULT_MODEL = 'claude-opus-4-5-20251101';
 
 // =============================================================================
 // Initial State

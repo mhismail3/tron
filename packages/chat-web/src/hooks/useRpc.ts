@@ -6,7 +6,7 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { RpcClient } from '../rpc/client.js';
-import type { RpcEvent } from '@tron/core/browser';
+import type { RpcEvent, SessionListResult, ModelListResult } from '@tron/core/browser';
 
 // =============================================================================
 // Types
@@ -25,14 +25,26 @@ export interface UseRpcReturn {
   connect: () => Promise<void>;
   /** Disconnect from server */
   disconnect: () => void;
-  /** Create or resume a session */
+  /** Create a new session */
+  createSession: (workingDirectory?: string, model?: string) => Promise<string>;
+  /** Resume an existing session */
+  resumeSession: (sessionId: string) => Promise<string>;
+  /** Create or resume a session (legacy, uses current sessionId) */
   ensureSession: (workingDirectory?: string) => Promise<string>;
   /** Send a prompt to the agent */
-  sendPrompt: (prompt: string) => Promise<void>;
+  sendPrompt: (prompt: string, targetSessionId?: string) => Promise<void>;
   /** Abort current agent run */
-  abort: () => Promise<void>;
+  abort: (targetSessionId?: string) => Promise<void>;
   /** Switch to a different model */
-  switchModel: (modelId: string) => Promise<{ previousModel: string; newModel: string }>;
+  switchModel: (modelId: string, targetSessionId?: string) => Promise<{ previousModel: string; newModel: string }>;
+  /** Delete/close a session */
+  deleteSession: (targetSessionId: string) => Promise<boolean>;
+  /** List all sessions from server */
+  listSessions: () => Promise<SessionListResult>;
+  /** List available models */
+  listModels: () => Promise<ModelListResult>;
+  /** Set current session ID */
+  setSessionId: (sessionId: string | null) => void;
   /** Subscribe to all RPC events */
   onEvent: (handler: (event: RpcEvent) => void) => () => void;
   /** Last error */
@@ -56,7 +68,7 @@ const getWsUrl = (): string => {
 
 export function useRpc(): UseRpcReturn {
   const [status, setStatus] = useState<RpcConnectionStatus>('disconnected');
-  const [sessionId, setSessionId] = useState<string | null>(null);
+  const [sessionId, setSessionIdState] = useState<string | null>(null);
   const [error, setError] = useState<Error | null>(null);
 
   const clientRef = useRef<RpcClient | null>(null);
@@ -126,72 +138,157 @@ export function useRpc(): UseRpcReturn {
   const disconnect = useCallback(() => {
     clientRef.current?.disconnect();
     setStatus('disconnected');
-    setSessionId(null);
+    setSessionIdState(null);
   }, []);
 
-  // Ensure session exists
-  const ensureSession = useCallback(async (workingDirectory = '/project'): Promise<string> => {
+  // Create a new session
+  const createSession = useCallback(
+    async (workingDirectory = '/project', model?: string): Promise<string> => {
+      const client = clientRef.current;
+      if (!client || !client.isConnected()) {
+        throw new Error('Not connected');
+      }
+
+      const result = await client.sessionCreate({ workingDirectory, model });
+      setSessionIdState(result.sessionId);
+      return result.sessionId;
+    },
+    []
+  );
+
+  // Resume an existing session
+  const resumeSession = useCallback(async (targetSessionId: string): Promise<string> => {
     const client = clientRef.current;
     if (!client || !client.isConnected()) {
       throw new Error('Not connected');
     }
 
-    // If we already have a session, return it
-    if (sessionId) {
-      return sessionId;
-    }
-
-    // Create a new session
-    const result = await client.sessionCreate({ workingDirectory });
-    setSessionId(result.sessionId);
+    const result = await client.sessionResume({ sessionId: targetSessionId });
+    setSessionIdState(result.sessionId);
     return result.sessionId;
-  }, [sessionId]);
+  }, []);
+
+  // Ensure session exists (legacy compatibility)
+  const ensureSession = useCallback(
+    async (workingDirectory = '/project'): Promise<string> => {
+      const client = clientRef.current;
+      if (!client || !client.isConnected()) {
+        throw new Error('Not connected');
+      }
+
+      // If we already have a session, return it
+      if (sessionId) {
+        return sessionId;
+      }
+
+      // Create a new session
+      return createSession(workingDirectory);
+    },
+    [sessionId, createSession]
+  );
 
   // Send prompt
-  const sendPrompt = useCallback(async (prompt: string): Promise<void> => {
-    const client = clientRef.current;
-    if (!client || !client.isConnected()) {
-      throw new Error('Not connected');
-    }
+  const sendPrompt = useCallback(
+    async (prompt: string, targetSessionId?: string): Promise<void> => {
+      const client = clientRef.current;
+      if (!client || !client.isConnected()) {
+        throw new Error('Not connected');
+      }
 
-    // Ensure we have a session
-    const currentSessionId = sessionId || await ensureSession();
+      // Use provided session or current session
+      const effectiveSessionId = targetSessionId || sessionId || (await ensureSession());
 
-    // Send the prompt
-    await client.agentPrompt({
-      sessionId: currentSessionId,
-      prompt,
-    });
-  }, [sessionId, ensureSession]);
+      // Send the prompt
+      await client.agentPrompt({
+        sessionId: effectiveSessionId,
+        prompt,
+      });
+    },
+    [sessionId, ensureSession]
+  );
 
   // Abort
-  const abort = useCallback(async (): Promise<void> => {
-    const client = clientRef.current;
-    if (!client || !client.isConnected() || !sessionId) {
-      return;
-    }
+  const abort = useCallback(
+    async (targetSessionId?: string): Promise<void> => {
+      const client = clientRef.current;
+      if (!client || !client.isConnected()) {
+        return;
+      }
 
-    await client.agentAbort({ sessionId });
-  }, [sessionId]);
+      const effectiveSessionId = targetSessionId || sessionId;
+      if (!effectiveSessionId) return;
+
+      await client.agentAbort({ sessionId: effectiveSessionId });
+    },
+    [sessionId]
+  );
 
   // Switch model
-  const switchModel = useCallback(async (modelId: string): Promise<{ previousModel: string; newModel: string }> => {
+  const switchModel = useCallback(
+    async (
+      modelId: string,
+      targetSessionId?: string
+    ): Promise<{ previousModel: string; newModel: string }> => {
+      const client = clientRef.current;
+      if (!client || !client.isConnected()) {
+        throw new Error('Not connected');
+      }
+
+      // Use provided session or current session
+      const effectiveSessionId = targetSessionId || sessionId || (await ensureSession());
+
+      // Switch the model
+      const result = await client.modelSwitch({
+        sessionId: effectiveSessionId,
+        model: modelId,
+      });
+
+      return result;
+    },
+    [sessionId, ensureSession]
+  );
+
+  // Delete/close a session
+  const deleteSession = useCallback(async (targetSessionId: string): Promise<boolean> => {
     const client = clientRef.current;
     if (!client || !client.isConnected()) {
       throw new Error('Not connected');
     }
 
-    // Ensure we have a session
-    const currentSessionId = sessionId || await ensureSession();
+    const result = await client.sessionDelete({ sessionId: targetSessionId });
 
-    // Switch the model
-    const result = await client.modelSwitch({
-      sessionId: currentSessionId,
-      model: modelId,
-    });
+    // If we deleted the current session, clear the sessionId
+    if (targetSessionId === sessionId) {
+      setSessionIdState(null);
+    }
 
-    return result;
-  }, [sessionId, ensureSession]);
+    return result.deleted;
+  }, [sessionId]);
+
+  // List sessions from server
+  const listSessions = useCallback(async (): Promise<SessionListResult> => {
+    const client = clientRef.current;
+    if (!client || !client.isConnected()) {
+      throw new Error('Not connected');
+    }
+
+    return client.sessionList({ includeEnded: false });
+  }, []);
+
+  // List available models
+  const listModels = useCallback(async (): Promise<ModelListResult> => {
+    const client = clientRef.current;
+    if (!client || !client.isConnected()) {
+      throw new Error('Not connected');
+    }
+
+    return client.modelList();
+  }, []);
+
+  // Set session ID manually (for switching between sessions)
+  const setSessionId = useCallback((newSessionId: string | null) => {
+    setSessionIdState(newSessionId);
+  }, []);
 
   // Subscribe to events
   const onEvent = useCallback((handler: (event: RpcEvent) => void): (() => void) => {
@@ -207,10 +304,16 @@ export function useRpc(): UseRpcReturn {
     client: clientRef.current,
     connect,
     disconnect,
+    createSession,
+    resumeSession,
     ensureSession,
     sendPrompt,
     abort,
     switchModel,
+    deleteSession,
+    listSessions,
+    listModels,
+    setSessionId,
     onEvent,
     error,
   };

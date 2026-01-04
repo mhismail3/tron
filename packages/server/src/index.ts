@@ -77,6 +77,9 @@ function createRpcContext(orchestrator: SessionOrchestrator): RpcContext {
       async rewindSession(sessionId, toIndex) {
         return orchestrator.rewindSession(sessionId, toIndex);
       },
+      async switchModel(sessionId, model) {
+        return orchestrator.switchModel(sessionId, model);
+      },
     },
     agentManager: {
       async prompt(params) {

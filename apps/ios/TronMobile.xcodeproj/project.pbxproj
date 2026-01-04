@@ -1,0 +1,554 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		0186B0083110F291EA235935 /* RPCTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = B082B6CE011A17ED14F3393B /* RPCTypes.swift */; };
+		14260190901BA8299D13DC43 /* InputBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3EF2CB735CA19344DB30086D /* InputBar.swift */; };
+		2AC4711FE03EDA25CA10832D /* ChatView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5571DC3A896875D1693192D9 /* ChatView.swift */; };
+		35E00DB7B38895FF3C3A473E /* Message.swift in Sources */ = {isa = PBXBuildFile; fileRef = 67E30FC4A871038322F79EB0 /* Message.swift */; };
+		4445FADC8739036DF9B95BA0 /* Events.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC00489C0CFF17B0531219D9 /* Events.swift */; };
+		482423A54FE0C25BA4414CCA /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 42E47B6EAD030227C54F0028 /* SettingsView.swift */; };
+		490E7266613F29CD1E3F69F3 /* String+Extensions.swift in Sources */ = {isa = PBXBuildFile; fileRef = 68870B0709527607F70004EB /* String+Extensions.swift */; };
+		7704175EFC374D5E5425BC6D /* TronIcons.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00739C1F26626C7791649198 /* TronIcons.swift */; };
+		78CCA04903454E3CD22AABC5 /* SessionListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2A3821612AB671B19C9F254D /* SessionListView.swift */; };
+		8D03520968C046CF0A0C5CC9 /* TronMobileApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = B018ED18CE376F88F9C442F4 /* TronMobileApp.swift */; };
+		901A2D24F559EC522BF3D175 /* Date+Extensions.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB4071D0B8C943D30748238A /* Date+Extensions.swift */; };
+		A3BCE182EB003CB62D1D96E6 /* RPCClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = B9DD45A3974192F927E1B73A /* RPCClient.swift */; };
+		AA0AC5B4C07C617F0612C7FA /* View+Extensions.swift in Sources */ = {isa = PBXBuildFile; fileRef = B4B65C803EB12E8C7004E843 /* View+Extensions.swift */; };
+		C5D9BF6461C33FF5131E7B42 /* ChatViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 25C6E368AD4411B086E35A61 /* ChatViewModel.swift */; };
+		DB84AFFF8F9ADCC50F75B33B /* WebSocketService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79449B7B56831FA69C873699 /* WebSocketService.swift */; };
+		E36A71E3DB6FC3116C36F11B /* AnyCodable.swift in Sources */ = {isa = PBXBuildFile; fileRef = 30CFDC8D8AA4B77F61F2AF71 /* AnyCodable.swift */; };
+		EAE9FFCC465D011583D191E0 /* TronColors.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0BA5810A34C92084B89C6EA4 /* TronColors.swift */; };
+		EED3EB5C8DA4800D10BC6AEA /* MessageBubble.swift in Sources */ = {isa = PBXBuildFile; fileRef = C37E248C562712A416669C61 /* MessageBubble.swift */; };
+		FE3D89D152521876D2DDF464 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 8347F0B7D54B1F1EAA6C762C /* Assets.xcassets */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		FE51065D36C2797AE10574CA /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = DFD92FEB2A06256AAEB57E15 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 5CE10CFB51EA2F88B755A197;
+			remoteInfo = TronMobile;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXFileReference section */
+		00739C1F26626C7791649198 /* TronIcons.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TronIcons.swift; sourceTree = "<group>"; };
+		0BA5810A34C92084B89C6EA4 /* TronColors.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TronColors.swift; sourceTree = "<group>"; };
+		25C6E368AD4411B086E35A61 /* ChatViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatViewModel.swift; sourceTree = "<group>"; };
+		2A3821612AB671B19C9F254D /* SessionListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionListView.swift; sourceTree = "<group>"; };
+		30CFDC8D8AA4B77F61F2AF71 /* AnyCodable.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnyCodable.swift; sourceTree = "<group>"; };
+		3EF2CB735CA19344DB30086D /* InputBar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InputBar.swift; sourceTree = "<group>"; };
+		42E47B6EAD030227C54F0028 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
+		5571DC3A896875D1693192D9 /* ChatView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatView.swift; sourceTree = "<group>"; };
+		67E30FC4A871038322F79EB0 /* Message.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Message.swift; sourceTree = "<group>"; };
+		68870B0709527607F70004EB /* String+Extensions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "String+Extensions.swift"; sourceTree = "<group>"; };
+		6FF70E627268406FDA7DAC41 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		79449B7B56831FA69C873699 /* WebSocketService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebSocketService.swift; sourceTree = "<group>"; };
+		8347F0B7D54B1F1EAA6C762C /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		AB4071D0B8C943D30748238A /* Date+Extensions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Date+Extensions.swift"; sourceTree = "<group>"; };
+		B018ED18CE376F88F9C442F4 /* TronMobileApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TronMobileApp.swift; sourceTree = "<group>"; };
+		B082B6CE011A17ED14F3393B /* RPCTypes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RPCTypes.swift; sourceTree = "<group>"; };
+		B4B65C803EB12E8C7004E843 /* View+Extensions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "View+Extensions.swift"; sourceTree = "<group>"; };
+		B9DD45A3974192F927E1B73A /* RPCClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RPCClient.swift; sourceTree = "<group>"; };
+		C37E248C562712A416669C61 /* MessageBubble.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MessageBubble.swift; sourceTree = "<group>"; };
+		C9EDF4ADEF01F732B6DE8F15 /* TronMobileTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = TronMobileTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		CC00489C0CFF17B0531219D9 /* Events.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Events.swift; sourceTree = "<group>"; };
+		D819D7B903761AE0BB4C6992 /* TronMobile.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = TronMobile.entitlements; sourceTree = "<group>"; };
+		F2B298578C85F2293B9568BA /* TronMobile.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = TronMobile.app; sourceTree = BUILT_PRODUCTS_DIR; };
+/* End PBXFileReference section */
+
+/* Begin PBXGroup section */
+		161F8AEF8FBE5C9C772B5263 /* Tests */ = {
+			isa = PBXGroup;
+			children = (
+			);
+			path = Tests;
+			sourceTree = "<group>";
+		};
+		2415D02CBAD7EC7588F4CA6F /* Sources */ = {
+			isa = PBXGroup;
+			children = (
+				8347F0B7D54B1F1EAA6C762C /* Assets.xcassets */,
+				6FF70E627268406FDA7DAC41 /* Info.plist */,
+				D819D7B903761AE0BB4C6992 /* TronMobile.entitlements */,
+				A330FEB69A6F3221BC858FB4 /* App */,
+				C14716D67E7B2B11827F5E09 /* Extensions */,
+				E76F08E1413C91E422B18ECD /* Models */,
+				28F5D0524B2913D13DA8C86F /* Services */,
+				D24F740FADE5892AC59EFE0A /* Theme */,
+				92E678876BE6D4CFFD746FD7 /* ViewModels */,
+				8019A5A03208D1ACB7D52BA9 /* Views */,
+			);
+			path = Sources;
+			sourceTree = "<group>";
+		};
+		28F5D0524B2913D13DA8C86F /* Services */ = {
+			isa = PBXGroup;
+			children = (
+				B9DD45A3974192F927E1B73A /* RPCClient.swift */,
+				79449B7B56831FA69C873699 /* WebSocketService.swift */,
+			);
+			path = Services;
+			sourceTree = "<group>";
+		};
+		39DED799DDC5580458E2237A /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				F2B298578C85F2293B9568BA /* TronMobile.app */,
+				C9EDF4ADEF01F732B6DE8F15 /* TronMobileTests.xctest */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		73D37B19239C31F0B91AF61A = {
+			isa = PBXGroup;
+			children = (
+				2415D02CBAD7EC7588F4CA6F /* Sources */,
+				161F8AEF8FBE5C9C772B5263 /* Tests */,
+				39DED799DDC5580458E2237A /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		8019A5A03208D1ACB7D52BA9 /* Views */ = {
+			isa = PBXGroup;
+			children = (
+				5571DC3A896875D1693192D9 /* ChatView.swift */,
+				3EF2CB735CA19344DB30086D /* InputBar.swift */,
+				C37E248C562712A416669C61 /* MessageBubble.swift */,
+				2A3821612AB671B19C9F254D /* SessionListView.swift */,
+				42E47B6EAD030227C54F0028 /* SettingsView.swift */,
+			);
+			path = Views;
+			sourceTree = "<group>";
+		};
+		92E678876BE6D4CFFD746FD7 /* ViewModels */ = {
+			isa = PBXGroup;
+			children = (
+				25C6E368AD4411B086E35A61 /* ChatViewModel.swift */,
+			);
+			path = ViewModels;
+			sourceTree = "<group>";
+		};
+		A330FEB69A6F3221BC858FB4 /* App */ = {
+			isa = PBXGroup;
+			children = (
+				B018ED18CE376F88F9C442F4 /* TronMobileApp.swift */,
+			);
+			path = App;
+			sourceTree = "<group>";
+		};
+		C14716D67E7B2B11827F5E09 /* Extensions */ = {
+			isa = PBXGroup;
+			children = (
+				AB4071D0B8C943D30748238A /* Date+Extensions.swift */,
+				68870B0709527607F70004EB /* String+Extensions.swift */,
+				B4B65C803EB12E8C7004E843 /* View+Extensions.swift */,
+			);
+			path = Extensions;
+			sourceTree = "<group>";
+		};
+		D24F740FADE5892AC59EFE0A /* Theme */ = {
+			isa = PBXGroup;
+			children = (
+				0BA5810A34C92084B89C6EA4 /* TronColors.swift */,
+				00739C1F26626C7791649198 /* TronIcons.swift */,
+			);
+			path = Theme;
+			sourceTree = "<group>";
+		};
+		E76F08E1413C91E422B18ECD /* Models */ = {
+			isa = PBXGroup;
+			children = (
+				30CFDC8D8AA4B77F61F2AF71 /* AnyCodable.swift */,
+				CC00489C0CFF17B0531219D9 /* Events.swift */,
+				67E30FC4A871038322F79EB0 /* Message.swift */,
+				B082B6CE011A17ED14F3393B /* RPCTypes.swift */,
+			);
+			path = Models;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		2423FA22FBA724E77DCB5381 /* TronMobileTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = CD4033E8395E163C62CAAB72 /* Build configuration list for PBXNativeTarget "TronMobileTests" */;
+			buildPhases = (
+				F0CA03081B1B7173E8463C39 /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				B72B66910E2067A15F72BE84 /* PBXTargetDependency */,
+			);
+			name = TronMobileTests;
+			packageProductDependencies = (
+			);
+			productName = TronMobileTests;
+			productReference = C9EDF4ADEF01F732B6DE8F15 /* TronMobileTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+		5CE10CFB51EA2F88B755A197 /* TronMobile */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 0619CB0742D5F447CB406A67 /* Build configuration list for PBXNativeTarget "TronMobile" */;
+			buildPhases = (
+				E32699CBDFF77BF941883031 /* Sources */,
+				BAA4C3D8C37E85528D252009 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = TronMobile;
+			packageProductDependencies = (
+			);
+			productName = TronMobile;
+			productReference = F2B298578C85F2293B9568BA /* TronMobile.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		DFD92FEB2A06256AAEB57E15 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = YES;
+				LastUpgradeCheck = 1600;
+				TargetAttributes = {
+					2423FA22FBA724E77DCB5381 = {
+						DevelopmentTeam = "";
+						ProvisioningStyle = Automatic;
+					};
+					5CE10CFB51EA2F88B755A197 = {
+						DevelopmentTeam = "";
+						ProvisioningStyle = Automatic;
+					};
+				};
+			};
+			buildConfigurationList = AA8EC1DB96ADBAE46DED02A0 /* Build configuration list for PBXProject "TronMobile" */;
+			compatibilityVersion = "Xcode 14.0";
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				Base,
+				en,
+			);
+			mainGroup = 73D37B19239C31F0B91AF61A;
+			minimizedProjectReferenceProxies = 1;
+			preferredProjectObjectVersion = 77;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				5CE10CFB51EA2F88B755A197 /* TronMobile */,
+				2423FA22FBA724E77DCB5381 /* TronMobileTests */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		BAA4C3D8C37E85528D252009 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				FE3D89D152521876D2DDF464 /* Assets.xcassets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		E32699CBDFF77BF941883031 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				E36A71E3DB6FC3116C36F11B /* AnyCodable.swift in Sources */,
+				2AC4711FE03EDA25CA10832D /* ChatView.swift in Sources */,
+				C5D9BF6461C33FF5131E7B42 /* ChatViewModel.swift in Sources */,
+				901A2D24F559EC522BF3D175 /* Date+Extensions.swift in Sources */,
+				4445FADC8739036DF9B95BA0 /* Events.swift in Sources */,
+				14260190901BA8299D13DC43 /* InputBar.swift in Sources */,
+				35E00DB7B38895FF3C3A473E /* Message.swift in Sources */,
+				EED3EB5C8DA4800D10BC6AEA /* MessageBubble.swift in Sources */,
+				A3BCE182EB003CB62D1D96E6 /* RPCClient.swift in Sources */,
+				0186B0083110F291EA235935 /* RPCTypes.swift in Sources */,
+				78CCA04903454E3CD22AABC5 /* SessionListView.swift in Sources */,
+				482423A54FE0C25BA4414CCA /* SettingsView.swift in Sources */,
+				490E7266613F29CD1E3F69F3 /* String+Extensions.swift in Sources */,
+				EAE9FFCC465D011583D191E0 /* TronColors.swift in Sources */,
+				7704175EFC374D5E5425BC6D /* TronIcons.swift in Sources */,
+				8D03520968C046CF0A0C5CC9 /* TronMobileApp.swift in Sources */,
+				AA0AC5B4C07C617F0612C7FA /* View+Extensions.swift in Sources */,
+				DB84AFFF8F9ADCC50F75B33B /* WebSocketService.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		F0CA03081B1B7173E8463C39 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		B72B66910E2067A15F72BE84 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 5CE10CFB51EA2F88B755A197 /* TronMobile */;
+			targetProxy = FE51065D36C2797AE10574CA /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		241E6CA6280627394AD0BB74 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/TronMobile.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/TronMobile";
+			};
+			name = Debug;
+		};
+		7CF7F0FFCAF188F55F5F90A8 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				CODE_SIGN_IDENTITY = "-";
+				CODE_SIGN_STYLE = Automatic;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				DEVELOPMENT_TEAM = "";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				PRODUCT_BUNDLE_IDENTIFIER = com.tron.mobile;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 6.0;
+			};
+			name = Release;
+		};
+		7E938EF44D249B947CF75178 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = Sources/TronMobile.entitlements;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = Sources/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0.0;
+				SDKROOT = iphoneos;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		BAEB94BE0CABE4A1DB2F64F8 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/TronMobile.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/TronMobile";
+			};
+			name = Release;
+		};
+		C2FE90C4DBABAC5D8818B88A /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = Sources/TronMobile.entitlements;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = Sources/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0.0;
+				SDKROOT = iphoneos;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		D63245C1803C3D917CB421E0 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				CODE_SIGN_IDENTITY = "-";
+				CODE_SIGN_STYLE = Automatic;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				DEVELOPMENT_TEAM = "";
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"$(inherited)",
+					"DEBUG=1",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_BUNDLE_IDENTIFIER = com.tron.mobile;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 6.0;
+			};
+			name = Debug;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		0619CB0742D5F447CB406A67 /* Build configuration list for PBXNativeTarget "TronMobile" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				7E938EF44D249B947CF75178 /* Debug */,
+				C2FE90C4DBABAC5D8818B88A /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		AA8EC1DB96ADBAE46DED02A0 /* Build configuration list for PBXProject "TronMobile" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				D63245C1803C3D917CB421E0 /* Debug */,
+				7CF7F0FFCAF188F55F5F90A8 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		CD4033E8395E163C62CAAB72 /* Build configuration list for PBXNativeTarget "TronMobileTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				241E6CA6280627394AD0BB74 /* Debug */,
+				BAEB94BE0CABE4A1DB2F64F8 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = DFD92FEB2A06256AAEB57E15 /* Project object */;
+}

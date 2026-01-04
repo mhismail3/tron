@@ -253,6 +253,39 @@ export class SessionManager extends EventEmitter {
   }
 
   /**
+   * Update session properties (model, systemPrompt, etc.)
+   */
+  async updateSession(
+    sessionId: string,
+    updates: { model?: string; systemPrompt?: string }
+  ): Promise<void> {
+    const session = await this.getSession(sessionId);
+    if (!session) {
+      throw new Error(`Session not found: ${sessionId}`);
+    }
+
+    // Apply updates
+    if (updates.model) {
+      session.model = updates.model;
+    }
+    if (updates.systemPrompt !== undefined) {
+      session.systemPrompt = updates.systemPrompt;
+    }
+    session.lastActivityAt = new Date().toISOString();
+
+    // Append a metadata update entry to track the change
+    const entry: MetadataUpdateEntry = {
+      type: 'metadata_update',
+      timestamp: session.lastActivityAt,
+      updates: { model: updates.model, systemPrompt: updates.systemPrompt } as Partial<SessionMetadata>,
+    };
+
+    await this.appendEntry(sessionId, entry);
+
+    logger.debug('Session updated', { sessionId, updates });
+  }
+
+  /**
    * Update session metadata
    */
   async updateMetadata(
@@ -501,7 +534,16 @@ export class SessionManager extends EventEmitter {
 
           case 'metadata_update':
             if (session) {
-              session.metadata = { ...session.metadata, ...entry.updates };
+              // Handle model updates stored in metadata_update entries
+              if (entry.updates.model) {
+                session.model = entry.updates.model;
+              }
+              if (entry.updates.systemPrompt !== undefined) {
+                session.systemPrompt = entry.updates.systemPrompt;
+              }
+              // Merge other metadata updates
+              const { model: _m, systemPrompt: _s, ...metadataUpdates } = entry.updates;
+              session.metadata = { ...session.metadata, ...metadataUpdates };
               session.lastActivityAt = entry.timestamp;
             }
             break;

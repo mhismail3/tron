@@ -31,6 +31,9 @@ import type {
   AgentAbortResult,
   AgentGetStateParams,
   AgentGetStateResult,
+  ModelSwitchParams,
+  ModelSwitchResult,
+  ModelListResult,
   MemorySearchParams,
   RpcMemorySearchResult,
   MemoryAddEntryParams,
@@ -40,6 +43,7 @@ import type {
   SystemPingResult,
   SystemGetInfoResult,
 } from './types.js';
+import { ANTHROPIC_MODELS } from '../providers/models.js';
 
 const logger = createLogger('rpc');
 
@@ -64,6 +68,7 @@ interface SessionManager {
   deleteSession(sessionId: string): Promise<boolean>;
   forkSession(sessionId: string, fromIndex?: number): Promise<SessionForkResult>;
   rewindSession(sessionId: string, toIndex: number): Promise<SessionRewindResult>;
+  switchModel(sessionId: string, model: string): Promise<ModelSwitchResult>;
 }
 
 interface SessionInfo {
@@ -206,6 +211,12 @@ export class RpcHandler extends EventEmitter {
           return this.handleAgentAbort(request);
         case 'agent.getState':
           return this.handleAgentGetState(request);
+
+        // Model methods
+        case 'model.switch':
+          return this.handleModelSwitch(request);
+        case 'model.list':
+          return this.handleModelList(request);
 
         // Memory methods
         case 'memory.search':
@@ -373,6 +384,45 @@ export class RpcHandler extends EventEmitter {
     }
 
     const result = await this.context.agentManager.getState(params.sessionId);
+    return this.successResponse(request.id, result);
+  }
+
+  // ===========================================================================
+  // Model Handlers
+  // ===========================================================================
+
+  private async handleModelSwitch(request: RpcRequest): Promise<RpcResponse> {
+    const params = request.params as ModelSwitchParams | undefined;
+
+    if (!params?.sessionId) {
+      return this.errorResponse(request.id, 'INVALID_PARAMS', 'sessionId is required');
+    }
+    if (!params?.model) {
+      return this.errorResponse(request.id, 'INVALID_PARAMS', 'model is required');
+    }
+
+    // Validate model exists
+    const modelInfo = ANTHROPIC_MODELS.find((m) => m.id === params.model);
+    if (!modelInfo) {
+      return this.errorResponse(request.id, 'INVALID_PARAMS', `Unknown model: ${params.model}`);
+    }
+
+    const result = await this.context.sessionManager.switchModel(params.sessionId, params.model);
+    return this.successResponse(request.id, result);
+  }
+
+  private async handleModelList(request: RpcRequest): Promise<RpcResponse> {
+    const result: ModelListResult = {
+      models: ANTHROPIC_MODELS.map((m) => ({
+        id: m.id,
+        name: m.shortName,
+        provider: 'anthropic',
+        contextWindow: m.contextWindow,
+        supportsThinking: m.supportsThinking,
+        supportsImages: true, // All Claude models support images
+      })),
+    };
+
     return this.successResponse(request.id, result);
   }
 

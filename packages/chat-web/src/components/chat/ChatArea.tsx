@@ -146,6 +146,21 @@ export function ChatArea({ onSubmit, onCommand, onStop }: ChatAreaProps) {
     inputRef.current?.focus();
   }, []);
 
+  // Handle escape key from InputBar
+  const handleEscape = useCallback(() => {
+    if (showCommandPalette) {
+      setShowCommandPalette(false);
+    } else if (state.isProcessing && onStop) {
+      onStop();
+    }
+  }, [showCommandPalette, state.isProcessing, onStop]);
+
+  // Handle slash command detection from InputBar
+  const handleSlashCommand = useCallback((partial: string) => {
+    setCommandQuery(partial.slice(1)); // Remove leading /
+    setShowCommandPalette(true);
+  }, []);
+
   return (
     <div className="chat-area" onKeyDown={handleKeyDown}>
       {/* Messages */}
@@ -172,7 +187,11 @@ export function ChatArea({ onSubmit, onCommand, onStop }: ChatAreaProps) {
           value={state.input}
           onChange={handleInputChange}
           onSubmit={handleSubmit}
-          disabled={state.isProcessing}
+          onStop={onStop}
+          onSlashCommand={handleSlashCommand}
+          onEscape={handleEscape}
+          isProcessing={state.isProcessing}
+          commandPaletteOpen={showCommandPalette}
           placeholder={
             state.isProcessing
               ? 'Processing...'

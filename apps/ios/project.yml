@@ -1,0 +1,78 @@
+name: TronMobile
+options:
+  bundleIdPrefix: com.tron
+  deploymentTarget:
+    iOS: "18.0"
+  xcodeVersion: "16.0"
+  developmentLanguage: en
+  generateEmptyDirectories: true
+  createIntermediateGroups: true
+
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    ENABLE_USER_SCRIPT_SANDBOXING: false
+    IPHONEOS_DEPLOYMENT_TARGET: "18.0"
+    DEVELOPMENT_TEAM: ""
+    CODE_SIGN_IDENTITY: "-"
+    CODE_SIGN_STYLE: Automatic
+    PRODUCT_BUNDLE_IDENTIFIER: com.tron.mobile
+    INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES
+    INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents: YES
+    INFOPLIST_KEY_UILaunchScreen_Generation: YES
+    INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone: "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight"
+    INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad: "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight"
+
+targets:
+  TronMobile:
+    type: application
+    platform: iOS
+    sources:
+      - path: Sources
+        createIntermediateGroups: true
+    settings:
+      base:
+        INFOPLIST_FILE: Sources/Info.plist
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
+        GENERATE_INFOPLIST_FILE: NO
+        MARKETING_VERSION: "1.0.0"
+        CURRENT_PROJECT_VERSION: "1"
+        SWIFT_EMIT_LOC_STRINGS: YES
+    entitlements:
+      path: Sources/TronMobile.entitlements
+      properties:
+        com.apple.developer.networking.wifi-info: true
+
+  TronMobileTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - path: Tests
+        createIntermediateGroups: true
+        optional: true
+    dependencies:
+      - target: TronMobile
+    settings:
+      base:
+        BUNDLE_LOADER: "$(TEST_HOST)"
+        TEST_HOST: "$(BUILT_PRODUCTS_DIR)/TronMobile.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/TronMobile"
+
+schemes:
+  TronMobile:
+    build:
+      targets:
+        TronMobile: all
+        TronMobileTests: [test]
+    run:
+      config: Debug
+    test:
+      config: Debug
+      targets:
+        - TronMobileTests
+    profile:
+      config: Release
+    analyze:
+      config: Debug
+    archive:
+      config: Release

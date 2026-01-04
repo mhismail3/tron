@@ -300,6 +300,37 @@ export class SessionOrchestrator extends EventEmitter {
     return this.activeSessions.get(sessionId);
   }
 
+  /**
+   * Switch the model for a session
+   */
+  async switchModel(sessionId: string, model: string): Promise<{ previousModel: string; newModel: string }> {
+    const session = await this.sessionManager.getSession(sessionId);
+    if (!session) {
+      throw new Error(`Session not found: ${sessionId}`);
+    }
+
+    const previousModel = session.model;
+
+    // Update the session with the new model
+    await this.sessionManager.updateSession(sessionId, { model });
+
+    // If there's an active session, recreate the agent with the new model
+    const active = this.activeSessions.get(sessionId);
+    if (active) {
+      // Get the updated session
+      const updatedSession = await this.sessionManager.getSession(sessionId);
+      if (updatedSession) {
+        active.session = updatedSession;
+        // Recreate agent with new model
+        active.agent = await this.createAgentForSession(updatedSession);
+      }
+    }
+
+    logger.info('Model switched', { sessionId, previousModel, newModel: model });
+
+    return { previousModel, newModel: model };
+  }
+
   // ===========================================================================
   // Session Fork & Rewind
   // ===========================================================================

@@ -234,12 +234,17 @@ export interface ToolResultEntry {
 }
 
 /**
- * Metadata update entry
+ * Metadata update entry (also used for session property updates like model)
  */
 export interface MetadataUpdateEntry {
   type: 'metadata_update';
   timestamp: string;
-  updates: Partial<SessionMetadata>;
+  updates: Partial<SessionMetadata> & {
+    /** Model update (stored alongside metadata for convenience) */
+    model?: string;
+    /** System prompt update */
+    systemPrompt?: string;
+  };
 }
 
 /**

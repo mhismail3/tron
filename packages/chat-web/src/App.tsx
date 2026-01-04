@@ -2,16 +2,32 @@
  * @fileoverview Main App component for Tron Chat
  *
  * Integrates state management, layout, and RPC connection.
+ * Supports multiple sessions with full persistence across page reloads.
  */
-import { useEffect, useState, useCallback, useMemo } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { ChatProvider, useChatDispatch, useChat } from './store/context.js';
 import { AppShell, Sidebar, type SessionSummary } from './components/layout/index.js';
 import { ChatArea } from './components/chat/ChatArea.js';
 import { ConnectionStatus } from './components/ui/ConnectionStatus.js';
 import { ModelSwitcher } from './components/overlay/index.js';
 import { useRpc } from './hooks/useRpc.js';
+import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts.js';
+import { useSessionPersistence } from './hooks/useSessionPersistence.js';
 import type { RpcEvent, ModelInfo } from '@tron/core/browser';
 import type { Command } from './commands/index.js';
+import type { DisplayMessage, SessionSummary as StoreSessionSummary } from './store/types.js';
+
+// =============================================================================
+// Session State Cache (for multi-session support)
+// =============================================================================
+
+interface SessionCache {
+  messages: DisplayMessage[];
+  model: string;
+  tokenUsage: { input: number; output: number };
+  streamingContent: string;
+  thinkingText: string;
+}
 
 // =============================================================================
 // Inner App (with access to chat context)
@@ -25,22 +41,38 @@ function AppContent() {
     sessionId: rpcSessionId,
     connect,
     disconnect,
+    createSession,
+    deleteSession,
+    resumeSession,
     sendPrompt,
     abort,
     switchModel,
+    setSessionId: setRpcSessionId,
     onEvent,
     error,
   } = useRpc();
+
+  const persistence = useSessionPersistence();
 
   const [isOnline, setIsOnline] = useState(navigator.onLine);
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [modelSwitcherOpen, setModelSwitcherOpen] = useState(false);
   const [modelSwitching, setModelSwitching] = useState(false);
+  const [sessions, setSessions] = useState<SessionSummary[]>([]);
+
+  // Session cache to store state when switching between sessions
+  const sessionCacheRef = useRef<Map<string, SessionCache>>(new Map());
 
   // Detect mobile
   const [isMobile, setIsMobile] = useState(
     typeof window !== 'undefined' && window.innerWidth < 640
   );
+
+  // Input ref for focus management
+  const inputRef = useRef<HTMLTextAreaElement>(null);
+
+  // Track if initial load has happened
+  const initialLoadRef = useRef(false);
 
   useEffect(() => {
     const handleResize = () => {
@@ -52,6 +84,47 @@ function AppContent() {
     window.addEventListener('resize', handleResize);
     return () => window.removeEventListener('resize', handleResize);
   }, []);
+
+  // Load persisted sessions on mount
+  useEffect(() => {
+    if (initialLoadRef.current) return;
+    initialLoadRef.current = true;
+
+    const { sessions: persistedSessions, activeSessionId } = persistence.loadSessions();
+
+    if (persistedSessions.length > 0) {
+      // Convert to sidebar format
+      const sidebarSessions: SessionSummary[] = persistedSessions.map((s) => ({
+        sessionId: s.id,
+        workingDirectory: s.workingDirectory || '/project',
+        model: s.model || 'claude-opus-4-5-20251101',
+        messageCount: s.messageCount || 0,
+        createdAt: s.lastActivity,
+        lastActivity: s.lastActivity,
+        isActive: true,
+      }));
+      setSessions(sidebarSessions);
+
+      // If there's an active session, load its state
+      if (activeSessionId) {
+        const sessionState = persistence.loadSessionState(activeSessionId);
+        if (sessionState) {
+          dispatch({ type: 'SET_SESSION', payload: activeSessionId });
+          dispatch({ type: 'SET_CURRENT_MODEL', payload: sessionState.model });
+          dispatch({ type: 'SET_TOKEN_USAGE', payload: sessionState.tokenUsage });
+          dispatch({ type: 'SET_INITIALIZED', payload: true });
+
+          // Load messages
+          for (const msg of sessionState.messages) {
+            dispatch({ type: 'ADD_MESSAGE', payload: msg });
+          }
+
+          // Pre-set the RPC session ID (it will be validated when connected)
+          setRpcSessionId(activeSessionId);
+        }
+      }
+    }
+  }, [persistence, dispatch, setRpcSessionId]);
 
   // Handle online/offline events
   useEffect(() => {
@@ -76,13 +149,25 @@ function AppContent() {
     };
   }, [connect, disconnect, isOnline]);
 
-  // Sync RPC session to state
+  // Sync RPC session to state when a new session is created
   useEffect(() => {
     if (rpcSessionId && rpcSessionId !== state.sessionId) {
       dispatch({ type: 'SET_SESSION', payload: rpcSessionId });
       dispatch({ type: 'SET_INITIALIZED', payload: true });
     }
   }, [rpcSessionId, state.sessionId, dispatch]);
+
+  // Persist session state whenever messages change
+  useEffect(() => {
+    const sessionId = state.sessionId || rpcSessionId;
+    if (sessionId && state.messages.length > 0) {
+      persistence.saveSessionState(sessionId, {
+        messages: state.messages,
+        model: state.currentModel,
+        tokenUsage: state.tokenUsage,
+      });
+    }
+  }, [state.messages, state.currentModel, state.tokenUsage, state.sessionId, rpcSessionId, persistence]);
 
   // Subscribe to RPC events
   useEffect(() => {
@@ -160,24 +245,23 @@ function AppContent() {
           dispatch({ type: 'SET_ACTIVE_TOOL_INPUT', payload: null });
           break;
 
-        case 'agent.turn_end':
-          // Finalize any remaining streaming content
-          if (state.streamingContent.trim()) {
+        case 'agent.turn_end': {
+          // Turn ended - update token usage from this turn
+          const turnUsage = data.tokenUsage as { inputTokens?: number; outputTokens?: number } | undefined;
+          if (turnUsage) {
             dispatch({
-              type: 'ADD_MESSAGE',
+              type: 'SET_TOKEN_USAGE',
               payload: {
-                id: `msg_${Date.now()}`,
-                role: 'assistant',
-                content: state.streamingContent.trim(),
-                timestamp: new Date().toISOString(),
+                input: (state.tokenUsage?.input || 0) + (turnUsage.inputTokens || 0),
+                output: (state.tokenUsage?.output || 0) + (turnUsage.outputTokens || 0),
               },
             });
-            dispatch({ type: 'CLEAR_STREAMING' });
           }
           break;
+        }
 
         case 'agent.complete':
-          // Final cleanup
+          // Final cleanup - finalize any remaining streaming content
           if (state.streamingContent.trim()) {
             dispatch({
               type: 'ADD_MESSAGE',
@@ -193,18 +277,6 @@ function AppContent() {
           dispatch({ type: 'SET_PROCESSING', payload: false });
           dispatch({ type: 'SET_STREAMING', payload: false });
           dispatch({ type: 'SET_THINKING_TEXT', payload: '' });
-
-          // Update token usage if provided
-          const usage = data.tokenUsage as { input?: number; output?: number } | undefined;
-          if (usage) {
-            dispatch({
-              type: 'SET_TOKEN_USAGE',
-              payload: {
-                input: (state.tokenUsage?.input || 0) + (usage.input || 0),
-                output: (state.tokenUsage?.output || 0) + (usage.output || 0),
-              },
-            });
-          }
           break;
 
         case 'agent.error':
@@ -249,11 +321,78 @@ function AppContent() {
     });
   }, [status, dispatch]);
 
+  // Save current session state to cache before switching
+  const saveCurrentSessionToCache = useCallback(() => {
+    const sessionId = state.sessionId || rpcSessionId;
+    if (sessionId) {
+      sessionCacheRef.current.set(sessionId, {
+        messages: state.messages,
+        model: state.currentModel,
+        tokenUsage: state.tokenUsage,
+        streamingContent: state.streamingContent,
+        thinkingText: state.thinkingText,
+      });
+    }
+  }, [state, rpcSessionId]);
+
+  // Load session state from cache
+  const loadSessionFromCache = useCallback(
+    (sessionId: string) => {
+      const cached = sessionCacheRef.current.get(sessionId);
+      if (cached) {
+        // Clear current messages
+        dispatch({ type: 'RESET' });
+
+        // Load cached state
+        dispatch({ type: 'SET_SESSION', payload: sessionId });
+        dispatch({ type: 'SET_CURRENT_MODEL', payload: cached.model });
+        dispatch({ type: 'SET_TOKEN_USAGE', payload: cached.tokenUsage });
+
+        for (const msg of cached.messages) {
+          dispatch({ type: 'ADD_MESSAGE', payload: msg });
+        }
+
+        return true;
+      }
+
+      // Try loading from persistence
+      const persisted = persistence.loadSessionState(sessionId);
+      if (persisted) {
+        dispatch({ type: 'RESET' });
+        dispatch({ type: 'SET_SESSION', payload: sessionId });
+        dispatch({ type: 'SET_CURRENT_MODEL', payload: persisted.model });
+        dispatch({ type: 'SET_TOKEN_USAGE', payload: persisted.tokenUsage });
+
+        for (const msg of persisted.messages) {
+          dispatch({ type: 'ADD_MESSAGE', payload: msg });
+        }
+
+        return true;
+      }
+
+      return false;
+    },
+    [dispatch, persistence]
+  );
+
   // Handle message submission
   const handleSubmit = useCallback(
     async (message: string) => {
+      const sessionId = state.sessionId || rpcSessionId;
+
+      // Add user message immediately
+      dispatch({
+        type: 'ADD_MESSAGE',
+        payload: {
+          id: `user_${Date.now()}`,
+          role: 'user',
+          content: message,
+          timestamp: new Date().toISOString(),
+        },
+      });
+
       try {
-        await sendPrompt(message);
+        await sendPrompt(message, sessionId || undefined);
       } catch (err) {
         console.error('Failed to send message:', err);
         dispatch({
@@ -267,7 +406,7 @@ function AppContent() {
         });
       }
     },
-    [sendPrompt, dispatch]
+    [sendPrompt, dispatch, state.sessionId, rpcSessionId]
   );
 
   // Handle stop button
@@ -386,43 +525,236 @@ function AppContent() {
     [dispatch, state.sessionId, state.currentModel, state.messages.length, rpcSessionId]
   );
 
-  // Session management - convert store sessions to Sidebar format
-  const sessions = useMemo<SessionSummary[]>(() => {
-    const activeSessionId = state.sessionId || rpcSessionId;
-    if (activeSessionId) {
-      return [
-        {
-          sessionId: activeSessionId,
+  // Handle session selection (switching)
+  const handleSessionSelect = useCallback(
+    async (sessionId: string) => {
+      const currentSessionId = state.sessionId || rpcSessionId;
+      if (sessionId === currentSessionId) return;
+
+      // Save current session state
+      saveCurrentSessionToCache();
+
+      // Load the selected session
+      loadSessionFromCache(sessionId);
+
+      // Update RPC session
+      setRpcSessionId(sessionId);
+
+      // Update persistence
+      persistence.setActiveSession(sessionId);
+
+      // Try to resume the session with the server
+      if (status === 'connected') {
+        try {
+          await resumeSession(sessionId);
+        } catch (err) {
+          console.warn('Failed to resume session with server:', err);
+          // Session might not exist on server yet - that's okay for locally persisted sessions
+        }
+      }
+    },
+    [
+      state.sessionId,
+      rpcSessionId,
+      saveCurrentSessionToCache,
+      loadSessionFromCache,
+      setRpcSessionId,
+      persistence,
+      status,
+      resumeSession,
+    ]
+  );
+
+  // Handle new session creation
+  const handleNewSession = useCallback(async () => {
+    // Save current session state first
+    saveCurrentSessionToCache();
+
+    // Reset UI state for new session
+    dispatch({ type: 'RESET' });
+
+    const now = new Date().toISOString();
+
+    try {
+      // Create new session via RPC if connected
+      if (status === 'connected') {
+        const newSessionId = await createSession('/project', state.currentModel);
+
+        // Create session summary
+        const newSession: SessionSummary = {
+          sessionId: newSessionId,
           workingDirectory: '/project',
           model: state.currentModel,
-          messageCount: state.messages.length,
-          createdAt: new Date().toISOString(),
-          lastActivity: new Date().toISOString(),
+          messageCount: 0,
+          createdAt: now,
+          lastActivity: now,
           isActive: true,
+        };
+
+        // Update sessions list
+        setSessions((prev) => [...prev, newSession]);
+
+        // Save to persistence
+        const storeSession: StoreSessionSummary = {
+          id: newSessionId,
+          title: 'New Session',
+          lastActivity: now,
+          model: state.currentModel,
+          messageCount: 0,
+          workingDirectory: '/project',
+        };
+        persistence.saveSession(storeSession);
+        persistence.setActiveSession(newSessionId);
+
+        // Update state
+        dispatch({ type: 'SET_SESSION', payload: newSessionId });
+        dispatch({ type: 'SET_INITIALIZED', payload: true });
+      } else {
+        // Create local-only session if not connected
+        const localSessionId = `local_${Date.now()}`;
+
+        const newSession: SessionSummary = {
+          sessionId: localSessionId,
+          workingDirectory: '/project',
+          model: state.currentModel,
+          messageCount: 0,
+          createdAt: now,
+          lastActivity: now,
+          isActive: true,
+        };
+
+        setSessions((prev) => [...prev, newSession]);
+
+        const storeSession: StoreSessionSummary = {
+          id: localSessionId,
+          title: 'New Session',
+          lastActivity: now,
+          model: state.currentModel,
+          messageCount: 0,
+          workingDirectory: '/project',
+        };
+        persistence.saveSession(storeSession);
+        persistence.setActiveSession(localSessionId);
+
+        dispatch({ type: 'SET_SESSION', payload: localSessionId });
+        dispatch({ type: 'SET_INITIALIZED', payload: true });
+      }
+    } catch (err) {
+      console.error('Failed to create session:', err);
+      dispatch({
+        type: 'ADD_MESSAGE',
+        payload: {
+          id: `error_${Date.now()}`,
+          role: 'system',
+          content: `Failed to create session: ${err instanceof Error ? err.message : 'Unknown error'}`,
+          timestamp: new Date().toISOString(),
         },
-      ];
+      });
     }
-    return [];
-  }, [state.sessionId, state.messages.length, state.currentModel, rpcSessionId]);
+  }, [
+    saveCurrentSessionToCache,
+    dispatch,
+    status,
+    createSession,
+    state.currentModel,
+    persistence,
+  ]);
 
-  const handleSessionSelect = useCallback(
-    (_sessionId: string) => {
-      // TODO: Implement session switching via RPC
-    },
-    []
-  );
-
-  const handleNewSession = useCallback(() => {
-    // TODO: Create new session via RPC
-    dispatch({ type: 'RESET' });
-  }, [dispatch]);
-
+  // Handle session deletion
   const handleSessionDelete = useCallback(
-    (_sessionId: string) => {
-      // TODO: Delete session via RPC
+    async (sessionId: string) => {
+      try {
+        // Abort any ongoing processing for this session
+        if (state.isProcessing && (state.sessionId === sessionId || rpcSessionId === sessionId)) {
+          await abort(sessionId);
+        }
+
+        // Delete from server if connected
+        if (status === 'connected') {
+          try {
+            await deleteSession(sessionId);
+          } catch (err) {
+            console.warn('Failed to delete session from server:', err);
+            // Continue with local deletion even if server deletion fails
+          }
+        }
+
+        // Remove from local state
+        setSessions((prev) => prev.filter((s) => s.sessionId !== sessionId));
+
+        // Remove from persistence
+        persistence.removeSession(sessionId);
+
+        // Remove from cache
+        sessionCacheRef.current.delete(sessionId);
+
+        // If this was the active session, switch to another or create new
+        const currentSessionId = state.sessionId || rpcSessionId;
+        if (sessionId === currentSessionId) {
+          dispatch({ type: 'RESET' });
+          setRpcSessionId(null);
+
+          // Switch to another session if available
+          const remainingSessions = sessions.filter((s) => s.sessionId !== sessionId);
+          if (remainingSessions.length > 0) {
+            const nextSession = remainingSessions[0]!;
+            loadSessionFromCache(nextSession.sessionId);
+            setRpcSessionId(nextSession.sessionId);
+            persistence.setActiveSession(nextSession.sessionId);
+          }
+        }
+      } catch (err) {
+        console.error('Failed to delete session:', err);
+        dispatch({
+          type: 'ADD_MESSAGE',
+          payload: {
+            id: `error_${Date.now()}`,
+            role: 'system',
+            content: `Failed to delete session: ${err instanceof Error ? err.message : 'Unknown error'}`,
+            timestamp: new Date().toISOString(),
+          },
+        });
+      }
     },
-    []
+    [
+      state.isProcessing,
+      state.sessionId,
+      rpcSessionId,
+      abort,
+      status,
+      deleteSession,
+      persistence,
+      sessions,
+      dispatch,
+      setRpcSessionId,
+      loadSessionFromCache,
+    ]
   );
+
+  // Global keyboard shortcuts
+  useKeyboardShortcuts({
+    enabled: true,
+    shortcuts: {
+      onOpenCommandPalette: () => {
+        // Focus input and type / to open command palette
+        if (inputRef.current) {
+          inputRef.current.focus();
+          dispatch({ type: 'SET_INPUT', payload: '/' });
+        }
+      },
+      onEscape: () => {
+        if (modelSwitcherOpen) {
+          setModelSwitcherOpen(false);
+        } else if (state.isProcessing) {
+          abort();
+        }
+      },
+      onFocusInput: () => {
+        inputRef.current?.focus();
+      },
+      onNewSession: handleNewSession,
+    },
+  });
 
   // Sidebar component
   const sidebar = (
@@ -446,9 +778,14 @@ function AppContent() {
   );
 
   // Map RPC status to connection status component format
-  const connectionStatus = status === 'connected' ? 'connected' :
-                          status === 'connecting' || status === 'reconnecting' ? 'connecting' :
-                          status === 'error' ? 'error' : 'disconnected';
+  const connectionStatus =
+    status === 'connected'
+      ? 'connected'
+      : status === 'connecting' || status === 'reconnecting'
+        ? 'connecting'
+        : status === 'error'
+          ? 'error'
+          : 'disconnected';
 
   return (
     <div
