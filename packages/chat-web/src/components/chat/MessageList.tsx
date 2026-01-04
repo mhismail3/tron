@@ -10,7 +10,6 @@ import type { DisplayMessage } from '../../store/types.js';
 import { MessageItem } from './MessageItem.js';
 import { ThinkingBlock } from './ThinkingBlock.js';
 import { StreamingContent } from './StreamingContent.js';
-import { WelcomeBox } from './WelcomeBox.js';
 import { ToolIndicator } from './ToolIndicator.js';
 import './MessageList.css';
 
@@ -33,14 +32,6 @@ export interface MessageListProps {
   isStreaming?: boolean;
   /** Current thinking text */
   thinkingText?: string;
-  /** Welcome box model */
-  welcomeModel?: string;
-  /** Welcome box working directory */
-  welcomeWorkingDirectory?: string;
-  /** Welcome box git branch */
-  welcomeGitBranch?: string;
-  /** Whether to show welcome */
-  showWelcome?: boolean;
 }
 
 // =============================================================================
@@ -55,10 +46,6 @@ export function MessageList({
   streamingContent,
   isStreaming = false,
   thinkingText,
-  welcomeModel,
-  welcomeWorkingDirectory,
-  welcomeGitBranch,
-  showWelcome = false,
 }: MessageListProps) {
   const listRef = useRef<HTMLDivElement>(null);
   const endRef = useRef<HTMLDivElement>(null);
@@ -75,7 +62,7 @@ export function MessageList({
     isProcessing && !streamingContent && !activeTool;
   const showActiveTool = isProcessing && activeTool && !streamingContent;
   const showStreaming = streamingContent && streamingContent.length > 0;
-  const showEmpty = messages.length === 0 && !showWelcome;
+  const showEmpty = messages.length === 0;
 
   return (
     <div
@@ -85,15 +72,6 @@ export function MessageList({
       aria-label="Conversation messages"
       ref={listRef}
     >
-      {/* Welcome Box */}
-      {showWelcome && welcomeModel && welcomeWorkingDirectory && (
-        <WelcomeBox
-          model={welcomeModel}
-          workingDirectory={welcomeWorkingDirectory}
-          gitBranch={welcomeGitBranch}
-        />
-      )}
-
       {/* Empty State */}
       {showEmpty && (
         <div className="message-list-empty">

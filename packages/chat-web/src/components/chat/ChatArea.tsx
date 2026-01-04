@@ -163,10 +163,6 @@ export function ChatArea({ onSubmit, onCommand, onStop }: ChatAreaProps) {
           streamingContent={state.streamingContent}
           isStreaming={state.isStreaming}
           thinkingText={state.thinkingText}
-          showWelcome={state.isInitialized}
-          welcomeModel={state.currentModel}
-          welcomeWorkingDirectory={state.workingDirectory}
-          welcomeGitBranch={state.gitBranch ?? undefined}
         />
       </div>
 
@@ -191,6 +187,7 @@ export function ChatArea({ onSubmit, onCommand, onStop }: ChatAreaProps) {
         <StatusBar
           status={state.status as 'idle' | 'processing' | 'error' | 'connected'}
           model={state.currentModel}
+          workingDirectory={state.workingDirectory}
           tokenUsage={state.tokenUsage}
         />
       </div>

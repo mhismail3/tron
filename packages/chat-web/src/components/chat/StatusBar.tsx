@@ -15,6 +15,8 @@ interface StatusBarProps {
   status?: 'idle' | 'processing' | 'error' | 'connected';
   /** Current model name */
   model?: string;
+  /** Working directory path */
+  workingDirectory?: string;
   /** Token usage stats (new format) */
   tokenUsage?: TokenUsage;
   /** Legacy: input tokens */
@@ -30,6 +32,7 @@ interface StatusBarProps {
 export function StatusBar({
   status: _status = 'idle',
   model = 'claude-sonnet-4-20250514',
+  workingDirectory,
   tokenUsage,
   inputTokens = 0,
   outputTokens = 0,
@@ -67,8 +70,16 @@ export function StatusBar({
         color: 'var(--text-tertiary)',
       }}
     >
-      {/* Model info */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-sm)' }}>
+      {/* Left: Working directory and model */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-md)' }}>
+        {workingDirectory && (
+          <span
+            style={{ color: 'var(--text-secondary)' }}
+            title={workingDirectory}
+          >
+            {workingDirectory.split('/').pop() || workingDirectory}
+          </span>
+        )}
         <Badge>{model}</Badge>
       </div>
 
