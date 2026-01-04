@@ -20,7 +20,7 @@ export interface UseWebSocketReturn {
 }
 
 // Use page hostname to support Tailscale/remote access
-const WS_URL = import.meta.env.VITE_WS_URL ||
+const WS_URL = (import.meta as { env?: Record<string, string> }).env?.VITE_WS_URL ||
   `ws://${window.location.hostname || 'localhost'}:8080/ws`;
 console.log('[WebSocket] Connecting to:', WS_URL);
 const RECONNECT_DELAY = 3000;

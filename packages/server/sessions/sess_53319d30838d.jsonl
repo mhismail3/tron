@@ -1,0 +1,2 @@
+{"type":"session_start","timestamp":"2026-01-04T06:53:22.538Z","sessionId":"sess_53319d30838d","workingDirectory":"/project","model":"claude-sonnet-4-20250514","provider":"anthropic","metadata":{}}
+{"type":"message","timestamp":"2026-01-04T06:53:22.554Z","message":{"role":"user","content":"Hello, who are you?"},"turn":0}

@@ -29,7 +29,7 @@ const toolColors: Record<string, string> = {
 
 function getToolColor(name: string): string {
   const lowerName = name.toLowerCase();
-  return toolColors[lowerName] || toolColors.default;
+  return toolColors[lowerName] ?? toolColors['default'] ?? 'var(--accent)';
 }
 
 function getToolIcon(name: string): string {

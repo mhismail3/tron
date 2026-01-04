@@ -20,6 +20,7 @@ import {
   type Handoff,
   type CodeChange,
   type MemoryEntry,
+  type TronEvent,
 } from '@tron/core';
 
 const logger = createLogger('orchestrator');
@@ -619,10 +620,135 @@ export class SessionOrchestrator extends EventEmitter {
       maxTurns: 50,
     };
 
-    return new TronAgent(agentConfig, {
+    const agent = new TronAgent(agentConfig, {
       sessionId: session.id,
       workingDirectory: session.workingDirectory,
     });
+
+    // Register event listener to forward agent events to WebSocket clients
+    agent.onEvent((event) => {
+      this.forwardAgentEvent(session.id, event);
+    });
+
+    return agent;
+  }
+
+  /**
+   * Forward TronAgent events to RPC event format for WebSocket clients
+   */
+  private forwardAgentEvent(sessionId: string, event: TronEvent): void {
+    const timestamp = new Date().toISOString();
+
+    switch (event.type) {
+      case 'turn_start':
+        this.emit('agent_event', {
+          type: 'agent.turn_start',
+          sessionId,
+          timestamp,
+          data: { turn: event.turn },
+        });
+        break;
+
+      case 'turn_end':
+        this.emit('agent_event', {
+          type: 'agent.turn_end',
+          sessionId,
+          timestamp,
+          data: {
+            turn: event.turn,
+            duration: event.duration,
+            tokenUsage: event.tokenUsage,
+          },
+        });
+        break;
+
+      case 'message_update':
+        // This is the text streaming event
+        this.emit('agent_event', {
+          type: 'agent.text_delta',
+          sessionId,
+          timestamp,
+          data: { delta: event.content },
+        });
+        break;
+
+      case 'tool_execution_start':
+        this.emit('agent_event', {
+          type: 'agent.tool_start',
+          sessionId,
+          timestamp,
+          data: {
+            toolCallId: event.toolCallId,
+            toolName: event.toolName,
+            arguments: event.arguments,
+          },
+        });
+        break;
+
+      case 'tool_execution_end':
+        this.emit('agent_event', {
+          type: 'agent.tool_end',
+          sessionId,
+          timestamp,
+          data: {
+            toolCallId: event.toolCallId,
+            toolName: event.toolName,
+            success: !event.isError,
+            result: event.result,
+            duration: event.duration,
+          },
+        });
+        break;
+
+      case 'agent_start':
+        // Emit turn start for the first turn
+        this.emit('agent_event', {
+          type: 'agent.turn_start',
+          sessionId,
+          timestamp,
+          data: {},
+        });
+        break;
+
+      case 'agent_end':
+        this.emit('agent_event', {
+          type: 'agent.complete',
+          sessionId,
+          timestamp,
+          data: {
+            success: !event.error,
+            error: event.error,
+          },
+        });
+        break;
+
+      case 'agent_interrupted':
+        this.emit('agent_event', {
+          type: 'agent.complete',
+          sessionId,
+          timestamp,
+          data: {
+            success: false,
+            interrupted: true,
+            partialContent: event.partialContent,
+          },
+        });
+        break;
+
+      // Optionally forward other events for debugging/advanced UI features
+      case 'api_retry':
+        this.emit('agent_event', {
+          type: 'agent.retry',
+          sessionId,
+          timestamp,
+          data: {
+            attempt: event.attempt,
+            maxRetries: event.maxRetries,
+            delayMs: event.delayMs,
+          },
+        });
+        break;
+    }
   }
 
   private startCleanupTimer(): void {

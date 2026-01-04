@@ -1,0 +1,86 @@
+/**
+ * InputBar Styles
+ *
+ * Terminal-style input with bordered box.
+ */
+
+.input-bar {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--space-sm);
+}
+
+.input-bar-wrapper {
+  flex: 1;
+  position: relative;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  background: var(--bg-surface);
+  transition: border-color var(--transition-fast);
+}
+
+.input-bar-wrapper.focused {
+  border-color: var(--primary);
+}
+
+.input-bar-textarea {
+  width: 100%;
+  padding: var(--space-sm) var(--space-md);
+  background: transparent;
+  border: none;
+  outline: none;
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  line-height: 22px;
+  resize: none;
+  overflow-y: auto;
+}
+
+.input-bar-textarea::placeholder {
+  color: var(--text-muted);
+}
+
+.input-bar-textarea:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Send/Stop Button */
+.input-bar-button {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border: none;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.input-bar-button.send {
+  background: var(--primary);
+  color: var(--text-on-primary);
+}
+
+.input-bar-button.send:hover:not(:disabled) {
+  background: var(--primary-bright);
+}
+
+.input-bar-button.send:disabled {
+  background: var(--bg-elevated);
+  color: var(--text-muted);
+  cursor: not-allowed;
+}
+
+.input-bar-button.stop {
+  background: var(--error);
+  color: white;
+}
+
+.input-bar-button.stop:hover {
+  background: var(--error);
+  opacity: 0.9;
+}

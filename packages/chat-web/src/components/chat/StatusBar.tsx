@@ -4,21 +4,43 @@
 import React from 'react';
 import { Badge } from '../ui/Badge.js';
 
-interface StatusBarProps {
-  model?: string;
-  inputTokens?: number;
-  outputTokens?: number;
+interface TokenUsage {
+  input: number;
+  output: number;
   cost?: number;
+}
+
+interface StatusBarProps {
+  /** Connection/processing status */
+  status?: 'idle' | 'processing' | 'error' | 'connected';
+  /** Current model name */
+  model?: string;
+  /** Token usage stats (new format) */
+  tokenUsage?: TokenUsage;
+  /** Legacy: input tokens */
+  inputTokens?: number;
+  /** Legacy: output tokens */
+  outputTokens?: number;
+  /** Cost in dollars */
+  cost?: number;
+  /** Context window usage percentage */
   contextPercent?: number;
 }
 
 export function StatusBar({
+  status: _status = 'idle',
   model = 'claude-sonnet-4-20250514',
+  tokenUsage,
   inputTokens = 0,
   outputTokens = 0,
   cost,
   contextPercent = 0,
 }: StatusBarProps): React.ReactElement {
+  // Support both new and legacy token format
+  const inTokens = tokenUsage?.input ?? inputTokens;
+  const outTokens = tokenUsage?.output ?? outputTokens;
+  const totalCost = tokenUsage?.cost ?? cost;
+  // TODO: Use _status to show connection/processing indicator
   const formatNumber = (n: number): string => {
     if (n >= 1000000) return `${(n / 1000000).toFixed(1)}M`;
     if (n >= 1000) return `${(n / 1000).toFixed(1)}K`;
@@ -55,15 +77,15 @@ export function StatusBar({
         {/* Tokens */}
         <div style={{ display: 'flex', gap: 'var(--space-xs)' }}>
           <span style={{ color: 'var(--text-muted)' }}>in:</span>
-          <span>{formatNumber(inputTokens)}</span>
+          <span>{formatNumber(inTokens)}</span>
           <span style={{ color: 'var(--text-muted)' }}>out:</span>
-          <span>{formatNumber(outputTokens)}</span>
+          <span>{formatNumber(outTokens)}</span>
         </div>
 
         {/* Cost */}
-        {cost !== undefined && cost > 0 && (
+        {totalCost !== undefined && totalCost > 0 && (
           <span style={{ color: 'var(--success)' }}>
-            ${cost.toFixed(4)}
+            ${totalCost.toFixed(4)}
           </span>
         )}
 

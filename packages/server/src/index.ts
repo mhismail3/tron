@@ -270,6 +270,16 @@ export class TronServer {
       });
     });
 
+    // Forward streaming agent events to WebSocket clients
+    this.orchestrator.on('agent_event', (event) => {
+      this.wsServer?.broadcastEvent({
+        type: event.type,
+        sessionId: event.sessionId,
+        timestamp: event.timestamp,
+        data: event.data,
+      });
+    });
+
     this.isRunning = true;
 
     logger.info('Tron server started', {

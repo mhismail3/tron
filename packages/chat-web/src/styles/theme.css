@@ -1,87 +1,118 @@
 /**
  * Tron Chat Theme
- * Warm dark theme inspired by retro terminal aesthetics
+ * Forest green terminal aesthetic matching TUI
  */
 
 :root {
-  /* Background layers */
-  --bg-base: #0d0d0d;
-  --bg-surface: #171615;
-  --bg-elevated: #1f1d1b;
-  --bg-overlay: #2a2725;
+  /* === Forest Green Palette === */
+  --primary: #123524;
+  --primary-light: #1a4a32;
+  --primary-bright: #2a6a4a;
+  --primary-vivid: #2a7a52;
 
-  /* Text colors */
-  --text-primary: #f0ebe3;
-  --text-secondary: #d4cfc7;
-  --text-tertiary: #9a9590;
-  --text-muted: #5c5855;
+  /* Extended green palette */
+  --emerald: #50c878;
+  --mint: #98ffb3;
+  --sage: #7a9a8a;
 
-  /* Accent colors */
-  --accent: #c45b37;
-  --accent-hover: #d66b47;
-  --accent-active: #b04a28;
-  --accent-muted: rgba(196, 91, 55, 0.15);
+  /* === Background layers (forest undertones) === */
+  --bg-base: #0a0f0c;
+  --bg-surface: #0f1610;
+  --bg-elevated: #141c16;
+  --bg-overlay: #1a241c;
+  --bg-hover: #1e2a20;
 
-  /* Secondary accent */
-  --secondary: #2c8f7a;
-  --secondary-hover: #3aa08a;
-  --secondary-muted: rgba(44, 143, 122, 0.15);
+  /* === Text colors === */
+  --text-primary: #e8f0ea;
+  --text-secondary: #c0d0c5;
+  --text-tertiary: #7a9a8a;
+  --text-muted: #4a5a50;
+  --text-dim: #3a4a40;
 
-  /* Status colors */
-  --success: #4ade80;
+  /* === Role colors (TUI parity) === */
+  --role-user: var(--primary-vivid);
+  --role-assistant: var(--emerald);
+  --role-system: var(--text-muted);
+  --role-tool: var(--mint);
+
+  /* === Status colors === */
+  --status-ready: var(--emerald);
+  --status-thinking: var(--mint);
+  --status-processing: var(--primary-vivid);
+  --status-running: #60a5fa;
+  --status-error: #ef4444;
+
+  /* === Semantic colors === */
+  --success: #50c878;
   --warning: #fbbf24;
   --error: #ef4444;
   --info: #60a5fa;
 
-  /* User message colors */
-  --user-bg: #9a4a2e;
-  --user-text: #f0ebe3;
-  --user-border: #6b3520;
+  /* === Message styling === */
+  --user-bg: var(--primary);
+  --user-text: var(--text-primary);
+  --user-border: var(--primary-light);
 
-  /* Assistant message colors */
-  --assistant-bg: var(--bg-elevated);
+  --assistant-bg: transparent;
   --assistant-text: var(--text-primary);
-  --assistant-border: var(--bg-overlay);
+  --assistant-border: transparent;
 
-  /* Borders and shadows */
-  --border-subtle: rgba(255, 255, 255, 0.06);
-  --border-default: rgba(255, 255, 255, 0.1);
+  --tool-bg: var(--bg-elevated);
+  --tool-text: var(--text-secondary);
+  --tool-border: var(--primary-light);
+
+  /* === Borders and shadows === */
+  --border-subtle: rgba(80, 200, 120, 0.08);
+  --border-default: rgba(80, 200, 120, 0.15);
+  --border-focus: var(--emerald);
   --shadow-sm: 2px 2px 0px rgba(0, 0, 0, 0.3);
   --shadow-md: 3px 3px 0px rgba(0, 0, 0, 0.3);
   --shadow-lg: 4px 4px 0px rgba(0, 0, 0, 0.4);
 
-  /* Spacing */
+  /* === Spacing === */
   --space-xs: 4px;
   --space-sm: 8px;
   --space-md: 12px;
   --space-lg: 16px;
   --space-xl: 20px;
   --space-2xl: 24px;
+  --space-3xl: 32px;
 
-  /* Border radius */
-  --radius-sm: 6px;
-  --radius-md: 10px;
-  --radius-lg: 14px;
+  /* === Border radius === */
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
   --radius-full: 9999px;
 
-  /* Typography */
-  --font-mono: 'JetBrains Mono', ui-monospace, monospace;
+  /* === Typography === */
+  --font-mono: 'JetBrains Mono', 'Fira Code', ui-monospace, monospace;
   --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
 
   /* Font sizes */
   --text-xs: 11px;
   --text-sm: 13px;
-  --text-base: 15px;
-  --text-lg: 17px;
-  --text-xl: 20px;
+  --text-base: 14px;
+  --text-lg: 16px;
+  --text-xl: 18px;
 
-  /* Transitions */
+  /* === Layout === */
+  --sidebar-width: 280px;
+  --sidebar-collapsed: 64px;
+  --header-height: 48px;
+  --input-height: 48px;
+  --max-content-width: 800px;
+
+  /* === Transitions === */
   --transition-fast: 0.1s ease;
   --transition-normal: 0.15s ease;
   --transition-slow: 0.25s ease;
+
+  /* === Thinking animation === */
+  --thinking-bar-color: var(--emerald);
+  --thinking-interval: 80ms;
 }
 
-/* Base styles */
+/* === Base Reset === */
 * {
   box-sizing: border-box;
   margin: 0;
@@ -94,20 +125,16 @@ html, body, #root {
 }
 
 body {
-  font-family: var(--font-sans);
+  font-family: var(--font-mono);
   font-size: var(--text-base);
-  line-height: 1.5;
+  line-height: 1.6;
   background: var(--bg-base);
   color: var(--text-primary);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
 
-code, pre, .mono {
-  font-family: var(--font-mono);
-}
-
-/* Scrollbar styling */
+/* === Scrollbar (terminal style) === */
 ::-webkit-scrollbar {
   width: 8px;
   height: 8px;
@@ -118,39 +145,167 @@ code, pre, .mono {
 }
 
 ::-webkit-scrollbar-thumb {
-  background: var(--bg-overlay);
-  border-radius: var(--radius-full);
+  background: var(--primary-light);
+  border-radius: 2px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: var(--text-muted);
+  background: var(--primary-bright);
 }
 
-/* Focus styles */
+/* === Focus styles === */
 :focus-visible {
-  outline: 2px solid var(--accent);
+  outline: 2px solid var(--emerald);
   outline-offset: 2px;
 }
 
-/* Selection */
+/* === Selection === */
 ::selection {
-  background: var(--accent-muted);
+  background: rgba(80, 200, 120, 0.25);
   color: var(--text-primary);
 }
 
-/* Utility classes */
-.glass {
-  background: var(--bg-elevated);
-  border: 1px solid var(--border-subtle);
-  backdrop-filter: blur(8px);
-}
+/* === Terminal Icons (Unicode) === */
+.icon-user::before { content: '›'; }
+.icon-assistant::before { content: '✦'; }
+.icon-system::before { content: '⚡'; }
+.icon-tool-running::before { content: '◐'; }
+.icon-tool-success::before { content: '✓'; }
+.icon-tool-error::before { content: '✗'; }
+.icon-ready::before { content: '◉'; }
+.icon-thinking::before { content: '⋯'; }
+.icon-streaming::before { content: '▸'; }
 
-.retro-shadow {
-  box-shadow: var(--shadow-md);
+/* === Utility Classes === */
+.mono {
+  font-family: var(--font-mono);
 }
 
 .truncate {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* === Thinking Animation Bars === */
+@keyframes thinking-pulse {
+  0%, 100% {
+    transform: scaleY(0.3);
+  }
+  50% {
+    transform: scaleY(1);
+  }
+}
+
+.thinking-bars {
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  height: 14px;
+}
+
+.thinking-bar {
+  width: 3px;
+  background: var(--thinking-bar-color);
+  border-radius: 1px;
+  animation: thinking-pulse 0.6s ease-in-out infinite;
+  transform-origin: bottom;
+}
+
+.thinking-bar:nth-child(1) { animation-delay: 0ms; }
+.thinking-bar:nth-child(2) { animation-delay: 80ms; }
+.thinking-bar:nth-child(3) { animation-delay: 160ms; }
+.thinking-bar:nth-child(4) { animation-delay: 240ms; }
+.thinking-bar:nth-child(5) { animation-delay: 320ms; }
+
+/* === Streaming Cursor === */
+@keyframes cursor-blink {
+  0%, 50% { opacity: 1; }
+  51%, 100% { opacity: 0; }
+}
+
+.streaming-cursor {
+  display: inline-block;
+  width: 8px;
+  height: 1.2em;
+  background: var(--emerald);
+  animation: cursor-blink 1s step-end infinite;
+  vertical-align: text-bottom;
+  margin-left: 2px;
+}
+
+/* === Message Prefixes (Terminal style) === */
+.message-prefix {
+  display: inline-block;
+  width: 20px;
+  text-align: center;
+  flex-shrink: 0;
+}
+
+.message-prefix.user {
+  color: var(--role-user);
+}
+
+.message-prefix.assistant {
+  color: var(--role-assistant);
+}
+
+.message-prefix.system {
+  color: var(--role-system);
+}
+
+.message-prefix.tool {
+  color: var(--role-tool);
+}
+
+/* === Code Blocks === */
+pre, code {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+}
+
+pre {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  padding: var(--space-md);
+  overflow-x: auto;
+}
+
+code {
+  background: var(--bg-overlay);
+  padding: 2px 6px;
+  border-radius: var(--radius-sm);
+}
+
+pre code {
+  background: transparent;
+  padding: 0;
+}
+
+/* === Responsive Breakpoints === */
+@media (max-width: 640px) {
+  :root {
+    --text-base: 13px;
+    --space-md: 10px;
+    --space-lg: 14px;
+  }
+}
+
+@media (max-width: 1024px) {
+  :root {
+    --sidebar-width: 240px;
+  }
 }

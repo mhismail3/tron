@@ -17,7 +17,9 @@ export function Badge({ variant = 'default', children }: BadgeProps): React.Reac
     info: { bg: 'rgba(96, 165, 250, 0.15)', text: 'var(--info)' },
   };
 
-  const { bg, text } = colors[variant];
+  const defaultColors = { bg: 'var(--bg-overlay)', text: 'var(--text-secondary)' };
+  const colorConfig = colors[variant] ?? defaultColors;
+  const { bg, text } = colorConfig;
 
   return (
     <span

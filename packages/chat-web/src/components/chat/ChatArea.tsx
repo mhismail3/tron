@@ -1,0 +1,198 @@
+/**
+ * @fileoverview ChatArea Component
+ *
+ * Main chat area integrating MessageList, InputBar, and CommandPalette.
+ * Handles input processing, command detection, and message submission.
+ */
+
+import { useState, useCallback, useRef, useEffect } from 'react';
+import { useChat, useChatDispatch } from '../../store/context.js';
+import { MessageList } from './MessageList.js';
+import { InputBar } from './InputBar.js';
+import { StatusBar } from './StatusBar.js';
+import { CommandPalette } from '../overlay/CommandPalette.js';
+import { isCommand, parseCommand, findCommand } from '../../commands/index.js';
+import type { Command } from '../../commands/index.js';
+import './ChatArea.css';
+
+// =============================================================================
+// Types
+// =============================================================================
+
+export interface ChatAreaProps {
+  /** Called when user submits a message */
+  onSubmit?: (message: string) => void;
+  /** Called when command is executed */
+  onCommand?: (command: Command, args: string[]) => void;
+  /** Called when user requests to stop processing */
+  onStop?: () => void;
+}
+
+// =============================================================================
+// Component
+// =============================================================================
+
+export function ChatArea({ onSubmit, onCommand, onStop }: ChatAreaProps) {
+  const state = useChat();
+  const dispatch = useChatDispatch();
+
+  const [showCommandPalette, setShowCommandPalette] = useState(false);
+  const [commandQuery, setCommandQuery] = useState('');
+  const inputRef = useRef<HTMLTextAreaElement>(null);
+
+  // Handle input changes - detect slash commands
+  const handleInputChange = useCallback((value: string) => {
+    dispatch({ type: 'SET_INPUT', payload: value });
+
+    // Open command palette when typing /
+    if (value === '/') {
+      setCommandQuery('');
+      setShowCommandPalette(true);
+    } else if (value.startsWith('/') && !value.includes(' ')) {
+      // Continue filtering as user types command name
+      setCommandQuery(value.slice(1));
+      setShowCommandPalette(true);
+    }
+  }, [dispatch]);
+
+  // Handle message submission
+  const handleSubmit = useCallback(() => {
+    const input = state.input.trim();
+    if (!input) return;
+
+    // Check if it's a command
+    if (isCommand(input)) {
+      const parsed = parseCommand(input);
+      if (parsed) {
+        const command = findCommand(parsed.name);
+        if (command) {
+          // Execute command
+          onCommand?.(command, parsed.args);
+          dispatch({ type: 'SET_INPUT', payload: '' });
+          return;
+        }
+      }
+      // Unknown command - show error
+      dispatch({
+        type: 'ADD_MESSAGE',
+        payload: {
+          id: `msg_${Date.now()}`,
+          role: 'system',
+          content: `Unknown command: ${input}. Type /help for available commands.`,
+          timestamp: new Date().toISOString(),
+        },
+      });
+      dispatch({ type: 'SET_INPUT', payload: '' });
+      return;
+    }
+
+    // Regular message - add to messages and submit
+    dispatch({
+      type: 'ADD_MESSAGE',
+      payload: {
+        id: `msg_user_${Date.now()}`,
+        role: 'user',
+        content: input,
+        timestamp: new Date().toISOString(),
+      },
+    });
+    dispatch({ type: 'SET_INPUT', payload: '' });
+
+    onSubmit?.(input);
+  }, [state.input, dispatch, onSubmit, onCommand]);
+
+  // Handle command selection from palette
+  const handleCommandSelect = useCallback(
+    (command: Command) => {
+      // If command has options (like model switcher), we need a submenu
+      // For now, just execute the command
+      onCommand?.(command, []);
+      dispatch({ type: 'SET_INPUT', payload: '' });
+      setShowCommandPalette(false);
+    },
+    [dispatch, onCommand],
+  );
+
+  // Handle command palette close
+  const handleCommandPaletteClose = useCallback(() => {
+    setShowCommandPalette(false);
+    // Keep focus on input
+    inputRef.current?.focus();
+  }, []);
+
+  // Handle keyboard shortcuts
+  const handleKeyDown = useCallback(
+    (e: React.KeyboardEvent) => {
+      // Ctrl+K or Ctrl+/ to open command palette
+      if ((e.ctrlKey || e.metaKey) && (e.key === 'k' || e.key === '/')) {
+        e.preventDefault();
+        setCommandQuery('');
+        setShowCommandPalette(true);
+        return;
+      }
+
+      // Escape to cancel/interrupt
+      if (e.key === 'Escape') {
+        if (state.isProcessing && onStop) {
+          onStop();
+        }
+      }
+    },
+    [state.isProcessing, onStop],
+  );
+
+  // Focus input on mount
+  useEffect(() => {
+    inputRef.current?.focus();
+  }, []);
+
+  return (
+    <div className="chat-area" onKeyDown={handleKeyDown}>
+      {/* Messages */}
+      <div className="chat-area-messages">
+        <MessageList
+          messages={state.messages}
+          isProcessing={state.isProcessing}
+          activeTool={state.activeTool}
+          activeToolInput={state.activeToolInput}
+          streamingContent={state.streamingContent}
+          isStreaming={state.isStreaming}
+          thinkingText={state.thinkingText}
+          showWelcome={state.isInitialized}
+          welcomeModel={state.currentModel}
+          welcomeWorkingDirectory="/project"
+          welcomeGitBranch={state.gitBranch ?? undefined}
+        />
+      </div>
+
+      {/* Input */}
+      <div className="chat-area-input">
+        <InputBar
+          ref={inputRef}
+          value={state.input}
+          onChange={handleInputChange}
+          onSubmit={handleSubmit}
+          disabled={state.isProcessing}
+          placeholder={
+            state.isProcessing
+              ? 'Processing...'
+              : 'Type a message or / for commands'
+          }
+        />
+        <StatusBar
+          status={state.status as 'idle' | 'processing' | 'error' | 'connected'}
+          model={state.currentModel}
+          tokenUsage={state.tokenUsage}
+        />
+      </div>
+
+      {/* Command Palette Overlay */}
+      <CommandPalette
+        open={showCommandPalette}
+        onClose={handleCommandPaletteClose}
+        onSelect={handleCommandSelect}
+        initialQuery={commandQuery}
+      />
+    </div>
+  );
+}

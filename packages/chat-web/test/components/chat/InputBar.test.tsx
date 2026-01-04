@@ -80,7 +80,8 @@ describe('InputBar', () => {
 
     // Find the button and check for stop icon (square)
     const buttons = screen.getAllByRole('button');
-    const stopButton = buttons[0];
+    expect(buttons.length).toBeGreaterThan(0);
+    const stopButton = buttons[0]!;
 
     fireEvent.click(stopButton);
     expect(handleStop).toHaveBeenCalled();

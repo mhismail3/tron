@@ -1,0 +1,212 @@
+/**
+ * MessageItem Styles
+ *
+ * Terminal-style message display with role prefixes.
+ */
+
+.message-item {
+  display: flex;
+  gap: var(--space-sm);
+  padding: var(--space-sm) 0;
+  font-family: var(--font-mono);
+}
+
+/* ============================================================================
+   Role Prefix
+   ============================================================================ */
+
+.message-prefix {
+  flex-shrink: 0;
+  width: 20px;
+  text-align: center;
+  font-weight: 500;
+  line-height: 1.6;
+}
+
+.message-prefix.user {
+  color: var(--role-user);
+}
+
+.message-prefix.assistant {
+  color: var(--role-assistant);
+}
+
+.message-prefix.system {
+  color: var(--role-system);
+}
+
+.message-prefix.tool {
+  color: var(--role-tool);
+}
+
+/* ============================================================================
+   Message Body
+   ============================================================================ */
+
+.message-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+}
+
+/* ============================================================================
+   Content
+   ============================================================================ */
+
+.message-content {
+  line-height: 1.6;
+}
+
+.message-content.collapsible.collapsed {
+  max-height: 150px;
+  overflow: hidden;
+  position: relative;
+}
+
+.message-content.collapsible.collapsed::after {
+  content: '';
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 40px;
+  background: linear-gradient(transparent, var(--bg-base));
+  pointer-events: none;
+}
+
+.message-text {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: var(--text-base);
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--text-primary);
+}
+
+/* ============================================================================
+   Toggle Button
+   ============================================================================ */
+
+.message-toggle {
+  align-self: flex-start;
+  padding: var(--space-xs) var(--space-sm);
+  background: transparent;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  color: var(--text-tertiary);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.message-toggle:hover {
+  background: var(--bg-hover);
+  border-color: var(--border-default);
+  color: var(--text-secondary);
+}
+
+.message-toggle:focus-visible {
+  outline: 2px solid var(--emerald);
+  outline-offset: 2px;
+}
+
+/* ============================================================================
+   Timestamp
+   ============================================================================ */
+
+.message-time {
+  font-size: var(--text-xs);
+  color: var(--text-dim);
+}
+
+/* ============================================================================
+   Tool Header
+   ============================================================================ */
+
+.tool-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  padding: var(--space-xs) 0;
+}
+
+.tool-status {
+  font-size: var(--text-sm);
+}
+
+.tool-status.running {
+  color: var(--status-running);
+  animation: spin 1s linear infinite;
+}
+
+.tool-status.success {
+  color: var(--success);
+}
+
+.tool-status.error {
+  color: var(--error);
+}
+
+.tool-name {
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+
+.tool-duration {
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+}
+
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* ============================================================================
+   Role-specific Styling
+   ============================================================================ */
+
+.message-item.role-user {
+  /* User messages */
+}
+
+.message-item.role-user .message-text {
+  color: var(--text-primary);
+}
+
+.message-item.role-assistant {
+  /* Assistant messages */
+}
+
+.message-item.role-system {
+  /* System messages */
+}
+
+.message-item.role-system .message-text {
+  color: var(--text-tertiary);
+  font-size: var(--text-sm);
+}
+
+.message-item.role-tool {
+  /* Tool messages */
+  padding: var(--space-md) 0;
+}
+
+.message-item.role-tool .message-content {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  padding: var(--space-sm) var(--space-md);
+}
+
+.message-item.role-tool .message-text {
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+}

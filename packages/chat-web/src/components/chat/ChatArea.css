@@ -1,0 +1,47 @@
+/**
+ * ChatArea Styles
+ *
+ * Main chat layout with messages and input.
+ */
+
+.chat-area {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+}
+
+/* ============================================================================
+   Messages Section
+   ============================================================================ */
+
+.chat-area-messages {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--space-lg);
+}
+
+/* ============================================================================
+   Input Section
+   ============================================================================ */
+
+.chat-area-input {
+  flex-shrink: 0;
+  padding: var(--space-md) var(--space-lg);
+  border-top: 1px solid var(--border-subtle);
+  background: var(--bg-surface);
+}
+
+/* ============================================================================
+   Responsive
+   ============================================================================ */
+
+@media (max-width: 640px) {
+  .chat-area-messages {
+    padding: var(--space-md);
+  }
+
+  .chat-area-input {
+    padding: var(--space-sm) var(--space-md);
+  }
+}
