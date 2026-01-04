@@ -12,7 +12,7 @@
  * - Proper session end with handoff creation
  */
 import React, { useReducer, useCallback, useEffect, useRef } from 'react';
-import { Box, Text, useInput, useApp } from 'ink';
+import { Box, Text, useInput, useApp, Static } from 'ink';
 import { MessageList } from './components/MessageList.js';
 import { StatusBar } from './components/StatusBar.js';
 import { SlashCommandMenu } from './components/SlashCommandMenu.js';
@@ -1312,24 +1312,29 @@ export function App({ config, auth }: AppProps): React.ReactElement {
       {/*
         LAYOUT PHILOSOPHY FOR SCROLL BEHAVIOR:
 
-        We intentionally avoid height="100%" and flexGrow={1} on the main container.
-        This allows content to flow naturally into the terminal's scrollback buffer.
+        We use Ink's Static component for content that should be "written once"
+        and become part of the terminal's scrollback buffer. This includes:
+        1. Welcome box (rendered once at session start)
+        2. Past messages (rendered once when they appear)
 
-        The MessageList uses Ink's Static component for past messages, which:
-        1. Renders each message ONCE and never re-renders it
-        2. Allows the terminal's native scrollback to work freely
-        3. Only the "live" area (thinking, streaming, input) re-renders
+        Static content is NEVER re-rendered - it becomes permanent scrollback.
+        Only the "live" area (thinking, streaming, input, status) re-renders.
 
-        This means users can scroll up freely while the agent processes,
-        and the view won't jump around.
+        CRITICAL: Static content appears at the TOP of Ink's output.
+        Multiple Static components render in order (first Static = topmost).
+        This is why WelcomeBox must be in its own Static BEFORE MessageList.
       */}
 
-      {/* Welcome Box */}
-      <WelcomeBox
-        model={config.model ?? DEFAULT_MODEL}
-        workingDirectory={config.workingDirectory}
-        gitBranch={state.gitBranch ?? undefined}
-      />
+      {/* Welcome Box - Static so it renders once at the very top of scrollback */}
+      <Static items={['welcome']}>
+        {() => (
+          <WelcomeBox
+            model={config.model ?? DEFAULT_MODEL}
+            workingDirectory={config.workingDirectory}
+            gitBranch={state.gitBranch ?? undefined}
+          />
+        )}
+      </Static>
 
       {/* Message List - uses Static for past messages, dynamic area for live content */}
       <Box flexDirection="column" paddingX={1}>
