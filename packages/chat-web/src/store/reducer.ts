@@ -139,8 +139,14 @@ export function reducer(state: AppState, action: AppAction): AppState {
     // Messages
     // =========================================================================
 
-    case 'ADD_MESSAGE':
+    case 'ADD_MESSAGE': {
+      // Deduplicate: don't add if a message with this ID already exists
+      const exists = state.messages.some((m) => m.id === action.payload.id);
+      if (exists) {
+        return state;
+      }
       return { ...state, messages: [...state.messages, action.payload] };
+    }
 
     case 'UPDATE_MESSAGE':
       return {

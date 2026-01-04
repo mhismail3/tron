@@ -782,7 +782,8 @@ export class SessionOrchestrator extends EventEmitter {
             toolCallId: event.toolCallId,
             toolName: event.toolName,
             success: !event.isError,
-            result: event.result,
+            output: event.result,
+            error: event.isError ? event.result : undefined,
             duration: event.duration,
           },
         });
