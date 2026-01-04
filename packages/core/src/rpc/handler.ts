@@ -7,6 +7,9 @@
 import { EventEmitter } from 'events';
 import { createLogger } from '../logging/logger.js';
 import { VERSION } from '../index.js';
+import * as fs from 'fs/promises';
+import * as path from 'path';
+import * as os from 'os';
 import type {
   RpcRequest,
   RpcResponse,
@@ -42,6 +45,9 @@ import type {
   MemoryGetHandoffsResult,
   SystemPingResult,
   SystemGetInfoResult,
+  FilesystemListDirParams,
+  FilesystemListDirResult,
+  FilesystemGetHomeResult,
 } from './types.js';
 import { ANTHROPIC_MODELS } from '../providers/models.js';
 
@@ -225,6 +231,12 @@ export class RpcHandler extends EventEmitter {
           return this.handleMemoryAddEntry(request);
         case 'memory.getHandoffs':
           return this.handleMemoryGetHandoffs(request);
+
+        // Filesystem methods
+        case 'filesystem.listDir':
+          return this.handleFilesystemListDir(request);
+        case 'filesystem.getHome':
+          return this.handleFilesystemGetHome(request);
 
         // System methods
         case 'system.ping':
@@ -491,6 +503,127 @@ export class RpcHandler extends EventEmitter {
           createdAt: handoff.createdAt as string,
         };
       }),
+    };
+
+    return this.successResponse(request.id, result);
+  }
+
+  // ===========================================================================
+  // Filesystem Handlers
+  // ===========================================================================
+
+  private async handleFilesystemListDir(request: RpcRequest): Promise<RpcResponse> {
+    const params = (request.params || {}) as FilesystemListDirParams;
+
+    // Default to home directory if no path specified
+    const targetPath = params.path || os.homedir();
+    const showHidden = params.showHidden ?? false;
+
+    try {
+      // Resolve to absolute path and normalize
+      const resolvedPath = path.resolve(targetPath);
+
+      // Read directory entries
+      const dirents = await fs.readdir(resolvedPath, { withFileTypes: true });
+
+      // Filter and map entries
+      const entries: FilesystemListDirResult['entries'] = [];
+
+      for (const dirent of dirents) {
+        // Skip hidden files unless requested
+        if (!showHidden && dirent.name.startsWith('.')) {
+          continue;
+        }
+
+        const entryPath = path.join(resolvedPath, dirent.name);
+        const isDirectory = dirent.isDirectory();
+        const isSymlink = dirent.isSymbolicLink();
+
+        let size: number | undefined;
+        let modifiedAt: string | undefined;
+
+        // Only get stats for non-directories (to avoid permission errors on system dirs)
+        if (!isDirectory) {
+          try {
+            const stats = await fs.stat(entryPath);
+            size = stats.size;
+            modifiedAt = stats.mtime.toISOString();
+          } catch {
+            // Skip if we can't read stats
+          }
+        }
+
+        entries.push({
+          name: dirent.name,
+          path: entryPath,
+          isDirectory,
+          isSymlink,
+          size,
+          modifiedAt,
+        });
+      }
+
+      // Sort: directories first, then alphabetically
+      entries.sort((a, b) => {
+        if (a.isDirectory && !b.isDirectory) return -1;
+        if (!a.isDirectory && b.isDirectory) return 1;
+        return a.name.toLowerCase().localeCompare(b.name.toLowerCase());
+      });
+
+      // Get parent path
+      const parent = resolvedPath === path.parse(resolvedPath).root
+        ? null
+        : path.dirname(resolvedPath);
+
+      const result: FilesystemListDirResult = {
+        path: resolvedPath,
+        parent,
+        entries,
+      };
+
+      return this.successResponse(request.id, result);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to list directory';
+      return this.errorResponse(request.id, 'FILESYSTEM_ERROR', message);
+    }
+  }
+
+  private async handleFilesystemGetHome(request: RpcRequest): Promise<RpcResponse> {
+    const homePath = os.homedir();
+
+    // Common project directories to suggest
+    const commonPaths = [
+      { name: 'Home', path: homePath },
+      { name: 'Desktop', path: path.join(homePath, 'Desktop') },
+      { name: 'Documents', path: path.join(homePath, 'Documents') },
+      { name: 'Downloads', path: path.join(homePath, 'Downloads') },
+      { name: 'Projects', path: path.join(homePath, 'projects') },
+      { name: 'Code', path: path.join(homePath, 'code') },
+      { name: 'Development', path: path.join(homePath, 'Development') },
+      { name: 'dev', path: path.join(homePath, 'dev') },
+      { name: 'src', path: path.join(homePath, 'src') },
+      { name: 'workspace', path: path.join(homePath, 'workspace') },
+      { name: 'work', path: path.join(homePath, 'work') },
+    ];
+
+    // Check which paths exist
+    const suggestedPaths = await Promise.all(
+      commonPaths.map(async ({ name, path: dirPath }) => {
+        try {
+          const stat = await fs.stat(dirPath);
+          return { name, path: dirPath, exists: stat.isDirectory() };
+        } catch {
+          return { name, path: dirPath, exists: false };
+        }
+      })
+    );
+
+    // Filter to only existing paths, but always include home
+    const existingPaths = suggestedPaths.filter(p => p.exists || p.path === homePath);
+
+    const result: FilesystemGetHomeResult = {
+      homePath,
+      suggestedPaths: existingPaths,
     };
 
     return this.successResponse(request.id, result);

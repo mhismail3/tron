@@ -66,6 +66,11 @@ export type {
   SystemPingResult,
   SystemGetInfoParams,
   SystemGetInfoResult,
+  // Filesystem types
+  FilesystemListDirParams,
+  FilesystemListDirResult,
+  FilesystemGetHomeParams,
+  FilesystemGetHomeResult,
   // Memory types
   MemorySearchParams,
   RpcMemorySearchResult,

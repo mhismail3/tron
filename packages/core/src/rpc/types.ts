@@ -94,6 +94,9 @@ export type RpcMethod =
   // Skill execution
   | 'skill.execute'
   | 'skill.list'
+  // Filesystem operations
+  | 'filesystem.listDir'
+  | 'filesystem.getHome'
   // System
   | 'system.ping'
   | 'system.getInfo'
@@ -386,6 +389,54 @@ export interface SystemShutdownParams {
 
 export interface SystemShutdownResult {
   acknowledged: boolean;
+}
+
+// =============================================================================
+// Filesystem Methods
+// =============================================================================
+
+/** List directory contents */
+export interface FilesystemListDirParams {
+  /** Path to list (defaults to home directory if not specified) */
+  path?: string;
+  /** Include hidden files (starting with .) */
+  showHidden?: boolean;
+}
+
+export interface FilesystemListDirResult {
+  /** Current directory path (absolute) */
+  path: string;
+  /** Parent directory path (null if at root) */
+  parent: string | null;
+  /** Directory entries */
+  entries: Array<{
+    /** Entry name */
+    name: string;
+    /** Full path */
+    path: string;
+    /** Whether this is a directory */
+    isDirectory: boolean;
+    /** Whether this is a symbolic link */
+    isSymlink?: boolean;
+    /** File size in bytes (files only) */
+    size?: number;
+    /** Last modified timestamp */
+    modifiedAt?: string;
+  }>;
+}
+
+/** Get home directory */
+export interface FilesystemGetHomeParams {}
+
+export interface FilesystemGetHomeResult {
+  /** User's home directory path */
+  homePath: string;
+  /** Common project directories */
+  suggestedPaths: Array<{
+    name: string;
+    path: string;
+    exists: boolean;
+  }>;
 }
 
 // =============================================================================

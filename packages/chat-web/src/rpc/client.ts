@@ -37,6 +37,10 @@ import type {
   SystemPingResult,
   SystemGetInfoParams,
   SystemGetInfoResult,
+  FilesystemListDirParams,
+  FilesystemListDirResult,
+  FilesystemGetHomeParams,
+  FilesystemGetHomeResult,
 } from '@tron/core/browser';
 
 // =============================================================================
@@ -280,6 +284,15 @@ export class RpcClient {
 
   systemGetInfo(params?: SystemGetInfoParams): Promise<SystemGetInfoResult> {
     return this.request('system.getInfo', params);
+  }
+
+  // Filesystem methods
+  filesystemListDir(params?: FilesystemListDirParams): Promise<FilesystemListDirResult> {
+    return this.request('filesystem.listDir', params);
+  }
+
+  filesystemGetHome(params?: FilesystemGetHomeParams): Promise<FilesystemGetHomeResult> {
+    return this.request('filesystem.getHome', params);
   }
 
   // ===========================================================================

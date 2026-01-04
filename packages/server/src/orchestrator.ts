@@ -11,6 +11,13 @@ import {
   SessionManager,
   SQLiteMemoryStore,
   HandoffManager,
+  ReadTool,
+  WriteTool,
+  EditTool,
+  BashTool,
+  GrepTool,
+  FindTool,
+  LsTool,
   type Session,
   type AgentConfig,
   type TurnResult,
@@ -21,9 +28,36 @@ import {
   type CodeChange,
   type MemoryEntry,
   type TronEvent,
+  type TronTool,
 } from '@tron/core';
 
 const logger = createLogger('orchestrator');
+
+// =============================================================================
+// Default System Prompt
+// =============================================================================
+
+const DEFAULT_SYSTEM_PROMPT = `You are Tron, an AI coding assistant with full access to the user's file system.
+
+You have access to the following tools:
+- read: Read files from the file system
+- write: Write content to files
+- edit: Make targeted edits to existing files
+- bash: Execute shell commands
+- grep: Search for patterns in files
+- find: Find files by name or pattern
+- ls: List directory contents
+
+When the user asks you to work with files or code, you can directly read, write, and edit files using these tools. You are operating on the server machine with full file system access.
+
+Be helpful, accurate, and efficient. When working with code:
+1. Read existing files to understand context before making changes
+2. Make targeted, minimal edits rather than rewriting entire files
+3. Test changes by running appropriate commands when asked
+4. Explain what you're doing and why
+
+Current working directory: {workingDirectory}
+`;
 
 // =============================================================================
 // Types
@@ -638,6 +672,29 @@ export class SessionOrchestrator extends EventEmitter {
     // Get API key from environment
     const apiKey = process.env.ANTHROPIC_API_KEY ?? '';
 
+    // Create all tools with the session's working directory
+    const workingDirectory = session.workingDirectory;
+    const tools: TronTool[] = [
+      new ReadTool({ workingDirectory }),
+      new WriteTool({ workingDirectory }),
+      new EditTool({ workingDirectory }),
+      new BashTool({ workingDirectory }),
+      new GrepTool({ workingDirectory }),
+      new FindTool({ workingDirectory }),
+      new LsTool({ workingDirectory }),
+    ];
+
+    // Use session's system prompt or generate a default one with working directory
+    const systemPrompt = session.systemPrompt ||
+      DEFAULT_SYSTEM_PROMPT.replace('{workingDirectory}', workingDirectory);
+
+    logger.info('Creating agent with tools', {
+      sessionId: session.id,
+      workingDirectory,
+      toolCount: tools.length,
+      toolNames: tools.map(t => t.name),
+    });
+
     const agentConfig: AgentConfig = {
       provider: {
         model: session.model,
@@ -646,8 +703,8 @@ export class SessionOrchestrator extends EventEmitter {
           apiKey,
         },
       },
-      tools: [], // Tools would be registered separately
-      systemPrompt: session.systemPrompt,
+      tools,
+      systemPrompt,
       maxTurns: 50,
     };
 

@@ -10,6 +10,7 @@ import { AppShell, Sidebar, type SessionSummary } from './components/layout/inde
 import { ChatArea } from './components/chat/ChatArea.js';
 import { ConnectionStatus } from './components/ui/ConnectionStatus.js';
 import { ModelSwitcher } from './components/overlay/index.js';
+import { WorkspaceSelector } from './components/workspace/index.js';
 import { useRpc } from './hooks/useRpc.js';
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts.js';
 import { useSessionPersistence } from './hooks/useSessionPersistence.js';
@@ -39,6 +40,7 @@ function AppContent() {
   const {
     status,
     sessionId: rpcSessionId,
+    client,
     connect,
     disconnect,
     createSession,
@@ -59,6 +61,7 @@ function AppContent() {
   const [modelSwitcherOpen, setModelSwitcherOpen] = useState(false);
   const [modelSwitching, setModelSwitching] = useState(false);
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
+  const [workspaceSelectorOpen, setWorkspaceSelectorOpen] = useState(false);
 
   // Session cache to store state when switching between sessions
   const sessionCacheRef = useRef<Map<string, SessionCache>>(new Map());
@@ -565,8 +568,16 @@ function AppContent() {
     ]
   );
 
-  // Handle new session creation
-  const handleNewSession = useCallback(async () => {
+  // Handle new session creation - opens workspace selector
+  const handleNewSession = useCallback(() => {
+    // Open workspace selector to choose directory
+    setWorkspaceSelectorOpen(true);
+  }, []);
+
+  // Handle workspace selection - creates the actual session
+  const handleWorkspaceSelect = useCallback(async (workingDirectory: string) => {
+    setWorkspaceSelectorOpen(false);
+
     // Save current session state first
     saveCurrentSessionToCache();
 
@@ -578,12 +589,12 @@ function AppContent() {
     try {
       // Create new session via RPC if connected
       if (status === 'connected') {
-        const newSessionId = await createSession('/project', state.currentModel);
+        const newSessionId = await createSession(workingDirectory, state.currentModel);
 
         // Create session summary
         const newSession: SessionSummary = {
           sessionId: newSessionId,
-          workingDirectory: '/project',
+          workingDirectory,
           model: state.currentModel,
           messageCount: 0,
           createdAt: now,
@@ -597,11 +608,11 @@ function AppContent() {
         // Save to persistence
         const storeSession: StoreSessionSummary = {
           id: newSessionId,
-          title: 'New Session',
+          title: workingDirectory.split('/').pop() || 'New Session',
           lastActivity: now,
           model: state.currentModel,
           messageCount: 0,
-          workingDirectory: '/project',
+          workingDirectory,
         };
         persistence.saveSession(storeSession);
         persistence.setActiveSession(newSessionId);
@@ -615,7 +626,7 @@ function AppContent() {
 
         const newSession: SessionSummary = {
           sessionId: localSessionId,
-          workingDirectory: '/project',
+          workingDirectory,
           model: state.currentModel,
           messageCount: 0,
           createdAt: now,
@@ -627,11 +638,11 @@ function AppContent() {
 
         const storeSession: StoreSessionSummary = {
           id: localSessionId,
-          title: 'New Session',
+          title: workingDirectory.split('/').pop() || 'New Session',
           lastActivity: now,
           model: state.currentModel,
           messageCount: 0,
-          workingDirectory: '/project',
+          workingDirectory,
         };
         persistence.saveSession(storeSession);
         persistence.setActiveSession(localSessionId);
@@ -837,6 +848,14 @@ function AppContent() {
         onClose={() => setModelSwitcherOpen(false)}
         onSelect={handleModelSelect}
         loading={modelSwitching}
+      />
+
+      {/* Workspace Selector */}
+      <WorkspaceSelector
+        isOpen={workspaceSelectorOpen}
+        onSelect={handleWorkspaceSelect}
+        onClose={() => setWorkspaceSelectorOpen(false)}
+        client={client}
       />
     </div>
   );

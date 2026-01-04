@@ -20,7 +20,7 @@ brew install xcodegen
 ### 2. Generate Xcode Project
 
 ```bash
-cd apps/ios
+cd packages/ios-app
 xcodegen generate
 ```
 
@@ -100,7 +100,7 @@ Free Apple accounts require re-sideloading every 7 days. Just:
 ## Project Structure
 
 ```
-apps/ios/
+packages/ios-app/
 ├── project.yml              # XcodeGen project definition
 ├── Sources/
 │   ├── App/
