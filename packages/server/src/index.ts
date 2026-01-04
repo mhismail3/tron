@@ -3,9 +3,7 @@
  *
  * Main entry point for the Tron WebSocket server.
  */
-import * as path from 'path';
-import * as os from 'os';
-import { createLogger, getSettings, type RpcContext } from '@tron/core';
+import { createLogger, getSettings, resolveTronPath, getTronDataDir, type RpcContext } from '@tron/core';
 import { TronWebSocketServer, type WebSocketServerConfig } from './websocket.js';
 import { SessionOrchestrator, type OrchestratorConfig } from './orchestrator.js';
 import { HealthServer, type HealthServerConfig } from './health.js';
@@ -204,11 +202,11 @@ export class TronServer {
 
     logger.info('Starting Tron server...');
 
-    // Resolve paths
-    const homeDir = os.homedir();
-    const tronDir = path.join(homeDir, '.tron');
-    const sessionsDir = this.config.sessionsDir ?? path.join(tronDir, 'sessions');
-    const memoryDbPath = this.config.memoryDbPath ?? path.join(tronDir, 'memory.db');
+    // Resolve paths to canonical ~/.tron directory
+    // This ensures all clients (TUI, web, etc.) work with the same data files
+    const tronDir = getTronDataDir();
+    const sessionsDir = resolveTronPath(this.config.sessionsDir ?? 'sessions', tronDir);
+    const memoryDbPath = resolveTronPath(this.config.memoryDbPath ?? 'memory.db', tronDir);
 
     // Initialize orchestrator
     const orchestratorConfig: OrchestratorConfig = {

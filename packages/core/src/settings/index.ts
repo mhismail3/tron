@@ -76,4 +76,7 @@ export {
   generateDefaultSettingsFile,
   applyEnvOverrides,
   getSettingsWithEnv,
+  // Path resolution utilities
+  resolveTronPath,
+  getTronDataDir,
 } from './loader.js';

@@ -383,3 +383,37 @@ export function applyEnvOverrides(settings: TronSettings): TronSettings {
 export function getSettingsWithEnv(): TronSettings {
   return applyEnvOverrides(getSettings());
 }
+
+// =============================================================================
+// Path Resolution Utilities
+// =============================================================================
+
+/**
+ * Resolve a path that may be relative to the Tron directory (~/.tron)
+ * If the path is already absolute, returns it unchanged.
+ * If the path is relative, resolves it against ~/.tron.
+ *
+ * This ensures all clients (server, TUI, etc.) use the same canonical paths
+ * for data storage, enabling collaborative sharing across interfaces.
+ *
+ * @param relativePath - Path that may be relative (e.g., 'sessions', 'memory.db')
+ * @param tronDir - Optional override for the Tron directory (defaults to ~/.tron)
+ * @returns Absolute path resolved against the Tron directory
+ */
+export function resolveTronPath(relativePath: string, tronDir?: string): string {
+  // If already absolute, return as-is
+  if (path.isAbsolute(relativePath)) {
+    return relativePath;
+  }
+
+  const baseTronDir = tronDir ?? getSettingsDir();
+  return path.join(baseTronDir, relativePath);
+}
+
+/**
+ * Get the canonical Tron data directory (~/.tron)
+ * This is the single source of truth for all Tron data storage paths.
+ */
+export function getTronDataDir(homeDir?: string): string {
+  return getSettingsDir(homeDir);
+}
