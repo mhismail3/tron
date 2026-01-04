@@ -192,12 +192,11 @@ export function MessageList({
 
       {/* Thinking indicator - pulsing bars */}
       {/* marginTop=1 provides spacing between static messages and dynamic thinking area */}
-      {/* marginLeft=3 aligns bars with text content (1 base + 2 for "› " prefix) */}
+      {/* marginLeft=2 aligns bars with text content: 1 base margin + 1 for "›" = bars align with space after icon */}
+      {/* Then user text starts after the space, and "Thinking" label provides visual alignment */}
       {isProcessing && thinkingText && !streamingContent && (
-        <Box flexDirection="column" marginLeft={3} marginTop={1}>
-          <Box flexDirection="row">
-            <ThinkingIndicator label="Thinking" color={inkColors.statusThinking} />
-          </Box>
+        <Box flexDirection="column" marginLeft={2} marginTop={1}>
+          <ThinkingIndicator label="Thinking" color={inkColors.statusThinking} />
           {thinkingText.length > 0 && (
             <Box flexDirection="column" marginLeft={5}>
               {formatThinkingText(thinkingText).map((line, index) => (
@@ -212,9 +211,9 @@ export function MessageList({
 
       {/* Show thinking indicator when processing but not yet streaming or thinking */}
       {/* marginTop=1 provides spacing between static messages and dynamic thinking area */}
-      {/* marginLeft=3 aligns bars with text content (1 base + 2 for "› " prefix) */}
+      {/* marginLeft=2 aligns bars with text content */}
       {isProcessing && !streamingContent && !thinkingText && !activeTool && (
-        <Box marginLeft={3} marginTop={1} flexDirection="row">
+        <Box marginLeft={2} marginTop={1} flexDirection="row">
           <ThinkingIndicator label="Thinking" color={inkColors.spinner} />
         </Box>
       )}
