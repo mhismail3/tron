@@ -14,14 +14,20 @@ struct SessionSidebar: View {
         List(selection: $selectedSessionId) {
             Section {
                 Button(action: onNewSession) {
-                    Label("New Session", systemImage: TronIcon.newSession.systemName)
-                        .font(.headline)
-                        .foregroundStyle(.tronEmerald)
+                    HStack(spacing: 10) {
+                        Image(systemName: "plus")
+                            .font(.system(size: 14, weight: .semibold))
+                        Text("New Session")
+                            .font(.subheadline.weight(.medium))
+                    }
+                    .foregroundStyle(.tronEmerald)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.vertical, 6)
                 }
                 .listRowBackground(Color.tronSurface)
             }
 
-            Section("Sessions") {
+            Section {
                 ForEach(sessionStore.sortedSessions) { session in
                     SessionSidebarRow(
                         session: session,
@@ -30,9 +36,10 @@ struct SessionSidebar: View {
                     .tag(session.id)
                     .listRowBackground(
                         session.id == selectedSessionId
-                            ? Color.tronEmerald.opacity(0.2)
+                            ? Color.tronSurfaceElevated
                             : Color.tronSurface
                     )
+                    .listRowInsets(EdgeInsets(top: 6, leading: 12, bottom: 6, trailing: 12))
                     .swipeActions(edge: .trailing, allowsFullSwipe: true) {
                         Button(role: .destructive) {
                             onDeleteSession(session.id)
@@ -41,10 +48,14 @@ struct SessionSidebar: View {
                         }
                     }
                 }
+            } header: {
+                Text("Sessions")
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(.tronTextMuted)
+                    .textCase(nil)
             }
-
         }
-        .listStyle(.sidebar)
+        .listStyle(.insetGrouped)
         .scrollContentBackground(.hidden)
         .background(Color.tronBackground)
         .navigationTitle("Tron")
@@ -52,6 +63,7 @@ struct SessionSidebar: View {
             ToolbarItem(placement: .topBarTrailing) {
                 Button(action: onSettings) {
                     Image(systemName: "gearshape")
+                        .font(.system(size: 16))
                         .foregroundStyle(.tronTextSecondary)
                 }
             }
@@ -66,53 +78,72 @@ struct SessionSidebarRow: View {
     let isSelected: Bool
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack {
+        VStack(alignment: .leading, spacing: 4) {
+            // Title row with status dot
+            HStack(spacing: 6) {
                 Text(session.displayTitle)
-                    .font(.headline)
+                    .font(.subheadline.weight(.medium))
                     .foregroundStyle(.tronTextPrimary)
                     .lineLimit(1)
-
-                Spacer()
 
                 if session.isActive {
                     Circle()
                         .fill(Color.tronSuccess)
-                        .frame(width: 8, height: 8)
+                        .frame(width: 6, height: 6)
                 }
-            }
-
-            HStack(spacing: 8) {
-                // Model badge
-                Text(session.shortModel)
-                    .font(.caption2.weight(.medium))
-                    .foregroundStyle(.tronTextMuted)
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 2)
-                    .background(Color.tronPrimary.opacity(0.5))
-                    .clipShape(Capsule())
-
-                // Message count
-                Label("\(session.messageCount)", systemImage: "bubble.left")
-                    .font(.caption2)
-                    .foregroundStyle(.tronTextMuted)
 
                 Spacer()
 
-                // Relative date
                 Text(session.formattedDate)
                     .font(.caption2)
                     .foregroundStyle(.tronTextMuted)
             }
 
-            // Working directory
-            Text(session.workingDirectory)
+            // Meta row: model badge + message count
+            HStack(spacing: 6) {
+                // Model badge
+                Text(session.shortModel)
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(.tronTextSecondary)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(Color.tronSurfaceElevated)
+                    .clipShape(Capsule())
+
+                // Message count
+                HStack(spacing: 2) {
+                    Image(systemName: "bubble.left")
+                        .font(.system(size: 9))
+                    Text("\(session.messageCount)")
+                        .font(.system(size: 10))
+                }
+                .foregroundStyle(.tronTextMuted)
+
+                Spacer()
+            }
+
+            // Working directory (truncated)
+            Text(session.displayDirectory)
                 .font(.caption2)
                 .foregroundStyle(.tronTextMuted)
                 .lineLimit(1)
-                .truncationMode(.middle)
+                .truncationMode(.head)
         }
-        .padding(.vertical, 4)
+        .padding(.vertical, 2)
+    }
+}
+
+// MARK: - StoredSession Extension for Display
+
+extension StoredSession {
+    var displayDirectory: String {
+        let path = workingDirectory
+        // Show just the last two path components
+        let components = path.split(separator: "/")
+        if components.count >= 2 {
+            return "~/" + components.suffix(2).joined(separator: "/")
+        }
+        return path
     }
 }
 
@@ -122,33 +153,36 @@ struct EmptySessionsView: View {
     let onNewSession: () -> Void
 
     var body: some View {
-        VStack(spacing: 24) {
+        VStack(spacing: 20) {
             Image(systemName: "bubble.left.and.text.bubble.right")
-                .font(.system(size: 64))
+                .font(.system(size: 48, weight: .light))
                 .foregroundStyle(.tronTextMuted)
 
-            VStack(spacing: 8) {
+            VStack(spacing: 6) {
                 Text("No Sessions")
-                    .font(.title2.weight(.semibold))
+                    .font(.title3.weight(.semibold))
                     .foregroundStyle(.tronTextPrimary)
 
-                Text("Create a new session to start chatting with Tron")
+                Text("Create a new session to start")
                     .font(.subheadline)
-                    .foregroundStyle(.tronTextSecondary)
-                    .multilineTextAlignment(.center)
+                    .foregroundStyle(.tronTextMuted)
             }
 
             Button(action: onNewSession) {
-                Label("New Session", systemImage: TronIcon.newSession.systemName)
-                    .font(.headline)
-                    .foregroundStyle(.tronBackground)
-                    .padding(.horizontal, 24)
-                    .padding(.vertical, 12)
-                    .background(LinearGradient.tronEmeraldGradient)
-                    .clipShape(Capsule())
+                HStack(spacing: 6) {
+                    Image(systemName: "plus")
+                        .font(.system(size: 14, weight: .semibold))
+                    Text("New Session")
+                        .font(.subheadline.weight(.medium))
+                }
+                .foregroundStyle(.white)
+                .padding(.horizontal, 20)
+                .padding(.vertical, 10)
+                .background(Color.tronEmerald)
+                .clipShape(Capsule())
             }
         }
-        .padding(40)
+        .padding(32)
     }
 }
 

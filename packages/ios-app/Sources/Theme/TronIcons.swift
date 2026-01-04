@@ -169,29 +169,34 @@ struct ConnectionIndicator: View {
     let state: ConnectionState
 
     var body: some View {
-        HStack(spacing: 6) {
-            statusIcon
-            Text(state.displayText)
-                .font(.caption)
-                .foregroundStyle(Color.tronTextSecondary)
-        }
+        statusDot
     }
 
     @ViewBuilder
-    private var statusIcon: some View {
+    private var statusDot: some View {
         switch state {
         case .connected:
             Circle()
                 .fill(Color.tronSuccess)
                 .frame(width: 8, height: 8)
         case .connecting, .reconnecting:
-            PulsingIcon(icon: .connecting, size: 12, color: .tronWarning)
+            Circle()
+                .fill(Color.tronWarning)
+                .frame(width: 8, height: 8)
+                .overlay(
+                    Circle()
+                        .stroke(Color.tronWarning.opacity(0.5), lineWidth: 2)
+                        .scaleEffect(1.5)
+                        .opacity(0.5)
+                )
         case .disconnected:
             Circle()
                 .fill(Color.tronTextMuted)
                 .frame(width: 8, height: 8)
         case .failed:
-            TronIconView(icon: .error, size: 12, color: .tronError)
+            Circle()
+                .fill(Color.tronError)
+                .frame(width: 8, height: 8)
         }
     }
 }

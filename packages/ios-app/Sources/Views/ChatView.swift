@@ -182,36 +182,39 @@ struct ChatView: View {
     // MARK: - Status Bar
 
     private var statusBar: some View {
-        HStack(spacing: 12) {
-            // Connection status
-            Circle()
-                .fill(viewModel.connectionState.isConnected ? Color.tronSuccess : Color.tronError)
-                .frame(width: 6, height: 6)
-
-            // Model
+        HStack(spacing: 8) {
+            // Model badge
             Text(viewModel.currentModel.shortModelName)
-                .font(.caption2.weight(.medium))
+                .font(.system(size: 11, weight: .medium))
                 .foregroundStyle(.tronTextSecondary)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 3)
+                .background(Color.tronSurfaceElevated)
+                .clipShape(Capsule())
 
             Spacer()
 
             // Token usage
             if let usage = viewModel.totalTokenUsage {
-                HStack(spacing: 4) {
-                    Image(systemName: "arrow.down")
-                        .font(.caption2)
-                    Text(usage.formattedInput)
+                HStack(spacing: 6) {
+                    HStack(spacing: 2) {
+                        Image(systemName: "arrow.down")
+                            .font(.system(size: 9))
+                        Text(usage.formattedInput)
+                    }
 
-                    Image(systemName: "arrow.up")
-                        .font(.caption2)
-                    Text(usage.formattedOutput)
+                    HStack(spacing: 2) {
+                        Image(systemName: "arrow.up")
+                            .font(.system(size: 9))
+                        Text(usage.formattedOutput)
+                    }
                 }
-                .font(.caption2)
+                .font(.system(size: 10))
                 .foregroundStyle(.tronTextMuted)
             }
         }
         .padding(.horizontal, 12)
-        .padding(.vertical, 6)
+        .padding(.vertical, 5)
         .background(Color.tronSurface)
     }
 
@@ -277,12 +280,13 @@ extension String {
 struct ProcessingIndicator: View {
     var body: some View {
         HStack(spacing: 8) {
-            WaveformIcon(size: 20, color: .tronEmerald)
+            WaveformIcon(size: 16, color: .tronEmerald)
             Text("Processing...")
-                .font(.subheadline)
-                .foregroundStyle(.tronTextSecondary)
+                .font(.caption)
+                .foregroundStyle(.tronTextMuted)
         }
-        .padding()
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
@@ -294,37 +298,39 @@ struct ThinkingBanner: View {
     @Binding var isExpanded: Bool
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 6) {
             Button {
                 withAnimation(.tronStandard) {
                     isExpanded.toggle()
                 }
             } label: {
-                HStack {
-                    RotatingIcon(icon: .thinking, size: 14, color: .tronPrimaryVivid)
+                HStack(spacing: 6) {
+                    RotatingIcon(icon: .thinking, size: 12, color: .tronTextMuted)
                     Text("Thinking")
                         .font(.caption.weight(.medium))
-                        .foregroundStyle(.tronTextSecondary)
+                        .foregroundStyle(.tronTextMuted)
                     Spacer()
-                    TronIconView(
-                        icon: isExpanded ? .collapse : .expand,
-                        size: 12,
-                        color: .tronTextMuted
-                    )
+                    Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundStyle(.tronTextMuted)
                 }
             }
 
             if isExpanded {
                 Text(text)
                     .font(.caption)
-                    .foregroundStyle(.tronTextMuted)
+                    .foregroundStyle(.tronTextSecondary)
                     .italic()
                     .lineLimit(10)
             }
         }
-        .padding(12)
-        .background(Color.tronPrimary.opacity(0.3))
-        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .padding(10)
+        .background(Color.tronSurface)
+        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .stroke(Color.tronBorder, lineWidth: 0.5)
+        )
         .padding(.horizontal)
     }
 }

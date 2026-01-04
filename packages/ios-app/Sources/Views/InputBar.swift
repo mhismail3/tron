@@ -113,16 +113,12 @@ struct InputBar: View {
 
                 TextField("Message...", text: $text, axis: .vertical)
                     .textFieldStyle(.plain)
-                    .font(.body)
+                    .font(.subheadline)
                     .foregroundStyle(.tronTextPrimary)
                     .padding(.horizontal, 14)
                     .padding(.vertical, 10)
-                    .background(Color.tronBackground)
-                    .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 20, style: .continuous)
-                            .stroke(Color.tronBorder, lineWidth: 1)
-                    )
+                    .background(Color.tronSurfaceElevated)
+                    .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
                     .lineLimit(1...8)
                     .focused($isFocused)
                     .disabled(isProcessing)
@@ -220,29 +216,24 @@ struct AttachedImageThumbnail: View {
                 Image(uiImage: uiImage)
                     .resizable()
                     .aspectRatio(contentMode: .fill)
-                    .frame(width: 60, height: 60)
-                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    .frame(width: 56, height: 56)
+                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
             } else {
-                RoundedRectangle(cornerRadius: 8)
+                RoundedRectangle(cornerRadius: 10)
                     .fill(Color.tronSurfaceElevated)
-                    .frame(width: 60, height: 60)
+                    .frame(width: 56, height: 56)
                     .overlay {
-                        TronIconView(icon: .photo, size: 24, color: .tronTextMuted)
+                        TronIconView(icon: .photo, size: 20, color: .tronTextMuted)
                     }
             }
 
             // Remove button
             Button(action: onRemove) {
                 Image(systemName: "xmark.circle.fill")
-                    .font(.system(size: 18))
-                    .foregroundStyle(.white)
-                    .background(
-                        Circle()
-                            .fill(Color.black.opacity(0.6))
-                            .frame(width: 16, height: 16)
-                    )
+                    .font(.system(size: 16))
+                    .foregroundStyle(.white, .black.opacity(0.6))
             }
-            .offset(x: 6, y: -6)
+            .offset(x: 4, y: -4)
         }
     }
 }

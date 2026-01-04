@@ -2,66 +2,66 @@ import SwiftUI
 
 // MARK: - Tron Color Palette
 
-/// Forest green color palette inspired by the Tron TUI
+/// Refined dark color palette with green accents
 extension Color {
-    // MARK: - Primary Greens (from TUI theme.ts)
+    // MARK: - Accent Colors
 
-    /// Deep forest green - primary brand color
-    static let tronPrimary = Color(hex: "#123524")
+    /// Primary accent - refined emerald
+    static let tronPrimary = Color(hex: "#10B981")
 
-    /// Slightly lighter forest green
-    static let tronPrimaryLight = Color(hex: "#1a4d2e")
+    /// Light accent for hover/highlights
+    static let tronPrimaryLight = Color(hex: "#34D399")
 
-    /// Bright forest green for emphasis
-    static let tronPrimaryBright = Color(hex: "#2d5a3d")
+    /// Bright accent for emphasis
+    static let tronPrimaryBright = Color(hex: "#6EE7B7")
 
-    /// Vivid green for interactive elements
-    static let tronPrimaryVivid = Color(hex: "#3a7d4a")
+    /// Vivid accent for interactive elements
+    static let tronPrimaryVivid = Color(hex: "#10B981")
 
-    /// Emerald green - assistant accent
-    static let tronEmerald = Color(hex: "#4a9d6f")
+    /// Emerald - assistant accent
+    static let tronEmerald = Color(hex: "#10B981")
 
-    /// Mint green - user accent
-    static let tronMint = Color(hex: "#5cb88c")
+    /// Mint - user accent
+    static let tronMint = Color(hex: "#34D399")
 
-    /// Sage green - subtle accents
-    static let tronSage = Color(hex: "#7acca6")
+    /// Sage - subtle accents
+    static let tronSage = Color(hex: "#6EE7B7")
 
     // MARK: - Semantic Colors
 
-    static let tronSuccess = Color.green
-    static let tronWarning = Color.yellow
-    static let tronError = Color.red
-    static let tronInfo = Color.blue
+    static let tronSuccess = Color(hex: "#10B981")
+    static let tronWarning = Color(hex: "#F59E0B")
+    static let tronError = Color(hex: "#EF4444")
+    static let tronInfo = Color(hex: "#3B82F6")
 
-    // MARK: - Backgrounds
+    // MARK: - Backgrounds (neutral dark grays)
 
-    /// Deepest background
-    static let tronBackground = Color(hex: "#0a1a10")
+    /// Deepest background - near black
+    static let tronBackground = Color(hex: "#09090B")
 
-    /// Surface background (cards, etc)
-    static let tronSurface = Color(hex: "#0f2418")
+    /// Surface background (cards, etc) - dark gray
+    static let tronSurface = Color(hex: "#18181B")
 
     /// Elevated surface background
-    static let tronSurfaceElevated = Color(hex: "#152d1f")
+    static let tronSurfaceElevated = Color(hex: "#27272A")
 
     /// Subtle separator/border color
-    static let tronBorder = Color(hex: "#1d3a28")
+    static let tronBorder = Color(hex: "#3F3F46")
 
     // MARK: - Text Colors
 
-    static let tronTextPrimary = Color.white
-    static let tronTextSecondary = Color(white: 0.75)
-    static let tronTextMuted = Color(white: 0.5)
-    static let tronTextDisabled = Color(white: 0.35)
+    static let tronTextPrimary = Color(hex: "#FAFAFA")
+    static let tronTextSecondary = Color(hex: "#A1A1AA")
+    static let tronTextMuted = Color(hex: "#71717A")
+    static let tronTextDisabled = Color(hex: "#52525B")
 
     // MARK: - Role Colors
 
-    static let userBubble = Color.tronMint.opacity(0.15)
-    static let assistantBubble = Color.tronSurface
-    static let systemBubble = Color.tronPrimary.opacity(0.5)
-    static let toolBubble = Color.tronInfo.opacity(0.15)
-    static let errorBubble = Color.tronError.opacity(0.15)
+    static let userBubble = Color(hex: "#10B981")
+    static let assistantBubble = Color(hex: "#27272A")
+    static let systemBubble = Color(hex: "#3F3F46")
+    static let toolBubble = Color(hex: "#1E3A5F")
+    static let errorBubble = Color(hex: "#7F1D1D")
 
     // MARK: - Hex Initializer
 
@@ -144,23 +144,23 @@ extension View {
 // MARK: - Gradient Definitions
 
 extension LinearGradient {
-    /// Primary Tron gradient for buttons and accents
+    /// Primary gradient for buttons and accents
     static let tronPrimaryGradient = LinearGradient(
-        colors: [.tronPrimaryBright, .tronPrimary],
+        colors: [Color(hex: "#34D399"), Color(hex: "#10B981")],
         startPoint: .topLeading,
         endPoint: .bottomTrailing
     )
 
     /// Emerald gradient for assistant elements
     static let tronEmeraldGradient = LinearGradient(
-        colors: [.tronMint, .tronEmerald],
+        colors: [Color(hex: "#34D399"), Color(hex: "#10B981")],
         startPoint: .top,
         endPoint: .bottom
     )
 
     /// Background gradient
     static let tronBackgroundGradient = LinearGradient(
-        colors: [.tronBackground, Color(hex: "#050d08")],
+        colors: [Color(hex: "#09090B"), Color(hex: "#000000")],
         startPoint: .top,
         endPoint: .bottom
     )

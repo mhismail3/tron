@@ -5,11 +5,19 @@ import SwiftUI
 struct MessageBubble: View {
     let message: ChatMessage
 
-    var body: some View {
-        HStack(alignment: .top, spacing: 12) {
-            avatarView
+    private var isUserMessage: Bool {
+        message.role == .user
+    }
 
-            VStack(alignment: .leading, spacing: 6) {
+    var body: some View {
+        HStack(alignment: .top, spacing: 10) {
+            if isUserMessage {
+                Spacer(minLength: 60)
+            } else {
+                avatarView
+            }
+
+            VStack(alignment: isUserMessage ? .trailing : .leading, spacing: 4) {
                 contentView
 
                 if let usage = message.tokenUsage {
@@ -17,7 +25,11 @@ struct MessageBubble: View {
                 }
             }
 
-            Spacer(minLength: 40)
+            if isUserMessage {
+                // No avatar for user - cleaner look
+            } else {
+                Spacer(minLength: 60)
+            }
         }
     }
 
@@ -27,8 +39,8 @@ struct MessageBubble: View {
     private var avatarView: some View {
         ZStack {
             Circle()
-                .fill(avatarColor.opacity(0.2))
-                .frame(width: 36, height: 36)
+                .fill(avatarColor)
+                .frame(width: 28, height: 28)
 
             avatarIcon
         }
@@ -36,10 +48,10 @@ struct MessageBubble: View {
 
     private var avatarColor: Color {
         switch message.role {
-        case .user: return .tronMint
-        case .assistant: return .tronEmerald
-        case .system: return .tronTextSecondary
-        case .toolResult: return .tronInfo
+        case .user: return .tronEmerald
+        case .assistant: return .tronSurfaceElevated
+        case .system: return .tronSurface
+        case .toolResult: return .tronInfo.opacity(0.2)
         }
     }
 
@@ -47,17 +59,17 @@ struct MessageBubble: View {
     private var avatarIcon: some View {
         switch message.role {
         case .user:
-            TronIconView(icon: .user, size: 18)
+            TronIconView(icon: .user, size: 14, color: .white)
         case .assistant:
             if message.isStreaming {
-                WaveformIcon(size: 18, color: .tronEmerald)
+                WaveformIcon(size: 14, color: .tronEmerald)
             } else {
-                TronIconView(icon: .assistant, size: 18)
+                TronIconView(icon: .assistant, size: 14, color: .tronEmerald)
             }
         case .system:
-            TronIconView(icon: .system, size: 18)
+            TronIconView(icon: .system, size: 14, color: .tronTextMuted)
         case .toolResult:
-            TronIconView(icon: .toolSuccess, size: 18)
+            TronIconView(icon: .toolSuccess, size: 14)
         }
     }
 
@@ -96,12 +108,26 @@ struct TextContentView: View {
     let text: String
     let role: MessageRole
 
+    private var isUser: Bool { role == .user }
+
     var body: some View {
         Text(LocalizedStringKey(text))
             .font(.body)
-            .foregroundStyle(.tronTextPrimary)
+            .foregroundStyle(isUser ? .white : .tronTextPrimary)
             .textSelection(.enabled)
-            .tronBubble(role: role)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+            .background(bubbleBackground)
+            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+    }
+
+    private var bubbleBackground: Color {
+        switch role {
+        case .user: return .tronEmerald
+        case .assistant: return .tronSurfaceElevated
+        case .system: return .tronSurface
+        case .toolResult: return .toolBubble
+        }
     }
 }
 
@@ -123,7 +149,10 @@ struct StreamingContentView: View {
 
             StreamingCursor()
         }
-        .tronBubble(role: .assistant)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .background(Color.tronSurfaceElevated)
+        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
     }
 }
 
@@ -149,29 +178,31 @@ struct ThinkingContentView: View {
                 }
             } label: {
                 HStack(spacing: 6) {
-                    TronIconView(icon: .thinking, size: 14)
+                    TronIconView(icon: .thinking, size: 12, color: .tronTextMuted)
                     Text("Thinking")
                         .font(.caption.weight(.medium))
-                        .foregroundStyle(.tronTextSecondary)
+                        .foregroundStyle(.tronTextMuted)
                     Spacer()
-                    TronIconView(
-                        icon: expanded ? .collapse : .expand,
-                        size: 10,
-                        color: .tronTextMuted
-                    )
+                    Image(systemName: expanded ? "chevron.up" : "chevron.down")
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundStyle(.tronTextMuted)
                 }
             }
 
             if expanded {
                 Text(content)
                     .font(.caption)
-                    .foregroundStyle(.tronTextMuted)
+                    .foregroundStyle(.tronTextSecondary)
                     .italic()
             }
         }
-        .padding(12)
-        .background(Color.tronPrimary.opacity(0.3))
+        .padding(10)
+        .background(Color.tronSurface)
         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(Color.tronBorder, lineWidth: 0.5)
+        )
     }
 }
 
@@ -181,44 +212,45 @@ struct ToolUseView: View {
     let tool: ToolUseData
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 8) {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 6) {
                 statusIcon
                 Text(tool.displayName)
-                    .font(.subheadline.weight(.medium).monospaced())
+                    .font(.caption.weight(.medium).monospaced())
                     .foregroundStyle(.tronTextPrimary)
+                    .lineLimit(1)
 
                 Spacer()
 
                 if let duration = tool.formattedDuration {
                     Text(duration)
-                        .font(.caption.monospaced())
+                        .font(.caption2.monospaced())
                         .foregroundStyle(.tronTextMuted)
                 }
             }
 
             if !tool.arguments.isEmpty {
                 Text(tool.truncatedArguments)
-                    .font(.caption.monospaced())
-                    .foregroundStyle(.tronTextSecondary)
-                    .lineLimit(3)
+                    .font(.caption2.monospaced())
+                    .foregroundStyle(.tronTextMuted)
+                    .lineLimit(2)
             }
 
             if let result = tool.result {
                 Divider()
                     .background(Color.tronBorder)
 
-                Text(result.prefix(300) + (result.count > 300 ? "..." : ""))
-                    .font(.caption.monospaced())
+                Text(result.prefix(200) + (result.count > 200 ? "..." : ""))
+                    .font(.caption2.monospaced())
                     .foregroundStyle(.tronTextSecondary)
-                    .lineLimit(5)
+                    .lineLimit(4)
             }
         }
-        .padding(12)
-        .background(statusBackground)
-        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .padding(10)
+        .background(Color.tronSurface)
+        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
                 .stroke(statusBorder, lineWidth: 1)
         )
     }
@@ -227,27 +259,19 @@ struct ToolUseView: View {
     private var statusIcon: some View {
         switch tool.status {
         case .running:
-            RotatingIcon(icon: .toolRunning, size: 16, color: .tronInfo)
+            RotatingIcon(icon: .toolRunning, size: 12, color: .tronInfo)
         case .success:
-            TronIconView(icon: .toolSuccess, size: 16)
+            TronIconView(icon: .toolSuccess, size: 12, color: .tronSuccess)
         case .error:
-            TronIconView(icon: .toolError, size: 16)
-        }
-    }
-
-    private var statusBackground: Color {
-        switch tool.status {
-        case .running: return .tronInfo.opacity(0.1)
-        case .success: return .tronSuccess.opacity(0.1)
-        case .error: return .tronError.opacity(0.1)
+            TronIconView(icon: .toolError, size: 12, color: .tronError)
         }
     }
 
     private var statusBorder: Color {
         switch tool.status {
-        case .running: return .tronInfo.opacity(0.3)
-        case .success: return .tronSuccess.opacity(0.3)
-        case .error: return .tronError.opacity(0.3)
+        case .running: return .tronInfo.opacity(0.4)
+        case .success: return .tronBorder
+        case .error: return .tronError.opacity(0.4)
         }
     }
 }
@@ -259,23 +283,29 @@ struct ToolResultView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            HStack {
+            HStack(spacing: 4) {
                 TronIconView(
                     icon: result.isError ? .toolError : .toolSuccess,
-                    size: 14
+                    size: 12,
+                    color: result.isError ? .tronError : .tronSuccess
                 )
                 Text(result.isError ? "Error" : "Result")
-                    .font(.caption.weight(.medium))
-                    .foregroundStyle(result.isError ? .tronError : .tronSuccess)
+                    .font(.caption2.weight(.medium))
+                    .foregroundStyle(result.isError ? .tronError : .tronTextMuted)
             }
 
             Text(result.truncatedContent)
-                .font(.caption.monospaced())
+                .font(.caption2.monospaced())
                 .foregroundStyle(.tronTextSecondary)
+                .lineLimit(4)
         }
-        .padding(12)
-        .background(result.isError ? Color.errorBubble : Color.toolBubble)
-        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .padding(10)
+        .background(Color.tronSurface)
+        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .stroke(result.isError ? Color.tronError.opacity(0.3) : Color.tronBorder, lineWidth: 0.5)
+        )
     }
 }
 
@@ -285,17 +315,17 @@ struct ErrorContentView: View {
     let message: String
 
     var body: some View {
-        HStack(spacing: 8) {
-            TronIconView(icon: .error, size: 16)
+        HStack(spacing: 6) {
+            TronIconView(icon: .error, size: 14, color: .tronError)
             Text(message)
-                .font(.subheadline)
-                .foregroundStyle(.tronError)
+                .font(.caption)
+                .foregroundStyle(.tronTextSecondary)
         }
-        .padding(12)
-        .background(Color.errorBubble)
-        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .padding(10)
+        .background(Color.tronError.opacity(0.1))
+        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
                 .stroke(Color.tronError.opacity(0.3), lineWidth: 1)
         )
     }
@@ -307,20 +337,20 @@ struct ImagesContentView: View {
     let images: [ImageContent]
 
     var body: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: 6) {
             ForEach(images) { image in
                 if let uiImage = UIImage(data: image.data) {
                     Image(uiImage: uiImage)
                         .resizable()
                         .aspectRatio(contentMode: .fill)
-                        .frame(width: 100, height: 100)
+                        .frame(width: 80, height: 80)
                         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                 }
             }
         }
-        .padding(8)
-        .background(Color.userBubble)
-        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .padding(4)
+        .background(Color.tronEmerald.opacity(0.1))
+        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
     }
 }
 
