@@ -76,43 +76,57 @@ export function useRpc(): UseRpcReturn {
 
   // Initialize client on mount
   useEffect(() => {
-    const client = new RpcClient(getWsUrl(), {
+    const rpcClient = new RpcClient(getWsUrl(), {
       autoReconnect: true,
       reconnectDelay: 1000,
       maxReconnectAttempts: 10,
     });
 
     // Set up connection handlers
-    client.on('connected', () => {
+    rpcClient.on('connected', () => {
+      console.log('[useRpc] EVENT: connected, socket.readyState=%s', rpcClient.isConnected());
       setStatus('connected');
       setError(null);
     });
 
-    client.on('disconnected', () => {
+    rpcClient.on('disconnected', () => {
+      console.log('[useRpc] EVENT: disconnected');
       setStatus('disconnected');
     });
 
-    client.on('reconnecting', (attempt) => {
+    rpcClient.on('reconnecting', (attempt) => {
+      console.log(`[useRpc] EVENT: reconnecting attempt ${attempt}`);
       setStatus('reconnecting');
-      console.log(`[RPC] Reconnecting attempt ${attempt}`);
     });
 
-    client.on('error', (err) => {
+    rpcClient.on('error', (err) => {
+      console.log('[useRpc] EVENT: error', err);
       setStatus('error');
       setError(err);
     });
 
     // Forward all events to subscribers
-    client.on('*', (event: RpcEvent) => {
+    rpcClient.on('*', (event: RpcEvent) => {
       for (const handler of eventHandlersRef.current) {
         handler(event);
       }
     });
 
-    clientRef.current = client;
+    clientRef.current = rpcClient;
+    // Note: setClient is called in 'connected' handler to ensure client.isConnected() works
+
+    // Auto-connect on mount
+    console.log('[useRpc] Starting auto-connect to', rpcClient.getUrl());
+    rpcClient.connect()
+      .then(() => {
+        console.log('[useRpc] Auto-connect succeeded, isConnected=%s', rpcClient.isConnected());
+      })
+      .catch((err) => {
+        console.error('[useRpc] Auto-connect FAILED:', err);
+      });
 
     return () => {
-      client.disconnect();
+      rpcClient.disconnect();
       clientRef.current = null;
     };
   }, []);
@@ -298,6 +312,8 @@ export function useRpc(): UseRpcReturn {
     };
   }, []);
 
+  // Return clientRef.current directly - the status change will trigger re-render
+  // and by that time clientRef.current will have the connected client
   return {
     status,
     sessionId,

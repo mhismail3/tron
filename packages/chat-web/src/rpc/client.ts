@@ -119,30 +119,77 @@ export class RpcClient {
    */
   connect(): Promise<void> {
     return new Promise((resolve, reject) => {
+      console.log('[RpcClient] connect() called, current readyState=%s', this.socket?.readyState);
+
+      // Already connected
       if (this.socket?.readyState === WebSocket.OPEN) {
+        console.log('[RpcClient] Already connected');
         resolve();
         return;
       }
 
-      this.intentionalClose = false;
-      this.socket = new WebSocket(this.url);
+      // Already connecting - wait for that connection
+      if (this.socket?.readyState === WebSocket.CONNECTING) {
+        console.log('[RpcClient] Already connecting, waiting...');
+        const checkInterval = setInterval(() => {
+          if (this.socket?.readyState === WebSocket.OPEN) {
+            clearInterval(checkInterval);
+            resolve();
+          } else if (!this.socket || this.socket.readyState > WebSocket.OPEN) {
+            clearInterval(checkInterval);
+            reject(new Error('Connection failed while waiting'));
+          }
+        }, 50);
+        return;
+      }
 
-      this.socket.onopen = () => {
+      this.intentionalClose = false;
+      console.log('[RpcClient] Creating WebSocket to', this.url);
+      const socket = new WebSocket(this.url);
+      this.socket = socket;
+
+      socket.onopen = () => {
+        // Verify this is still our current socket (not a stale reference)
+        if (this.socket !== socket) {
+          console.log('[RpcClient] Ignoring OPEN from stale socket');
+          return;
+        }
+        console.log('[RpcClient] WebSocket OPEN, readyState=%s', socket.readyState);
         this.reconnectAttempts = 0;
+        // Emit connected event immediately when socket opens
+        for (const handler of this.connectionHandlers.connected) {
+          handler();
+        }
         resolve();
       };
 
-      this.socket.onclose = (event) => {
+      socket.onclose = (event) => {
+        // Verify this is still our current socket
+        if (this.socket !== socket) {
+          console.log('[RpcClient] Ignoring CLOSE from stale socket');
+          return;
+        }
+        console.log('[RpcClient] WebSocket CLOSE, code=%d, reason=%s', event.code, event.reason);
         this.handleClose(event.code, event.reason);
       };
 
-      this.socket.onerror = () => {
+      socket.onerror = (event) => {
+        // Verify this is still our current socket
+        if (this.socket !== socket) {
+          console.log('[RpcClient] Ignoring ERROR from stale socket');
+          return;
+        }
+        console.error('[RpcClient] WebSocket ERROR', event);
         const error = new Error('WebSocket connection failed');
         reject(error);
         this.emitConnectionError(error);
       };
 
-      this.socket.onmessage = (event) => {
+      socket.onmessage = (event) => {
+        // Verify this is still our current socket
+        if (this.socket !== socket) {
+          return;
+        }
         this.handleMessage(event.data);
       };
     });
@@ -152,13 +199,22 @@ export class RpcClient {
    * Disconnect from the server
    */
   disconnect(): void {
+    console.log('[RpcClient] disconnect() called, readyState=%s', this.socket?.readyState);
     this.intentionalClose = true;
     this.cancelReconnect();
     this.rejectAllPending('Connection closed');
 
     if (this.socket) {
-      this.socket.close(1000, 'Client disconnect');
+      // Clear handlers before closing to prevent stale callbacks
+      const socket = this.socket;
       this.socket = null;
+      socket.onopen = null;
+      socket.onclose = null;
+      socket.onerror = null;
+      socket.onmessage = null;
+      if (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING) {
+        socket.close(1000, 'Client disconnect');
+      }
     }
   }
 

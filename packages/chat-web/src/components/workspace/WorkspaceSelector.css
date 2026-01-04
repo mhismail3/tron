@@ -233,9 +233,14 @@
 
 .workspace-loading {
   display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
+  gap: var(--space-md);
   padding: var(--space-xl);
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  color: var(--text-muted);
 }
 
 .workspace-spinner {
@@ -254,11 +259,44 @@
 }
 
 .workspace-error {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-md);
   text-align: center;
   padding: var(--space-lg);
   font-family: var(--font-mono);
   font-size: var(--text-sm);
   color: var(--error);
+}
+
+.workspace-retry-button {
+  padding: var(--space-sm) var(--space-md);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  color: var(--text-primary);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.workspace-retry-button:hover {
+  background: var(--bg-hover);
+  border-color: var(--emerald);
+}
+
+.workspace-connecting {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-md);
+  padding: var(--space-xl);
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  color: var(--text-muted);
 }
 
 .workspace-empty {

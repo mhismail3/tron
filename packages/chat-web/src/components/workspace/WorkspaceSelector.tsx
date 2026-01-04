@@ -23,6 +23,8 @@ export interface WorkspaceSelectorProps {
   onClose: () => void;
   /** RPC client for filesystem operations */
   client: RpcClient | null;
+  /** Connection status from useRpc */
+  connectionStatus?: 'connected' | 'connecting' | 'disconnected' | 'reconnecting' | 'error';
 }
 
 interface DirectoryEntry {
@@ -68,7 +70,11 @@ export function WorkspaceSelector({
   onSelect,
   onClose,
   client,
+  connectionStatus: _connectionStatus = 'disconnected',
 }: WorkspaceSelectorProps): React.ReactElement | null {
+  // Note: connectionStatus prop kept for API compatibility but we now use
+  // waitForConnection internally to handle race conditions properly
+  void _connectionStatus;
   const [currentPath, setCurrentPath] = useState<string>('');
   const [entries, setEntries] = useState<DirectoryEntry[]>([]);
   const [suggestedPaths, setSuggestedPaths] = useState<FilesystemGetHomeResult['suggestedPaths']>([]);
@@ -77,33 +83,19 @@ export function WorkspaceSelector({
   const [error, setError] = useState<string | null>(null);
   const [inputPath, setInputPath] = useState('');
   const [showHidden, setShowHidden] = useState(false);
+  // Track actual connection readiness (not just React state)
+  const [isReady, setIsReady] = useState(false);
 
-  // Load home directory and suggestions on mount
-  useEffect(() => {
-    if (isOpen && client) {
-      loadHome();
-    }
-  }, [isOpen, client]);
-
-  const loadHome = useCallback(async () => {
-    if (!client) return;
-
-    setLoading(true);
-    setError(null);
-
-    try {
-      const result = await client.filesystemGetHome({});
-      setSuggestedPaths(result.suggestedPaths);
-      // Navigate to home directory
-      await loadDirectory(result.homePath);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load home directory');
-      setLoading(false);
-    }
-  }, [client]);
-
+  // Define loadDirectory first (used by loadHome)
   const loadDirectory = useCallback(async (path: string) => {
     if (!client) return;
+
+    // Ensure we're actually connected before making request
+    if (!client.isConnected()) {
+      setError('Connection lost. Please try again.');
+      setIsReady(false);
+      return;
+    }
 
     setLoading(true);
     setError(null);
@@ -126,11 +118,89 @@ export function WorkspaceSelector({
         }))
       );
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to list directory');
+      const message = err instanceof Error ? err.message : 'Failed to list directory';
+      setError(message);
+      // If connection was lost during request, mark as not ready
+      if (message === 'Not connected' || message === 'Connection closed') {
+        setIsReady(false);
+      }
     } finally {
       setLoading(false);
     }
   }, [client, showHidden]);
+
+  // Wait for the client to be actually connected (WebSocket OPEN state)
+  const waitForConnection = useCallback(async (timeoutMs = 5000): Promise<boolean> => {
+    if (!client) {
+      console.log('[WorkspaceSelector] waitForConnection: no client');
+      return false;
+    }
+
+    const startTime = Date.now();
+    const pollInterval = 100;
+    let pollCount = 0;
+
+    console.log('[WorkspaceSelector] waitForConnection: starting poll, timeout=%dms', timeoutMs);
+
+    while (Date.now() - startTime < timeoutMs) {
+      const connected = client.isConnected();
+      if (pollCount % 10 === 0) { // Log every 1 second
+        console.log('[WorkspaceSelector] waitForConnection: poll #%d, connected=%s, elapsed=%dms',
+          pollCount, connected, Date.now() - startTime);
+      }
+      if (connected) {
+        console.log('[WorkspaceSelector] waitForConnection: connected after %dms', Date.now() - startTime);
+        return true;
+      }
+      await new Promise(resolve => setTimeout(resolve, pollInterval));
+      pollCount++;
+    }
+
+    console.log('[WorkspaceSelector] waitForConnection: TIMEOUT after %dms', Date.now() - startTime);
+    return false;
+  }, [client]);
+
+  // Load home directory with proper connection waiting
+  const loadHome = useCallback(async () => {
+    if (!client) {
+      setError('No client available');
+      return;
+    }
+
+    setLoading(true);
+    setError(null);
+    setIsReady(false);
+
+    // First, wait for actual WebSocket connection to be ready
+    const connected = await waitForConnection(5000);
+    if (!connected) {
+      setError('Unable to connect to server');
+      setLoading(false);
+      return;
+    }
+
+    setIsReady(true);
+
+    try {
+      const result = await client.filesystemGetHome({});
+      setSuggestedPaths(result.suggestedPaths);
+      await loadDirectory(result.homePath);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to load home directory';
+      setError(message);
+      setLoading(false);
+    }
+  }, [client, loadDirectory, waitForConnection]);
+
+  // Load home directory when modal opens (loadHome handles connection waiting)
+  useEffect(() => {
+    if (isOpen && client) {
+      // Reset state when modal opens
+      setError(null);
+      setIsReady(false);
+      loadHome();
+    }
+  }, [isOpen, client, loadHome]);
 
   const handleNavigate = useCallback((path: string) => {
     loadDirectory(path);
@@ -255,23 +325,34 @@ export function WorkspaceSelector({
             </label>
           </div>
 
-          {/* Loading state */}
+          {/* Connecting/Loading state - show spinner while waiting for connection or loading */}
           {loading && (
             <div className="workspace-loading">
               <div className="workspace-spinner" />
+              {!isReady && <span>Connecting to server...</span>}
             </div>
           )}
 
           {/* Error state */}
           {error && !loading && (
-            <div className="workspace-error">{error}</div>
+            <div className="workspace-error">
+              <span>{error}</span>
+              <button
+                onClick={loadHome}
+                className="workspace-retry-button"
+              >
+                Retry
+              </button>
+            </div>
           )}
 
           {/* Directory entries */}
-          {!loading && !error && (
+          {isReady && !loading && !error && (
             <div className="workspace-entries">
-              {entries.length === 0 ? (
+              {entries.length === 0 && currentPath ? (
                 <div className="workspace-empty">No subdirectories</div>
+              ) : entries.length === 0 ? (
+                <div className="workspace-empty">Loading...</div>
               ) : (
                 entries.map((entry) => (
                   <button

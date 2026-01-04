@@ -160,9 +160,11 @@ function AppContent() {
     return () => {
       window.removeEventListener('online', handleOnline);
       window.removeEventListener('offline', handleOffline);
-      disconnect();
+      // Note: Don't call disconnect() here - useRpc manages its own connection lifecycle.
+      // Calling disconnect here causes race conditions with React Strict Mode and
+      // state changes (like setConnectionAttempted) that trigger effect re-runs.
     };
-  }, [connect, disconnect, isOnline, connectionAttempted]);
+  }, [connect, isOnline, connectionAttempted]);
 
   // Sync RPC session to state when a new session is created
   useEffect(() => {
@@ -854,6 +856,7 @@ function AppContent() {
           onSelect={handleWorkspaceSelect}
           onClose={() => setWorkspaceSelectorOpen(false)}
           client={client}
+          connectionStatus={status}
         />
       </div>
     );
@@ -893,6 +896,7 @@ function AppContent() {
         onSelect={handleWorkspaceSelect}
         onClose={() => setWorkspaceSelectorOpen(false)}
         client={client}
+        connectionStatus={status}
       />
     </div>
   );
