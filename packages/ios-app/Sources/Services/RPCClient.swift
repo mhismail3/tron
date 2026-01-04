@@ -1,6 +1,5 @@
 import Foundation
 import Combine
-import os
 
 // MARK: - RPC Client Errors
 
@@ -22,8 +21,6 @@ enum RPCClientError: Error, LocalizedError {
 
 @MainActor
 class RPCClient: ObservableObject {
-    private let logger = Logger(subsystem: "com.tron.mobile", category: "RPCClient")
-
     private var webSocket: WebSocketService?
     private var cancellables = Set<AnyCancellable>()
 
@@ -50,7 +47,13 @@ class RPCClient: ObservableObject {
     // MARK: - Connection
 
     func connect() async {
-        logger.info("Initializing connection to \(self.serverURL.absoluteString)")
+        // Don't reconnect if already connected
+        if webSocket != nil && connectionState.isConnected {
+            log.debug("Already connected, skipping connect", category: .rpc)
+            return
+        }
+
+        log.info("Initializing connection to \(self.serverURL.absoluteString)", category: .rpc)
 
         let ws = WebSocketService(serverURL: serverURL)
         self.webSocket = ws
@@ -72,7 +75,7 @@ class RPCClient: ObservableObject {
     }
 
     func disconnect() async {
-        logger.info("Disconnecting")
+        log.info("Disconnecting from server", category: .rpc)
         currentSessionId = nil
         webSocket?.disconnect()
         webSocket = nil
@@ -88,7 +91,7 @@ class RPCClient: ObservableObject {
 
     private func handleEventData(_ data: Data) {
         guard let event = ParsedEvent.parse(from: data) else {
-            logger.warning("Failed to parse event")
+            log.warning("Failed to parse event data", category: .events)
             return
         }
 
@@ -132,10 +135,10 @@ class RPCClient: ObservableObject {
             onError?(e.message)
 
         case .connected(let e):
-            logger.info("Connected to server version: \(e.version ?? "unknown")")
+            log.info("Server version: \(e.version ?? "unknown")", category: .rpc)
 
         case .unknown(let type):
-            logger.debug("Unknown event type: \(type)")
+            log.debug("Unknown event type: \(type)", category: .events)
         }
     }
 
@@ -162,7 +165,7 @@ class RPCClient: ObservableObject {
 
         currentSessionId = result.sessionId
         currentModel = result.model
-        logger.info("Created session: \(result.sessionId)")
+        log.info("Created session: \(result.sessionId)", category: .session)
 
         return result
     }
@@ -196,14 +199,14 @@ class RPCClient: ObservableObject {
         }
 
         let params = SessionResumeParams(sessionId: sessionId)
-        let result: SessionCreateResult = try await ws.send(
+        let result: SessionResumeResult = try await ws.send(
             method: "session.resume",
             params: params
         )
 
         currentSessionId = result.sessionId
         currentModel = result.model
-        logger.info("Resumed session: \(sessionId)")
+        log.info("Resumed session: \(sessionId) with \(result.messageCount) messages", category: .session)
     }
 
     func endSession() async throws {
@@ -216,7 +219,7 @@ class RPCClient: ObservableObject {
         let _: EmptyParams = try await ws.send(method: "session.end", params: params)
 
         currentSessionId = nil
-        logger.info("Ended session: \(sessionId)")
+        log.info("Ended session: \(sessionId)", category: .session)
     }
 
     func getSessionHistory(limit: Int = 100) async throws -> [HistoryMessage] {
@@ -262,7 +265,7 @@ class RPCClient: ObservableObject {
         )
 
         if !result.acknowledged {
-            logger.warning("Prompt not acknowledged")
+            log.warning("Prompt not acknowledged by server", category: .chat)
         }
     }
 
@@ -274,7 +277,7 @@ class RPCClient: ObservableObject {
 
         let params = AgentAbortParams(sessionId: sessionId)
         let _: EmptyParams = try await ws.send(method: "agent.abort", params: params)
-        logger.info("Aborted agent")
+        log.info("Aborted agent", category: .chat)
     }
 
     func getAgentState() async throws -> AgentStateResult {
@@ -309,6 +312,155 @@ class RPCClient: ObservableObject {
             method: "system.getInfo",
             params: EmptyParams()
         )
+    }
+
+    // MARK: - Session Management (Extended)
+
+    func deleteSession(_ sessionId: String) async throws -> Bool {
+        guard let ws = webSocket else {
+            throw RPCClientError.connectionNotEstablished
+        }
+
+        let params = SessionDeleteParams(sessionId: sessionId)
+        let result: SessionDeleteResult = try await ws.send(
+            method: "session.delete",
+            params: params
+        )
+
+        if currentSessionId == sessionId {
+            currentSessionId = nil
+        }
+
+        log.info("Deleted session: \(sessionId)", category: .session)
+        return result.deleted
+    }
+
+    func forkSession(_ sessionId: String, fromIndex: Int? = nil) async throws -> SessionForkResult {
+        guard let ws = webSocket else {
+            throw RPCClientError.connectionNotEstablished
+        }
+
+        let params = SessionForkParams(sessionId: sessionId, fromMessageIndex: fromIndex)
+        let result: SessionForkResult = try await ws.send(
+            method: "session.fork",
+            params: params
+        )
+
+        log.info("Forked session \(sessionId) to \(result.newSessionId)", category: .session)
+        return result
+    }
+
+    func rewindSession(_ sessionId: String, toIndex: Int) async throws -> SessionRewindResult {
+        guard let ws = webSocket else {
+            throw RPCClientError.connectionNotEstablished
+        }
+
+        let params = SessionRewindParams(sessionId: sessionId, toMessageIndex: toIndex)
+        let result: SessionRewindResult = try await ws.send(
+            method: "session.rewind",
+            params: params
+        )
+
+        log.info("Rewound session \(sessionId) to message \(toIndex)", category: .session)
+        return result
+    }
+
+    // MARK: - Model Methods
+
+    func switchModel(_ sessionId: String, model: String) async throws -> ModelSwitchResult {
+        guard let ws = webSocket else {
+            throw RPCClientError.connectionNotEstablished
+        }
+
+        let params = ModelSwitchParams(sessionId: sessionId, model: model)
+        let result: ModelSwitchResult = try await ws.send(
+            method: "model.switch",
+            params: params
+        )
+
+        if currentSessionId == sessionId {
+            currentModel = result.newModel
+        }
+
+        log.info("Switched model from \(result.previousModel) to \(result.newModel)", category: .session)
+        return result
+    }
+
+    func listModels() async throws -> [ModelInfo] {
+        guard let ws = webSocket else {
+            throw RPCClientError.connectionNotEstablished
+        }
+
+        let result: ModelListResult = try await ws.send(
+            method: "model.list",
+            params: EmptyParams()
+        )
+
+        return result.models
+    }
+
+    // MARK: - Filesystem Methods
+
+    func listDirectory(path: String?, showHidden: Bool = false) async throws -> DirectoryListResult {
+        guard let ws = webSocket else {
+            throw RPCClientError.connectionNotEstablished
+        }
+
+        let params = FilesystemListDirParams(path: path, showHidden: showHidden)
+        return try await ws.send(
+            method: "filesystem.listDir",
+            params: params
+        )
+    }
+
+    func getHome() async throws -> HomeResult {
+        guard let ws = webSocket else {
+            throw RPCClientError.connectionNotEstablished
+        }
+
+        return try await ws.send(
+            method: "filesystem.getHome",
+            params: EmptyParams()
+        )
+    }
+
+    // MARK: - Memory Methods
+
+    func searchMemory(
+        query: String? = nil,
+        type: String? = nil,
+        source: String? = nil,
+        limit: Int = 20
+    ) async throws -> MemorySearchResult {
+        guard let ws = webSocket else {
+            throw RPCClientError.connectionNotEstablished
+        }
+
+        let params = MemorySearchParams(
+            searchText: query,
+            type: type,
+            source: source,
+            limit: limit
+        )
+
+        return try await ws.send(
+            method: "memory.search",
+            params: params
+        )
+    }
+
+    func getHandoffs(workingDirectory: String? = nil, limit: Int = 10) async throws -> [Handoff] {
+        guard let ws = webSocket else {
+            throw RPCClientError.connectionNotEstablished
+        }
+
+        let params = HandoffsParams(workingDirectory: workingDirectory, limit: limit)
+        let result: HandoffsResult = try await ws.send(
+            method: "memory.getHandoffs",
+            params: params
+        )
+
+        return result.handoffs
     }
 
     // MARK: - State Accessors

@@ -11,6 +11,8 @@ struct InputBar: View {
     let onSend: () -> Void
     let onAbort: () -> Void
     let onRemoveImage: (ImageContent) -> Void
+    var inputHistory: InputHistoryStore?
+    var onHistoryNavigate: ((String) -> Void)?
 
     @FocusState private var isFocused: Bool
     @State private var showingImagePicker = false
@@ -90,26 +92,87 @@ struct InputBar: View {
     // MARK: - Text Field
 
     private var textField: some View {
-        TextField("Message...", text: $text, axis: .vertical)
-            .textFieldStyle(.plain)
-            .font(.body)
-            .foregroundStyle(.tronTextPrimary)
-            .padding(.horizontal, 14)
-            .padding(.vertical, 10)
-            .background(Color.tronBackground)
-            .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: 20, style: .continuous)
-                    .stroke(Color.tronBorder, lineWidth: 1)
-            )
-            .lineLimit(1...8)
-            .focused($isFocused)
-            .disabled(isProcessing)
-            .onSubmit {
-                if !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    onSend()
-                }
+        VStack(spacing: 4) {
+            // History indicator
+            if let history = inputHistory, history.isNavigating,
+               let position = history.navigationPosition {
+                Text("History: \(position)")
+                    .font(.caption2)
+                    .foregroundStyle(.tronTextMuted)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 2)
+                    .background(Color.tronSurfaceElevated)
+                    .clipShape(Capsule())
             }
+
+            HStack(spacing: 8) {
+                // History navigation buttons
+                if inputHistory != nil {
+                    historyNavigationButtons
+                }
+
+                TextField("Message...", text: $text, axis: .vertical)
+                    .textFieldStyle(.plain)
+                    .font(.body)
+                    .foregroundStyle(.tronTextPrimary)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 10)
+                    .background(Color.tronBackground)
+                    .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 20, style: .continuous)
+                            .stroke(Color.tronBorder, lineWidth: 1)
+                    )
+                    .lineLimit(1...8)
+                    .focused($isFocused)
+                    .disabled(isProcessing)
+                    .onSubmit {
+                        if !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                            onSend()
+                        }
+                    }
+            }
+        }
+    }
+
+    // MARK: - History Navigation
+
+    private var historyNavigationButtons: some View {
+        VStack(spacing: 2) {
+            Button {
+                navigateHistoryUp()
+            } label: {
+                Image(systemName: "chevron.up")
+                    .font(.caption)
+                    .foregroundStyle(.tronTextSecondary)
+                    .frame(width: 24, height: 16)
+            }
+            .disabled(isProcessing || inputHistory?.history.isEmpty == true)
+
+            Button {
+                navigateHistoryDown()
+            } label: {
+                Image(systemName: "chevron.down")
+                    .font(.caption)
+                    .foregroundStyle(.tronTextSecondary)
+                    .frame(width: 24, height: 16)
+            }
+            .disabled(isProcessing || inputHistory?.isNavigating != true)
+        }
+    }
+
+    private func navigateHistoryUp() {
+        guard let history = inputHistory else { return }
+        if let newText = history.navigateUp(currentInput: text) {
+            onHistoryNavigate?(newText)
+        }
+    }
+
+    private func navigateHistoryDown() {
+        guard let history = inputHistory else { return }
+        if let newText = history.navigateDown() {
+            onHistoryNavigate?(newText)
+        }
     }
 
     // MARK: - Action Button
@@ -196,7 +259,9 @@ struct AttachedImageThumbnail: View {
             selectedImages: .constant([]),
             onSend: {},
             onAbort: {},
-            onRemoveImage: { _ in }
+            onRemoveImage: { _ in },
+            inputHistory: nil,
+            onHistoryNavigate: nil
         )
     }
     .background(Color.tronBackground)

@@ -4,94 +4,215 @@ import PhotosUI
 // MARK: - Chat View
 
 struct ChatView: View {
+    @EnvironmentObject var sessionStore: SessionStore
     @StateObject private var viewModel: ChatViewModel
+    @StateObject private var inputHistory = InputHistoryStore()
     @FocusState private var isInputFocused: Bool
     @State private var scrollProxy: ScrollViewProxy?
+    @State private var showModelSwitcher = false
+    @State private var showSessionStats = false
+    @State private var showHelp = false
+    @State private var showContextAudit = false
 
-    init(rpcClient: RPCClient) {
-        _viewModel = StateObject(wrappedValue: ChatViewModel(rpcClient: rpcClient))
+    private let sessionId: String
+    private let rpcClient: RPCClient
+
+    init(rpcClient: RPCClient, sessionId: String) {
+        self.sessionId = sessionId
+        self.rpcClient = rpcClient
+        _viewModel = StateObject(wrappedValue: ChatViewModel(rpcClient: rpcClient, sessionId: sessionId))
     }
 
     var body: some View {
-        NavigationStack {
-            ZStack {
-                // Background
-                Color.tronBackground
-                    .ignoresSafeArea()
+        ZStack {
+            // Background
+            Color.tronBackground
+                .ignoresSafeArea()
 
-                VStack(spacing: 0) {
-                    // Messages
-                    messagesScrollView
+            VStack(spacing: 0) {
+                // Messages
+                messagesScrollView
 
-                    // Thinking indicator
-                    if !viewModel.thinkingText.isEmpty {
-                        ThinkingBanner(
-                            text: viewModel.thinkingText,
-                            isExpanded: $viewModel.isThinkingExpanded
-                        )
-                    }
-
-                    // Input area
-                    InputBar(
-                        text: $viewModel.inputText,
-                        isProcessing: viewModel.isProcessing,
-                        attachedImages: $viewModel.attachedImages,
-                        selectedImages: $viewModel.selectedImages,
-                        onSend: viewModel.sendMessage,
-                        onAbort: viewModel.abortAgent,
-                        onRemoveImage: viewModel.removeAttachedImage
+                // Thinking indicator
+                if !viewModel.thinkingText.isEmpty {
+                    ThinkingBanner(
+                        text: viewModel.thinkingText,
+                        isExpanded: $viewModel.isThinkingExpanded
                     )
-                    .focused($isInputFocused)
                 }
-            }
-            .navigationTitle("Tron")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbarBackground(Color.tronSurface, for: .navigationBar)
-            .toolbarBackground(.visible, for: .navigationBar)
-            .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    ConnectionIndicator(state: viewModel.connectionState)
-                }
-                ToolbarItem(placement: .topBarTrailing) {
-                    Menu {
-                        Button {
-                            viewModel.showSessionList = true
-                        } label: {
-                            Label("Sessions", systemImage: TronIcon.session.systemName)
-                        }
 
-                        Button {
-                            viewModel.showSettings = true
-                        } label: {
-                            Label("Settings", systemImage: TronIcon.settings.systemName)
-                        }
-                    } label: {
-                        TronIconView(icon: .settings, size: 18)
+                // Status bar
+                statusBar
+
+                // Input area
+                InputBar(
+                    text: $viewModel.inputText,
+                    isProcessing: viewModel.isProcessing,
+                    attachedImages: $viewModel.attachedImages,
+                    selectedImages: $viewModel.selectedImages,
+                    onSend: {
+                        // Add to history before sending
+                        inputHistory.addToHistory(viewModel.inputText)
+                        viewModel.sendMessage()
+                        sessionStore.incrementMessageCount(for: sessionId)
+                    },
+                    onAbort: viewModel.abortAgent,
+                    onRemoveImage: viewModel.removeAttachedImage,
+                    inputHistory: inputHistory,
+                    onHistoryNavigate: { newText in
+                        viewModel.inputText = newText
                     }
+                )
+                .focused($isInputFocused)
+            }
+        }
+        .navigationTitle(sessionStore.activeSession?.displayTitle ?? "Chat")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbarBackground(Color.tronSurface, for: .navigationBar)
+        .toolbarBackground(.visible, for: .navigationBar)
+        .toolbar {
+            ToolbarItem(placement: .topBarLeading) {
+                ConnectionIndicator(state: viewModel.connectionState)
+            }
+
+            ToolbarItem(placement: .topBarTrailing) {
+                commandsMenu
+            }
+        }
+        .sheet(isPresented: $viewModel.showSettings) {
+            SettingsView()
+        }
+        .sheet(isPresented: $showModelSwitcher) {
+            ModelSwitcher(
+                rpcClient: rpcClient,
+                currentModel: viewModel.currentModel,
+                sessionId: sessionId,
+                onModelChanged: { newModel in
+                    // Model changed
+                }
+            )
+        }
+        .sheet(isPresented: $showSessionStats) {
+            SessionStatsView(
+                session: sessionStore.activeSession,
+                tokenUsage: viewModel.totalTokenUsage
+            )
+        }
+        .sheet(isPresented: $showHelp) {
+            HelpSheet()
+        }
+        .sheet(isPresented: $showContextAudit) {
+            ContextAuditView(
+                rpcClient: rpcClient,
+                sessionId: sessionId
+            )
+        }
+        .alert("Error", isPresented: $viewModel.showError) {
+            Button("OK") { viewModel.clearError() }
+        } message: {
+            Text(viewModel.errorMessage ?? "Unknown error")
+        }
+        .task {
+            await viewModel.connectAndResume()
+        }
+        .onChange(of: viewModel.totalTokenUsage) { _, usage in
+            if let usage = usage {
+                sessionStore.updateTokenUsage(
+                    for: sessionId,
+                    input: usage.inputTokens,
+                    output: usage.outputTokens
+                )
+            }
+        }
+    }
+
+    // MARK: - Commands Menu
+
+    private var commandsMenu: some View {
+        Menu {
+            // Model section
+            Section {
+                Button {
+                    showModelSwitcher = true
+                } label: {
+                    Label(viewModel.currentModel.shortModelName, systemImage: "cpu")
                 }
             }
-            .sheet(isPresented: $viewModel.showSettings) {
-                SettingsView()
+
+            // Session section
+            Section("Session") {
+                Button {
+                    showSessionStats = true
+                } label: {
+                    Label("Session Info", systemImage: "info.circle")
+                }
+
+                Button {
+                    showContextAudit = true
+                } label: {
+                    Label("Memory & Context", systemImage: "brain")
+                }
+
+                Button {
+                    viewModel.clearMessages()
+                } label: {
+                    Label("Clear Messages", systemImage: "trash")
+                }
             }
-            .sheet(isPresented: $viewModel.showSessionList) {
-                SessionListView(viewModel: viewModel)
+
+            // Settings section
+            Section {
+                Button {
+                    showHelp = true
+                } label: {
+                    Label("Help", systemImage: "questionmark.circle")
+                }
+
+                Button {
+                    viewModel.showSettings = true
+                } label: {
+                    Label("Settings", systemImage: TronIcon.settings.systemName)
+                }
             }
-            .alert("Error", isPresented: $viewModel.showError) {
-                Button("OK") { viewModel.clearError() }
-            } message: {
-                Text(viewModel.errorMessage ?? "Unknown error")
+        } label: {
+            TronIconView(icon: .settings, size: 18)
+        }
+    }
+
+    // MARK: - Status Bar
+
+    private var statusBar: some View {
+        HStack(spacing: 12) {
+            // Connection status
+            Circle()
+                .fill(viewModel.connectionState.isConnected ? Color.tronSuccess : Color.tronError)
+                .frame(width: 6, height: 6)
+
+            // Model
+            Text(viewModel.currentModel.shortModelName)
+                .font(.caption2.weight(.medium))
+                .foregroundStyle(.tronTextSecondary)
+
+            Spacer()
+
+            // Token usage
+            if let usage = viewModel.totalTokenUsage {
+                HStack(spacing: 4) {
+                    Image(systemName: "arrow.down")
+                        .font(.caption2)
+                    Text(usage.formattedInput)
+
+                    Image(systemName: "arrow.up")
+                        .font(.caption2)
+                    Text(usage.formattedOutput)
+                }
+                .font(.caption2)
+                .foregroundStyle(.tronTextMuted)
             }
         }
-        .preferredColorScheme(.dark)
-        .task {
-            await viewModel.connect()
-            // Create initial session
-            let documentsPath = FileManager.default.urls(
-                for: .documentDirectory,
-                in: .userDomainMask
-            ).first?.path ?? "~"
-            await viewModel.createNewSession(workingDirectory: documentsPath)
-        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
+        .background(Color.tronSurface)
     }
 
     // MARK: - Messages Scroll View
@@ -129,10 +250,25 @@ struct ChatView: View {
                 }
             }
             .onChange(of: viewModel.messages.last?.content) { _, _ in
-                // Scroll when streaming content updates
                 proxy.scrollTo("bottom", anchor: .bottom)
             }
         }
+    }
+}
+
+// MARK: - String Extension for Short Model Name
+
+extension String {
+    var shortModelName: String {
+        if contains("opus") { return "Opus" }
+        if contains("sonnet") { return "Sonnet" }
+        if contains("haiku") { return "Haiku" }
+        // Extract short name from model ID
+        let parts = split(separator: "-")
+        if parts.count >= 2 {
+            return String(parts[0]).capitalized + " " + String(parts[1]).capitalized
+        }
+        return self
     }
 }
 
@@ -193,8 +329,134 @@ struct ThinkingBanner: View {
     }
 }
 
+// MARK: - Session Stats View
+
+struct SessionStatsView: View {
+    let session: StoredSession?
+    let tokenUsage: TokenUsage?
+
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            List {
+                if let session = session {
+                    Section("Session") {
+                        LabeledContent("ID", value: String(session.id.prefix(8)) + "...")
+                        LabeledContent("Model", value: session.shortModel)
+                        LabeledContent("Messages", value: "\(session.messageCount)")
+                        LabeledContent("Created", value: session.createdAt.formatted())
+                        LabeledContent("Last Activity", value: session.formattedDate)
+                    }
+
+                    Section("Workspace") {
+                        Text(session.workingDirectory)
+                            .font(.caption)
+                            .foregroundStyle(.tronTextSecondary)
+                    }
+                }
+
+                if let usage = tokenUsage {
+                    Section("Token Usage") {
+                        LabeledContent("Input", value: usage.formattedInput)
+                        LabeledContent("Output", value: usage.formattedOutput)
+                        LabeledContent("Total", value: usage.formattedTotal)
+                    }
+                }
+            }
+            .scrollContentBackground(.hidden)
+            .background(Color.tronBackground)
+            .navigationTitle("Session Info")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbarBackground(Color.tronSurface, for: .navigationBar)
+            .toolbarBackground(.visible, for: .navigationBar)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Done") { dismiss() }
+                }
+            }
+        }
+        .preferredColorScheme(.dark)
+    }
+}
+
+// MARK: - Help Sheet
+
+struct HelpSheet: View {
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section("Capabilities") {
+                    FeatureHelpRow(icon: "folder", title: "File Access", description: "Read and write files in your workspace")
+                    FeatureHelpRow(icon: "terminal", title: "Shell Commands", description: "Execute terminal commands")
+                    FeatureHelpRow(icon: "pencil.and.outline", title: "Code Editing", description: "Make precise changes to your code")
+                    FeatureHelpRow(icon: "photo", title: "Image Input", description: "Send images for analysis")
+                }
+
+                Section("Tips") {
+                    Text("Use the menu to switch models, view session info, or access settings.")
+                        .font(.subheadline)
+                        .foregroundStyle(.tronTextSecondary)
+
+                    Text("The status bar shows your connection state and token usage.")
+                        .font(.subheadline)
+                        .foregroundStyle(.tronTextSecondary)
+                }
+
+                Section("About") {
+                    LabeledContent("Version", value: "1.0.0")
+                }
+            }
+            .scrollContentBackground(.hidden)
+            .background(Color.tronBackground)
+            .navigationTitle("Help")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbarBackground(Color.tronSurface, for: .navigationBar)
+            .toolbarBackground(.visible, for: .navigationBar)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Done") { dismiss() }
+                }
+            }
+        }
+        .preferredColorScheme(.dark)
+    }
+}
+
+struct FeatureHelpRow: View {
+    let icon: String
+    let title: String
+    let description: String
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: icon)
+                .font(.title3)
+                .foregroundStyle(.tronEmerald)
+                .frame(width: 28)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.headline)
+                    .foregroundStyle(.tronTextPrimary)
+                Text(description)
+                    .font(.caption)
+                    .foregroundStyle(.tronTextSecondary)
+            }
+        }
+    }
+}
+
 // MARK: - Preview
 
 #Preview {
-    ChatView(rpcClient: RPCClient(serverURL: URL(string: "ws://localhost:8080/ws")!))
+    NavigationStack {
+        ChatView(
+            rpcClient: RPCClient(serverURL: URL(string: "ws://localhost:8080/ws")!),
+            sessionId: "test-session"
+        )
+        .environmentObject(SessionStore())
+    }
 }

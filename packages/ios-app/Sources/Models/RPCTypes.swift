@@ -98,6 +98,13 @@ struct SessionResumeParams: Encodable {
     let sessionId: String
 }
 
+struct SessionResumeResult: Decodable {
+    let sessionId: String
+    let model: String
+    let messageCount: Int
+    let lastActivity: String
+}
+
 struct SessionEndParams: Encodable {
     let sessionId: String
 }
@@ -203,4 +210,154 @@ struct SystemInfoResult: Decodable {
 
 struct SystemPingResult: Decodable {
     let pong: Bool
+}
+
+// MARK: - Session Delete/Fork/Rewind
+
+struct SessionDeleteParams: Encodable {
+    let sessionId: String
+}
+
+struct SessionDeleteResult: Decodable {
+    let deleted: Bool
+}
+
+struct SessionForkParams: Encodable {
+    let sessionId: String
+    let fromMessageIndex: Int?
+}
+
+struct SessionForkResult: Decodable {
+    let newSessionId: String
+    let forkedFrom: String
+    let messageCount: Int
+}
+
+struct SessionRewindParams: Encodable {
+    let sessionId: String
+    let toMessageIndex: Int
+}
+
+struct SessionRewindResult: Decodable {
+    let sessionId: String
+    let newMessageCount: Int
+    let removedCount: Int
+}
+
+// MARK: - Model Methods
+
+struct ModelSwitchParams: Encodable {
+    let sessionId: String
+    let model: String
+}
+
+struct ModelSwitchResult: Decodable {
+    let previousModel: String
+    let newModel: String
+}
+
+struct ModelInfo: Decodable, Identifiable, Hashable {
+    let id: String
+    let name: String
+    let provider: String
+    let contextWindow: Int
+    let maxOutputTokens: Int?
+    let supportsThinking: Bool?
+    let supportsImages: Bool?
+    let tier: String?
+    let isLegacy: Bool?
+
+    var displayName: String {
+        if let tier = tier {
+            return "\(name) (\(tier))"
+        }
+        return name
+    }
+
+    var shortName: String {
+        if id.contains("opus") { return "Opus" }
+        if id.contains("sonnet") { return "Sonnet" }
+        if id.contains("haiku") { return "Haiku" }
+        return name
+    }
+}
+
+struct ModelListResult: Decodable {
+    let models: [ModelInfo]
+}
+
+// MARK: - Filesystem Methods
+
+struct FilesystemListDirParams: Encodable {
+    let path: String?
+    let showHidden: Bool?
+}
+
+struct DirectoryEntry: Decodable, Identifiable, Hashable {
+    let name: String
+    let path: String
+    let isDirectory: Bool
+    let isSymlink: Bool?
+    let size: Int?
+    let modifiedAt: String?
+
+    var id: String { path }
+}
+
+struct DirectoryListResult: Decodable {
+    let path: String
+    let parent: String?
+    let entries: [DirectoryEntry]
+}
+
+struct HomeResult: Decodable {
+    let homePath: String
+    let suggestedPaths: [SuggestedPath]?
+}
+
+struct SuggestedPath: Decodable, Identifiable, Hashable {
+    let name: String
+    let path: String
+    let exists: Bool?
+
+    var id: String { path }
+}
+
+// MARK: - Memory Methods
+
+struct MemorySearchParams: Encodable {
+    let searchText: String?
+    let type: String?
+    let source: String?
+    let limit: Int?
+}
+
+struct MemoryEntry: Decodable, Identifiable {
+    let id: String
+    let type: String
+    let content: String
+    let source: String
+    let relevance: Double?
+    let timestamp: String?
+}
+
+struct MemorySearchResult: Decodable {
+    let entries: [MemoryEntry]
+    let totalCount: Int
+}
+
+struct HandoffsParams: Encodable {
+    let workingDirectory: String?
+    let limit: Int?
+}
+
+struct Handoff: Decodable, Identifiable {
+    let id: String
+    let sessionId: String
+    let summary: String
+    let createdAt: String
+}
+
+struct HandoffsResult: Decodable {
+    let handoffs: [Handoff]
 }

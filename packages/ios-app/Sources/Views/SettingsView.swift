@@ -11,6 +11,7 @@ struct SettingsView: View {
     @AppStorage("defaultModel") private var defaultModel = "claude-sonnet-4-20250514"
 
     @State private var showingResetAlert = false
+    @State private var showLogViewer = false
 
     var body: some View {
         NavigationStack {
@@ -77,6 +78,36 @@ struct SettingsView: View {
                     Text("About")
                 }
 
+                // Debug
+                Section {
+                    Button {
+                        showLogViewer = true
+                    } label: {
+                        HStack {
+                            Label("View Logs", systemImage: "doc.text.magnifyingglass")
+                            Spacer()
+                            Text("Level: \(String(describing: log.minimumLevel).capitalized)")
+                                .font(.caption)
+                                .foregroundStyle(.tronTextMuted)
+                        }
+                    }
+
+                    Picker("Log Level", selection: Binding(
+                        get: { log.minimumLevel },
+                        set: { log.setLevel($0) }
+                    )) {
+                        Text("Verbose").tag(LogLevel.verbose)
+                        Text("Debug").tag(LogLevel.debug)
+                        Text("Info").tag(LogLevel.info)
+                        Text("Warning").tag(LogLevel.warning)
+                        Text("Error").tag(LogLevel.error)
+                    }
+                } header: {
+                    Text("Debug")
+                } footer: {
+                    Text("View real-time logs for debugging connection and message issues.")
+                }
+
                 // Advanced
                 Section {
                     Button(role: .destructive) {
@@ -87,6 +118,9 @@ struct SettingsView: View {
                 } header: {
                     Text("Advanced")
                 }
+            }
+            .sheet(isPresented: $showLogViewer) {
+                LogViewer()
             }
             .scrollContentBackground(.hidden)
             .background(Color.tronBackground)

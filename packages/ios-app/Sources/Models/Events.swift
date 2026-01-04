@@ -3,15 +3,11 @@ import Foundation
 // MARK: - Server Event Types
 
 /// Represents all server-sent events via WebSocket
+/// Server format: { type, sessionId?, timestamp?, data: { ...payload } }
 struct ServerEvent: Decodable {
     let type: String
     let sessionId: String?
     let timestamp: String?
-
-    // We'll decode data separately based on type
-    private enum CodingKeys: String, CodingKey {
-        case type, sessionId, timestamp
-    }
 }
 
 // MARK: - Event Data Types
@@ -19,29 +15,52 @@ struct ServerEvent: Decodable {
 struct TextDeltaEvent: Decodable {
     let type: String
     let sessionId: String?
-    let delta: String
-    let messageIndex: Int?
+    let timestamp: String?
+    let data: TextDeltaData
+
+    struct TextDeltaData: Decodable {
+        let delta: String
+        let messageIndex: Int?
+    }
+
+    var delta: String { data.delta }
 }
 
 struct ThinkingDeltaEvent: Decodable {
     let type: String
     let sessionId: String?
-    let delta: String
+    let timestamp: String?
+    let data: ThinkingDeltaData
+
+    struct ThinkingDeltaData: Decodable {
+        let delta: String
+    }
+
+    var delta: String { data.delta }
 }
 
 struct ToolStartEvent: Decodable {
     let type: String
     let sessionId: String?
-    let toolName: String
-    let toolCallId: String
-    let arguments: [String: AnyCodable]?
+    let timestamp: String?
+    let data: ToolStartData
+
+    struct ToolStartData: Decodable {
+        let toolName: String
+        let toolCallId: String
+        let arguments: [String: AnyCodable]?
+    }
+
+    var toolName: String { data.toolName }
+    var toolCallId: String { data.toolCallId }
+    var arguments: [String: AnyCodable]? { data.arguments }
 
     var formattedArguments: String {
-        guard let args = arguments else { return "" }
+        guard let args = data.arguments else { return "" }
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        guard let data = try? encoder.encode(args),
-              let string = String(data: data, encoding: .utf8) else {
+        guard let jsonData = try? encoder.encode(args),
+              let string = String(data: jsonData, encoding: .utf8) else {
             return ""
         }
         return string
@@ -51,17 +70,28 @@ struct ToolStartEvent: Decodable {
 struct ToolEndEvent: Decodable {
     let type: String
     let sessionId: String?
-    let toolCallId: String
-    let success: Bool
-    let result: String?
-    let error: String?
-    let durationMs: Int?
+    let timestamp: String?
+    let data: ToolEndData
+
+    struct ToolEndData: Decodable {
+        let toolCallId: String
+        let success: Bool
+        let result: String?
+        let error: String?
+        let durationMs: Int?
+    }
+
+    var toolCallId: String { data.toolCallId }
+    var success: Bool { data.success }
+    var result: String? { data.result }
+    var error: String? { data.error }
+    var durationMs: Int? { data.durationMs }
 
     var displayResult: String {
-        if success {
-            return result ?? "Success"
+        if data.success {
+            return data.result ?? "Success"
         } else {
-            return error ?? "Error"
+            return data.error ?? "Error"
         }
     }
 }
@@ -69,35 +99,85 @@ struct ToolEndEvent: Decodable {
 struct TurnStartEvent: Decodable {
     let type: String
     let sessionId: String?
-    let turnNumber: Int
+    let timestamp: String?
+    let data: TurnStartData?
+
+    struct TurnStartData: Decodable {
+        let turn: Int?
+        let turnNumber: Int?
+
+        // Handle both "turn" and "turnNumber" from server
+        var number: Int { turn ?? turnNumber ?? 1 }
+    }
+
+    var turnNumber: Int { data?.number ?? 1 }
 }
 
 struct TurnEndEvent: Decodable {
     let type: String
     let sessionId: String?
-    let turnNumber: Int
-    let tokenUsage: TokenUsage?
-    let stopReason: String?
+    let timestamp: String?
+    let data: TurnEndData?
+
+    struct TurnEndData: Decodable {
+        let turn: Int?
+        let turnNumber: Int?
+        let duration: Int?
+        let tokenUsage: TokenUsage?
+        let stopReason: String?
+    }
+
+    var turnNumber: Int { data?.turn ?? data?.turnNumber ?? 1 }
+    var tokenUsage: TokenUsage? { data?.tokenUsage }
+    var stopReason: String? { data?.stopReason }
 }
 
 struct CompleteEvent: Decodable {
     let type: String
     let sessionId: String?
-    let totalTokens: TokenUsage?
-    let totalTurns: Int?
+    let timestamp: String?
+    let data: CompleteData?
+
+    struct CompleteData: Decodable {
+        let success: Bool?
+        let totalTokens: TokenUsage?
+        let totalTurns: Int?
+    }
+
+    var totalTokens: TokenUsage? { data?.totalTokens }
+    var totalTurns: Int? { data?.totalTurns }
 }
 
 struct ErrorEvent: Decodable {
     let type: String
     let sessionId: String?
-    let code: String
-    let message: String
+    let timestamp: String?
+    let data: ErrorData?
+
+    struct ErrorData: Decodable {
+        let code: String?
+        let message: String?
+        let error: String?
+    }
+
+    var code: String { data?.code ?? "UNKNOWN" }
+    var message: String { data?.message ?? data?.error ?? "Unknown error" }
 }
 
 struct ConnectedEvent: Decodable {
     let type: String
-    let serverId: String?
-    let version: String?
+    let timestamp: String?
+    let data: ConnectedData?
+
+    struct ConnectedData: Decodable {
+        let clientId: String?
+        let serverId: String?
+        let version: String?
+    }
+
+    var serverId: String? { data?.serverId }
+    var version: String? { data?.version }
+    var clientId: String? { data?.clientId }
 }
 
 // MARK: - Event Type Constants
@@ -112,8 +192,10 @@ enum EventType: String {
     case complete = "agent.complete"
     case error = "agent.error"
     case connected = "connection.established"
+    case systemConnected = "system.connected"
     case sessionCreated = "session.created"
     case sessionEnded = "session.ended"
+    case agentTurn = "agent.turn"
 }
 
 // MARK: - Event Parsing
@@ -133,50 +215,66 @@ enum ParsedEvent {
     static func parse(from data: Data) -> ParsedEvent? {
         guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let type = json["type"] as? String else {
+            log.warning("Failed to extract event type from data", category: .events)
             return nil
         }
 
         let decoder = JSONDecoder()
 
-        switch type {
-        case EventType.textDelta.rawValue:
-            guard let event = try? decoder.decode(TextDeltaEvent.self, from: data) else { return nil }
-            return .textDelta(event)
+        do {
+            switch type {
+            case EventType.textDelta.rawValue:
+                let event = try decoder.decode(TextDeltaEvent.self, from: data)
+                return .textDelta(event)
 
-        case EventType.thinkingDelta.rawValue:
-            guard let event = try? decoder.decode(ThinkingDeltaEvent.self, from: data) else { return nil }
-            return .thinkingDelta(event)
+            case EventType.thinkingDelta.rawValue:
+                let event = try decoder.decode(ThinkingDeltaEvent.self, from: data)
+                return .thinkingDelta(event)
 
-        case EventType.toolStart.rawValue:
-            guard let event = try? decoder.decode(ToolStartEvent.self, from: data) else { return nil }
-            return .toolStart(event)
+            case EventType.toolStart.rawValue:
+                let event = try decoder.decode(ToolStartEvent.self, from: data)
+                return .toolStart(event)
 
-        case EventType.toolEnd.rawValue:
-            guard let event = try? decoder.decode(ToolEndEvent.self, from: data) else { return nil }
-            return .toolEnd(event)
+            case EventType.toolEnd.rawValue:
+                let event = try decoder.decode(ToolEndEvent.self, from: data)
+                return .toolEnd(event)
 
-        case EventType.turnStart.rawValue:
-            guard let event = try? decoder.decode(TurnStartEvent.self, from: data) else { return nil }
-            return .turnStart(event)
+            case EventType.turnStart.rawValue:
+                let event = try decoder.decode(TurnStartEvent.self, from: data)
+                return .turnStart(event)
 
-        case EventType.turnEnd.rawValue:
-            guard let event = try? decoder.decode(TurnEndEvent.self, from: data) else { return nil }
-            return .turnEnd(event)
+            case EventType.turnEnd.rawValue:
+                let event = try decoder.decode(TurnEndEvent.self, from: data)
+                return .turnEnd(event)
 
-        case EventType.complete.rawValue:
-            guard let event = try? decoder.decode(CompleteEvent.self, from: data) else { return nil }
-            return .complete(event)
+            case EventType.complete.rawValue:
+                let event = try decoder.decode(CompleteEvent.self, from: data)
+                return .complete(event)
 
-        case EventType.error.rawValue:
-            guard let event = try? decoder.decode(ErrorEvent.self, from: data) else { return nil }
-            return .error(event)
+            case EventType.error.rawValue:
+                let event = try decoder.decode(ErrorEvent.self, from: data)
+                return .error(event)
 
-        case EventType.connected.rawValue:
-            guard let event = try? decoder.decode(ConnectedEvent.self, from: data) else { return nil }
-            return .connected(event)
+            case EventType.connected.rawValue, EventType.systemConnected.rawValue:
+                let event = try decoder.decode(ConnectedEvent.self, from: data)
+                return .connected(event)
 
-        default:
-            return .unknown(type)
+            case EventType.sessionCreated.rawValue, EventType.sessionEnded.rawValue, EventType.agentTurn.rawValue:
+                // These are informational events we don't need to handle
+                log.debug("Ignoring informational event: \(type)", category: .events)
+                return nil
+
+            default:
+                log.debug("Unknown event type: \(type)", category: .events)
+                return .unknown(type)
+            }
+        } catch {
+            log.error("Failed to decode \(type) event: \(error.localizedDescription)", category: .events)
+            // Log the raw JSON for debugging
+            if let jsonStr = String(data: data, encoding: .utf8) {
+                log.debug("Raw event JSON: \(jsonStr.prefix(500))", category: .events)
+            }
+            return nil
         }
     }
 }
