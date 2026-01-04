@@ -77,7 +77,8 @@ export function MessageItem({ message, isStreaming = false }: MessageItemProps) 
   }, []);
 
   // Determine if content is long and should be collapsible
-  const shouldCollapse = message.content.length > COLLAPSE_THRESHOLD;
+  // Only collapse tool messages - assistant messages should always show in full
+  const shouldCollapse = message.role === 'tool' && message.content.length > COLLAPSE_THRESHOLD;
   const isCollapsed = shouldCollapse && !isExpanded;
 
   // Get role-specific styling
