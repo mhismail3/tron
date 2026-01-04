@@ -9,6 +9,7 @@
   gap: var(--space-xs);
   padding: var(--space-xs) 0;
   font-family: var(--font-mono);
+  font-size: var(--text-sm);
 }
 
 
@@ -29,7 +30,7 @@
    ============================================================================ */
 
 .message-content {
-  line-height: 1.6;
+  line-height: 1.45;
 }
 
 .message-content.collapsible.collapsed {
@@ -144,15 +145,26 @@
 .tool-name {
   display: inline-flex;
   align-items: center;
+  gap: var(--space-xs);
   padding: 2px var(--space-sm);
   background: var(--bg-elevated);
   border-radius: var(--radius-sm);
-  font-weight: 500;
   font-size: var(--text-sm);
   color: var(--text-secondary);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.tool-label {
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.tool-detail {
+  font-weight: 400;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
 }
 
 @keyframes spin {
@@ -178,7 +190,8 @@
 
 .message-item.role-assistant {
   /* Assistant messages with green vertical line */
-  padding-left: var(--space-sm);
+  padding-left: var(--space-lg);
+  margin-left: var(--space-xs);
   border-left: 2px solid var(--accent);
 }
 

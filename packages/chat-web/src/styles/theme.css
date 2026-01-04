@@ -1,7 +1,43 @@
 /**
  * Tron Chat Theme
- * Refined dark theme with green accent
+ * Dark and light themes with green accent
  */
+
+/* =============================================================================
+   Theme Toggle Transition
+   Applied to all theme-sensitive properties for smooth switching
+   ============================================================================= */
+
+:root {
+  --theme-transition: background-color 0.3s ease,
+                      color 0.3s ease,
+                      border-color 0.3s ease,
+                      box-shadow 0.3s ease,
+                      fill 0.3s ease,
+                      stroke 0.3s ease;
+}
+
+html {
+  color-scheme: dark light;
+}
+
+/* Apply transitions globally for theme switching */
+*,
+*::before,
+*::after {
+  transition: var(--theme-transition);
+}
+
+/* Disable transitions on page load to prevent flash */
+html.no-transitions *,
+html.no-transitions *::before,
+html.no-transitions *::after {
+  transition: none !important;
+}
+
+/* =============================================================================
+   Dark Theme (Default)
+   ============================================================================= */
 
 :root {
   /* === Neutral Palette (Primary UI) === */
@@ -316,5 +352,226 @@ pre code {
   :root {
     --text-base: 13px;
     --sidebar-width: 240px;
+  }
+}
+
+/* =============================================================================
+   Dark Theme (explicit selection)
+   ============================================================================= */
+
+[data-theme="dark"] {
+  /* Inherits from :root - just needs to exist to override media queries */
+  color-scheme: dark;
+}
+
+/* =============================================================================
+   Light Theme
+   ============================================================================= */
+
+[data-theme="light"] {
+  /* === Neutral Palette (Inverted for light mode) === */
+  --neutral-950: #ffffff;
+  --neutral-900: #fafafa;
+  --neutral-850: #f5f5f5;
+  --neutral-800: #ebebeb;
+  --neutral-750: #e0e0e0;
+  --neutral-700: #d4d4d4;
+  --neutral-600: #a3a3a3;
+  --neutral-500: #737373;
+  --neutral-400: #525252;
+  --neutral-300: #404040;
+  --neutral-200: #262626;
+  --neutral-100: #171717;
+
+  /* === Accent (Green - slightly adjusted for light bg) === */
+  --accent: #059669;
+  --accent-dim: #047857;
+  --accent-bright: #10b981;
+  --accent-muted: rgba(5, 150, 105, 0.12);
+
+  /* === Primary (Accent aliases) === */
+  --primary: rgba(5, 150, 105, 0.1);
+  --primary-light: rgba(5, 150, 105, 0.18);
+  --primary-bright: var(--accent-bright);
+  --emerald: var(--accent);
+  --text-on-primary: var(--text-primary);
+
+  /* === Background Layers === */
+  --bg-base: #ffffff;
+  --bg-surface: #fafafa;
+  --bg-elevated: #f5f5f5;
+  --bg-overlay: #ebebeb;
+  --bg-hover: #e5e5e5;
+  --bg-active: #d9d9d9;
+
+  /* === Text Colors === */
+  --text-primary: #171717;
+  --text-secondary: #404040;
+  --text-tertiary: #525252;
+  --text-muted: #737373;
+  --text-dim: #a3a3a3;
+
+  /* === Role Colors === */
+  --role-user: var(--accent);
+  --role-assistant: var(--neutral-400);
+  --role-system: #2563eb;
+  --role-tool: var(--accent-dim);
+
+  /* === Status Colors === */
+  --status-ready: var(--accent);
+  --status-thinking: var(--neutral-500);
+  --status-processing: var(--accent-dim);
+  --status-running: #2563eb;
+  --status-error: #dc2626;
+
+  /* === Semantic Colors === */
+  --success: var(--accent);
+  --warning: #d97706;
+  --error: #dc2626;
+  --info: #2563eb;
+
+  /* === Message Styling === */
+  --user-bg: var(--bg-elevated);
+  --user-text: var(--text-primary);
+  --user-border: var(--neutral-700);
+
+  --assistant-bg: transparent;
+  --assistant-text: var(--text-primary);
+  --assistant-border: transparent;
+
+  --tool-bg: var(--bg-elevated);
+  --tool-text: var(--text-secondary);
+  --tool-border: var(--neutral-700);
+
+  /* === Borders === */
+  --border-subtle: #e5e5e5;
+  --border-default: #d4d4d4;
+  --border-strong: #a3a3a3;
+  --border-focus: var(--accent);
+
+  /* === Shadows (lighter for light mode) === */
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.05);
+  --shadow-md: 0 2px 4px rgba(0, 0, 0, 0.08);
+  --shadow-lg: 0 4px 12px rgba(0, 0, 0, 0.1);
+
+  /* === Diff Colors === */
+  --diff-add-bg: rgba(5, 150, 105, 0.1);
+  --diff-add-border: rgba(5, 150, 105, 0.3);
+  --diff-remove-bg: rgba(220, 38, 38, 0.1);
+  --diff-remove-border: rgba(220, 38, 38, 0.3);
+}
+
+/* Light theme scrollbar */
+[data-theme="light"] ::-webkit-scrollbar-thumb {
+  background: var(--neutral-700);
+}
+
+[data-theme="light"] ::-webkit-scrollbar-thumb:hover {
+  background: var(--neutral-600);
+}
+
+/* Light theme selection */
+[data-theme="light"] ::selection {
+  background: var(--accent-muted);
+  color: var(--text-primary);
+}
+
+/* =============================================================================
+   System Preference Detection
+   Auto-switch when user prefers light and no explicit theme is set
+   ============================================================================= */
+
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme]) {
+    /* === Neutral Palette (Inverted for light mode) === */
+    --neutral-950: #ffffff;
+    --neutral-900: #fafafa;
+    --neutral-850: #f5f5f5;
+    --neutral-800: #ebebeb;
+    --neutral-750: #e0e0e0;
+    --neutral-700: #d4d4d4;
+    --neutral-600: #a3a3a3;
+    --neutral-500: #737373;
+    --neutral-400: #525252;
+    --neutral-300: #404040;
+    --neutral-200: #262626;
+    --neutral-100: #171717;
+
+    /* === Accent (Green - slightly adjusted for light bg) === */
+    --accent: #059669;
+    --accent-dim: #047857;
+    --accent-bright: #10b981;
+    --accent-muted: rgba(5, 150, 105, 0.12);
+
+    /* === Primary (Accent aliases) === */
+    --primary: rgba(5, 150, 105, 0.1);
+    --primary-light: rgba(5, 150, 105, 0.18);
+    --primary-bright: var(--accent-bright);
+    --emerald: var(--accent);
+    --text-on-primary: var(--text-primary);
+
+    /* === Background Layers === */
+    --bg-base: #ffffff;
+    --bg-surface: #fafafa;
+    --bg-elevated: #f5f5f5;
+    --bg-overlay: #ebebeb;
+    --bg-hover: #e5e5e5;
+    --bg-active: #d9d9d9;
+
+    /* === Text Colors === */
+    --text-primary: #171717;
+    --text-secondary: #404040;
+    --text-tertiary: #525252;
+    --text-muted: #737373;
+    --text-dim: #a3a3a3;
+
+    /* === Role Colors === */
+    --role-user: var(--accent);
+    --role-assistant: var(--neutral-400);
+    --role-system: #2563eb;
+    --role-tool: var(--accent-dim);
+
+    /* === Status Colors === */
+    --status-ready: var(--accent);
+    --status-thinking: var(--neutral-500);
+    --status-processing: var(--accent-dim);
+    --status-running: #2563eb;
+    --status-error: #dc2626;
+
+    /* === Semantic Colors === */
+    --success: var(--accent);
+    --warning: #d97706;
+    --error: #dc2626;
+    --info: #2563eb;
+
+    /* === Message Styling === */
+    --user-bg: var(--bg-elevated);
+    --user-text: var(--text-primary);
+    --user-border: var(--neutral-700);
+
+    --assistant-bg: transparent;
+    --assistant-text: var(--text-primary);
+    --assistant-border: transparent;
+
+    --tool-bg: var(--bg-elevated);
+    --tool-text: var(--text-secondary);
+    --tool-border: var(--neutral-700);
+
+    /* === Borders === */
+    --border-subtle: #e5e5e5;
+    --border-default: #d4d4d4;
+    --border-strong: #a3a3a3;
+    --border-focus: var(--accent);
+
+    /* === Shadows (lighter for light mode) === */
+    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.05);
+    --shadow-md: 0 2px 4px rgba(0, 0, 0, 0.08);
+    --shadow-lg: 0 4px 12px rgba(0, 0, 0, 0.1);
+
+    /* === Diff Colors === */
+    --diff-add-bg: rgba(5, 150, 105, 0.1);
+    --diff-add-border: rgba(5, 150, 105, 0.3);
+    --diff-remove-bg: rgba(220, 38, 38, 0.1);
+    --diff-remove-border: rgba(220, 38, 38, 0.3);
   }
 }

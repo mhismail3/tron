@@ -38,82 +38,201 @@ const COLLAPSE_THRESHOLD = 500; // chars
 // Helpers
 // =============================================================================
 
+interface ToolDescription {
+  /** The canonical tool name (shown in bold) */
+  label: string;
+  /** Additional details like filename, command, etc. */
+  detail?: string;
+}
+
 /**
- * Format a descriptive tool name from tool name + input
+ * Format a structured tool description with separate label and detail
+ * Label is shown bold, detail is shown in normal weight
  */
-function formatToolDescription(toolName: string, toolInput?: string): string {
-  if (!toolInput) return toolName;
+function formatToolDescription(toolName: string, toolInput?: string): ToolDescription {
+  if (!toolInput) {
+    return { label: formatToolLabel(toolName) };
+  }
 
   try {
     const args = JSON.parse(toolInput);
 
+    // Try to extract file path from various possible argument names
+    const filePath = args.file_path || args.filePath || args.path || args.file;
+    const getFilename = (p: string) => p.split('/').pop() || p;
+
     switch (toolName.toLowerCase()) {
       case 'read': {
-        const path = args.file_path || args.path;
-        if (path) {
-          // Show just filename or last path segment
-          const filename = path.split('/').pop() || path;
-          return `Read ${filename}`;
+        if (filePath) {
+          return { label: 'Read', detail: getFilename(filePath) };
         }
-        return 'Read file';
+        return { label: 'Read' };
       }
 
       case 'write': {
-        const path = args.file_path || args.path;
-        if (path) {
-          const filename = path.split('/').pop() || path;
-          return `Write ${filename}`;
+        if (filePath) {
+          return { label: 'Write', detail: getFilename(filePath) };
         }
-        return 'Write file';
+        return { label: 'Write' };
       }
 
       case 'edit': {
-        const path = args.file_path || args.path;
-        if (path) {
-          const filename = path.split('/').pop() || path;
-          return `Edit ${filename}`;
+        if (filePath) {
+          return { label: 'Edit', detail: getFilename(filePath) };
         }
-        return 'Edit file';
+        return { label: 'Edit' };
       }
 
       case 'bash': {
-        const cmd = args.command;
+        const cmd = args.command || args.cmd;
         if (cmd) {
-          // Show first part of command, truncated
-          const shortCmd = cmd.length > 40 ? cmd.substring(0, 40) + '…' : cmd;
-          return `$ ${shortCmd}`;
+          const displayCmd = cmd.length > 60 ? cmd.substring(0, 60) + '…' : cmd;
+          return { label: 'Bash', detail: displayCmd };
         }
-        return 'Bash command';
+        return { label: 'Bash' };
       }
 
+      // Shell commands that should show as "Bash <command>"
       case 'ls': {
-        const path = args.path || args.directory || '.';
-        return `ls ${path}`;
+        const path = args.path || args.directory || args.dir || '.';
+        return { label: 'Bash', detail: `ls ${path}` };
+      }
+
+      case 'cat': {
+        if (filePath) {
+          return { label: 'Bash', detail: `cat ${getFilename(filePath)}` };
+        }
+        return { label: 'Bash', detail: 'cat' };
+      }
+
+      case 'mkdir': {
+        const dir = args.path || args.directory || args.name;
+        if (dir) {
+          return { label: 'Bash', detail: `mkdir ${dir}` };
+        }
+        return { label: 'Bash', detail: 'mkdir' };
+      }
+
+      case 'rm': {
+        if (filePath) {
+          return { label: 'Bash', detail: `rm ${getFilename(filePath)}` };
+        }
+        return { label: 'Bash', detail: 'rm' };
+      }
+
+      case 'mv': {
+        const src = args.source || args.src || args.from;
+        const dst = args.destination || args.dst || args.to;
+        if (src && dst) {
+          return { label: 'Bash', detail: `mv ${getFilename(src)} → ${getFilename(dst)}` };
+        }
+        return { label: 'Bash', detail: 'mv' };
+      }
+
+      case 'cp': {
+        const src = args.source || args.src || args.from;
+        const dst = args.destination || args.dst || args.to;
+        if (src && dst) {
+          return { label: 'Bash', detail: `cp ${getFilename(src)} → ${getFilename(dst)}` };
+        }
+        return { label: 'Bash', detail: 'cp' };
+      }
+
+      case 'glob': {
+        const pattern = args.pattern;
+        if (pattern) {
+          return { label: 'Glob', detail: pattern };
+        }
+        return { label: 'Glob' };
       }
 
       case 'grep': {
         const pattern = args.pattern || args.query;
+        const searchPath = args.path;
         if (pattern) {
-          const shortPattern = pattern.length > 30 ? pattern.substring(0, 30) + '…' : pattern;
-          return `Grep "${shortPattern}"`;
+          const shortPattern = pattern.length > 40 ? pattern.substring(0, 40) + '…' : pattern;
+          const detail = searchPath ? `"${shortPattern}" in ${getFilename(searchPath)}` : `"${shortPattern}"`;
+          return { label: 'Grep', detail };
         }
-        return 'Search files';
+        return { label: 'Grep' };
       }
 
-      case 'find': {
-        const pattern = args.pattern || args.name;
-        if (pattern) {
-          return `Find ${pattern}`;
+      case 'task': {
+        const desc = args.description || args.prompt;
+        if (desc) {
+          const shortDesc = desc.length > 50 ? desc.substring(0, 50) + '…' : desc;
+          return { label: 'Task', detail: shortDesc };
         }
-        return 'Find files';
+        return { label: 'Task' };
+      }
+
+      case 'webfetch': {
+        const url = args.url;
+        if (url) {
+          try {
+            const domain = new URL(url).hostname;
+            return { label: 'WebFetch', detail: domain };
+          } catch {
+            return { label: 'WebFetch', detail: url.substring(0, 40) };
+          }
+        }
+        return { label: 'WebFetch' };
+      }
+
+      case 'websearch': {
+        const query = args.query;
+        if (query) {
+          const shortQuery = query.length > 40 ? query.substring(0, 40) + '…' : query;
+          return { label: 'WebSearch', detail: `"${shortQuery}"` };
+        }
+        return { label: 'WebSearch' };
+      }
+
+      case 'todowrite': {
+        return { label: 'TodoWrite' };
+      }
+
+      case 'notebookedit': {
+        const nbPath = args.notebook_path;
+        if (nbPath) {
+          return { label: 'NotebookEdit', detail: getFilename(nbPath) };
+        }
+        return { label: 'NotebookEdit' };
+      }
+
+      case 'askuserquestion': {
+        return { label: 'AskUser' };
+      }
+
+      case 'enterplanmode': {
+        return { label: 'PlanMode' };
+      }
+
+      case 'exitplanmode': {
+        return { label: 'PlanMode', detail: 'exit' };
       }
 
       default:
-        return toolName;
+        // Handle MCP tools and other unknown tools
+        return { label: formatToolLabel(toolName) };
     }
   } catch {
-    return toolName;
+    return { label: formatToolLabel(toolName) };
   }
+}
+
+/**
+ * Format a tool name into a readable label
+ */
+function formatToolLabel(toolName: string): string {
+  // Handle MCP tool names like "mcp__server__tool"
+  if (toolName.startsWith('mcp__')) {
+    const parts = toolName.split('__');
+    // Return the last part as the tool name
+    return parts[parts.length - 1] || toolName;
+  }
+  // Capitalize first letter
+  return toolName.charAt(0).toUpperCase() + toolName.slice(1);
 }
 
 /**
@@ -141,12 +260,15 @@ interface ToolHeaderProps {
 
 function ToolHeader({ toolName, toolInput, status }: ToolHeaderProps) {
   const statusIcon = TOOL_STATUS_ICONS[status];
-  const description = formatToolDescription(toolName, toolInput);
+  const { label, detail } = formatToolDescription(toolName, toolInput);
 
   return (
     <div className="tool-header">
       <span className={`tool-status ${status}`}>{statusIcon}</span>
-      <span className="tool-name">{description}</span>
+      <span className="tool-name">
+        <strong className="tool-label">{label}</strong>
+        {detail && <span className="tool-detail">{detail}</span>}
+      </span>
     </div>
   );
 }

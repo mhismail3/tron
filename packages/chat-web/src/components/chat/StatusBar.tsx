@@ -1,7 +1,8 @@
 /**
- * @fileoverview Status bar showing model, tokens, context, directory
+ * @fileoverview Status bar showing model, tokens, context, directory, theme toggle
  */
 import React, { useState, useCallback } from 'react';
+import { useTheme, type Theme } from '../../hooks/index.js';
 
 interface TokenUsage {
   input: number;
@@ -23,6 +24,18 @@ interface StatusBarProps {
   /** Callback when model is changed */
   onModelChange?: (model: string) => void;
 }
+
+const THEME_ICONS: Record<Theme, string> = {
+  dark: '◐',
+  light: '○',
+  system: '◑',
+};
+
+const THEME_LABELS: Record<Theme, string> = {
+  dark: 'Dark',
+  light: 'Light',
+  system: 'Auto',
+};
 
 // Model ID to display name mapping
 const MODEL_DISPLAY_NAMES: Record<string, string> = {
@@ -96,6 +109,7 @@ export function StatusBar({
   onModelChange,
 }: StatusBarProps): React.ReactElement {
   const [showModelPicker, setShowModelPicker] = useState(false);
+  const { theme, cycleTheme } = useTheme();
 
   const inTokens = tokenUsage?.input ?? 0;
   const outTokens = tokenUsage?.output ?? 0;
@@ -258,21 +272,55 @@ export function StatusBar({
         </div>
       </div>
 
-      {/* Right side: Directory */}
-      {workingDirectory && (
-        <div
+      {/* Right side: Theme toggle + Directory */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-md)' }}>
+        {/* Theme Toggle */}
+        <button
+          onClick={cycleTheme}
           style={{
-            color: 'var(--text-tertiary)',
             display: 'flex',
             alignItems: 'center',
             gap: 'var(--space-xs)',
+            padding: 'var(--space-xs) var(--space-sm)',
+            background: 'transparent',
+            border: '1px solid var(--border-subtle)',
+            borderRadius: 'var(--radius-sm)',
+            color: 'var(--text-muted)',
+            fontSize: 'var(--text-xs)',
+            fontFamily: 'var(--font-mono)',
+            cursor: 'pointer',
+            transition: 'all var(--transition-fast)',
           }}
-          title={workingDirectory}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.borderColor = 'var(--border-default)';
+            e.currentTarget.style.color = 'var(--text-secondary)';
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.borderColor = 'var(--border-subtle)';
+            e.currentTarget.style.color = 'var(--text-muted)';
+          }}
+          title={`Theme: ${THEME_LABELS[theme]} (click to cycle)`}
         >
-          <span style={{ opacity: 0.5 }}>📁</span>
-          <span>{projectName}</span>
-        </div>
-      )}
+          <span>{THEME_ICONS[theme]}</span>
+          <span>{THEME_LABELS[theme]}</span>
+        </button>
+
+        {/* Directory */}
+        {workingDirectory && (
+          <div
+            style={{
+              color: 'var(--text-tertiary)',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 'var(--space-xs)',
+            }}
+            title={workingDirectory}
+          >
+            <span style={{ opacity: 0.5 }}>📁</span>
+            <span>{projectName}</span>
+          </div>
+        )}
+      </div>
     </div>
   );
 }

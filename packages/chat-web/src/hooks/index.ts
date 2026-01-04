@@ -12,3 +12,4 @@ export {
   type UseSessionPersistenceOptions,
   type UseSessionPersistenceReturn,
 } from './useSessionPersistence.js';
+export { useTheme, type Theme, type ResolvedTheme } from './useTheme.js';

@@ -1,13 +1,13 @@
 /**
  * StreamingContent Styles
  *
- * Streaming text display with animated cursor and markdown rendering.
+ * Compact, elegant markdown rendering with comprehensive formatting support.
  */
 
 .streaming-content {
   font-family: var(--font-mono);
-  font-size: var(--text-base);
-  line-height: 1.6;
+  font-size: var(--text-sm);
+  line-height: 1.45;
   color: var(--text-primary);
 }
 
@@ -20,56 +20,235 @@
   word-break: break-word;
 }
 
-.markdown-paragraph {
-  margin: 0 0 var(--space-sm) 0;
+/* ============================================================================
+   Paragraphs
+   ============================================================================ */
+
+.md-paragraph {
+  margin: 0 0 0.5em 0;
+  line-height: 1.45;
 }
 
-.markdown-paragraph:last-child {
+.md-paragraph:last-child {
   margin-bottom: 0;
+}
+
+/* ============================================================================
+   Headings
+   ============================================================================ */
+
+.md-heading {
+  font-family: var(--font-mono);
+  font-weight: 600;
+  color: var(--text-primary);
+  margin: 0.8em 0 0.4em 0;
+  line-height: 1.3;
+}
+
+.md-heading:first-child {
+  margin-top: 0;
+}
+
+.md-h1 {
+  font-size: 1.25em;
+  color: var(--accent);
+  border-bottom: 1px solid var(--border-subtle);
+  padding-bottom: 0.25em;
+}
+
+.md-h2 {
+  font-size: 1.1em;
+  color: var(--accent);
+}
+
+.md-h3 {
+  font-size: 1em;
+}
+
+.md-h4,
+.md-h5,
+.md-h6 {
+  font-size: 0.95em;
+  color: var(--text-secondary);
 }
 
 /* ============================================================================
    Inline Formatting
    ============================================================================ */
 
-.streaming-content strong {
+.md-bold {
   font-weight: 600;
   color: var(--text-primary);
 }
 
-.streaming-content em {
+.md-italic {
   font-style: italic;
   color: var(--text-secondary);
 }
 
-.inline-code {
+.md-code {
   background: var(--bg-overlay);
-  padding: 2px 6px;
+  padding: 1px 5px;
   border-radius: var(--radius-sm);
   font-family: var(--font-mono);
   font-size: 0.9em;
-  color: var(--mint);
+  color: var(--accent);
+  border: 1px solid var(--border-subtle);
+}
+
+.md-link {
+  color: var(--accent);
+  text-decoration: none;
+  border-bottom: 1px solid var(--accent-muted);
+  transition: border-color var(--transition-fast);
+}
+
+.md-link:hover {
+  border-bottom-color: var(--accent);
 }
 
 /* ============================================================================
    Code Blocks
    ============================================================================ */
 
-.code-block {
-  margin: var(--space-md) 0;
-  padding: var(--space-md);
+.md-codeblock {
+  position: relative;
+  margin: 0.6em 0;
+  padding: 0.6em 0.8em;
   background: var(--bg-elevated);
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-sm);
   overflow-x: auto;
 }
 
-.code-block code {
+.md-codeblock code {
   font-family: var(--font-mono);
-  font-size: var(--text-sm);
+  font-size: var(--text-xs);
+  line-height: 1.4;
   color: var(--text-secondary);
   background: transparent;
   padding: 0;
+}
+
+.md-codeblock-lang {
+  position: absolute;
+  top: 0;
+  right: 0;
+  padding: 2px 6px;
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+  background: var(--bg-overlay);
+  border-bottom-left-radius: var(--radius-sm);
+  border-top-right-radius: var(--radius-sm);
+}
+
+/* ============================================================================
+   Lists
+   ============================================================================ */
+
+.md-list {
+  margin: 0.4em 0;
+  padding-left: 1.5em;
+  line-height: 1.4;
+}
+
+.md-list-unordered {
+  list-style-type: disc;
+}
+
+.md-list-ordered {
+  list-style-type: decimal;
+}
+
+.md-list-item {
+  margin: 0.15em 0;
+  padding-left: 0.25em;
+}
+
+.md-list-item::marker {
+  color: var(--text-muted);
+}
+
+/* Nested lists */
+.md-list .md-list {
+  margin: 0.2em 0;
+}
+
+/* ============================================================================
+   Blockquotes
+   ============================================================================ */
+
+.md-blockquote {
+  margin: 0.5em 0;
+  padding: 0.4em 0.8em;
+  border-left: 3px solid var(--accent-dim);
+  background: var(--bg-elevated);
+  color: var(--text-secondary);
+  font-style: italic;
+}
+
+.md-blockquote .md-paragraph {
+  margin: 0.25em 0;
+}
+
+.md-blockquote .md-paragraph:last-child {
+  margin-bottom: 0;
+}
+
+/* ============================================================================
+   Tables
+   ============================================================================ */
+
+.md-table-wrapper {
+  margin: 0.6em 0;
+  overflow-x: auto;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+}
+
+.md-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--text-xs);
+  line-height: 1.35;
+}
+
+.md-table th,
+.md-table td {
+  padding: 0.35em 0.6em;
+  text-align: left;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.md-table th {
+  background: var(--bg-elevated);
+  font-weight: 600;
+  color: var(--text-primary);
+  white-space: nowrap;
+}
+
+.md-table td {
+  color: var(--text-secondary);
+}
+
+.md-table tr:last-child td {
+  border-bottom: none;
+}
+
+.md-table tr:hover td {
+  background: var(--bg-hover);
+}
+
+/* ============================================================================
+   Horizontal Rule
+   ============================================================================ */
+
+.md-hr {
+  margin: 0.8em 0;
+  border: none;
+  border-top: 1px solid var(--border-subtle);
 }
 
 /* ============================================================================
@@ -78,9 +257,9 @@
 
 .streaming-cursor {
   display: inline-block;
-  width: 8px;
-  height: 1.2em;
-  background: var(--emerald);
+  width: 6px;
+  height: 1em;
+  background: var(--accent);
   animation: cursor-blink 1s step-end infinite;
   vertical-align: text-bottom;
   margin-left: 2px;
@@ -95,7 +274,7 @@
 }
 
 /* ============================================================================
-   Animation (also in theme.css for global use)
+   Animation
    ============================================================================ */
 
 @keyframes cursor-blink {
