@@ -129,7 +129,11 @@ export function MessageItem({ message, isStreaming = false }: MessageItemProps) 
               isStreaming={isStreaming}
             />
           ) : (
-            <pre className="message-text">{message.content}</pre>
+            <pre className="message-text">
+              {typeof message.content === 'string'
+                ? message.content
+                : JSON.stringify(message.content, null, 2)}
+            </pre>
           )}
         </div>
 

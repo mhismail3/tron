@@ -773,7 +773,12 @@ export class SessionOrchestrator extends EventEmitter {
         });
         break;
 
-      case 'tool_execution_end':
+      case 'tool_execution_end': {
+        // Extract string content from tool result object
+        const resultContent = typeof event.result === 'object' && event.result !== null
+          ? (event.result as { content?: string }).content ?? JSON.stringify(event.result)
+          : String(event.result ?? '');
+
         this.emit('agent_event', {
           type: 'agent.tool_end',
           sessionId,
@@ -782,12 +787,13 @@ export class SessionOrchestrator extends EventEmitter {
             toolCallId: event.toolCallId,
             toolName: event.toolName,
             success: !event.isError,
-            output: event.result,
-            error: event.isError ? event.result : undefined,
+            output: event.isError ? undefined : resultContent,
+            error: event.isError ? resultContent : undefined,
             duration: event.duration,
           },
         });
         break;
+      }
 
       case 'agent_start':
         // Emit turn start for the first turn
