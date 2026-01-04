@@ -191,9 +191,10 @@ export function MessageList({
       */}
 
       {/* Thinking indicator - pulsing bars */}
+      {/* marginTop=1 provides spacing between static messages and dynamic thinking area */}
       {/* Aligned with text after prompt prefix (> ) - marginLeft=1 + 2 spaces for "> " */}
       {isProcessing && thinkingText && !streamingContent && (
-        <Box flexDirection="column" marginLeft={1}>
+        <Box flexDirection="column" marginLeft={1} marginTop={1}>
           <Box flexDirection="row">
             <Text>  </Text>
             <ThinkingIndicator label="Thinking" color={inkColors.statusThinking} />
@@ -211,17 +212,19 @@ export function MessageList({
       )}
 
       {/* Show thinking indicator when processing but not yet streaming or thinking */}
+      {/* marginTop=1 provides spacing between static messages and dynamic thinking area */}
       {/* Aligned with text after prompt prefix (> ) */}
       {isProcessing && !streamingContent && !thinkingText && !activeTool && (
-        <Box marginLeft={1} flexDirection="row">
+        <Box marginLeft={1} marginTop={1} flexDirection="row">
           <Text>  </Text>
           <ThinkingIndicator label="Thinking" color={inkColors.spinner} />
         </Box>
       )}
 
       {/* Tool execution indicator */}
+      {/* marginTop=1 provides spacing between static messages and dynamic tool area */}
       {activeTool && (
-        <Box marginLeft={1}>
+        <Box marginLeft={1} marginTop={1}>
           <ToolExecution
             toolName={activeTool}
             status="running"
@@ -231,8 +234,9 @@ export function MessageList({
       )}
 
       {/* Streaming content */}
+      {/* marginTop=1 provides spacing between static messages and streaming area */}
       {streamingContent && (
-        <Box flexDirection="row" marginLeft={1}>
+        <Box flexDirection="row" marginLeft={1} marginTop={1}>
           <Text color={inkColors.roleAssistant}>{icons.streaming} </Text>
           <Box flexShrink={1}>
             <StreamingContent
