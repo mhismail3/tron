@@ -71,10 +71,6 @@ struct ChatView: View {
         .toolbarBackground(Color.tronSurface, for: .navigationBar)
         .toolbarBackground(.visible, for: .navigationBar)
         .toolbar {
-            ToolbarItem(placement: .topBarLeading) {
-                ConnectionIndicator(state: viewModel.connectionState)
-            }
-
             ToolbarItem(placement: .topBarTrailing) {
                 commandsMenu
             }
@@ -113,6 +109,8 @@ struct ChatView: View {
             Text(viewModel.errorMessage ?? "Unknown error")
         }
         .task {
+            // Inject session store for message persistence
+            viewModel.setSessionStore(sessionStore)
             await viewModel.connectAndResume()
         }
         .onChange(of: viewModel.totalTokenUsage) { _, usage in
@@ -263,15 +261,36 @@ struct ChatView: View {
 
 extension String {
     var shortModelName: String {
-        if contains("opus") { return "Opus" }
-        if contains("sonnet") { return "Sonnet" }
-        if contains("haiku") { return "Haiku" }
-        // Extract short name from model ID
-        let parts = split(separator: "-")
-        if parts.count >= 2 {
-            return String(parts[0]).capitalized + " " + String(parts[1]).capitalized
+        let lowered = lowercased()
+
+        // Detect tier
+        let tier: String
+        if lowered.contains("opus") {
+            tier = "Opus"
+        } else if lowered.contains("sonnet") {
+            tier = "Sonnet"
+        } else if lowered.contains("haiku") {
+            tier = "Haiku"
+        } else {
+            let parts = split(separator: "-")
+            if parts.count >= 2 {
+                return String(parts[0]).capitalized + " " + String(parts[1]).capitalized
+            }
+            return self
         }
-        return self
+
+        // Detect version
+        if lowered.contains("4-5") || lowered.contains("4.5") {
+            return "\(tier) 4.5"
+        }
+        if lowered.contains("-4-") || lowered.contains("sonnet-4") || lowered.contains("opus-4") || lowered.contains("haiku-4") {
+            return "\(tier) 4"
+        }
+        if lowered.contains("3-5") || lowered.contains("3.5") {
+            return "\(tier) 3.5"
+        }
+
+        return tier
     }
 }
 

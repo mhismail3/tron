@@ -97,26 +97,47 @@ struct ModelSwitcher: View {
     }
 
     private var groupedModels: [ModelGroup] {
-        let tiers = ["opus", "sonnet", "haiku"]
+        // Separate 4.5 models (latest) from legacy models
+        let latestModels = models.filter { is45Model($0) }
+        let legacyModels = models.filter { !is45Model($0) }
+
         var groups: [ModelGroup] = []
 
+        // Latest 4.5 models first - ordered by tier: Opus, Sonnet, Haiku
+        let orderedLatest = latestModels.sorted { m1, m2 in
+            tierPriority(m1) < tierPriority(m2)
+        }
+
+        if !orderedLatest.isEmpty {
+            groups.append(ModelGroup(tier: "Latest (4.5)", models: orderedLatest))
+        }
+
+        // Legacy models grouped by tier
+        let tiers = ["opus", "sonnet", "haiku"]
         for tier in tiers {
-            let tierModels = models.filter { model in
+            let tierModels = legacyModels.filter { model in
                 model.id.lowercased().contains(tier)
-            }.sorted { m1, m2 in
-                // Sort by non-legacy first, then by name
-                if (m1.isLegacy ?? false) != (m2.isLegacy ?? false) {
-                    return !(m1.isLegacy ?? false)
-                }
-                return m1.id > m2.id // Newer models first
-            }
+            }.sorted { $0.id > $1.id }
 
             if !tierModels.isEmpty {
-                groups.append(ModelGroup(tier: tier.capitalized, models: tierModels))
+                groups.append(ModelGroup(tier: "\(tier.capitalized) (Legacy)", models: tierModels))
             }
         }
 
         return groups
+    }
+
+    private func is45Model(_ model: ModelInfo) -> Bool {
+        let id = model.id.lowercased()
+        return id.contains("4-5") || id.contains("4.5") || id.contains("opus-4-5") || id.contains("sonnet-4-5") || id.contains("haiku-4-5")
+    }
+
+    private func tierPriority(_ model: ModelInfo) -> Int {
+        let id = model.id.lowercased()
+        if id.contains("opus") { return 0 }
+        if id.contains("sonnet") { return 1 }
+        if id.contains("haiku") { return 2 }
+        return 3
     }
 
     private func loadModels() async {
@@ -173,7 +194,7 @@ struct ModelRow: View {
 
             VStack(alignment: .leading, spacing: 4) {
                 HStack {
-                    Text(model.name)
+                    Text(model.formattedModelName)
                         .font(.headline)
                         .foregroundStyle(.tronTextPrimary)
 
@@ -187,7 +208,15 @@ struct ModelRow: View {
                             .clipShape(Capsule())
                     }
 
-                    if model.isLegacy == true {
+                    if model.is45Model {
+                        Text("Latest")
+                            .font(.caption2.weight(.medium))
+                            .foregroundStyle(.tronEmerald)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(Color.tronEmerald.opacity(0.15))
+                            .clipShape(Capsule())
+                    } else if model.isLegacy == true {
                         Text("Legacy")
                             .font(.caption2.weight(.medium))
                             .foregroundStyle(.tronTextMuted)

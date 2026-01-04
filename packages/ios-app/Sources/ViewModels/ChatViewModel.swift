@@ -34,13 +34,110 @@ class ChatViewModel: ObservableObject {
     private var accumulatedInputTokens = 0
     private var accumulatedOutputTokens = 0
 
+    // MARK: - Performance Optimization: Batched Updates
+
+    private var pendingTextDelta = ""
+    private var textUpdateTask: Task<Void, Never>?
+    private let textUpdateInterval: UInt64 = 50_000_000 // 50ms in nanoseconds
+
     // MARK: - Initialization
 
-    init(rpcClient: RPCClient, sessionId: String) {
+    /// Reference to SessionStore for message persistence
+    private weak var sessionStore: SessionStore?
+
+    init(rpcClient: RPCClient, sessionId: String, sessionStore: SessionStore? = nil) {
         self.rpcClient = rpcClient
         self.sessionId = sessionId
+        self.sessionStore = sessionStore
         setupBindings()
         setupEventHandlers()
+    }
+
+    /// Set the session store reference (used when injected via environment)
+    func setSessionStore(_ store: SessionStore) {
+        self.sessionStore = store
+        loadPersistedMessages()
+    }
+
+    /// Load persisted messages from SessionStore
+    private func loadPersistedMessages() {
+        guard let store = sessionStore else { return }
+        let storedMessages = store.getMessages(for: sessionId)
+
+        messages = storedMessages.compactMap { stored -> ChatMessage? in
+            let role: MessageRole
+            switch stored.role {
+            case "user": role = .user
+            case "assistant": role = .assistant
+            case "system": role = .system
+            case "toolResult": role = .toolResult
+            default: role = .assistant
+            }
+
+            if let toolName = stored.toolName {
+                let tool = ToolUseData(
+                    toolName: toolName,
+                    toolCallId: stored.id.uuidString,
+                    arguments: "",
+                    status: stored.toolResult != nil ? .success : .running,
+                    result: stored.toolResult
+                )
+                return ChatMessage(id: stored.id, role: role, content: .toolUse(tool), timestamp: stored.timestamp)
+            }
+
+            return ChatMessage(id: stored.id, role: role, content: .text(stored.content), timestamp: stored.timestamp)
+        }
+
+        log.info("Loaded \(messages.count) persisted messages for session \(sessionId)", category: .session)
+    }
+
+    /// Persist current messages to SessionStore
+    private func persistMessages() {
+        guard let store = sessionStore else { return }
+
+        let storedMessages = messages.compactMap { msg -> SessionStore.StoredMessage? in
+            let roleString: String
+            switch msg.role {
+            case .user: roleString = "user"
+            case .assistant: roleString = "assistant"
+            case .system: roleString = "system"
+            case .toolResult: roleString = "toolResult"
+            }
+
+            switch msg.content {
+            case .text(let text), .streaming(let text):
+                return SessionStore.StoredMessage(
+                    id: msg.id,
+                    role: roleString,
+                    content: text,
+                    timestamp: msg.timestamp,
+                    toolName: nil,
+                    toolResult: nil
+                )
+            case .toolUse(let tool):
+                return SessionStore.StoredMessage(
+                    id: msg.id,
+                    role: roleString,
+                    content: tool.displayName,
+                    timestamp: msg.timestamp,
+                    toolName: tool.toolName,
+                    toolResult: tool.result
+                )
+            case .error(let error):
+                return SessionStore.StoredMessage(
+                    id: msg.id,
+                    role: roleString,
+                    content: error,
+                    timestamp: msg.timestamp,
+                    toolName: nil,
+                    toolResult: nil
+                )
+            default:
+                return nil
+            }
+        }
+
+        store.saveMessages(storedMessages, for: sessionId)
     }
 
     private func setupBindings() {
@@ -249,9 +346,36 @@ class ChatViewModel: ObservableObject {
     // MARK: - Event Handlers
 
     private func handleTextDelta(_ delta: String) {
+        // Batch text deltas for better performance
+        pendingTextDelta += delta
         streamingText += delta
-        updateStreamingMessage(with: .streaming(streamingText))
+
+        // Cancel any pending update task
+        textUpdateTask?.cancel()
+
+        // Schedule batched update (coalesce rapid updates)
+        textUpdateTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: self?.textUpdateInterval ?? 50_000_000)
+            guard !Task.isCancelled else { return }
+
+            await MainActor.run { [weak self] in
+                guard let self = self else { return }
+                self.updateStreamingMessage(with: .streaming(self.streamingText))
+                self.pendingTextDelta = ""
+            }
+        }
+
         log.verbose("Text delta received: +\(delta.count) chars, total: \(streamingText.count)", category: .events)
+    }
+
+    /// Force flush any pending text updates (called before completion)
+    private func flushPendingTextUpdates() {
+        textUpdateTask?.cancel()
+        textUpdateTask = nil
+        if !pendingTextDelta.isEmpty {
+            updateStreamingMessage(with: .streaming(streamingText))
+            pendingTextDelta = ""
+        }
     }
 
     private func handleThinkingDelta(_ delta: String) {
@@ -326,10 +450,14 @@ class ChatViewModel: ObservableObject {
 
     private func handleComplete() {
         log.info("Agent complete, finalizing message (streamingText: \(streamingText.count) chars)", category: .events)
+        // Flush any pending batched updates before finalizing
+        flushPendingTextUpdates()
         isProcessing = false
         finalizeStreamingMessage()
         thinkingText = ""
         currentToolMessages.removeAll()
+        // Persist messages after completion
+        persistMessages()
     }
 
     private func handleError(_ message: String) {

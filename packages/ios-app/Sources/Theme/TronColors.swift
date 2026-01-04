@@ -34,6 +34,11 @@ extension Color {
     static let tronError = Color(hex: "#EF4444")
     static let tronInfo = Color(hex: "#3B82F6")
 
+    // MARK: - Special Colors
+
+    /// Phthalo green for iOS 26 liquid glass effect
+    static let tronPhthaloGreen = Color(hex: "#123524")
+
     // MARK: - Backgrounds (neutral dark grays)
 
     /// Deepest background - near black
@@ -215,4 +220,7 @@ extension ShapeStyle where Self == Color {
     static var systemBubble: Color { .systemBubble }
     static var toolBubble: Color { .toolBubble }
     static var errorBubble: Color { .errorBubble }
+
+    // Special Colors
+    static var tronPhthaloGreen: Color { .tronPhthaloGreen }
 }

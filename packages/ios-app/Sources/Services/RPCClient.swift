@@ -26,7 +26,7 @@ class RPCClient: ObservableObject {
 
     @Published private(set) var connectionState: ConnectionState = .disconnected
     @Published private(set) var currentSessionId: String?
-    @Published private(set) var currentModel: String = "claude-sonnet-4-20250514"
+    @Published private(set) var currentModel: String = "claude-opus-4-5-20251101"
 
     // Event callbacks
     var onTextDelta: ((String) -> Void)?

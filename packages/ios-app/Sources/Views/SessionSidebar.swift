@@ -11,53 +11,45 @@ struct SessionSidebar: View {
     let onSettings: () -> Void
 
     var body: some View {
-        List(selection: $selectedSessionId) {
-            Section {
-                Button(action: onNewSession) {
-                    HStack(spacing: 10) {
-                        Image(systemName: "plus")
-                            .font(.system(size: 14, weight: .semibold))
-                        Text("New Session")
-                            .font(.subheadline.weight(.medium))
-                    }
-                    .foregroundStyle(.tronEmerald)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.vertical, 6)
-                }
-                .listRowBackground(Color.tronSurface)
-            }
-
-            Section {
-                ForEach(sessionStore.sortedSessions) { session in
-                    SessionSidebarRow(
-                        session: session,
-                        isSelected: session.id == selectedSessionId
-                    )
-                    .tag(session.id)
-                    .listRowBackground(
-                        session.id == selectedSessionId
-                            ? Color.tronSurfaceElevated
-                            : Color.tronSurface
-                    )
-                    .listRowInsets(EdgeInsets(top: 6, leading: 12, bottom: 6, trailing: 12))
-                    .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-                        Button(role: .destructive) {
-                            onDeleteSession(session.id)
-                        } label: {
-                            Label("Delete", systemImage: "trash")
+        ZStack(alignment: .bottomTrailing) {
+            List(selection: $selectedSessionId) {
+                Section {
+                    ForEach(sessionStore.sortedSessions) { session in
+                        SessionSidebarRow(
+                            session: session,
+                            isSelected: session.id == selectedSessionId
+                        )
+                        .tag(session.id)
+                        .listRowBackground(
+                            session.id == selectedSessionId
+                                ? Color.tronSurfaceElevated
+                                : Color.tronSurface
+                        )
+                        .listRowInsets(EdgeInsets(top: 6, leading: 12, bottom: 6, trailing: 12))
+                        .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                            Button(role: .destructive) {
+                                onDeleteSession(session.id)
+                            } label: {
+                                Label("Delete", systemImage: "trash")
+                            }
                         }
                     }
+                } header: {
+                    Text("Sessions")
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(.tronTextMuted)
+                        .textCase(nil)
                 }
-            } header: {
-                Text("Sessions")
-                    .font(.caption.weight(.medium))
-                    .foregroundStyle(.tronTextMuted)
-                    .textCase(nil)
             }
+            .listStyle(.insetGrouped)
+            .scrollContentBackground(.hidden)
+            .background(Color.tronBackground)
+
+            // Floating circular plus button - iOS 26 liquid glass style
+            FloatingNewSessionButton(action: onNewSession)
+                .padding(.trailing, 20)
+                .padding(.bottom, 24)
         }
-        .listStyle(.insetGrouped)
-        .scrollContentBackground(.hidden)
-        .background(Color.tronBackground)
         .navigationTitle("Tron")
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
@@ -68,6 +60,86 @@ struct SessionSidebar: View {
                 }
             }
         }
+    }
+}
+
+// MARK: - Floating New Session Button
+
+struct FloatingNewSessionButton: View {
+    let action: () -> Void
+
+    @State private var isPressed = false
+
+    var body: some View {
+        Button(action: action) {
+            ZStack {
+                // Outer glass layer with phthalo green tint
+                Circle()
+                    .fill(
+                        LinearGradient(
+                            colors: [
+                                Color.tronPhthaloGreen.opacity(0.9),
+                                Color.tronPhthaloGreen.opacity(0.7)
+                            ],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                    .frame(width: 56, height: 56)
+
+                // Glass overlay for liquid effect
+                Circle()
+                    .fill(
+                        LinearGradient(
+                            colors: [
+                                Color.white.opacity(0.25),
+                                Color.white.opacity(0.05),
+                                Color.clear
+                            ],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                    .frame(width: 56, height: 56)
+
+                // Inner highlight ring
+                Circle()
+                    .strokeBorder(
+                        LinearGradient(
+                            colors: [
+                                Color.tronEmerald.opacity(0.6),
+                                Color.tronPhthaloGreen.opacity(0.3)
+                            ],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        ),
+                        lineWidth: 1.5
+                    )
+                    .frame(width: 56, height: 56)
+
+                // Plus icon
+                Image(systemName: "plus")
+                    .font(.system(size: 24, weight: .semibold))
+                    .foregroundStyle(.white)
+            }
+            .shadow(color: Color.tronPhthaloGreen.opacity(0.5), radius: 12, x: 0, y: 6)
+            .shadow(color: Color.black.opacity(0.3), radius: 8, x: 0, y: 4)
+            .scaleEffect(isPressed ? 0.92 : 1.0)
+        }
+        .buttonStyle(PlainButtonStyle())
+        .simultaneousGesture(
+            DragGesture(minimumDistance: 0)
+                .onChanged { _ in
+                    withAnimation(.tronFast) {
+                        isPressed = true
+                    }
+                }
+                .onEnded { _ in
+                    withAnimation(.tronFast) {
+                        isPressed = false
+                    }
+                }
+        )
     }
 }
 

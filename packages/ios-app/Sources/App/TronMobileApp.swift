@@ -23,7 +23,7 @@ class AppState: ObservableObject {
     @AppStorage("serverPort") private var serverPort = "8080"
     @AppStorage("useTLS") private var useTLS = false
     @AppStorage("workingDirectory") var workingDirectory = ""
-    @AppStorage("defaultModel") var defaultModel = "claude-sonnet-4-20250514"
+    @AppStorage("defaultModel") var defaultModel = "claude-opus-4-5-20251101"
 
     private var _rpcClient: RPCClient?
 
@@ -357,12 +357,19 @@ struct NewSessionFlow: View {
 
                 Section {
                     Picker("Model", selection: $selectedModel) {
+                        // Latest 4.5 models first
                         Text("Claude Opus 4.5").tag("claude-opus-4-5-20251101")
-                        Text("Claude Sonnet 4").tag("claude-sonnet-4-20250514")
-                        Text("Claude Haiku 3.5").tag("claude-3-5-haiku-20241022")
+                        Text("Claude Sonnet 4.5").tag("claude-sonnet-4-5-20251101")
+                        Text("Claude Haiku 4.5").tag("claude-haiku-4-5-20251101")
+
+                        // Legacy models
+                        Text("Claude Sonnet 4 (Legacy)").tag("claude-sonnet-4-20250514")
+                        Text("Claude Haiku 3.5 (Legacy)").tag("claude-3-5-haiku-20241022")
                     }
                 } header: {
                     Text("Model")
+                } footer: {
+                    Text("Claude Opus 4.5 is the most capable model")
                 }
 
                 if let error = errorMessage {

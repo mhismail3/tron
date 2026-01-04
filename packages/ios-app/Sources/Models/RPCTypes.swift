@@ -267,11 +267,9 @@ struct ModelInfo: Decodable, Identifiable, Hashable {
     let tier: String?
     let isLegacy: Bool?
 
+    /// Properly formatted display name (e.g., "Claude Opus 4.5", "Claude Sonnet 4")
     var displayName: String {
-        if let tier = tier {
-            return "\(name) (\(tier))"
-        }
-        return name
+        formattedModelName
     }
 
     var shortName: String {
@@ -279,6 +277,48 @@ struct ModelInfo: Decodable, Identifiable, Hashable {
         if id.contains("sonnet") { return "Sonnet" }
         if id.contains("haiku") { return "Haiku" }
         return name
+    }
+
+    /// Formats model name properly: "Claude Opus 4.5", "Claude Sonnet 4", etc.
+    var formattedModelName: String {
+        let lowerId = id.lowercased()
+
+        // Detect tier
+        let tierName: String
+        if lowerId.contains("opus") {
+            tierName = "Opus"
+        } else if lowerId.contains("sonnet") {
+            tierName = "Sonnet"
+        } else if lowerId.contains("haiku") {
+            tierName = "Haiku"
+        } else {
+            return name
+        }
+
+        // Detect version - check for 4.5 first (latest)
+        if lowerId.contains("4-5") || lowerId.contains("4.5") {
+            return "Claude \(tierName) 4.5"
+        }
+        // Check for version 4
+        if lowerId.contains("-4-") || lowerId.contains("sonnet-4") || lowerId.contains("opus-4") || lowerId.contains("haiku-4") {
+            return "Claude \(tierName) 4"
+        }
+        // Check for 3.5
+        if lowerId.contains("3-5") || lowerId.contains("3.5") {
+            return "Claude \(tierName) 3.5"
+        }
+        // Check for version 3
+        if lowerId.contains("-3-") || lowerId.contains("sonnet-3") || lowerId.contains("opus-3") || lowerId.contains("haiku-3") {
+            return "Claude \(tierName) 3"
+        }
+
+        return "Claude \(tierName)"
+    }
+
+    /// Whether this is a 4.5 (latest generation) model
+    var is45Model: Bool {
+        let lowerId = id.lowercased()
+        return lowerId.contains("4-5") || lowerId.contains("4.5")
     }
 }
 

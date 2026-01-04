@@ -70,6 +70,7 @@ class SessionStore: ObservableObject {
     private let logger = Logger(subsystem: "com.tron.mobile", category: "SessionStore")
     private let storageKey = "tron.sessions"
     private let activeSessionKey = "tron.activeSessionId"
+    private let messagesStorageKey = "tron.sessionMessages"
 
     @Published var sessions: [StoredSession] = []
     @Published var activeSessionId: String?
@@ -77,17 +78,108 @@ class SessionStore: ObservableObject {
     private var saveTask: Task<Void, Never>?
     private let saveDebounceMs: UInt64 = 500
 
+    // MARK: - Cached Computed Properties (Performance Optimization)
+
+    /// Cached sorted sessions - recomputed only when sessions change
+    @Published private(set) var sortedSessions: [StoredSession] = []
+
+    /// Cached active session lookup
+    private var _activeSession: StoredSession?
+
     var activeSession: StoredSession? {
-        guard let id = activeSessionId else { return nil }
-        return sessions.first { $0.id == id }
+        if let id = activeSessionId {
+            // Use cached value if still valid
+            if _activeSession?.id == id {
+                return _activeSession
+            }
+            _activeSession = sessions.first { $0.id == id }
+            return _activeSession
+        }
+        _activeSession = nil
+        return nil
     }
 
-    var sortedSessions: [StoredSession] {
-        sessions.sorted { $0.lastActivity > $1.lastActivity }
-    }
+    /// Session messages storage (for persistence)
+    private var sessionMessages: [String: [StoredMessage]] = [:]
 
     init() {
         loadSessions()
+        loadSessionMessages()
+    }
+
+    // MARK: - Session Messages Persistence
+
+    struct StoredMessage: Codable, Identifiable {
+        let id: UUID
+        let role: String
+        let content: String
+        let timestamp: Date
+        let toolName: String?
+        let toolResult: String?
+    }
+
+    func getMessages(for sessionId: String) -> [StoredMessage] {
+        sessionMessages[sessionId] ?? []
+    }
+
+    func saveMessages(_ messages: [StoredMessage], for sessionId: String) {
+        sessionMessages[sessionId] = messages
+        debouncedSaveMessages()
+    }
+
+    func appendMessage(_ message: StoredMessage, for sessionId: String) {
+        if sessionMessages[sessionId] == nil {
+            sessionMessages[sessionId] = []
+        }
+        sessionMessages[sessionId]?.append(message)
+        debouncedSaveMessages()
+    }
+
+    func clearMessages(for sessionId: String) {
+        sessionMessages.removeValue(forKey: sessionId)
+        debouncedSaveMessages()
+    }
+
+    private func loadSessionMessages() {
+        if let data = UserDefaults.standard.data(forKey: messagesStorageKey) {
+            do {
+                let decoder = JSONDecoder()
+                decoder.dateDecodingStrategy = .iso8601
+                sessionMessages = try decoder.decode([String: [StoredMessage]].self, from: data)
+                logger.info("Loaded messages for \(self.sessionMessages.count) sessions")
+            } catch {
+                logger.error("Failed to decode session messages: \(error.localizedDescription)")
+                sessionMessages = [:]
+            }
+        }
+    }
+
+    private func saveSessionMessages() {
+        do {
+            let encoder = JSONEncoder()
+            encoder.dateEncodingStrategy = .iso8601
+            let data = try encoder.encode(sessionMessages)
+            UserDefaults.standard.set(data, forKey: messagesStorageKey)
+            logger.debug("Saved messages for \(self.sessionMessages.count) sessions")
+        } catch {
+            logger.error("Failed to encode session messages: \(error.localizedDescription)")
+        }
+    }
+
+    private var saveMessagesTask: Task<Void, Never>?
+
+    private func debouncedSaveMessages() {
+        saveMessagesTask?.cancel()
+        saveMessagesTask = Task {
+            try? await Task.sleep(nanoseconds: saveDebounceMs * 1_000_000)
+            guard !Task.isCancelled else { return }
+            saveSessionMessages()
+        }
+    }
+
+    /// Recompute cached sorted sessions
+    private func updateSortedSessions() {
+        sortedSessions = sessions.sorted { $0.lastActivity > $1.lastActivity }
     }
 
     // MARK: - Persistence
@@ -106,6 +198,7 @@ class SessionStore: ObservableObject {
         }
 
         activeSessionId = UserDefaults.standard.string(forKey: activeSessionKey)
+        updateSortedSessions()
     }
 
     private func saveSessions() {
@@ -150,17 +243,25 @@ class SessionStore: ObservableObject {
             sessions.append(session)
         }
         activeSessionId = session.id
+        _activeSession = session
+        updateSortedSessions()
         saveImmediately()
     }
 
     func updateSession(id: String, update: (inout StoredSession) -> Void) {
         guard let index = sessions.firstIndex(where: { $0.id == id }) else { return }
         update(&sessions[index])
+        // Invalidate cache if active session was updated
+        if id == activeSessionId {
+            _activeSession = sessions[index]
+        }
+        updateSortedSessions()
         debouncedSave()
     }
 
     func setActiveSession(_ sessionId: String?) {
         activeSessionId = sessionId
+        _activeSession = nil // Invalidate cache
 
         // Update isActive flags
         for i in sessions.indices {
@@ -172,9 +273,13 @@ class SessionStore: ObservableObject {
 
     func deleteSession(_ sessionId: String) {
         sessions.removeAll { $0.id == sessionId }
+        // Also delete stored messages for this session
+        clearMessages(for: sessionId)
         if activeSessionId == sessionId {
             activeSessionId = sessions.first?.id
+            _activeSession = nil
         }
+        updateSortedSessions()
         saveImmediately()
     }
 
