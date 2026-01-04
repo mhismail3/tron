@@ -8,6 +8,7 @@
 import { useState, useCallback, useMemo } from 'react';
 import type { DisplayMessage } from '../../store/types.js';
 import { StreamingContent } from './StreamingContent.js';
+import { ToolResultViewer } from './ToolResultViewer.js';
 import './MessageItem.css';
 
 // =============================================================================
@@ -25,15 +26,8 @@ export interface MessageItemProps {
 // Constants
 // =============================================================================
 
-const ROLE_PREFIXES = {
-  user: '›',
-  assistant: '✦',
-  system: '⚡',
-  tool: '◐',
-} as const;
-
 const TOOL_STATUS_ICONS = {
-  running: '◐',
+  running: '↻',
   success: '✓',
   error: '✗',
 } as const;
@@ -128,10 +122,11 @@ function formatToolDescription(toolName: string, toolInput?: string): string {
 function formatDuration(durationMs?: number): string | null {
   if (durationMs === undefined || durationMs === null) return null;
   if (durationMs < 1000) {
-    return `${Math.round(durationMs)}ms`;
+    return `Ran in ${Math.round(durationMs)}ms`;
   }
-  return `${(durationMs / 1000).toFixed(1)}s`;
+  return `Ran in ${(durationMs / 1000).toFixed(1)}s`;
 }
+
 
 // =============================================================================
 // Helper Components
@@ -144,18 +139,14 @@ interface ToolHeaderProps {
   duration?: number;
 }
 
-function ToolHeader({ toolName, toolInput, status, duration }: ToolHeaderProps) {
+function ToolHeader({ toolName, toolInput, status }: ToolHeaderProps) {
   const statusIcon = TOOL_STATUS_ICONS[status];
   const description = formatToolDescription(toolName, toolInput);
-  const formattedDuration = formatDuration(duration);
 
   return (
     <div className="tool-header">
       <span className={`tool-status ${status}`}>{statusIcon}</span>
       <span className="tool-name">{description}</span>
-      {formattedDuration && (
-        <span className="tool-duration">{formattedDuration}</span>
-      )}
     </div>
   );
 }
@@ -178,7 +169,6 @@ export function MessageItem({ message, isStreaming = false }: MessageItemProps) 
 
   // Get role-specific styling
   const roleClass = `role-${message.role}`;
-  const prefix = ROLE_PREFIXES[message.role] || '?';
 
   // Format timestamp
   const formattedTime = useMemo(() => {
@@ -196,15 +186,15 @@ export function MessageItem({ message, isStreaming = false }: MessageItemProps) 
     .filter(Boolean)
     .join(' ');
 
+  // Format duration for tool messages
+  const formattedDuration = message.role === 'tool' ? formatDuration(message.duration) : null;
+
   return (
     <article
       className={itemClasses}
       role="article"
       aria-label={`${message.role} message`}
     >
-      {/* Role prefix */}
-      <span className={`message-prefix ${message.role}`}>{prefix}</span>
-
       {/* Message body */}
       <div className="message-body">
         {/* Tool header for tool messages */}
@@ -223,6 +213,14 @@ export function MessageItem({ message, isStreaming = false }: MessageItemProps) 
             <StreamingContent
               content={message.content}
               isStreaming={isStreaming}
+            />
+          ) : message.role === 'tool' && message.toolName ? (
+            <ToolResultViewer
+              toolName={message.toolName}
+              toolInput={message.toolInput}
+              content={message.content}
+              status={message.toolStatus || 'success'}
+              isCollapsed={isCollapsed}
             />
           ) : (
             <pre className="message-text">
@@ -245,10 +243,18 @@ export function MessageItem({ message, isStreaming = false }: MessageItemProps) 
           </button>
         )}
 
-        {/* Timestamp */}
-        <time className="message-time" dateTime={message.timestamp}>
-          {formattedTime}
-        </time>
+        {/* Timestamp and duration */}
+        <div className="message-meta">
+          <time className="message-time" dateTime={message.timestamp}>
+            {formattedTime}
+          </time>
+          {formattedDuration && (
+            <>
+              <span className="meta-separator">·</span>
+              <span className="message-duration">{formattedDuration}</span>
+            </>
+          )}
+        </div>
       </div>
     </article>
   );

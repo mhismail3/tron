@@ -1,0 +1,202 @@
+/**
+ * ReadResultViewer Styles
+ *
+ * Code file display with line numbers and syntax hints.
+ */
+
+.read-viewer {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  line-height: 1.5;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  background: var(--bg-base);
+}
+
+/* ============================================================================
+   Header
+   ============================================================================ */
+
+.read-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-md);
+  padding: var(--space-sm) var(--space-md);
+  background: var(--bg-elevated);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.read-header-left {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  min-width: 0;
+  flex: 1;
+}
+
+.read-header-right {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  flex-shrink: 0;
+}
+
+.read-icon {
+  font-size: var(--text-sm);
+  flex-shrink: 0;
+}
+
+.read-path {
+  color: var(--text-secondary);
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.read-lang {
+  padding: 1px var(--space-xs);
+  background: var(--bg-surface);
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  font-size: 10px;
+  text-transform: uppercase;
+}
+
+/* ============================================================================
+   Header Buttons
+   ============================================================================ */
+
+.read-copy,
+.read-toggle {
+  padding: 2px var(--space-xs);
+  background: transparent;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  color: var(--text-tertiary);
+  cursor: pointer;
+  font-size: var(--text-xs);
+  transition: all var(--transition-fast);
+}
+
+.read-copy:hover,
+.read-toggle:hover {
+  background: var(--bg-hover);
+  border-color: var(--border-default);
+  color: var(--text-secondary);
+}
+
+.read-line-count {
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+}
+
+/* ============================================================================
+   Content Area
+   ============================================================================ */
+
+.read-content {
+  overflow-y: auto;
+  overflow-x: auto;
+}
+
+.read-lines {
+  display: flex;
+  flex-direction: column;
+}
+
+.read-line {
+  display: flex;
+  align-items: stretch;
+  min-height: 20px;
+}
+
+.read-line:hover {
+  background: var(--bg-hover);
+}
+
+.read-line-num {
+  flex-shrink: 0;
+  width: 48px;
+  padding: 0 var(--space-sm);
+  text-align: right;
+  color: var(--text-dim);
+  background: var(--bg-surface);
+  border-right: 1px solid var(--border-subtle);
+  user-select: none;
+  font-variant-numeric: tabular-nums;
+}
+
+.read-line-content {
+  flex: 1;
+  padding: 0 var(--space-sm);
+  white-space: pre;
+  overflow-x: visible;
+  color: var(--text-secondary);
+}
+
+/* ============================================================================
+   Language-specific hints (subtle background tints)
+   ============================================================================ */
+
+.read-viewer--typescript .read-header,
+.read-viewer--javascript .read-header {
+  border-left: 3px solid #3178c6;
+}
+
+.read-viewer--python .read-header {
+  border-left: 3px solid #3776ab;
+}
+
+.read-viewer--rust .read-header {
+  border-left: 3px solid #ce412b;
+}
+
+.read-viewer--go .read-header {
+  border-left: 3px solid #00add8;
+}
+
+.read-viewer--css .read-header,
+.read-viewer--scss .read-header {
+  border-left: 3px solid #264de4;
+}
+
+.read-viewer--json .read-header {
+  border-left: 3px solid #f5a623;
+}
+
+.read-viewer--yaml .read-header {
+  border-left: 3px solid #cb171e;
+}
+
+.read-viewer--markdown .read-header {
+  border-left: 3px solid #083fa1;
+}
+
+.read-viewer--bash .read-header {
+  border-left: 3px solid var(--accent);
+}
+
+/* ============================================================================
+   Scrollbar
+   ============================================================================ */
+
+.read-content::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.read-content::-webkit-scrollbar-track {
+  background: var(--bg-surface);
+}
+
+.read-content::-webkit-scrollbar-thumb {
+  background: var(--border-default);
+  border-radius: 4px;
+}
+
+.read-content::-webkit-scrollbar-thumb:hover {
+  background: var(--border-strong);
+}

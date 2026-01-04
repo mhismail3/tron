@@ -20,12 +20,12 @@
 }
 
 .input-bar-wrapper.focused {
-  border-color: var(--accent);
+  border-color: var(--border-default);
 }
 
 .input-bar-textarea {
   width: 100%;
-  padding: 7px var(--space-md);
+  padding: 6px var(--space-md);
   background: transparent;
   border: none;
   outline: none;
