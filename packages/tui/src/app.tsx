@@ -92,6 +92,7 @@ const initialState: AppState = {
   temporaryInput: '',
   currentModel: DEFAULT_MODEL,
   gitBranch: null,
+  queuedMessages: [],
 };
 
 // =============================================================================
@@ -293,6 +294,10 @@ function reducer(state: AppState, action: AppAction): AppState {
       }
       return { ...state, messages };
     }
+    case 'QUEUE_MESSAGE':
+      return { ...state, queuedMessages: [...state.queuedMessages, action.payload] };
+    case 'CLEAR_QUEUE':
+      return { ...state, queuedMessages: [] };
     default:
       return state;
   }
@@ -347,6 +352,12 @@ export function App({ config, auth }: AppProps): React.ReactElement {
   const isProcessingRef = useRef(false);
   // Track menu stack in ref for raw stdin escape handler
   const menuStackRef = useRef<MenuStackEntry[]>([]);
+  // Track previous cumulative input tokens for per-turn delta calculation
+  const prevCumulativeInputRef = useRef(0);
+  // Track if a tool was executed this turn (to know if we should show tokens)
+  const hadToolThisTurnRef = useRef(false);
+  // Track the last tool message ID to attach token usage
+  const lastToolMsgIdRef = useRef<string | null>(null);
 
   /**
    * Finalize any pending streaming content as an assistant message.
@@ -374,6 +385,9 @@ export function App({ config, auth }: AppProps): React.ReactElement {
       case 'turn_start':
         dispatch({ type: 'SET_STATUS', payload: 'Thinking' });
         dispatch({ type: 'SET_STREAMING', payload: true });
+        // Reset tool tracking for this turn
+        hadToolThisTurnRef.current = false;
+        lastToolMsgIdRef.current = null;
         break;
 
       case 'message_update':
@@ -436,8 +450,9 @@ export function App({ config, auth }: AppProps): React.ReactElement {
           }
 
           // Add tool message to display with the captured tool input
+          const toolMsgId = `msg_${messageIdRef.current++}`;
           const toolMsg: DisplayMessage = {
-            id: `msg_${messageIdRef.current++}`,
+            id: toolMsgId,
             role: 'tool',
             content: formattedContent,
             timestamp: new Date().toISOString(),
@@ -447,6 +462,9 @@ export function App({ config, auth }: AppProps): React.ReactElement {
             duration: 'duration' in event ? event.duration : undefined,
           };
           dispatch({ type: 'ADD_MESSAGE', payload: toolMsg });
+          // Track that we had a tool this turn and store its ID for token attachment
+          hadToolThisTurnRef.current = true;
+          lastToolMsgIdRef.current = toolMsgId;
           dispatch({ type: 'SET_ACTIVE_TOOL', payload: null });
           dispatch({ type: 'SET_ACTIVE_TOOL_INPUT', payload: null });
           currentToolInputRef.current = null;
@@ -458,12 +476,30 @@ export function App({ config, auth }: AppProps): React.ReactElement {
         // Finalize any remaining streaming content at end of turn
         // This handles cases where text comes after tool calls
         finalizeStreamingContent();
-        // Apply token usage to the last assistant message if available
-        if ('tokenUsage' in event && event.tokenUsage) {
+        // Attach per-turn token usage to the last tool message (if we had a tool)
+        // Only show tokens on tool operations, not final text responses
+        if ('tokenUsage' in event && event.tokenUsage && hadToolThisTurnRef.current && lastToolMsgIdRef.current) {
+          // Calculate per-turn input tokens (delta from cumulative)
+          const cumulativeInput = event.tokenUsage.inputTokens;
+          const perTurnInput = cumulativeInput - prevCumulativeInputRef.current;
+          prevCumulativeInputRef.current = cumulativeInput;
+          // Output tokens are already per-turn from the API
+          const perTurnOutput = event.tokenUsage.outputTokens;
           dispatch({
-            type: 'UPDATE_LAST_ASSISTANT_TOKENS',
-            payload: event.tokenUsage,
+            type: 'UPDATE_MESSAGE',
+            payload: {
+              id: lastToolMsgIdRef.current,
+              updates: {
+                tokenUsage: {
+                  inputTokens: perTurnInput,
+                  outputTokens: perTurnOutput,
+                },
+              },
+            },
           });
+        } else if ('tokenUsage' in event && event.tokenUsage) {
+          // Update cumulative tracking even when not displaying
+          prevCumulativeInputRef.current = event.tokenUsage.inputTokens;
         }
         break;
 
@@ -631,6 +667,21 @@ export function App({ config, auth }: AppProps): React.ReactElement {
     menuStackRef.current = state.menuStack;
   }, [state.menuStack]);
 
+  // Process queued messages when processing ends
+  const processQueueRef = useRef<(() => Promise<void>) | null>(null);
+  useEffect(() => {
+    // When processing ends and we have queued messages, trigger the queue processing
+    if (!state.isProcessing && state.queuedMessages.length > 0 && processQueueRef.current) {
+      // Combine all queued messages into one prompt
+      const combinedPrompt = state.queuedMessages.join('\n\n');
+      dispatch({ type: 'CLEAR_QUEUE' });
+      // Set the input and trigger submit
+      dispatch({ type: 'SET_INPUT', payload: combinedPrompt });
+      // Use setTimeout to ensure state is updated before submit
+      setTimeout(() => processQueueRef.current?.(), 0);
+    }
+  }, [state.isProcessing, state.queuedMessages]);
+
   // Handle graceful exit with session end
   const handleExit = useCallback(async () => {
     if (isExitingRef.current) return;
@@ -688,7 +739,16 @@ export function App({ config, auth }: AppProps): React.ReactElement {
       return;
     }
 
-    if (!state.input.trim() || state.isProcessing || !agentRef.current || !tuiSessionRef.current) {
+    if (!state.input.trim() || !agentRef.current || !tuiSessionRef.current) {
+      return;
+    }
+
+    // If processing, queue the message for later
+    if (state.isProcessing) {
+      const queuedPrompt = state.input.trim();
+      dispatch({ type: 'QUEUE_MESSAGE', payload: queuedPrompt });
+      dispatch({ type: 'CLEAR_INPUT' });
+      dispatch({ type: 'ADD_TO_HISTORY', payload: queuedPrompt });
       return;
     }
 
@@ -815,6 +875,11 @@ export function App({ config, auth }: AppProps): React.ReactElement {
       streamingContentRef.current = '';
     }
   }, [state.input, state.isProcessing, state.menuStack]);
+
+  // Keep processQueueRef updated with latest handleSubmit
+  useEffect(() => {
+    processQueueRef.current = handleSubmit;
+  }, [handleSubmit]);
 
   // Get sorted models for model switcher
   // Must match the sorting in ModelSwitcher component
@@ -1230,6 +1295,7 @@ export function App({ config, auth }: AppProps): React.ReactElement {
 
       return; // Don't process other input while slash menu is open
     }
+
   });
 
   // Don't render the full UI until initialized
@@ -1250,8 +1316,8 @@ export function App({ config, auth }: AppProps): React.ReactElement {
         gitBranch={state.gitBranch ?? undefined}
       />
 
-      {/* Message List */}
-      <Box flexDirection="column" flexGrow={1} paddingX={1} overflow="hidden">
+      {/* Message List - terminal handles scrolling naturally */}
+      <Box flexDirection="column" flexGrow={1} paddingX={1}>
         <MessageList
           messages={state.messages}
           isProcessing={state.isProcessing}
@@ -1284,6 +1350,15 @@ export function App({ config, auth }: AppProps): React.ReactElement {
           onCancel={() => dispatch({ type: 'POP_MENU' })}
           maxVisible={6}
         />
+      )}
+
+      {/* Queue indicator - shown when messages are queued */}
+      {state.queuedMessages.length > 0 && (
+        <Box marginLeft={2}>
+          <Text color={inkColors.statusThinking}>
+            ⏳ {state.queuedMessages.length} message{state.queuedMessages.length !== 1 ? 's' : ''} queued (will send when ready)
+          </Text>
+        </Box>
       )}
 
       {/* Prompt Box */}

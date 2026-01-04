@@ -107,6 +107,8 @@ export interface AppState {
   currentModel: string;
   /** Git branch name for the working directory */
   gitBranch: string | null;
+  /** Messages queued while agent is processing */
+  queuedMessages: string[];
 }
 
 export interface DisplayMessage {
@@ -160,7 +162,9 @@ export type AppAction =
   | { type: 'RESET_HISTORY_NAVIGATION' }
   | { type: 'SET_CURRENT_MODEL'; payload: string }
   | { type: 'SET_GIT_BRANCH'; payload: string | null }
-  | { type: 'UPDATE_LAST_ASSISTANT_TOKENS'; payload: { inputTokens: number; outputTokens: number } };
+  | { type: 'UPDATE_LAST_ASSISTANT_TOKENS'; payload: { inputTokens: number; outputTokens: number } }
+  | { type: 'QUEUE_MESSAGE'; payload: string }
+  | { type: 'CLEAR_QUEUE' };
 
 // =============================================================================
 // Component Props

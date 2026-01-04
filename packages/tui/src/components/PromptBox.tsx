@@ -27,8 +27,9 @@ export function PromptBox({
   const handleSubmit = (expandedContent?: string) => {
     // Use expanded content if provided (contains actual paste content)
     const contentToSubmit = expandedContent ?? value;
-    if (contentToSubmit.trim() && !isProcessing) {
+    if (contentToSubmit.trim()) {
       // Update the value to the expanded content before submitting
+      // Parent (app.tsx) handles queueing during processing
       if (expandedContent && expandedContent !== value) {
         onChange(expandedContent);
       }

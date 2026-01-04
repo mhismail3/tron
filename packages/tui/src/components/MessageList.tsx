@@ -3,6 +3,9 @@
  *
  * Displays the conversation messages with streaming support.
  * Uses elegant Unicode icons and markdown rendering.
+ *
+ * Terminal scrolling is handled naturally by the terminal emulator.
+ * All messages are rendered and the terminal's scroll buffer manages history.
  */
 import React from 'react';
 import { Box, Text } from 'ink';
@@ -100,6 +103,7 @@ export function MessageList({
         </Box>
       )}
 
+      {/* Render all messages - terminal handles scrolling */}
       {messages.map((message) => (
         <MessageItem key={message.id} message={message} />
       ))}
@@ -203,6 +207,7 @@ function MessageItem({ message }: MessageItemProps): React.ReactElement {
           toolInput={message.toolInput}
           duration={message.duration}
           output={message.content}
+          tokenUsage={message.tokenUsage}
         />
       </Box>
     );
@@ -230,14 +235,8 @@ function MessageItem({ message }: MessageItemProps): React.ReactElement {
     );
   }
 
-  // Format token usage if available
-  const formatTokenUsage = (usage: { inputTokens: number; outputTokens: number } | undefined) => {
-    if (!usage) return null;
-    return `(${usage.inputTokens.toLocaleString()}/${usage.outputTokens.toLocaleString()})`;
-  };
-
   // Assistant messages - render markdown with proper indentation
-  // The icon is on its own, content starts on same line and wraps underneath
+  // No token display here - tokens are shown only on tool operations
   return (
     <Box flexDirection="column" marginLeft={1}>
       <Box flexDirection="row">
@@ -246,14 +245,6 @@ function MessageItem({ message }: MessageItemProps): React.ReactElement {
           <MarkdownText content={content} />
         </Box>
       </Box>
-      {message.tokenUsage && (
-        <Box marginLeft={2}>
-          <Text color={inkColors.dim}>
-            {formatTokenUsage(message.tokenUsage)} tokens in/out
-          </Text>
-        </Box>
-      )}
     </Box>
   );
 }
-

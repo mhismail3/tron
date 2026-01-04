@@ -224,9 +224,9 @@ export function MacOSInput({
   const continuationPrefix = continuationPrefixProp ?? (promptPrefix ? ' '.repeat(promptPrefix.length) : '');
   // Width available for text content (after prefix)
   const contentWidth = Math.max(10, terminalWidth - promptPrefix.length);
-  // Input is editable when focused and not processing
+  // Input is always editable when focused - allows typing during processing for message queue
   // Note: menuOpen doesn't block character input - only navigation keys are delegated to parent
-  const isEditable = focus && !isProcessing;
+  const isEditable = focus;
   // Cursor position (character index in the string)
   const [cursorOffset, setCursorOffset] = useState(value.length);
   // Selection anchor - null means no selection
@@ -1371,7 +1371,7 @@ export function MacOSInput({
     return renderData;
   };
 
-  const prefixColor = isProcessing ? inkColors.dim : promptColor;
+  const prefixColor = promptColor;
   const renderPrefix = (isFirstContentLine: boolean, isSoftWrap: boolean = false): React.ReactElement | null => {
     // First content line gets the prompt prefix
     // Soft-wrapped lines (continuation within a logical line) get continuation prefix
@@ -1389,34 +1389,7 @@ export function MacOSInput({
     return <Text color={isSoftWrap ? inkColors.dim : undefined}>{prefix}</Text>;
   };
 
-  if (isProcessing) {
-    const displayValue = value.length > 0 ? value : 'Processing...';
-    // Handle wrapping for processing state too
-    const result: Array<{ text: string; isFirst: boolean; isSoftWrap: boolean }> = [];
-    let isFirst = true;
-    for (const line of displayValue.split('\n')) {
-      const wrapped = wrapLine(line, 0);
-      for (let i = 0; i < wrapped.length; i++) {
-        result.push({
-          text: wrapped[i]?.text || ' ',
-          isFirst: isFirst,
-          isSoftWrap: i > 0,
-        });
-        isFirst = false;
-      }
-    }
-    return (
-      <Box flexDirection="column">
-        {result.map((line, idx) => (
-          <Box key={idx} flexDirection="row">
-            {renderPrefix(line.isFirst, line.isSoftWrap)}
-            <Text color={inkColors.dim}>{line.text}</Text>
-          </Box>
-        ))}
-      </Box>
-    );
-  }
-
+  // Render input normally - always interactive for message queue support
   const renderData = buildRenderData();
 
   // Return Box with separate Text elements for each line

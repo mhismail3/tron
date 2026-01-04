@@ -31,6 +31,8 @@ const initialState: AppState = {
   historyIndex: -1,
   temporaryInput: '',
   currentModel: 'claude-sonnet-4-20250514',
+  gitBranch: null,
+  queuedMessages: [],
 };
 
 function reducer(state: AppState, action: AppAction): AppState {
@@ -178,6 +180,12 @@ function reducer(state: AppState, action: AppAction): AppState {
       return { ...state, historyIndex: -1 };
     case 'SET_CURRENT_MODEL':
       return { ...state, currentModel: action.payload };
+    case 'SET_GIT_BRANCH':
+      return { ...state, gitBranch: action.payload };
+    case 'QUEUE_MESSAGE':
+      return { ...state, queuedMessages: [...state.queuedMessages, action.payload] };
+    case 'CLEAR_QUEUE':
+      return { ...state, queuedMessages: [] };
     default:
       return state;
   }
@@ -633,6 +641,74 @@ describe('Menu Stack', () => {
       // User presses Escape again - pop slash menu
       state = reducer(state, { type: 'POP_MENU' });
       expect(state.menuStack).toHaveLength(0);
+    });
+  });
+});
+
+describe('Message Queue', () => {
+  describe('QUEUE_MESSAGE', () => {
+    it('should add message to empty queue', () => {
+      const state = reducer(initialState, { type: 'QUEUE_MESSAGE', payload: 'First message' });
+      expect(state.queuedMessages).toHaveLength(1);
+      expect(state.queuedMessages[0]).toBe('First message');
+    });
+
+    it('should append message to existing queue', () => {
+      const startState = { ...initialState, queuedMessages: ['First'] };
+      const state = reducer(startState, { type: 'QUEUE_MESSAGE', payload: 'Second' });
+      expect(state.queuedMessages).toHaveLength(2);
+      expect(state.queuedMessages[0]).toBe('First');
+      expect(state.queuedMessages[1]).toBe('Second');
+    });
+
+    it('should preserve message order', () => {
+      let state = initialState;
+      state = reducer(state, { type: 'QUEUE_MESSAGE', payload: 'A' });
+      state = reducer(state, { type: 'QUEUE_MESSAGE', payload: 'B' });
+      state = reducer(state, { type: 'QUEUE_MESSAGE', payload: 'C' });
+      expect(state.queuedMessages).toEqual(['A', 'B', 'C']);
+    });
+  });
+
+  describe('CLEAR_QUEUE', () => {
+    it('should clear all queued messages', () => {
+      const startState = { ...initialState, queuedMessages: ['Msg1', 'Msg2', 'Msg3'] };
+      const state = reducer(startState, { type: 'CLEAR_QUEUE' });
+      expect(state.queuedMessages).toHaveLength(0);
+    });
+
+    it('should not affect other state', () => {
+      const startState = {
+        ...initialState,
+        queuedMessages: ['Msg1', 'Msg2'],
+        input: 'current input',
+        isProcessing: true,
+      };
+      const state = reducer(startState, { type: 'CLEAR_QUEUE' });
+      expect(state.queuedMessages).toHaveLength(0);
+      expect(state.input).toBe('current input');
+      expect(state.isProcessing).toBe(true);
+    });
+  });
+
+  describe('Queue Flow', () => {
+    it('should support complete queue workflow', () => {
+      let state = initialState;
+
+      // User queues multiple messages while processing
+      state = reducer(state, { type: 'SET_PROCESSING', payload: true });
+      state = reducer(state, { type: 'QUEUE_MESSAGE', payload: 'Do this first' });
+      state = reducer(state, { type: 'QUEUE_MESSAGE', payload: 'Then do this' });
+
+      expect(state.queuedMessages).toEqual(['Do this first', 'Then do this']);
+      expect(state.isProcessing).toBe(true);
+
+      // Processing ends, queue is cleared
+      state = reducer(state, { type: 'SET_PROCESSING', payload: false });
+      state = reducer(state, { type: 'CLEAR_QUEUE' });
+
+      expect(state.queuedMessages).toHaveLength(0);
+      expect(state.isProcessing).toBe(false);
     });
   });
 });

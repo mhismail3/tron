@@ -7,6 +7,7 @@
 import React from 'react';
 import { Text, Box } from 'ink';
 import { inkColors, icons, palette } from '../theme.js';
+import { formatTokens } from '@tron/core';
 
 // Display configuration
 const MAX_INPUT_LENGTH = 60;
@@ -102,6 +103,11 @@ export interface ToolExecutionProps {
   output?: string;
   /** Whether to show expanded output (more lines) */
   expanded?: boolean;
+  /** Token usage for this tool operation (per-turn, not cumulative) */
+  tokenUsage?: {
+    inputTokens: number;
+    outputTokens: number;
+  };
 }
 
 /**
@@ -145,6 +151,7 @@ export function ToolExecution({
   duration,
   output,
   expanded = false,
+  tokenUsage,
 }: ToolExecutionProps): React.ReactElement {
 
   const getStatusIndicator = () => {
@@ -193,6 +200,11 @@ export function ToolExecution({
         )}
         {status === 'success' && duration !== undefined && (
           <Text color={inkColors.dim}>({duration}ms)</Text>
+        )}
+        {tokenUsage && (
+          <Text color={inkColors.dim}>
+            {formatTokens(tokenUsage.inputTokens)}/{formatTokens(tokenUsage.outputTokens)}
+          </Text>
         )}
       </Box>
 
