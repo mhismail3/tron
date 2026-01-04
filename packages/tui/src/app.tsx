@@ -359,6 +359,14 @@ export function App({ config, auth }: AppProps): React.ReactElement {
   // Track the last tool message ID to attach token usage
   const lastToolMsgIdRef = useRef<string | null>(null);
 
+  // Welcome box state for Static component - must be added after mount
+  // Static only renders NEW items, so we start empty and add 'welcome' after mount
+  const [welcomeItems, setWelcomeItems] = React.useState<string[]>([]);
+  React.useEffect(() => {
+    // Trigger Static to render the welcome box after first render
+    setWelcomeItems(['welcome']);
+  }, []);
+
   /**
    * Finalize any pending streaming content as an assistant message.
    * This ensures text appears before tool calls in the correct order.
@@ -1326,7 +1334,9 @@ export function App({ config, auth }: AppProps): React.ReactElement {
       */}
 
       {/* Welcome Box - Static so it renders once at the very top of scrollback */}
-      <Static items={['welcome']}>
+      {/* welcomeItems starts empty, then ['welcome'] is added after mount */}
+      {/* This triggers Static to render the welcome as a NEW item */}
+      <Static items={welcomeItems}>
         {(item) => (
           <Box key={item}>
             <WelcomeBox
