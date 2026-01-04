@@ -11,6 +11,7 @@ export default defineConfig({
   },
   server: {
     port: 3000,
+    host: '0.0.0.0', // Allow Tailscale/network access
     proxy: {
       '/ws': {
         target: 'ws://localhost:8080',
