@@ -1,0 +1,410 @@
+/**
+ * WorkspaceSelector Styles
+ *
+ * Modal for selecting a workspace directory.
+ */
+
+.workspace-selector-overlay {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 10vh;
+  background: rgba(0, 0, 0, 0.7);
+  z-index: 100;
+  animation: fade-in var(--transition-fast);
+  outline: none;
+}
+
+.workspace-selector {
+  position: relative;
+  width: 100%;
+  max-width: 600px;
+  max-height: 80vh;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  animation: slide-down var(--transition-fast);
+}
+
+/* ============================================================================
+   Header
+   ============================================================================ */
+
+.workspace-selector-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-md);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.workspace-selector-title {
+  font-family: var(--font-mono);
+  font-size: var(--text-base);
+  font-weight: 600;
+  color: var(--emerald);
+}
+
+.workspace-selector-close {
+  background: none;
+  border: none;
+  padding: var(--space-xs);
+  cursor: pointer;
+  color: var(--text-muted);
+  transition: color var(--transition-fast);
+  line-height: 1;
+}
+
+.workspace-selector-close:hover {
+  color: var(--text-primary);
+}
+
+.workspace-selector-close svg {
+  width: 20px;
+  height: 20px;
+}
+
+/* ============================================================================
+   Path Input
+   ============================================================================ */
+
+.workspace-path-form {
+  display: flex;
+  gap: var(--space-sm);
+  padding: var(--space-md);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.workspace-path-input {
+  flex: 1;
+  padding: var(--space-sm) var(--space-md);
+  background: var(--bg-input);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  color: var(--text-primary);
+  outline: none;
+  transition: border-color var(--transition-fast);
+}
+
+.workspace-path-input:focus {
+  border-color: var(--emerald);
+}
+
+.workspace-path-input::placeholder {
+  color: var(--text-muted);
+}
+
+.workspace-path-button {
+  padding: var(--space-sm) var(--space-md);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  color: var(--text-primary);
+  cursor: pointer;
+  transition: background var(--transition-fast);
+}
+
+.workspace-path-button:hover {
+  background: var(--bg-hover);
+}
+
+/* ============================================================================
+   Quick Access
+   ============================================================================ */
+
+.workspace-quick-access {
+  padding: var(--space-md);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.workspace-quick-label {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  margin-bottom: var(--space-sm);
+}
+
+.workspace-quick-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-xs);
+}
+
+.workspace-quick-button {
+  padding: var(--space-xs) var(--space-sm);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.workspace-quick-button:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+  border-color: var(--emerald);
+}
+
+/* ============================================================================
+   Directory Browser
+   ============================================================================ */
+
+.workspace-browser {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--space-md);
+}
+
+.workspace-nav-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  margin-bottom: var(--space-md);
+}
+
+.workspace-nav-up {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-xs);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.workspace-nav-up:hover:not(:disabled) {
+  background: var(--bg-hover);
+  border-color: var(--emerald);
+}
+
+.workspace-nav-up:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.workspace-nav-up svg {
+  width: 16px;
+  height: 16px;
+  color: var(--text-secondary);
+}
+
+.workspace-current-path {
+  flex: 1;
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.workspace-hidden-toggle {
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.workspace-hidden-toggle input {
+  accent-color: var(--emerald);
+}
+
+/* ============================================================================
+   Loading & Error States
+   ============================================================================ */
+
+.workspace-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-xl);
+}
+
+.workspace-spinner {
+  width: 24px;
+  height: 24px;
+  border: 2px solid var(--border-subtle);
+  border-top-color: var(--emerald);
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.workspace-error {
+  text-align: center;
+  padding: var(--space-lg);
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  color: var(--error);
+}
+
+.workspace-empty {
+  text-align: center;
+  padding: var(--space-lg);
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+}
+
+/* ============================================================================
+   Directory Entries
+   ============================================================================ */
+
+.workspace-entries {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.workspace-entry {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  padding: var(--space-sm) var(--space-md);
+  background: none;
+  border: none;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  text-align: left;
+  width: 100%;
+  transition: background var(--transition-fast);
+}
+
+.workspace-entry:hover {
+  background: var(--bg-hover);
+}
+
+.workspace-entry-icon {
+  color: var(--warning);
+  flex-shrink: 0;
+}
+
+.workspace-entry-icon svg {
+  width: 20px;
+  height: 20px;
+}
+
+.workspace-entry-name {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  color: var(--text-primary);
+}
+
+/* ============================================================================
+   Footer
+   ============================================================================ */
+
+.workspace-selector-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-md);
+  border-top: 1px solid var(--border-subtle);
+  background: var(--bg-surface);
+}
+
+.workspace-selected {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+}
+
+.workspace-selected-path {
+  color: var(--text-secondary);
+}
+
+.workspace-footer-buttons {
+  display: flex;
+  gap: var(--space-sm);
+}
+
+.workspace-button-cancel {
+  padding: var(--space-sm) var(--space-md);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  color: var(--text-primary);
+  cursor: pointer;
+  transition: background var(--transition-fast);
+}
+
+.workspace-button-cancel:hover {
+  background: var(--bg-hover);
+}
+
+.workspace-button-select {
+  padding: var(--space-sm) var(--space-md);
+  background: var(--emerald);
+  border: 1px solid var(--emerald);
+  border-radius: var(--radius-md);
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  color: var(--bg-base);
+  font-weight: 500;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.workspace-button-select:hover:not(:disabled) {
+  background: var(--emerald-bright);
+}
+
+.workspace-button-select:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* ============================================================================
+   Responsive
+   ============================================================================ */
+
+@media (max-width: 640px) {
+  .workspace-selector-overlay {
+    padding-top: 5vh;
+    padding-left: var(--space-md);
+    padding-right: var(--space-md);
+  }
+
+  .workspace-selector {
+    max-height: 90vh;
+  }
+
+  .workspace-quick-buttons {
+    gap: var(--space-xs);
+  }
+
+  .workspace-footer-buttons {
+    flex-direction: column;
+    width: 100%;
+  }
+
+  .workspace-button-cancel,
+  .workspace-button-select {
+    width: 100%;
+  }
+}
