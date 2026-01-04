@@ -6,38 +6,11 @@
 
 .message-item {
   display: flex;
-  gap: var(--space-sm);
-  padding: var(--space-sm) 0;
+  gap: var(--space-xs);
+  padding: var(--space-xs) 0;
   font-family: var(--font-mono);
 }
 
-/* ============================================================================
-   Role Prefix
-   ============================================================================ */
-
-.message-prefix {
-  flex-shrink: 0;
-  width: 20px;
-  text-align: center;
-  font-weight: 500;
-  line-height: 1.6;
-}
-
-.message-prefix.user {
-  color: var(--role-user);
-}
-
-.message-prefix.assistant {
-  color: var(--role-assistant);
-}
-
-.message-prefix.system {
-  color: var(--role-system);
-}
-
-.message-prefix.tool {
-  color: var(--role-tool);
-}
 
 /* ============================================================================
    Message Body
@@ -79,7 +52,8 @@
 .message-text {
   margin: 0;
   font-family: var(--font-mono);
-  font-size: var(--text-base);
+  font-size: var(--text-sm);
+  line-height: 1.5;
   white-space: pre-wrap;
   word-break: break-word;
   color: var(--text-primary);
@@ -114,12 +88,28 @@
 }
 
 /* ============================================================================
-   Timestamp
+   Timestamp & Meta
    ============================================================================ */
+
+.message-meta {
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+}
 
 .message-time {
   font-size: var(--text-xs);
   color: var(--text-dim);
+}
+
+.meta-separator {
+  font-size: var(--text-xs);
+  color: var(--text-dim);
+}
+
+.message-duration {
+  font-size: var(--text-xs);
+  color: var(--text-muted);
 }
 
 /* ============================================================================
@@ -129,12 +119,8 @@
 .tool-header {
   display: flex;
   align-items: center;
-  gap: var(--space-sm);
-  padding: var(--space-xs) var(--space-sm);
-  background: var(--bg-overlay);
-  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
-  border-bottom: 1px solid var(--border-subtle);
-  margin: calc(-1 * var(--space-sm)) calc(-1 * var(--space-md)) var(--space-sm);
+  gap: var(--space-xs);
+  margin-bottom: var(--space-xs);
 }
 
 .tool-status {
@@ -156,19 +142,17 @@
 }
 
 .tool-name {
-  flex: 1;
+  display: inline-flex;
+  align-items: center;
+  padding: 2px var(--space-sm);
+  background: var(--bg-elevated);
+  border-radius: var(--radius-sm);
   font-weight: 500;
   font-size: var(--text-sm);
   color: var(--text-secondary);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.tool-duration {
-  font-size: var(--text-xs);
-  color: var(--text-muted);
-  flex-shrink: 0;
 }
 
 @keyframes spin {
@@ -193,7 +177,9 @@
 }
 
 .message-item.role-assistant {
-  /* Assistant messages */
+  /* Assistant messages with green vertical line */
+  padding-left: var(--space-sm);
+  border-left: 2px solid var(--accent);
 }
 
 .message-item.role-system {
@@ -202,26 +188,31 @@
 
 .message-item.role-system .message-text {
   color: var(--text-tertiary);
-  font-size: var(--text-sm);
+  font-size: var(--text-xs);
 }
 
 .message-item.role-tool {
   /* Tool messages */
-  padding: var(--space-sm) 0;
+  padding: var(--space-xs) 0;
+  flex-direction: column;
+}
+
+.message-item.role-tool .message-body {
+  width: 100%;
 }
 
 .message-item.role-tool .message-content {
   background: var(--bg-elevated);
   border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-md);
-  padding: var(--space-sm) var(--space-md);
+  border-radius: var(--radius-sm);
+  padding: var(--space-sm);
   overflow: hidden;
 }
 
 .message-item.role-tool .message-text {
-  font-size: var(--text-sm);
+  font-size: var(--text-xs);
   color: var(--text-secondary);
-  max-height: 300px;
+  max-height: 200px;
   overflow-y: auto;
   margin: 0;
 }

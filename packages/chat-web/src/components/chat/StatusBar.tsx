@@ -125,7 +125,7 @@ export function StatusBar({
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'space-between',
-        padding: 'var(--space-xs) var(--space-lg)',
+        padding: 'var(--space-xs) 0',
         background: 'var(--bg-surface)',
         fontSize: 'var(--text-xs)',
         fontFamily: 'var(--font-mono)',
