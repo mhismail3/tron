@@ -192,6 +192,7 @@ function AppContent() {
   // Refs to avoid stale closures in event handlers
   const streamingContentRef = useRef(state.streamingContent);
   const tokenUsageRef = useRef(state.tokenUsage);
+  const activeToolInputRef = useRef(state.activeToolInput);
 
   useEffect(() => {
     streamingContentRef.current = state.streamingContent;
@@ -200,6 +201,10 @@ function AppContent() {
   useEffect(() => {
     tokenUsageRef.current = state.tokenUsage;
   }, [state.tokenUsage]);
+
+  useEffect(() => {
+    activeToolInputRef.current = state.activeToolInput;
+  }, [state.activeToolInput]);
 
   // Subscribe to RPC events (stable subscription - no re-subscribing on state changes)
   useEffect(() => {
@@ -259,8 +264,9 @@ function AppContent() {
           break;
         }
 
-        case 'agent.tool_end':
+        case 'agent.tool_end': {
           // Add tool result as a message
+          const toolInput = activeToolInputRef.current; // Use ref to get current value
           if (data.toolName && typeof data.toolName === 'string') {
             dispatch({
               type: 'ADD_MESSAGE',
@@ -270,6 +276,7 @@ function AppContent() {
                 content: (data.output as string) || (data.error as string) || '',
                 timestamp: new Date().toISOString(),
                 toolName: data.toolName,
+                toolInput: toolInput || undefined,
                 toolStatus: data.success ? 'success' : 'error',
                 duration: data.duration as number,
               },
@@ -278,6 +285,7 @@ function AppContent() {
           dispatch({ type: 'SET_ACTIVE_TOOL', payload: null });
           dispatch({ type: 'SET_ACTIVE_TOOL_INPUT', payload: null });
           break;
+        }
 
         case 'agent.turn_end': {
           // Turn ended - update token usage from this turn
@@ -462,7 +470,7 @@ function AppContent() {
     }
   }, [abort, dispatch]);
 
-  // Handle model selection
+  // Handle model selection (from ModelSwitcher overlay)
   const handleModelSelect = useCallback(
     async (model: ModelInfo) => {
       setModelSwitching(true);
@@ -492,6 +500,28 @@ function AppContent() {
         });
       } finally {
         setModelSwitching(false);
+      }
+    },
+    [switchModel, dispatch]
+  );
+
+  // Handle model change from StatusBar dropdown
+  const handleModelChange = useCallback(
+    async (modelId: string) => {
+      try {
+        const result = await switchModel(modelId);
+        dispatch({ type: 'SET_CURRENT_MODEL', payload: result.newModel });
+      } catch (err) {
+        console.error('Failed to switch model:', err);
+        dispatch({
+          type: 'ADD_MESSAGE',
+          payload: {
+            id: `error_${Date.now()}`,
+            role: 'system',
+            content: `Failed to switch model: ${err instanceof Error ? err.message : 'Unknown error'}`,
+            timestamp: new Date().toISOString(),
+          },
+        });
       }
     },
     [switchModel, dispatch]
@@ -826,6 +856,7 @@ function AppContent() {
       onSubmit={handleSubmit}
       onCommand={handleCommand}
       onStop={handleStop}
+      onModelChange={handleModelChange}
     />
   );
 

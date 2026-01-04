@@ -6,8 +6,7 @@
  */
 
 .app-shell {
-  display: grid;
-  grid-template-columns: var(--sidebar-width) 1fr;
+  display: flex;
   height: 100%;
   width: 100%;
   overflow: hidden;
@@ -23,14 +22,20 @@
   display: flex;
   flex-direction: column;
   height: 100%;
+  width: var(--sidebar-width);
+  min-width: var(--sidebar-width);
   background: var(--bg-surface);
   border-right: 1px solid var(--border-subtle);
   overflow: hidden;
-  transition: width var(--transition-normal), transform var(--transition-normal);
+  transition: width var(--transition-normal), min-width var(--transition-normal), opacity var(--transition-normal);
 }
 
 .app-shell-sidebar.collapsed {
-  width: var(--sidebar-collapsed);
+  width: 0;
+  min-width: 0;
+  border-right: none;
+  opacity: 0;
+  pointer-events: none;
 }
 
 /* ============================================================================
@@ -40,9 +45,12 @@
 .app-shell-main {
   display: flex;
   flex-direction: column;
+  flex: 1;
   height: 100%;
+  min-width: 0;
   overflow: hidden;
   background: var(--bg-base);
+  transition: flex var(--transition-normal);
 }
 
 /* ============================================================================
@@ -52,30 +60,29 @@
 .sidebar-toggle {
   position: absolute;
   left: calc(var(--sidebar-width) - 12px);
-  top: 50%;
-  transform: translateY(-50%);
+  top: var(--space-lg);
   z-index: 20;
   width: 24px;
-  height: 48px;
+  height: 32px;
   display: flex;
   align-items: center;
   justify-content: center;
-  background: var(--bg-elevated);
-  border: 1px solid var(--border-subtle);
+  background: var(--bg-surface);
+  border: 1px solid var(--border-default);
   border-radius: var(--radius-sm);
   color: var(--text-tertiary);
   cursor: pointer;
-  transition: all var(--transition-fast);
+  transition: all var(--transition-normal);
 }
 
 .sidebar-toggle:hover {
   background: var(--bg-hover);
   color: var(--text-secondary);
-  border-color: var(--border-default);
+  border-color: var(--border-strong);
 }
 
 .sidebar-toggle:focus-visible {
-  outline: 2px solid var(--emerald);
+  outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
 
@@ -86,7 +93,7 @@
 
 /* Adjust toggle position when collapsed */
 .app-shell:has(.app-shell-sidebar.collapsed) .sidebar-toggle {
-  left: calc(var(--sidebar-collapsed) - 12px);
+  left: var(--space-sm);
 }
 
 /* ============================================================================

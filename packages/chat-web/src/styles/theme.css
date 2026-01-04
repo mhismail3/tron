@@ -1,57 +1,67 @@
 /**
  * Tron Chat Theme
- * Forest green terminal aesthetic matching TUI
+ * Refined dark theme with green accent
  */
 
 :root {
-  /* === Forest Green Palette === */
-  --primary: #123524;
-  --primary-light: #1a4a32;
-  --primary-bright: #2a6a4a;
-  --primary-vivid: #2a7a52;
+  /* === Neutral Palette (Primary UI) === */
+  --neutral-950: #0a0a0b;
+  --neutral-900: #111113;
+  --neutral-850: #161618;
+  --neutral-800: #1c1c1f;
+  --neutral-750: #222225;
+  --neutral-700: #2a2a2e;
+  --neutral-600: #3a3a40;
+  --neutral-500: #52525a;
+  --neutral-400: #71717a;
+  --neutral-300: #a1a1aa;
+  --neutral-200: #d4d4d8;
+  --neutral-100: #f4f4f5;
 
-  /* Extended green palette */
-  --emerald: #50c878;
-  --mint: #98ffb3;
-  --sage: #7a9a8a;
+  /* === Accent (Green - used sparingly) === */
+  --accent: #10b981;
+  --accent-dim: #059669;
+  --accent-bright: #34d399;
+  --accent-muted: rgba(16, 185, 129, 0.15);
 
-  /* === Background layers (forest undertones) === */
-  --bg-base: #0a0f0c;
-  --bg-surface: #0f1610;
-  --bg-elevated: #141c16;
-  --bg-overlay: #1a241c;
-  --bg-hover: #1e2a20;
+  /* === Background Layers === */
+  --bg-base: var(--neutral-950);
+  --bg-surface: var(--neutral-900);
+  --bg-elevated: var(--neutral-850);
+  --bg-overlay: var(--neutral-800);
+  --bg-hover: var(--neutral-750);
+  --bg-active: var(--neutral-700);
 
-  /* === Text colors === */
-  --text-primary: #e8f0ea;
-  --text-secondary: #c0d0c5;
-  --text-tertiary: #7a9a8a;
-  --text-muted: #4a5a50;
-  --text-dim: #3a4a40;
+  /* === Text Colors === */
+  --text-primary: var(--neutral-100);
+  --text-secondary: var(--neutral-300);
+  --text-tertiary: var(--neutral-400);
+  --text-muted: var(--neutral-500);
+  --text-dim: var(--neutral-600);
 
-  /* === Role colors (TUI parity) === */
-  --role-user: var(--primary-vivid);
-  --role-assistant: var(--emerald);
-  --role-system: var(--text-muted);
-  --role-tool: var(--mint);
+  /* === Role Colors === */
+  --role-user: var(--accent);
+  --role-assistant: var(--neutral-200);
+  --role-system: var(--neutral-500);
+  --role-tool: var(--neutral-400);
 
-  /* === Status colors === */
-  --status-ready: var(--emerald);
-  --status-thinking: var(--mint);
-  --status-processing: var(--primary-vivid);
-  --status-running: #60a5fa;
+  /* === Status Colors === */
+  --status-ready: var(--accent);
+  --status-thinking: var(--neutral-400);
+  --status-processing: var(--accent-dim);
+  --status-running: #3b82f6;
   --status-error: #ef4444;
 
-  /* === Semantic colors === */
-  --success: #50c878;
-  --warning: #fbbf24;
+  /* === Semantic Colors === */
+  --success: var(--accent);
+  --warning: #f59e0b;
   --error: #ef4444;
-  --info: #60a5fa;
+  --info: #3b82f6;
 
-  /* === Message styling === */
-  --user-bg: var(--primary);
+  /* === Message Styling === */
+  --user-bg: var(--bg-elevated);
   --user-text: var(--text-primary);
-  --user-border: var(--primary-light);
+  --user-border: var(--neutral-700);
 
   --assistant-bg: transparent;
   --assistant-text: var(--text-primary);
@@ -59,15 +69,18 @@
 
   --tool-bg: var(--bg-elevated);
   --tool-text: var(--text-secondary);
-  --tool-border: var(--primary-light);
+  --tool-border: var(--neutral-700);
 
-  /* === Borders and shadows === */
-  --border-subtle: rgba(80, 200, 120, 0.08);
-  --border-default: rgba(80, 200, 120, 0.15);
-  --border-focus: var(--emerald);
-  --shadow-sm: 2px 2px 0px rgba(0, 0, 0, 0.3);
-  --shadow-md: 3px 3px 0px rgba(0, 0, 0, 0.3);
-  --shadow-lg: 4px 4px 0px rgba(0, 0, 0, 0.4);
+  /* === Borders === */
+  --border-subtle: var(--neutral-800);
+  --border-default: var(--neutral-700);
+  --border-strong: var(--neutral-600);
+  --border-focus: var(--accent);
+
+  /* === Shadows === */
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
+  --shadow-md: 0 2px 4px rgba(0, 0, 0, 0.4);
+  --shadow-lg: 0 4px 8px rgba(0, 0, 0, 0.5);
 
   /* === Spacing === */
   --space-xs: 4px;
@@ -78,38 +91,47 @@
   --space-2xl: 24px;
   --space-3xl: 32px;
 
-  /* === Border radius === */
+  /* === Border Radius === */
   --radius-sm: 4px;
   --radius-md: 6px;
   --radius-lg: 8px;
+  --radius-xl: 12px;
   --radius-full: 9999px;
 
   /* === Typography === */
-  --font-mono: 'JetBrains Mono', 'Fira Code', ui-monospace, monospace;
-  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-mono: 'SF Mono', 'Monaco', 'Inconsolata', 'Roboto Mono', 'Source Code Pro', ui-monospace, monospace;
+  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
 
   /* Font sizes */
   --text-xs: 11px;
-  --text-sm: 13px;
+  --text-sm: 12px;
   --text-base: 14px;
   --text-lg: 16px;
   --text-xl: 18px;
 
+  /* Line heights */
+  --leading-tight: 1.4;
+  --leading-normal: 1.6;
+  --leading-relaxed: 1.8;
+
   /* === Layout === */
-  --sidebar-width: 280px;
-  --sidebar-collapsed: 64px;
+  --sidebar-width: 260px;
+  --sidebar-collapsed: 0px;
   --header-height: 48px;
   --input-height: 48px;
-  --max-content-width: 800px;
+  --max-content-width: 900px;
+  --scrollbar-spacing: 16px;
 
   /* === Transitions === */
   --transition-fast: 0.1s ease;
-  --transition-normal: 0.15s ease;
-  --transition-slow: 0.25s ease;
+  --transition-normal: 0.2s ease;
+  --transition-slow: 0.3s ease;
 
-  /* === Thinking animation === */
-  --thinking-bar-color: var(--emerald);
-  --thinking-interval: 80ms;
+  /* === Diff Colors === */
+  --diff-add-bg: rgba(16, 185, 129, 0.1);
+  --diff-add-border: rgba(16, 185, 129, 0.3);
+  --diff-remove-bg: rgba(239, 68, 68, 0.1);
+  --diff-remove-border: rgba(239, 68, 68, 0.3);
 }
 
 /* === Base Reset === */
@@ -127,60 +149,59 @@ html, body, #root {
 body {
   font-family: var(--font-mono);
   font-size: var(--text-base);
-  line-height: 1.6;
+  line-height: var(--leading-normal);
   background: var(--bg-base);
   color: var(--text-primary);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
 
-/* === Scrollbar (terminal style) === */
+/* === Scrollbar === */
 ::-webkit-scrollbar {
   width: 8px;
   height: 8px;
 }
 
 ::-webkit-scrollbar-track {
-  background: var(--bg-surface);
+  background: transparent;
 }
 
 ::-webkit-scrollbar-thumb {
-  background: var(--primary-light);
-  border-radius: 2px;
+  background: var(--neutral-700);
+  border-radius: 4px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: var(--primary-bright);
+  background: var(--neutral-600);
 }
 
-/* === Focus styles === */
+/* Add spacing for scrollbar */
+.scrollable {
+  padding-right: var(--scrollbar-spacing);
+}
+
+/* === Focus Styles === */
 :focus-visible {
-  outline: 2px solid var(--emerald);
+  outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
 
 /* === Selection === */
 ::selection {
-  background: rgba(80, 200, 120, 0.25);
+  background: var(--accent-muted);
   color: var(--text-primary);
 }
 
-/* === Terminal Icons (Unicode) === */
+/* === Terminal Icons === */
 .icon-user::before { content: '›'; }
 .icon-assistant::before { content: '✦'; }
 .icon-system::before { content: '⚡'; }
 .icon-tool-running::before { content: '◐'; }
 .icon-tool-success::before { content: '✓'; }
 .icon-tool-error::before { content: '✗'; }
-.icon-ready::before { content: '◉'; }
-.icon-thinking::before { content: '⋯'; }
-.icon-streaming::before { content: '▸'; }
 
 /* === Utility Classes === */
-.mono {
-  font-family: var(--font-mono);
-}
-
+.mono { font-family: var(--font-mono); }
 .truncate {
   overflow: hidden;
   text-overflow: ellipsis;
@@ -199,76 +220,64 @@ body {
   border: 0;
 }
 
-/* === Thinking Animation Bars === */
+/* === Animations === */
 @keyframes thinking-pulse {
-  0%, 100% {
-    transform: scaleY(0.3);
-  }
-  50% {
-    transform: scaleY(1);
-  }
+  0%, 100% { opacity: 0.3; }
+  50% { opacity: 1; }
 }
 
-.thinking-bars {
-  display: flex;
-  align-items: flex-end;
-  gap: 2px;
-  height: 14px;
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
 }
 
-.thinking-bar {
-  width: 3px;
-  background: var(--thinking-bar-color);
-  border-radius: 1px;
-  animation: thinking-pulse 0.6s ease-in-out infinite;
-  transform-origin: bottom;
-}
-
-.thinking-bar:nth-child(1) { animation-delay: 0ms; }
-.thinking-bar:nth-child(2) { animation-delay: 80ms; }
-.thinking-bar:nth-child(3) { animation-delay: 160ms; }
-.thinking-bar:nth-child(4) { animation-delay: 240ms; }
-.thinking-bar:nth-child(5) { animation-delay: 320ms; }
-
-/* === Streaming Cursor === */
 @keyframes cursor-blink {
   0%, 50% { opacity: 1; }
   51%, 100% { opacity: 0; }
 }
 
+.thinking-bars {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.thinking-bar {
+  width: 3px;
+  height: 12px;
+  background: var(--accent);
+  border-radius: 1px;
+  animation: thinking-pulse 1s ease-in-out infinite;
+}
+
+.thinking-bar:nth-child(1) { animation-delay: 0ms; }
+.thinking-bar:nth-child(2) { animation-delay: 150ms; }
+.thinking-bar:nth-child(3) { animation-delay: 300ms; }
+
 .streaming-cursor {
   display: inline-block;
-  width: 8px;
-  height: 1.2em;
-  background: var(--emerald);
+  width: 2px;
+  height: 1em;
+  background: var(--accent);
   animation: cursor-blink 1s step-end infinite;
+  margin-left: 1px;
   vertical-align: text-bottom;
-  margin-left: 2px;
 }
 
-/* === Message Prefixes (Terminal style) === */
+/* === Message Prefixes === */
 .message-prefix {
-  display: inline-block;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   width: 20px;
-  text-align: center;
   flex-shrink: 0;
+  font-weight: 500;
 }
 
-.message-prefix.user {
-  color: var(--role-user);
-}
-
-.message-prefix.assistant {
-  color: var(--role-assistant);
-}
-
-.message-prefix.system {
-  color: var(--role-system);
-}
-
-.message-prefix.tool {
-  color: var(--role-tool);
-}
+.message-prefix.user { color: var(--role-user); }
+.message-prefix.assistant { color: var(--role-assistant); }
+.message-prefix.system { color: var(--role-system); }
+.message-prefix.tool { color: var(--role-tool); }
 
 /* === Code Blocks === */
 pre, code {
@@ -279,7 +288,7 @@ pre, code {
 pre {
   background: var(--bg-elevated);
   border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-md);
   padding: var(--space-md);
   overflow-x: auto;
 }
@@ -295,17 +304,10 @@ pre code {
   padding: 0;
 }
 
-/* === Responsive Breakpoints === */
-@media (max-width: 640px) {
+/* === Responsive === */
+@media (max-width: 768px) {
   :root {
     --text-base: 13px;
-    --space-md: 10px;
-    --space-lg: 14px;
-  }
-}
-
-@media (max-width: 1024px) {
-  :root {
     --sidebar-width: 240px;
   }
 }

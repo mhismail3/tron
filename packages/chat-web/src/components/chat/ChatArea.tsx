@@ -26,15 +26,33 @@ export interface ChatAreaProps {
   onCommand?: (command: Command, args: string[]) => void;
   /** Called when user requests to stop processing */
   onStop?: () => void;
+  /** Called when user changes the model */
+  onModelChange?: (model: string) => void;
 }
 
 // =============================================================================
 // Component
 // =============================================================================
 
-export function ChatArea({ onSubmit, onCommand, onStop }: ChatAreaProps) {
+// Context window sizes by model (approximate)
+const MODEL_CONTEXT_SIZES: Record<string, number> = {
+  'claude-opus-4-5-20251101': 200000,
+  'claude-sonnet-4-20250514': 200000,
+  'claude-3-5-sonnet-20241022': 200000,
+  'claude-3-5-haiku-20241022': 200000,
+  'claude-3-opus-20240229': 200000,
+  'claude-3-sonnet-20240229': 200000,
+  'claude-3-haiku-20240307': 200000,
+};
+
+export function ChatArea({ onSubmit, onCommand, onStop, onModelChange }: ChatAreaProps) {
   const state = useChat();
   const dispatch = useChatDispatch();
+
+  // Calculate context usage percentage
+  const totalTokens = (state.tokenUsage?.input ?? 0) + (state.tokenUsage?.output ?? 0);
+  const contextSize = MODEL_CONTEXT_SIZES[state.currentModel] ?? 200000;
+  const contextPercent = Math.round((totalTokens / contextSize) * 100);
 
   const [showCommandPalette, setShowCommandPalette] = useState(false);
   const [commandQuery, setCommandQuery] = useState('');
@@ -189,6 +207,8 @@ export function ChatArea({ onSubmit, onCommand, onStop }: ChatAreaProps) {
           model={state.currentModel}
           workingDirectory={state.workingDirectory}
           tokenUsage={state.tokenUsage}
+          contextPercent={contextPercent}
+          onModelChange={onModelChange}
         />
       </div>
 

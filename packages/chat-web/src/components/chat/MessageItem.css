@@ -109,7 +109,7 @@
 }
 
 .message-toggle:focus-visible {
-  outline: 2px solid var(--emerald);
+  outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
 
@@ -130,11 +130,16 @@
   display: flex;
   align-items: center;
   gap: var(--space-sm);
-  padding: var(--space-xs) 0;
+  padding: var(--space-xs) var(--space-sm);
+  background: var(--bg-overlay);
+  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+  border-bottom: 1px solid var(--border-subtle);
+  margin: calc(-1 * var(--space-sm)) calc(-1 * var(--space-md)) var(--space-sm);
 }
 
 .tool-status {
   font-size: var(--text-sm);
+  flex-shrink: 0;
 }
 
 .tool-status.running {
@@ -151,13 +156,19 @@
 }
 
 .tool-name {
+  flex: 1;
   font-weight: 500;
+  font-size: var(--text-sm);
   color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .tool-duration {
   font-size: var(--text-xs);
   color: var(--text-muted);
+  flex-shrink: 0;
 }
 
 @keyframes spin {
@@ -196,17 +207,34 @@
 
 .message-item.role-tool {
   /* Tool messages */
-  padding: var(--space-md) 0;
+  padding: var(--space-sm) 0;
 }
 
 .message-item.role-tool .message-content {
   background: var(--bg-elevated);
   border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-md);
   padding: var(--space-sm) var(--space-md);
+  overflow: hidden;
 }
 
 .message-item.role-tool .message-text {
   font-size: var(--text-sm);
   color: var(--text-secondary);
+  max-height: 300px;
+  overflow-y: auto;
+  margin: 0;
+}
+
+/* Diff-style output for edits */
+.message-item.role-tool .message-text .diff-add {
+  background: var(--diff-add-bg);
+  border-left: 2px solid var(--diff-add-border);
+  padding-left: var(--space-xs);
+}
+
+.message-item.role-tool .message-text .diff-remove {
+  background: var(--diff-remove-bg);
+  border-left: 2px solid var(--diff-remove-border);
+  padding-left: var(--space-xs);
 }

@@ -41,23 +41,118 @@ const TOOL_STATUS_ICONS = {
 const COLLAPSE_THRESHOLD = 500; // chars
 
 // =============================================================================
+// Helpers
+// =============================================================================
+
+/**
+ * Format a descriptive tool name from tool name + input
+ */
+function formatToolDescription(toolName: string, toolInput?: string): string {
+  if (!toolInput) return toolName;
+
+  try {
+    const args = JSON.parse(toolInput);
+
+    switch (toolName.toLowerCase()) {
+      case 'read': {
+        const path = args.file_path || args.path;
+        if (path) {
+          // Show just filename or last path segment
+          const filename = path.split('/').pop() || path;
+          return `Read ${filename}`;
+        }
+        return 'Read file';
+      }
+
+      case 'write': {
+        const path = args.file_path || args.path;
+        if (path) {
+          const filename = path.split('/').pop() || path;
+          return `Write ${filename}`;
+        }
+        return 'Write file';
+      }
+
+      case 'edit': {
+        const path = args.file_path || args.path;
+        if (path) {
+          const filename = path.split('/').pop() || path;
+          return `Edit ${filename}`;
+        }
+        return 'Edit file';
+      }
+
+      case 'bash': {
+        const cmd = args.command;
+        if (cmd) {
+          // Show first part of command, truncated
+          const shortCmd = cmd.length > 40 ? cmd.substring(0, 40) + '…' : cmd;
+          return `$ ${shortCmd}`;
+        }
+        return 'Bash command';
+      }
+
+      case 'ls': {
+        const path = args.path || args.directory || '.';
+        return `ls ${path}`;
+      }
+
+      case 'grep': {
+        const pattern = args.pattern || args.query;
+        if (pattern) {
+          const shortPattern = pattern.length > 30 ? pattern.substring(0, 30) + '…' : pattern;
+          return `Grep "${shortPattern}"`;
+        }
+        return 'Search files';
+      }
+
+      case 'find': {
+        const pattern = args.pattern || args.name;
+        if (pattern) {
+          return `Find ${pattern}`;
+        }
+        return 'Find files';
+      }
+
+      default:
+        return toolName;
+    }
+  } catch {
+    return toolName;
+  }
+}
+
+/**
+ * Format duration in a readable way
+ */
+function formatDuration(durationMs?: number): string | null {
+  if (durationMs === undefined || durationMs === null) return null;
+  if (durationMs < 1000) {
+    return `${Math.round(durationMs)}ms`;
+  }
+  return `${(durationMs / 1000).toFixed(1)}s`;
+}
+
+// =============================================================================
 // Helper Components
 // =============================================================================
 
 interface ToolHeaderProps {
   toolName: string;
+  toolInput?: string;
   status: 'running' | 'success' | 'error';
   duration?: number;
 }
 
-function ToolHeader({ toolName, status, duration }: ToolHeaderProps) {
+function ToolHeader({ toolName, toolInput, status, duration }: ToolHeaderProps) {
   const statusIcon = TOOL_STATUS_ICONS[status];
-  const formattedDuration = duration ? `${(duration / 1000).toFixed(1)}s` : null;
+  const description = formatToolDescription(toolName, toolInput);
+  const formattedDuration = formatDuration(duration);
 
   return (
     <div className="tool-header">
       <span className={`tool-status ${status}`}>{statusIcon}</span>
-      <span className="tool-name">{toolName}</span>
+      <span className="tool-name">{description}</span>
       {formattedDuration && (
         <span className="tool-duration">{formattedDuration}</span>
       )}
@@ -116,6 +211,7 @@ export function MessageItem({ message, isStreaming = false }: MessageItemProps) 
         {message.role === 'tool' && message.toolName && (
           <ToolHeader
             toolName={message.toolName}
+            toolInput={message.toolInput}
             status={message.toolStatus || 'success'}
             duration={message.duration}
           />
