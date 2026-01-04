@@ -231,7 +231,7 @@ class ChatViewModel: ObservableObject {
     }
 
     private func handleToolStart(_ event: ToolStartEvent) {
-        let tool = ToolUseContent(
+        let tool = ToolUseData(
             toolName: event.toolName,
             toolCallId: event.toolCallId,
             arguments: event.formattedArguments,

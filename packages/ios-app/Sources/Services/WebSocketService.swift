@@ -4,7 +4,7 @@ import os
 
 // MARK: - Connection State
 
-enum ConnectionState: Equatable {
+enum ConnectionState: Equatable, Sendable {
     case disconnected
     case connecting
     case connected
@@ -29,7 +29,7 @@ enum ConnectionState: Equatable {
 
 // MARK: - WebSocket Errors
 
-enum WebSocketError: Error, LocalizedError {
+enum WebSocketError: Error, LocalizedError, Sendable {
     case notConnected
     case timeout
     case invalidResponse
@@ -51,7 +51,8 @@ enum WebSocketError: Error, LocalizedError {
 
 // MARK: - WebSocket Service
 
-actor WebSocketService {
+@MainActor
+final class WebSocketService: ObservableObject {
     private let logger = Logger(subsystem: "com.tron.mobile", category: "WebSocket")
 
     private var webSocketTask: URLSessionWebSocketTask?
@@ -59,26 +60,17 @@ actor WebSocketService {
     private var receiveTask: Task<Void, Never>?
 
     private let serverURL: URL
-    private var isConnected = false
+    private var isConnectedFlag = false
     private var reconnectAttempts = 0
     private let maxReconnectAttempts = 5
     private let reconnectDelay: TimeInterval = 2.0
     private let requestTimeout: TimeInterval = 30.0
 
-    // Pending requests awaiting responses
     private var pendingRequests: [String: CheckedContinuation<Data, Error>] = [:]
 
-    // Publishers for external observation
-    nonisolated let eventSubject = PassthroughSubject<Data, Never>()
-    nonisolated let connectionSubject = CurrentValueSubject<ConnectionState, Never>(.disconnected)
+    @Published private(set) var connectionState: ConnectionState = .disconnected
 
-    nonisolated var events: AnyPublisher<Data, Never> {
-        eventSubject.eraseToAnyPublisher()
-    }
-
-    nonisolated var connectionState: AnyPublisher<ConnectionState, Never> {
-        connectionSubject.eraseToAnyPublisher()
-    }
+    var onEvent: ((Data) -> Void)?
 
     init(serverURL: URL) {
         self.serverURL = serverURL
@@ -87,12 +79,12 @@ actor WebSocketService {
     // MARK: - Connection Management
 
     func connect() async {
-        guard !isConnected else {
+        guard !isConnectedFlag else {
             logger.debug("Already connected, skipping connect request")
             return
         }
 
-        connectionSubject.send(.connecting)
+        connectionState = .connecting
         logger.info("Connecting to \(self.serverURL.absoluteString)")
 
         let configuration = URLSessionConfiguration.default
@@ -107,17 +99,15 @@ actor WebSocketService {
         webSocketTask = session.webSocketTask(with: request)
         webSocketTask?.resume()
 
-        isConnected = true
+        isConnectedFlag = true
         reconnectAttempts = 0
-        connectionSubject.send(.connected)
+        connectionState = .connected
         logger.info("Connected successfully")
 
-        // Start receive loop
         receiveTask = Task { [weak self] in
             await self?.receiveLoop()
         }
 
-        // Start heartbeat
         pingTask = Task { [weak self] in
             await self?.heartbeatLoop()
         }
@@ -125,7 +115,7 @@ actor WebSocketService {
 
     func disconnect() {
         logger.info("Disconnecting")
-        isConnected = false
+        isConnectedFlag = false
         pingTask?.cancel()
         pingTask = nil
         receiveTask?.cancel()
@@ -133,13 +123,12 @@ actor WebSocketService {
         webSocketTask?.cancel(with: .goingAway, reason: nil)
         webSocketTask = nil
 
-        // Fail all pending requests
-        for (id, continuation) in pendingRequests {
+        for (_, continuation) in pendingRequests {
             continuation.resume(throwing: WebSocketError.notConnected)
-            pendingRequests.removeValue(forKey: id)
         }
+        pendingRequests.removeAll()
 
-        connectionSubject.send(.disconnected)
+        connectionState = .disconnected
     }
 
     // MARK: - Request/Response
@@ -148,7 +137,7 @@ actor WebSocketService {
         method: String,
         params: P
     ) async throws -> R {
-        guard isConnected, let task = webSocketTask else {
+        guard isConnectedFlag, let task = webSocketTask else {
             throw WebSocketError.notConnected
         }
 
@@ -161,24 +150,22 @@ actor WebSocketService {
 
         logger.debug("Sending: \(method) id=\(requestId)")
 
-        // Send the message
         let message = URLSessionWebSocketTask.Message.data(data)
         try await task.send(message)
 
-        // Wait for response with timeout
         let responseData = try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Data, Error>) in
             pendingRequests[requestId] = continuation
 
-            // Set up timeout
-            Task {
-                try? await Task.sleep(for: .seconds(requestTimeout))
-                if let pending = await self.pendingRequests.removeValue(forKey: requestId) {
-                    pending.resume(throwing: WebSocketError.timeout)
+            Task { [weak self] in
+                try? await Task.sleep(for: .seconds(self?.requestTimeout ?? 30))
+                await MainActor.run {
+                    if let pending = self?.pendingRequests.removeValue(forKey: requestId) {
+                        pending.resume(throwing: WebSocketError.timeout)
+                    }
                 }
             }
         }
 
-        // Decode response
         let decoder = JSONDecoder()
         do {
             let response = try decoder.decode(RPCResponse<R>.self, from: responseData)
@@ -201,7 +188,7 @@ actor WebSocketService {
     // MARK: - Receive Loop
 
     private func receiveLoop() async {
-        while isConnected {
+        while isConnectedFlag {
             do {
                 guard let message = try await webSocketTask?.receive() else {
                     logger.warning("Receive returned nil")
@@ -219,10 +206,10 @@ actor WebSocketService {
                     continue
                 }
 
-                await handleMessage(data)
+                handleMessage(data)
 
             } catch {
-                if isConnected {
+                if isConnectedFlag {
                     logger.error("Receive error: \(error.localizedDescription)")
                     await handleDisconnect()
                 }
@@ -231,15 +218,13 @@ actor WebSocketService {
         }
     }
 
-    private func handleMessage(_ data: Data) async {
-        // Check if it's a response (has 'id' field) or event (has 'type' field)
+    private func handleMessage(_ data: Data) {
         guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
             logger.warning("Received non-JSON message")
             return
         }
 
         if let id = json["id"] as? String {
-            // RPC Response - resolve pending request
             if let continuation = pendingRequests.removeValue(forKey: id) {
                 continuation.resume(returning: data)
                 logger.debug("Resolved response for id=\(id)")
@@ -247,8 +232,7 @@ actor WebSocketService {
                 logger.warning("Received response for unknown id=\(id)")
             }
         } else if json["type"] != nil {
-            // Server Event - publish to subscribers
-            eventSubject.send(data)
+            onEvent?(data)
         } else {
             logger.debug("Received message without id or type")
         }
@@ -257,9 +241,9 @@ actor WebSocketService {
     // MARK: - Heartbeat
 
     private func heartbeatLoop() async {
-        while isConnected {
+        while isConnectedFlag {
             try? await Task.sleep(for: .seconds(30))
-            guard isConnected else { break }
+            guard isConnectedFlag else { break }
 
             do {
                 try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
@@ -281,37 +265,29 @@ actor WebSocketService {
     // MARK: - Reconnection
 
     private func handleDisconnect() async {
-        isConnected = false
+        isConnectedFlag = false
         webSocketTask?.cancel(with: .abnormalClosure, reason: nil)
         webSocketTask = nil
 
-        // Fail pending requests
-        for (id, continuation) in pendingRequests {
+        for (_, continuation) in pendingRequests {
             continuation.resume(throwing: WebSocketError.connectionFailed("Disconnected"))
-            pendingRequests.removeValue(forKey: id)
         }
+        pendingRequests.removeAll()
 
-        // Auto-reconnect with exponential backoff
         if reconnectAttempts < maxReconnectAttempts {
             reconnectAttempts += 1
             let delay = reconnectDelay * pow(1.5, Double(reconnectAttempts - 1))
-            connectionSubject.send(.reconnecting(attempt: reconnectAttempts))
+            connectionState = .reconnecting(attempt: reconnectAttempts)
 
             logger.info("Reconnecting in \(delay)s (attempt \(self.reconnectAttempts))")
             try? await Task.sleep(for: .seconds(delay))
 
-            if !isConnected {
+            if !isConnectedFlag {
                 await connect()
             }
         } else {
-            connectionSubject.send(.failed(reason: "Max reconnection attempts reached"))
+            connectionState = .failed(reason: "Max reconnection attempts reached")
             logger.error("Max reconnection attempts reached")
         }
-    }
-
-    // MARK: - State
-
-    func getConnectionState() -> ConnectionState {
-        connectionSubject.value
     }
 }

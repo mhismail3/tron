@@ -24,7 +24,7 @@ struct RPCResponse<R: Decodable>: Decodable {
 }
 
 /// RPC error details
-struct RPCError: Decodable, Error, LocalizedError {
+struct RPCError: Decodable, Error, LocalizedError, Sendable {
     let code: String
     let message: String
     let details: [String: AnyCodable]?

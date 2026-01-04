@@ -55,21 +55,18 @@ class RPCClient: ObservableObject {
         let ws = WebSocketService(serverURL: serverURL)
         self.webSocket = ws
 
-        // Observe connection state
-        await ws.connectionState
+        // Observe connection state via @Published property
+        ws.$connectionState
             .receive(on: DispatchQueue.main)
             .sink { [weak self] state in
                 self?.connectionState = state
             }
             .store(in: &cancellables)
 
-        // Observe events
-        await ws.events
-            .receive(on: DispatchQueue.main)
-            .sink { [weak self] data in
-                self?.handleEventData(data)
-            }
-            .store(in: &cancellables)
+        // Set event handler callback
+        ws.onEvent = { [weak self] data in
+            self?.handleEventData(data)
+        }
 
         await ws.connect()
     }
@@ -77,7 +74,7 @@ class RPCClient: ObservableObject {
     func disconnect() async {
         logger.info("Disconnecting")
         currentSessionId = nil
-        await webSocket?.disconnect()
+        webSocket?.disconnect()
         webSocket = nil
     }
 

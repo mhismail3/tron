@@ -1,7 +1,7 @@
 import Foundation
 
 /// A type-erased Codable value for handling dynamic JSON.
-struct AnyCodable: Codable, Equatable, Hashable {
+struct AnyCodable: Codable, Equatable, Hashable, @unchecked Sendable {
     let value: Any
 
     init(_ value: Any?) {

@@ -173,7 +173,7 @@ struct ConnectionIndicator: View {
             statusIcon
             Text(state.displayText)
                 .font(.caption)
-                .foregroundStyle(.tronTextSecondary)
+                .foregroundStyle(Color.tronTextSecondary)
         }
     }
 
@@ -207,7 +207,7 @@ struct ThinkingIndicator: View {
 
             Text("Thinking" + String(repeating: ".", count: dots))
                 .font(.subheadline)
-                .foregroundStyle(.tronTextSecondary)
+                .foregroundStyle(Color.tronTextSecondary)
                 .frame(width: 100, alignment: .leading)
         }
         .onAppear {

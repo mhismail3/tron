@@ -7,14 +7,11 @@ struct MessageBubble: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
-            // Avatar
             avatarView
 
-            // Content
             VStack(alignment: .leading, spacing: 6) {
                 contentView
 
-                // Metadata row
                 if let usage = message.tokenUsage {
                     TokenBadge(usage: usage)
                 }
@@ -70,32 +67,32 @@ struct MessageBubble: View {
     private var contentView: some View {
         switch message.content {
         case .text(let text):
-            TextContent(text: text, role: message.role)
+            TextContentView(text: text, role: message.role)
 
         case .streaming(let text):
-            StreamingContent(text: text)
+            StreamingContentView(text: text)
 
         case .thinking(let visible, let isExpanded):
-            ThinkingContent(content: visible, isExpanded: isExpanded)
+            ThinkingContentView(content: visible, isExpanded: isExpanded)
 
         case .toolUse(let tool):
-            ToolUseContent(tool: tool)
+            ToolUseView(tool: tool)
 
         case .toolResult(let result):
-            ToolResultContent(result: result)
+            ToolResultView(result: result)
 
         case .error(let errorMessage):
-            ErrorContent(message: errorMessage)
+            ErrorContentView(message: errorMessage)
 
         case .images(let images):
-            ImagesContent(images: images)
+            ImagesContentView(images: images)
         }
     }
 }
 
-// MARK: - Text Content
+// MARK: - Text Content View
 
-struct TextContent: View {
+struct TextContentView: View {
     let text: String
     let role: MessageRole
 
@@ -108,9 +105,9 @@ struct TextContent: View {
     }
 }
 
-// MARK: - Streaming Content
+// MARK: - Streaming Content View
 
-struct StreamingContent: View {
+struct StreamingContentView: View {
     let text: String
 
     var body: some View {
@@ -130,9 +127,9 @@ struct StreamingContent: View {
     }
 }
 
-// MARK: - Thinking Content
+// MARK: - Thinking Content View
 
-struct ThinkingContent: View {
+struct ThinkingContentView: View {
     let content: String
     let isExpanded: Bool
 
@@ -178,14 +175,13 @@ struct ThinkingContent: View {
     }
 }
 
-// MARK: - Tool Use Content
+// MARK: - Tool Use View
 
-struct ToolUseContent: View {
-    let tool: Models.ToolUseContent
+struct ToolUseView: View {
+    let tool: ToolUseData
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            // Header
             HStack(spacing: 8) {
                 statusIcon
                 Text(tool.displayName)
@@ -201,7 +197,6 @@ struct ToolUseContent: View {
                 }
             }
 
-            // Arguments preview
             if !tool.arguments.isEmpty {
                 Text(tool.truncatedArguments)
                     .font(.caption.monospaced())
@@ -209,7 +204,6 @@ struct ToolUseContent: View {
                     .lineLimit(3)
             }
 
-            // Result
             if let result = tool.result {
                 Divider()
                     .background(Color.tronBorder)
@@ -258,13 +252,10 @@ struct ToolUseContent: View {
     }
 }
 
-// Namespace alias to avoid conflict with local struct
-private typealias Models = TronMobile
+// MARK: - Tool Result View
 
-// MARK: - Tool Result Content
-
-struct ToolResultContent: View {
-    let result: TronMobile.ToolResultContent
+struct ToolResultView: View {
+    let result: ToolResultData
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -288,9 +279,9 @@ struct ToolResultContent: View {
     }
 }
 
-// MARK: - Error Content
+// MARK: - Error Content View
 
-struct ErrorContent: View {
+struct ErrorContentView: View {
     let message: String
 
     var body: some View {
@@ -310,9 +301,9 @@ struct ErrorContent: View {
     }
 }
 
-// MARK: - Images Content
+// MARK: - Images Content View
 
-struct ImagesContent: View {
+struct ImagesContentView: View {
     let images: [ImageContent]
 
     var body: some View {
@@ -363,11 +354,8 @@ struct TokenBadge: View {
     ScrollView {
         VStack(spacing: 12) {
             MessageBubble(message: .user("Hello, can you help me?"))
-
-            MessageBubble(message: .assistant("Of course! I'd be happy to help. What do you need?"))
-
-            MessageBubble(message: .streaming("I'm currently typing this response"))
-
+            MessageBubble(message: .assistant("Of course! I'd be happy to help."))
+            MessageBubble(message: .streaming("I'm currently typing..."))
             MessageBubble(message: .error("Something went wrong"))
         }
         .padding()

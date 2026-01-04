@@ -57,8 +57,8 @@ enum MessageContent: Equatable {
     case text(String)
     case streaming(String)
     case thinking(visible: String, isExpanded: Bool)
-    case toolUse(ToolUseContent)
-    case toolResult(ToolResultContent)
+    case toolUse(ToolUseData)
+    case toolResult(ToolResultData)
     case error(String)
     case images([ImageContent])
 
@@ -89,9 +89,9 @@ enum MessageContent: Equatable {
     }
 }
 
-// MARK: - Tool Use Content
+// MARK: - Tool Use Data
 
-struct ToolUseContent: Equatable {
+struct ToolUseData: Equatable {
     let toolName: String
     let toolCallId: String
     let arguments: String
@@ -100,7 +100,6 @@ struct ToolUseContent: Equatable {
     var durationMs: Int?
 
     var displayName: String {
-        // Convert tool names like "Read" or "Bash" to friendly names
         switch toolName.lowercased() {
         case "read": return "Reading file"
         case "write": return "Writing file"
@@ -148,9 +147,9 @@ enum ToolStatus: Equatable {
     }
 }
 
-// MARK: - Tool Result Content
+// MARK: - Tool Result Data
 
-struct ToolResultContent: Equatable {
+struct ToolResultData: Equatable {
     let toolCallId: String
     let content: String
     let isError: Bool
@@ -180,27 +179,22 @@ struct ImageContent: Equatable, Identifiable {
 // MARK: - Message Extensions
 
 extension ChatMessage {
-    /// Creates a user message with text content
     static func user(_ text: String) -> ChatMessage {
         ChatMessage(role: .user, content: .text(text))
     }
 
-    /// Creates an assistant message with text content
     static func assistant(_ text: String) -> ChatMessage {
         ChatMessage(role: .assistant, content: .text(text))
     }
 
-    /// Creates a streaming assistant message
     static func streaming(_ text: String = "") -> ChatMessage {
         ChatMessage(role: .assistant, content: .streaming(text), isStreaming: true)
     }
 
-    /// Creates a system message
     static func system(_ text: String) -> ChatMessage {
         ChatMessage(role: .system, content: .text(text))
     }
 
-    /// Creates an error message
     static func error(_ text: String) -> ChatMessage {
         ChatMessage(role: .assistant, content: .error(text))
     }

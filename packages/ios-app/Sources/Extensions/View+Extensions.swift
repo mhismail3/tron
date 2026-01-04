@@ -3,7 +3,6 @@ import SwiftUI
 // MARK: - View Extensions
 
 extension View {
-    /// Conditionally applies a modifier
     @ViewBuilder
     func `if`<Content: View>(
         _ condition: Bool,
@@ -16,7 +15,6 @@ extension View {
         }
     }
 
-    /// Applies a modifier if the value is non-nil
     @ViewBuilder
     func ifLet<T, Content: View>(
         _ value: T?,
@@ -29,7 +27,6 @@ extension View {
         }
     }
 
-    /// Hides the view conditionally
     @ViewBuilder
     func hidden(_ hidden: Bool) -> some View {
         if hidden {
@@ -39,8 +36,7 @@ extension View {
         }
     }
 
-    /// Reads the size of a view
-    func readSize(onChange: @escaping (CGSize) -> Void) -> some View {
+    func readSize(onChange: @escaping @Sendable (CGSize) -> Void) -> some View {
         background(
             GeometryReader { proxy in
                 Color.clear
@@ -50,7 +46,6 @@ extension View {
         .onPreferenceChange(SizePreferenceKey.self, perform: onChange)
     }
 
-    /// Adds a navigation back button with custom action
     func navigationBackButton(action: @escaping () -> Void) -> some View {
         navigationBarBackButtonHidden(true)
             .toolbar {
@@ -67,7 +62,6 @@ extension View {
             }
     }
 
-    /// Applies a shimmering loading effect
     func shimmer(active: Bool = true) -> some View {
         self.modifier(ShimmerModifier(active: active))
     }
@@ -76,7 +70,7 @@ extension View {
 // MARK: - Size Preference Key
 
 private struct SizePreferenceKey: PreferenceKey {
-    static var defaultValue: CGSize = .zero
+    nonisolated(unsafe) static var defaultValue: CGSize = .zero
     static func reduce(value: inout CGSize, nextValue: () -> CGSize) {
         value = nextValue()
     }
@@ -176,7 +170,6 @@ extension ButtonStyle where Self == TronSecondaryButtonStyle {
 // MARK: - Keyboard Handling
 
 extension View {
-    /// Dismisses keyboard when tapped outside
     func dismissKeyboardOnTap() -> some View {
         self.onTapGesture {
             UIApplication.shared.sendAction(

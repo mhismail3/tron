@@ -178,3 +178,41 @@ extension Animation {
     /// Slow Tron UI animation for emphasis
     static let tronSlow = Animation.spring(response: 0.5, dampingFraction: 0.75)
 }
+
+// MARK: - ShapeStyle Extension for foregroundStyle compatibility
+
+extension ShapeStyle where Self == Color {
+    // Primary Greens
+    static var tronPrimary: Color { .tronPrimary }
+    static var tronPrimaryLight: Color { .tronPrimaryLight }
+    static var tronPrimaryBright: Color { .tronPrimaryBright }
+    static var tronPrimaryVivid: Color { .tronPrimaryVivid }
+    static var tronEmerald: Color { .tronEmerald }
+    static var tronMint: Color { .tronMint }
+    static var tronSage: Color { .tronSage }
+
+    // Semantic Colors
+    static var tronSuccess: Color { .tronSuccess }
+    static var tronWarning: Color { .tronWarning }
+    static var tronError: Color { .tronError }
+    static var tronInfo: Color { .tronInfo }
+
+    // Backgrounds
+    static var tronBackground: Color { .tronBackground }
+    static var tronSurface: Color { .tronSurface }
+    static var tronSurfaceElevated: Color { .tronSurfaceElevated }
+    static var tronBorder: Color { .tronBorder }
+
+    // Text Colors
+    static var tronTextPrimary: Color { .tronTextPrimary }
+    static var tronTextSecondary: Color { .tronTextSecondary }
+    static var tronTextMuted: Color { .tronTextMuted }
+    static var tronTextDisabled: Color { .tronTextDisabled }
+
+    // Role Colors
+    static var userBubble: Color { .userBubble }
+    static var assistantBubble: Color { .assistantBubble }
+    static var systemBubble: Color { .systemBubble }
+    static var toolBubble: Color { .toolBubble }
+    static var errorBubble: Color { .errorBubble }
+}
