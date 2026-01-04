@@ -1308,7 +1308,22 @@ export function App({ config, auth }: AppProps): React.ReactElement {
   }
 
   return (
-    <Box flexDirection="column" height="100%">
+    <Box flexDirection="column">
+      {/*
+        LAYOUT PHILOSOPHY FOR SCROLL BEHAVIOR:
+
+        We intentionally avoid height="100%" and flexGrow={1} on the main container.
+        This allows content to flow naturally into the terminal's scrollback buffer.
+
+        The MessageList uses Ink's Static component for past messages, which:
+        1. Renders each message ONCE and never re-renders it
+        2. Allows the terminal's native scrollback to work freely
+        3. Only the "live" area (thinking, streaming, input) re-renders
+
+        This means users can scroll up freely while the agent processes,
+        and the view won't jump around.
+      */}
+
       {/* Welcome Box */}
       <WelcomeBox
         model={config.model ?? DEFAULT_MODEL}
@@ -1316,8 +1331,8 @@ export function App({ config, auth }: AppProps): React.ReactElement {
         gitBranch={state.gitBranch ?? undefined}
       />
 
-      {/* Message List - terminal handles scrolling naturally */}
-      <Box flexDirection="column" flexGrow={1} paddingX={1}>
+      {/* Message List - uses Static for past messages, dynamic area for live content */}
+      <Box flexDirection="column" paddingX={1}>
         <MessageList
           messages={state.messages}
           isProcessing={state.isProcessing}

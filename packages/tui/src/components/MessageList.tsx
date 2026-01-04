@@ -4,11 +4,16 @@
  * Displays the conversation messages with streaming support.
  * Uses elegant Unicode icons and markdown rendering.
  *
- * Terminal scrolling is handled naturally by the terminal emulator.
- * All messages are rendered and the terminal's scroll buffer manages history.
+ * CRITICAL FOR SCROLL BEHAVIOR:
+ * Uses Ink's Static component for past messages. Static content is written
+ * once and becomes part of the terminal's scrollback buffer - it's never
+ * re-rendered. This allows users to scroll up freely while the agent processes.
+ *
+ * Only the "live" area (thinking indicator, streaming) is in the dynamic
+ * render portion that gets re-rendered on state changes.
  */
 import React from 'react';
-import { Box, Text } from 'ink';
+import { Box, Text, Static } from 'ink';
 import { ThinkingIndicator } from './ThinkingIndicator.js';
 import { StreamingContent } from './StreamingContent.js';
 import { ToolExecution } from './ToolExecution.js';
@@ -103,10 +108,30 @@ export function MessageList({
         </Box>
       )}
 
-      {/* Render all messages - terminal handles scrolling */}
-      {messages.map((message) => (
-        <MessageItem key={message.id} message={message} />
-      ))}
+      {/*
+        STATIC MESSAGES - Critical for scroll behavior!
+
+        Static component renders items ONCE and never re-renders them.
+        They become part of the terminal's scrollback buffer, allowing
+        users to scroll up freely while the agent continues processing.
+
+        Only new messages (not in Static's items array from last render)
+        get rendered. Existing messages are never touched.
+      */}
+      <Static items={messages}>
+        {(message, index) => (
+          <Box key={message.id} marginTop={index > 0 ? 1 : 0}>
+            <MessageItem message={message} />
+          </Box>
+        )}
+      </Static>
+
+      {/*
+        DYNAMIC AREA - This is the only part that re-renders.
+
+        Everything below here is the "live" area that updates during
+        agent processing. It's kept minimal to reduce visual disruption.
+      */}
 
       {/* Thinking indicator - pulsing bars */}
       {/* Aligned with text after prompt prefix (> ) - marginLeft=1 + 2 spaces for "> " */}
