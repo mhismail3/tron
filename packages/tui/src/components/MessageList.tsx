@@ -165,7 +165,7 @@ export function MessageList({
         {(item, index) => {
           if (item.type === 'welcome') {
             return (
-              <Box key={item.id}>
+              <Box key={item.id} width="100%">
                 <WelcomeBox
                   model={item.model}
                   workingDirectory={item.workingDirectory}

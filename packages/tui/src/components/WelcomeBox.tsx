@@ -65,6 +65,7 @@ export function WelcomeBox({
         paddingX={1}
         paddingY={0}
         marginX={1}
+        width="100%"
       >
         <Box flexDirection="row" justifyContent="flex-end">
           <Text color={inkColors.logo} bold>TRON</Text>
@@ -86,6 +87,7 @@ export function WelcomeBox({
       paddingX={1}
       paddingY={0}
       marginX={1}
+      width="100%"
     >
       {/* Left: TRON Block Logo */}
       <Box flexDirection="column" marginRight={2} justifyContent="center">
