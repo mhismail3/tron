@@ -28,6 +28,7 @@ interface SessionCache {
   tokenUsage: { input: number; output: number };
   streamingContent: string;
   thinkingText: string;
+  workingDirectory: string;
 }
 
 // =============================================================================
@@ -119,6 +120,7 @@ function AppContent() {
           dispatch({ type: 'SET_SESSION', payload: activeSessionId });
           dispatch({ type: 'SET_CURRENT_MODEL', payload: sessionState.model });
           dispatch({ type: 'SET_TOKEN_USAGE', payload: sessionState.tokenUsage });
+          dispatch({ type: 'SET_WORKING_DIRECTORY', payload: sessionState.workingDirectory || '/project' });
           dispatch({ type: 'SET_INITIALIZED', payload: true });
 
           // Load messages
@@ -182,9 +184,10 @@ function AppContent() {
         messages: state.messages,
         model: state.currentModel,
         tokenUsage: state.tokenUsage,
+        workingDirectory: state.workingDirectory,
       });
     }
-  }, [state.messages, state.currentModel, state.tokenUsage, state.sessionId, rpcSessionId, persistence]);
+  }, [state.messages, state.currentModel, state.tokenUsage, state.workingDirectory, state.sessionId, rpcSessionId, persistence]);
 
   // Refs to avoid stale closures in event handlers
   const streamingContentRef = useRef(state.streamingContent);
@@ -365,6 +368,7 @@ function AppContent() {
         tokenUsage: state.tokenUsage,
         streamingContent: state.streamingContent,
         thinkingText: state.thinkingText,
+        workingDirectory: state.workingDirectory,
       });
     }
   }, [state, rpcSessionId]);
@@ -381,6 +385,7 @@ function AppContent() {
         dispatch({ type: 'SET_SESSION', payload: sessionId });
         dispatch({ type: 'SET_CURRENT_MODEL', payload: cached.model });
         dispatch({ type: 'SET_TOKEN_USAGE', payload: cached.tokenUsage });
+        dispatch({ type: 'SET_WORKING_DIRECTORY', payload: cached.workingDirectory });
 
         for (const msg of cached.messages) {
           dispatch({ type: 'ADD_MESSAGE', payload: msg });
@@ -396,6 +401,9 @@ function AppContent() {
         dispatch({ type: 'SET_SESSION', payload: sessionId });
         dispatch({ type: 'SET_CURRENT_MODEL', payload: persisted.model });
         dispatch({ type: 'SET_TOKEN_USAGE', payload: persisted.tokenUsage });
+        if (persisted.workingDirectory) {
+          dispatch({ type: 'SET_WORKING_DIRECTORY', payload: persisted.workingDirectory });
+        }
 
         for (const msg of persisted.messages) {
           dispatch({ type: 'ADD_MESSAGE', payload: msg });
@@ -614,6 +622,8 @@ function AppContent() {
 
     // Reset UI state for new session
     dispatch({ type: 'RESET' });
+    // Set working directory for the new session
+    dispatch({ type: 'SET_WORKING_DIRECTORY', payload: workingDirectory });
 
     const now = new Date().toISOString();
 

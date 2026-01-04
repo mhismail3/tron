@@ -165,7 +165,7 @@ export function ChatArea({ onSubmit, onCommand, onStop }: ChatAreaProps) {
           thinkingText={state.thinkingText}
           showWelcome={state.isInitialized}
           welcomeModel={state.currentModel}
-          welcomeWorkingDirectory="/project"
+          welcomeWorkingDirectory={state.workingDirectory}
           welcomeGitBranch={state.gitBranch ?? undefined}
         />
       </div>

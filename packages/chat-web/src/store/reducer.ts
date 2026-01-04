@@ -51,6 +51,7 @@ export const initialState: AppState = {
   // Model and environment
   currentModel: DEFAULT_MODEL,
   gitBranch: null,
+  workingDirectory: '/project',
 
   // Queue
   queuedMessages: [],
@@ -108,6 +109,7 @@ export function reducer(state: AppState, action: AppAction): AppState {
         sessions: state.sessions,
         ui: state.ui,
         currentModel: state.currentModel,
+        workingDirectory: state.workingDirectory,
       };
 
     // =========================================================================
@@ -333,6 +335,9 @@ export function reducer(state: AppState, action: AppAction): AppState {
 
     case 'SET_GIT_BRANCH':
       return { ...state, gitBranch: action.payload };
+
+    case 'SET_WORKING_DIRECTORY':
+      return { ...state, workingDirectory: action.payload };
 
     // =========================================================================
     // Queue

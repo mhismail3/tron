@@ -107,6 +107,7 @@ export interface AppState {
   // Model and environment
   currentModel: string;
   gitBranch: string | null;
+  workingDirectory: string;
 
   // Message queue (for queuing during processing)
   queuedMessages: string[];
@@ -172,6 +173,7 @@ export type AppAction =
   // Model
   | { type: 'SET_CURRENT_MODEL'; payload: string }
   | { type: 'SET_GIT_BRANCH'; payload: string | null }
+  | { type: 'SET_WORKING_DIRECTORY'; payload: string }
 
   // Queue
   | { type: 'QUEUE_MESSAGE'; payload: string }
