@@ -20,12 +20,12 @@
 }
 
 .input-bar-wrapper.focused {
-  border-color: var(--primary);
+  border-color: var(--accent);
 }
 
 .input-bar-textarea {
   width: 100%;
-  padding: var(--space-sm) var(--space-md);
+  padding: 7px var(--space-md);
   background: transparent;
   border: none;
   outline: none;
@@ -61,12 +61,12 @@
 }
 
 .input-bar-button.send {
-  background: var(--primary);
-  color: var(--text-on-primary);
+  background: var(--accent);
+  color: var(--bg-base);
 }
 
 .input-bar-button.send:hover:not(:disabled) {
-  background: var(--primary-bright);
+  background: var(--accent-bright);
 }
 
 .input-bar-button.send:disabled {

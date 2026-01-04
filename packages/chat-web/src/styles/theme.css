@@ -24,6 +24,13 @@
   --accent-bright: #34d399;
   --accent-muted: rgba(16, 185, 129, 0.15);
 
+  /* === Primary (Accent aliases for backwards compatibility) === */
+  --primary: rgba(16, 185, 129, 0.15);
+  --primary-light: rgba(16, 185, 129, 0.25);
+  --primary-bright: var(--accent-bright);
+  --emerald: var(--accent);
+  --text-on-primary: var(--text-primary);
+
   /* === Background Layers === */
   --bg-base: var(--neutral-950);
   --bg-surface: var(--neutral-900);
@@ -41,9 +48,9 @@
 
   /* === Role Colors === */
   --role-user: var(--accent);
-  --role-assistant: var(--neutral-200);
-  --role-system: var(--neutral-500);
-  --role-tool: var(--neutral-400);
+  --role-assistant: var(--neutral-300);
+  --role-system: #3b82f6;
+  --role-tool: var(--accent-dim);
 
   /* === Status Colors === */
   --status-ready: var(--accent);

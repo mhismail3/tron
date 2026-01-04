@@ -46,7 +46,7 @@ interface InputBarProps {
 
 const LINE_HEIGHT = 22;
 const MAX_ROWS = 8;
-const VERTICAL_PADDING = 20;
+const VERTICAL_PADDING = 14; // Total padding to match 36px button height
 
 // =============================================================================
 // Component
