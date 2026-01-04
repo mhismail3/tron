@@ -192,11 +192,10 @@ export function MessageList({
 
       {/* Thinking indicator - pulsing bars */}
       {/* marginTop=1 provides spacing between static messages and dynamic thinking area */}
-      {/* Aligned with text after prompt prefix (> ) - marginLeft=1 + 2 spaces for "> " */}
+      {/* marginLeft=3 aligns bars with text content (1 base + 2 for "› " prefix) */}
       {isProcessing && thinkingText && !streamingContent && (
-        <Box flexDirection="column" marginLeft={1} marginTop={1}>
+        <Box flexDirection="column" marginLeft={3} marginTop={1}>
           <Box flexDirection="row">
-            <Text>  </Text>
             <ThinkingIndicator label="Thinking" color={inkColors.statusThinking} />
           </Box>
           {thinkingText.length > 0 && (
@@ -213,10 +212,9 @@ export function MessageList({
 
       {/* Show thinking indicator when processing but not yet streaming or thinking */}
       {/* marginTop=1 provides spacing between static messages and dynamic thinking area */}
-      {/* Aligned with text after prompt prefix (> ) */}
+      {/* marginLeft=3 aligns bars with text content (1 base + 2 for "› " prefix) */}
       {isProcessing && !streamingContent && !thinkingText && !activeTool && (
-        <Box marginLeft={1} marginTop={1} flexDirection="row">
-          <Text>  </Text>
+        <Box marginLeft={3} marginTop={1} flexDirection="row">
           <ThinkingIndicator label="Thinking" color={inkColors.spinner} />
         </Box>
       )}
