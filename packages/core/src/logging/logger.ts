@@ -67,12 +67,14 @@ function createPinoLogger(options: LoggerOptions = {}): pino.Logger {
           colorize: true,
           translateTime: 'HH:MM:ss.l',
           ignore: 'pid,hostname',
+          destination: 2, // stderr - critical for TUI compatibility
         },
       },
     });
   }
 
-  return pino(pinoOptions);
+  // JSON mode also goes to stderr to avoid interfering with TUI
+  return pino(pinoOptions, pino.destination(2));
 }
 
 // =============================================================================
