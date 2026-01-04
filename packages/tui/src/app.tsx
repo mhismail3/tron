@@ -12,12 +12,11 @@
  * - Proper session end with handoff creation
  */
 import React, { useReducer, useCallback, useEffect, useRef } from 'react';
-import { Box, Text, useInput, useApp, Static } from 'ink';
+import { Box, Text, useInput, useApp } from 'ink';
 import { MessageList } from './components/MessageList.js';
 import { StatusBar } from './components/StatusBar.js';
 import { SlashCommandMenu } from './components/SlashCommandMenu.js';
 import { ModelSwitcher } from './components/ModelSwitcher.js';
-import { WelcomeBox } from './components/WelcomeBox.js';
 import { PromptBox } from './components/PromptBox.js';
 import {
   BUILT_IN_COMMANDS,
@@ -359,12 +358,12 @@ export function App({ config, auth }: AppProps): React.ReactElement {
   // Track the last tool message ID to attach token usage
   const lastToolMsgIdRef = useRef<string | null>(null);
 
-  // Welcome box state for Static component - must be added after mount
-  // Static only renders NEW items, so we start empty and add 'welcome' after mount
-  const [welcomeItems, setWelcomeItems] = React.useState<string[]>([]);
+  // Welcome box state - must be set after mount to trigger Static render
+  // Static only renders NEW items, so we start with false and set true after mount
+  const [showWelcome, setShowWelcome] = React.useState(false);
   React.useEffect(() => {
     // Trigger Static to render the welcome box after first render
-    setWelcomeItems(['welcome']);
+    setShowWelcome(true);
   }, []);
 
   /**
@@ -1320,35 +1319,22 @@ export function App({ config, auth }: AppProps): React.ReactElement {
       {/*
         LAYOUT PHILOSOPHY FOR SCROLL BEHAVIOR:
 
-        We use Ink's Static component for content that should be "written once"
-        and become part of the terminal's scrollback buffer. This includes:
+        MessageList uses Ink's Static component for content that should be
+        "written once" and become part of the terminal's scrollback buffer:
         1. Welcome box (rendered once at session start)
         2. Past messages (rendered once when they appear)
+
+        Both are combined in ONE Static flow inside MessageList to ensure
+        correct ordering (welcome first, then messages).
 
         Static content is NEVER re-rendered - it becomes permanent scrollback.
         Only the "live" area (thinking, streaming, input, status) re-renders.
 
-        CRITICAL: Static content appears at the TOP of Ink's output.
-        Multiple Static components render in order (first Static = topmost).
-        This is why WelcomeBox must be in its own Static BEFORE MessageList.
+        This allows users to scroll up freely while the agent processes.
       */}
 
-      {/* Welcome Box - Static so it renders once at the very top of scrollback */}
-      {/* welcomeItems starts empty, then ['welcome'] is added after mount */}
-      {/* This triggers Static to render the welcome as a NEW item */}
-      <Static items={welcomeItems}>
-        {(item) => (
-          <Box key={item}>
-            <WelcomeBox
-              model={config.model ?? DEFAULT_MODEL}
-              workingDirectory={config.workingDirectory}
-              gitBranch={state.gitBranch ?? undefined}
-            />
-          </Box>
-        )}
-      </Static>
-
-      {/* Message List - uses Static for past messages, dynamic area for live content */}
+      {/* Message List - combines welcome box and messages in one Static flow */}
+      {/* This ensures correct ordering: welcome first, then messages */}
       <Box flexDirection="column" paddingX={1}>
         <MessageList
           messages={state.messages}
@@ -1358,6 +1344,10 @@ export function App({ config, auth }: AppProps): React.ReactElement {
           streamingContent={state.streamingContent}
           isStreaming={state.isStreaming}
           thinkingText={state.thinkingText}
+          showWelcome={showWelcome}
+          welcomeModel={config.model ?? DEFAULT_MODEL}
+          welcomeWorkingDirectory={config.workingDirectory}
+          welcomeGitBranch={state.gitBranch ?? undefined}
         />
       </Box>
 

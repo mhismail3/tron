@@ -11,6 +11,9 @@
  *
  * Only the "live" area (thinking indicator, streaming) is in the dynamic
  * render portion that gets re-rendered on state changes.
+ *
+ * The welcome box and messages are combined into a single Static flow to
+ * ensure correct ordering (welcome first, then messages).
  */
 import React from 'react';
 import { Box, Text, Static } from 'ink';
@@ -18,8 +21,14 @@ import { ThinkingIndicator } from './ThinkingIndicator.js';
 import { StreamingContent } from './StreamingContent.js';
 import { ToolExecution } from './ToolExecution.js';
 import { MarkdownText } from './MarkdownText.js';
+import { WelcomeBox } from './WelcomeBox.js';
 import type { DisplayMessage } from '../types.js';
 import { inkColors, icons } from '../theme.js';
+
+// Type for Static items - either welcome or message
+type StaticItem =
+  | { type: 'welcome'; id: string; model: string; workingDirectory: string; gitBranch?: string }
+  | { type: 'message'; message: DisplayMessage };
 
 // Thinking display configuration
 const MAX_THINKING_LINES = 4;
@@ -85,6 +94,12 @@ export interface MessageListProps {
   isStreaming?: boolean;
   /** Current thinking text */
   thinkingText?: string;
+  /** Welcome box props - rendered as first item in Static */
+  welcomeModel?: string;
+  welcomeWorkingDirectory?: string;
+  welcomeGitBranch?: string;
+  /** Whether to show welcome (controlled by parent to trigger Static render) */
+  showWelcome?: boolean;
 }
 
 export function MessageList({
@@ -95,9 +110,37 @@ export function MessageList({
   streamingContent,
   isStreaming,
   thinkingText,
+  welcomeModel,
+  welcomeWorkingDirectory,
+  welcomeGitBranch,
+  showWelcome = false,
 }: MessageListProps): React.ReactElement {
-  // Show "Ready" indicator when no messages and not processing
-  const showReady = messages.length === 0 && !isProcessing && !streamingContent;
+  // Show "Ready" indicator when no messages and not processing and welcome shown
+  const showReady = messages.length === 0 && !isProcessing && !streamingContent && showWelcome;
+
+  // Build combined static items: welcome (if shown) + messages
+  // This ensures welcome and messages are in the same Static flow with correct ordering
+  const staticItems: StaticItem[] = React.useMemo(() => {
+    const items: StaticItem[] = [];
+
+    // Add welcome as first item if shown
+    if (showWelcome && welcomeModel && welcomeWorkingDirectory) {
+      items.push({
+        type: 'welcome',
+        id: 'welcome',
+        model: welcomeModel,
+        workingDirectory: welcomeWorkingDirectory,
+        gitBranch: welcomeGitBranch,
+      });
+    }
+
+    // Add all messages
+    for (const message of messages) {
+      items.push({ type: 'message', message });
+    }
+
+    return items;
+  }, [showWelcome, welcomeModel, welcomeWorkingDirectory, welcomeGitBranch, messages]);
 
   return (
     <Box flexDirection="column" gap={1}>
@@ -109,21 +152,35 @@ export function MessageList({
       )}
 
       {/*
-        STATIC MESSAGES - Critical for scroll behavior!
+        STATIC CONTENT - Critical for scroll behavior!
 
         Static component renders items ONCE and never re-renders them.
         They become part of the terminal's scrollback buffer, allowing
         users to scroll up freely while the agent continues processing.
 
-        Only new messages (not in Static's items array from last render)
-        get rendered. Existing messages are never touched.
+        Welcome box and messages are combined in one Static to ensure
+        correct ordering (welcome first, then messages in order).
       */}
-      <Static items={messages}>
-        {(message, index) => (
-          <Box key={message.id} marginTop={index > 0 ? 1 : 0}>
-            <MessageItem message={message} />
-          </Box>
-        )}
+      <Static items={staticItems}>
+        {(item, index) => {
+          if (item.type === 'welcome') {
+            return (
+              <Box key={item.id}>
+                <WelcomeBox
+                  model={item.model}
+                  workingDirectory={item.workingDirectory}
+                  gitBranch={item.gitBranch}
+                />
+              </Box>
+            );
+          }
+          // Message item
+          return (
+            <Box key={item.message.id} marginTop={index > 0 ? 1 : 0}>
+              <MessageItem message={item.message} />
+            </Box>
+          );
+        }}
       </Static>
 
       {/*
