@@ -86,18 +86,8 @@ export function ChatArea({ onSubmit, onCommand, onStop }: ChatAreaProps) {
       return;
     }
 
-    // Regular message - add to messages and submit
-    dispatch({
-      type: 'ADD_MESSAGE',
-      payload: {
-        id: `msg_user_${Date.now()}`,
-        role: 'user',
-        content: input,
-        timestamp: new Date().toISOString(),
-      },
-    });
+    // Regular message - submit (parent will add to messages)
     dispatch({ type: 'SET_INPUT', payload: '' });
-
     onSubmit?.(input);
   }, [state.input, dispatch, onSubmit, onCommand]);
 

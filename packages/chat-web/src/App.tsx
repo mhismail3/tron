@@ -8,9 +8,9 @@ import { useEffect, useState, useCallback, useRef } from 'react';
 import { ChatProvider, useChatDispatch, useChat } from './store/context.js';
 import { AppShell, Sidebar, type SessionSummary } from './components/layout/index.js';
 import { ChatArea } from './components/chat/ChatArea.js';
-import { ConnectionStatus } from './components/ui/ConnectionStatus.js';
 import { ModelSwitcher } from './components/overlay/index.js';
 import { WorkspaceSelector } from './components/workspace/index.js';
+import { WelcomePage } from './components/welcome/index.js';
 import { useRpc } from './hooks/useRpc.js';
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts.js';
 import { useSessionPersistence } from './hooks/useSessionPersistence.js';
@@ -62,6 +62,10 @@ function AppContent() {
   const [modelSwitching, setModelSwitching] = useState(false);
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
   const [workspaceSelectorOpen, setWorkspaceSelectorOpen] = useState(false);
+
+  // Initialization state - prevents banner flashing
+  const [appInitialized, setAppInitialized] = useState(false);
+  const [connectionAttempted, setConnectionAttempted] = useState(false);
 
   // Session cache to store state when switching between sessions
   const sessionCacheRef = useRef<Map<string, SessionCache>>(new Map());
@@ -129,7 +133,7 @@ function AppContent() {
     }
   }, [persistence, dispatch, setRpcSessionId]);
 
-  // Handle online/offline events
+  // Handle online/offline events and initial connection
   useEffect(() => {
     const handleOnline = () => {
       setIsOnline(true);
@@ -140,9 +144,17 @@ function AppContent() {
     window.addEventListener('online', handleOnline);
     window.addEventListener('offline', handleOffline);
 
-    // Initial connection
-    if (isOnline) {
-      connect();
+    // Initial connection attempt
+    if (isOnline && !connectionAttempted) {
+      setConnectionAttempted(true);
+      connect().finally(() => {
+        // Mark app as initialized after first connection attempt completes
+        // (regardless of success/failure)
+        setTimeout(() => setAppInitialized(true), 100);
+      });
+    } else if (!isOnline) {
+      // If offline, still mark as initialized
+      setAppInitialized(true);
     }
 
     return () => {
@@ -150,7 +162,7 @@ function AppContent() {
       window.removeEventListener('offline', handleOffline);
       disconnect();
     };
-  }, [connect, disconnect, isOnline]);
+  }, [connect, disconnect, isOnline, connectionAttempted]);
 
   // Sync RPC session to state when a new session is created
   useEffect(() => {
@@ -172,7 +184,19 @@ function AppContent() {
     }
   }, [state.messages, state.currentModel, state.tokenUsage, state.sessionId, rpcSessionId, persistence]);
 
-  // Subscribe to RPC events
+  // Refs to avoid stale closures in event handlers
+  const streamingContentRef = useRef(state.streamingContent);
+  const tokenUsageRef = useRef(state.tokenUsage);
+
+  useEffect(() => {
+    streamingContentRef.current = state.streamingContent;
+  }, [state.streamingContent]);
+
+  useEffect(() => {
+    tokenUsageRef.current = state.tokenUsage;
+  }, [state.tokenUsage]);
+
+  // Subscribe to RPC events (stable subscription - no re-subscribing on state changes)
   useEffect(() => {
     const unsubscribe = onEvent((event: RpcEvent) => {
       const data = event.data as Record<string, unknown>;
@@ -203,15 +227,16 @@ function AppContent() {
           }
           break;
 
-        case 'agent.tool_start':
+        case 'agent.tool_start': {
           // Finalize streaming content as a message
-          if (state.streamingContent.trim()) {
+          const currentStreaming = streamingContentRef.current;
+          if (currentStreaming.trim()) {
             dispatch({
               type: 'ADD_MESSAGE',
               payload: {
                 id: `msg_${Date.now()}`,
                 role: 'assistant',
-                content: state.streamingContent.trim(),
+                content: currentStreaming.trim(),
                 timestamp: new Date().toISOString(),
               },
             });
@@ -227,6 +252,7 @@ function AppContent() {
             payload: JSON.stringify(data.arguments ?? {}, null, 2),
           });
           break;
+        }
 
         case 'agent.tool_end':
           // Add tool result as a message
@@ -252,26 +278,28 @@ function AppContent() {
           // Turn ended - update token usage from this turn
           const turnUsage = data.tokenUsage as { inputTokens?: number; outputTokens?: number } | undefined;
           if (turnUsage) {
+            const currentTokenUsage = tokenUsageRef.current;
             dispatch({
               type: 'SET_TOKEN_USAGE',
               payload: {
-                input: (state.tokenUsage?.input || 0) + (turnUsage.inputTokens || 0),
-                output: (state.tokenUsage?.output || 0) + (turnUsage.outputTokens || 0),
+                input: (currentTokenUsage?.input || 0) + (turnUsage.inputTokens || 0),
+                output: (currentTokenUsage?.output || 0) + (turnUsage.outputTokens || 0),
               },
             });
           }
           break;
         }
 
-        case 'agent.complete':
+        case 'agent.complete': {
           // Final cleanup - finalize any remaining streaming content
-          if (state.streamingContent.trim()) {
+          const currentStreaming = streamingContentRef.current;
+          if (currentStreaming.trim()) {
             dispatch({
               type: 'ADD_MESSAGE',
               payload: {
                 id: `msg_${Date.now()}`,
                 role: 'assistant',
-                content: state.streamingContent.trim(),
+                content: currentStreaming.trim(),
                 timestamp: new Date().toISOString(),
               },
             });
@@ -281,6 +309,7 @@ function AppContent() {
           dispatch({ type: 'SET_STREAMING', payload: false });
           dispatch({ type: 'SET_THINKING_TEXT', payload: '' });
           break;
+        }
 
         case 'agent.error':
           dispatch({
@@ -307,7 +336,7 @@ function AppContent() {
     });
 
     return unsubscribe;
-  }, [onEvent, dispatch, state.streamingContent, state.tokenUsage]);
+  }, [onEvent, dispatch]);
 
   // Update connection status in state
   useEffect(() => {
@@ -798,6 +827,38 @@ function AppContent() {
           ? 'error'
           : 'disconnected';
 
+  // Determine if we have sessions
+  const hasSessions = sessions.length > 0;
+
+  // Show welcome page if no sessions exist
+  if (!hasSessions) {
+    return (
+      <div
+        style={{
+          height: '100%',
+          display: 'flex',
+          flexDirection: 'column',
+          background: 'var(--bg-base)',
+          color: 'var(--text-primary)',
+        }}
+      >
+        <WelcomePage
+          onNewSession={handleNewSession}
+          connectionStatus={connectionStatus}
+          isInitializing={!appInitialized}
+        />
+
+        {/* Workspace Selector (for creating first session) */}
+        <WorkspaceSelector
+          isOpen={workspaceSelectorOpen}
+          onSelect={handleWorkspaceSelect}
+          onClose={() => setWorkspaceSelectorOpen(false)}
+          client={client}
+        />
+      </div>
+    );
+  }
+
   return (
     <div
       style={{
@@ -808,30 +869,6 @@ function AppContent() {
         color: 'var(--text-primary)',
       }}
     >
-      {/* Connection status banner */}
-      {connectionStatus !== 'connected' && (
-        <ConnectionStatus
-          status={connectionStatus}
-          isOnline={isOnline}
-          onRetry={connect}
-        />
-      )}
-
-      {/* Error banner */}
-      {error && (
-        <div
-          style={{
-            padding: 'var(--space-sm) var(--space-md)',
-            background: 'rgba(239, 68, 68, 0.15)',
-            color: 'var(--error)',
-            fontSize: 'var(--text-sm)',
-            borderBottom: '1px solid var(--error)',
-          }}
-        >
-          {error.message}
-        </div>
-      )}
-
       {/* Main layout */}
       <AppShell
         sidebar={sidebar}
