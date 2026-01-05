@@ -82,12 +82,33 @@ function normalizeContentBlock(block: unknown): Record<string, unknown> | null {
       };
 
     case 'tool_use': {
+      const toolName = typeof b.name === 'string' ? b.name : String(b.name ?? 'unknown');
+
+      // IMPORTANT: The Anthropic API uses 'input', but our internal ToolCall type uses 'arguments'
+      // We need to check for BOTH to handle both sources correctly
+      const rawInput = b.input ?? b.arguments;
+      const hasInputKey = 'input' in b;
+      const hasArgumentsKey = 'arguments' in b;
+
+      logger.debug('Normalizing tool_use block', {
+        toolName,
+        blockKeys: Object.keys(b),
+        hasInputKey,
+        hasArgumentsKey,
+        inputType: typeof rawInput,
+        inputIsObject: rawInput !== null && typeof rawInput === 'object',
+        inputKeys: rawInput && typeof rawInput === 'object' ? Object.keys(rawInput as object) : [],
+        inputPreview: rawInput ? JSON.stringify(rawInput).slice(0, 200) : 'undefined/null',
+      });
+
       // Preserve the full input object with potential truncation for very large inputs
-      let input = b.input;
+      let input = rawInput;
       if (input && typeof input === 'object') {
-        // Deep clone to avoid mutating original
+        // Deep clone to avoid mutating original and ensure it serializes correctly
         try {
           const inputStr = JSON.stringify(input);
+          // Parse it back to ensure clean serialization (removes any class instances/prototypes)
+          input = JSON.parse(inputStr);
           if (inputStr.length > MAX_TOOL_INPUT_SIZE) {
             // For very large inputs, store a truncated version
             input = {
@@ -96,22 +117,56 @@ function normalizeContentBlock(block: unknown): Record<string, unknown> | null {
               _preview: inputStr.slice(0, MAX_TOOL_INPUT_SIZE),
             };
           }
-        } catch {
-          // If JSON.stringify fails, keep original
+        } catch (e) {
+          // If JSON.stringify fails, try to extract what we can
+          logger.warn('Failed to serialize tool input', { toolName, error: String(e) });
+          input = { _serializationError: true };
         }
+      } else if (input === undefined || input === null) {
+        // Explicitly log when input is missing
+        logger.warn('Tool use block has no input', { toolName, hasInputKey, hasArgumentsKey });
+        input = {};
       }
 
-      return {
-        type: 'tool_use',
+      const result = {
+        type: 'tool_use' as const,
         id: typeof b.id === 'string' ? b.id : String(b.id ?? ''),
-        name: typeof b.name === 'string' ? b.name : String(b.name ?? ''),
-        input: input ?? {},
+        name: toolName,
+        input: input,
       };
+
+      logger.debug('Normalized tool_use result', {
+        toolName,
+        inputKeys: Object.keys(result.input as object),
+        hasContent: Object.keys(result.input as object).length > 0,
+      });
+
+      return result;
     }
 
     case 'tool_result': {
+      // IMPORTANT: Anthropic API uses 'tool_use_id', but our internal ToolResultMessage uses 'toolCallId'
+      // We need to check for BOTH to handle both sources correctly
+      const toolUseId = typeof b.tool_use_id === 'string' ? b.tool_use_id :
+                        typeof b.toolCallId === 'string' ? b.toolCallId :
+                        String(b.tool_use_id ?? b.toolCallId ?? '');
+      const blockKeys = Object.keys(b);
+      const rawContent = b.content;
+      const isError = b.is_error === true || b.isError === true;
+
+      logger.debug('Normalizing tool_result block', {
+        toolUseId: toolUseId.slice(0, 20) + '...',
+        blockKeys,
+        contentType: typeof rawContent,
+        contentIsArray: Array.isArray(rawContent),
+        contentLength: typeof rawContent === 'string' ? rawContent.length :
+                       Array.isArray(rawContent) ? rawContent.length : 0,
+        contentPreview: typeof rawContent === 'string' ? rawContent.slice(0, 100) :
+                       Array.isArray(rawContent) ? JSON.stringify(rawContent).slice(0, 100) : 'N/A',
+      });
+
       // Handle content which can be a string or array
-      let content = b.content;
+      let content = rawContent;
 
       if (typeof content === 'string') {
         // Truncate very large string results
@@ -130,19 +185,27 @@ function normalizeContentBlock(block: unknown): Record<string, unknown> | null {
 
         content = textParts.length > MAX_TOOL_RESULT_SIZE
           ? truncateString(textParts, MAX_TOOL_RESULT_SIZE)
-          : textParts || String(content);
+          : textParts || JSON.stringify(rawContent);
       } else if (content !== undefined && content !== null) {
         content = String(content);
       } else {
         content = '';
       }
 
-      return {
-        type: 'tool_result',
-        tool_use_id: typeof b.tool_use_id === 'string' ? b.tool_use_id : String(b.tool_use_id ?? ''),
+      const result = {
+        type: 'tool_result' as const,
+        tool_use_id: toolUseId,
         content,
-        is_error: b.is_error === true,
+        is_error: isError,
       };
+
+      logger.debug('Normalized tool_result result', {
+        toolUseId: toolUseId.slice(0, 20) + '...',
+        contentLength: typeof result.content === 'string' ? result.content.length : 0,
+        isError: result.is_error,
+      });
+
+      return result;
     }
 
     case 'thinking':
@@ -747,6 +810,23 @@ export class EventStoreOrchestrator extends EventEmitter {
         .filter(m => m.role === 'assistant')
         .flatMap(m => Array.isArray(m.content) ? m.content : [{ type: 'text' as const, text: String(m.content) }]);
 
+      // DEBUG: Log RAW content blocks BEFORE normalization
+      const toolUseBlocks = allAssistantContent.filter((b: any) => b.type === 'tool_use');
+      logger.debug('RAW assistant content before normalization', {
+        sessionId: active.sessionId,
+        totalBlocks: allAssistantContent.length,
+        toolUseBlocks: toolUseBlocks.length,
+        toolUseDetails: toolUseBlocks.map((b: any) => ({
+          name: b.name,
+          id: typeof b.id === 'string' ? b.id.slice(0, 20) + '...' : 'N/A',
+          hasInputKey: 'input' in b,
+          inputType: typeof b.input,
+          inputIsObject: b.input !== null && typeof b.input === 'object',
+          inputKeys: b.input && typeof b.input === 'object' ? Object.keys(b.input) : [],
+          inputPreview: b.input ? JSON.stringify(b.input).slice(0, 150) : 'undefined/null',
+        })),
+      });
+
       // Normalize content blocks to ensure consistent structure and apply truncation
       const normalizedAssistantContent = normalizeContentBlocks(allAssistantContent);
 
@@ -769,37 +849,40 @@ export class EventStoreOrchestrator extends EventEmitter {
         },
       });
 
-      // Also record tool_result blocks from user messages (these follow tool_use)
-      // The first user message is just the prompt (already stored above), subsequent
-      // user messages contain tool_result blocks
-      const userMessagesWithToolResults = runResult.messages
-        .filter(m => m.role === 'user')
-        .slice(1); // Skip the first one (the original prompt)
+      // Also record tool_result blocks from tool result messages
+      // TronAgent stores these as ToolResultMessage with role: 'toolResult'
+      // We need to convert them to content blocks for storage
+      const toolResultMessages = runResult.messages.filter(m => m.role === 'toolResult') as any[];
 
-      if (userMessagesWithToolResults.length > 0) {
-        const allToolResults = userMessagesWithToolResults
-          .flatMap(m => Array.isArray(m.content) ? m.content : []);
+      if (toolResultMessages.length > 0) {
+        // Convert ToolResultMessage format to tool_result content blocks
+        const toolResultBlocks = toolResultMessages.map(m => ({
+          type: 'tool_result' as const,
+          tool_use_id: m.toolCallId,
+          content: typeof m.content === 'string' ? m.content :
+                   Array.isArray(m.content) ? m.content.map((c: any) => c.text).join('\n') : '',
+          is_error: m.isError === true,
+        }));
 
-        if (allToolResults.length > 0) {
-          // Normalize tool results with truncation for large content
-          const normalizedToolResults = normalizeContentBlocks(allToolResults);
+        // Normalize with truncation for large content
+        const normalizedToolResults = normalizeContentBlocks(toolResultBlocks);
 
-          logger.debug('Storing tool results', {
-            sessionId: active.sessionId,
-            resultCount: normalizedToolResults.length,
-            sampleContent: normalizedToolResults.slice(0, 3).map(r => ({
-              type: r.type,
-              hasContent: !!(r.content || r.text),
-              contentLength: typeof r.content === 'string' ? r.content.length : 0,
-            })),
-          });
+        logger.debug('Storing tool results', {
+          sessionId: active.sessionId,
+          resultCount: normalizedToolResults.length,
+          sampleContent: normalizedToolResults.slice(0, 3).map(r => ({
+            type: r.type,
+            toolUseId: (r.tool_use_id as string)?.slice(0, 20) + '...',
+            hasContent: !!(r.content || r.text),
+            contentLength: typeof r.content === 'string' ? r.content.length : 0,
+          })),
+        });
 
-          await this.eventStore.append({
-            sessionId: active.sessionId,
-            type: 'message.user',
-            payload: { content: normalizedToolResults },
-          });
-        }
+        await this.eventStore.append({
+          sessionId: active.sessionId,
+          type: 'message.user',
+          payload: { content: normalizedToolResults },
+        });
       }
 
       // Emit completion event

@@ -1,6 +1,17 @@
 import SwiftUI
 import PhotosUI
 
+// MARK: - Scroll Position Tracking
+
+/// Simple PreferenceKey to track scroll offset for detecting user scroll direction
+private struct ScrollOffsetPreferenceKey: PreferenceKey {
+    nonisolated(unsafe) static var defaultValue: CGFloat = 0
+
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = nextValue()
+    }
+}
+
 // MARK: - Chat View
 
 @available(iOS 26.0, *)
@@ -13,6 +24,17 @@ struct ChatView: View {
     @State private var showSessionStats = false
     @State private var showContextAudit = false
     @State private var showSessionHistory = false
+    /// Cached models for faster ModelSwitcher opening
+    @State private var cachedModels: [ModelInfo] = []
+
+    // MARK: - Smart Auto-Scroll State
+    /// Sticky flag: true until user scrolls up, then stays false until button tap
+    /// This prevents geometry-based detection from incorrectly re-enabling auto-scroll
+    @State private var autoScrollEnabled = true
+    /// Track if we should show the scroll-to-bottom button (new content while scrolled up)
+    @State private var hasUnreadContent = false
+    /// Last scroll offset to detect scroll direction
+    @State private var lastScrollOffset: CGFloat = 0
 
     private let sessionId: String
     private let rpcClient: RPCClient
@@ -79,8 +101,9 @@ struct ChatView: View {
                 currentModel: viewModel.currentModel,
                 sessionId: sessionId,
                 onModelChanged: { newModel in
-                    // Model changed
-                }
+                    // Model changed - update cache
+                },
+                cachedModels: cachedModels.isEmpty ? nil : cachedModels
             )
         }
         .sheet(isPresented: $showSessionStats) {
@@ -107,10 +130,30 @@ struct ChatView: View {
             Text(viewModel.errorMessage ?? "Unknown error")
         }
         .task {
+            // Sync events from server to ensure local EventDatabase has latest state
+            // This ensures tool calls and results are properly persisted
+            do {
+                try await eventStoreManager.syncSessionEvents(sessionId: sessionId)
+            } catch {
+                // Non-fatal: continue with local data if sync fails (offline mode)
+                print("Event sync failed (using local cache): \(error.localizedDescription)")
+            }
+
             // Inject event store manager for event-sourced persistence
+            // This loads messages from EventDatabase (now synced with server)
             let workspaceId = eventStoreManager.activeSession?.workspaceId ?? ""
             viewModel.setEventStoreManager(eventStoreManager, workspaceId: workspaceId)
             await viewModel.connectAndResume()
+
+            // Pre-fetch models in background for faster ModelSwitcher opening
+            await prefetchModels()
+        }
+    }
+
+    /// Pre-fetch models for faster ModelSwitcher opening
+    private func prefetchModels() async {
+        if let models = try? await rpcClient.listModels() {
+            cachedModels = models
         }
     }
 
@@ -176,41 +219,154 @@ struct ChatView: View {
     // MARK: - Messages Scroll View
 
     private var messagesScrollView: some View {
-        ScrollViewReader { proxy in
-            ScrollView {
-                LazyVStack(spacing: 12) {
-                    ForEach(viewModel.messages) { message in
-                        MessageBubble(message: message)
-                            .id(message.id)
-                            .transition(.asymmetric(
-                                insertion: .opacity.combined(with: .move(edge: .bottom)),
-                                removal: .opacity
-                            ))
-                    }
+        ZStack(alignment: .bottom) {
+            ScrollViewReader { proxy in
+                ScrollView {
+                    LazyVStack(spacing: 12) {
+                        // Load more messages button (like iOS Messages)
+                        if viewModel.hasMoreMessages {
+                            loadMoreButton
+                                .id("loadMore")
+                        }
 
-                    if viewModel.isProcessing && viewModel.messages.last?.isStreaming != true {
-                        ProcessingIndicator()
-                            .id("processing")
-                    }
+                        ForEach(viewModel.messages) { message in
+                            MessageBubble(message: message)
+                                .id(message.id)
+                                .transition(.asymmetric(
+                                    insertion: .opacity.combined(with: .move(edge: .bottom)),
+                                    removal: .opacity
+                                ))
+                        }
 
-                    // Scroll anchor
-                    Color.clear
+                        if viewModel.isProcessing && viewModel.messages.last?.isStreaming != true {
+                            ProcessingIndicator()
+                                .id("processing")
+                        }
+
+                        // Scroll anchor with position detection
+                        GeometryReader { geo in
+                            Color.clear
+                                .preference(
+                                    key: ScrollOffsetPreferenceKey.self,
+                                    value: geo.frame(in: .global).minY
+                                )
+                        }
                         .frame(height: 1)
                         .id("bottom")
+                    }
+                    .padding()
                 }
-                .padding()
-            }
-            .scrollDismissesKeyboard(.interactively)
-            .onAppear { scrollProxy = proxy }
-            .onChange(of: viewModel.messages.count) { _, _ in
-                withAnimation(.tronFast) {
-                    proxy.scrollTo("bottom", anchor: .bottom)
+                .scrollDismissesKeyboard(.interactively)
+                .onPreferenceChange(ScrollOffsetPreferenceKey.self) { currentOffset in
+                    // Detect scroll direction: if offset increased significantly, user scrolled UP
+                    // (bottom anchor moved down = user pulled content down = scrolled up)
+                    let scrollDelta = currentOffset - lastScrollOffset
+
+                    // Only disable auto-scroll if user actively scrolled up (delta > threshold)
+                    // and we're currently processing (streaming content)
+                    if scrollDelta > 30 && viewModel.isProcessing {
+                        // User scrolled up while content is streaming
+                        autoScrollEnabled = false
+                        hasUnreadContent = true
+                    }
+
+                    lastScrollOffset = currentOffset
+                }
+                .onAppear {
+                    scrollProxy = proxy
+                }
+                .onChange(of: viewModel.messages.count) { oldCount, newCount in
+                    if autoScrollEnabled {
+                        withAnimation(.tronFast) {
+                            proxy.scrollTo("bottom", anchor: .bottom)
+                        }
+                    } else if newCount > oldCount {
+                        hasUnreadContent = true
+                    }
+                }
+                .onChange(of: viewModel.messages.last?.content) { _, _ in
+                    if autoScrollEnabled {
+                        proxy.scrollTo("bottom", anchor: .bottom)
+                    }
+                    // Don't set hasUnreadContent here - it's already set when autoScrollEnabled becomes false
+                }
+                .onChange(of: viewModel.isProcessing) { wasProcessing, isProcessing in
+                    // When processing ends, if user hasn't scrolled, scroll to bottom
+                    if wasProcessing && !isProcessing && autoScrollEnabled {
+                        withAnimation(.tronFast) {
+                            proxy.scrollTo("bottom", anchor: .bottom)
+                        }
+                    }
+                    // When processing starts fresh, reset auto-scroll
+                    if !wasProcessing && isProcessing {
+                        // Only reset if user previously finished reading (scrolled back)
+                        // This allows continuous sessions to respect user scroll position
+                    }
                 }
             }
-            .onChange(of: viewModel.messages.last?.content) { _, _ in
-                proxy.scrollTo("bottom", anchor: .bottom)
+
+            // Floating "scroll to bottom" button when auto-scroll is disabled
+            if !autoScrollEnabled && (hasUnreadContent || viewModel.isProcessing) {
+                scrollToBottomButton
+                    .transition(.opacity.combined(with: .scale(scale: 0.8)))
+                    .padding(.bottom, 16)
             }
         }
+    }
+
+    // MARK: - Scroll to Bottom Button
+
+    private var scrollToBottomButton: some View {
+        Button {
+            withAnimation(.tronStandard) {
+                scrollProxy?.scrollTo("bottom", anchor: .bottom)
+            }
+            // Re-enable auto-scroll and clear unread indicator
+            autoScrollEnabled = true
+            hasUnreadContent = false
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: "arrow.down")
+                    .font(.system(size: 12, weight: .semibold))
+                if hasUnreadContent {
+                    Text("New content")
+                        .font(.system(size: 12, weight: .medium))
+                }
+            }
+            .foregroundStyle(.white)
+            .padding(.horizontal, hasUnreadContent ? 14 : 10)
+            .padding(.vertical, 10)
+            .background(.tronEmerald.opacity(0.9))
+            .clipShape(Capsule())
+            .shadow(color: .black.opacity(0.3), radius: 8, y: 4)
+        }
+    }
+
+    // MARK: - Load More Button
+
+    private var loadMoreButton: some View {
+        Button {
+            viewModel.loadMoreMessages()
+        } label: {
+            HStack(spacing: 8) {
+                if viewModel.isLoadingMoreMessages {
+                    ProgressView()
+                        .scaleEffect(0.8)
+                        .tint(.white.opacity(0.7))
+                } else {
+                    Image(systemName: "arrow.up.circle")
+                        .font(.system(size: 14, weight: .medium))
+                }
+                Text(viewModel.isLoadingMoreMessages ? "Loading..." : "Load Earlier Messages")
+                    .font(.system(size: 13, weight: .medium))
+            }
+            .foregroundStyle(.white.opacity(0.6))
+            .padding(.vertical, 8)
+            .padding(.horizontal, 16)
+            .background(.white.opacity(0.1), in: Capsule())
+        }
+        .disabled(viewModel.isLoadingMoreMessages)
+        .padding(.bottom, 8)
     }
 }
 

@@ -23,6 +23,10 @@ class ChatViewModel: ObservableObject {
     @Published var thinkingText = ""
     @Published var isThinkingExpanded = false
     @Published var totalTokenUsage: TokenUsage?
+    /// Whether more older messages are available for loading
+    @Published var hasMoreMessages = false
+    /// Whether currently loading more messages
+    @Published var isLoadingMoreMessages = false
 
     // MARK: - Private State
 
@@ -35,7 +39,7 @@ class ChatViewModel: ObservableObject {
     private var accumulatedInputTokens = 0
     private var accumulatedOutputTokens = 0
 
-    /// Track tool calls for the current turn (for persistence)
+    /// Track tool calls for the current turn (for display purposes)
     private var currentTurnToolCalls: [ToolCallRecord] = []
 
     // MARK: - Performance Optimization: Batched Updates
@@ -55,6 +59,17 @@ class ChatViewModel: ObservableObject {
     /// Current turn counter
     private var currentTurn = 0
 
+    // MARK: - Pagination State
+
+    /// All loaded messages from EventDatabase (full set for pagination)
+    private var allReconstructedMessages: [ChatMessage] = []
+    /// Number of messages to show initially
+    private static let initialMessageBatchSize = 50
+    /// Number of messages to load on scroll-up
+    private static let additionalMessageBatchSize = 30
+    /// Current number of messages displayed (from the end)
+    private var displayedMessageCount = 0
+
     init(rpcClient: RPCClient, sessionId: String, eventStoreManager: EventStoreManager? = nil) {
         self.rpcClient = rpcClient
         self.sessionId = sessionId
@@ -67,10 +82,219 @@ class ChatViewModel: ObservableObject {
     func setEventStoreManager(_ manager: EventStoreManager, workspaceId: String) {
         self.eventStoreManager = manager
         self.workspaceId = workspaceId
-        loadPersistedMessages()
+        // Load persisted messages asynchronously to avoid blocking UI
+        Task { @MainActor in
+            await loadPersistedMessagesAsync()
+        }
     }
 
-    /// Load messages from EventDatabase via state reconstruction
+    /// Load messages from EventDatabase asynchronously to avoid blocking UI
+    private func loadPersistedMessagesAsync() async {
+        guard let manager = eventStoreManager else { return }
+
+        // Yield to let UI render first
+        await Task.yield()
+
+        do {
+            let state = try manager.getStateAtHead(sessionId)
+
+            // Process messages with periodic yields to keep UI responsive
+            var loadedMessages: [ChatMessage] = []
+            var messageCount = 0
+
+            for reconstructed in state.messages {
+                messageCount += 1
+                // Yield every 10 messages to allow UI updates
+                if messageCount % 10 == 0 {
+                    await Task.yield()
+                }
+
+                let role: MessageRole
+                switch reconstructed.role {
+                case "user": role = .user
+                case "assistant": role = .assistant
+                case "system": role = .system
+                case "toolResult": role = .toolResult
+                default: role = .assistant
+                }
+
+                // Handle content which could be a string or array of content blocks
+                logger.debug("[DEBUG] ChatVM loadPersisted: role=\(reconstructed.role) content type=\(type(of: reconstructed.content))", category: .session)
+                if let textContent = reconstructed.content as? String {
+                    logger.debug("[DEBUG] ChatVM: parsed as String, length: \(textContent.count)", category: .session)
+                    loadedMessages.append(ChatMessage(role: role, content: .text(textContent)))
+                } else if let contentBlocks = convertToContentBlocks(reconstructed.content) {
+                    logger.debug("[DEBUG] ChatVM: parsed as content blocks, count: \(contentBlocks.count)", category: .session)
+                    // Parse content blocks for text and tool_use blocks
+                    var textParts: [String] = []
+
+                    for block in contentBlocks {
+                        let blockType = block["type"] as? String
+
+                        if blockType == "text", let text = block["text"] as? String {
+                            textParts.append(text)
+                        } else if blockType == "tool_use" {
+                            // Flush any accumulated text before the tool use
+                            if !textParts.isEmpty {
+                                let combinedText = textParts.joined()
+                                if !combinedText.isEmpty {
+                                    loadedMessages.append(ChatMessage(role: role, content: .text(combinedText)))
+                                }
+                                textParts = []
+                            }
+
+                            // Parse tool_use block
+                            let toolName = block["name"] as? String ?? "Unknown"
+                            let toolCallId = block["id"] as? String ?? UUID().uuidString
+
+                            // Format arguments as JSON string - handle multiple possible types
+                            var argsString = "{}"
+                            let inputValue = block["input"]
+                            logger.debug("[DEBUG] tool_use '\(toolName)' input type: \(type(of: inputValue as Any))", category: .session)
+
+                            if let inputDict = inputValue as? [String: Any] {
+                                if let jsonData = try? JSONSerialization.data(withJSONObject: inputDict, options: [.prettyPrinted, .sortedKeys]),
+                                   let jsonStr = String(data: jsonData, encoding: .utf8) {
+                                    argsString = jsonStr
+                                }
+                            } else if let inputDict = inputValue as? [String: AnyCodable] {
+                                // Handle case where AnyCodable wraps nested dictionaries
+                                let unwrapped = inputDict.mapValues { $0.value }
+                                if let jsonData = try? JSONSerialization.data(withJSONObject: unwrapped, options: [.prettyPrinted, .sortedKeys]),
+                                   let jsonStr = String(data: jsonData, encoding: .utf8) {
+                                    argsString = jsonStr
+                                }
+                            }
+                            logger.debug("[DEBUG] tool_use '\(toolName)' argsString: \(argsString.prefix(100))", category: .session)
+
+                            let tool = ToolUseData(
+                                toolName: toolName,
+                                toolCallId: toolCallId,
+                                arguments: argsString,
+                                status: .success,
+                                result: nil,
+                                durationMs: nil
+                            )
+                            loadedMessages.append(ChatMessage(role: .assistant, content: .toolUse(tool)))
+                        } else if blockType == "tool_result" {
+                            // Tool results - update the corresponding tool message
+                            let toolUseId = block["tool_use_id"] as? String ?? ""
+                            logger.debug("[DEBUG] tool_result for '\(toolUseId)', content type: \(type(of: block["content"] as Any))", category: .session)
+                            var resultContent = ""
+
+                            if let content = block["content"] as? String {
+                                resultContent = content
+                            } else if let contentArray = block["content"] as? [[String: Any]] {
+                                for contentBlock in contentArray {
+                                    if let text = contentBlock["text"] as? String {
+                                        resultContent += text
+                                    }
+                                }
+                            }
+                            logger.debug("[DEBUG] tool_result content length: \(resultContent.count)", category: .session)
+
+                            // Find and update the tool message with this result
+                            if let index = loadedMessages.lastIndex(where: {
+                                if case .toolUse(let tool) = $0.content {
+                                    return tool.toolCallId == toolUseId
+                                }
+                                return false
+                            }) {
+                                if case .toolUse(var tool) = loadedMessages[index].content {
+                                    tool.result = resultContent
+                                    loadedMessages[index].content = .toolUse(tool)
+                                }
+                            }
+                        }
+                    }
+
+                    // Flush any remaining text after all blocks
+                    if !textParts.isEmpty {
+                        let combinedText = textParts.joined()
+                        if !combinedText.isEmpty {
+                            loadedMessages.append(ChatMessage(role: role, content: .text(combinedText)))
+                        }
+                    }
+                } else {
+                    logger.warning("[DEBUG] ChatVM: content was neither String nor convertible to blocks! type=\(type(of: reconstructed.content))", category: .session)
+                }
+            }
+
+            // Store all messages for pagination
+            allReconstructedMessages = loadedMessages
+
+            // Show only the latest batch of messages (like iOS Messages app)
+            let batchSize = min(Self.initialMessageBatchSize, loadedMessages.count)
+            displayedMessageCount = batchSize
+            hasMoreMessages = loadedMessages.count > batchSize
+
+            if batchSize > 0 {
+                let startIndex = loadedMessages.count - batchSize
+                messages = Array(loadedMessages[startIndex...])
+            } else {
+                messages = []
+            }
+
+            // Update turn counter and token usage
+            currentTurn = state.turnCount
+            if state.tokenUsage.inputTokens > 0 || state.tokenUsage.outputTokens > 0 {
+                accumulatedInputTokens = state.tokenUsage.inputTokens
+                accumulatedOutputTokens = state.tokenUsage.outputTokens
+                totalTokenUsage = TokenUsage(
+                    inputTokens: accumulatedInputTokens,
+                    outputTokens: accumulatedOutputTokens,
+                    cacheReadTokens: nil,
+                    cacheCreationTokens: nil
+                )
+            }
+
+            logger.info("Loaded \(loadedMessages.count) messages, displaying latest \(batchSize) for session \(sessionId)", category: .session)
+        } catch {
+            logger.error("Failed to load messages from EventDatabase: \(error.localizedDescription)", category: .session)
+        }
+    }
+
+    /// Load more older messages when user scrolls to top (like iOS Messages)
+    /// This prepends historical messages from the initial load snapshot
+    func loadMoreMessages() {
+        guard hasMoreMessages, !isLoadingMoreMessages else { return }
+
+        isLoadingMoreMessages = true
+
+        // Calculate how many historical messages we haven't shown yet
+        let historicalCount = allReconstructedMessages.count
+        let shownFromHistory = displayedMessageCount
+
+        // How many more to load from history
+        let remainingInHistory = historicalCount - shownFromHistory
+        let batchToLoad = min(Self.additionalMessageBatchSize, remainingInHistory)
+
+        if batchToLoad > 0 {
+            // Get the next batch of older messages (from the end of unshown portion)
+            let endIndex = historicalCount - shownFromHistory
+            let startIndex = max(0, endIndex - batchToLoad)
+            let olderMessages = Array(allReconstructedMessages[startIndex..<endIndex])
+
+            // Prepend to current messages
+            messages.insert(contentsOf: olderMessages, at: 0)
+            displayedMessageCount += batchToLoad
+
+            logger.debug("Loaded \(batchToLoad) more messages, now showing \(displayedMessageCount) historical + new", category: .session)
+        }
+
+        hasMoreMessages = displayedMessageCount < historicalCount
+        isLoadingMoreMessages = false
+    }
+
+    /// Append a new message to the display (streaming messages during active session)
+    /// Note: Historical messages are in allReconstructedMessages; this is for new messages only
+    private func appendMessage(_ message: ChatMessage) {
+        messages.append(message)
+        // Don't add to allReconstructedMessages - that's the historical snapshot
+        // New messages are persisted via EventDatabase and will be in the snapshot next session
+    }
+
+    /// Load messages from EventDatabase via state reconstruction (sync version - kept for compatibility)
     private func loadPersistedMessages() {
         guard let manager = eventStoreManager else { return }
 
@@ -92,7 +316,7 @@ class ChatViewModel: ObservableObject {
                 // Handle content which could be a string or array of content blocks
                 if let textContent = reconstructed.content as? String {
                     loadedMessages.append(ChatMessage(role: role, content: .text(textContent)))
-                } else if let contentBlocks = reconstructed.content as? [[String: Any]] {
+                } else if let contentBlocks = convertToContentBlocks(reconstructed.content) {
                     // Parse content blocks for text and tool_use blocks
                     var textParts: [String] = []
 
@@ -194,45 +418,6 @@ class ChatViewModel: ObservableObject {
         }
     }
 
-    /// Cache user message event to EventDatabase
-    private func cacheUserMessageEvent(content: String) {
-        guard let manager = eventStoreManager else { return }
-        currentTurn += 1
-
-        do {
-            _ = try manager.cacheUserMessage(
-                sessionId: sessionId,
-                workspaceId: workspaceId,
-                content: content,
-                turn: currentTurn
-            )
-            logger.debug("Cached user message event for turn \(currentTurn)", category: .events)
-        } catch {
-            logger.error("Failed to cache user message: \(error.localizedDescription)", category: .events)
-        }
-    }
-
-    /// Cache assistant message event to EventDatabase
-    /// Now includes tool calls in content blocks format for full persistence
-    private func cacheAssistantMessageEvent(content: String, toolCalls: [ToolCallRecord] = [], tokenUsage: TokenUsage?) {
-        guard let manager = eventStoreManager else { return }
-
-        do {
-            _ = try manager.cacheAssistantMessage(
-                sessionId: sessionId,
-                workspaceId: workspaceId,
-                content: content,
-                toolCalls: toolCalls,
-                turn: currentTurn,
-                tokenUsage: tokenUsage,
-                model: currentModel
-            )
-            logger.debug("Cached assistant message event for turn \(currentTurn) with \(toolCalls.count) tool calls", category: .events)
-        } catch {
-            logger.error("Failed to cache assistant message: \(error.localizedDescription)", category: .events)
-        }
-    }
-
     private func setupBindings() {
         rpcClient.$connectionState
             .receive(on: DispatchQueue.main)
@@ -271,6 +456,10 @@ class ChatViewModel: ObservableObject {
             self?.handleTurnEnd(event)
         }
 
+        rpcClient.onAgentTurn = { [weak self] event in
+            self?.handleAgentTurn(event)
+        }
+
         rpcClient.onComplete = { [weak self] in
             self?.handleComplete()
         }
@@ -289,9 +478,11 @@ class ChatViewModel: ObservableObject {
         logger.debug("Calling rpcClient.connect()...", category: .session)
         await rpcClient.connect()
 
-        // Wait for connection
-        logger.verbose("Waiting 500ms for connection to stabilize...", category: .session)
-        try? await Task.sleep(for: .milliseconds(500))
+        // Only wait if not already connected (avoid unnecessary delay)
+        if !rpcClient.isConnected {
+            logger.verbose("Waiting briefly for connection...", category: .session)
+            try? await Task.sleep(for: .milliseconds(100))
+        }
 
         guard rpcClient.isConnected else {
             logger.warning("Failed to connect to server - rpcClient.isConnected=false", category: .session)
@@ -310,16 +501,12 @@ class ChatViewModel: ObservableObject {
             return
         }
 
-        // Try to load message history (non-critical, may not be supported)
-        do {
-            logger.debug("Fetching session history...", category: .session)
-            let history = try await rpcClient.getSessionHistory()
-            messages = history.map { historyToMessage($0) }
-            logger.info("Loaded \(history.count) messages from history", category: .session)
-        } catch {
-            // History fetch is optional - server may not support it
-            logger.debug("Could not fetch history (may not be supported): \(error.localizedDescription)", category: .session)
-        }
+        // NOTE: We intentionally do NOT fetch server history here.
+        // The local EventDatabase is the source of truth for message history,
+        // and it contains full content blocks (including tool calls and results).
+        // Server history is text-only and would lose tool call information.
+        // Messages are loaded via setEventStoreManager() -> loadPersistedMessagesAsync()
+        logger.debug("Session resumed, using local EventDatabase for message history", category: .session)
     }
 
     func disconnect() async {
@@ -340,6 +527,54 @@ class ChatViewModel: ObservableObject {
         )
     }
 
+    /// Safely convert Any to content blocks array.
+    /// Handles JSON type erasure where arrays become [Any] instead of [[String: Any]].
+    /// Also handles NSArray from Objective-C bridging.
+    private func convertToContentBlocks(_ value: Any) -> [[String: Any]]? {
+        logger.debug("[DEBUG] convertToContentBlocks: input type=\(type(of: value))", category: .session)
+
+        // Direct cast (works if already properly typed)
+        if let blocks = value as? [[String: Any]] {
+            logger.debug("[DEBUG] convertToContentBlocks: direct cast to [[String: Any]] succeeded, \(blocks.count) blocks", category: .session)
+            return blocks
+        }
+
+        // Handle [Any] arrays (common after JSON decoding)
+        if let anyArray = value as? [Any] {
+            logger.debug("[DEBUG] convertToContentBlocks: cast to [Any] succeeded, \(anyArray.count) elements", category: .session)
+            var result: [[String: Any]] = []
+            for (idx, element) in anyArray.enumerated() {
+                logger.debug("[DEBUG] convertToContentBlocks: element[\(idx)] type=\(type(of: element))", category: .session)
+                if let dict = element as? [String: Any] {
+                    result.append(dict)
+                }
+            }
+            // Only return if we successfully converted all elements
+            if !result.isEmpty {
+                logger.debug("[DEBUG] convertToContentBlocks: converted to \(result.count) blocks", category: .session)
+                return result
+            }
+        }
+
+        // Handle NSArray (Objective-C bridging)
+        if let nsArray = value as? NSArray {
+            var result: [[String: Any]] = []
+            for element in nsArray {
+                if let dict = element as? [String: Any] {
+                    result.append(dict)
+                } else if let nsDict = element as? NSDictionary as? [String: Any] {
+                    result.append(nsDict)
+                }
+            }
+            if !result.isEmpty {
+                return result
+            }
+        }
+
+        logger.warning("[DEBUG] convertToContentBlocks: all conversion attempts failed for type \(type(of: value))", category: .session)
+        return nil
+    }
+
     // MARK: - Message Sending
 
     func sendMessage() {
@@ -351,20 +586,20 @@ class ChatViewModel: ObservableObject {
 
         logger.info("Sending message: \"\(text.prefix(100))...\" with \(attachedImages.count) images", category: .chat)
 
-        // Create user message
+        // Create user message (use appendMessage to keep pagination in sync)
         if !attachedImages.isEmpty {
             let imageMessage = ChatMessage(role: .user, content: .images(attachedImages))
-            messages.append(imageMessage)
+            appendMessage(imageMessage)
             logger.debug("Added image message with \(attachedImages.count) images", category: .chat)
         }
 
         if !text.isEmpty {
             let userMessage = ChatMessage.user(text)
-            messages.append(userMessage)
+            appendMessage(userMessage)
             logger.debug("Added user text message", category: .chat)
-
-            // Cache user message event to EventDatabase
-            cacheUserMessageEvent(content: text)
+            currentTurn += 1
+            // Note: We don't cache user message locally - server is source of truth
+            // After turn completes, we sync from server to get authoritative events
         }
 
         inputText = ""
@@ -509,7 +744,7 @@ class ChatViewModel: ObservableObject {
         messages.append(message)
         currentToolMessages[message.id] = message
 
-        // Track tool call for persistence
+        // Track tool call for persistence (will be added to content items when complete)
         let record = ToolCallRecord(
             toolCallId: event.toolCallId,
             toolName: event.toolName,
@@ -539,7 +774,7 @@ class ChatViewModel: ObservableObject {
             logger.warning("Could not find tool message for toolCallId=\(event.toolCallId)", category: .events)
         }
 
-        // Update tracked tool call with result for persistence
+        // Update tracked tool call with result (for display tracking)
         if let idx = currentTurnToolCalls.firstIndex(where: { $0.toolCallId == event.toolCallId }) {
             currentTurnToolCalls[idx].result = event.displayResult
             currentTurnToolCalls[idx].isError = !event.success
@@ -573,25 +808,106 @@ class ChatViewModel: ObservableObject {
         }
     }
 
+    private func handleAgentTurn(_ event: AgentTurnEvent) {
+        logger.info("Agent turn received: \(event.messages.count) messages, \(event.toolUses.count) tool uses, \(event.toolResults.count) tool results", category: .events)
+
+        // Cache the full turn content to EventStoreManager
+        // This captures tool_use and tool_result blocks that may not be in server events
+        guard let manager = eventStoreManager else {
+            logger.warning("No EventStoreManager to cache agent turn content", category: .events)
+            return
+        }
+
+        // Convert AgentTurnEvent messages to cacheable format
+        var turnMessages: [[String: Any]] = []
+        for msg in event.messages {
+            var messageDict: [String: Any] = ["role": msg.role]
+
+            // Convert content to proper format
+            switch msg.content {
+            case .text(let text):
+                messageDict["content"] = text
+            case .blocks(let blocks):
+                var contentBlocks: [[String: Any]] = []
+                for block in blocks {
+                    switch block {
+                    case .text(let text):
+                        contentBlocks.append(["type": "text", "text": text])
+                    case .toolUse(let id, let name, let input):
+                        var inputDict: [String: Any] = [:]
+                        for (key, value) in input {
+                            inputDict[key] = value.value
+                        }
+                        contentBlocks.append([
+                            "type": "tool_use",
+                            "id": id,
+                            "name": name,
+                            "input": inputDict
+                        ])
+                    case .toolResult(let toolUseId, let content, let isError):
+                        contentBlocks.append([
+                            "type": "tool_result",
+                            "tool_use_id": toolUseId,
+                            "content": content,
+                            "is_error": isError
+                        ])
+                    case .thinking(let text):
+                        contentBlocks.append(["type": "thinking", "thinking": text])
+                    case .unknown:
+                        break
+                    }
+                }
+                messageDict["content"] = contentBlocks
+            }
+            turnMessages.append(messageDict)
+        }
+
+        // Cache the turn content for merging with server events
+        manager.cacheTurnContent(
+            sessionId: sessionId,
+            turnNumber: event.turnNumber,
+            messages: turnMessages
+        )
+
+        // Now trigger sync AFTER caching content
+        // This ensures the cache is populated before enrichment happens
+        logger.info("Triggering sync after caching agent turn content", category: .events)
+        Task {
+            await syncSessionEventsFromServer()
+        }
+    }
+
     private func handleComplete() {
         logger.info("Agent complete, finalizing message (streamingText: \(streamingText.count) chars, toolCalls: \(currentTurnToolCalls.count))", category: .events)
         // Flush any pending batched updates before finalizing
         flushPendingTextUpdates()
-
-        // Cache assistant message event with tool calls before finalizing
-        if !streamingText.isEmpty || !currentTurnToolCalls.isEmpty {
-            cacheAssistantMessageEvent(
-                content: streamingText,
-                toolCalls: currentTurnToolCalls,
-                tokenUsage: totalTokenUsage
-            )
-        }
 
         isProcessing = false
         finalizeStreamingMessage()
         thinkingText = ""
         currentToolMessages.removeAll()
         currentTurnToolCalls.removeAll()  // Clear tool calls for next turn
+
+        // NOTE: We do NOT sync from server here anymore.
+        // The sync is triggered from handleAgentTurn which arrives AFTER agent.complete
+        // and contains the full message content including tool blocks.
+        // This ensures the cache is populated before syncing.
+    }
+
+    /// Sync session events from server after turn completes
+    /// This ensures the local EventDatabase has authoritative server events
+    private func syncSessionEventsFromServer() async {
+        guard let manager = eventStoreManager else {
+            logger.warning("No EventStoreManager available for sync", category: .events)
+            return
+        }
+
+        do {
+            try await manager.syncSessionEvents(sessionId: sessionId)
+            logger.info("Synced session events from server for session \(sessionId)", category: .events)
+        } catch {
+            logger.error("Failed to sync session events: \(error.localizedDescription)", category: .events)
+        }
     }
 
     private func handleError(_ message: String) {

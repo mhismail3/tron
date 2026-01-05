@@ -14,6 +14,12 @@ struct ToolCallRecord {
     var isError: Bool = false
 }
 
+/// Ordered content item for proper interleaving of text and tool calls
+enum OrderedContentItem {
+    case text(String)
+    case toolCall(ToolCallRecord)
+}
+
 // MARK: - Event Store Manager
 
 /// Central manager for event-sourced session state
@@ -35,6 +41,11 @@ class EventStoreManager: ObservableObject {
 
     // Session change notification for views that need to react
     let sessionUpdated = PassthroughSubject<String, Never>()
+
+    // MARK: - Turn Content Cache
+    // Caches full message content from agent.turn events for merging with server events
+    // Key: sessionId, Value: array of messages with full content blocks
+    private var turnContentCache: [String: [[String: Any]]] = [:]
 
     // MARK: - Initialization
 
@@ -116,6 +127,8 @@ class EventStoreManager: ObservableObject {
     }
 
     /// Sync events for a specific session
+    /// This is the primary way to get session data - server is source of truth
+    /// Events are enriched with cached tool content from agent.turn events
     func syncSessionEvents(sessionId: String) async throws {
         logger.info("Syncing events for session \(sessionId)")
 
@@ -123,7 +136,7 @@ class EventStoreManager: ObservableObject {
         let syncState = try eventDB.getSyncState(sessionId)
         let afterEventId = syncState?.lastSyncedEventId
 
-        // Fetch events since cursor
+        // Fetch events since cursor from server (authoritative source)
         let result = try await rpcClient.getEventsSince(
             sessionId: sessionId,
             afterEventId: afterEventId,
@@ -132,13 +145,13 @@ class EventStoreManager: ObservableObject {
 
         if !result.events.isEmpty {
             // Convert server events
-            let events = result.events.map { rawEventToSessionEvent($0) }
+            var events = result.events.map { rawEventToSessionEvent($0) }
 
-            // IMPORTANT: Delete any locally-cached events that duplicate these server events
-            // This prevents duplicates when local caching races with server sync
-            try eventDB.deleteLocalDuplicates(sessionId: sessionId, serverEvents: events)
+            // Enrich events with cached tool content from agent.turn
+            // This ensures tool_use and tool_result blocks are preserved
+            events = try enrichEventsWithCachedContent(events: events, sessionId: sessionId)
 
-            // Now insert the authoritative server events
+            // Insert enriched events
             try eventDB.insertEvents(events)
 
             // Update sync state
@@ -262,7 +275,8 @@ class EventStoreManager: ObservableObject {
             $0.type == "message.user" || $0.type == "message.assistant"
         }.count
 
-        // Update head event
+        // Update head event - use latest event from server (authoritative source)
+        // All events should be from server (evt_* IDs) since we don't create local events
         if let lastEvent = events.last {
             session.headEventId = lastEvent.id
         }
@@ -324,9 +338,14 @@ class EventStoreManager: ObservableObject {
         }
     }
 
-    // MARK: - Real-time Event Caching
+    // MARK: - Local Event Caching (Deprecated)
+    // NOTE: These methods create local events with UUID IDs.
+    // The preferred approach is to sync from server after each turn.
+    // Server events (evt_* IDs) are the authoritative source of truth.
+    // These methods are kept for edge cases but should not be used in normal flow.
 
     /// Cache a new event received during streaming
+    /// @deprecated Prefer syncing from server after turn completes
     func cacheStreamingEvent(_ event: SessionEvent) throws {
         try eventDB.insertEvent(event)
 
@@ -345,6 +364,7 @@ class EventStoreManager: ObservableObject {
     }
 
     /// Cache a user message event
+    /// @deprecated Prefer syncing from server after turn completes
     func cacheUserMessage(
         sessionId: String,
         workspaceId: String,
@@ -374,6 +394,7 @@ class EventStoreManager: ObservableObject {
 
     /// Cache an assistant message event with optional tool calls
     /// Content is stored as an array of content blocks to match server format
+    /// @deprecated Prefer syncing from server after turn completes
     func cacheAssistantMessage(
         sessionId: String,
         workspaceId: String,
@@ -461,6 +482,219 @@ class EventStoreManager: ObservableObject {
         }
 
         return event
+    }
+
+    /// Cache an assistant message with ordered content items (text and tools interleaved)
+    /// This preserves intermediate text that appears before/between tool calls
+    /// @deprecated Prefer syncing from server after turn completes
+    func cacheAssistantMessageOrdered(
+        sessionId: String,
+        workspaceId: String,
+        contentItems: [OrderedContentItem],
+        turn: Int,
+        tokenUsage: TokenUsage?,
+        model: String
+    ) throws -> SessionEvent {
+        let session = try eventDB.getSession(sessionId)
+        let parentId = session?.headEventId
+
+        // Build content blocks array in order
+        var contentBlocks: [[String: Any]] = []
+
+        for item in contentItems {
+            switch item {
+            case .text(let text):
+                if !text.isEmpty {
+                    contentBlocks.append([
+                        "type": "text",
+                        "text": text
+                    ])
+                }
+
+            case .toolCall(let toolCall):
+                // Parse arguments from JSON string to dictionary
+                var inputDict: [String: Any] = [:]
+                if let data = toolCall.arguments.data(using: .utf8),
+                   let parsed = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                    inputDict = parsed
+                }
+
+                // Add tool_use block
+                contentBlocks.append([
+                    "type": "tool_use",
+                    "id": toolCall.toolCallId,
+                    "name": toolCall.toolName,
+                    "input": inputDict
+                ])
+
+                // Add tool_result block if we have a result
+                if let result = toolCall.result {
+                    contentBlocks.append([
+                        "type": "tool_result",
+                        "tool_use_id": toolCall.toolCallId,
+                        "content": result,
+                        "is_error": toolCall.isError
+                    ])
+                }
+            }
+        }
+
+        var payload: [String: AnyCodable] = [
+            "content": AnyCodable(contentBlocks),
+            "turn": AnyCodable(turn),
+            "model": AnyCodable(model)
+        ]
+
+        if let usage = tokenUsage {
+            payload["tokenUsage"] = AnyCodable([
+                "inputTokens": usage.inputTokens,
+                "outputTokens": usage.outputTokens
+            ])
+        }
+
+        let event = SessionEvent(
+            id: UUID().uuidString,
+            parentId: parentId,
+            sessionId: sessionId,
+            workspaceId: workspaceId,
+            type: "message.assistant",
+            timestamp: ISO8601DateFormatter().string(from: Date()),
+            sequence: (session?.eventCount ?? 0) + 1,
+            payload: payload
+        )
+
+        try cacheStreamingEvent(event)
+
+        // Update session token usage
+        if var updatedSession = try eventDB.getSession(sessionId),
+           let usage = tokenUsage {
+            updatedSession.inputTokens += usage.inputTokens
+            updatedSession.outputTokens += usage.outputTokens
+            try eventDB.insertSession(updatedSession)
+            loadSessions()
+        }
+
+        logger.info("Cached ordered assistant message with \(contentBlocks.count) content blocks")
+        return event
+    }
+
+    // MARK: - Turn Content Caching
+
+    /// Cache full turn content from agent.turn event
+    /// This captures tool_use and tool_result blocks that may not be in server events
+    func cacheTurnContent(sessionId: String, turnNumber: Int, messages: [[String: Any]]) {
+        // Store messages for this session (replace any existing cache)
+        turnContentCache[sessionId] = messages
+        logger.info("Cached turn \(turnNumber) content for session \(sessionId): \(messages.count) messages")
+
+        // Log content block types for debugging
+        for (idx, msg) in messages.enumerated() {
+            let role = msg["role"] as? String ?? "unknown"
+            if let content = msg["content"] as? [[String: Any]] {
+                let types = content.compactMap { $0["type"] as? String }
+                logger.debug("  Message \(idx) (\(role)): \(types.joined(separator: ", "))")
+            } else if let text = msg["content"] as? String {
+                logger.debug("  Message \(idx) (\(role)): text (\(text.count) chars)")
+            }
+        }
+    }
+
+    /// Get cached turn content for enriching server events
+    private func getCachedTurnContent(sessionId: String) -> [[String: Any]]? {
+        return turnContentCache[sessionId]
+    }
+
+    /// Clear cached turn content after successful enrichment
+    private func clearCachedTurnContent(sessionId: String) {
+        turnContentCache.removeValue(forKey: sessionId)
+        logger.debug("Cleared turn content cache for session \(sessionId)")
+    }
+
+    /// Enrich server events with cached turn content
+    /// Server events may lack full tool content; this merges in the rich content from agent.turn
+    private func enrichEventsWithCachedContent(events: [SessionEvent], sessionId: String) throws -> [SessionEvent] {
+        guard let cachedMessages = getCachedTurnContent(sessionId: sessionId) else {
+            return events // No cached content to merge
+        }
+
+        var enrichedEvents = events
+        var enrichedCount = 0
+
+        // Build a lookup of cached content by role
+        // We'll match assistant messages with their rich content
+        let cachedAssistantMessages = cachedMessages.filter { ($0["role"] as? String) == "assistant" }
+
+        // Find message.assistant events that might need enrichment
+        for (idx, event) in enrichedEvents.enumerated() {
+            guard event.type == "message.assistant" else { continue }
+
+            // Check if event has simplified content (just text, no tool blocks)
+            let hasToolBlocks = checkForToolBlocks(in: event.payload)
+
+            if !hasToolBlocks {
+                // Try to find matching cached content with tool blocks
+                // Use the last cached assistant message that has tool blocks
+                if let richContent = cachedAssistantMessages.last,
+                   let contentBlocks = richContent["content"] as? [[String: Any]],
+                   contentBlocks.contains(where: { ($0["type"] as? String) == "tool_use" }) {
+
+                    // Create enriched payload
+                    var enrichedPayload = event.payload
+                    enrichedPayload["content"] = AnyCodable(contentBlocks)
+
+                    // Create new event with enriched payload
+                    let enrichedEvent = SessionEvent(
+                        id: event.id,
+                        parentId: event.parentId,
+                        sessionId: event.sessionId,
+                        workspaceId: event.workspaceId,
+                        type: event.type,
+                        timestamp: event.timestamp,
+                        sequence: event.sequence,
+                        payload: enrichedPayload
+                    )
+
+                    enrichedEvents[idx] = enrichedEvent
+                    enrichedCount += 1
+                    logger.info("Enriched event \(event.id) with \(contentBlocks.count) content blocks")
+                }
+            }
+        }
+
+        if enrichedCount > 0 {
+            logger.info("Enriched \(enrichedCount) events with cached tool content for session \(sessionId)")
+            // Clear cache after successful enrichment
+            clearCachedTurnContent(sessionId: sessionId)
+        }
+
+        return enrichedEvents
+    }
+
+    /// Check if event payload has tool_use or tool_result blocks
+    private func checkForToolBlocks(in payload: [String: AnyCodable]) -> Bool {
+        guard let content = payload["content"]?.value else { return false }
+
+        // Content could be a string (no tool blocks) or array of blocks
+        if content is String { return false }
+
+        if let blocks = content as? [[String: Any]] {
+            return blocks.contains { block in
+                let type = block["type"] as? String
+                return type == "tool_use" || type == "tool_result"
+            }
+        }
+
+        if let blocks = content as? [Any] {
+            return blocks.contains { element in
+                if let block = element as? [String: Any] {
+                    let type = block["type"] as? String
+                    return type == "tool_use" || type == "tool_result"
+                }
+                return false
+            }
+        }
+
+        return false
     }
 
     // MARK: - Tree Operations (Fork/Rewind)

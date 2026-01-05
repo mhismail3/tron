@@ -7,6 +7,8 @@ struct ModelSwitcher: View {
     let currentModel: String
     let sessionId: String
     let onModelChanged: (String) -> Void
+    /// Pre-loaded models from cache (optional - will fetch if nil)
+    var cachedModels: [ModelInfo]?
 
     @Environment(\.dismiss) private var dismiss
     @State private var models: [ModelInfo] = []
@@ -56,11 +58,23 @@ struct ModelSwitcher: View {
             } message: {
                 Text(errorMessage ?? "")
             }
-            .task {
-                await loadModels()
-            }
             .onAppear {
                 selectedModelId = currentModel
+                // Use cached models immediately if available
+                if let cached = cachedModels, !cached.isEmpty {
+                    models = cached
+                    isLoading = false
+                }
+            }
+            .task {
+                // If we had cached models, refresh in background
+                // Otherwise load synchronously (but still async)
+                if cachedModels == nil || cachedModels?.isEmpty == true {
+                    await loadModels()
+                } else {
+                    // Refresh in background without blocking UI
+                    await refreshModelsInBackground()
+                }
             }
         }
         .preferredColorScheme(.dark)
@@ -148,6 +162,19 @@ struct ModelSwitcher: View {
             errorMessage = error.localizedDescription
         }
         isLoading = false
+    }
+
+    /// Refresh models in background without showing loading indicator
+    private func refreshModelsInBackground() async {
+        do {
+            let freshModels = try await rpcClient.listModels()
+            // Only update if we got results
+            if !freshModels.isEmpty {
+                models = freshModels
+            }
+        } catch {
+            // Silently fail - we have cached data
+        }
     }
 
     private func switchModel() {
@@ -267,6 +294,7 @@ struct ModelRow: View {
         rpcClient: RPCClient(serverURL: URL(string: "ws://localhost:8080/ws")!),
         currentModel: "claude-sonnet-4-20250514",
         sessionId: "test",
-        onModelChanged: { _ in }
+        onModelChanged: { _ in },
+        cachedModels: nil
     )
 }

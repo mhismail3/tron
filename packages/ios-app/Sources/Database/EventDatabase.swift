@@ -268,56 +268,102 @@ class EventDatabase: ObservableObject {
     }
 
     /// Delete locally-cached events that would be duplicates of incoming server events.
-    /// Local events have UUID-style IDs, server events have "evt_" prefixed IDs.
-    /// This should be called BEFORE inserting server events to prevent duplicates.
-    func deleteLocalDuplicates(sessionId: String, serverEvents: [SessionEvent]) throws {
+    /// @deprecated This method is no longer needed since we don't create local events.
+    /// Server events (evt_* IDs) are now the authoritative source of truth.
+    /// Kept for backwards compatibility with existing data.
+    func deleteLocalDuplicates(sessionId: String, serverEvents: [SessionEvent]) throws -> [String: [String: AnyCodable]] {
         // Get all local events for this session (those with UUID-style IDs, not "evt_" prefix)
         let localEvents = try getEventsBySession(sessionId).filter { !$0.id.hasPrefix("evt_") }
 
+        // Map of server event ID -> rich content payload to merge
+        var contentToMerge: [String: [String: AnyCodable]] = [:]
+
         guard !localEvents.isEmpty else {
             logger.debug("No local events to deduplicate for session \(sessionId)")
-            return
+            return contentToMerge
         }
 
         logger.debug("Checking \(localEvents.count) local events against \(serverEvents.count) server events")
 
-        // Build a set of (type, content) pairs from server events for quick lookup
-        // Note: We don't use 'turn' for matching because server events may not include it
-        var serverEventKeys = Set<String>()
-        for event in serverEvents {
-            if event.type == "message.user" || event.type == "message.assistant" {
-                // Extract content - handle both String and Array content
-                var contentStr = ""
-                if let content = event.payload["content"]?.value as? String {
-                    contentStr = content
-                } else if let contentArray = event.payload["content"]?.value as? [[String: Any]] {
-                    // Handle content blocks (array of {type: "text", text: "..."})
-                    contentStr = contentArray.compactMap { $0["text"] as? String }.joined()
+        // Helper to check if content has tool_use or tool_result blocks
+        func hasToolBlocks(_ payload: [String: AnyCodable]) -> Bool {
+            guard let contentArray = payload["content"]?.value as? [[String: Any]] else {
+                // Also try [Any] which is what AnyCodable decodes arrays as
+                guard let anyArray = payload["content"]?.value as? [Any] else {
+                    return false
                 }
-
-                // Key by type + content prefix only (no turn - server may not include it)
-                let key = "\(event.type):\(String(contentStr.prefix(100)))"
-                serverEventKeys.insert(key)
-                logger.debug("Server event key: \(key)")
+                for element in anyArray {
+                    if let dict = element as? [String: Any],
+                       let type = dict["type"] as? String,
+                       type == "tool_use" || type == "tool_result" {
+                        return true
+                    }
+                }
+                return false
+            }
+            return contentArray.contains { block in
+                let blockType = block["type"] as? String
+                return blockType == "tool_use" || blockType == "tool_result"
             }
         }
 
-        // Find local events that match server events and delete them
+        // Helper to extract text content for matching
+        func extractTextContent(_ payload: [String: AnyCodable]) -> String {
+            if let content = payload["content"]?.value as? String {
+                return content
+            } else if let contentArray = payload["content"]?.value as? [[String: Any]] {
+                return contentArray.compactMap { $0["text"] as? String }.joined()
+            } else if let anyArray = payload["content"]?.value as? [Any] {
+                // Handle [Any] from AnyCodable decoding
+                var texts: [String] = []
+                for element in anyArray {
+                    if let dict = element as? [String: Any],
+                       let text = dict["text"] as? String {
+                        texts.append(text)
+                    }
+                }
+                return texts.joined()
+            }
+            return ""
+        }
+
+        // Build map of server events by key, tracking id and whether they have tool blocks
+        struct ServerEventInfo {
+            let id: String
+            let hasToolBlocks: Bool
+        }
+        var serverEventMap: [String: ServerEventInfo] = [:]
+
+        for event in serverEvents {
+            if event.type == "message.user" || event.type == "message.assistant" {
+                let contentStr = extractTextContent(event.payload)
+                let key = "\(event.type):\(String(contentStr.prefix(100)))"
+                let info = ServerEventInfo(id: event.id, hasToolBlocks: hasToolBlocks(event.payload))
+                serverEventMap[key] = info
+                logger.debug("Server event key: \(key), hasToolBlocks: \(info.hasToolBlocks)")
+            }
+        }
+
+        // Find local events that match server events
+        // When local has richer content (tool blocks) than server, store content to merge
         var idsToDelete: [String] = []
         for localEvent in localEvents {
             if localEvent.type == "message.user" || localEvent.type == "message.assistant" {
-                var contentStr = ""
-                if let content = localEvent.payload["content"]?.value as? String {
-                    contentStr = content
-                } else if let contentArray = localEvent.payload["content"]?.value as? [[String: Any]] {
-                    contentStr = contentArray.compactMap { $0["text"] as? String }.joined()
-                }
-
+                let contentStr = extractTextContent(localEvent.payload)
                 let key = "\(localEvent.type):\(String(contentStr.prefix(100)))"
-                logger.debug("Local event key: \(key), matches: \(serverEventKeys.contains(key))")
+                let localHasToolBlocks = hasToolBlocks(localEvent.payload)
 
-                if serverEventKeys.contains(key) {
+                if let serverInfo = serverEventMap[key] {
+                    // Always delete local event - it will be replaced by server event
                     idsToDelete.append(localEvent.id)
+
+                    // If local has tool blocks but server doesn't, save content to merge
+                    if localHasToolBlocks && !serverInfo.hasToolBlocks {
+                        logger.info("Will merge local tool blocks into server event: \(serverInfo.id)")
+                        contentToMerge[serverInfo.id] = localEvent.payload
+                    }
+
+                    logger.debug("Local event key: \(key) - will delete (localTools: \(localHasToolBlocks), serverTools: \(serverInfo.hasToolBlocks), merge: \(localHasToolBlocks && !serverInfo.hasToolBlocks))")
                 }
             }
         }
@@ -345,6 +391,8 @@ class EventDatabase: ObservableObject {
         } else {
             logger.debug("No duplicates found to delete")
         }
+
+        return contentToMerge
     }
 
     /// Check if an event with the given ID already exists
@@ -527,12 +575,24 @@ class EventDatabase: ObservableObject {
         var messages: [ReconstructedMessage] = []
 
         for event in ancestors {
-            if event.type == "message.user" {
-                let content = event.payload["content"]?.value ?? ""
-                messages.append(ReconstructedMessage(role: "user", content: content))
-            } else if event.type == "message.assistant" {
-                let content = event.payload["content"]?.value ?? ""
-                messages.append(ReconstructedMessage(role: "assistant", content: content))
+            if event.type == "message.user" || event.type == "message.assistant" {
+                // Content can be array of content blocks (with tool_use/tool_result) or string
+                let content: Any
+                if let contentValue = event.payload["content"]?.value {
+                    if let blocks = contentValue as? [[String: Any]] {
+                        content = blocks
+                    } else if let blocks = contentValue as? [Any] {
+                        content = blocks
+                    } else if let text = contentValue as? String {
+                        content = text
+                    } else {
+                        content = String(describing: contentValue)
+                    }
+                } else {
+                    content = ""
+                }
+                let role = event.type == "message.user" ? "user" : "assistant"
+                messages.append(ReconstructedMessage(role: role, content: content))
             }
         }
 
@@ -560,7 +620,21 @@ class EventDatabase: ObservableObject {
         for event in ancestors {
             switch event.type {
             case "message.user":
-                let content = event.payload["content"]?.value ?? ""
+                // Content can be an array of content blocks (with tool_result) or a simple string
+                let content: Any
+                if let contentValue = event.payload["content"]?.value {
+                    if let blocks = contentValue as? [[String: Any]] {
+                        content = blocks
+                    } else if let blocks = contentValue as? [Any] {
+                        content = blocks
+                    } else if let text = contentValue as? String {
+                        content = text
+                    } else {
+                        content = String(describing: contentValue)
+                    }
+                } else {
+                    content = ""
+                }
                 messages.append(ReconstructedMessage(role: "user", content: content))
 
                 if let usage = event.payload["tokenUsage"]?.value as? [String: Any] {
@@ -569,7 +643,32 @@ class EventDatabase: ObservableObject {
                 }
 
             case "message.assistant":
-                let content = event.payload["content"]?.value ?? ""
+                // Content can be an array of content blocks (with tool_use/tool_result) or a simple string
+                // Preserve the original structure so downstream code can parse tool blocks
+                let content: Any
+                if let contentValue = event.payload["content"]?.value {
+                    // Debug: log the actual type we received
+                    logger.debug("[DEBUG] message.assistant content type: \(type(of: contentValue))")
+
+                    // Check if it's an array of content blocks
+                    if let blocks = contentValue as? [[String: Any]] {
+                        logger.debug("[DEBUG] Parsed as [[String: Any]] with \(blocks.count) blocks")
+                        content = blocks
+                    } else if let blocks = contentValue as? [Any] {
+                        logger.debug("[DEBUG] Parsed as [Any] with \(blocks.count) elements")
+                        content = blocks
+                    } else if let text = contentValue as? String {
+                        logger.debug("[DEBUG] Parsed as String: \(text.prefix(100))")
+                        content = text
+                    } else {
+                        // Unknown format - log and use string representation
+                        logger.info("[DEBUG] Unknown content format, using String(describing:)")
+                        content = String(describing: contentValue)
+                    }
+                } else {
+                    logger.debug("[DEBUG] message.assistant has no content field")
+                    content = ""
+                }
                 messages.append(ReconstructedMessage(role: "assistant", content: content))
 
                 if let usage = event.payload["tokenUsage"]?.value as? [String: Any] {
@@ -673,23 +772,57 @@ class EventDatabase: ObservableObject {
         try execute("DELETE FROM sync_state")
     }
 
-    /// Remove duplicate events for a session, keeping server events (evt_*) over local events (UUIDs).
+    /// Remove duplicate events for a session, preferring events with richer content (tool blocks).
+    /// When content richness is equal, prefers server events (evt_*) over local events (UUIDs).
     /// Call this to repair databases that have accumulated duplicates.
     func deduplicateSession(_ sessionId: String) throws -> Int {
         let events = try getEventsBySession(sessionId)
 
+        // Helper to check if content has tool_use or tool_result blocks
+        func hasToolBlocks(_ payload: [String: AnyCodable]) -> Bool {
+            guard let contentArray = payload["content"]?.value as? [[String: Any]] else {
+                guard let anyArray = payload["content"]?.value as? [Any] else {
+                    return false
+                }
+                for element in anyArray {
+                    if let dict = element as? [String: Any],
+                       let type = dict["type"] as? String,
+                       type == "tool_use" || type == "tool_result" {
+                        return true
+                    }
+                }
+                return false
+            }
+            return contentArray.contains { block in
+                let blockType = block["type"] as? String
+                return blockType == "tool_use" || blockType == "tool_result"
+            }
+        }
+
+        // Helper to extract text content for matching
+        func extractTextContent(_ payload: [String: AnyCodable]) -> String {
+            if let content = payload["content"]?.value as? String {
+                return content
+            } else if let contentArray = payload["content"]?.value as? [[String: Any]] {
+                return contentArray.compactMap { $0["text"] as? String }.joined()
+            } else if let anyArray = payload["content"]?.value as? [Any] {
+                var texts: [String] = []
+                for element in anyArray {
+                    if let dict = element as? [String: Any],
+                       let text = dict["text"] as? String {
+                        texts.append(text)
+                    }
+                }
+                return texts.joined()
+            }
+            return ""
+        }
+
         // Group events by (type, content prefix) to find duplicates
-        // Note: We don't use 'turn' for matching because server events may not include it
         var keyToEvents: [String: [SessionEvent]] = [:]
         for event in events {
             if event.type == "message.user" || event.type == "message.assistant" {
-                var contentStr = ""
-                if let content = event.payload["content"]?.value as? String {
-                    contentStr = content
-                } else if let contentArray = event.payload["content"]?.value as? [[String: Any]] {
-                    contentStr = contentArray.compactMap { $0["text"] as? String }.joined()
-                }
-
+                let contentStr = extractTextContent(event.payload)
                 let key = "\(event.type):\(String(contentStr.prefix(100)))"
 
                 var group = keyToEvents[key] ?? []
@@ -704,18 +837,40 @@ class EventDatabase: ObservableObject {
             if group.count > 1 {
                 logger.debug("Found \(group.count) events for key: \(key)")
 
-                // Prefer server events (evt_*) over local events
-                let serverEvents = group.filter { $0.id.hasPrefix("evt_") }
-                let localEvents = group.filter { !$0.id.hasPrefix("evt_") }
+                // Categorize events by content richness
+                let eventsWithTools = group.filter { hasToolBlocks($0.payload) }
+                let eventsWithoutTools = group.filter { !hasToolBlocks($0.payload) }
 
-                if !serverEvents.isEmpty {
-                    // Keep server events, delete local ones
-                    logger.debug("Keeping \(serverEvents.count) server events, deleting \(localEvents.count) local events")
-                    idsToDelete.append(contentsOf: localEvents.map { $0.id })
+                if !eventsWithTools.isEmpty {
+                    // Keep events with tool blocks, delete those without
+                    logger.debug("Keeping \(eventsWithTools.count) events with tool blocks, deleting \(eventsWithoutTools.count) without")
+                    idsToDelete.append(contentsOf: eventsWithoutTools.map { $0.id })
+
+                    // Among events with tools, prefer server events
+                    if eventsWithTools.count > 1 {
+                        let serverWithTools = eventsWithTools.filter { $0.id.hasPrefix("evt_") }
+                        let localWithTools = eventsWithTools.filter { !$0.id.hasPrefix("evt_") }
+
+                        if !serverWithTools.isEmpty {
+                            // Keep server events with tools, delete local ones with tools
+                            idsToDelete.append(contentsOf: localWithTools.map { $0.id })
+                        } else {
+                            // Keep first local with tools
+                            idsToDelete.append(contentsOf: localWithTools.dropFirst().map { $0.id })
+                        }
+                    }
                 } else {
-                    // No server events, keep the first local one
-                    logger.debug("No server events, keeping first local, deleting \(localEvents.count - 1) others")
-                    idsToDelete.append(contentsOf: localEvents.dropFirst().map { $0.id })
+                    // No events with tools - prefer server events
+                    let serverEvents = group.filter { $0.id.hasPrefix("evt_") }
+                    let localEvents = group.filter { !$0.id.hasPrefix("evt_") }
+
+                    if !serverEvents.isEmpty {
+                        logger.debug("Keeping \(serverEvents.count) server events, deleting \(localEvents.count) local events")
+                        idsToDelete.append(contentsOf: localEvents.map { $0.id })
+                    } else {
+                        logger.debug("No server events, keeping first local, deleting \(localEvents.count - 1) others")
+                        idsToDelete.append(contentsOf: localEvents.dropFirst().map { $0.id })
+                    }
                 }
             }
         }

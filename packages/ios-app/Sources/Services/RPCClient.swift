@@ -35,6 +35,7 @@ class RPCClient: ObservableObject {
     var onToolEnd: ((ToolEndEvent) -> Void)?
     var onTurnStart: ((TurnStartEvent) -> Void)?
     var onTurnEnd: ((TurnEndEvent) -> Void)?
+    var onAgentTurn: ((AgentTurnEvent) -> Void)?
     var onComplete: (() -> Void)?
     var onError: ((String) -> Void)?
 
@@ -125,6 +126,10 @@ class RPCClient: ObservableObject {
         case .turnEnd(let e):
             guard checkSession(e.sessionId) else { return }
             onTurnEnd?(e)
+
+        case .agentTurn(let e):
+            guard checkSession(e.sessionId) else { return }
+            onAgentTurn?(e)
 
         case .complete(let e):
             guard checkSession(e.sessionId) else { return }

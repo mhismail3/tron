@@ -814,8 +814,10 @@ struct WorkspaceSelector: View {
             // Ensure connection is established first
             await rpcClient.connect()
 
-            // Small delay to let connection stabilize
-            try? await Task.sleep(for: .milliseconds(500))
+            // Only wait briefly if not already connected
+            if !rpcClient.isConnected {
+                try? await Task.sleep(for: .milliseconds(100))
+            }
 
             let home = try await rpcClient.getHome()
             currentPath = home.homePath
