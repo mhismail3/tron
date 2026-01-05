@@ -28,10 +28,10 @@ struct ChatView: View {
     @State private var cachedModels: [ModelInfo] = []
 
     // MARK: - Smart Auto-Scroll State
-    /// Sticky flag: true until user scrolls up, then stays false until button tap
-    /// This prevents geometry-based detection from incorrectly re-enabling auto-scroll
+    /// Auto-scroll is enabled when user is at/near the bottom of the chat
+    /// Disabled when user scrolls up, re-enabled when they scroll back to bottom or tap the button
     @State private var autoScrollEnabled = true
-    /// Track if we should show the scroll-to-bottom button (new content while scrolled up)
+    /// Track if there's new content while user is scrolled up
     @State private var hasUnreadContent = false
     /// Last scroll offset to detect scroll direction
     @State private var lastScrollOffset: CGFloat = 0
@@ -67,6 +67,9 @@ struct ChatView: View {
                         selectedImages: $viewModel.selectedImages,
                         onSend: {
                             inputHistory.addToHistory(viewModel.inputText)
+                            // Reset auto-scroll when user sends a message - they're at the bottom
+                            autoScrollEnabled = true
+                            hasUnreadContent = false
                             viewModel.sendMessage()
                         },
                         onAbort: viewModel.abortAgent,
@@ -218,98 +221,116 @@ struct ChatView: View {
 
     // MARK: - Messages Scroll View
 
+    /// Threshold for disabling auto-scroll - if user scrolls this far from bottom, disable
+    private let scrollUpDisableThreshold: CGFloat = 50
+    /// Threshold for re-enabling - user must be very close to bottom (only used when NOT processing)
+    private let nearBottomEnableThreshold: CGFloat = 30
+
     private var messagesScrollView: some View {
-        ZStack(alignment: .bottom) {
-            ScrollViewReader { proxy in
-                ScrollView {
-                    LazyVStack(spacing: 12) {
-                        // Load more messages button (like iOS Messages)
-                        if viewModel.hasMoreMessages {
-                            loadMoreButton
-                                .id("loadMore")
-                        }
+        GeometryReader { containerGeo in
+            let containerFrame = containerGeo.frame(in: .global)
 
-                        ForEach(viewModel.messages) { message in
-                            MessageBubble(message: message)
-                                .id(message.id)
-                                .transition(.asymmetric(
-                                    insertion: .opacity.combined(with: .move(edge: .bottom)),
-                                    removal: .opacity
-                                ))
-                        }
+            ZStack(alignment: .bottom) {
+                ScrollViewReader { proxy in
+                    ScrollView {
+                        LazyVStack(spacing: 12) {
+                            // Load more messages button (like iOS Messages)
+                            if viewModel.hasMoreMessages {
+                                loadMoreButton
+                                    .id("loadMore")
+                            }
 
-                        if viewModel.isProcessing && viewModel.messages.last?.isStreaming != true {
-                            ProcessingIndicator()
-                                .id("processing")
-                        }
+                            ForEach(viewModel.messages) { message in
+                                MessageBubble(message: message)
+                                    .id(message.id)
+                                    .transition(.asymmetric(
+                                        insertion: .opacity.combined(with: .move(edge: .bottom)),
+                                        removal: .opacity
+                                    ))
+                            }
 
-                        // Scroll anchor with position detection
-                        GeometryReader { geo in
-                            Color.clear
-                                .preference(
-                                    key: ScrollOffsetPreferenceKey.self,
-                                    value: geo.frame(in: .global).minY
-                                )
+                            if viewModel.isProcessing && viewModel.messages.last?.isStreaming != true {
+                                ProcessingIndicator()
+                                    .id("processing")
+                            }
+
+                            // Scroll anchor with position detection
+                            GeometryReader { geo in
+                                Color.clear
+                                    .preference(
+                                        key: ScrollOffsetPreferenceKey.self,
+                                        value: geo.frame(in: .global).minY
+                                    )
+                            }
+                            .frame(height: 1)
+                            .id("bottom")
                         }
-                        .frame(height: 1)
-                        .id("bottom")
+                        .padding()
                     }
-                    .padding()
-                }
-                .scrollDismissesKeyboard(.interactively)
-                .onPreferenceChange(ScrollOffsetPreferenceKey.self) { currentOffset in
-                    // Detect scroll direction: if offset increased significantly, user scrolled UP
-                    // (bottom anchor moved down = user pulled content down = scrolled up)
-                    let scrollDelta = currentOffset - lastScrollOffset
+                    .scrollDismissesKeyboard(.interactively)
+                    .onPreferenceChange(ScrollOffsetPreferenceKey.self) { bottomY in
+                        // Calculate distance from bottom of viewport
+                        // bottomY = global Y of bottom anchor
+                        // containerFrame.maxY = bottom of visible scroll area
+                        // Positive = scrolled up (anchor below viewport)
+                        // Negative/zero = at bottom (anchor at or above viewport bottom)
+                        let distanceFromBottom = bottomY - containerFrame.maxY
 
-                    // Only disable auto-scroll if user actively scrolled up (delta > threshold)
-                    // and we're currently processing (streaming content)
-                    if scrollDelta > 30 && viewModel.isProcessing {
-                        // User scrolled up while content is streaming
-                        autoScrollEnabled = false
-                        hasUnreadContent = true
+                        // Detect scroll direction from delta
+                        let scrollDelta = bottomY - lastScrollOffset
+                        let isUserScrollingUp = scrollDelta > 15
+
+                        // DISABLE auto-scroll: User scrolled up past threshold during processing
+                        if isUserScrollingUp && distanceFromBottom > scrollUpDisableThreshold {
+                            if autoScrollEnabled {
+                                autoScrollEnabled = false
+                                hasUnreadContent = true
+                            }
+                        }
+
+                        // RE-ENABLE auto-scroll: Only when NOT processing and user scrolled to very bottom
+                        // During processing, only the button can re-enable (prevents snap-back)
+                        if !viewModel.isProcessing && distanceFromBottom < nearBottomEnableThreshold && !autoScrollEnabled {
+                            autoScrollEnabled = true
+                            hasUnreadContent = false
+                        }
+
+                        lastScrollOffset = bottomY
                     }
-
-                    lastScrollOffset = currentOffset
-                }
-                .onAppear {
-                    scrollProxy = proxy
-                }
-                .onChange(of: viewModel.messages.count) { oldCount, newCount in
-                    if autoScrollEnabled {
-                        withAnimation(.tronFast) {
+                    .onAppear {
+                        scrollProxy = proxy
+                    }
+                    .onChange(of: viewModel.messages.count) { oldCount, newCount in
+                        if autoScrollEnabled {
+                            withAnimation(.tronFast) {
+                                proxy.scrollTo("bottom", anchor: .bottom)
+                            }
+                        } else if newCount > oldCount {
+                            hasUnreadContent = true
+                        }
+                    }
+                    .onChange(of: viewModel.messages.last?.content) { _, _ in
+                        if autoScrollEnabled {
                             proxy.scrollTo("bottom", anchor: .bottom)
                         }
-                    } else if newCount > oldCount {
-                        hasUnreadContent = true
                     }
-                }
-                .onChange(of: viewModel.messages.last?.content) { _, _ in
-                    if autoScrollEnabled {
-                        proxy.scrollTo("bottom", anchor: .bottom)
-                    }
-                    // Don't set hasUnreadContent here - it's already set when autoScrollEnabled becomes false
-                }
-                .onChange(of: viewModel.isProcessing) { wasProcessing, isProcessing in
-                    // When processing ends, if user hasn't scrolled, scroll to bottom
-                    if wasProcessing && !isProcessing && autoScrollEnabled {
-                        withAnimation(.tronFast) {
-                            proxy.scrollTo("bottom", anchor: .bottom)
+                    .onChange(of: viewModel.isProcessing) { wasProcessing, isProcessing in
+                        // When processing ends and auto-scroll is enabled, ensure we're at bottom
+                        if wasProcessing && !isProcessing && autoScrollEnabled {
+                            withAnimation(.tronFast) {
+                                proxy.scrollTo("bottom", anchor: .bottom)
+                            }
+                            hasUnreadContent = false
                         }
                     }
-                    // When processing starts fresh, reset auto-scroll
-                    if !wasProcessing && isProcessing {
-                        // Only reset if user previously finished reading (scrolled back)
-                        // This allows continuous sessions to respect user scroll position
-                    }
                 }
-            }
 
-            // Floating "scroll to bottom" button when auto-scroll is disabled
-            if !autoScrollEnabled && (hasUnreadContent || viewModel.isProcessing) {
-                scrollToBottomButton
-                    .transition(.opacity.combined(with: .scale(scale: 0.8)))
-                    .padding(.bottom, 16)
+                // Floating "scroll to bottom" button - show when auto-scroll disabled and unread content
+                if !autoScrollEnabled && hasUnreadContent {
+                    scrollToBottomButton
+                        .transition(.opacity.combined(with: .scale(scale: 0.8)))
+                        .padding(.bottom, 16)
+                }
             }
         }
     }
