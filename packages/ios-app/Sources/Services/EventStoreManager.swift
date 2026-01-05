@@ -2,6 +2,18 @@ import Foundation
 import Combine
 import os
 
+// MARK: - Tool Call Record (for persistence)
+
+/// Tracks tool calls during a turn for event-sourced persistence
+/// Note: Duplicated from ChatViewModel for module independence
+struct ToolCallRecord {
+    let toolCallId: String
+    let toolName: String
+    let arguments: String
+    var result: String?
+    var isError: Bool = false
+}
+
 // MARK: - Event Store Manager
 
 /// Central manager for event-sourced session state
@@ -360,11 +372,13 @@ class EventStoreManager: ObservableObject {
         return event
     }
 
-    /// Cache an assistant message event
+    /// Cache an assistant message event with optional tool calls
+    /// Content is stored as an array of content blocks to match server format
     func cacheAssistantMessage(
         sessionId: String,
         workspaceId: String,
         content: String,
+        toolCalls: [ToolCallRecord] = [],
         turn: Int,
         tokenUsage: TokenUsage?,
         model: String
@@ -372,8 +386,47 @@ class EventStoreManager: ObservableObject {
         let session = try eventDB.getSession(sessionId)
         let parentId = session?.headEventId
 
+        // Build content blocks array matching server format
+        var contentBlocks: [[String: Any]] = []
+
+        // Add tool_use and tool_result blocks for each tool call
+        for toolCall in toolCalls {
+            // Parse arguments from JSON string to dictionary
+            var inputDict: [String: Any] = [:]
+            if let data = toolCall.arguments.data(using: .utf8),
+               let parsed = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                inputDict = parsed
+            }
+
+            // Add tool_use block
+            contentBlocks.append([
+                "type": "tool_use",
+                "id": toolCall.toolCallId,
+                "name": toolCall.toolName,
+                "input": inputDict
+            ])
+
+            // Add tool_result block if we have a result
+            if let result = toolCall.result {
+                contentBlocks.append([
+                    "type": "tool_result",
+                    "tool_use_id": toolCall.toolCallId,
+                    "content": result,
+                    "is_error": toolCall.isError
+                ])
+            }
+        }
+
+        // Add final text block if there's content
+        if !content.isEmpty {
+            contentBlocks.append([
+                "type": "text",
+                "text": content
+            ])
+        }
+
         var payload: [String: AnyCodable] = [
-            "content": AnyCodable(content),
+            "content": AnyCodable(contentBlocks),
             "turn": AnyCodable(turn),
             "model": AnyCodable(model)
         ]

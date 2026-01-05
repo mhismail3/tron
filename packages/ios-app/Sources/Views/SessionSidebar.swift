@@ -2,6 +2,7 @@ import SwiftUI
 
 // MARK: - Session Sidebar
 
+@available(iOS 26.0, *)
 struct SessionSidebar: View {
     @EnvironmentObject var eventStoreManager: EventStoreManager
     @EnvironmentObject var appState: AppState
@@ -19,11 +20,8 @@ struct SessionSidebar: View {
                         isSelected: session.id == selectedSessionId
                     )
                     .tag(session.id)
-                    .listRowBackground(
-                        session.id == selectedSessionId
-                            ? Color.tronSurfaceElevated
-                            : Color.tronSurface
-                    )
+                    .listRowBackground(Color.clear)
+                    .listRowSeparator(.hidden)
                     .listRowInsets(EdgeInsets(top: 6, leading: 12, bottom: 6, trailing: 12))
                     .swipeActions(edge: .trailing, allowsFullSwipe: true) {
                         Button(role: .destructive) {
@@ -34,9 +32,8 @@ struct SessionSidebar: View {
                     }
                 }
             }
-            .listStyle(.insetGrouped)
+            .listStyle(.plain)
             .scrollContentBackground(.hidden)
-            .background(Color.tronBackground)
 
             // Floating circular plus button - iOS 26 liquid glass style
             FloatingNewSessionButton(action: onNewSession)
@@ -44,6 +41,7 @@ struct SessionSidebar: View {
                 .padding(.bottom, 24)
         }
         .navigationBarTitleDisplayMode(.inline)
+        .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
         .toolbar {
             ToolbarItem(placement: .topBarLeading) {
                 Image("TronLogo")
@@ -60,16 +58,20 @@ struct SessionSidebar: View {
             ToolbarItem(placement: .topBarTrailing) {
                 Button(action: onSettings) {
                     Image(systemName: "gearshape")
-                        .font(.system(size: 16))
-                        .foregroundStyle(.tronTextSecondary)
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundStyle(.white.opacity(0.85))
+                        .frame(width: 32, height: 32)
                 }
+                .buttonStyle(.plain)
+                .glassEffect(.regular.tint(Color.tronPhthaloGreen).interactive(), in: .circle)
             }
         }
     }
 }
 
-// MARK: - Floating New Session Button (Native iOS 26 style)
+// MARK: - Floating New Session Button (iOS 26 Liquid Glass)
 
+@available(iOS 26.0, *)
 struct FloatingNewSessionButton: View {
     let action: () -> Void
 
@@ -77,16 +79,17 @@ struct FloatingNewSessionButton: View {
         Button(action: action) {
             Image(systemName: "plus")
                 .font(.system(size: 22, weight: .semibold))
+                .foregroundStyle(.white)
                 .frame(width: 56, height: 56)
         }
-        .buttonStyle(.borderedProminent)
-        .buttonBorderShape(.circle)
-        .tint(Color(hex: "#123524"))
+        .buttonStyle(.plain)
+        .glassEffect(.regular.tint(Color.tronPhthaloGreen).interactive(), in: .circle)
     }
 }
 
 // MARK: - Cached Session Sidebar Row (uses CachedSession from EventDatabase)
 
+@available(iOS 26.0, *)
 struct CachedSessionSidebarRow: View {
     let session: CachedSession
     let isSelected: Bool
@@ -97,7 +100,7 @@ struct CachedSessionSidebarRow: View {
             HStack(spacing: 6) {
                 Text(session.displayTitle)
                     .font(.subheadline.weight(.medium))
-                    .foregroundStyle(.tronTextPrimary)
+                    .foregroundStyle(.white.opacity(0.95))
                     .lineLimit(1)
 
                 if session.status == .active {
@@ -110,19 +113,18 @@ struct CachedSessionSidebarRow: View {
 
                 Text(session.formattedDate)
                     .font(.caption2)
-                    .foregroundStyle(.tronTextMuted)
+                    .foregroundStyle(.white.opacity(0.5))
             }
 
             // Meta row: model badge + message count
             HStack(spacing: 6) {
-                // Model badge
+                // Model badge with glass effect
                 Text(session.shortModel)
                     .font(.system(size: 10, weight: .medium))
-                    .foregroundStyle(.tronTextSecondary)
+                    .foregroundStyle(.white.opacity(0.8))
                     .padding(.horizontal, 6)
                     .padding(.vertical, 2)
-                    .background(Color.tronSurfaceElevated)
-                    .clipShape(Capsule())
+                    .glassEffect(.regular.tint(Color.tronPhthaloGreen), in: .capsule)
 
                 // Message count
                 HStack(spacing: 2) {
@@ -131,7 +133,7 @@ struct CachedSessionSidebarRow: View {
                     Text("\(session.messageCount)")
                         .font(.system(size: 10))
                 }
-                .foregroundStyle(.tronTextMuted)
+                .foregroundStyle(.white.opacity(0.5))
 
                 Spacer()
             }
@@ -139,11 +141,18 @@ struct CachedSessionSidebarRow: View {
             // Working directory (truncated)
             Text(session.displayDirectory)
                 .font(.caption2)
-                .foregroundStyle(.tronTextMuted)
+                .foregroundStyle(.white.opacity(0.4))
                 .lineLimit(1)
                 .truncationMode(.head)
         }
-        .padding(.vertical, 2)
+        .padding(.vertical, 6)
+        .padding(.horizontal, 12)
+        .glassEffect(
+            isSelected
+                ? .regular.tint(Color.tronEmerald.opacity(0.3)).interactive()
+                : .regular.tint(Color.tronPhthaloGreen.opacity(0.2)),
+            in: RoundedRectangle(cornerRadius: 12, style: .continuous)
+        )
     }
 }
 
@@ -163,6 +172,7 @@ extension CachedSession {
 
 // MARK: - Empty Sessions View
 
+@available(iOS 26.0, *)
 struct EmptySessionsView: View {
     let onNewSession: () -> Void
 
@@ -170,16 +180,16 @@ struct EmptySessionsView: View {
         VStack(spacing: 20) {
             Image(systemName: "bubble.left.and.text.bubble.right")
                 .font(.system(size: 48, weight: .light))
-                .foregroundStyle(.tronTextMuted)
+                .foregroundStyle(.white.opacity(0.4))
 
             VStack(spacing: 6) {
                 Text("No Sessions")
                     .font(.title3.weight(.semibold))
-                    .foregroundStyle(.tronTextPrimary)
+                    .foregroundStyle(.white.opacity(0.9))
 
                 Text("Create a new session to start")
                     .font(.subheadline)
-                    .foregroundStyle(.tronTextMuted)
+                    .foregroundStyle(.white.opacity(0.5))
             }
 
             Button(action: onNewSession) {
@@ -192,9 +202,9 @@ struct EmptySessionsView: View {
                 .foregroundStyle(.white)
                 .padding(.horizontal, 20)
                 .padding(.vertical, 10)
-                .background(Color.tronEmerald)
-                .clipShape(Capsule())
             }
+            .buttonStyle(.plain)
+            .glassEffect(.regular.tint(Color.tronEmerald).interactive(), in: .capsule)
         }
         .padding(32)
     }

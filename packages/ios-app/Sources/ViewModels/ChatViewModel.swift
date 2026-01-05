@@ -4,6 +4,7 @@ import os
 import PhotosUI
 
 // MARK: - Chat View Model
+// Note: ToolCallRecord is defined in EventStoreManager.swift
 
 @MainActor
 class ChatViewModel: ObservableObject {
@@ -33,6 +34,9 @@ class ChatViewModel: ObservableObject {
     private var currentToolMessages: [UUID: ChatMessage] = [:]
     private var accumulatedInputTokens = 0
     private var accumulatedOutputTokens = 0
+
+    /// Track tool calls for the current turn (for persistence)
+    private var currentTurnToolCalls: [ToolCallRecord] = []
 
     // MARK: - Performance Optimization: Batched Updates
 
@@ -209,7 +213,8 @@ class ChatViewModel: ObservableObject {
     }
 
     /// Cache assistant message event to EventDatabase
-    private func cacheAssistantMessageEvent(content: String, tokenUsage: TokenUsage?) {
+    /// Now includes tool calls in content blocks format for full persistence
+    private func cacheAssistantMessageEvent(content: String, toolCalls: [ToolCallRecord] = [], tokenUsage: TokenUsage?) {
         guard let manager = eventStoreManager else { return }
 
         do {
@@ -217,11 +222,12 @@ class ChatViewModel: ObservableObject {
                 sessionId: sessionId,
                 workspaceId: workspaceId,
                 content: content,
+                toolCalls: toolCalls,
                 turn: currentTurn,
                 tokenUsage: tokenUsage,
                 model: currentModel
             )
-            logger.debug("Cached assistant message event for turn \(currentTurn)", category: .events)
+            logger.debug("Cached assistant message event for turn \(currentTurn) with \(toolCalls.count) tool calls", category: .events)
         } catch {
             logger.error("Failed to cache assistant message: \(error.localizedDescription)", category: .events)
         }
@@ -502,6 +508,14 @@ class ChatViewModel: ObservableObject {
         let message = ChatMessage(role: .assistant, content: .toolUse(tool))
         messages.append(message)
         currentToolMessages[message.id] = message
+
+        // Track tool call for persistence
+        let record = ToolCallRecord(
+            toolCallId: event.toolCallId,
+            toolName: event.toolName,
+            arguments: event.formattedArguments
+        )
+        currentTurnToolCalls.append(record)
     }
 
     private func handleToolEnd(_ event: ToolEndEvent) {
@@ -523,6 +537,12 @@ class ChatViewModel: ObservableObject {
             }
         } else {
             logger.warning("Could not find tool message for toolCallId=\(event.toolCallId)", category: .events)
+        }
+
+        // Update tracked tool call with result for persistence
+        if let idx = currentTurnToolCalls.firstIndex(where: { $0.toolCallId == event.toolCallId }) {
+            currentTurnToolCalls[idx].result = event.displayResult
+            currentTurnToolCalls[idx].isError = !event.success
         }
     }
 
@@ -554,19 +574,24 @@ class ChatViewModel: ObservableObject {
     }
 
     private func handleComplete() {
-        logger.info("Agent complete, finalizing message (streamingText: \(streamingText.count) chars)", category: .events)
+        logger.info("Agent complete, finalizing message (streamingText: \(streamingText.count) chars, toolCalls: \(currentTurnToolCalls.count))", category: .events)
         // Flush any pending batched updates before finalizing
         flushPendingTextUpdates()
 
-        // Cache assistant message event before finalizing
-        if !streamingText.isEmpty {
-            cacheAssistantMessageEvent(content: streamingText, tokenUsage: totalTokenUsage)
+        // Cache assistant message event with tool calls before finalizing
+        if !streamingText.isEmpty || !currentTurnToolCalls.isEmpty {
+            cacheAssistantMessageEvent(
+                content: streamingText,
+                toolCalls: currentTurnToolCalls,
+                tokenUsage: totalTokenUsage
+            )
         }
 
         isProcessing = false
         finalizeStreamingMessage()
         thinkingText = ""
         currentToolMessages.removeAll()
+        currentTurnToolCalls.removeAll()  // Clear tool calls for next turn
     }
 
     private func handleError(_ message: String) {

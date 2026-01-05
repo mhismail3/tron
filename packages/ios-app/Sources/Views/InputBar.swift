@@ -1,8 +1,9 @@
 import SwiftUI
 import PhotosUI
 
-// MARK: - Input Bar
+// MARK: - Input Bar (iOS 26 Liquid Glass)
 
+@available(iOS 26.0, *)
 struct InputBar: View {
     @Binding var text: String
     let isProcessing: Bool
@@ -25,7 +26,7 @@ struct InputBar: View {
 
     var body: some View {
         VStack(spacing: 8) {
-            // Attached images preview (hidden but functionality preserved)
+            // Attached images preview
             if !attachedImages.isEmpty {
                 attachedImagesRow
             }
@@ -47,14 +48,13 @@ struct InputBar: View {
             .padding(.horizontal)
             .padding(.vertical, 8)
         }
-        // No solid background - transparent for liquid glass effect
     }
 
-    // MARK: - Status Pills Row (Liquid Glass)
+    // MARK: - Status Pills Row (iOS 26 Liquid Glass)
 
     private var statusPillsRow: some View {
         HStack {
-            // Model pill - tappable
+            // Model pill - tappable with liquid glass
             if !modelName.isEmpty {
                 Button(action: { onModelTap?() }) {
                     HStack(spacing: 4) {
@@ -63,16 +63,17 @@ struct InputBar: View {
                         Text(modelName.shortModelName)
                             .font(.system(size: 11, weight: .medium))
                     }
-                    .foregroundStyle(.primary.opacity(0.8))
+                    .foregroundStyle(.white.opacity(0.9))
                     .padding(.horizontal, 10)
                     .padding(.vertical, 5)
-                    .background(.ultraThinMaterial, in: Capsule())
                 }
+                .buttonStyle(.plain)
+                .glassEffect(.regular.tint(Color.tronPhthaloGreen).interactive(), in: .capsule)
             }
 
             Spacer()
 
-            // Token stats pill
+            // Token stats pill with liquid glass
             if tokenUsage != nil || contextPercentage > 0 {
                 HStack(spacing: 8) {
                     // Input tokens
@@ -94,10 +95,10 @@ struct InputBar: View {
                         .foregroundStyle(contextPercentageColor)
                 }
                 .font(.system(size: 10, weight: .medium, design: .monospaced))
-                .foregroundStyle(.primary.opacity(0.6))
+                .foregroundStyle(.white.opacity(0.7))
                 .padding(.horizontal, 10)
                 .padding(.vertical, 5)
-                .background(.ultraThinMaterial, in: Capsule())
+                .glassEffect(.regular.tint(Color.tronPhthaloGreen), in: .capsule)
             }
         }
     }
@@ -180,10 +181,10 @@ struct InputBar: View {
         TextField("Message...", text: $text, axis: .vertical)
             .textFieldStyle(.plain)
             .font(.subheadline)
-            .foregroundStyle(.primary)
+            .foregroundStyle(.white.opacity(0.9))
             .padding(.horizontal, 14)
-            .padding(.vertical, 10)
-            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+            .padding(.vertical, 12)
+            .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
             .lineLimit(1...8)
             .focused($isFocused)
             .disabled(isProcessing)
@@ -317,22 +318,23 @@ struct InputBar: View {
             Group {
                 if isProcessing {
                     Image(systemName: "stop.fill")
-                        .font(.system(size: 14, weight: .semibold))
+                        .font(.system(size: 16, weight: .semibold))
                         .foregroundStyle(.red)
                 } else {
                     Image(systemName: "arrow.up")
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(canSend ? .white : .primary.opacity(0.3))
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(canSend ? .white : .white.opacity(0.3))
                 }
             }
-            .frame(width: 32, height: 32)
-            .background(
-                isProcessing
-                    ? AnyShapeStyle(.ultraThinMaterial)
-                    : (canSend ? AnyShapeStyle(Color.tronEmerald) : AnyShapeStyle(.ultraThinMaterial)),
-                in: Circle()
-            )
+            .frame(width: 40, height: 40)
         }
+        .buttonStyle(.plain)
+        .glassEffect(
+            canSend && !isProcessing
+                ? .regular.tint(Color.tronEmerald).interactive()
+                : .regular,
+            in: .circle
+        )
         .disabled(!isProcessing && !canSend)
         .animation(.easeInOut(duration: 0.2), value: isProcessing)
         .animation(.easeInOut(duration: 0.2), value: canSend)
@@ -379,6 +381,7 @@ struct AttachedImageThumbnail: View {
 
 // MARK: - Preview
 
+@available(iOS 26.0, *)
 #Preview {
     VStack {
         Spacer()
@@ -394,6 +397,5 @@ struct AttachedImageThumbnail: View {
             onHistoryNavigate: nil
         )
     }
-    .background(Color.tronBackground)
     .preferredColorScheme(.dark)
 }

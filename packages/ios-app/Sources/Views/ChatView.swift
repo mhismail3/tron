@@ -3,6 +3,7 @@ import PhotosUI
 
 // MARK: - Chat View
 
+@available(iOS 26.0, *)
 struct ChatView: View {
     @EnvironmentObject var eventStoreManager: EventStoreManager
     @StateObject private var viewModel: ChatViewModel
@@ -25,53 +26,46 @@ struct ChatView: View {
     }
 
     var body: some View {
-        ZStack {
-            // Background
-            Color.tronBackground
-                .ignoresSafeArea()
+        VStack(spacing: 0) {
+            // Messages
+            messagesScrollView
 
-            VStack(spacing: 0) {
-                // Messages
-                messagesScrollView
-
-                // Thinking indicator
-                if !viewModel.thinkingText.isEmpty {
-                    ThinkingBanner(
-                        text: viewModel.thinkingText,
-                        isExpanded: $viewModel.isThinkingExpanded
-                    )
-                }
-
-                // Input area with integrated status pills (liquid glass style)
-                InputBar(
-                    text: $viewModel.inputText,
-                    isProcessing: viewModel.isProcessing,
-                    attachedImages: $viewModel.attachedImages,
-                    selectedImages: $viewModel.selectedImages,
-                    onSend: {
-                        // Add to history before sending
-                        inputHistory.addToHistory(viewModel.inputText)
-                        viewModel.sendMessage()
-                        // Message count is now tracked in EventDatabase via EventStoreManager
-                    },
-                    onAbort: viewModel.abortAgent,
-                    onRemoveImage: viewModel.removeAttachedImage,
-                    inputHistory: inputHistory,
-                    onHistoryNavigate: { newText in
-                        viewModel.inputText = newText
-                    },
-                    modelName: viewModel.currentModel,
-                    onModelTap: { showModelSwitcher = true },
-                    tokenUsage: viewModel.totalTokenUsage,
-                    contextPercentage: viewModel.contextPercentage
+            // Thinking indicator
+            if !viewModel.thinkingText.isEmpty {
+                ThinkingBanner(
+                    text: viewModel.thinkingText,
+                    isExpanded: $viewModel.isThinkingExpanded
                 )
-                .focused($isInputFocused)
             }
+
+            // Input area with integrated status pills (liquid glass style)
+            InputBar(
+                text: $viewModel.inputText,
+                isProcessing: viewModel.isProcessing,
+                attachedImages: $viewModel.attachedImages,
+                selectedImages: $viewModel.selectedImages,
+                onSend: {
+                    // Add to history before sending
+                    inputHistory.addToHistory(viewModel.inputText)
+                    viewModel.sendMessage()
+                    // Message count is now tracked in EventDatabase via EventStoreManager
+                },
+                onAbort: viewModel.abortAgent,
+                onRemoveImage: viewModel.removeAttachedImage,
+                inputHistory: inputHistory,
+                onHistoryNavigate: { newText in
+                    viewModel.inputText = newText
+                },
+                modelName: viewModel.currentModel,
+                onModelTap: { showModelSwitcher = true },
+                tokenUsage: viewModel.totalTokenUsage,
+                contextPercentage: viewModel.contextPercentage
+            )
+            .focused($isInputFocused)
         }
         .navigationTitle(eventStoreManager.activeSession?.displayTitle ?? "Chat")
         .navigationBarTitleDisplayMode(.inline)
-        .toolbarBackground(.ultraThinMaterial, for: .navigationBar)
-        .toolbarBackground(.visible, for: .navigationBar)
+        .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 commandsMenu
@@ -179,8 +173,13 @@ struct ChatView: View {
                 }
             }
         } label: {
-            TronIconView(icon: .settings, size: 18)
+            Image(systemName: "gearshape")
+                .font(.system(size: 14, weight: .medium))
+                .foregroundStyle(.white.opacity(0.85))
+                .frame(width: 32, height: 32)
         }
+        .buttonStyle(.plain)
+        .glassEffect(.regular.tint(Color.tronPhthaloGreen).interactive(), in: .circle)
     }
 
     // Note: Status bar (model pill, token stats) is now integrated into InputBar

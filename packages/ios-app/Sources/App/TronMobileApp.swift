@@ -11,17 +11,23 @@ struct TronMobileApp: App {
     var body: some Scene {
         WindowGroup {
             Group {
-                if let manager = eventStoreManager {
-                    ContentView()
-                        .environmentObject(appState)
-                        .environmentObject(manager)
-                        .environmentObject(eventDatabase)
+                if #available(iOS 26.0, *) {
+                    if let manager = eventStoreManager {
+                        ContentView()
+                            .environmentObject(appState)
+                            .environmentObject(manager)
+                            .environmentObject(eventDatabase)
+                    } else {
+                        // Loading state while initializing
+                        ProgressView()
+                            .progressViewStyle(CircularProgressViewStyle(tint: .tronEmerald))
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    }
                 } else {
-                    // Loading state while initializing
-                    ProgressView()
-                        .progressViewStyle(CircularProgressViewStyle(tint: .tronEmerald))
+                    // Fallback for older iOS versions
+                    Text("This app requires iOS 26 or later")
+                        .foregroundStyle(.white)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        .background(Color.tronBackground)
                 }
             }
             .preferredColorScheme(.dark)
@@ -102,6 +108,7 @@ class AppState: ObservableObject {
 
 // MARK: - Content View
 
+@available(iOS 26.0, *)
 struct ContentView: View {
     @EnvironmentObject var appState: AppState
     @EnvironmentObject var eventStoreManager: EventStoreManager
@@ -228,11 +235,11 @@ struct ContentView: View {
             VStack(spacing: 8) {
                 Text("Select a Session")
                     .font(.title3.weight(.medium))
-                    .foregroundStyle(.tronTextPrimary)
+                    .foregroundStyle(.white.opacity(0.9))
 
                 Text("Choose a session from the sidebar or create a new one")
                     .font(.subheadline)
-                    .foregroundStyle(.tronTextSecondary)
+                    .foregroundStyle(.white.opacity(0.5))
                     .multilineTextAlignment(.center)
             }
 
@@ -246,9 +253,9 @@ struct ContentView: View {
                         .foregroundStyle(.white)
                         .padding(.horizontal, 24)
                         .padding(.vertical, 12)
-                        .background(Color.tronEmerald)
-                        .clipShape(Capsule())
                 }
+                .buttonStyle(.plain)
+                .glassEffect(.regular.tint(Color.tronEmerald).interactive(), in: .capsule)
                 .padding(.top, 8)
             }
 
@@ -256,7 +263,6 @@ struct ContentView: View {
         }
         .padding(40)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color.tronBackground)
     }
 
     private func deleteSession(_ sessionId: String) {
@@ -276,6 +282,7 @@ struct ContentView: View {
 
 // MARK: - Welcome Page
 
+@available(iOS 26.0, *)
 struct WelcomePage: View {
     let onNewSession: () -> Void
     let onSettings: () -> Void
@@ -289,9 +296,12 @@ struct WelcomePage: View {
                 Spacer()
                 Button(action: onSettings) {
                     Image(systemName: "gearshape")
-                        .font(.title2)
-                        .foregroundStyle(.tronTextSecondary)
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundStyle(.white.opacity(0.85))
+                        .frame(width: 32, height: 32)
                 }
+                .buttonStyle(.plain)
+                .glassEffect(.regular.tint(Color.tronPhthaloGreen).interactive(), in: .circle)
                 .padding()
             }
 
@@ -311,7 +321,7 @@ struct WelcomePage: View {
 
                 Text("AI-powered coding assistant")
                     .font(.subheadline)
-                    .foregroundStyle(.tronTextSecondary)
+                    .foregroundStyle(.white.opacity(0.6))
             }
 
             // Server connection info
@@ -323,11 +333,10 @@ struct WelcomePage: View {
                 Text(":\(appState.serverURL.port ?? 8080)")
                     .font(.caption)
             }
-            .foregroundStyle(.tronTextMuted)
+            .foregroundStyle(.white.opacity(0.6))
             .padding(.horizontal, 12)
             .padding(.vertical, 6)
-            .background(Color.tronSurface)
-            .clipShape(Capsule())
+            .glassEffect(.regular.tint(Color.tronPhthaloGreen).interactive(), in: .capsule)
             .onTapGesture {
                 onSettings()
             }
@@ -358,20 +367,20 @@ struct WelcomePage: View {
             Button(action: onNewSession) {
                 Label("Start New Session", systemImage: TronIcon.newSession.systemName)
                     .font(.headline)
-                    .foregroundStyle(.tronBackground)
+                    .foregroundStyle(.white)
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 16)
-                    .background(LinearGradient.tronEmeraldGradient)
-                    .clipShape(RoundedRectangle(cornerRadius: 12))
             }
+            .buttonStyle(.plain)
+            .glassEffect(.regular.tint(Color.tronEmerald).interactive(), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
             .padding(.horizontal, 32)
             .padding(.bottom, 32)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color.tronBackground)
     }
 }
 
+@available(iOS 26.0, *)
 struct FeatureRow: View {
     let icon: String
     let title: String
@@ -387,10 +396,10 @@ struct FeatureRow: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(title)
                     .font(.headline)
-                    .foregroundStyle(.tronTextPrimary)
+                    .foregroundStyle(.white.opacity(0.9))
                 Text(description)
                     .font(.caption)
-                    .foregroundStyle(.tronTextSecondary)
+                    .foregroundStyle(.white.opacity(0.5))
             }
         }
     }
@@ -398,6 +407,7 @@ struct FeatureRow: View {
 
 // MARK: - New Session Flow
 
+@available(iOS 26.0, *)
 struct NewSessionFlow: View {
     let rpcClient: RPCClient
     let defaultModel: String
@@ -411,173 +421,168 @@ struct NewSessionFlow: View {
     @State private var errorMessage: String?
     @State private var showWorkspaceSelector = false
 
-    private let createButtonTint = Color(hex: "#123524")
-
     var body: some View {
         NavigationStack {
-            ZStack {
-                // Full panel background
-                Color.tronSurface
-                    .ignoresSafeArea()
+            VStack(spacing: 0) {
+                // Main content area
+                ScrollView {
+                    VStack(spacing: 24) {
+                        // Workspace section
+                        VStack(alignment: .leading, spacing: 12) {
+                            Text("Workspace")
+                                .font(.subheadline.weight(.medium))
+                                .foregroundStyle(.white.opacity(0.6))
 
-                VStack(spacing: 0) {
-                    // Main content area
-                    ScrollView {
-                        VStack(spacing: 24) {
-                            // Workspace section
-                            VStack(alignment: .leading, spacing: 12) {
-                                Text("Workspace")
-                                    .font(.subheadline.weight(.medium))
-                                    .foregroundStyle(.tronTextSecondary)
+                            Button {
+                                showWorkspaceSelector = true
+                            } label: {
+                                HStack {
+                                    if workingDirectory.isEmpty {
+                                        Text("Select Workspace")
+                                            .foregroundStyle(.white.opacity(0.4))
+                                    } else {
+                                        Text(workingDirectory)
+                                            .foregroundStyle(.white.opacity(0.9))
+                                            .lineLimit(1)
+                                            .truncationMode(.head)
+                                    }
+                                    Spacer()
+                                    Image(systemName: "folder.fill")
+                                        .foregroundStyle(.tronEmerald)
+                                }
+                                .padding(.horizontal, 16)
+                                .padding(.vertical, 14)
+                            }
+                            .buttonStyle(.plain)
+                            .glassEffect(.regular.tint(Color.tronPhthaloGreen).interactive(), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+
+                            Text("The directory where the agent will operate")
+                                .font(.caption)
+                                .foregroundStyle(.white.opacity(0.4))
+                        }
+
+                        // Model section
+                        VStack(alignment: .leading, spacing: 12) {
+                            Text("Model")
+                                .font(.subheadline.weight(.medium))
+                                .foregroundStyle(.white.opacity(0.6))
+
+                            Menu {
+                                Button {
+                                    selectedModel = "claude-opus-4-5-20251101"
+                                } label: {
+                                    HStack {
+                                        Text("Claude Opus 4.5")
+                                        if selectedModel == "claude-opus-4-5-20251101" {
+                                            Image(systemName: "checkmark")
+                                        }
+                                    }
+                                }
 
                                 Button {
-                                    showWorkspaceSelector = true
+                                    selectedModel = "claude-sonnet-4-5-20251101"
                                 } label: {
                                     HStack {
-                                        if workingDirectory.isEmpty {
-                                            Text("Select Workspace")
-                                                .foregroundStyle(.tronTextMuted)
-                                        } else {
-                                            Text(workingDirectory)
-                                                .foregroundStyle(.tronTextPrimary)
-                                                .lineLimit(1)
-                                                .truncationMode(.head)
+                                        Text("Claude Sonnet 4.5")
+                                        if selectedModel == "claude-sonnet-4-5-20251101" {
+                                            Image(systemName: "checkmark")
                                         }
-                                        Spacer()
-                                        Image(systemName: "folder.fill")
-                                            .foregroundStyle(.tronEmerald)
                                     }
-                                    .padding(.horizontal, 16)
-                                    .padding(.vertical, 14)
-                                    .background(Color.tronSurfaceElevated)
-                                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                                 }
 
-                                Text("The directory where the agent will operate")
-                                    .font(.caption)
-                                    .foregroundStyle(.tronTextMuted)
-                            }
-
-                            // Model section
-                            VStack(alignment: .leading, spacing: 12) {
-                                Text("Model")
-                                    .font(.subheadline.weight(.medium))
-                                    .foregroundStyle(.tronTextSecondary)
-
-                                Menu {
-                                    Button {
-                                        selectedModel = "claude-opus-4-5-20251101"
-                                    } label: {
-                                        HStack {
-                                            Text("Claude Opus 4.5")
-                                            if selectedModel == "claude-opus-4-5-20251101" {
-                                                Image(systemName: "checkmark")
-                                            }
-                                        }
-                                    }
-
-                                    Button {
-                                        selectedModel = "claude-sonnet-4-5-20251101"
-                                    } label: {
-                                        HStack {
-                                            Text("Claude Sonnet 4.5")
-                                            if selectedModel == "claude-sonnet-4-5-20251101" {
-                                                Image(systemName: "checkmark")
-                                            }
-                                        }
-                                    }
-
-                                    Button {
-                                        selectedModel = "claude-haiku-4-5-20251101"
-                                    } label: {
-                                        HStack {
-                                            Text("Claude Haiku 4.5")
-                                            if selectedModel == "claude-haiku-4-5-20251101" {
-                                                Image(systemName: "checkmark")
-                                            }
-                                        }
-                                    }
-
-                                    Divider()
-
-                                    Button {
-                                        selectedModel = "claude-sonnet-4-20250514"
-                                    } label: {
-                                        Text("Claude Sonnet 4 (Legacy)")
-                                    }
-
-                                    Button {
-                                        selectedModel = "claude-3-5-haiku-20241022"
-                                    } label: {
-                                        Text("Claude Haiku 3.5 (Legacy)")
-                                    }
+                                Button {
+                                    selectedModel = "claude-haiku-4-5-20251101"
                                 } label: {
                                     HStack {
-                                        Text(selectedModel.shortModelName)
-                                            .foregroundStyle(.tronTextPrimary)
-                                        Spacer()
-                                        Image(systemName: "chevron.up.chevron.down")
-                                            .font(.caption)
-                                            .foregroundStyle(.tronTextSecondary)
+                                        Text("Claude Haiku 4.5")
+                                        if selectedModel == "claude-haiku-4-5-20251101" {
+                                            Image(systemName: "checkmark")
+                                        }
                                     }
-                                    .padding(.horizontal, 16)
-                                    .padding(.vertical, 14)
-                                    .background(Color.tronSurfaceElevated)
-                                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                                 }
 
-                                Text(modelDescription)
-                                    .font(.caption)
-                                    .foregroundStyle(.tronTextMuted)
-                            }
+                                Divider()
 
-                            // Error message
-                            if let error = errorMessage {
+                                Button {
+                                    selectedModel = "claude-sonnet-4-20250514"
+                                } label: {
+                                    Text("Claude Sonnet 4 (Legacy)")
+                                }
+
+                                Button {
+                                    selectedModel = "claude-3-5-haiku-20241022"
+                                } label: {
+                                    Text("Claude Haiku 3.5 (Legacy)")
+                                }
+                            } label: {
                                 HStack {
-                                    Image(systemName: "exclamationmark.triangle.fill")
-                                        .foregroundStyle(.tronError)
-                                    Text(error)
-                                        .font(.subheadline)
-                                        .foregroundStyle(.tronError)
+                                    Text(selectedModel.shortModelName)
+                                        .foregroundStyle(.white.opacity(0.9))
+                                    Spacer()
+                                    Image(systemName: "chevron.up.chevron.down")
+                                        .font(.caption)
+                                        .foregroundStyle(.white.opacity(0.6))
                                 }
-                                .padding()
-                                .background(Color.tronError.opacity(0.1))
-                                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                                .padding(.horizontal, 16)
+                                .padding(.vertical, 14)
                             }
+                            .glassEffect(.regular.tint(Color.tronPhthaloGreen).interactive(), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
 
-                            Spacer(minLength: 100)
+                            Text(modelDescription)
+                                .font(.caption)
+                                .foregroundStyle(.white.opacity(0.4))
                         }
-                        .padding(.horizontal, 20)
-                        .padding(.top, 20)
-                    }
 
-                    // Create button - native iOS style with tint
-                    Button {
-                        createSession()
-                    } label: {
-                        HStack(spacing: 8) {
-                            if isCreating {
-                                ProgressView()
-                                    .tint(.white)
-                            } else {
-                                Text("Create Session")
-                                    .font(.headline)
+                        // Error message
+                        if let error = errorMessage {
+                            HStack {
+                                Image(systemName: "exclamationmark.triangle.fill")
+                                    .foregroundStyle(.tronError)
+                                Text(error)
+                                    .font(.subheadline)
+                                    .foregroundStyle(.tronError)
                             }
+                            .padding()
+                            .glassEffect(.regular.tint(Color.tronError.opacity(0.3)), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
                         }
-                        .frame(maxWidth: .infinity)
-                        .frame(height: 50)
+
+                        Spacer(minLength: 100)
                     }
-                    .buttonStyle(.borderedProminent)
-                    .tint(Color(hex: "#123524"))
-                    .disabled(isCreating || workingDirectory.isEmpty)
                     .padding(.horizontal, 20)
-                    .padding(.bottom, 16)
+                    .padding(.top, 20)
                 }
+
+                // Create button - liquid glass style
+                Button {
+                    createSession()
+                } label: {
+                    HStack(spacing: 8) {
+                        if isCreating {
+                            ProgressView()
+                                .tint(.white)
+                        } else {
+                            Text("Create Session")
+                                .font(.headline)
+                                .foregroundStyle(.white)
+                        }
+                    }
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 50)
+                }
+                .buttonStyle(.plain)
+                .glassEffect(
+                    (isCreating || workingDirectory.isEmpty)
+                        ? .regular.tint(Color.tronPhthaloGreen)
+                        : .regular.tint(Color.tronEmerald).interactive(),
+                    in: RoundedRectangle(cornerRadius: 12, style: .continuous)
+                )
+                .disabled(isCreating || workingDirectory.isEmpty)
+                .padding(.horizontal, 20)
+                .padding(.bottom, 16)
             }
             .navigationTitle("New Session")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbarBackground(Color.tronSurface, for: .navigationBar)
-            .toolbarBackground(.visible, for: .navigationBar)
+            .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     Button("Cancel") { dismiss() }
