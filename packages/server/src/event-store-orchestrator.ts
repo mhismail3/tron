@@ -39,6 +39,142 @@ import {
 const logger = createLogger('event-store-orchestrator');
 
 // =============================================================================
+// Content Block Utilities
+// =============================================================================
+
+/**
+ * Maximum size for tool result content before truncation (10KB)
+ */
+const MAX_TOOL_RESULT_SIZE = 10 * 1024;
+
+/**
+ * Maximum size for tool input arguments before truncation (5KB)
+ */
+const MAX_TOOL_INPUT_SIZE = 5 * 1024;
+
+/**
+ * Truncate a string to the specified max length, adding a truncation notice
+ */
+function truncateString(str: string, maxLength: number): string {
+  if (str.length <= maxLength) return str;
+  const truncated = str.slice(0, maxLength);
+  const remaining = str.length - maxLength;
+  return `${truncated}\n\n... [truncated ${remaining} characters]`;
+}
+
+/**
+ * Normalize and sanitize a content block for storage.
+ * Ensures all required fields are present and applies truncation for large content.
+ */
+function normalizeContentBlock(block: unknown): Record<string, unknown> | null {
+  if (typeof block !== 'object' || block === null) return null;
+
+  const b = block as Record<string, unknown>;
+  const type = b.type;
+
+  if (typeof type !== 'string') return null;
+
+  switch (type) {
+    case 'text':
+      return {
+        type: 'text',
+        text: typeof b.text === 'string' ? b.text : String(b.text ?? ''),
+      };
+
+    case 'tool_use': {
+      // Preserve the full input object with potential truncation for very large inputs
+      let input = b.input;
+      if (input && typeof input === 'object') {
+        // Deep clone to avoid mutating original
+        try {
+          const inputStr = JSON.stringify(input);
+          if (inputStr.length > MAX_TOOL_INPUT_SIZE) {
+            // For very large inputs, store a truncated version
+            input = {
+              _truncated: true,
+              _originalSize: inputStr.length,
+              _preview: inputStr.slice(0, MAX_TOOL_INPUT_SIZE),
+            };
+          }
+        } catch {
+          // If JSON.stringify fails, keep original
+        }
+      }
+
+      return {
+        type: 'tool_use',
+        id: typeof b.id === 'string' ? b.id : String(b.id ?? ''),
+        name: typeof b.name === 'string' ? b.name : String(b.name ?? ''),
+        input: input ?? {},
+      };
+    }
+
+    case 'tool_result': {
+      // Handle content which can be a string or array
+      let content = b.content;
+
+      if (typeof content === 'string') {
+        // Truncate very large string results
+        if (content.length > MAX_TOOL_RESULT_SIZE) {
+          content = truncateString(content, MAX_TOOL_RESULT_SIZE);
+        }
+      } else if (Array.isArray(content)) {
+        // Content is an array of content parts (e.g., text + images)
+        // Extract text and truncate if needed
+        const textParts = content
+          .filter((p): p is { type: string; text: string } =>
+            typeof p === 'object' && p !== null && p.type === 'text' && typeof p.text === 'string'
+          )
+          .map(p => p.text)
+          .join('\n');
+
+        content = textParts.length > MAX_TOOL_RESULT_SIZE
+          ? truncateString(textParts, MAX_TOOL_RESULT_SIZE)
+          : textParts || String(content);
+      } else if (content !== undefined && content !== null) {
+        content = String(content);
+      } else {
+        content = '';
+      }
+
+      return {
+        type: 'tool_result',
+        tool_use_id: typeof b.tool_use_id === 'string' ? b.tool_use_id : String(b.tool_use_id ?? ''),
+        content,
+        is_error: b.is_error === true,
+      };
+    }
+
+    case 'thinking':
+      return {
+        type: 'thinking',
+        thinking: typeof b.thinking === 'string' ? b.thinking : String(b.thinking ?? ''),
+      };
+
+    default:
+      // Unknown type - preserve as-is
+      return { ...b };
+  }
+}
+
+/**
+ * Normalize an array of content blocks for storage
+ */
+function normalizeContentBlocks(content: unknown): Record<string, unknown>[] {
+  if (!Array.isArray(content)) {
+    // Single string content
+    if (typeof content === 'string') {
+      return [{ type: 'text', text: content }];
+    }
+    return [];
+  }
+
+  return content
+    .map(normalizeContentBlock)
+    .filter((b): b is Record<string, unknown> => b !== null);
+}
+
+// =============================================================================
 // Default System Prompt
 // =============================================================================
 
@@ -605,19 +741,66 @@ export class EventStoreOrchestrator extends EventEmitter {
       active.lastActivity = new Date();
 
       // Record assistant response event
-      // Get the last assistant message from the run result
-      const lastAssistantMessage = runResult.messages
+      // Combine ALL assistant message content blocks to preserve tool_use history
+      // In multi-turn agentic runs, tool_use blocks are in earlier assistant messages
+      const allAssistantContent = runResult.messages
         .filter(m => m.role === 'assistant')
-        .at(-1);
+        .flatMap(m => Array.isArray(m.content) ? m.content : [{ type: 'text' as const, text: String(m.content) }]);
+
+      // Normalize content blocks to ensure consistent structure and apply truncation
+      const normalizedAssistantContent = normalizeContentBlocks(allAssistantContent);
+
+      logger.debug('Storing assistant content', {
+        sessionId: active.sessionId,
+        blockCount: normalizedAssistantContent.length,
+        blockTypes: normalizedAssistantContent.map(b => b.type),
+        toolUseCount: normalizedAssistantContent.filter(b => b.type === 'tool_use').length,
+        hasInputs: normalizedAssistantContent
+          .filter(b => b.type === 'tool_use')
+          .map(b => ({ name: b.name, hasInput: !!b.input && Object.keys(b.input as object).length > 0 })),
+      });
 
       await this.eventStore.append({
         sessionId: active.sessionId,
         type: 'message.assistant',
         payload: {
-          content: lastAssistantMessage?.content || [],
+          content: normalizedAssistantContent,
           tokenUsage: runResult.totalTokenUsage,
         },
       });
+
+      // Also record tool_result blocks from user messages (these follow tool_use)
+      // The first user message is just the prompt (already stored above), subsequent
+      // user messages contain tool_result blocks
+      const userMessagesWithToolResults = runResult.messages
+        .filter(m => m.role === 'user')
+        .slice(1); // Skip the first one (the original prompt)
+
+      if (userMessagesWithToolResults.length > 0) {
+        const allToolResults = userMessagesWithToolResults
+          .flatMap(m => Array.isArray(m.content) ? m.content : []);
+
+        if (allToolResults.length > 0) {
+          // Normalize tool results with truncation for large content
+          const normalizedToolResults = normalizeContentBlocks(allToolResults);
+
+          logger.debug('Storing tool results', {
+            sessionId: active.sessionId,
+            resultCount: normalizedToolResults.length,
+            sampleContent: normalizedToolResults.slice(0, 3).map(r => ({
+              type: r.type,
+              hasContent: !!(r.content || r.text),
+              contentLength: typeof r.content === 'string' ? r.content.length : 0,
+            })),
+          });
+
+          await this.eventStore.append({
+            sessionId: active.sessionId,
+            type: 'message.user',
+            payload: { content: normalizedToolResults },
+          });
+        }
+      }
 
       // Emit completion event
       this.emit('agent_turn', {
