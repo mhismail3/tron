@@ -28,15 +28,15 @@ struct ChatView: View {
     @State private var cachedModels: [ModelInfo] = []
 
     // MARK: - Smart Auto-Scroll State
-    /// Auto-scroll is enabled when user is at/near the bottom of the chat
-    /// Disabled when user scrolls up, re-enabled when they scroll back to bottom or tap the button
+    /// Whether to auto-scroll to bottom on new content
+    /// Set to false when user scrolls up, true when they tap button or send message
     @State private var autoScrollEnabled = true
     /// Track if there's new content while user is scrolled up
     @State private var hasUnreadContent = false
-    /// Last scroll offset to detect scroll direction
-    @State private var lastScrollOffset: CGFloat = 0
-    /// Grace period after re-enabling auto-scroll (button tap or send) to ignore scroll detection
+    /// Grace period after explicit user actions (button tap, send) to prevent gesture detection
     @State private var autoScrollGraceUntil: Date = .distantPast
+    /// Track the last known bottom distance to detect when user scrolls back to bottom
+    @State private var lastBottomDistance: CGFloat = 0
 
     private let sessionId: String
     private let rpcClient: RPCClient
@@ -69,11 +69,11 @@ struct ChatView: View {
                         selectedImages: $viewModel.selectedImages,
                         onSend: {
                             inputHistory.addToHistory(viewModel.inputText)
-                            // Reset auto-scroll when user sends a message - they're at the bottom
+                            // Reset auto-scroll when user sends a message
                             autoScrollEnabled = true
                             hasUnreadContent = false
-                            // Grace period to prevent scroll detection from disabling during initial scroll
-                            autoScrollGraceUntil = Date().addingTimeInterval(0.5)
+                            // Grace period to prevent gesture detection during initial scroll animation
+                            autoScrollGraceUntil = Date().addingTimeInterval(0.8)
                             viewModel.sendMessage()
                         },
                         onAbort: viewModel.abortAgent,
@@ -225,14 +225,12 @@ struct ChatView: View {
 
     // MARK: - Messages Scroll View
 
-    /// Threshold for disabling auto-scroll - if user scrolls this far from bottom, disable
-    private let scrollUpDisableThreshold: CGFloat = 50
-    /// Threshold for re-enabling - user must be very close to bottom (only used when NOT processing)
-    private let nearBottomEnableThreshold: CGFloat = 30
+    /// Distance to consider "at bottom" for re-enabling auto-scroll when processing ends
+    private let atBottomThreshold: CGFloat = 50
 
     private var messagesScrollView: some View {
         GeometryReader { containerGeo in
-            let containerFrame = containerGeo.frame(in: .global)
+            let containerHeight = containerGeo.size.height
 
             ZStack(alignment: .bottom) {
                 ScrollViewReader { proxy in
@@ -258,12 +256,12 @@ struct ChatView: View {
                                     .id("processing")
                             }
 
-                            // Scroll anchor with position detection
+                            // Scroll anchor with position detection for "at bottom" tracking
                             GeometryReader { geo in
                                 Color.clear
                                     .preference(
                                         key: ScrollOffsetPreferenceKey.self,
-                                        value: geo.frame(in: .global).minY
+                                        value: geo.frame(in: .named("scrollContainer")).minY - containerHeight
                                     )
                             }
                             .frame(height: 1)
@@ -271,41 +269,40 @@ struct ChatView: View {
                         }
                         .padding()
                     }
+                    .coordinateSpace(name: "scrollContainer")
                     .scrollDismissesKeyboard(.interactively)
-                    .onPreferenceChange(ScrollOffsetPreferenceKey.self) { bottomY in
-                        // Skip scroll detection during grace period (after button tap or send)
-                        guard Date() > autoScrollGraceUntil else {
-                            lastScrollOffset = bottomY
-                            return
-                        }
+                    // GESTURE-BASED DETECTION: Detect user scrolling up via drag gesture
+                    // When user drags finger down on screen, they're scrolling up through content
+                    .simultaneousGesture(
+                        DragGesture(minimumDistance: 30)
+                            .onChanged { value in
+                                // Skip during grace period (after button tap or send message)
+                                guard Date() > autoScrollGraceUntil else { return }
 
-                        // Calculate distance from bottom of viewport
-                        // bottomY = global Y of bottom anchor
-                        // containerFrame.maxY = bottom of visible scroll area
-                        // Positive = scrolled up (anchor below viewport)
-                        // Negative/zero = at bottom (anchor at or above viewport bottom)
-                        let distanceFromBottom = bottomY - containerFrame.maxY
-
-                        // Detect scroll direction from delta
-                        let scrollDelta = bottomY - lastScrollOffset
-                        let isUserScrollingUp = scrollDelta > 15
-
-                        // DISABLE auto-scroll: User scrolled up past threshold during processing
-                        if isUserScrollingUp && distanceFromBottom > scrollUpDisableThreshold {
-                            if autoScrollEnabled {
-                                autoScrollEnabled = false
-                                hasUnreadContent = true
+                                // User is dragging down (scrolling up through content)
+                                // translation.height > 0 means finger moved down
+                                if value.translation.height > 40 && autoScrollEnabled {
+                                    print("👆 USER SCROLL UP detected - disabling auto-scroll")
+                                    autoScrollEnabled = false
+                                    if viewModel.isProcessing {
+                                        hasUnreadContent = true
+                                    }
+                                }
                             }
-                        }
+                    )
+                    // Track distance from bottom to re-enable auto-scroll when user scrolls back
+                    .onPreferenceChange(ScrollOffsetPreferenceKey.self) { distanceFromBottom in
+                        lastBottomDistance = distanceFromBottom
 
-                        // RE-ENABLE auto-scroll: Only when NOT processing and user scrolled to very bottom
-                        // During processing, only the button can re-enable (prevents snap-back)
-                        if !viewModel.isProcessing && distanceFromBottom < nearBottomEnableThreshold && !autoScrollEnabled {
+                        // Re-enable auto-scroll ONLY when:
+                        // 1. User has scrolled back to bottom (or very close)
+                        // 2. NOT currently processing (to prevent snap-back during streaming)
+                        // During processing, only the button can re-enable
+                        if !viewModel.isProcessing && distanceFromBottom > -atBottomThreshold && !autoScrollEnabled {
+                            print("✅ User scrolled to bottom (not processing) - re-enabling auto-scroll")
                             autoScrollEnabled = true
                             hasUnreadContent = false
                         }
-
-                        lastScrollOffset = bottomY
                     }
                     .onAppear {
                         scrollProxy = proxy
@@ -320,26 +317,39 @@ struct ChatView: View {
                         }
                     }
                     .onChange(of: viewModel.messages.last?.content) { _, _ in
+                        // Only auto-scroll during streaming if user hasn't scrolled up
                         if autoScrollEnabled {
                             proxy.scrollTo("bottom", anchor: .bottom)
+                        } else if viewModel.isProcessing {
+                            // New content while scrolled up during processing
+                            hasUnreadContent = true
                         }
                     }
                     .onChange(of: viewModel.isProcessing) { wasProcessing, isProcessing in
-                        // When processing ends and auto-scroll is enabled, ensure we're at bottom
-                        if wasProcessing && !isProcessing && autoScrollEnabled {
-                            withAnimation(.tronFast) {
-                                proxy.scrollTo("bottom", anchor: .bottom)
+                        if wasProcessing && !isProcessing {
+                            // Processing ended
+                            if autoScrollEnabled {
+                                // Was following - ensure at bottom
+                                withAnimation(.tronFast) {
+                                    proxy.scrollTo("bottom", anchor: .bottom)
+                                }
                             }
+                            // Clear unread content when processing ends
+                            // (user will see the final state regardless of position)
                             hasUnreadContent = false
                         }
                     }
                 }
 
-                // Floating "scroll to bottom" button - show when auto-scroll disabled and unread content
+                // Floating "New Messages" button - show when user has scrolled up during streaming
                 if !autoScrollEnabled && hasUnreadContent {
                     scrollToBottomButton
-                        .transition(.opacity.combined(with: .scale(scale: 0.8)))
+                        .transition(.asymmetric(
+                            insertion: .opacity.combined(with: .scale(scale: 0.8)).combined(with: .move(edge: .bottom)),
+                            removal: .opacity.combined(with: .scale(scale: 0.9))
+                        ))
                         .padding(.bottom, 16)
+                        .animation(.tronStandard, value: hasUnreadContent)
                 }
             }
         }
@@ -349,14 +359,15 @@ struct ChatView: View {
 
     private var scrollToBottomButton: some View {
         Button {
+            // Re-enable auto-scroll first so the scroll animation isn't blocked
+            autoScrollEnabled = true
+            hasUnreadContent = false
+            // Grace period to prevent gesture detection during scroll animation
+            autoScrollGraceUntil = Date().addingTimeInterval(0.8)
+
             withAnimation(.tronStandard) {
                 scrollProxy?.scrollTo("bottom", anchor: .bottom)
             }
-            // Re-enable auto-scroll and clear unread indicator
-            autoScrollEnabled = true
-            hasUnreadContent = false
-            // Grace period to ignore scroll detection during programmatic scroll animation
-            autoScrollGraceUntil = Date().addingTimeInterval(0.5)
         } label: {
             HStack(spacing: 6) {
                 Image(systemName: "arrow.down")
