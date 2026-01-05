@@ -35,6 +35,8 @@ struct ChatView: View {
     @State private var hasUnreadContent = false
     /// Last scroll offset to detect scroll direction
     @State private var lastScrollOffset: CGFloat = 0
+    /// Grace period after re-enabling auto-scroll (button tap or send) to ignore scroll detection
+    @State private var autoScrollGraceUntil: Date = .distantPast
 
     private let sessionId: String
     private let rpcClient: RPCClient
@@ -70,6 +72,8 @@ struct ChatView: View {
                             // Reset auto-scroll when user sends a message - they're at the bottom
                             autoScrollEnabled = true
                             hasUnreadContent = false
+                            // Grace period to prevent scroll detection from disabling during initial scroll
+                            autoScrollGraceUntil = Date().addingTimeInterval(0.5)
                             viewModel.sendMessage()
                         },
                         onAbort: viewModel.abortAgent,
@@ -269,6 +273,12 @@ struct ChatView: View {
                     }
                     .scrollDismissesKeyboard(.interactively)
                     .onPreferenceChange(ScrollOffsetPreferenceKey.self) { bottomY in
+                        // Skip scroll detection during grace period (after button tap or send)
+                        guard Date() > autoScrollGraceUntil else {
+                            lastScrollOffset = bottomY
+                            return
+                        }
+
                         // Calculate distance from bottom of viewport
                         // bottomY = global Y of bottom anchor
                         // containerFrame.maxY = bottom of visible scroll area
@@ -345,6 +355,8 @@ struct ChatView: View {
             // Re-enable auto-scroll and clear unread indicator
             autoScrollEnabled = true
             hasUnreadContent = false
+            // Grace period to ignore scroll detection during programmatic scroll animation
+            autoScrollGraceUntil = Date().addingTimeInterval(0.5)
         } label: {
             HStack(spacing: 6) {
                 Image(systemName: "arrow.down")
