@@ -32,11 +32,11 @@ struct LogViewer: View {
                 ToolbarItem(placement: .topBarTrailing) {
                     Menu {
                         Button("Copy All Logs") {
-                            UIPasteboard.general.string = log.exportLogs()
+                            UIPasteboard.general.string = logger.exportLogs()
                         }
 
                         Button("Clear Logs") {
-                            log.clearBuffer()
+                            logger.clearBuffer()
                             refreshLogs()
                         }
 
@@ -44,13 +44,13 @@ struct LogViewer: View {
 
                         ForEach(LogLevel.allCases.filter { $0 != .none }, id: \.self) { level in
                             Button {
-                                log.setLevel(level)
+                                logger.setLevel(level)
                                 refreshLogs()
                             } label: {
-                                if log.minimumLevel == level {
-                                    Label("Level: \(level)", systemImage: "checkmark")
+                                if logger.minimumLevel == level {
+                                    Label("Level: \(String(describing: level))", systemImage: "checkmark")
                                 } else {
-                                    Text("Level: \(level)")
+                                    Text("Level: \(String(describing: level))")
                                 }
                             }
                         }
@@ -170,7 +170,7 @@ struct LogViewer: View {
     // MARK: - Helpers
 
     private func refreshLogs() {
-        logs = log.getRecentLogs(count: 500, level: selectedLevel, category: selectedCategory)
+        logs = logger.getRecentLogs(count: 500, level: selectedLevel, category: selectedCategory)
     }
 
     private func colorForLevel(_ level: LogLevel) -> Color {

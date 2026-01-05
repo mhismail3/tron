@@ -48,6 +48,13 @@ import type {
   FilesystemListDirParams,
   FilesystemListDirResult,
   FilesystemGetHomeResult,
+  WorktreeGetStatusParams,
+  WorktreeGetStatusResult,
+  WorktreeCommitParams,
+  WorktreeCommitResult,
+  WorktreeMergeParams,
+  WorktreeMergeResult,
+  WorktreeListResult,
 } from './types.js';
 import { ANTHROPIC_MODELS } from '../providers/models.js';
 
@@ -64,6 +71,53 @@ export interface RpcContext {
   sessionManager: SessionManager;
   agentManager: AgentManager;
   memoryStore: MemoryStore;
+  /** EventStore for event-sourced session operations (optional for backwards compatibility) */
+  eventStore?: EventStoreManager;
+  /** Worktree manager for git worktree operations (optional) */
+  worktreeManager?: WorktreeRpcManager;
+}
+
+/**
+ * Worktree manager interface for RPC operations
+ */
+export interface WorktreeRpcManager {
+  getWorktreeStatus(sessionId: string): Promise<{
+    isolated: boolean;
+    branch: string;
+    baseCommit: string;
+    path: string;
+    hasUncommittedChanges?: boolean;
+    commitCount?: number;
+  } | null>;
+  commitWorktree(sessionId: string, message: string): Promise<{
+    success: boolean;
+    commitHash?: string;
+    filesChanged?: string[];
+    error?: string;
+  }>;
+  mergeWorktree(sessionId: string, targetBranch: string, strategy?: 'merge' | 'rebase' | 'squash'): Promise<{
+    success: boolean;
+    mergeCommit?: string;
+    conflicts?: string[];
+  }>;
+  listWorktrees(): Promise<Array<{ path: string; branch: string; sessionId?: string }>>;
+}
+
+// EventStore manager interface (implemented by EventStoreOrchestrator)
+export interface EventStoreManager {
+  // Event operations
+  getEventHistory(sessionId: string, options?: { types?: string[]; limit?: number; beforeEventId?: string }): Promise<{ events: unknown[]; hasMore: boolean; oldestEventId?: string }>;
+  getEventsSince(options: { sessionId?: string; workspaceId?: string; afterEventId?: string; afterTimestamp?: string; limit?: number }): Promise<{ events: unknown[]; nextCursor?: string; hasMore: boolean }>;
+  appendEvent(sessionId: string, type: string, payload: Record<string, unknown>, parentId?: string): Promise<{ event: unknown; newHeadEventId: string }>;
+
+  // Tree operations
+  getTreeVisualization(sessionId: string, options?: { maxDepth?: number; messagesOnly?: boolean }): Promise<{ sessionId: string; rootEventId: string; headEventId: string; nodes: unknown[]; totalEvents: number }>;
+  getBranches(sessionId: string): Promise<{ mainBranch: unknown; forks: unknown[] }>;
+  getSubtree(eventId: string, options?: { maxDepth?: number; direction?: 'descendants' | 'ancestors' }): Promise<{ nodes: unknown[] }>;
+  getAncestors(eventId: string): Promise<{ events: unknown[] }>;
+
+  // Search
+  searchContent(query: string, options?: { sessionId?: string; workspaceId?: string; types?: string[]; limit?: number }): Promise<{ results: unknown[]; totalCount: number }>;
 }
 
 // Manager interfaces (implemented elsewhere)
@@ -72,8 +126,9 @@ interface SessionManager {
   getSession(sessionId: string): Promise<SessionInfo | null>;
   listSessions(params: SessionListParams): Promise<SessionInfo[]>;
   deleteSession(sessionId: string): Promise<boolean>;
-  forkSession(sessionId: string, fromIndex?: number): Promise<SessionForkResult>;
-  rewindSession(sessionId: string, toIndex: number): Promise<SessionRewindResult>;
+  // Updated to use EventId-based operations (EventStore integration)
+  forkSession(sessionId: string, fromEventId?: string): Promise<SessionForkResult>;
+  rewindSession(sessionId: string, toEventId: string): Promise<SessionRewindResult>;
   switchModel(sessionId: string, model: string): Promise<ModelSwitchResult>;
 }
 
@@ -244,6 +299,40 @@ export class RpcHandler extends EventEmitter {
         case 'system.getInfo':
           return this.handleSystemGetInfo(request);
 
+        // Event methods (requires eventStore in context)
+        case 'events.getHistory':
+          return this.handleEventsGetHistory(request);
+        case 'events.getSince':
+          return this.handleEventsGetSince(request);
+        case 'events.append':
+          return this.handleEventsAppend(request);
+
+        // Tree methods (requires eventStore in context)
+        case 'tree.getVisualization':
+          return this.handleTreeGetVisualization(request);
+        case 'tree.getBranches':
+          return this.handleTreeGetBranches(request);
+        case 'tree.getSubtree':
+          return this.handleTreeGetSubtree(request);
+        case 'tree.getAncestors':
+          return this.handleTreeGetAncestors(request);
+
+        // Search methods
+        case 'search.content':
+          return this.handleSearchContent(request);
+        case 'search.events':
+          return this.handleSearchEvents(request);
+
+        // Worktree methods
+        case 'worktree.getStatus':
+          return this.handleWorktreeGetStatus(request);
+        case 'worktree.commit':
+          return this.handleWorktreeCommit(request);
+        case 'worktree.merge':
+          return this.handleWorktreeMerge(request);
+        case 'worktree.list':
+          return this.handleWorktreeList(request);
+
         default:
           return this.errorResponse(request.id, 'METHOD_NOT_FOUND', `Unknown method: ${request.method}`);
       }
@@ -333,9 +422,11 @@ export class RpcHandler extends EventEmitter {
       return this.errorResponse(request.id, 'INVALID_PARAMS', 'sessionId is required');
     }
 
+    // Fork now uses EventStore via EventId
+    // The sessionManager will be updated to use EventStore internally
     const result = await this.context.sessionManager.forkSession(
       params.sessionId,
-      params.fromMessageIndex
+      params.fromEventId // Pass eventId, sessionManager handles conversion
     );
 
     return this.successResponse(request.id, result);
@@ -347,13 +438,14 @@ export class RpcHandler extends EventEmitter {
     if (!params?.sessionId) {
       return this.errorResponse(request.id, 'INVALID_PARAMS', 'sessionId is required');
     }
-    if (params.toMessageIndex === undefined) {
-      return this.errorResponse(request.id, 'INVALID_PARAMS', 'toMessageIndex is required');
+    if (!params.toEventId) {
+      return this.errorResponse(request.id, 'INVALID_PARAMS', 'toEventId is required');
     }
 
+    // Rewind now uses EventStore via EventId
     const result = await this.context.sessionManager.rewindSession(
       params.sessionId,
-      params.toMessageIndex
+      params.toEventId // Pass eventId, sessionManager handles conversion
     );
 
     return this.successResponse(request.id, result);
@@ -653,6 +745,275 @@ export class RpcHandler extends EventEmitter {
         heapTotal: memory.heapTotal,
       },
     };
+
+    return this.successResponse(request.id, result);
+  }
+
+  // ===========================================================================
+  // Event Handlers
+  // ===========================================================================
+
+  private async handleEventsGetHistory(request: RpcRequest): Promise<RpcResponse> {
+    if (!this.context.eventStore) {
+      return this.errorResponse(request.id, 'NOT_SUPPORTED', 'EventStore not available');
+    }
+
+    const params = request.params as { sessionId: string; types?: string[]; limit?: number; beforeEventId?: string } | undefined;
+
+    if (!params?.sessionId) {
+      return this.errorResponse(request.id, 'INVALID_PARAMS', 'sessionId is required');
+    }
+
+    const result = await this.context.eventStore.getEventHistory(params.sessionId, {
+      types: params.types,
+      limit: params.limit,
+      beforeEventId: params.beforeEventId,
+    });
+
+    return this.successResponse(request.id, result);
+  }
+
+  private async handleEventsGetSince(request: RpcRequest): Promise<RpcResponse> {
+    if (!this.context.eventStore) {
+      return this.errorResponse(request.id, 'NOT_SUPPORTED', 'EventStore not available');
+    }
+
+    const params = request.params as { sessionId?: string; workspaceId?: string; afterEventId?: string; afterTimestamp?: string; limit?: number } | undefined;
+
+    const result = await this.context.eventStore.getEventsSince({
+      sessionId: params?.sessionId,
+      workspaceId: params?.workspaceId,
+      afterEventId: params?.afterEventId,
+      afterTimestamp: params?.afterTimestamp,
+      limit: params?.limit,
+    });
+
+    return this.successResponse(request.id, result);
+  }
+
+  private async handleEventsAppend(request: RpcRequest): Promise<RpcResponse> {
+    if (!this.context.eventStore) {
+      return this.errorResponse(request.id, 'NOT_SUPPORTED', 'EventStore not available');
+    }
+
+    const params = request.params as { sessionId: string; type: string; payload: Record<string, unknown>; parentId?: string } | undefined;
+
+    if (!params?.sessionId) {
+      return this.errorResponse(request.id, 'INVALID_PARAMS', 'sessionId is required');
+    }
+    if (!params?.type) {
+      return this.errorResponse(request.id, 'INVALID_PARAMS', 'type is required');
+    }
+    if (!params?.payload) {
+      return this.errorResponse(request.id, 'INVALID_PARAMS', 'payload is required');
+    }
+
+    const result = await this.context.eventStore.appendEvent(
+      params.sessionId,
+      params.type,
+      params.payload,
+      params.parentId
+    );
+
+    return this.successResponse(request.id, result);
+  }
+
+  // ===========================================================================
+  // Tree Handlers
+  // ===========================================================================
+
+  private async handleTreeGetVisualization(request: RpcRequest): Promise<RpcResponse> {
+    if (!this.context.eventStore) {
+      return this.errorResponse(request.id, 'NOT_SUPPORTED', 'EventStore not available');
+    }
+
+    const params = request.params as { sessionId: string; maxDepth?: number; messagesOnly?: boolean } | undefined;
+
+    if (!params?.sessionId) {
+      return this.errorResponse(request.id, 'INVALID_PARAMS', 'sessionId is required');
+    }
+
+    const result = await this.context.eventStore.getTreeVisualization(params.sessionId, {
+      maxDepth: params.maxDepth,
+      messagesOnly: params.messagesOnly,
+    });
+
+    return this.successResponse(request.id, result);
+  }
+
+  private async handleTreeGetBranches(request: RpcRequest): Promise<RpcResponse> {
+    if (!this.context.eventStore) {
+      return this.errorResponse(request.id, 'NOT_SUPPORTED', 'EventStore not available');
+    }
+
+    const params = request.params as { sessionId: string } | undefined;
+
+    if (!params?.sessionId) {
+      return this.errorResponse(request.id, 'INVALID_PARAMS', 'sessionId is required');
+    }
+
+    const result = await this.context.eventStore.getBranches(params.sessionId);
+    return this.successResponse(request.id, result);
+  }
+
+  private async handleTreeGetSubtree(request: RpcRequest): Promise<RpcResponse> {
+    if (!this.context.eventStore) {
+      return this.errorResponse(request.id, 'NOT_SUPPORTED', 'EventStore not available');
+    }
+
+    const params = request.params as { eventId: string; maxDepth?: number; direction?: 'descendants' | 'ancestors' } | undefined;
+
+    if (!params?.eventId) {
+      return this.errorResponse(request.id, 'INVALID_PARAMS', 'eventId is required');
+    }
+
+    const result = await this.context.eventStore.getSubtree(params.eventId, {
+      maxDepth: params.maxDepth,
+      direction: params.direction,
+    });
+
+    return this.successResponse(request.id, result);
+  }
+
+  private async handleTreeGetAncestors(request: RpcRequest): Promise<RpcResponse> {
+    if (!this.context.eventStore) {
+      return this.errorResponse(request.id, 'NOT_SUPPORTED', 'EventStore not available');
+    }
+
+    const params = request.params as { eventId: string } | undefined;
+
+    if (!params?.eventId) {
+      return this.errorResponse(request.id, 'INVALID_PARAMS', 'eventId is required');
+    }
+
+    const result = await this.context.eventStore.getAncestors(params.eventId);
+    return this.successResponse(request.id, result);
+  }
+
+  // ===========================================================================
+  // Search Handlers
+  // ===========================================================================
+
+  private async handleSearchContent(request: RpcRequest): Promise<RpcResponse> {
+    if (!this.context.eventStore) {
+      return this.errorResponse(request.id, 'NOT_SUPPORTED', 'EventStore not available');
+    }
+
+    const params = request.params as { query: string; sessionId?: string; workspaceId?: string; types?: string[]; limit?: number } | undefined;
+
+    if (!params?.query) {
+      return this.errorResponse(request.id, 'INVALID_PARAMS', 'query is required');
+    }
+
+    const result = await this.context.eventStore.searchContent(params.query, {
+      sessionId: params.sessionId,
+      workspaceId: params.workspaceId,
+      types: params.types,
+      limit: params.limit,
+    });
+
+    return this.successResponse(request.id, result);
+  }
+
+  private async handleSearchEvents(request: RpcRequest): Promise<RpcResponse> {
+    if (!this.context.eventStore) {
+      return this.errorResponse(request.id, 'NOT_SUPPORTED', 'EventStore not available');
+    }
+
+    const params = request.params as { query: string; sessionId?: string; workspaceId?: string; types?: string[]; limit?: number } | undefined;
+
+    if (!params?.query) {
+      return this.errorResponse(request.id, 'INVALID_PARAMS', 'query is required');
+    }
+
+    const result = await this.context.eventStore.searchContent(params.query, {
+      sessionId: params.sessionId,
+      workspaceId: params.workspaceId,
+      types: params.types,
+      limit: params.limit,
+    });
+
+    return this.successResponse(request.id, result);
+  }
+
+  // ===========================================================================
+  // Worktree Handlers
+  // ===========================================================================
+
+  private async handleWorktreeGetStatus(request: RpcRequest): Promise<RpcResponse> {
+    if (!this.context.worktreeManager) {
+      return this.errorResponse(request.id, 'NOT_SUPPORTED', 'Worktree manager not available');
+    }
+
+    const params = request.params as WorktreeGetStatusParams | undefined;
+
+    if (!params?.sessionId) {
+      return this.errorResponse(request.id, 'INVALID_PARAMS', 'sessionId is required');
+    }
+
+    const worktree = await this.context.worktreeManager.getWorktreeStatus(params.sessionId);
+
+    const result: WorktreeGetStatusResult = {
+      hasWorktree: worktree !== null,
+      worktree: worktree ?? undefined,
+    };
+
+    return this.successResponse(request.id, result);
+  }
+
+  private async handleWorktreeCommit(request: RpcRequest): Promise<RpcResponse> {
+    if (!this.context.worktreeManager) {
+      return this.errorResponse(request.id, 'NOT_SUPPORTED', 'Worktree manager not available');
+    }
+
+    const params = request.params as WorktreeCommitParams | undefined;
+
+    if (!params?.sessionId) {
+      return this.errorResponse(request.id, 'INVALID_PARAMS', 'sessionId is required');
+    }
+    if (!params?.message) {
+      return this.errorResponse(request.id, 'INVALID_PARAMS', 'message is required');
+    }
+
+    const result: WorktreeCommitResult = await this.context.worktreeManager.commitWorktree(
+      params.sessionId,
+      params.message
+    );
+
+    return this.successResponse(request.id, result);
+  }
+
+  private async handleWorktreeMerge(request: RpcRequest): Promise<RpcResponse> {
+    if (!this.context.worktreeManager) {
+      return this.errorResponse(request.id, 'NOT_SUPPORTED', 'Worktree manager not available');
+    }
+
+    const params = request.params as WorktreeMergeParams | undefined;
+
+    if (!params?.sessionId) {
+      return this.errorResponse(request.id, 'INVALID_PARAMS', 'sessionId is required');
+    }
+    if (!params?.targetBranch) {
+      return this.errorResponse(request.id, 'INVALID_PARAMS', 'targetBranch is required');
+    }
+
+    const result: WorktreeMergeResult = await this.context.worktreeManager.mergeWorktree(
+      params.sessionId,
+      params.targetBranch,
+      params.strategy
+    );
+
+    return this.successResponse(request.id, result);
+  }
+
+  private async handleWorktreeList(request: RpcRequest): Promise<RpcResponse> {
+    if (!this.context.worktreeManager) {
+      return this.errorResponse(request.id, 'NOT_SUPPORTED', 'Worktree manager not available');
+    }
+
+    const worktrees = await this.context.worktreeManager.listWorktrees();
+
+    const result: WorktreeListResult = { worktrees };
 
     return this.successResponse(request.id, result);
   }

@@ -14,37 +14,101 @@ struct InputBar: View {
     var inputHistory: InputHistoryStore?
     var onHistoryNavigate: ((String) -> Void)?
 
+    // Status bar info
+    var modelName: String = ""
+    var onModelTap: (() -> Void)?
+    var tokenUsage: TokenUsage?
+    var contextPercentage: Int = 0
+
     @FocusState private var isFocused: Bool
     @State private var showingImagePicker = false
 
     var body: some View {
         VStack(spacing: 8) {
-            // Attached images preview
+            // Attached images preview (hidden but functionality preserved)
             if !attachedImages.isEmpty {
                 attachedImagesRow
             }
 
-            // Input row
+            // Status pills row - liquid glass style
+            if !modelName.isEmpty || tokenUsage != nil {
+                statusPillsRow
+                    .padding(.horizontal)
+            }
+
+            // Input row - liquid glass style
             HStack(alignment: .bottom, spacing: 12) {
-                // Attachment button
-                attachmentMenu
+                // Text field with glass background
+                textFieldGlass
 
-                // Text field
-                textField
-
-                // Send/Abort button
-                actionButton
+                // Send/Abort button - liquid glass
+                actionButtonGlass
             }
             .padding(.horizontal)
             .padding(.vertical, 8)
         }
-        .background(Color.tronSurface)
-        .overlay(
-            Rectangle()
-                .fill(Color.tronBorder)
-                .frame(height: 0.5),
-            alignment: .top
-        )
+        // No solid background - transparent for liquid glass effect
+    }
+
+    // MARK: - Status Pills Row (Liquid Glass)
+
+    private var statusPillsRow: some View {
+        HStack {
+            // Model pill - tappable
+            if !modelName.isEmpty {
+                Button(action: { onModelTap?() }) {
+                    HStack(spacing: 4) {
+                        Image(systemName: "cpu")
+                            .font(.system(size: 9, weight: .medium))
+                        Text(modelName.shortModelName)
+                            .font(.system(size: 11, weight: .medium))
+                    }
+                    .foregroundStyle(.primary.opacity(0.8))
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 5)
+                    .background(.ultraThinMaterial, in: Capsule())
+                }
+            }
+
+            Spacer()
+
+            // Token stats pill
+            if tokenUsage != nil || contextPercentage > 0 {
+                HStack(spacing: 8) {
+                    // Input tokens
+                    HStack(spacing: 2) {
+                        Image(systemName: "arrow.down")
+                            .font(.system(size: 8))
+                        Text(tokenUsage?.formattedInput ?? "0")
+                    }
+
+                    // Output tokens
+                    HStack(spacing: 2) {
+                        Image(systemName: "arrow.up")
+                            .font(.system(size: 8))
+                        Text(tokenUsage?.formattedOutput ?? "0")
+                    }
+
+                    // Context percentage
+                    Text("\(contextPercentage)%")
+                        .foregroundStyle(contextPercentageColor)
+                }
+                .font(.system(size: 10, weight: .medium, design: .monospaced))
+                .foregroundStyle(.primary.opacity(0.6))
+                .padding(.horizontal, 10)
+                .padding(.vertical, 5)
+                .background(.ultraThinMaterial, in: Capsule())
+            }
+        }
+    }
+
+    private var contextPercentageColor: Color {
+        if contextPercentage >= 95 {
+            return .red
+        } else if contextPercentage >= 80 {
+            return .orange
+        }
+        return .primary.opacity(0.6)
     }
 
     // MARK: - Attached Images Row
@@ -89,7 +153,48 @@ struct InputBar: View {
         .disabled(isProcessing)
     }
 
-    // MARK: - Text Field
+    // MARK: - Simplified Text Field (without history navigation)
+
+    private var textFieldSimplified: some View {
+        TextField("Message...", text: $text, axis: .vertical)
+            .textFieldStyle(.plain)
+            .font(.subheadline)
+            .foregroundStyle(.tronTextPrimary)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+            .background(Color.tronSurfaceElevated)
+            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .lineLimit(1...8)
+            .focused($isFocused)
+            .disabled(isProcessing)
+            .onSubmit {
+                if !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    onSend()
+                }
+            }
+    }
+
+    // MARK: - Glass Text Field (iOS 26 Liquid Glass)
+
+    private var textFieldGlass: some View {
+        TextField("Message...", text: $text, axis: .vertical)
+            .textFieldStyle(.plain)
+            .font(.subheadline)
+            .foregroundStyle(.primary)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+            .lineLimit(1...8)
+            .focused($isFocused)
+            .disabled(isProcessing)
+            .onSubmit {
+                if !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    onSend()
+                }
+            }
+    }
+
+    // MARK: - Text Field (preserved implementation with history)
 
     private var textField: some View {
         VStack(spacing: 4) {
@@ -197,6 +302,40 @@ struct InputBar: View {
         .disabled(!isProcessing && !canSend)
         .animation(.tronFast, value: isProcessing)
         .animation(.tronFast, value: canSend)
+    }
+
+    // MARK: - Glass Action Button (iOS 26 Liquid Glass)
+
+    private var actionButtonGlass: some View {
+        Button {
+            if isProcessing {
+                onAbort()
+            } else {
+                onSend()
+            }
+        } label: {
+            Group {
+                if isProcessing {
+                    Image(systemName: "stop.fill")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(.red)
+                } else {
+                    Image(systemName: "arrow.up")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(canSend ? .white : .primary.opacity(0.3))
+                }
+            }
+            .frame(width: 32, height: 32)
+            .background(
+                isProcessing
+                    ? AnyShapeStyle(.ultraThinMaterial)
+                    : (canSend ? AnyShapeStyle(Color.tronEmerald) : AnyShapeStyle(.ultraThinMaterial)),
+                in: Circle()
+            )
+        }
+        .disabled(!isProcessing && !canSend)
+        .animation(.easeInOut(duration: 0.2), value: isProcessing)
+        .animation(.easeInOut(duration: 0.2), value: canSend)
     }
 
     private var canSend: Bool {

@@ -28,3 +28,26 @@ export {
   useChatDispatch,
   useChatSelector,
 } from './context.js';
+
+// Event DB (IndexedDB event cache)
+export {
+  EventDB,
+  getEventDB,
+  type CachedEvent,
+  type CachedSession,
+  type SyncState,
+  type EventTreeNode,
+} from './event-db.js';
+
+// Worktree Store
+export {
+  useWorktreeStore,
+  worktreeReducer,
+  initialWorktreeState,
+  type WorktreeState,
+  type WorktreeAction,
+  type WorktreeStatus,
+  type WorktreeInfo,
+  type WorktreeListItem,
+  type UseWorktreeStoreReturn,
+} from './worktree-store.js';

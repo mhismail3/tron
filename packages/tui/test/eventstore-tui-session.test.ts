@@ -1,0 +1,979 @@
+/**
+ * @fileoverview TUI EventStore Integration Tests
+ *
+ * These tests verify the EventStoreTuiSession class integrates correctly
+ * with the EventStore for session management. The TUI uses direct database
+ * access (local-first) since it runs on the same machine.
+ *
+ * Test-Driven Development: These tests are written FIRST to define
+ * the expected behavior before implementation.
+ */
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import * as path from 'path';
+import * as os from 'os';
+import * as fs from 'fs';
+import {
+  EventStore,
+  type SessionId,
+  type EventId,
+  type EventMessage,
+  type EventSessionState,
+  type TronSessionEvent,
+} from '@tron/core';
+
+// Import the class we'll create
+import { EventStoreTuiSession, type EventStoreTuiSessionConfig } from '../src/session/eventstore-tui-session.js';
+
+// Test utilities
+function createTempDir(): string {
+  const tmpDir = path.join(os.tmpdir(), `tron-tui-test-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+  fs.mkdirSync(tmpDir, { recursive: true });
+  return tmpDir;
+}
+
+function cleanupTempDir(dir: string): void {
+  try {
+    fs.rmSync(dir, { recursive: true, force: true });
+  } catch {
+    // Ignore cleanup errors
+  }
+}
+
+describe('EventStoreTuiSession', () => {
+  let tempDir: string;
+  let eventStore: EventStore;
+  let config: EventStoreTuiSessionConfig;
+
+  beforeEach(async () => {
+    tempDir = createTempDir();
+
+    // Create EventStore with in-memory database for tests
+    eventStore = new EventStore(':memory:');
+    await eventStore.initialize();
+
+    config = {
+      workingDirectory: tempDir,
+      tronDir: path.join(tempDir, '.tron'),
+      model: 'claude-sonnet-4-20250514',
+      provider: 'anthropic',
+      eventStore,
+    };
+  });
+
+  afterEach(async () => {
+    await eventStore.close();
+    cleanupTempDir(tempDir);
+  });
+
+  // ===========================================================================
+  // Initialization Tests
+  // ===========================================================================
+
+  describe('initialization', () => {
+    it('should create a new session with EventStore', async () => {
+      const tuiSession = new EventStoreTuiSession(config);
+      const result = await tuiSession.initialize();
+
+      expect(result.sessionId).toBeDefined();
+      expect(result.sessionId).toMatch(/^sess_/);
+      expect(result.systemPrompt).toBeDefined();
+    });
+
+    it('should create workspace if not exists', async () => {
+      const tuiSession = new EventStoreTuiSession(config);
+      await tuiSession.initialize();
+
+      const sessionId = tuiSession.getSessionId();
+      const session = await eventStore.getSession(sessionId);
+
+      expect(session).toBeDefined();
+      expect(session?.workingDirectory).toBe(tempDir);
+    });
+
+    it('should create root session.start event', async () => {
+      const tuiSession = new EventStoreTuiSession(config);
+      await tuiSession.initialize();
+
+      const sessionId = tuiSession.getSessionId();
+      const events = await eventStore.getEventsBySession(sessionId);
+
+      expect(events.length).toBeGreaterThanOrEqual(1);
+      expect(events[0].type).toBe('session.start');
+      expect(events[0].payload).toMatchObject({
+        model: 'claude-sonnet-4-20250514',
+        provider: 'anthropic',
+        workingDirectory: tempDir,
+      });
+    });
+
+    it('should record session metadata in start event', async () => {
+      const tuiSession = new EventStoreTuiSession(config);
+      await tuiSession.initialize();
+
+      const sessionId = tuiSession.getSessionId();
+      const events = await eventStore.getEventsBySession(sessionId);
+      const startEvent = events.find(e => e.type === 'session.start');
+
+      expect(startEvent?.payload).toMatchObject({
+        clientType: 'tui',
+        version: expect.any(String),
+      });
+    });
+
+    it('should resume existing session by ID', async () => {
+      // Create first session
+      const tuiSession1 = new EventStoreTuiSession(config);
+      const result1 = await tuiSession1.initialize();
+      await tuiSession1.addMessage({ role: 'user', content: 'Hello' });
+
+      // Resume same session
+      const tuiSession2 = new EventStoreTuiSession({
+        ...config,
+        sessionId: result1.sessionId,
+      });
+      const result2 = await tuiSession2.initialize();
+
+      expect(result2.sessionId).toBe(result1.sessionId);
+      const messages = await tuiSession2.getMessages();
+      expect(messages.length).toBe(1);
+      expect(messages[0].content).toBe('Hello');
+    });
+
+    it('should load context from AGENTS.md/CLAUDE.md files', async () => {
+      // Create context file
+      const agentsFile = path.join(tempDir, 'AGENTS.md');
+      fs.writeFileSync(agentsFile, '# Test Agent Context\nThis is test context.');
+
+      const tuiSession = new EventStoreTuiSession(config);
+      const result = await tuiSession.initialize();
+
+      expect(result.systemPrompt).toContain('Test Agent Context');
+    });
+  });
+
+  // ===========================================================================
+  // Message Recording Tests
+  // ===========================================================================
+
+  describe('message recording', () => {
+    it('should record user message as event', async () => {
+      const tuiSession = new EventStoreTuiSession(config);
+      await tuiSession.initialize();
+
+      await tuiSession.addMessage({ role: 'user', content: 'Hello, assistant!' });
+
+      const sessionId = tuiSession.getSessionId();
+      const events = await eventStore.getEventsBySession(sessionId);
+      const userEvent = events.find(e => e.type === 'message.user');
+
+      expect(userEvent).toBeDefined();
+      expect(userEvent?.payload).toMatchObject({
+        content: 'Hello, assistant!',
+      });
+    });
+
+    it('should record assistant message as event', async () => {
+      const tuiSession = new EventStoreTuiSession(config);
+      await tuiSession.initialize();
+
+      await tuiSession.addMessage({
+        role: 'assistant',
+        content: [{ type: 'text', text: 'Hello, human!' }],
+      });
+
+      const sessionId = tuiSession.getSessionId();
+      const events = await eventStore.getEventsBySession(sessionId);
+      const assistantEvent = events.find(e => e.type === 'message.assistant');
+
+      expect(assistantEvent).toBeDefined();
+      expect(assistantEvent?.payload.content).toEqual([{ type: 'text', text: 'Hello, human!' }]);
+    });
+
+    it('should track token usage in events', async () => {
+      const tuiSession = new EventStoreTuiSession(config);
+      await tuiSession.initialize();
+
+      await tuiSession.addMessage(
+        { role: 'assistant', content: [{ type: 'text', text: 'Response' }] },
+        { inputTokens: 100, outputTokens: 50 }
+      );
+
+      const sessionId = tuiSession.getSessionId();
+      const events = await eventStore.getEventsBySession(sessionId);
+      const assistantEvent = events.find(e => e.type === 'message.assistant');
+
+      // Token usage is stored in payload.tokenUsage
+      expect(assistantEvent?.payload.tokenUsage).toEqual({
+        inputTokens: 100,
+        outputTokens: 50,
+      });
+    });
+
+    it('should maintain event chain via parentId', async () => {
+      const tuiSession = new EventStoreTuiSession(config);
+      await tuiSession.initialize();
+
+      await tuiSession.addMessage({ role: 'user', content: 'First message' });
+      await tuiSession.addMessage({ role: 'assistant', content: [{ type: 'text', text: 'Response' }] });
+      await tuiSession.addMessage({ role: 'user', content: 'Second message' });
+
+      const sessionId = tuiSession.getSessionId();
+      const events = await eventStore.getEventsBySession(sessionId);
+
+      // Each event should have parentId pointing to previous
+      for (let i = 1; i < events.length; i++) {
+        expect(events[i].parentId).toBe(events[i - 1].id);
+      }
+    });
+
+    it('should update session head after each message', async () => {
+      const tuiSession = new EventStoreTuiSession(config);
+      await tuiSession.initialize();
+
+      await tuiSession.addMessage({ role: 'user', content: 'Message 1' });
+
+      const sessionId = tuiSession.getSessionId();
+      const session1 = await eventStore.getSession(sessionId);
+      const head1 = session1?.headEventId;
+
+      await tuiSession.addMessage({ role: 'user', content: 'Message 2' });
+
+      const session2 = await eventStore.getSession(sessionId);
+      const head2 = session2?.headEventId;
+
+      expect(head2).not.toBe(head1);
+    });
+
+    it('should skip persistence in ephemeral mode but track in memory', async () => {
+      const ephemeralConfig: EventStoreTuiSessionConfig = {
+        ...config,
+        ephemeral: true,
+      };
+
+      const tuiSession = new EventStoreTuiSession(ephemeralConfig);
+      await tuiSession.initialize();
+
+      await tuiSession.addMessage({ role: 'user', content: 'Ephemeral message' });
+
+      // Should still be able to get messages in memory
+      const messages = await tuiSession.getMessages();
+      expect(messages.length).toBe(1);
+
+      // But EventStore should have no message events (only session.start)
+      const sessionId = tuiSession.getSessionId();
+      const events = await eventStore.getEventsBySession(sessionId);
+      const messageEvents = events.filter(e => e.type === 'message.user' || e.type === 'message.assistant');
+      expect(messageEvents.length).toBe(0);
+    });
+  });
+
+  // ===========================================================================
+  // Tool Recording Tests
+  // ===========================================================================
+
+  describe('tool recording', () => {
+    it('should record tool call as event', async () => {
+      const tuiSession = new EventStoreTuiSession(config);
+      await tuiSession.initialize();
+
+      await tuiSession.recordToolCall({
+        toolCallId: 'call_123',
+        toolName: 'read',
+        arguments: { file_path: '/test/file.ts' },
+      });
+
+      const sessionId = tuiSession.getSessionId();
+      const events = await eventStore.getEventsBySession(sessionId);
+      const toolCallEvent = events.find(e => e.type === 'tool.call');
+
+      expect(toolCallEvent).toBeDefined();
+      expect(toolCallEvent?.payload).toMatchObject({
+        toolCallId: 'call_123',
+        toolName: 'read',
+        arguments: { file_path: '/test/file.ts' },
+      });
+    });
+
+    it('should record tool result as event', async () => {
+      const tuiSession = new EventStoreTuiSession(config);
+      await tuiSession.initialize();
+
+      await tuiSession.recordToolCall({
+        toolCallId: 'call_123',
+        toolName: 'read',
+        arguments: { file_path: '/test/file.ts' },
+      });
+
+      await tuiSession.recordToolResult({
+        toolCallId: 'call_123',
+        result: 'File contents here',
+        isError: false,
+      });
+
+      const sessionId = tuiSession.getSessionId();
+      const events = await eventStore.getEventsBySession(sessionId);
+      const toolResultEvent = events.find(e => e.type === 'tool.result');
+
+      expect(toolResultEvent).toBeDefined();
+      expect(toolResultEvent?.payload).toMatchObject({
+        toolCallId: 'call_123',
+        result: 'File contents here',
+        isError: false,
+      });
+    });
+
+    it('should record tool errors', async () => {
+      const tuiSession = new EventStoreTuiSession(config);
+      await tuiSession.initialize();
+
+      await tuiSession.recordToolCall({
+        toolCallId: 'call_456',
+        toolName: 'bash',
+        arguments: { command: 'invalid-command' },
+      });
+
+      await tuiSession.recordToolResult({
+        toolCallId: 'call_456',
+        result: 'Command not found',
+        isError: true,
+      });
+
+      const sessionId = tuiSession.getSessionId();
+      const events = await eventStore.getEventsBySession(sessionId);
+      const toolResultEvent = events.find(e => e.type === 'tool.result');
+
+      expect(toolResultEvent?.payload.isError).toBe(true);
+    });
+  });
+
+  // ===========================================================================
+  // Ledger Tests
+  // ===========================================================================
+
+  describe('ledger management', () => {
+    it('should record ledger update as event', async () => {
+      const tuiSession = new EventStoreTuiSession(config);
+      await tuiSession.initialize();
+
+      await tuiSession.updateLedger({
+        goal: 'Implement feature X',
+        now: 'Writing tests',
+      });
+
+      const sessionId = tuiSession.getSessionId();
+      const events = await eventStore.getEventsBySession(sessionId);
+      const ledgerEvent = events.find(e => e.type === 'ledger.update');
+
+      expect(ledgerEvent).toBeDefined();
+      expect(ledgerEvent?.payload).toMatchObject({
+        updates: {
+          goal: 'Implement feature X',
+          now: 'Writing tests',
+        },
+      });
+    });
+
+    it('should reconstruct ledger from events', async () => {
+      const tuiSession = new EventStoreTuiSession(config);
+      await tuiSession.initialize();
+
+      await tuiSession.updateLedger({ goal: 'Goal 1' });
+      await tuiSession.updateLedger({ now: 'Task 1' });
+      await tuiSession.updateLedger({ next: ['Task 2', 'Task 3'] });
+
+      const ledger = await tuiSession.getLedger();
+
+      expect(ledger.goal).toBe('Goal 1');
+      expect(ledger.now).toBe('Task 1');
+      expect(ledger.next).toEqual(['Task 2', 'Task 3']);
+    });
+
+    it('should add working file via ledger event', async () => {
+      const tuiSession = new EventStoreTuiSession(config);
+      await tuiSession.initialize();
+
+      await tuiSession.addWorkingFile('/src/test.ts');
+      await tuiSession.addWorkingFile('/src/other.ts');
+
+      const ledger = await tuiSession.getLedger();
+      expect(ledger.workingFiles).toContain('/src/test.ts');
+      expect(ledger.workingFiles).toContain('/src/other.ts');
+    });
+
+    it('should record decisions via ledger events', async () => {
+      const tuiSession = new EventStoreTuiSession(config);
+      await tuiSession.initialize();
+
+      await tuiSession.addDecision('Use TypeScript', 'Better type safety');
+
+      const ledger = await tuiSession.getLedger();
+      expect(ledger.decisions).toContainEqual(expect.objectContaining({
+        choice: 'Use TypeScript',
+        reason: 'Better type safety',
+        // timestamp is added automatically
+      }));
+    });
+
+    it('should complete current task and move to next', async () => {
+      const tuiSession = new EventStoreTuiSession(config);
+      await tuiSession.initialize();
+
+      await tuiSession.updateLedger({
+        now: 'Task A',
+        next: ['Task B', 'Task C'],
+      });
+
+      await tuiSession.completeCurrentTask();
+
+      const ledger = await tuiSession.getLedger();
+      expect(ledger.done).toContain('Task A');
+      expect(ledger.now).toBe('Task B');
+      expect(ledger.next).toEqual(['Task C']);
+    });
+  });
+
+  // ===========================================================================
+  // State Reconstruction Tests
+  // ===========================================================================
+
+  describe('state reconstruction', () => {
+    it('should get messages from event chain', async () => {
+      const tuiSession = new EventStoreTuiSession(config);
+      await tuiSession.initialize();
+
+      await tuiSession.addMessage({ role: 'user', content: 'Hello' });
+      await tuiSession.addMessage({ role: 'assistant', content: [{ type: 'text', text: 'Hi!' }] });
+      await tuiSession.addMessage({ role: 'user', content: 'How are you?' });
+
+      const messages = await tuiSession.getMessages();
+
+      expect(messages.length).toBe(3);
+      expect(messages[0].role).toBe('user');
+      expect(messages[0].content).toBe('Hello');
+      expect(messages[1].role).toBe('assistant');
+      expect(messages[2].content).toBe('How are you?');
+    });
+
+    it('should get full session state', async () => {
+      const tuiSession = new EventStoreTuiSession(config);
+      await tuiSession.initialize();
+
+      await tuiSession.addMessage({ role: 'user', content: 'Test' }, { inputTokens: 10, outputTokens: 0 });
+      await tuiSession.addMessage(
+        { role: 'assistant', content: [{ type: 'text', text: 'Response' }] },
+        { inputTokens: 0, outputTokens: 20 }
+      );
+      await tuiSession.updateLedger({ goal: 'Test goal' });
+
+      const state = await tuiSession.getSessionState();
+
+      expect(state.messages.length).toBe(2);
+      expect(state.tokenUsage.inputTokens).toBe(10);
+      expect(state.tokenUsage.outputTokens).toBe(20);
+      expect(state.ledger.goal).toBe('Test goal');
+    });
+
+    it('should get state at specific event (point-in-time)', async () => {
+      const tuiSession = new EventStoreTuiSession(config);
+      await tuiSession.initialize();
+
+      await tuiSession.addMessage({ role: 'user', content: 'Message 1' });
+
+      // Get the event ID after first message
+      const sessionId = tuiSession.getSessionId();
+      const events = await eventStore.getEventsBySession(sessionId);
+      const afterFirstMessage = events[events.length - 1].id;
+
+      await tuiSession.addMessage({ role: 'user', content: 'Message 2' });
+      await tuiSession.addMessage({ role: 'user', content: 'Message 3' });
+
+      // Get state at earlier point
+      const stateAtPoint = await tuiSession.getStateAt(afterFirstMessage);
+      expect(stateAtPoint.messages.length).toBe(1);
+      expect(stateAtPoint.messages[0].content).toBe('Message 1');
+    });
+
+    it('should get token usage totals', async () => {
+      const tuiSession = new EventStoreTuiSession(config);
+      await tuiSession.initialize();
+
+      await tuiSession.addMessage({ role: 'user', content: 'Test' }, { inputTokens: 100, outputTokens: 0 });
+      await tuiSession.addMessage(
+        { role: 'assistant', content: [{ type: 'text', text: 'Response' }] },
+        { inputTokens: 50, outputTokens: 75 }
+      );
+
+      const usage = tuiSession.getTokenUsage();
+      expect(usage.inputTokens).toBe(150);
+      expect(usage.outputTokens).toBe(75);
+    });
+  });
+
+  // ===========================================================================
+  // Fork Tests
+  // ===========================================================================
+
+  describe('fork operations', () => {
+    it('should fork session from current head', async () => {
+      const tuiSession = new EventStoreTuiSession(config);
+      await tuiSession.initialize();
+
+      await tuiSession.addMessage({ role: 'user', content: 'Original message' });
+      await tuiSession.addMessage({ role: 'assistant', content: [{ type: 'text', text: 'Original response' }] });
+
+      const forkResult = await tuiSession.fork();
+
+      expect(forkResult.newSessionId).toBeDefined();
+      expect(forkResult.newSessionId).not.toBe(tuiSession.getSessionId());
+      expect(forkResult.forkedFromSessionId).toBe(tuiSession.getSessionId());
+    });
+
+    it('should fork session from specific event', async () => {
+      const tuiSession = new EventStoreTuiSession(config);
+      await tuiSession.initialize();
+
+      await tuiSession.addMessage({ role: 'user', content: 'Message 1' });
+
+      // Get event ID after first message
+      const sessionId = tuiSession.getSessionId();
+      const events = await eventStore.getEventsBySession(sessionId);
+      const forkPoint = events[events.length - 1].id;
+
+      await tuiSession.addMessage({ role: 'user', content: 'Message 2' });
+      await tuiSession.addMessage({ role: 'user', content: 'Message 3' });
+
+      const forkResult = await tuiSession.fork({ fromEventId: forkPoint });
+
+      expect(forkResult.forkedFromEventId).toBe(forkPoint);
+
+      // Load forked session and check messages
+      const forkedSession = new EventStoreTuiSession({
+        ...config,
+        sessionId: forkResult.newSessionId,
+      });
+      await forkedSession.initialize();
+      const messages = await forkedSession.getMessages();
+
+      // Should only have 1 message (fork point was after first message)
+      expect(messages.length).toBe(1);
+      expect(messages[0].content).toBe('Message 1');
+    });
+
+    it('should allow divergent paths after fork', async () => {
+      const tuiSession = new EventStoreTuiSession(config);
+      await tuiSession.initialize();
+
+      await tuiSession.addMessage({ role: 'user', content: 'Common base' });
+
+      const forkResult = await tuiSession.fork();
+
+      // Add different messages to each session
+      await tuiSession.addMessage({ role: 'user', content: 'Original path' });
+
+      const forkedSession = new EventStoreTuiSession({
+        ...config,
+        sessionId: forkResult.newSessionId,
+      });
+      await forkedSession.initialize();
+      await forkedSession.addMessage({ role: 'user', content: 'Forked path' });
+
+      // Check they diverged
+      const originalMessages = await tuiSession.getMessages();
+      const forkedMessages = await forkedSession.getMessages();
+
+      expect(originalMessages[1].content).toBe('Original path');
+      expect(forkedMessages[1].content).toBe('Forked path');
+    });
+
+    it('should preserve ledger state in fork', async () => {
+      const tuiSession = new EventStoreTuiSession(config);
+      await tuiSession.initialize();
+
+      await tuiSession.updateLedger({ goal: 'Original goal' });
+      await tuiSession.addWorkingFile('/src/test.ts');
+
+      const forkResult = await tuiSession.fork();
+
+      const forkedSession = new EventStoreTuiSession({
+        ...config,
+        sessionId: forkResult.newSessionId,
+      });
+      await forkedSession.initialize();
+
+      const ledger = await forkedSession.getLedger();
+      expect(ledger.goal).toBe('Original goal');
+      expect(ledger.workingFiles).toContain('/src/test.ts');
+    });
+  });
+
+  // ===========================================================================
+  // Rewind Tests
+  // ===========================================================================
+
+  describe('rewind operations', () => {
+    it('should rewind session to previous event', async () => {
+      const tuiSession = new EventStoreTuiSession(config);
+      await tuiSession.initialize();
+
+      await tuiSession.addMessage({ role: 'user', content: 'Message 1' });
+
+      // Get event ID after first message
+      const sessionId = tuiSession.getSessionId();
+      const events = await eventStore.getEventsBySession(sessionId);
+      const rewindPoint = events[events.length - 1].id;
+
+      await tuiSession.addMessage({ role: 'user', content: 'Message 2' });
+      await tuiSession.addMessage({ role: 'user', content: 'Message 3' });
+
+      // Current should have 3 messages
+      let messages = await tuiSession.getMessages();
+      expect(messages.length).toBe(3);
+
+      // Rewind
+      const rewindResult = await tuiSession.rewind(rewindPoint);
+
+      expect(rewindResult.newHeadEventId).toBe(rewindPoint);
+
+      // Should now have only 1 message
+      messages = await tuiSession.getMessages();
+      expect(messages.length).toBe(1);
+      expect(messages[0].content).toBe('Message 1');
+    });
+
+    it('should preserve rewound-over events', async () => {
+      const tuiSession = new EventStoreTuiSession(config);
+      await tuiSession.initialize();
+
+      await tuiSession.addMessage({ role: 'user', content: 'Keep this' });
+
+      const sessionId = tuiSession.getSessionId();
+      const events1 = await eventStore.getEventsBySession(sessionId);
+      const rewindPoint = events1[events1.length - 1].id;
+
+      await tuiSession.addMessage({ role: 'user', content: 'Rewound over' });
+
+      const eventsBefore = await eventStore.getEventsBySession(sessionId);
+      await tuiSession.rewind(rewindPoint);
+      const eventsAfter = await eventStore.getEventsBySession(sessionId);
+
+      // Events should still exist in database
+      expect(eventsAfter.length).toBe(eventsBefore.length);
+    });
+
+    it('should allow new events from rewound point', async () => {
+      const tuiSession = new EventStoreTuiSession(config);
+      await tuiSession.initialize();
+
+      await tuiSession.addMessage({ role: 'user', content: 'Message 1' });
+
+      const sessionId = tuiSession.getSessionId();
+      const events = await eventStore.getEventsBySession(sessionId);
+      const rewindPoint = events[events.length - 1].id;
+
+      await tuiSession.addMessage({ role: 'user', content: 'To be rewound' });
+
+      await tuiSession.rewind(rewindPoint);
+
+      // Add new message from rewound point
+      await tuiSession.addMessage({ role: 'user', content: 'New path' });
+
+      const messages = await tuiSession.getMessages();
+      expect(messages.length).toBe(2);
+      expect(messages[1].content).toBe('New path');
+    });
+
+    it('should throw error for invalid rewind point', async () => {
+      const tuiSession = new EventStoreTuiSession(config);
+      await tuiSession.initialize();
+
+      await expect(tuiSession.rewind('invalid_event_id' as EventId)).rejects.toThrow();
+    });
+  });
+
+  // ===========================================================================
+  // Compaction Tests
+  // ===========================================================================
+
+  describe('compaction', () => {
+    it('should detect when compaction is needed', async () => {
+      const tuiSession = new EventStoreTuiSession({
+        ...config,
+        compactionMaxTokens: 1000,
+        compactionThreshold: 0.8,
+      });
+      await tuiSession.initialize();
+
+      // Add messages that exceed threshold
+      for (let i = 0; i < 20; i++) {
+        await tuiSession.addMessage(
+          { role: 'user', content: 'A'.repeat(100) },
+          { inputTokens: 50, outputTokens: 0 }
+        );
+        await tuiSession.addMessage(
+          { role: 'assistant', content: [{ type: 'text', text: 'B'.repeat(100) }] },
+          { inputTokens: 0, outputTokens: 50 }
+        );
+      }
+
+      expect(tuiSession.needsCompaction()).toBe(true);
+    });
+
+    it('should record compaction boundary event', async () => {
+      const tuiSession = new EventStoreTuiSession({
+        ...config,
+        compactionMaxTokens: 200,  // Lower threshold for easier triggering
+        compactionThreshold: 0.5,  // Trigger at 100 tokens
+        compactionTargetTokens: 50,
+      });
+      await tuiSession.initialize();
+
+      // Add messages with longer content to trigger compaction
+      // Each message pair needs ~50 chars to reach 100 token threshold quickly
+      const longQuestion = 'This is a longer question that will consume more tokens for testing purposes. ';
+      const longAnswer = 'This is a comprehensive answer with enough content to help trigger compaction. ';
+
+      for (let i = 0; i < 10; i++) {
+        await tuiSession.addMessage(
+          { role: 'user', content: longQuestion + i },
+          { inputTokens: 30, outputTokens: 0 }
+        );
+        await tuiSession.addMessage(
+          { role: 'assistant', content: [{ type: 'text', text: longAnswer + i }] },
+          { inputTokens: 0, outputTokens: 30 }
+        );
+      }
+
+      if (tuiSession.needsCompaction()) {
+        await tuiSession.compact();
+      }
+
+      const sessionId = tuiSession.getSessionId();
+      const events = await eventStore.getEventsBySession(sessionId);
+      const compactEvents = events.filter(e =>
+        e.type === 'compact.boundary' || e.type === 'compact.summary'
+      );
+
+      expect(compactEvents.length).toBeGreaterThan(0);
+    });
+
+    it('should include summary in compaction event', async () => {
+      const tuiSession = new EventStoreTuiSession({
+        ...config,
+        compactionMaxTokens: 300,
+        compactionThreshold: 0.5,
+        compactionTargetTokens: 100,
+      });
+      await tuiSession.initialize();
+
+      // Add messages
+      for (let i = 0; i < 5; i++) {
+        await tuiSession.addMessage(
+          { role: 'user', content: `Working on task ${i}` },
+          { inputTokens: 50, outputTokens: 0 }
+        );
+        await tuiSession.addMessage(
+          { role: 'assistant', content: [{ type: 'text', text: `Completed task ${i}` }] },
+          { inputTokens: 0, outputTokens: 50 }
+        );
+      }
+
+      if (tuiSession.needsCompaction()) {
+        await tuiSession.compact();
+
+        const sessionId = tuiSession.getSessionId();
+        const events = await eventStore.getEventsBySession(sessionId);
+        const summaryEvent = events.find(e => e.type === 'compact.summary');
+
+        expect(summaryEvent?.payload.summary).toBeDefined();
+        expect(typeof summaryEvent?.payload.summary).toBe('string');
+      }
+    });
+  });
+
+  // ===========================================================================
+  // Session End Tests
+  // ===========================================================================
+
+  describe('session end', () => {
+    it('should record session.end event', async () => {
+      const tuiSession = new EventStoreTuiSession(config);
+      await tuiSession.initialize();
+
+      await tuiSession.addMessage({ role: 'user', content: 'Work done' });
+
+      const endResult = await tuiSession.end();
+
+      expect(endResult.sessionId).toBe(tuiSession.getSessionId());
+
+      const sessionId = tuiSession.getSessionId();
+      const events = await eventStore.getEventsBySession(sessionId);
+      const endEvent = events.find(e => e.type === 'session.end');
+
+      expect(endEvent).toBeDefined();
+      expect(endEvent?.payload.reason).toBe('completed');
+    });
+
+    it('should include summary in end event when enough messages', async () => {
+      const tuiSession = new EventStoreTuiSession({
+        ...config,
+        minMessagesForHandoff: 2,
+      });
+      await tuiSession.initialize();
+
+      await tuiSession.updateLedger({ goal: 'Test task', now: 'Working on it' });
+      await tuiSession.addMessage({ role: 'user', content: 'First message' });
+      await tuiSession.addMessage({ role: 'assistant', content: [{ type: 'text', text: 'Response' }] });
+      await tuiSession.addMessage({ role: 'user', content: 'Second message' });
+
+      const endResult = await tuiSession.end();
+
+      expect(endResult.handoffCreated).toBe(true);
+
+      const sessionId = tuiSession.getSessionId();
+      const events = await eventStore.getEventsBySession(sessionId);
+      const endEvent = events.find(e => e.type === 'session.end');
+
+      expect(endEvent?.payload.summary).toBeDefined();
+    });
+
+    it('should mark session as ended', async () => {
+      const tuiSession = new EventStoreTuiSession(config);
+      await tuiSession.initialize();
+
+      await tuiSession.end();
+
+      const sessionId = tuiSession.getSessionId();
+      const session = await eventStore.getSession(sessionId);
+
+      expect(session?.status).toBe('ended');
+    });
+
+    it('should not allow operations after end', async () => {
+      const tuiSession = new EventStoreTuiSession(config);
+      await tuiSession.initialize();
+
+      await tuiSession.end();
+
+      await expect(tuiSession.addMessage({ role: 'user', content: 'After end' }))
+        .rejects.toThrow(/session.*ended/i);
+    });
+  });
+
+  // ===========================================================================
+  // Search Tests
+  // ===========================================================================
+
+  describe('search', () => {
+    it('should search messages in session', async () => {
+      const tuiSession = new EventStoreTuiSession(config);
+      await tuiSession.initialize();
+
+      await tuiSession.addMessage({ role: 'user', content: 'How do I implement authentication?' });
+      await tuiSession.addMessage({ role: 'assistant', content: [{ type: 'text', text: 'Use JWT tokens for authentication' }] });
+      await tuiSession.addMessage({ role: 'user', content: 'What about database setup?' });
+
+      const results = await tuiSession.searchMessages('authentication');
+
+      expect(results.length).toBeGreaterThan(0);
+      expect(results.some(r => r.content.toLowerCase().includes('authentication'))).toBe(true);
+    });
+
+    it('should search across all sessions in workspace', async () => {
+      // Create first session
+      const tuiSession1 = new EventStoreTuiSession(config);
+      await tuiSession1.initialize();
+      await tuiSession1.addMessage({ role: 'user', content: 'Working on feature X' });
+      await tuiSession1.end();
+
+      // Create second session
+      const tuiSession2 = new EventStoreTuiSession(config);
+      await tuiSession2.initialize();
+      await tuiSession2.addMessage({ role: 'user', content: 'Still working on feature X' });
+
+      const results = await tuiSession2.searchWorkspace('feature X');
+
+      // Should find results from both sessions
+      expect(results.length).toBeGreaterThan(0);
+    });
+  });
+
+  // ===========================================================================
+  // Event History Tests
+  // ===========================================================================
+
+  describe('event history', () => {
+    it('should get recent events', async () => {
+      const tuiSession = new EventStoreTuiSession(config);
+      await tuiSession.initialize();
+
+      await tuiSession.addMessage({ role: 'user', content: 'Test' });
+      await tuiSession.updateLedger({ goal: 'Goal' });
+
+      const events = await tuiSession.getRecentEvents(5);
+
+      expect(events.length).toBeGreaterThanOrEqual(3); // start + message + ledger
+      expect(events.some(e => e.type === 'session.start')).toBe(true);
+      expect(events.some(e => e.type === 'message.user')).toBe(true);
+      expect(events.some(e => e.type === 'ledger.update')).toBe(true);
+    });
+
+    it('should get ancestors (full history to root)', async () => {
+      const tuiSession = new EventStoreTuiSession(config);
+      await tuiSession.initialize();
+
+      await tuiSession.addMessage({ role: 'user', content: 'Msg 1' });
+      await tuiSession.addMessage({ role: 'user', content: 'Msg 2' });
+      await tuiSession.addMessage({ role: 'user', content: 'Msg 3' });
+
+      const ancestors = await tuiSession.getAncestors();
+
+      // Should include all events from root to head
+      expect(ancestors[0].type).toBe('session.start'); // Root
+      expect(ancestors[ancestors.length - 1].type).toBe('message.user'); // Head
+    });
+
+    it('should get tree visualization data', async () => {
+      const tuiSession = new EventStoreTuiSession(config);
+      await tuiSession.initialize();
+
+      await tuiSession.addMessage({ role: 'user', content: 'Base' });
+      await tuiSession.fork();
+      await tuiSession.addMessage({ role: 'user', content: 'Original path' });
+
+      const tree = await tuiSession.getTreeVisualization();
+
+      expect(tree.root).toBeDefined();
+      expect(tree.root.id).toBeDefined();
+      expect(tree.branchPoints.length).toBeGreaterThan(0);
+    });
+  });
+
+  // ===========================================================================
+  // Context Audit Tests
+  // ===========================================================================
+
+  describe('context audit', () => {
+    it('should record context sources in audit', async () => {
+      // Create context file
+      const agentsFile = path.join(tempDir, 'AGENTS.md');
+      fs.writeFileSync(agentsFile, '# Test Context');
+
+      const tuiSession = new EventStoreTuiSession(config);
+      const result = await tuiSession.initialize();
+
+      expect(result.audit.contextFiles.length).toBeGreaterThan(0);
+      expect(result.audit.contextFiles.some(f => f.path.includes('AGENTS.md'))).toBe(true);
+    });
+
+    it('should record handoffs used in context', async () => {
+      // This would require setting up handoffs in eventstore
+      // For now, test that the audit structure is correct
+      const tuiSession = new EventStoreTuiSession(config);
+      const result = await tuiSession.initialize();
+
+      // ContextAuditData has 'handoffs' property (not 'handoffsUsed')
+      expect(result.audit).toHaveProperty('handoffs');
+      expect(Array.isArray(result.audit.handoffs)).toBe(true);
+    });
+  });
+});

@@ -25,7 +25,7 @@ import {
   filterCommands,
   type SlashCommand,
 } from './commands/slash-commands.js';
-import { TuiSession } from './session/tui-session.js';
+import { EventStoreTuiSession } from './session/eventstore-tui-session.js';
 import type { CliConfig, AppState, AppAction, AnthropicAuth, DisplayMessage, MenuStackEntry } from './types.js';
 import * as os from 'os';
 import * as path from 'path';
@@ -41,6 +41,7 @@ import {
   ANTHROPIC_MODELS,
   formatError,
   parseError,
+  EventStore,
   type AgentOptions,
   type TronEvent,
   type Message,
@@ -340,7 +341,8 @@ export function App({ config, auth }: AppProps): React.ReactElement {
   const [state, dispatch] = useReducer(reducer, initialState);
   const { exit } = useApp();
   const agentRef = useRef<TronAgent | null>(null);
-  const tuiSessionRef = useRef<TuiSession | null>(null);
+  const tuiSessionRef = useRef<EventStoreTuiSession | null>(null);
+  const eventStoreRef = useRef<EventStore | null>(null);
   const messageIdRef = useRef(0);
   const currentToolInputRef = useRef<string | null>(null);
   // Track streaming content in a ref for synchronous access in event handler
@@ -577,15 +579,23 @@ export function App({ config, auth }: AppProps): React.ReactElement {
   // Initialize session and agent
   useEffect(() => {
     const initializeSession = async () => {
-      // Create TuiSession for unified session management
+      // Create EventStore for session management
       const globalTronDir = path.join(os.homedir(), '.tron');
+      const eventStoreDbPath = path.join(globalTronDir, 'events.db');
 
-      const tuiSession = new TuiSession({
+      // Initialize EventStore
+      const eventStore = new EventStore(eventStoreDbPath);
+      await eventStore.initialize();
+      eventStoreRef.current = eventStore;
+
+      // Create EventStoreTuiSession for unified session management
+      const tuiSession = new EventStoreTuiSession({
         workingDirectory: config.workingDirectory,
         tronDir: globalTronDir,
         model: config.model ?? DEFAULT_MODEL,
         provider: config.provider ?? 'anthropic',
         ephemeral: config.ephemeral,
+        eventStore,
       });
 
       debugLog.session('init', {
@@ -700,7 +710,7 @@ export function App({ config, auth }: AppProps): React.ReactElement {
       try {
         const endResult = await tuiSessionRef.current.end();
         if (endResult.handoffCreated) {
-          console.log(`\nSession handoff created: ${endResult.handoffId}`);
+          console.log(`\nSession summary created for: ${endResult.sessionId}`);
         }
       } catch (error) {
         console.error('\nFailed to end session properly:', error);

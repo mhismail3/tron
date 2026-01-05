@@ -86,15 +86,15 @@ struct SettingsView: View {
                         HStack {
                             Label("View Logs", systemImage: "doc.text.magnifyingglass")
                             Spacer()
-                            Text("Level: \(String(describing: log.minimumLevel).capitalized)")
+                            Text("Level: \(String(describing: logger.minimumLevel).capitalized)")
                                 .font(.caption)
                                 .foregroundStyle(.tronTextMuted)
                         }
                     }
 
                     Picker("Log Level", selection: Binding(
-                        get: { log.minimumLevel },
-                        set: { log.setLevel($0) }
+                        get: { logger.minimumLevel },
+                        set: { logger.setLevel($0) }
                     )) {
                         Text("Verbose").tag(LogLevel.verbose)
                         Text("Debug").tag(LogLevel.debug)

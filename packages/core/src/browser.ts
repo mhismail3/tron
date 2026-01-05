@@ -82,6 +82,16 @@ export type {
   AgentToolStartEvent,
   AgentToolEndEvent,
   AgentCompleteEvent,
+  // Worktree types
+  WorktreeInfoRpc,
+  WorktreeGetStatusParams,
+  WorktreeGetStatusResult,
+  WorktreeCommitParams,
+  WorktreeCommitResult,
+  WorktreeMergeParams,
+  WorktreeMergeResult,
+  WorktreeListParams,
+  WorktreeListResult,
 } from './rpc/types.js';
 
 // Re-export model catalog (browser-safe)

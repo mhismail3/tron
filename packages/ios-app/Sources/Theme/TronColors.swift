@@ -34,6 +34,12 @@ extension Color {
     static let tronError = Color(hex: "#EF4444")
     static let tronInfo = Color(hex: "#3B82F6")
 
+    // Additional accent colors
+    static let tronAmber = Color(hex: "#F59E0B")
+    static let tronPurple = Color(hex: "#8B5CF6")
+    static let tronBlue = Color(hex: "#3B82F6")
+    static let tronCyan = Color(hex: "#06B6D4")
+
     // MARK: - Special Colors
 
     /// Phthalo green for iOS 26 liquid glass effect
@@ -201,6 +207,12 @@ extension ShapeStyle where Self == Color {
     static var tronWarning: Color { .tronWarning }
     static var tronError: Color { .tronError }
     static var tronInfo: Color { .tronInfo }
+
+    // Additional accent colors
+    static var tronAmber: Color { .tronAmber }
+    static var tronPurple: Color { .tronPurple }
+    static var tronBlue: Color { .tronBlue }
+    static var tronCyan: Color { .tronCyan }
 
     // Backgrounds
     static var tronBackground: Color { .tronBackground }

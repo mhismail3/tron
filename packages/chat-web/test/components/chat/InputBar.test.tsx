@@ -8,7 +8,8 @@ import { InputBar } from '../../../src/components/chat/InputBar.js';
 describe('InputBar', () => {
   it('should render textarea with placeholder', () => {
     render(<InputBar onSubmit={() => {}} />);
-    expect(screen.getByPlaceholderText('Type a message...')).toBeInTheDocument();
+    // Default placeholder includes hint about commands
+    expect(screen.getByPlaceholderText('Type a message... (/ for commands)')).toBeInTheDocument();
   });
 
   it('should accept custom placeholder', () => {

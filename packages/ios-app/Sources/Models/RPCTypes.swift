@@ -401,3 +401,157 @@ struct Handoff: Decodable, Identifiable {
 struct HandoffsResult: Decodable {
     let handoffs: [Handoff]
 }
+
+// MARK: - Event Sync Methods
+
+/// Get event history for a session
+struct EventsGetHistoryParams: Encodable {
+    let sessionId: String
+    let types: [String]?
+    let limit: Int?
+    let beforeEventId: String?
+
+    init(sessionId: String, types: [String]? = nil, limit: Int? = nil, beforeEventId: String? = nil) {
+        self.sessionId = sessionId
+        self.types = types
+        self.limit = limit
+        self.beforeEventId = beforeEventId
+    }
+}
+
+/// Raw event from server (matches core/events/types.ts)
+struct RawEvent: Decodable {
+    let id: String
+    let parentId: String?
+    let sessionId: String
+    let workspaceId: String
+    let type: String
+    let timestamp: String
+    let sequence: Int
+    let payload: [String: AnyCodable]
+}
+
+struct EventsGetHistoryResult: Decodable {
+    let events: [RawEvent]
+    let hasMore: Bool
+    let oldestEventId: String?
+}
+
+/// Get events since a cursor (for sync)
+struct EventsGetSinceParams: Encodable {
+    let sessionId: String?
+    let workspaceId: String?
+    let afterEventId: String?
+    let afterTimestamp: String?
+    let limit: Int?
+
+    init(sessionId: String? = nil, workspaceId: String? = nil, afterEventId: String? = nil, afterTimestamp: String? = nil, limit: Int? = nil) {
+        self.sessionId = sessionId
+        self.workspaceId = workspaceId
+        self.afterEventId = afterEventId
+        self.afterTimestamp = afterTimestamp
+        self.limit = limit
+    }
+}
+
+struct EventsGetSinceResult: Decodable {
+    let events: [RawEvent]
+    let nextCursor: String?
+    let hasMore: Bool
+}
+
+/// Session info from server (for session.list with full event metadata)
+struct ServerSessionInfo: Decodable {
+    let sessionId: String
+    let workspaceId: String?
+    let headEventId: String?
+    let rootEventId: String?
+    let status: String?
+    let title: String?
+    let model: String
+    let provider: String?
+    let workingDirectory: String?
+    let createdAt: String
+    let lastActivityAt: String?
+    let eventCount: Int?
+    let messageCount: Int
+    let inputTokens: Int?
+    let outputTokens: Int?
+    let isActive: Bool
+}
+
+// MARK: - Worktree Methods
+
+/// Worktree information for a session
+struct WorktreeInfo: Decodable, Equatable {
+    let isolated: Bool
+    let branch: String
+    let baseCommit: String
+    let path: String
+    let hasUncommittedChanges: Bool?
+    let commitCount: Int?
+
+    /// Short branch name (removes 'session/' prefix if present)
+    var shortBranch: String {
+        if branch.hasPrefix("session/") {
+            return String(branch.dropFirst(8))
+        }
+        return branch
+    }
+}
+
+/// Get worktree status for a session
+struct WorktreeGetStatusParams: Encodable {
+    let sessionId: String
+}
+
+struct WorktreeGetStatusResult: Decodable {
+    let hasWorktree: Bool
+    let worktree: WorktreeInfo?
+}
+
+/// Commit changes in a session's worktree
+struct WorktreeCommitParams: Encodable {
+    let sessionId: String
+    let message: String
+}
+
+struct WorktreeCommitResult: Decodable {
+    let success: Bool
+    let commitHash: String?
+    let filesChanged: [String]?
+    let error: String?
+}
+
+/// Merge a session's worktree to a target branch
+struct WorktreeMergeParams: Encodable {
+    let sessionId: String
+    let targetBranch: String
+    let strategy: String?
+
+    init(sessionId: String, targetBranch: String, strategy: String? = nil) {
+        self.sessionId = sessionId
+        self.targetBranch = targetBranch
+        self.strategy = strategy
+    }
+}
+
+struct WorktreeMergeResult: Decodable {
+    let success: Bool
+    let mergeCommit: String?
+    let conflicts: [String]?
+    let error: String?
+}
+
+/// List all worktrees
+struct WorktreeListItem: Decodable, Identifiable, Hashable {
+    let path: String
+    let branch: String
+    let sessionId: String?
+
+    var id: String { path }
+}
+
+struct WorktreeListResult: Decodable {
+    let worktrees: [WorktreeListItem]
+}

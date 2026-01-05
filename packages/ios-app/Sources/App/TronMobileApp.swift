@@ -3,14 +3,53 @@ import SwiftUI
 @main
 struct TronMobileApp: App {
     @StateObject private var appState = AppState()
-    @StateObject private var sessionStore = SessionStore()
+    @StateObject private var eventDatabase = EventDatabase()
+
+    // EventStoreManager is created lazily since it needs appState.rpcClient
+    @State private var eventStoreManager: EventStoreManager?
 
     var body: some Scene {
         WindowGroup {
-            ContentView()
-                .environmentObject(appState)
-                .environmentObject(sessionStore)
-                .preferredColorScheme(.dark)
+            Group {
+                if let manager = eventStoreManager {
+                    ContentView()
+                        .environmentObject(appState)
+                        .environmentObject(manager)
+                        .environmentObject(eventDatabase)
+                } else {
+                    // Loading state while initializing
+                    ProgressView()
+                        .progressViewStyle(CircularProgressViewStyle(tint: .tronEmerald))
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .background(Color.tronBackground)
+                }
+            }
+            .preferredColorScheme(.dark)
+            .task {
+                // Initialize event database and store manager on app launch
+                do {
+                    try await eventDatabase.initialize()
+
+                    // Create EventStoreManager with dependencies
+                    let manager = EventStoreManager(
+                        eventDB: eventDatabase,
+                        rpcClient: appState.rpcClient
+                    )
+                    manager.initialize()
+
+                    // Repair any duplicate events from previous sessions
+                    // This fixes the race condition between local caching and server sync
+                    manager.repairDuplicates()
+
+                    await MainActor.run {
+                        eventStoreManager = manager
+                    }
+
+                    print("[TronMobileApp] Event store initialized with \(manager.sessions.count) sessions")
+                } catch {
+                    print("[TronMobileApp] Failed to initialize event store: \(error)")
+                }
+            }
         }
     }
 }
@@ -65,7 +104,8 @@ class AppState: ObservableObject {
 
 struct ContentView: View {
     @EnvironmentObject var appState: AppState
-    @EnvironmentObject var sessionStore: SessionStore
+    @EnvironmentObject var eventStoreManager: EventStoreManager
+    @EnvironmentObject var eventDatabase: EventDatabase
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
 
     @State private var selectedSessionId: String?
@@ -76,43 +116,63 @@ struct ContentView: View {
     @State private var showSettings = false
 
     var body: some View {
-        NavigationSplitView(columnVisibility: $columnVisibility) {
-            // Sidebar
-            SessionSidebar(
-                selectedSessionId: $selectedSessionId,
-                onNewSession: { showNewSessionSheet = true },
-                onDeleteSession: { sessionId in
-                    sessionToDelete = sessionId
-                    showDeleteConfirmation = true
-                },
-                onSettings: { showSettings = true }
-            )
-        } detail: {
-            // Main content
-            if let sessionId = selectedSessionId,
-               sessionStore.sessionExists(sessionId) {
-                ChatView(
-                    rpcClient: appState.rpcClient,
-                    sessionId: sessionId
-                )
-            } else if sessionStore.sessions.isEmpty {
+        Group {
+            // On iPhone with no sessions, show WelcomePage directly
+            if horizontalSizeClass == .compact && eventStoreManager.sessions.isEmpty {
                 WelcomePage(
                     onNewSession: { showNewSessionSheet = true },
                     onSettings: { showSettings = true }
                 )
             } else {
-                selectSessionPrompt
+                NavigationSplitView(columnVisibility: $columnVisibility) {
+                    // Sidebar
+                    SessionSidebar(
+                        selectedSessionId: $selectedSessionId,
+                        onNewSession: { showNewSessionSheet = true },
+                        onDeleteSession: { sessionId in
+                            sessionToDelete = sessionId
+                            showDeleteConfirmation = true
+                        },
+                        onSettings: { showSettings = true }
+                    )
+                } detail: {
+                    // Main content
+                    if let sessionId = selectedSessionId,
+                       eventStoreManager.sessionExists(sessionId) {
+                        ChatView(
+                            rpcClient: appState.rpcClient,
+                            sessionId: sessionId
+                        )
+                    } else if eventStoreManager.sessions.isEmpty {
+                        WelcomePage(
+                            onNewSession: { showNewSessionSheet = true },
+                            onSettings: { showSettings = true }
+                        )
+                    } else {
+                        selectSessionPrompt
+                    }
+                }
+                .navigationSplitViewStyle(.balanced)
             }
         }
-        .navigationSplitViewStyle(.balanced)
         .tint(.tronEmerald)
         .sheet(isPresented: $showNewSessionSheet) {
             NewSessionFlow(
                 rpcClient: appState.rpcClient,
                 defaultModel: appState.defaultModel,
-                onSessionCreated: { session in
-                    sessionStore.addSession(session)
-                    selectedSessionId = session.id
+                onSessionCreated: { sessionId, workspaceId, model, workingDirectory in
+                    // Cache the new session in EventStoreManager
+                    do {
+                        try eventStoreManager.cacheNewSession(
+                            sessionId: sessionId,
+                            workspaceId: workspaceId,
+                            model: model,
+                            workingDirectory: workingDirectory
+                        )
+                    } catch {
+                        print("[ContentView] Failed to cache new session: \(error)")
+                    }
+                    selectedSessionId = sessionId
                     showNewSessionSheet = false
                 }
             )
@@ -135,43 +195,64 @@ struct ContentView: View {
         }
         .onAppear {
             // Restore last active session
-            if let activeId = sessionStore.activeSessionId,
-               sessionStore.sessionExists(activeId) {
+            if let activeId = eventStoreManager.activeSessionId,
+               eventStoreManager.sessionExists(activeId) {
                 selectedSessionId = activeId
             }
         }
         .onChange(of: selectedSessionId) { _, newValue in
             if let id = newValue {
-                sessionStore.setActiveSession(id)
+                eventStoreManager.setActiveSession(id)
             }
         }
     }
 
     private var selectSessionPrompt: some View {
-        VStack(spacing: 16) {
-            Image(systemName: "sidebar.left")
-                .font(.system(size: 48))
-                .foregroundStyle(.tronTextMuted)
+        VStack(spacing: 24) {
+            Spacer()
 
-            Text("Select a Session")
-                .font(.title2.weight(.medium))
-                .foregroundStyle(.tronTextPrimary)
+            // Logo and branding
+            VStack(spacing: 16) {
+                Image("TronLogo")
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .frame(height: 64)
 
-            Text("Choose a session from the sidebar or create a new one")
-                .font(.subheadline)
-                .foregroundStyle(.tronTextSecondary)
-                .multilineTextAlignment(.center)
+                Text("TRON")
+                    .font(.system(size: 24, weight: .bold, design: .monospaced))
+                    .foregroundStyle(.tronEmerald)
+                    .tracking(3)
+            }
 
+            // Prompt
+            VStack(spacing: 8) {
+                Text("Select a Session")
+                    .font(.title3.weight(.medium))
+                    .foregroundStyle(.tronTextPrimary)
+
+                Text("Choose a session from the sidebar or create a new one")
+                    .font(.subheadline)
+                    .foregroundStyle(.tronTextSecondary)
+                    .multilineTextAlignment(.center)
+            }
+
+            // Show sidebar button on compact
             if horizontalSizeClass == .compact {
                 Button {
                     columnVisibility = .all
                 } label: {
                     Label("Show Sessions", systemImage: "sidebar.left")
                         .font(.headline)
-                        .foregroundStyle(.tronEmerald)
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 24)
+                        .padding(.vertical, 12)
+                        .background(Color.tronEmerald)
+                        .clipShape(Capsule())
                 }
                 .padding(.top, 8)
             }
+
+            Spacer()
         }
         .padding(40)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -180,17 +261,14 @@ struct ContentView: View {
 
     private func deleteSession(_ sessionId: String) {
         Task {
-            // Try to delete from server (optional, might fail if offline)
             do {
-                _ = try await appState.rpcClient.deleteSession(sessionId)
+                try await eventStoreManager.deleteSession(sessionId)
             } catch {
-                // Ignore server errors, still delete locally
+                print("[ContentView] Failed to delete session: \(error)")
             }
 
-            sessionStore.deleteSession(sessionId)
-
             if selectedSessionId == sessionId {
-                selectedSessionId = sessionStore.sessions.first?.id
+                selectedSessionId = eventStoreManager.sessions.first?.id
             }
         }
     }
@@ -220,20 +298,19 @@ struct WelcomePage: View {
             Spacer()
 
             // Logo
-            VStack(spacing: 16) {
-                Image(systemName: "cpu")
-                    .font(.system(size: 72))
-                    .foregroundStyle(
-                        LinearGradient.tronEmeraldGradient
-                    )
-                    .symbolEffect(.pulse, options: .repeating)
+            VStack(spacing: 20) {
+                Image("TronLogo")
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .frame(height: 80)
 
-                Text("Tron")
-                    .font(.largeTitle.weight(.bold))
-                    .foregroundStyle(.tronTextPrimary)
+                Text("TRON")
+                    .font(.system(size: 32, weight: .bold, design: .monospaced))
+                    .foregroundStyle(.tronEmerald)
+                    .tracking(4)
 
-                Text("AI Coding Agent")
-                    .font(.title3)
+                Text("AI-powered coding assistant")
+                    .font(.subheadline)
                     .foregroundStyle(.tronTextSecondary)
             }
 
@@ -324,7 +401,8 @@ struct FeatureRow: View {
 struct NewSessionFlow: View {
     let rpcClient: RPCClient
     let defaultModel: String
-    let onSessionCreated: (StoredSession) -> Void
+    /// Callback with (sessionId, workspaceId, model, workingDirectory)
+    let onSessionCreated: (String, String, String, String) -> Void
 
     @Environment(\.dismiss) private var dismiss
     @State private var workingDirectory = ""
@@ -333,78 +411,169 @@ struct NewSessionFlow: View {
     @State private var errorMessage: String?
     @State private var showWorkspaceSelector = false
 
+    private let createButtonTint = Color(hex: "#123524")
+
     var body: some View {
         NavigationStack {
-            Form {
-                Section {
-                    HStack {
-                        TextField("Working Directory", text: $workingDirectory)
-                            .autocapitalization(.none)
-                            .autocorrectionDisabled()
+            ZStack {
+                // Full panel background
+                Color.tronSurface
+                    .ignoresSafeArea()
 
-                        Button {
-                            showWorkspaceSelector = true
-                        } label: {
-                            Image(systemName: "folder")
-                                .foregroundStyle(.tronEmerald)
+                VStack(spacing: 0) {
+                    // Main content area
+                    ScrollView {
+                        VStack(spacing: 24) {
+                            // Workspace section
+                            VStack(alignment: .leading, spacing: 12) {
+                                Text("Workspace")
+                                    .font(.subheadline.weight(.medium))
+                                    .foregroundStyle(.tronTextSecondary)
+
+                                Button {
+                                    showWorkspaceSelector = true
+                                } label: {
+                                    HStack {
+                                        if workingDirectory.isEmpty {
+                                            Text("Select Workspace")
+                                                .foregroundStyle(.tronTextMuted)
+                                        } else {
+                                            Text(workingDirectory)
+                                                .foregroundStyle(.tronTextPrimary)
+                                                .lineLimit(1)
+                                                .truncationMode(.head)
+                                        }
+                                        Spacer()
+                                        Image(systemName: "folder.fill")
+                                            .foregroundStyle(.tronEmerald)
+                                    }
+                                    .padding(.horizontal, 16)
+                                    .padding(.vertical, 14)
+                                    .background(Color.tronSurfaceElevated)
+                                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                                }
+
+                                Text("The directory where the agent will operate")
+                                    .font(.caption)
+                                    .foregroundStyle(.tronTextMuted)
+                            }
+
+                            // Model section
+                            VStack(alignment: .leading, spacing: 12) {
+                                Text("Model")
+                                    .font(.subheadline.weight(.medium))
+                                    .foregroundStyle(.tronTextSecondary)
+
+                                Menu {
+                                    Button {
+                                        selectedModel = "claude-opus-4-5-20251101"
+                                    } label: {
+                                        HStack {
+                                            Text("Claude Opus 4.5")
+                                            if selectedModel == "claude-opus-4-5-20251101" {
+                                                Image(systemName: "checkmark")
+                                            }
+                                        }
+                                    }
+
+                                    Button {
+                                        selectedModel = "claude-sonnet-4-5-20251101"
+                                    } label: {
+                                        HStack {
+                                            Text("Claude Sonnet 4.5")
+                                            if selectedModel == "claude-sonnet-4-5-20251101" {
+                                                Image(systemName: "checkmark")
+                                            }
+                                        }
+                                    }
+
+                                    Button {
+                                        selectedModel = "claude-haiku-4-5-20251101"
+                                    } label: {
+                                        HStack {
+                                            Text("Claude Haiku 4.5")
+                                            if selectedModel == "claude-haiku-4-5-20251101" {
+                                                Image(systemName: "checkmark")
+                                            }
+                                        }
+                                    }
+
+                                    Divider()
+
+                                    Button {
+                                        selectedModel = "claude-sonnet-4-20250514"
+                                    } label: {
+                                        Text("Claude Sonnet 4 (Legacy)")
+                                    }
+
+                                    Button {
+                                        selectedModel = "claude-3-5-haiku-20241022"
+                                    } label: {
+                                        Text("Claude Haiku 3.5 (Legacy)")
+                                    }
+                                } label: {
+                                    HStack {
+                                        Text(selectedModel.shortModelName)
+                                            .foregroundStyle(.tronTextPrimary)
+                                        Spacer()
+                                        Image(systemName: "chevron.up.chevron.down")
+                                            .font(.caption)
+                                            .foregroundStyle(.tronTextSecondary)
+                                    }
+                                    .padding(.horizontal, 16)
+                                    .padding(.vertical, 14)
+                                    .background(Color.tronSurfaceElevated)
+                                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                                }
+
+                                Text(modelDescription)
+                                    .font(.caption)
+                                    .foregroundStyle(.tronTextMuted)
+                            }
+
+                            // Error message
+                            if let error = errorMessage {
+                                HStack {
+                                    Image(systemName: "exclamationmark.triangle.fill")
+                                        .foregroundStyle(.tronError)
+                                    Text(error)
+                                        .font(.subheadline)
+                                        .foregroundStyle(.tronError)
+                                }
+                                .padding()
+                                .background(Color.tronError.opacity(0.1))
+                                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                            }
+
+                            Spacer(minLength: 100)
                         }
+                        .padding(.horizontal, 20)
+                        .padding(.top, 20)
                     }
-                } header: {
-                    Text("Workspace")
-                } footer: {
-                    Text("The directory where the agent will operate")
-                }
 
-                Section {
-                    Picker("Model", selection: $selectedModel) {
-                        // Latest 4.5 models first
-                        Text("Claude Opus 4.5").tag("claude-opus-4-5-20251101")
-                        Text("Claude Sonnet 4.5").tag("claude-sonnet-4-5-20251101")
-                        Text("Claude Haiku 4.5").tag("claude-haiku-4-5-20251101")
-
-                        // Legacy models
-                        Text("Claude Sonnet 4 (Legacy)").tag("claude-sonnet-4-20250514")
-                        Text("Claude Haiku 3.5 (Legacy)").tag("claude-3-5-haiku-20241022")
-                    }
-                } header: {
-                    Text("Model")
-                } footer: {
-                    Text("Claude Opus 4.5 is the most capable model")
-                }
-
-                if let error = errorMessage {
-                    Section {
-                        Text(error)
-                            .foregroundStyle(.red)
-                    }
-                }
-
-                Section {
+                    // Create button - native iOS style with tint
                     Button {
                         createSession()
                     } label: {
-                        HStack {
-                            Spacer()
+                        HStack(spacing: 8) {
                             if isCreating {
                                 ProgressView()
-                                    .tint(.tronBackground)
+                                    .tint(.white)
                             } else {
                                 Text("Create Session")
+                                    .font(.headline)
                             }
-                            Spacer()
                         }
-                        .fontWeight(.semibold)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 50)
                     }
+                    .buttonStyle(.borderedProminent)
+                    .tint(Color(hex: "#123524"))
                     .disabled(isCreating || workingDirectory.isEmpty)
-                    .listRowBackground(
-                        (isCreating || workingDirectory.isEmpty)
-                            ? Color.tronTextMuted
-                            : Color.tronEmerald
-                    )
+                    .padding(.horizontal, 20)
+                    .padding(.bottom, 16)
                 }
             }
-            .scrollContentBackground(.hidden)
-            .background(Color.tronBackground)
             .navigationTitle("New Session")
             .navigationBarTitleDisplayMode(.inline)
             .toolbarBackground(Color.tronSurface, for: .navigationBar)
@@ -422,9 +591,21 @@ struct NewSessionFlow: View {
             }
             .onAppear {
                 selectedModel = defaultModel
+                showWorkspaceSelector = true
             }
         }
         .preferredColorScheme(.dark)
+    }
+
+    private var modelDescription: String {
+        if selectedModel.contains("opus") {
+            return "Claude Opus 4.5 is the most capable model"
+        } else if selectedModel.contains("sonnet") {
+            return "Claude Sonnet is fast and highly capable"
+        } else if selectedModel.contains("haiku") {
+            return "Claude Haiku is optimized for speed"
+        }
+        return ""
     }
 
     private func createSession() {
@@ -438,14 +619,14 @@ struct NewSessionFlow: View {
                     model: selectedModel
                 )
 
-                let session = StoredSession(
-                    id: result.sessionId,
-                    model: result.model,
-                    workingDirectory: workingDirectory
-                )
-
                 await MainActor.run {
-                    onSessionCreated(session)
+                    // Pass session details to callback - EventStoreManager will cache it
+                    onSessionCreated(
+                        result.sessionId,
+                        workingDirectory,  // workspaceId is the workingDirectory
+                        result.model,
+                        workingDirectory
+                    )
                 }
             } catch {
                 await MainActor.run {
@@ -553,7 +734,7 @@ struct WorkspaceSelector: View {
 
     private var directoryList: some View {
         VStack(spacing: 0) {
-            // Current path
+            // Current path header
             HStack {
                 Image(systemName: "folder.fill")
                     .foregroundStyle(.tronEmerald)
@@ -564,48 +745,64 @@ struct WorkspaceSelector: View {
                     .truncationMode(.head)
                 Spacer()
             }
-            .padding()
-            .background(Color.tronSurface)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
+            .background(Color.tronSurfaceElevated)
 
-            // Directory entries
-            List {
-                // Go up
-                if !currentPath.isEmpty {
-                    Button {
-                        navigateUp()
-                    } label: {
-                        HStack {
-                            Image(systemName: "arrow.up.circle")
-                                .foregroundStyle(.tronEmerald)
-                            Text("Go Up")
-                                .foregroundStyle(.tronTextPrimary)
+            // Directory entries - full height gray background
+            ScrollView {
+                LazyVStack(spacing: 0) {
+                    // Go up
+                    if !currentPath.isEmpty {
+                        Button {
+                            navigateUp()
+                        } label: {
+                            HStack {
+                                Image(systemName: "arrow.up.circle")
+                                    .foregroundStyle(.tronEmerald)
+                                Text("Go Up")
+                                    .foregroundStyle(.tronTextPrimary)
+                                Spacer()
+                            }
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 14)
+                        }
+
+                        Divider()
+                            .background(Color.tronBorder)
+                            .padding(.leading, 48)
+                    }
+
+                    // Directories
+                    ForEach(entries.filter { $0.isDirectory }) { entry in
+                        Button {
+                            navigateTo(entry.path)
+                        } label: {
+                            HStack {
+                                Image(systemName: "folder.fill")
+                                    .foregroundStyle(.tronEmerald)
+                                Text(entry.name)
+                                    .foregroundStyle(.tronTextPrimary)
+                                Spacer()
+                                Image(systemName: "chevron.right")
+                                    .font(.caption)
+                                    .foregroundStyle(.tronTextMuted)
+                            }
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 14)
+                        }
+
+                        if entry.id != entries.filter({ $0.isDirectory }).last?.id {
+                            Divider()
+                                .background(Color.tronBorder)
+                                .padding(.leading, 48)
                         }
                     }
-                    .listRowBackground(Color.tronSurface)
-                }
-
-                // Directories
-                ForEach(entries.filter { $0.isDirectory }) { entry in
-                    Button {
-                        navigateTo(entry.path)
-                    } label: {
-                        HStack {
-                            Image(systemName: "folder.fill")
-                                .foregroundStyle(.tronEmerald)
-                            Text(entry.name)
-                                .foregroundStyle(.tronTextPrimary)
-                            Spacer()
-                            Image(systemName: "chevron.right")
-                                .font(.caption)
-                                .foregroundStyle(.tronTextMuted)
-                        }
-                    }
-                    .listRowBackground(Color.tronSurface)
                 }
             }
-            .listStyle(.plain)
-            .scrollContentBackground(.hidden)
+            .background(Color.tronSurface)
         }
+        .background(Color.tronSurface)
     }
 
     private func loadHome() async {
@@ -652,8 +849,12 @@ struct WorkspaceSelector: View {
 
 // MARK: - Preview
 
+// Note: Preview requires EventStoreManager which needs RPCClient and EventDatabase
+// Previews can be enabled by creating mock instances
+/*
 #Preview {
     ContentView()
         .environmentObject(AppState())
-        .environmentObject(SessionStore())
+        .environmentObject(EventStoreManager(...))
 }
+*/

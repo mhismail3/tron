@@ -41,6 +41,14 @@ import type {
   FilesystemListDirResult,
   FilesystemGetHomeParams,
   FilesystemGetHomeResult,
+  WorktreeGetStatusParams,
+  WorktreeGetStatusResult,
+  WorktreeCommitParams,
+  WorktreeCommitResult,
+  WorktreeMergeParams,
+  WorktreeMergeResult,
+  WorktreeListParams,
+  WorktreeListResult,
 } from '@tron/core/browser';
 
 // =============================================================================
@@ -349,6 +357,23 @@ export class RpcClient {
 
   filesystemGetHome(params?: FilesystemGetHomeParams): Promise<FilesystemGetHomeResult> {
     return this.request('filesystem.getHome', params);
+  }
+
+  // Worktree methods
+  worktreeGetStatus(params: WorktreeGetStatusParams): Promise<WorktreeGetStatusResult> {
+    return this.request('worktree.getStatus', params);
+  }
+
+  worktreeCommit(params: WorktreeCommitParams): Promise<WorktreeCommitResult> {
+    return this.request('worktree.commit', params);
+  }
+
+  worktreeMerge(params: WorktreeMergeParams): Promise<WorktreeMergeResult> {
+    return this.request('worktree.merge', params);
+  }
+
+  worktreeList(params?: WorktreeListParams): Promise<WorktreeListResult> {
+    return this.request('worktree.list', params);
   }
 
   // ===========================================================================

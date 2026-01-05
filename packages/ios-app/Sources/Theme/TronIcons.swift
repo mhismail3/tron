@@ -205,6 +205,7 @@ struct ConnectionIndicator: View {
 
 struct ThinkingIndicator: View {
     @State private var dots = 0
+    @State private var timerTask: Task<Void, Never>?
 
     var body: some View {
         HStack(spacing: 8) {
@@ -216,9 +217,15 @@ struct ThinkingIndicator: View {
                 .frame(width: 100, alignment: .leading)
         }
         .onAppear {
-            Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { _ in
-                dots = (dots + 1) % 4
+            timerTask = Task { @MainActor in
+                while !Task.isCancelled {
+                    try? await Task.sleep(for: .milliseconds(500))
+                    dots = (dots + 1) % 4
+                }
             }
+        }
+        .onDisappear {
+            timerTask?.cancel()
         }
     }
 }

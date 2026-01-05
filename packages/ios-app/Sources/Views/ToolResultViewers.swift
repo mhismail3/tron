@@ -1,0 +1,1279 @@
+import SwiftUI
+
+// MARK: - Tool Result Router
+// Handles all 7 core Tron tools: Read, Write, Edit, Bash, Grep, Find, Ls
+
+struct ToolResultRouter: View {
+    let tool: ToolUseData
+    @State private var isExpanded = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            // Tool header
+            toolHeader
+
+            // Tool-specific result viewer
+            if let result = tool.result, !result.isEmpty {
+                resultViewer(for: result)
+            }
+        }
+        .background(Color.tronSurface.opacity(0.5))
+        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .stroke(statusBorder, lineWidth: 0.5)
+        )
+    }
+
+    private var toolHeader: some View {
+        HStack(spacing: 8) {
+            toolIcon
+
+            Text(displayToolName)
+                .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                .foregroundStyle(.tronTextPrimary)
+
+            if !toolDetail.isEmpty {
+                Text(toolDetail)
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundStyle(.tronTextMuted)
+                    .lineLimit(1)
+            }
+
+            Spacer()
+
+            statusBadge
+
+            if let duration = tool.formattedDuration {
+                Text(duration)
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundStyle(.tronTextMuted)
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(Color.tronSurfaceElevated)
+    }
+
+    // MARK: - Tool Icon (distinct for each tool)
+
+    private var toolIcon: some View {
+        let (iconName, iconColor) = toolIconConfig
+        return Image(systemName: iconName)
+            .font(.system(size: 11, weight: .medium))
+            .foregroundStyle(iconColor)
+            .frame(width: 16)
+    }
+
+    private var toolIconConfig: (name: String, color: Color) {
+        switch normalizedToolName {
+        case "read":
+            return ("doc.text", .tronEmerald)
+        case "write":
+            return ("doc.badge.plus", .tronSuccess)
+        case "edit":
+            return ("pencil.line", .orange)
+        case "bash":
+            return ("terminal", .tronEmerald)
+        case "grep":
+            return ("magnifyingglass", .purple)
+        case "find", "glob":
+            return ("doc.text.magnifyingglass", .cyan)
+        case "ls":
+            return ("folder", .yellow)
+        default:
+            return ("gearshape", .tronTextMuted)
+        }
+    }
+
+    // MARK: - Status Badge
+
+    @ViewBuilder
+    private var statusBadge: some View {
+        switch tool.status {
+        case .running:
+            ProgressView()
+                .scaleEffect(0.6)
+                .frame(width: 14, height: 14)
+        case .success:
+            Image(systemName: "checkmark.circle.fill")
+                .font(.system(size: 11))
+                .foregroundStyle(.tronSuccess)
+        case .error:
+            Image(systemName: "xmark.circle.fill")
+                .font(.system(size: 11))
+                .foregroundStyle(.tronError)
+        }
+    }
+
+    /// Display name - properly capitalized for each tool
+    private var displayToolName: String {
+        switch normalizedToolName {
+        case "read": return "Read"
+        case "write": return "Write"
+        case "edit": return "Edit"
+        case "bash": return "Bash"
+        case "grep": return "Grep"
+        case "find": return "Find"
+        case "glob": return "Glob"
+        case "ls": return "Ls"
+        default: return tool.toolName.capitalized
+        }
+    }
+
+    /// Normalized tool name for routing (lowercase)
+    private var normalizedToolName: String {
+        tool.toolName.lowercased()
+    }
+
+    /// Detail string shown after tool name
+    private var toolDetail: String {
+        let args = tool.arguments
+
+        switch normalizedToolName {
+        case "read":
+            return shortenPath(extractFilePath(from: args))
+        case "write":
+            return shortenPath(extractFilePath(from: args))
+        case "edit":
+            return shortenPath(extractFilePath(from: args))
+        case "bash":
+            return truncateCommand(extractCommand(from: args))
+        case "grep":
+            let pattern = extractPattern(from: args)
+            let path = extractPath(from: args)
+            if !path.isEmpty && path != "." {
+                return "\"\(pattern)\" in \(shortenPath(path))"
+            }
+            return "\"\(pattern)\""
+        case "find", "glob":
+            return extractPattern(from: args)
+        case "ls":
+            return extractPath(from: args)
+        default:
+            return ""
+        }
+    }
+
+    // MARK: - Result Viewer Routing
+
+    @ViewBuilder
+    private func resultViewer(for result: String) -> some View {
+        switch normalizedToolName {
+        case "read":
+            ReadResultViewer(
+                filePath: extractFilePath(from: tool.arguments),
+                content: result,
+                isExpanded: $isExpanded
+            )
+        case "write":
+            WriteResultViewer(
+                filePath: extractFilePath(from: tool.arguments),
+                result: result
+            )
+        case "edit":
+            EditResultViewer(
+                filePath: extractFilePath(from: tool.arguments),
+                result: result,
+                isExpanded: $isExpanded
+            )
+        case "bash":
+            BashResultViewer(
+                command: extractCommand(from: tool.arguments),
+                output: result,
+                isExpanded: $isExpanded
+            )
+        case "grep":
+            GrepResultViewer(
+                pattern: extractPattern(from: tool.arguments),
+                result: result,
+                isExpanded: $isExpanded
+            )
+        case "find", "glob":
+            FindResultViewer(
+                pattern: extractPattern(from: tool.arguments),
+                result: result,
+                isExpanded: $isExpanded
+            )
+        case "ls":
+            LsResultViewer(
+                path: extractPath(from: tool.arguments),
+                result: result,
+                isExpanded: $isExpanded
+            )
+        default:
+            GenericResultViewer(result: result, isExpanded: $isExpanded)
+        }
+    }
+
+    private var statusBorder: Color {
+        switch tool.status {
+        case .running: return .tronInfo.opacity(0.3)
+        case .success: return .tronBorder.opacity(0.3)
+        case .error: return .tronError.opacity(0.3)
+        }
+    }
+
+    // MARK: - Argument Parsing Helpers
+
+    private func extractFilePath(from args: String) -> String {
+        if let match = args.firstMatch(of: /"file_path"\s*:\s*"([^"]+)"/) {
+            return String(match.1)
+        }
+        if let match = args.firstMatch(of: /"path"\s*:\s*"([^"]+)"/) {
+            return String(match.1)
+        }
+        return ""
+    }
+
+    private func extractPath(from args: String) -> String {
+        if let match = args.firstMatch(of: /"path"\s*:\s*"([^"]+)"/) {
+            return String(match.1)
+        }
+        return "."
+    }
+
+    private func extractCommand(from args: String) -> String {
+        if let match = args.firstMatch(of: /"command"\s*:\s*"([^"]+)"/) {
+            return String(match.1).replacingOccurrences(of: "\\n", with: " ")
+        }
+        return ""
+    }
+
+    private func extractPattern(from args: String) -> String {
+        if let match = args.firstMatch(of: /"pattern"\s*:\s*"([^"]+)"/) {
+            return String(match.1)
+        }
+        return ""
+    }
+
+    /// Shorten a file path to just the filename for display
+    private func shortenPath(_ path: String) -> String {
+        guard !path.isEmpty else { return "" }
+        return URL(fileURLWithPath: path).lastPathComponent
+    }
+
+    /// Truncate long commands for the header
+    private func truncateCommand(_ cmd: String) -> String {
+        guard cmd.count > 40 else { return cmd }
+        return String(cmd.prefix(40)) + "..."
+    }
+}
+
+// MARK: - Bash Result Viewer
+
+struct BashResultViewer: View {
+    let command: String
+    let output: String
+    @Binding var isExpanded: Bool
+
+    private var lines: [String] {
+        output.components(separatedBy: "\n")
+    }
+
+    private var displayLines: [String] {
+        isExpanded ? lines : Array(lines.prefix(8))
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            // Output lines
+            ScrollView(.horizontal, showsIndicators: false) {
+                VStack(alignment: .leading, spacing: 0) {
+                    ForEach(Array(displayLines.enumerated()), id: \.offset) { index, line in
+                        HStack(spacing: 0) {
+                            // Line number
+                            Text("\(index + 1)")
+                                .font(.system(size: 10, design: .monospaced))
+                                .foregroundStyle(.tronTextMuted)
+                                .frame(width: 32, alignment: .trailing)
+                                .padding(.trailing, 8)
+                                .background(Color.tronSurface)
+
+                            // Line content
+                            Text(line.isEmpty ? " " : line)
+                                .font(.system(size: 11, design: .monospaced))
+                                .foregroundStyle(.tronTextSecondary)
+                        }
+                        .frame(minHeight: 18)
+                    }
+                }
+                .padding(.vertical, 4)
+            }
+            .frame(maxHeight: isExpanded ? .infinity : 160)
+
+            // Expand/collapse button
+            if lines.count > 8 {
+                Button {
+                    withAnimation(.tronFast) {
+                        isExpanded.toggle()
+                    }
+                } label: {
+                    HStack {
+                        Text(isExpanded ? "Show less" : "Show more (\(lines.count) lines)")
+                            .font(.system(size: 11, design: .monospaced))
+                        Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
+                            .font(.system(size: 10))
+                    }
+                    .foregroundStyle(.tronTextMuted)
+                    .padding(.vertical, 6)
+                    .frame(maxWidth: .infinity)
+                    .background(Color.tronSurface)
+                }
+            }
+        }
+    }
+}
+
+// MARK: - Read Result Viewer
+
+struct ReadResultViewer: View {
+    let filePath: String
+    let content: String
+    @Binding var isExpanded: Bool
+
+    private var lines: [String] {
+        content.components(separatedBy: "\n")
+    }
+
+    private var displayLines: [String] {
+        isExpanded ? lines : Array(lines.prefix(12))
+    }
+
+    private var fileExtension: String {
+        URL(fileURLWithPath: filePath).pathExtension.uppercased()
+    }
+
+    private var fileName: String {
+        URL(fileURLWithPath: filePath).lastPathComponent
+    }
+
+    private var languageColor: Color {
+        switch fileExtension.lowercased() {
+        case "swift": return Color(hex: "#F05138")
+        case "ts", "tsx": return Color(hex: "#3178C6")
+        case "js", "jsx": return Color(hex: "#F7DF1E")
+        case "py": return Color(hex: "#3776AB")
+        case "rs": return Color(hex: "#CE412B")
+        case "go": return Color(hex: "#00ADD8")
+        case "md": return Color(hex: "#083FA1")
+        case "json": return Color(hex: "#F5A623")
+        case "css", "scss": return Color(hex: "#264DE4")
+        case "yaml", "yml": return Color(hex: "#CB171E")
+        default: return .tronEmerald
+        }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            // File info header
+            HStack(spacing: 8) {
+                Image(systemName: "doc.text")
+                    .font(.system(size: 12))
+                    .foregroundStyle(languageColor)
+
+                Text(fileName)
+                    .font(.system(size: 11, weight: .medium, design: .monospaced))
+                    .foregroundStyle(.tronTextSecondary)
+                    .lineLimit(1)
+
+                if !fileExtension.isEmpty {
+                    Text(fileExtension)
+                        .font(.system(size: 9, weight: .medium))
+                        .foregroundStyle(.tronTextMuted)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(Color.tronSurface)
+                        .clipShape(RoundedRectangle(cornerRadius: 3))
+                }
+
+                Spacer()
+
+                Text("\(lines.count) lines")
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundStyle(.tronTextMuted)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .background(Color.tronSurface)
+            .overlay(
+                Rectangle()
+                    .fill(languageColor)
+                    .frame(width: 3),
+                alignment: .leading
+            )
+
+            // Content lines
+            ScrollView(.horizontal, showsIndicators: false) {
+                VStack(alignment: .leading, spacing: 0) {
+                    ForEach(Array(displayLines.enumerated()), id: \.offset) { index, line in
+                        HStack(spacing: 0) {
+                            // Line number
+                            Text("\(index + 1)")
+                                .font(.system(size: 10, design: .monospaced))
+                                .foregroundStyle(.tronTextMuted)
+                                .frame(width: 40, alignment: .trailing)
+                                .padding(.trailing, 8)
+                                .background(Color.tronSurface)
+
+                            // Line content
+                            Text(line.isEmpty ? " " : line)
+                                .font(.system(size: 11, design: .monospaced))
+                                .foregroundStyle(.tronTextSecondary)
+                        }
+                        .frame(minHeight: 18)
+                    }
+                }
+                .padding(.vertical, 4)
+            }
+            .frame(maxHeight: isExpanded ? .infinity : 220)
+
+            // Expand/collapse button
+            if lines.count > 12 {
+                Button {
+                    withAnimation(.tronFast) {
+                        isExpanded.toggle()
+                    }
+                } label: {
+                    HStack {
+                        Text(isExpanded ? "Show less" : "Show more")
+                            .font(.system(size: 11, design: .monospaced))
+                        Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
+                            .font(.system(size: 10))
+                    }
+                    .foregroundStyle(.tronTextMuted)
+                    .padding(.vertical, 6)
+                    .frame(maxWidth: .infinity)
+                    .background(Color.tronSurface)
+                }
+            }
+        }
+    }
+}
+
+// MARK: - Edit Result Viewer (Diff)
+
+struct EditResultViewer: View {
+    let filePath: String
+    let result: String
+    @Binding var isExpanded: Bool
+
+    /// Check if result contains a proper diff format
+    private var hasDiffFormat: Bool {
+        result.contains("@@") && (result.contains("-") || result.contains("+"))
+    }
+
+    /// Extract the success message if present (e.g., "Successfully replaced 1 occurrence...")
+    private var successMessage: String? {
+        let lines = result.components(separatedBy: "\n")
+        if let firstLine = lines.first,
+           firstLine.contains("Successfully") || firstLine.contains("successfully") {
+            return firstLine
+        }
+        return nil
+    }
+
+    private var diffStats: (added: Int, removed: Int) {
+        var added = 0
+        var removed = 0
+        for line in result.components(separatedBy: "\n") {
+            if line.hasPrefix("+") && !line.hasPrefix("+++") {
+                added += 1
+            } else if line.hasPrefix("-") && !line.hasPrefix("---") {
+                removed += 1
+            }
+        }
+        return (added, removed)
+    }
+
+    private var diffLines: [(type: DiffLineType, content: String, oldNum: Int?, newNum: Int?)] {
+        var lines: [(type: DiffLineType, content: String, oldNum: Int?, newNum: Int?)] = []
+        var oldLineNum = 0
+        var newLineNum = 0
+        var inDiff = false
+
+        for line in result.components(separatedBy: "\n") {
+            // Skip the "Successfully replaced..." line
+            if line.contains("Successfully") || line.contains("successfully") {
+                continue
+            }
+
+            if line.hasPrefix("@@") {
+                inDiff = true
+                // Parse hunk header for line numbers
+                if let match = line.firstMatch(of: /@@ -(\d+),?\d* \+(\d+),?\d* @@/) {
+                    oldLineNum = Int(match.1) ?? 0
+                    newLineNum = Int(match.2) ?? 0
+                }
+                lines.append((.hunk, line, nil, nil))
+            } else if line.hasPrefix("+") && !line.hasPrefix("+++") {
+                lines.append((.addition, String(line.dropFirst()), nil, newLineNum))
+                newLineNum += 1
+            } else if line.hasPrefix("-") && !line.hasPrefix("---") {
+                lines.append((.deletion, String(line.dropFirst()), oldLineNum, nil))
+                oldLineNum += 1
+            } else if inDiff && !line.hasPrefix("+++") && !line.hasPrefix("---") && !line.isEmpty {
+                let content = line.hasPrefix(" ") ? String(line.dropFirst()) : line
+                lines.append((.context, content, oldLineNum, newLineNum))
+                oldLineNum += 1
+                newLineNum += 1
+            }
+        }
+        return lines
+    }
+
+    private var displayLines: [(type: DiffLineType, content: String, oldNum: Int?, newNum: Int?)] {
+        isExpanded ? diffLines : Array(diffLines.prefix(15))
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            // File info header with stats
+            HStack(spacing: 8) {
+                Text(URL(fileURLWithPath: filePath).lastPathComponent)
+                    .font(.system(size: 11, weight: .medium, design: .monospaced))
+                    .foregroundStyle(.tronTextSecondary)
+                    .lineLimit(1)
+
+                Spacer()
+
+                // Stats badges
+                if diffStats.added > 0 {
+                    Text("+\(diffStats.added)")
+                        .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                        .foregroundStyle(.tronSuccess)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(Color.tronSuccess.opacity(0.15))
+                        .clipShape(RoundedRectangle(cornerRadius: 3))
+                }
+
+                if diffStats.removed > 0 {
+                    Text("-\(diffStats.removed)")
+                        .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                        .foregroundStyle(.tronError)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(Color.tronError.opacity(0.15))
+                        .clipShape(RoundedRectangle(cornerRadius: 3))
+                }
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .background(Color.tronSurface)
+
+            // Show diff if available, otherwise show the raw result
+            if hasDiffFormat && !diffLines.isEmpty {
+                // Diff lines
+                ScrollView(.horizontal, showsIndicators: false) {
+                    VStack(alignment: .leading, spacing: 0) {
+                        ForEach(Array(displayLines.enumerated()), id: \.offset) { _, line in
+                            DiffLineView(
+                                type: line.type,
+                                content: line.content,
+                                oldLineNum: line.oldNum,
+                                newLineNum: line.newNum
+                            )
+                        }
+                    }
+                }
+                .frame(maxHeight: isExpanded ? .infinity : 280)
+
+                // Expand/collapse button
+                if diffLines.count > 15 {
+                    Button {
+                        withAnimation(.tronFast) {
+                            isExpanded.toggle()
+                        }
+                    } label: {
+                        HStack {
+                            Text(isExpanded ? "Show less" : "Show more")
+                                .font(.system(size: 11, design: .monospaced))
+                            Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
+                                .font(.system(size: 10))
+                        }
+                        .foregroundStyle(.tronTextMuted)
+                        .padding(.vertical, 6)
+                        .frame(maxWidth: .infinity)
+                        .background(Color.tronSurface)
+                    }
+                }
+            } else if !result.isEmpty {
+                // Fallback: show raw result text
+                Text(result)
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundStyle(.tronTextSecondary)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+    }
+}
+
+enum DiffLineType {
+    case context
+    case addition
+    case deletion
+    case hunk
+}
+
+struct DiffLineView: View {
+    let type: DiffLineType
+    let content: String
+    let oldLineNum: Int?
+    let newLineNum: Int?
+
+    var body: some View {
+        HStack(spacing: 0) {
+            // Old line number
+            Text(oldLineNum.map { String($0) } ?? "")
+                .font(.system(size: 10, design: .monospaced))
+                .foregroundStyle(lineNumColor)
+                .frame(width: 32, alignment: .trailing)
+                .padding(.trailing, 4)
+                .background(lineNumBackground)
+
+            // New line number
+            Text(newLineNum.map { String($0) } ?? "")
+                .font(.system(size: 10, design: .monospaced))
+                .foregroundStyle(lineNumColor)
+                .frame(width: 32, alignment: .trailing)
+                .padding(.trailing, 4)
+                .background(lineNumBackground)
+
+            // Marker
+            Text(marker)
+                .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                .foregroundStyle(markerColor)
+                .frame(width: 16)
+
+            // Content
+            Text(content.isEmpty ? " " : content)
+                .font(.system(size: 11, design: .monospaced))
+                .foregroundStyle(contentColor)
+                .padding(.leading, 4)
+        }
+        .frame(minHeight: 18)
+        .background(lineBackground)
+    }
+
+    private var marker: String {
+        switch type {
+        case .addition: return "+"
+        case .deletion: return "-"
+        case .hunk: return ""
+        case .context: return ""
+        }
+    }
+
+    private var lineBackground: Color {
+        switch type {
+        case .addition: return Color.tronSuccess.opacity(0.1)
+        case .deletion: return Color.tronError.opacity(0.1)
+        case .hunk: return Color.tronSurface
+        case .context: return Color.clear
+        }
+    }
+
+    private var lineNumBackground: Color {
+        switch type {
+        case .addition: return Color.tronSuccess.opacity(0.08)
+        case .deletion: return Color.tronError.opacity(0.08)
+        default: return Color.tronSurface
+        }
+    }
+
+    private var lineNumColor: Color {
+        switch type {
+        case .addition: return .tronSuccess
+        case .deletion: return .tronError
+        default: return .tronTextMuted
+        }
+    }
+
+    private var markerColor: Color {
+        switch type {
+        case .addition: return .tronSuccess
+        case .deletion: return .tronError
+        default: return .tronTextMuted
+        }
+    }
+
+    private var contentColor: Color {
+        switch type {
+        case .hunk: return .tronEmerald
+        default: return .tronTextPrimary
+        }
+    }
+}
+
+// MARK: - Find Result Viewer (also used for Glob)
+// Shows a list of matched file paths
+
+struct FindResultViewer: View {
+    let pattern: String
+    let result: String
+    @Binding var isExpanded: Bool
+
+    private var files: [String] {
+        result.components(separatedBy: "\n").filter { !$0.isEmpty }
+    }
+
+    private var displayFiles: [String] {
+        isExpanded ? files : Array(files.prefix(10))
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            // File count header
+            HStack {
+                Image(systemName: "doc.text.magnifyingglass")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.cyan)
+
+                Text("\(files.count) files found")
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundStyle(.tronTextMuted)
+
+                Spacer()
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 6)
+            .background(Color.tronSurface)
+
+            // File list
+            VStack(alignment: .leading, spacing: 0) {
+                ForEach(displayFiles, id: \.self) { file in
+                    HStack(spacing: 8) {
+                        Image(systemName: fileIcon(for: file))
+                            .font(.system(size: 10))
+                            .foregroundStyle(fileIconColor(for: file))
+                            .frame(width: 14)
+
+                        Text(file)
+                            .font(.system(size: 11, design: .monospaced))
+                            .foregroundStyle(.tronTextSecondary)
+                            .lineLimit(1)
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 4)
+                }
+            }
+
+            // Expand/collapse button
+            if files.count > 10 {
+                Button {
+                    withAnimation(.tronFast) {
+                        isExpanded.toggle()
+                    }
+                } label: {
+                    HStack {
+                        Text(isExpanded ? "Show less" : "Show all \(files.count) files")
+                            .font(.system(size: 11, design: .monospaced))
+                        Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
+                            .font(.system(size: 10))
+                    }
+                    .foregroundStyle(.tronTextMuted)
+                    .padding(.vertical, 6)
+                    .frame(maxWidth: .infinity)
+                    .background(Color.tronSurface)
+                }
+            }
+        }
+    }
+
+    private func fileIcon(for path: String) -> String {
+        let ext = URL(fileURLWithPath: path).pathExtension.lowercased()
+        switch ext {
+        case "swift", "ts", "tsx", "js", "jsx", "py", "rs", "go":
+            return "doc.text"
+        case "json", "yaml", "yml", "xml":
+            return "doc.badge.gearshape"
+        case "md":
+            return "doc.richtext"
+        case "css", "scss":
+            return "paintbrush"
+        case "png", "jpg", "jpeg", "gif", "svg":
+            return "photo"
+        default:
+            return "doc"
+        }
+    }
+
+    private func fileIconColor(for path: String) -> Color {
+        let ext = URL(fileURLWithPath: path).pathExtension.lowercased()
+        switch ext {
+        case "swift": return Color(hex: "#F05138")
+        case "ts", "tsx": return Color(hex: "#3178C6")
+        case "js", "jsx": return Color(hex: "#F7DF1E")
+        case "py": return Color(hex: "#3776AB")
+        default: return .tronTextMuted
+        }
+    }
+}
+
+// MARK: - Ls Result Viewer
+// Shows directory listing with file details
+
+struct LsResultViewer: View {
+    let path: String
+    let result: String
+    @Binding var isExpanded: Bool
+
+    private var entries: [LsEntry] {
+        result.components(separatedBy: "\n")
+            .filter { !$0.isEmpty }
+            .compactMap { parseLsEntry($0) }
+    }
+
+    private var displayEntries: [LsEntry] {
+        isExpanded ? entries : Array(entries.prefix(12))
+    }
+
+    /// Parse an ls -la style line into structured data
+    private func parseLsEntry(_ line: String) -> LsEntry? {
+        // Skip "total" line
+        if line.hasPrefix("total") { return nil }
+
+        // Try to parse ls -la format: drwxr-xr-x  5 user staff  160 Jan  4 10:00 name
+        let components = line.split(separator: " ", omittingEmptySubsequences: true)
+        guard components.count >= 9 else {
+            // Simple format - just the name
+            return LsEntry(name: line.trimmingCharacters(in: .whitespaces), isDirectory: false, size: nil, permissions: nil)
+        }
+
+        let permissions = String(components[0])
+        let isDir = permissions.hasPrefix("d")
+        let size = Int(components[4])
+        let name = components.dropFirst(8).joined(separator: " ")
+
+        return LsEntry(name: name, isDirectory: isDir, size: size, permissions: permissions)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            // Header
+            HStack {
+                Image(systemName: "folder")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.yellow)
+
+                Text("\(entries.count) items")
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundStyle(.tronTextMuted)
+
+                Spacer()
+
+                if !path.isEmpty && path != "." {
+                    Text(path)
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundStyle(.tronTextMuted)
+                        .lineLimit(1)
+                }
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 6)
+            .background(Color.tronSurface)
+
+            // Directory listing
+            VStack(alignment: .leading, spacing: 0) {
+                ForEach(displayEntries, id: \.name) { entry in
+                    HStack(spacing: 8) {
+                        // Icon
+                        Image(systemName: entry.isDirectory ? "folder.fill" : entryIcon(for: entry.name))
+                            .font(.system(size: 10))
+                            .foregroundStyle(entry.isDirectory ? .yellow : entryIconColor(for: entry.name))
+                            .frame(width: 14)
+
+                        // Name
+                        Text(entry.name)
+                            .font(.system(size: 11, design: .monospaced))
+                            .foregroundStyle(entry.isDirectory ? .tronTextPrimary : .tronTextSecondary)
+                            .lineLimit(1)
+
+                        Spacer()
+
+                        // Size (if available)
+                        if let size = entry.size {
+                            Text(formatSize(size))
+                                .font(.system(size: 10, design: .monospaced))
+                                .foregroundStyle(.tronTextMuted)
+                        }
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 4)
+                }
+            }
+
+            // Expand/collapse button
+            if entries.count > 12 {
+                Button {
+                    withAnimation(.tronFast) {
+                        isExpanded.toggle()
+                    }
+                } label: {
+                    HStack {
+                        Text(isExpanded ? "Show less" : "Show all \(entries.count) items")
+                            .font(.system(size: 11, design: .monospaced))
+                        Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
+                            .font(.system(size: 10))
+                    }
+                    .foregroundStyle(.tronTextMuted)
+                    .padding(.vertical, 6)
+                    .frame(maxWidth: .infinity)
+                    .background(Color.tronSurface)
+                }
+            }
+        }
+    }
+
+    private func entryIcon(for name: String) -> String {
+        let ext = URL(fileURLWithPath: name).pathExtension.lowercased()
+        switch ext {
+        case "swift", "ts", "tsx", "js", "jsx", "py", "rs", "go":
+            return "doc.text"
+        case "json", "yaml", "yml", "xml":
+            return "doc.badge.gearshape"
+        case "md":
+            return "doc.richtext"
+        case "css", "scss":
+            return "paintbrush"
+        case "png", "jpg", "jpeg", "gif", "svg":
+            return "photo"
+        default:
+            return "doc"
+        }
+    }
+
+    private func entryIconColor(for name: String) -> Color {
+        let ext = URL(fileURLWithPath: name).pathExtension.lowercased()
+        switch ext {
+        case "swift": return Color(hex: "#F05138")
+        case "ts", "tsx": return Color(hex: "#3178C6")
+        case "js", "jsx": return Color(hex: "#F7DF1E")
+        case "py": return Color(hex: "#3776AB")
+        default: return .tronTextMuted
+        }
+    }
+
+    private func formatSize(_ bytes: Int) -> String {
+        if bytes < 1024 { return "\(bytes) B" }
+        if bytes < 1024 * 1024 { return "\(bytes / 1024) KB" }
+        return "\(bytes / (1024 * 1024)) MB"
+    }
+}
+
+/// Structured ls entry
+private struct LsEntry: Identifiable {
+    var id: String { name }
+    let name: String
+    let isDirectory: Bool
+    let size: Int?
+    let permissions: String?
+}
+
+// MARK: - Grep Result Viewer
+// Shows search results with file:line:match format parsing
+
+struct GrepResultViewer: View {
+    let pattern: String
+    let result: String
+    @Binding var isExpanded: Bool
+
+    private var matches: [GrepMatch] {
+        result.components(separatedBy: "\n")
+            .filter { !$0.isEmpty }
+            .map { parseGrepLine($0) }
+    }
+
+    private var displayMatches: [GrepMatch] {
+        isExpanded ? matches : Array(matches.prefix(10))
+    }
+
+    /// Parse a grep output line into structured data
+    /// Handles formats like: file.swift:42:matched text
+    private func parseGrepLine(_ line: String) -> GrepMatch {
+        // Try to parse file:line:content format
+        let parts = line.split(separator: ":", maxSplits: 2)
+        if parts.count >= 3 {
+            let file = String(parts[0])
+            let lineNum = Int(parts[1])
+            let content = String(parts[2])
+            return GrepMatch(file: file, line: lineNum, content: content, raw: line)
+        } else if parts.count == 2, let lineNum = Int(parts[1]) {
+            // file:line format without content
+            return GrepMatch(file: String(parts[0]), line: lineNum, content: nil, raw: line)
+        }
+        // Fallback - just the raw line
+        return GrepMatch(file: nil, line: nil, content: line, raw: line)
+    }
+
+    /// Group matches by file for display
+    private var matchesByFile: [(file: String, matches: [GrepMatch])] {
+        var grouped: [String: [GrepMatch]] = [:]
+        for match in matches {
+            let key = match.file ?? "(unknown)"
+            grouped[key, default: []].append(match)
+        }
+        return grouped.map { ($0.key, $0.value) }.sorted { $0.file < $1.file }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            // Match count header
+            HStack {
+                Image(systemName: "magnifyingglass")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.purple)
+
+                Text("\(matches.count) matches")
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundStyle(.tronTextMuted)
+
+                if !pattern.isEmpty {
+                    Text("for \"\(pattern)\"")
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundStyle(.tronTextMuted)
+                        .lineLimit(1)
+                }
+
+                Spacer()
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 6)
+            .background(Color.tronSurface)
+
+            // Results
+            ScrollView(.horizontal, showsIndicators: false) {
+                VStack(alignment: .leading, spacing: 0) {
+                    ForEach(Array(displayMatches.enumerated()), id: \.offset) { _, match in
+                        HStack(spacing: 0) {
+                            // File name (shortened)
+                            if let file = match.file {
+                                Text(URL(fileURLWithPath: file).lastPathComponent)
+                                    .font(.system(size: 10, design: .monospaced))
+                                    .foregroundStyle(.purple)
+                                    .frame(minWidth: 80, alignment: .leading)
+                            }
+
+                            // Line number
+                            if let lineNum = match.line {
+                                Text(":\(lineNum)")
+                                    .font(.system(size: 10, design: .monospaced))
+                                    .foregroundStyle(.tronTextMuted)
+                                    .frame(width: 40, alignment: .trailing)
+                            }
+
+                            // Content
+                            if let content = match.content {
+                                Text(content)
+                                    .font(.system(size: 11, design: .monospaced))
+                                    .foregroundStyle(.tronTextSecondary)
+                                    .padding(.leading, 8)
+                            }
+                        }
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 3)
+                    }
+                }
+            }
+            .frame(maxHeight: isExpanded ? .infinity : 200)
+
+            // Expand/collapse button
+            if matches.count > 10 {
+                Button {
+                    withAnimation(.tronFast) {
+                        isExpanded.toggle()
+                    }
+                } label: {
+                    HStack {
+                        Text(isExpanded ? "Show less" : "Show all \(matches.count) matches")
+                            .font(.system(size: 11, design: .monospaced))
+                        Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
+                            .font(.system(size: 10))
+                    }
+                    .foregroundStyle(.tronTextMuted)
+                    .padding(.vertical, 6)
+                    .frame(maxWidth: .infinity)
+                    .background(Color.tronSurface)
+                }
+            }
+        }
+    }
+}
+
+/// Structured grep match
+private struct GrepMatch {
+    let file: String?
+    let line: Int?
+    let content: String?
+    let raw: String
+}
+
+// MARK: - Write Result Viewer
+
+struct WriteResultViewer: View {
+    let filePath: String
+    let result: String
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "checkmark.circle.fill")
+                .font(.system(size: 12))
+                .foregroundStyle(.tronSuccess)
+
+            Text(result)
+                .font(.system(size: 11, design: .monospaced))
+                .foregroundStyle(.tronTextSecondary)
+                .lineLimit(2)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+    }
+}
+
+// MARK: - Generic Result Viewer
+
+struct GenericResultViewer: View {
+    let result: String
+    @Binding var isExpanded: Bool
+
+    private var displayText: String {
+        if isExpanded || result.count <= 500 {
+            return result
+        }
+        return String(result.prefix(500)) + "..."
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text(displayText)
+                .font(.system(size: 11, design: .monospaced))
+                .foregroundStyle(.tronTextSecondary)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+            if result.count > 500 {
+                Button {
+                    withAnimation(.tronFast) {
+                        isExpanded.toggle()
+                    }
+                } label: {
+                    HStack {
+                        Text(isExpanded ? "Show less" : "Show more")
+                            .font(.system(size: 11, design: .monospaced))
+                        Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
+                            .font(.system(size: 10))
+                    }
+                    .foregroundStyle(.tronTextMuted)
+                    .padding(.vertical, 6)
+                    .frame(maxWidth: .infinity)
+                    .background(Color.tronSurface)
+                }
+            }
+        }
+    }
+}
+
+// MARK: - Preview
+// Shows all 7 core tools: Read, Write, Edit, Bash, Grep, Find, Ls
+
+#Preview("All 7 Core Tools") {
+    ScrollView {
+        VStack(spacing: 16) {
+            // 1. Read - Read file contents
+            ToolResultRouter(tool: ToolUseData(
+                toolName: "Read",
+                toolCallId: "read-123",
+                arguments: "{\"file_path\": \"/Users/test/example.swift\"}",
+                status: .success,
+                result: "import Foundation\n\nstruct Example {\n    let name: String\n    var value: Int\n}\n",
+                durationMs: 15
+            ))
+
+            // 2. Write - Create/overwrite files
+            ToolResultRouter(tool: ToolUseData(
+                toolName: "Write",
+                toolCallId: "write-123",
+                arguments: "{\"file_path\": \"/Users/test/config.json\"}",
+                status: .success,
+                result: "Successfully wrote 256 bytes to config.json",
+                durationMs: 8
+            ))
+
+            // 3. Edit - Make precise edits
+            ToolResultRouter(tool: ToolUseData(
+                toolName: "Edit",
+                toolCallId: "edit-123",
+                arguments: "{\"file_path\": \"/Users/test/server.py\"}",
+                status: .success,
+                result: "@@ -2,3 +2,6 @@\n \"\"\"\n Simple test server.\n-\"\"\"\n+\"\"\"\n+\n+Version: 1.0.0\n+Last modified by: AI\n",
+                durationMs: 23
+            ))
+
+            // 4. Bash - Execute shell commands
+            ToolResultRouter(tool: ToolUseData(
+                toolName: "Bash",
+                toolCallId: "bash-123",
+                arguments: "{\"command\": \"git status --short\"}",
+                status: .success,
+                result: "M  README.md\nA  src/new-file.ts\n?? temp/",
+                durationMs: 45
+            ))
+
+            // 5. Grep - Search file contents
+            ToolResultRouter(tool: ToolUseData(
+                toolName: "Grep",
+                toolCallId: "grep-123",
+                arguments: "{\"pattern\": \"TODO\", \"path\": \"./src\"}",
+                status: .success,
+                result: "src/app.ts:42:// TODO: Add error handling\nsrc/utils.ts:18:// TODO: Optimize this function\nsrc/main.ts:7:// TODO: Add logging",
+                durationMs: 120
+            ))
+
+            // 6. Find - Find files by pattern
+            ToolResultRouter(tool: ToolUseData(
+                toolName: "Find",
+                toolCallId: "find-123",
+                arguments: "{\"pattern\": \"**/*.swift\"}",
+                status: .success,
+                result: "Sources/App/main.swift\nSources/Views/ChatView.swift\nSources/Models/Message.swift\nTests/AppTests.swift",
+                durationMs: 35
+            ))
+
+            // 7. Ls - List directory contents
+            ToolResultRouter(tool: ToolUseData(
+                toolName: "Ls",
+                toolCallId: "ls-123",
+                arguments: "{\"path\": \"./src\"}",
+                status: .success,
+                result: "drwxr-xr-x  5 user staff  160 Jan  4 10:00 components\ndrwxr-xr-x  3 user staff   96 Jan  4 09:30 utils\n-rw-r--r--  1 user staff 1234 Jan  4 10:00 app.ts\n-rw-r--r--  1 user staff  567 Jan  4 09:00 index.ts",
+                durationMs: 12
+            ))
+
+            // Also show running and error states
+            ToolResultRouter(tool: ToolUseData(
+                toolName: "Bash",
+                toolCallId: "bash-running",
+                arguments: "{\"command\": \"npm install\"}",
+                status: .running,
+                result: nil,
+                durationMs: nil
+            ))
+
+            ToolResultRouter(tool: ToolUseData(
+                toolName: "Read",
+                toolCallId: "read-error",
+                arguments: "{\"file_path\": \"/nonexistent/file.txt\"}",
+                status: .error,
+                result: "Error: File not found",
+                durationMs: 5
+            ))
+        }
+        .padding()
+    }
+    .background(Color.tronBackground)
+    .preferredColorScheme(.dark)
+}

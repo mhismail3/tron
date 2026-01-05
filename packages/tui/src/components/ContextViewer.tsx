@@ -209,14 +209,6 @@ function renderLedger(audit: ContextAuditData): string[] {
       lines.push(`  - ${f}`);
     }
   }
-  if (ledger.decisions && ledger.decisions.length > 0) {
-    lines.push('');
-    lines.push('Decisions:');
-    for (const d of ledger.decisions.slice(-5)) {
-      lines.push(`  → ${d.choice}: ${d.reason}`);
-    }
-  }
-
   return lines;
 }
 

@@ -3,7 +3,7 @@ import SwiftUI
 // MARK: - Session Sidebar
 
 struct SessionSidebar: View {
-    @EnvironmentObject var sessionStore: SessionStore
+    @EnvironmentObject var eventStoreManager: EventStoreManager
     @EnvironmentObject var appState: AppState
     @Binding var selectedSessionId: String?
     let onNewSession: () -> Void
@@ -13,32 +13,25 @@ struct SessionSidebar: View {
     var body: some View {
         ZStack(alignment: .bottomTrailing) {
             List(selection: $selectedSessionId) {
-                Section {
-                    ForEach(sessionStore.sortedSessions) { session in
-                        SessionSidebarRow(
-                            session: session,
-                            isSelected: session.id == selectedSessionId
-                        )
-                        .tag(session.id)
-                        .listRowBackground(
-                            session.id == selectedSessionId
-                                ? Color.tronSurfaceElevated
-                                : Color.tronSurface
-                        )
-                        .listRowInsets(EdgeInsets(top: 6, leading: 12, bottom: 6, trailing: 12))
-                        .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-                            Button(role: .destructive) {
-                                onDeleteSession(session.id)
-                            } label: {
-                                Label("Delete", systemImage: "trash")
-                            }
+                ForEach(eventStoreManager.sortedSessions) { session in
+                    CachedSessionSidebarRow(
+                        session: session,
+                        isSelected: session.id == selectedSessionId
+                    )
+                    .tag(session.id)
+                    .listRowBackground(
+                        session.id == selectedSessionId
+                            ? Color.tronSurfaceElevated
+                            : Color.tronSurface
+                    )
+                    .listRowInsets(EdgeInsets(top: 6, leading: 12, bottom: 6, trailing: 12))
+                    .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                        Button(role: .destructive) {
+                            onDeleteSession(session.id)
+                        } label: {
+                            Label("Delete", systemImage: "trash")
                         }
                     }
-                } header: {
-                    Text("Sessions")
-                        .font(.caption.weight(.medium))
-                        .foregroundStyle(.tronTextMuted)
-                        .textCase(nil)
                 }
             }
             .listStyle(.insetGrouped)
@@ -50,8 +43,20 @@ struct SessionSidebar: View {
                 .padding(.trailing, 20)
                 .padding(.bottom, 24)
         }
-        .navigationTitle("Tron")
+        .navigationBarTitleDisplayMode(.inline)
         .toolbar {
+            ToolbarItem(placement: .topBarLeading) {
+                Image("TronLogo")
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .frame(height: 28)
+            }
+            ToolbarItem(placement: .principal) {
+                Text("TRON")
+                    .font(.system(size: 16, weight: .bold, design: .monospaced))
+                    .foregroundStyle(.tronEmerald)
+                    .tracking(2)
+            }
             ToolbarItem(placement: .topBarTrailing) {
                 Button(action: onSettings) {
                     Image(systemName: "gearshape")
@@ -63,90 +68,27 @@ struct SessionSidebar: View {
     }
 }
 
-// MARK: - Floating New Session Button
+// MARK: - Floating New Session Button (Native iOS 26 style)
 
 struct FloatingNewSessionButton: View {
     let action: () -> Void
 
-    @State private var isPressed = false
-
     var body: some View {
         Button(action: action) {
-            ZStack {
-                // Outer glass layer with phthalo green tint
-                Circle()
-                    .fill(
-                        LinearGradient(
-                            colors: [
-                                Color.tronPhthaloGreen.opacity(0.9),
-                                Color.tronPhthaloGreen.opacity(0.7)
-                            ],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
-                    )
-                    .frame(width: 56, height: 56)
-
-                // Glass overlay for liquid effect
-                Circle()
-                    .fill(
-                        LinearGradient(
-                            colors: [
-                                Color.white.opacity(0.25),
-                                Color.white.opacity(0.05),
-                                Color.clear
-                            ],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
-                    )
-                    .frame(width: 56, height: 56)
-
-                // Inner highlight ring
-                Circle()
-                    .strokeBorder(
-                        LinearGradient(
-                            colors: [
-                                Color.tronEmerald.opacity(0.6),
-                                Color.tronPhthaloGreen.opacity(0.3)
-                            ],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        ),
-                        lineWidth: 1.5
-                    )
-                    .frame(width: 56, height: 56)
-
-                // Plus icon
-                Image(systemName: "plus")
-                    .font(.system(size: 24, weight: .semibold))
-                    .foregroundStyle(.white)
-            }
-            .shadow(color: Color.tronPhthaloGreen.opacity(0.5), radius: 12, x: 0, y: 6)
-            .shadow(color: Color.black.opacity(0.3), radius: 8, x: 0, y: 4)
-            .scaleEffect(isPressed ? 0.92 : 1.0)
+            Image(systemName: "plus")
+                .font(.system(size: 22, weight: .semibold))
+                .frame(width: 56, height: 56)
         }
-        .buttonStyle(PlainButtonStyle())
-        .simultaneousGesture(
-            DragGesture(minimumDistance: 0)
-                .onChanged { _ in
-                    withAnimation(.tronFast) {
-                        isPressed = true
-                    }
-                }
-                .onEnded { _ in
-                    withAnimation(.tronFast) {
-                        isPressed = false
-                    }
-                }
-        )
+        .buttonStyle(.borderedProminent)
+        .buttonBorderShape(.circle)
+        .tint(Color(hex: "#123524"))
     }
 }
 
-// MARK: - Session Sidebar Row
+// MARK: - Cached Session Sidebar Row (uses CachedSession from EventDatabase)
 
-struct SessionSidebarRow: View {
-    let session: StoredSession
+struct CachedSessionSidebarRow: View {
+    let session: CachedSession
     let isSelected: Bool
 
     var body: some View {
@@ -158,7 +100,7 @@ struct SessionSidebarRow: View {
                     .foregroundStyle(.tronTextPrimary)
                     .lineLimit(1)
 
-                if session.isActive {
+                if session.status == .active {
                     Circle()
                         .fill(Color.tronSuccess)
                         .frame(width: 6, height: 6)
@@ -205,9 +147,9 @@ struct SessionSidebarRow: View {
     }
 }
 
-// MARK: - StoredSession Extension for Display
+// MARK: - CachedSession Extension for Display
 
-extension StoredSession {
+extension CachedSession {
     var displayDirectory: String {
         let path = workingDirectory
         // Show just the last two path components
@@ -260,6 +202,9 @@ struct EmptySessionsView: View {
 
 // MARK: - Preview
 
+// Note: Preview requires EventStoreManager which needs RPCClient and EventDatabase
+// Previews can be enabled by creating mock instances
+/*
 #Preview {
     NavigationStack {
         SessionSidebar(
@@ -268,8 +213,9 @@ struct EmptySessionsView: View {
             onDeleteSession: { _ in },
             onSettings: {}
         )
-        .environmentObject(SessionStore())
+        .environmentObject(EventStoreManager(...))
         .environmentObject(AppState())
     }
     .preferredColorScheme(.dark)
 }
+*/

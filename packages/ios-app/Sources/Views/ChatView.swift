@@ -4,7 +4,7 @@ import PhotosUI
 // MARK: - Chat View
 
 struct ChatView: View {
-    @EnvironmentObject var sessionStore: SessionStore
+    @EnvironmentObject var eventStoreManager: EventStoreManager
     @StateObject private var viewModel: ChatViewModel
     @StateObject private var inputHistory = InputHistoryStore()
     @FocusState private var isInputFocused: Bool
@@ -13,6 +13,7 @@ struct ChatView: View {
     @State private var showSessionStats = false
     @State private var showHelp = false
     @State private var showContextAudit = false
+    @State private var showSessionHistory = false
 
     private let sessionId: String
     private let rpcClient: RPCClient
@@ -41,10 +42,7 @@ struct ChatView: View {
                     )
                 }
 
-                // Status bar
-                statusBar
-
-                // Input area
+                // Input area with integrated status pills (liquid glass style)
                 InputBar(
                     text: $viewModel.inputText,
                     isProcessing: viewModel.isProcessing,
@@ -54,21 +52,25 @@ struct ChatView: View {
                         // Add to history before sending
                         inputHistory.addToHistory(viewModel.inputText)
                         viewModel.sendMessage()
-                        sessionStore.incrementMessageCount(for: sessionId)
+                        // Message count is now tracked in EventDatabase via EventStoreManager
                     },
                     onAbort: viewModel.abortAgent,
                     onRemoveImage: viewModel.removeAttachedImage,
                     inputHistory: inputHistory,
                     onHistoryNavigate: { newText in
                         viewModel.inputText = newText
-                    }
+                    },
+                    modelName: viewModel.currentModel,
+                    onModelTap: { showModelSwitcher = true },
+                    tokenUsage: viewModel.totalTokenUsage,
+                    contextPercentage: viewModel.contextPercentage
                 )
                 .focused($isInputFocused)
             }
         }
-        .navigationTitle(sessionStore.activeSession?.displayTitle ?? "Chat")
+        .navigationTitle(eventStoreManager.activeSession?.displayTitle ?? "Chat")
         .navigationBarTitleDisplayMode(.inline)
-        .toolbarBackground(Color.tronSurface, for: .navigationBar)
+        .toolbarBackground(.ultraThinMaterial, for: .navigationBar)
         .toolbarBackground(.visible, for: .navigationBar)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
@@ -90,7 +92,7 @@ struct ChatView: View {
         }
         .sheet(isPresented: $showSessionStats) {
             SessionStatsView(
-                session: sessionStore.activeSession,
+                session: eventStoreManager.activeSession,
                 tokenUsage: viewModel.totalTokenUsage
             )
         }
@@ -103,24 +105,22 @@ struct ChatView: View {
                 sessionId: sessionId
             )
         }
+        .sheet(isPresented: $showSessionHistory) {
+            SessionHistorySheet(
+                sessionId: sessionId,
+                rpcClient: rpcClient
+            )
+        }
         .alert("Error", isPresented: $viewModel.showError) {
             Button("OK") { viewModel.clearError() }
         } message: {
             Text(viewModel.errorMessage ?? "Unknown error")
         }
         .task {
-            // Inject session store for message persistence
-            viewModel.setSessionStore(sessionStore)
+            // Inject event store manager for event-sourced persistence
+            let workspaceId = eventStoreManager.activeSession?.workspaceId ?? ""
+            viewModel.setEventStoreManager(eventStoreManager, workspaceId: workspaceId)
             await viewModel.connectAndResume()
-        }
-        .onChange(of: viewModel.totalTokenUsage) { _, usage in
-            if let usage = usage {
-                sessionStore.updateTokenUsage(
-                    for: sessionId,
-                    input: usage.inputTokens,
-                    output: usage.outputTokens
-                )
-            }
         }
     }
 
@@ -143,6 +143,12 @@ struct ChatView: View {
                     showSessionStats = true
                 } label: {
                     Label("Session Info", systemImage: "info.circle")
+                }
+
+                Button {
+                    showSessionHistory = true
+                } label: {
+                    Label("Session History", systemImage: "arrow.triangle.branch")
                 }
 
                 Button {
@@ -177,44 +183,8 @@ struct ChatView: View {
         }
     }
 
-    // MARK: - Status Bar
-
-    private var statusBar: some View {
-        HStack(spacing: 8) {
-            // Model badge
-            Text(viewModel.currentModel.shortModelName)
-                .font(.system(size: 11, weight: .medium))
-                .foregroundStyle(.tronTextSecondary)
-                .padding(.horizontal, 8)
-                .padding(.vertical, 3)
-                .background(Color.tronSurfaceElevated)
-                .clipShape(Capsule())
-
-            Spacer()
-
-            // Token usage
-            if let usage = viewModel.totalTokenUsage {
-                HStack(spacing: 6) {
-                    HStack(spacing: 2) {
-                        Image(systemName: "arrow.down")
-                            .font(.system(size: 9))
-                        Text(usage.formattedInput)
-                    }
-
-                    HStack(spacing: 2) {
-                        Image(systemName: "arrow.up")
-                            .font(.system(size: 9))
-                        Text(usage.formattedOutput)
-                    }
-                }
-                .font(.system(size: 10))
-                .foregroundStyle(.tronTextMuted)
-            }
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 5)
-        .background(Color.tronSurface)
-    }
+    // Note: Status bar (model pill, token stats) is now integrated into InputBar
+    // with iOS 26 liquid glass styling
 
     // MARK: - Messages Scroll View
 
@@ -357,7 +327,7 @@ struct ThinkingBanner: View {
 // MARK: - Session Stats View
 
 struct SessionStatsView: View {
-    let session: StoredSession?
+    let session: CachedSession?
     let tokenUsage: TokenUsage?
 
     @Environment(\.dismiss) private var dismiss
@@ -370,7 +340,7 @@ struct SessionStatsView: View {
                         LabeledContent("ID", value: String(session.id.prefix(8)) + "...")
                         LabeledContent("Model", value: session.shortModel)
                         LabeledContent("Messages", value: "\(session.messageCount)")
-                        LabeledContent("Created", value: session.createdAt.formatted())
+                        LabeledContent("Created", value: session.createdAt)
                         LabeledContent("Last Activity", value: session.formattedDate)
                     }
 
@@ -379,10 +349,16 @@ struct SessionStatsView: View {
                             .font(.caption)
                             .foregroundStyle(.tronTextSecondary)
                     }
+
+                    Section("Token Usage (Session)") {
+                        LabeledContent("Input", value: "\(session.inputTokens)")
+                        LabeledContent("Output", value: "\(session.outputTokens)")
+                        LabeledContent("Total", value: "\(session.inputTokens + session.outputTokens)")
+                    }
                 }
 
                 if let usage = tokenUsage {
-                    Section("Token Usage") {
+                    Section("Token Usage (Current)") {
                         LabeledContent("Input", value: usage.formattedInput)
                         LabeledContent("Output", value: usage.formattedOutput)
                         LabeledContent("Total", value: usage.formattedTotal)
@@ -476,12 +452,16 @@ struct FeatureHelpRow: View {
 
 // MARK: - Preview
 
+// Note: Preview requires EventStoreManager which needs RPCClient and EventDatabase
+// Previews can be enabled by creating mock instances
+/*
 #Preview {
     NavigationStack {
         ChatView(
             rpcClient: RPCClient(serverURL: URL(string: "ws://localhost:8080/ws")!),
             sessionId: "test-session"
         )
-        .environmentObject(SessionStore())
+        .environmentObject(EventStoreManager(...))
     }
 }
+*/

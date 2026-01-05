@@ -4,7 +4,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import * as http from 'http';
 import { HealthServer } from '../src/health.js';
-import type { SessionOrchestrator } from '../src/orchestrator.js';
+import type { EventStoreOrchestrator } from '../src/event-store-orchestrator.js';
 
 // Mock http module
 vi.mock('http', () => ({
@@ -23,7 +23,7 @@ const mockOrchestrator = {
     processingSessions: 1,
     uptime: 1000,
   }),
-} as unknown as SessionOrchestrator;
+} as unknown as EventStoreOrchestrator;
 
 describe('HealthServer', () => {
   let server: HealthServer;
@@ -47,9 +47,9 @@ describe('HealthServer', () => {
     });
   });
 
-  describe('setOrchestrator', () => {
+  describe('setEventStoreOrchestrator', () => {
     it('should set orchestrator reference', () => {
-      expect(() => server.setOrchestrator(mockOrchestrator)).not.toThrow();
+      expect(() => server.setEventStoreOrchestrator(mockOrchestrator)).not.toThrow();
     });
   });
 
@@ -104,7 +104,7 @@ describe('HealthServer - Request Handling', () => {
     });
 
     server = new HealthServer({ port: 8081 });
-    server.setOrchestrator(mockOrchestrator);
+    server.setEventStoreOrchestrator(mockOrchestrator);
     server.setWsClientCount(() => 3);
 
     mockReq = {

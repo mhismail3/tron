@@ -177,33 +177,18 @@ describe('MessageList', () => {
     });
   });
 
-  describe('welcome box', () => {
-    it('should show welcome when configured', () => {
-      renderWithProvider(
-        <MessageList
-          messages={[]}
-          showWelcome={true}
-          welcomeModel="claude-sonnet-4-20250514"
-          welcomeWorkingDirectory="/home/user/project"
-        />,
-      );
+  describe('empty state', () => {
+    it('should show empty state when no messages', () => {
+      renderWithProvider(<MessageList messages={[]} />);
 
-      // WelcomeBox formats model name as "sonnet-4" (removes "claude-" prefix and date suffix)
-      expect(screen.getByText('sonnet-4')).toBeInTheDocument();
+      expect(screen.getByText('No messages yet')).toBeInTheDocument();
     });
 
-    it('should show git branch when provided', () => {
-      renderWithProvider(
-        <MessageList
-          messages={[]}
-          showWelcome={true}
-          welcomeModel="claude-sonnet-4-20250514"
-          welcomeWorkingDirectory="/home/user/project"
-          welcomeGitBranch="main"
-        />,
-      );
+    it('should not show empty state when messages exist', () => {
+      const messages = [createMessage('user', 'Hello')];
+      renderWithProvider(<MessageList messages={messages} />);
 
-      expect(screen.getByText(/main/)).toBeInTheDocument();
+      expect(screen.queryByText('No messages yet')).not.toBeInTheDocument();
     });
   });
 

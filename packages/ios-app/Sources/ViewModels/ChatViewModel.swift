@@ -42,102 +42,189 @@ class ChatViewModel: ObservableObject {
 
     // MARK: - Initialization
 
-    /// Reference to SessionStore for message persistence
-    private weak var sessionStore: SessionStore?
+    /// Reference to EventStoreManager for event-sourced persistence
+    private weak var eventStoreManager: EventStoreManager?
 
-    init(rpcClient: RPCClient, sessionId: String, sessionStore: SessionStore? = nil) {
+    /// Workspace ID for event caching
+    private var workspaceId: String = ""
+
+    /// Current turn counter
+    private var currentTurn = 0
+
+    init(rpcClient: RPCClient, sessionId: String, eventStoreManager: EventStoreManager? = nil) {
         self.rpcClient = rpcClient
         self.sessionId = sessionId
-        self.sessionStore = sessionStore
+        self.eventStoreManager = eventStoreManager
         setupBindings()
         setupEventHandlers()
     }
 
-    /// Set the session store reference (used when injected via environment)
-    func setSessionStore(_ store: SessionStore) {
-        self.sessionStore = store
+    /// Set the event store manager reference (used when injected via environment)
+    func setEventStoreManager(_ manager: EventStoreManager, workspaceId: String) {
+        self.eventStoreManager = manager
+        self.workspaceId = workspaceId
         loadPersistedMessages()
     }
 
-    /// Load persisted messages from SessionStore
+    /// Load messages from EventDatabase via state reconstruction
     private func loadPersistedMessages() {
-        guard let store = sessionStore else { return }
-        let storedMessages = store.getMessages(for: sessionId)
+        guard let manager = eventStoreManager else { return }
 
-        messages = storedMessages.compactMap { stored -> ChatMessage? in
-            let role: MessageRole
-            switch stored.role {
-            case "user": role = .user
-            case "assistant": role = .assistant
-            case "system": role = .system
-            case "toolResult": role = .toolResult
-            default: role = .assistant
+        do {
+            let state = try manager.getStateAtHead(sessionId)
+
+            var loadedMessages: [ChatMessage] = []
+
+            for reconstructed in state.messages {
+                let role: MessageRole
+                switch reconstructed.role {
+                case "user": role = .user
+                case "assistant": role = .assistant
+                case "system": role = .system
+                case "toolResult": role = .toolResult
+                default: role = .assistant
+                }
+
+                // Handle content which could be a string or array of content blocks
+                if let textContent = reconstructed.content as? String {
+                    loadedMessages.append(ChatMessage(role: role, content: .text(textContent)))
+                } else if let contentBlocks = reconstructed.content as? [[String: Any]] {
+                    // Parse content blocks for text and tool_use blocks
+                    var textParts: [String] = []
+
+                    for block in contentBlocks {
+                        let blockType = block["type"] as? String
+
+                        if blockType == "text", let text = block["text"] as? String {
+                            textParts.append(text)
+                        } else if blockType == "tool_use" {
+                            // Flush any accumulated text before the tool use
+                            if !textParts.isEmpty {
+                                let combinedText = textParts.joined()
+                                if !combinedText.isEmpty {
+                                    loadedMessages.append(ChatMessage(role: role, content: .text(combinedText)))
+                                }
+                                textParts = []
+                            }
+
+                            // Parse tool_use block
+                            let toolName = block["name"] as? String ?? "Unknown"
+                            let toolCallId = block["id"] as? String ?? UUID().uuidString
+
+                            // Format arguments as JSON string
+                            var argsString = "{}"
+                            if let inputDict = block["input"] as? [String: Any],
+                               let jsonData = try? JSONSerialization.data(withJSONObject: inputDict, options: [.prettyPrinted, .sortedKeys]),
+                               let jsonStr = String(data: jsonData, encoding: .utf8) {
+                                argsString = jsonStr
+                            }
+
+                            let tool = ToolUseData(
+                                toolName: toolName,
+                                toolCallId: toolCallId,
+                                arguments: argsString,
+                                status: .success,  // Completed tools from history are always done
+                                result: nil,       // Result will be in a separate tool_result block
+                                durationMs: nil
+                            )
+                            loadedMessages.append(ChatMessage(role: .assistant, content: .toolUse(tool)))
+                        } else if blockType == "tool_result" {
+                            // Tool results - update the corresponding tool message
+                            let toolUseId = block["tool_use_id"] as? String ?? ""
+                            var resultContent = ""
+
+                            if let content = block["content"] as? String {
+                                resultContent = content
+                            } else if let contentArray = block["content"] as? [[String: Any]] {
+                                // Handle array of content blocks
+                                for contentBlock in contentArray {
+                                    if let text = contentBlock["text"] as? String {
+                                        resultContent += text
+                                    }
+                                }
+                            }
+
+                            // Find and update the tool message with this result
+                            if let index = loadedMessages.lastIndex(where: {
+                                if case .toolUse(let tool) = $0.content {
+                                    return tool.toolCallId == toolUseId
+                                }
+                                return false
+                            }) {
+                                if case .toolUse(var tool) = loadedMessages[index].content {
+                                    tool.result = resultContent
+                                    loadedMessages[index].content = .toolUse(tool)
+                                }
+                            }
+                        }
+                    }
+
+                    // Flush any remaining text after all blocks
+                    if !textParts.isEmpty {
+                        let combinedText = textParts.joined()
+                        if !combinedText.isEmpty {
+                            loadedMessages.append(ChatMessage(role: role, content: .text(combinedText)))
+                        }
+                    }
+                }
             }
 
-            if let toolName = stored.toolName {
-                let tool = ToolUseData(
-                    toolName: toolName,
-                    toolCallId: stored.id.uuidString,
-                    arguments: "",
-                    status: stored.toolResult != nil ? .success : .running,
-                    result: stored.toolResult
+            messages = loadedMessages
+
+            // Update turn counter and token usage
+            currentTurn = state.turnCount
+            if state.tokenUsage.inputTokens > 0 || state.tokenUsage.outputTokens > 0 {
+                accumulatedInputTokens = state.tokenUsage.inputTokens
+                accumulatedOutputTokens = state.tokenUsage.outputTokens
+                totalTokenUsage = TokenUsage(
+                    inputTokens: accumulatedInputTokens,
+                    outputTokens: accumulatedOutputTokens,
+                    cacheReadTokens: nil,
+                    cacheCreationTokens: nil
                 )
-                return ChatMessage(id: stored.id, role: role, content: .toolUse(tool), timestamp: stored.timestamp)
             }
 
-            return ChatMessage(id: stored.id, role: role, content: .text(stored.content), timestamp: stored.timestamp)
+            logger.info("Loaded \(messages.count) messages from EventDatabase for session \(sessionId)", category: .session)
+        } catch {
+            logger.error("Failed to load messages from EventDatabase: \(error.localizedDescription)", category: .session)
         }
-
-        log.info("Loaded \(messages.count) persisted messages for session \(sessionId)", category: .session)
     }
 
-    /// Persist current messages to SessionStore
-    private func persistMessages() {
-        guard let store = sessionStore else { return }
+    /// Cache user message event to EventDatabase
+    private func cacheUserMessageEvent(content: String) {
+        guard let manager = eventStoreManager else { return }
+        currentTurn += 1
 
-        let storedMessages = messages.compactMap { msg -> SessionStore.StoredMessage? in
-            let roleString: String
-            switch msg.role {
-            case .user: roleString = "user"
-            case .assistant: roleString = "assistant"
-            case .system: roleString = "system"
-            case .toolResult: roleString = "toolResult"
-            }
-
-            switch msg.content {
-            case .text(let text), .streaming(let text):
-                return SessionStore.StoredMessage(
-                    id: msg.id,
-                    role: roleString,
-                    content: text,
-                    timestamp: msg.timestamp,
-                    toolName: nil,
-                    toolResult: nil
-                )
-            case .toolUse(let tool):
-                return SessionStore.StoredMessage(
-                    id: msg.id,
-                    role: roleString,
-                    content: tool.displayName,
-                    timestamp: msg.timestamp,
-                    toolName: tool.toolName,
-                    toolResult: tool.result
-                )
-            case .error(let error):
-                return SessionStore.StoredMessage(
-                    id: msg.id,
-                    role: roleString,
-                    content: error,
-                    timestamp: msg.timestamp,
-                    toolName: nil,
-                    toolResult: nil
-                )
-            default:
-                return nil
-            }
+        do {
+            _ = try manager.cacheUserMessage(
+                sessionId: sessionId,
+                workspaceId: workspaceId,
+                content: content,
+                turn: currentTurn
+            )
+            logger.debug("Cached user message event for turn \(currentTurn)", category: .events)
+        } catch {
+            logger.error("Failed to cache user message: \(error.localizedDescription)", category: .events)
         }
+    }
 
-        store.saveMessages(storedMessages, for: sessionId)
+    /// Cache assistant message event to EventDatabase
+    private func cacheAssistantMessageEvent(content: String, tokenUsage: TokenUsage?) {
+        guard let manager = eventStoreManager else { return }
+
+        do {
+            _ = try manager.cacheAssistantMessage(
+                sessionId: sessionId,
+                workspaceId: workspaceId,
+                content: content,
+                turn: currentTurn,
+                tokenUsage: tokenUsage,
+                model: currentModel
+            )
+            logger.debug("Cached assistant message event for turn \(currentTurn)", category: .events)
+        } catch {
+            logger.error("Failed to cache assistant message: \(error.localizedDescription)", category: .events)
+        }
     }
 
     private func setupBindings() {
@@ -190,42 +277,42 @@ class ChatViewModel: ObservableObject {
     // MARK: - Connection & Session
 
     func connectAndResume() async {
-        log.info("connectAndResume() called for session \(sessionId)", category: .session)
+        logger.info("connectAndResume() called for session \(sessionId)", category: .session)
 
         // Connect to server
-        log.debug("Calling rpcClient.connect()...", category: .session)
+        logger.debug("Calling rpcClient.connect()...", category: .session)
         await rpcClient.connect()
 
         // Wait for connection
-        log.verbose("Waiting 500ms for connection to stabilize...", category: .session)
+        logger.verbose("Waiting 500ms for connection to stabilize...", category: .session)
         try? await Task.sleep(for: .milliseconds(500))
 
         guard rpcClient.isConnected else {
-            log.warning("Failed to connect to server - rpcClient.isConnected=false", category: .session)
+            logger.warning("Failed to connect to server - rpcClient.isConnected=false", category: .session)
             return
         }
-        log.info("Connected to server successfully", category: .session)
+        logger.info("Connected to server successfully", category: .session)
 
         // Resume the session
         do {
-            log.debug("Calling resumeSession for \(sessionId)...", category: .session)
+            logger.debug("Calling resumeSession for \(sessionId)...", category: .session)
             try await rpcClient.resumeSession(sessionId: sessionId)
-            log.info("Session resumed successfully", category: .session)
+            logger.info("Session resumed successfully", category: .session)
         } catch {
-            log.error("Failed to resume session: \(error.localizedDescription)", category: .session)
+            logger.error("Failed to resume session: \(error.localizedDescription)", category: .session)
             showErrorAlert("Failed to resume session: \(error.localizedDescription)")
             return
         }
 
         // Try to load message history (non-critical, may not be supported)
         do {
-            log.debug("Fetching session history...", category: .session)
+            logger.debug("Fetching session history...", category: .session)
             let history = try await rpcClient.getSessionHistory()
             messages = history.map { historyToMessage($0) }
-            log.info("Loaded \(history.count) messages from history", category: .session)
+            logger.info("Loaded \(history.count) messages from history", category: .session)
         } catch {
             // History fetch is optional - server may not support it
-            log.debug("Could not fetch history (may not be supported): \(error.localizedDescription)", category: .session)
+            logger.debug("Could not fetch history (may not be supported): \(error.localizedDescription)", category: .session)
         }
     }
 
@@ -252,23 +339,26 @@ class ChatViewModel: ObservableObject {
     func sendMessage() {
         let text = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty || !attachedImages.isEmpty else {
-            log.verbose("sendMessage() called but no text or images to send", category: .chat)
+            logger.verbose("sendMessage() called but no text or images to send", category: .chat)
             return
         }
 
-        log.info("Sending message: \"\(text.prefix(100))...\" with \(attachedImages.count) images", category: .chat)
+        logger.info("Sending message: \"\(text.prefix(100))...\" with \(attachedImages.count) images", category: .chat)
 
         // Create user message
         if !attachedImages.isEmpty {
             let imageMessage = ChatMessage(role: .user, content: .images(attachedImages))
             messages.append(imageMessage)
-            log.debug("Added image message with \(attachedImages.count) images", category: .chat)
+            logger.debug("Added image message with \(attachedImages.count) images", category: .chat)
         }
 
         if !text.isEmpty {
             let userMessage = ChatMessage.user(text)
             messages.append(userMessage)
-            log.debug("Added user text message", category: .chat)
+            logger.debug("Added user text message", category: .chat)
+
+            // Cache user message event to EventDatabase
+            cacheUserMessageEvent(content: text)
         }
 
         inputText = ""
@@ -280,7 +370,7 @@ class ChatViewModel: ObservableObject {
         messages.append(streamingMessage)
         streamingMessageId = streamingMessage.id
         streamingText = ""
-        log.verbose("Created streaming placeholder message id=\(streamingMessage.id)", category: .chat)
+        logger.verbose("Created streaming placeholder message id=\(streamingMessage.id)", category: .chat)
 
         // Prepare image attachments
         let imageAttachments = attachedImages.map {
@@ -292,30 +382,30 @@ class ChatViewModel: ObservableObject {
         // Send to server
         Task {
             do {
-                log.debug("Calling rpcClient.sendPrompt()...", category: .chat)
+                logger.debug("Calling rpcClient.sendPrompt()...", category: .chat)
                 try await rpcClient.sendPrompt(
                     text,
                     images: imageAttachments.isEmpty ? nil : imageAttachments
                 )
-                log.info("Prompt sent successfully", category: .chat)
+                logger.info("Prompt sent successfully", category: .chat)
             } catch {
-                log.error("Failed to send prompt: \(error.localizedDescription)", category: .chat)
+                logger.error("Failed to send prompt: \(error.localizedDescription)", category: .chat)
                 handleError(error.localizedDescription)
             }
         }
     }
 
     func abortAgent() {
-        log.info("Aborting agent...", category: .chat)
+        logger.info("Aborting agent...", category: .chat)
         Task {
             do {
                 try await rpcClient.abortAgent()
                 isProcessing = false
                 finalizeStreamingMessage()
                 messages.append(.system("Agent aborted"))
-                log.info("Agent aborted successfully", category: .chat)
+                logger.info("Agent aborted successfully", category: .chat)
             } catch {
-                log.error("Failed to abort agent: \(error.localizedDescription)", category: .chat)
+                logger.error("Failed to abort agent: \(error.localizedDescription)", category: .chat)
                 showErrorAlert(error.localizedDescription)
             }
         }
@@ -346,6 +436,16 @@ class ChatViewModel: ObservableObject {
     // MARK: - Event Handlers
 
     private func handleTextDelta(_ delta: String) {
+        // If there's no active streaming message, create a new one
+        // This happens when text arrives after tool calls
+        if streamingMessageId == nil {
+            let newStreamingMessage = ChatMessage.streaming()
+            messages.append(newStreamingMessage)
+            streamingMessageId = newStreamingMessage.id
+            streamingText = ""
+            logger.verbose("Created new streaming message after tool calls id=\(newStreamingMessage.id)", category: .events)
+        }
+
         // Batch text deltas for better performance
         pendingTextDelta += delta
         streamingText += delta
@@ -365,7 +465,7 @@ class ChatViewModel: ObservableObject {
             }
         }
 
-        log.verbose("Text delta received: +\(delta.count) chars, total: \(streamingText.count)", category: .events)
+        logger.verbose("Text delta received: +\(delta.count) chars, total: \(streamingText.count)", category: .events)
     }
 
     /// Force flush any pending text updates (called before completion)
@@ -380,12 +480,17 @@ class ChatViewModel: ObservableObject {
 
     private func handleThinkingDelta(_ delta: String) {
         thinkingText += delta
-        log.verbose("Thinking delta: +\(delta.count) chars", category: .events)
+        logger.verbose("Thinking delta: +\(delta.count) chars", category: .events)
     }
 
     private func handleToolStart(_ event: ToolStartEvent) {
-        log.info("Tool started: \(event.toolName) [\(event.toolCallId)]", category: .events)
-        log.debug("Tool args: \(event.formattedArguments.prefix(200))", category: .events)
+        logger.info("Tool started: \(event.toolName) [\(event.toolCallId)]", category: .events)
+        logger.debug("Tool args: \(event.formattedArguments.prefix(200))", category: .events)
+
+        // Finalize any current streaming text before tool starts
+        // This creates separate bubbles for text before vs after tool calls
+        flushPendingTextUpdates()
+        finalizeStreamingMessage()
 
         let tool = ToolUseData(
             toolName: event.toolName,
@@ -400,8 +505,8 @@ class ChatViewModel: ObservableObject {
     }
 
     private func handleToolEnd(_ event: ToolEndEvent) {
-        log.info("Tool ended: \(event.toolCallId) success=\(event.success) duration=\(event.durationMs ?? 0)ms", category: .events)
-        log.debug("Tool result: \(event.displayResult.prefix(300))", category: .events)
+        logger.info("Tool ended: \(event.toolCallId) success=\(event.success) duration=\(event.durationMs ?? 0)ms", category: .events)
+        logger.debug("Tool result: \(event.displayResult.prefix(300))", category: .events)
 
         // Find and update the tool message
         if let index = messages.lastIndex(where: {
@@ -417,16 +522,16 @@ class ChatViewModel: ObservableObject {
                 messages[index].content = .toolUse(tool)
             }
         } else {
-            log.warning("Could not find tool message for toolCallId=\(event.toolCallId)", category: .events)
+            logger.warning("Could not find tool message for toolCallId=\(event.toolCallId)", category: .events)
         }
     }
 
     private func handleTurnStart(_ event: TurnStartEvent) {
-        log.info("Turn \(event.turnNumber) started", category: .events)
+        logger.info("Turn \(event.turnNumber) started", category: .events)
     }
 
     private func handleTurnEnd(_ event: TurnEndEvent) {
-        log.info("Turn ended, tokens: in=\(event.tokenUsage?.inputTokens ?? 0) out=\(event.tokenUsage?.outputTokens ?? 0)", category: .events)
+        logger.info("Turn ended, tokens: in=\(event.tokenUsage?.inputTokens ?? 0) out=\(event.tokenUsage?.outputTokens ?? 0)", category: .events)
 
         // Update token usage on the streaming message
         if let id = streamingMessageId,
@@ -444,24 +549,28 @@ class ChatViewModel: ObservableObject {
                 cacheReadTokens: nil,
                 cacheCreationTokens: nil
             )
-            log.debug("Total tokens: in=\(accumulatedInputTokens) out=\(accumulatedOutputTokens)", category: .events)
+            logger.debug("Total tokens: in=\(accumulatedInputTokens) out=\(accumulatedOutputTokens)", category: .events)
         }
     }
 
     private func handleComplete() {
-        log.info("Agent complete, finalizing message (streamingText: \(streamingText.count) chars)", category: .events)
+        logger.info("Agent complete, finalizing message (streamingText: \(streamingText.count) chars)", category: .events)
         // Flush any pending batched updates before finalizing
         flushPendingTextUpdates()
+
+        // Cache assistant message event before finalizing
+        if !streamingText.isEmpty {
+            cacheAssistantMessageEvent(content: streamingText, tokenUsage: totalTokenUsage)
+        }
+
         isProcessing = false
         finalizeStreamingMessage()
         thinkingText = ""
         currentToolMessages.removeAll()
-        // Persist messages after completion
-        persistMessages()
     }
 
     private func handleError(_ message: String) {
-        log.error("Agent error: \(message)", category: .events)
+        logger.error("Agent error: \(message)", category: .events)
         isProcessing = false
         finalizeStreamingMessage()
         messages.append(.error(message))
@@ -527,5 +636,43 @@ class ChatViewModel: ObservableObject {
 
     var hasActiveSession: Bool {
         rpcClient.hasActiveSession
+    }
+
+    /// Estimated context usage percentage based on total tokens and model context window
+    var contextPercentage: Int {
+        guard let usage = totalTokenUsage else { return 0 }
+
+        // Get context window for current model
+        let contextWindow = modelContextWindow(for: currentModel)
+        guard contextWindow > 0 else { return 0 }
+
+        // Total tokens used (input + output counts toward context)
+        let totalUsed = usage.inputTokens + usage.outputTokens
+        let percentage = Double(totalUsed) / Double(contextWindow) * 100
+
+        return min(100, Int(percentage.rounded()))
+    }
+
+    /// Returns the context window size for a given model ID
+    private func modelContextWindow(for modelId: String) -> Int {
+        let lowered = modelId.lowercased()
+
+        // Claude 4.5 models have 200k context
+        if lowered.contains("4-5") || lowered.contains("4.5") {
+            return 200_000
+        }
+
+        // Claude 4 models have 200k context
+        if lowered.contains("-4-") || lowered.contains("sonnet-4") || lowered.contains("opus-4") {
+            return 200_000
+        }
+
+        // Claude 3.5 models have 200k context
+        if lowered.contains("3-5") || lowered.contains("3.5") {
+            return 200_000
+        }
+
+        // Default to 200k for safety
+        return 200_000
     }
 }

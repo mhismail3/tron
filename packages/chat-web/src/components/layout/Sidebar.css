@@ -200,12 +200,32 @@
   padding: var(--space-md) var(--space-lg);
   border-top: 1px solid var(--border-subtle);
   flex-shrink: 0;
+  display: flex;
+  align-items: center;
 }
 
-.footer-text {
-  font-family: var(--font-mono);
-  font-size: var(--text-xs);
-  color: var(--text-dim);
+.footer-brand {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  opacity: 0.6;
+  transition: opacity var(--transition-fast);
+}
+
+.footer-brand:hover {
+  opacity: 0.85;
+}
+
+.footer-icon {
+  height: 20px;
+  width: auto;
+  object-fit: contain;
+}
+
+.footer-logo {
+  height: 16px;
+  width: auto;
+  object-fit: contain;
 }
 
 /* ============================================================================

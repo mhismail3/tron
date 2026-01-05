@@ -13,3 +13,9 @@ export {
   type UseSessionPersistenceReturn,
 } from './useSessionPersistence.js';
 export { useTheme, type Theme, type ResolvedTheme } from './useTheme.js';
+export {
+  useEventStore,
+  type UseEventStoreOptions,
+  type EventStoreState,
+  type UseEventStoreReturn,
+} from './useEventStore.js';

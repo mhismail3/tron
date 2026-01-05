@@ -7,6 +7,8 @@
 
 import { useCallback } from 'react';
 import './WelcomePage.css';
+import mooseIcon from '../../assets/moose-icon.png';
+import tronLogo from '../../assets/tron-logo.png';
 
 // =============================================================================
 // Types
@@ -19,22 +21,6 @@ export interface WelcomePageProps {
   connectionStatus: 'connected' | 'connecting' | 'disconnected' | 'error';
   /** Whether still initializing */
   isInitializing?: boolean;
-}
-
-// =============================================================================
-// Icons
-// =============================================================================
-
-function TronLogo() {
-  return (
-    <svg width="64" height="64" viewBox="0 0 100 100" fill="none">
-      <rect width="100" height="100" rx="20" fill="var(--emerald)" fillOpacity="0.15" />
-      <path
-        d="M30 30h40v10H55v30H45V40H30V30z"
-        fill="var(--emerald)"
-      />
-    </svg>
-  );
 }
 
 function PlusIcon() {
@@ -102,8 +88,8 @@ export function WelcomePage({
       <div className="welcome-content">
         {/* Logo and title */}
         <div className="welcome-header">
-          <TronLogo />
-          <h1 className="welcome-title">Tron</h1>
+          <img src={mooseIcon} alt="Tron" className="welcome-icon" />
+          <img src={tronLogo} alt="Tron" className="welcome-logo" />
           <p className="welcome-subtitle">AI-powered coding assistant</p>
         </div>
 

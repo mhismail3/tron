@@ -6,6 +6,8 @@
 
 import { useState, useCallback, type ReactNode } from 'react';
 import './Sidebar.css';
+import mooseIcon from '../../assets/moose-icon.png';
+import tronLogo from '../../assets/tron-logo.png';
 
 // =============================================================================
 // Types
@@ -171,7 +173,12 @@ export function Sidebar({
 
       {/* Footer */}
       <div className="sidebar-footer">
-        <span className="footer-text">{!collapsed && 'Tron Chat'}</span>
+        {!collapsed && (
+          <div className="footer-brand">
+            <img src={mooseIcon} alt="" className="footer-icon" />
+            <img src={tronLogo} alt="Tron" className="footer-logo" />
+          </div>
+        )}
       </div>
     </nav>
   );

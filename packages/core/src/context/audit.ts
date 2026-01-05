@@ -33,11 +33,21 @@
  * ```
  */
 
-import type { Ledger } from '../memory/ledger-manager.js';
-
 // =============================================================================
 // Types
 // =============================================================================
+
+/**
+ * Simple ledger state for audit tracking
+ */
+export interface LedgerState {
+  goal?: string;
+  now?: string;
+  next?: string[];
+  done?: string[];
+  constraints?: string[];
+  workingFiles?: string[];
+}
 
 export interface ContextFileEntry {
   /** Absolute path to the file */
@@ -106,7 +116,7 @@ export interface ContextAuditData {
   contextFiles: ContextFileEntry[];
 
   /** Ledger state */
-  ledger: Partial<Ledger> | null;
+  ledger: LedgerState | null;
 
   /** Handoffs injected */
   handoffs: HandoffEntry[];
@@ -220,7 +230,7 @@ export class ContextAudit {
   /**
    * Set ledger state
    */
-  setLedger(ledger: Partial<Ledger> | null): void {
+  setLedger(ledger: LedgerState | null): void {
     this.data.ledger = ledger;
   }
 

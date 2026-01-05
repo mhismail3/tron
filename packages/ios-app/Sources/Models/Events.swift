@@ -75,21 +75,26 @@ struct ToolEndEvent: Decodable {
 
     struct ToolEndData: Decodable {
         let toolCallId: String
+        let toolName: String?
         let success: Bool
         let result: String?
+        let output: String?  // Server sometimes sends 'output' instead of 'result'
         let error: String?
         let durationMs: Int?
+        let duration: Int?   // Server sometimes sends 'duration' instead of 'durationMs'
     }
 
     var toolCallId: String { data.toolCallId }
+    var toolName: String? { data.toolName }
     var success: Bool { data.success }
-    var result: String? { data.result }
+    var result: String? { data.result ?? data.output }  // Prefer result, fallback to output
     var error: String? { data.error }
-    var durationMs: Int? { data.durationMs }
+    var durationMs: Int? { data.durationMs ?? data.duration }  // Handle both field names
 
     var displayResult: String {
         if data.success {
-            return data.result ?? "Success"
+            // Prefer output over result for full content, never just say "Success"
+            return data.output ?? data.result ?? ""
         } else {
             return data.error ?? "Error"
         }
@@ -215,7 +220,7 @@ enum ParsedEvent {
     static func parse(from data: Data) -> ParsedEvent? {
         guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let type = json["type"] as? String else {
-            log.warning("Failed to extract event type from data", category: .events)
+            logger.warning("Failed to extract event type from data", category: .events)
             return nil
         }
 
@@ -261,18 +266,18 @@ enum ParsedEvent {
 
             case EventType.sessionCreated.rawValue, EventType.sessionEnded.rawValue, EventType.agentTurn.rawValue:
                 // These are informational events we don't need to handle
-                log.debug("Ignoring informational event: \(type)", category: .events)
+                logger.debug("Ignoring informational event: \(type)", category: .events)
                 return nil
 
             default:
-                log.debug("Unknown event type: \(type)", category: .events)
+                logger.debug("Unknown event type: \(type)", category: .events)
                 return .unknown(type)
             }
         } catch {
-            log.error("Failed to decode \(type) event: \(error.localizedDescription)", category: .events)
+            logger.error("Failed to decode \(type) event: \(error.localizedDescription)", category: .events)
             // Log the raw JSON for debugging
             if let jsonStr = String(data: data, encoding: .utf8) {
-                log.debug("Raw event JSON: \(jsonStr.prefix(500))", category: .events)
+                logger.debug("Raw event JSON: \(jsonStr.prefix(500))", category: .events)
             }
             return nil
         }

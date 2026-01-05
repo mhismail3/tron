@@ -4,7 +4,7 @@
  * Integrates state management, layout, and RPC connection.
  * Supports multiple sessions with full persistence across page reloads.
  */
-import { useEffect, useState, useCallback, useRef } from 'react';
+import { useEffect, useState, useCallback, useRef, useMemo } from 'react';
 import { ChatProvider, useChatDispatch, useChat } from './store/context.js';
 import { AppShell, Sidebar, type SessionSummary } from './components/layout/index.js';
 import { ChatArea } from './components/chat/ChatArea.js';
@@ -14,6 +14,7 @@ import { WelcomePage } from './components/welcome/index.js';
 import { useRpc } from './hooks/useRpc.js';
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts.js';
 import { useSessionPersistence } from './hooks/useSessionPersistence.js';
+import { useEventStore } from './hooks/useEventStore.js';
 import type { RpcEvent, ModelInfo } from '@tron/core/browser';
 import type { Command } from './commands/index.js';
 import type { DisplayMessage, SessionSummary as StoreSessionSummary } from './store/types.js';
@@ -56,6 +57,19 @@ function AppContent() {
   } = useRpc();
 
   const persistence = useSessionPersistence();
+
+  // Memoize RPC call to prevent infinite re-renders in useEventStore
+  const rpcCall = useMemo(
+    () => (client ? client.request.bind(client) : undefined),
+    [client]
+  );
+
+  // Event store for local caching and tree operations
+  const eventStore = useEventStore({
+    rpcCall,
+    autoSync: status === 'connected',
+    syncInterval: 30000,
+  });
 
   const [isOnline, setIsOnline] = useState(navigator.onLine);
   const [sidebarOpen, setSidebarOpen] = useState(true);
@@ -619,6 +633,8 @@ function AppContent() {
       if (status === 'connected') {
         try {
           await resumeSession(sessionId);
+          // Sync events from server for this session
+          await eventStore.sync(sessionId);
         } catch (err) {
           console.warn('Failed to resume session with server:', err);
           // Session might not exist on server yet - that's okay for locally persisted sessions
@@ -634,6 +650,7 @@ function AppContent() {
       persistence,
       status,
       resumeSession,
+      eventStore,
     ]
   );
 
@@ -688,6 +705,23 @@ function AppContent() {
         persistence.saveSession(storeSession);
         persistence.setActiveSession(newSessionId);
 
+        // Cache in event store for tree operations
+        eventStore.cacheSession({
+          id: newSessionId,
+          workspaceId: workingDirectory,
+          rootEventId: null,
+          headEventId: null,
+          status: 'active',
+          title: workingDirectory.split('/').pop() || 'New Session',
+          model: state.currentModel,
+          provider: 'anthropic',
+          workingDirectory,
+          createdAt: now,
+          lastActivityAt: now,
+          eventCount: 0,
+          messageCount: 0,
+        });
+
         // Update state
         dispatch({ type: 'SET_SESSION', payload: newSessionId });
         dispatch({ type: 'SET_INITIALIZED', payload: true });
@@ -718,6 +752,23 @@ function AppContent() {
         persistence.saveSession(storeSession);
         persistence.setActiveSession(localSessionId);
 
+        // Cache in event store for tree operations
+        eventStore.cacheSession({
+          id: localSessionId,
+          workspaceId: workingDirectory,
+          rootEventId: null,
+          headEventId: null,
+          status: 'active',
+          title: workingDirectory.split('/').pop() || 'New Session',
+          model: state.currentModel,
+          provider: 'anthropic',
+          workingDirectory,
+          createdAt: now,
+          lastActivityAt: now,
+          eventCount: 0,
+          messageCount: 0,
+        });
+
         dispatch({ type: 'SET_SESSION', payload: localSessionId });
         dispatch({ type: 'SET_INITIALIZED', payload: true });
       }
@@ -740,6 +791,7 @@ function AppContent() {
     createSession,
     state.currentModel,
     persistence,
+    eventStore,
   ]);
 
   // Handle session deletion
@@ -769,6 +821,9 @@ function AppContent() {
 
         // Remove from cache
         sessionCacheRef.current.delete(sessionId);
+
+        // Remove from event store
+        await eventStore.removeSession(sessionId);
 
         // If this was the active session, switch to another or create new
         const currentSessionId = state.sessionId || rpcSessionId;
@@ -810,6 +865,7 @@ function AppContent() {
       dispatch,
       setRpcSessionId,
       loadSessionFromCache,
+      eventStore,
     ]
   );
 

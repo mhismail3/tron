@@ -5,7 +5,7 @@
  */
 import * as http from 'http';
 import { createLogger } from '@tron/core';
-import type { SessionOrchestrator } from './orchestrator.js';
+import type { EventStoreOrchestrator } from './event-store-orchestrator.js';
 
 const logger = createLogger('health');
 
@@ -45,7 +45,7 @@ export interface HealthResponse {
 export class HealthServer {
   private config: HealthServerConfig;
   private server: http.Server | null = null;
-  private orchestrator: SessionOrchestrator | null = null;
+  private orchestrator: EventStoreOrchestrator | null = null;
   private wsClientCount: () => number = () => 0;
 
   constructor(config: HealthServerConfig) {
@@ -55,7 +55,7 @@ export class HealthServer {
   /**
    * Set orchestrator reference for health checks
    */
-  setOrchestrator(orchestrator: SessionOrchestrator): void {
+  setEventStoreOrchestrator(orchestrator: EventStoreOrchestrator): void {
     this.orchestrator = orchestrator;
   }
 

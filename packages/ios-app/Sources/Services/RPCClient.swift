@@ -49,11 +49,11 @@ class RPCClient: ObservableObject {
     func connect() async {
         // Don't reconnect if already connected
         if webSocket != nil && connectionState.isConnected {
-            log.debug("Already connected, skipping connect", category: .rpc)
+            logger.debug("Already connected, skipping connect", category: .rpc)
             return
         }
 
-        log.info("Initializing connection to \(self.serverURL.absoluteString)", category: .rpc)
+        logger.info("Initializing connection to \(self.serverURL.absoluteString)", category: .rpc)
 
         let ws = WebSocketService(serverURL: serverURL)
         self.webSocket = ws
@@ -75,7 +75,7 @@ class RPCClient: ObservableObject {
     }
 
     func disconnect() async {
-        log.info("Disconnecting from server", category: .rpc)
+        logger.info("Disconnecting from server", category: .rpc)
         currentSessionId = nil
         webSocket?.disconnect()
         webSocket = nil
@@ -91,7 +91,7 @@ class RPCClient: ObservableObject {
 
     private func handleEventData(_ data: Data) {
         guard let event = ParsedEvent.parse(from: data) else {
-            log.warning("Failed to parse event data", category: .events)
+            logger.warning("Failed to parse event data", category: .events)
             return
         }
 
@@ -135,10 +135,10 @@ class RPCClient: ObservableObject {
             onError?(e.message)
 
         case .connected(let e):
-            log.info("Server version: \(e.version ?? "unknown")", category: .rpc)
+            logger.info("Server version: \(e.version ?? "unknown")", category: .rpc)
 
         case .unknown(let type):
-            log.debug("Unknown event type: \(type)", category: .events)
+            logger.debug("Unknown event type: \(type)", category: .events)
         }
     }
 
@@ -165,7 +165,7 @@ class RPCClient: ObservableObject {
 
         currentSessionId = result.sessionId
         currentModel = result.model
-        log.info("Created session: \(result.sessionId)", category: .session)
+        logger.info("Created session: \(result.sessionId)", category: .session)
 
         return result
     }
@@ -206,7 +206,7 @@ class RPCClient: ObservableObject {
 
         currentSessionId = result.sessionId
         currentModel = result.model
-        log.info("Resumed session: \(sessionId) with \(result.messageCount) messages", category: .session)
+        logger.info("Resumed session: \(sessionId) with \(result.messageCount) messages", category: .session)
     }
 
     func endSession() async throws {
@@ -219,7 +219,7 @@ class RPCClient: ObservableObject {
         let _: EmptyParams = try await ws.send(method: "session.end", params: params)
 
         currentSessionId = nil
-        log.info("Ended session: \(sessionId)", category: .session)
+        logger.info("Ended session: \(sessionId)", category: .session)
     }
 
     func getSessionHistory(limit: Int = 100) async throws -> [HistoryMessage] {
@@ -265,7 +265,7 @@ class RPCClient: ObservableObject {
         )
 
         if !result.acknowledged {
-            log.warning("Prompt not acknowledged by server", category: .chat)
+            logger.warning("Prompt not acknowledged by server", category: .chat)
         }
     }
 
@@ -277,7 +277,7 @@ class RPCClient: ObservableObject {
 
         let params = AgentAbortParams(sessionId: sessionId)
         let _: EmptyParams = try await ws.send(method: "agent.abort", params: params)
-        log.info("Aborted agent", category: .chat)
+        logger.info("Aborted agent", category: .chat)
     }
 
     func getAgentState() async throws -> AgentStateResult {
@@ -331,7 +331,7 @@ class RPCClient: ObservableObject {
             currentSessionId = nil
         }
 
-        log.info("Deleted session: \(sessionId)", category: .session)
+        logger.info("Deleted session: \(sessionId)", category: .session)
         return result.deleted
     }
 
@@ -346,7 +346,7 @@ class RPCClient: ObservableObject {
             params: params
         )
 
-        log.info("Forked session \(sessionId) to \(result.newSessionId)", category: .session)
+        logger.info("Forked session \(sessionId) to \(result.newSessionId)", category: .session)
         return result
     }
 
@@ -361,7 +361,7 @@ class RPCClient: ObservableObject {
             params: params
         )
 
-        log.info("Rewound session \(sessionId) to message \(toIndex)", category: .session)
+        logger.info("Rewound session \(sessionId) to message \(toIndex)", category: .session)
         return result
     }
 
@@ -382,7 +382,7 @@ class RPCClient: ObservableObject {
             currentModel = result.newModel
         }
 
-        log.info("Switched model from \(result.previousModel) to \(result.newModel)", category: .session)
+        logger.info("Switched model from \(result.previousModel) to \(result.newModel)", category: .session)
         return result
     }
 
@@ -461,6 +461,163 @@ class RPCClient: ObservableObject {
         )
 
         return result.handoffs
+    }
+
+    // MARK: - Event Sync Methods
+
+    /// Get event history for a session
+    func getEventHistory(
+        sessionId: String,
+        types: [String]? = nil,
+        limit: Int? = nil,
+        beforeEventId: String? = nil
+    ) async throws -> EventsGetHistoryResult {
+        guard let ws = webSocket else {
+            throw RPCClientError.connectionNotEstablished
+        }
+
+        let params = EventsGetHistoryParams(
+            sessionId: sessionId,
+            types: types,
+            limit: limit,
+            beforeEventId: beforeEventId
+        )
+
+        return try await ws.send(method: "events.getHistory", params: params)
+    }
+
+    /// Get events since a cursor (for incremental sync)
+    func getEventsSince(
+        sessionId: String? = nil,
+        workspaceId: String? = nil,
+        afterEventId: String? = nil,
+        afterTimestamp: String? = nil,
+        limit: Int? = nil
+    ) async throws -> EventsGetSinceResult {
+        guard let ws = webSocket else {
+            throw RPCClientError.connectionNotEstablished
+        }
+
+        let params = EventsGetSinceParams(
+            sessionId: sessionId,
+            workspaceId: workspaceId,
+            afterEventId: afterEventId,
+            afterTimestamp: afterTimestamp,
+            limit: limit
+        )
+
+        return try await ws.send(method: "events.getSince", params: params)
+    }
+
+    /// Get all events for a session (full sync)
+    func getAllEvents(sessionId: String) async throws -> [RawEvent] {
+        var allEvents: [RawEvent] = []
+        var hasMore = true
+        var beforeEventId: String? = nil
+
+        while hasMore {
+            let result = try await getEventHistory(
+                sessionId: sessionId,
+                limit: 100,
+                beforeEventId: beforeEventId
+            )
+            allEvents.append(contentsOf: result.events)
+            hasMore = result.hasMore
+            beforeEventId = result.oldestEventId
+        }
+
+        // Events come in reverse order, so reverse them
+        return allEvents.reversed()
+    }
+
+    // MARK: - Worktree Methods
+
+    /// Get worktree status for a session
+    func getWorktreeStatus(sessionId: String) async throws -> WorktreeGetStatusResult {
+        guard let ws = webSocket else {
+            throw RPCClientError.connectionNotEstablished
+        }
+
+        let params = WorktreeGetStatusParams(sessionId: sessionId)
+        return try await ws.send(method: "worktree.getStatus", params: params)
+    }
+
+    /// Get worktree status for current session
+    func getWorktreeStatus() async throws -> WorktreeGetStatusResult {
+        guard let sessionId = currentSessionId else {
+            throw RPCClientError.noActiveSession
+        }
+        return try await getWorktreeStatus(sessionId: sessionId)
+    }
+
+    /// Commit changes in a session's worktree
+    func commitWorktree(sessionId: String, message: String) async throws -> WorktreeCommitResult {
+        guard let ws = webSocket else {
+            throw RPCClientError.connectionNotEstablished
+        }
+
+        let params = WorktreeCommitParams(sessionId: sessionId, message: message)
+        let result: WorktreeCommitResult = try await ws.send(method: "worktree.commit", params: params)
+
+        if result.success {
+            logger.info("Committed worktree changes: \(result.commitHash ?? "unknown")", category: .session)
+        }
+
+        return result
+    }
+
+    /// Commit changes in current session's worktree
+    func commitWorktree(message: String) async throws -> WorktreeCommitResult {
+        guard let sessionId = currentSessionId else {
+            throw RPCClientError.noActiveSession
+        }
+        return try await commitWorktree(sessionId: sessionId, message: message)
+    }
+
+    /// Merge a session's worktree to a target branch
+    func mergeWorktree(
+        sessionId: String,
+        targetBranch: String,
+        strategy: String? = nil
+    ) async throws -> WorktreeMergeResult {
+        guard let ws = webSocket else {
+            throw RPCClientError.connectionNotEstablished
+        }
+
+        let params = WorktreeMergeParams(
+            sessionId: sessionId,
+            targetBranch: targetBranch,
+            strategy: strategy
+        )
+        let result: WorktreeMergeResult = try await ws.send(method: "worktree.merge", params: params)
+
+        if result.success {
+            logger.info("Merged worktree to \(targetBranch): \(result.mergeCommit ?? "unknown")", category: .session)
+        }
+
+        return result
+    }
+
+    /// Merge current session's worktree to a target branch
+    func mergeWorktree(targetBranch: String, strategy: String? = nil) async throws -> WorktreeMergeResult {
+        guard let sessionId = currentSessionId else {
+            throw RPCClientError.noActiveSession
+        }
+        return try await mergeWorktree(sessionId: sessionId, targetBranch: targetBranch, strategy: strategy)
+    }
+
+    /// List all worktrees
+    func listWorktrees() async throws -> [WorktreeListItem] {
+        guard let ws = webSocket else {
+            throw RPCClientError.connectionNotEstablished
+        }
+
+        let result: WorktreeListResult = try await ws.send(
+            method: "worktree.list",
+            params: EmptyParams()
+        )
+
+        return result.worktrees
     }
 
     // MARK: - State Accessors

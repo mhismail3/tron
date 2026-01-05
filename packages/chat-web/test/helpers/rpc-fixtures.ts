@@ -25,6 +25,10 @@ import type {
   AgentToolStartEvent,
   AgentToolEndEvent,
   AgentCompleteEvent,
+  WorktreeGetStatusResult,
+  WorktreeCommitResult,
+  WorktreeMergeResult,
+  WorktreeListResult,
 } from '@tron/core';
 
 // =============================================================================
@@ -428,4 +432,71 @@ export function createAgentTurnSequence(
   events.push(createAgentCompleteEvent(sessionId));
 
   return events;
+}
+
+// =============================================================================
+// Worktree Response Factories
+// =============================================================================
+
+export function createWorktreeGetStatusResponse(
+  id: string,
+  overrides: Partial<WorktreeGetStatusResult> = {},
+): RpcResponse<WorktreeGetStatusResult> {
+  return createResponse(id, {
+    hasWorktree: true,
+    worktree: {
+      isolated: true,
+      branch: 'session/test-session',
+      baseCommit: 'abc123',
+      path: '/path/to/.worktrees/test-session',
+      hasUncommittedChanges: false,
+      commitCount: 0,
+    },
+    ...overrides,
+  });
+}
+
+export function createWorktreeGetStatusNoWorktreeResponse(
+  id: string,
+): RpcResponse<WorktreeGetStatusResult> {
+  return createResponse(id, {
+    hasWorktree: false,
+  });
+}
+
+export function createWorktreeCommitResponse(
+  id: string,
+  overrides: Partial<WorktreeCommitResult> = {},
+): RpcResponse<WorktreeCommitResult> {
+  return createResponse(id, {
+    success: true,
+    commitHash: 'def456789',
+    filesChanged: ['file1.ts', 'file2.ts'],
+    ...overrides,
+  });
+}
+
+export function createWorktreeMergeResponse(
+  id: string,
+  overrides: Partial<WorktreeMergeResult> = {},
+): RpcResponse<WorktreeMergeResult> {
+  return createResponse(id, {
+    success: true,
+    mergeCommit: 'merge123456',
+    conflicts: [],
+    ...overrides,
+  });
+}
+
+export function createWorktreeListResponse(
+  id: string,
+  worktrees: WorktreeListResult['worktrees'] = [],
+): RpcResponse<WorktreeListResult> {
+  const defaultWorktrees: WorktreeListResult['worktrees'] = [
+    { path: '/path/to/repo', branch: 'main' },
+    { path: '/path/to/.worktrees/session1', branch: 'session/session1', sessionId: 'session1' },
+    { path: '/path/to/.worktrees/session2', branch: 'session/session2', sessionId: 'session2' },
+  ];
+
+  return createResponse(id, { worktrees: worktrees.length > 0 ? worktrees : defaultWorktrees });
 }

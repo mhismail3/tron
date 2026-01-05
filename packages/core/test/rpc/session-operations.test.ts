@@ -40,13 +40,14 @@ describe('RpcHandler - Session Fork & Rewind', () => {
         deleteSession: vi.fn().mockResolvedValue(true),
         forkSession: vi.fn().mockResolvedValue({
           newSessionId: 'sess_fork',
-          forkedFrom: 'sess_test',
-          messageCount: 3,
+          rootEventId: 'evt_root',
+          forkedFromEventId: 'evt_3',
+          forkedFromSessionId: 'sess_test',
         } as SessionForkResult),
         rewindSession: vi.fn().mockResolvedValue({
           sessionId: 'sess_test',
-          newMessageCount: 2,
-          removedCount: 3,
+          newHeadEventId: 'evt_1',
+          previousHeadEventId: 'evt_5',
         } as SessionRewindResult),
       },
       agentManager: {
@@ -82,8 +83,9 @@ describe('RpcHandler - Session Fork & Rewind', () => {
       expect(response.success).toBe(true);
       expect(response.result).toEqual({
         newSessionId: 'sess_fork',
-        forkedFrom: 'sess_test',
-        messageCount: 3,
+        rootEventId: 'evt_root',
+        forkedFromEventId: 'evt_3',
+        forkedFromSessionId: 'sess_test',
       });
       expect(mockContext.sessionManager.forkSession).toHaveBeenCalledWith(
         'sess_test',
@@ -91,17 +93,17 @@ describe('RpcHandler - Session Fork & Rewind', () => {
       );
     });
 
-    it('should fork a session from a specific index', async () => {
+    it('should fork a session from a specific event', async () => {
       const response = await handler.handle({
         id: 'req_2',
         method: 'session.fork',
-        params: { sessionId: 'sess_test', fromMessageIndex: 2 },
+        params: { sessionId: 'sess_test', fromEventId: 'evt_2' },
       });
 
       expect(response.success).toBe(true);
       expect(mockContext.sessionManager.forkSession).toHaveBeenCalledWith(
         'sess_test',
-        2
+        'evt_2'
       );
     });
 
@@ -118,22 +120,22 @@ describe('RpcHandler - Session Fork & Rewind', () => {
   });
 
   describe('session.rewind', () => {
-    it('should rewind a session to a specific index', async () => {
+    it('should rewind a session to a specific event', async () => {
       const response = await handler.handle({
         id: 'req_4',
         method: 'session.rewind',
-        params: { sessionId: 'sess_test', toMessageIndex: 1 },
+        params: { sessionId: 'sess_test', toEventId: 'evt_1' },
       });
 
       expect(response.success).toBe(true);
       expect(response.result).toEqual({
         sessionId: 'sess_test',
-        newMessageCount: 2,
-        removedCount: 3,
+        newHeadEventId: 'evt_1',
+        previousHeadEventId: 'evt_5',
       });
       expect(mockContext.sessionManager.rewindSession).toHaveBeenCalledWith(
         'sess_test',
-        1
+        'evt_1'
       );
     });
 
@@ -141,14 +143,14 @@ describe('RpcHandler - Session Fork & Rewind', () => {
       const response = await handler.handle({
         id: 'req_5',
         method: 'session.rewind',
-        params: { toMessageIndex: 1 },
+        params: { toEventId: 'evt_1' },
       });
 
       expect(response.success).toBe(false);
       expect(response.error?.code).toBe('INVALID_PARAMS');
     });
 
-    it('should require toMessageIndex', async () => {
+    it('should require toEventId', async () => {
       const response = await handler.handle({
         id: 'req_6',
         method: 'session.rewind',
@@ -239,13 +241,14 @@ describe('RpcHandler - Cross-Interface Session Continuity', () => {
         deleteSession: vi.fn().mockResolvedValue(true),
         forkSession: vi.fn().mockResolvedValue({
           newSessionId: 'sess_web_fork',
-          forkedFrom: 'sess_terminal',
-          messageCount: 2,
+          rootEventId: 'evt_fork_root',
+          forkedFromEventId: 'evt_2',
+          forkedFromSessionId: 'sess_terminal',
         }),
         rewindSession: vi.fn().mockResolvedValue({
           sessionId: 'sess_terminal',
-          newMessageCount: 2,
-          removedCount: 2,
+          newHeadEventId: 'evt_1',
+          previousHeadEventId: 'evt_4',
         }),
       },
       agentManager: {
@@ -292,24 +295,24 @@ describe('RpcHandler - Cross-Interface Session Continuity', () => {
     const forkResponse = await handler.handle({
       id: 'fork_1',
       method: 'session.fork',
-      params: { sessionId: 'sess_terminal', fromMessageIndex: 2 },
+      params: { sessionId: 'sess_terminal', fromEventId: 'evt_2' },
     });
     expect(forkResponse.success).toBe(true);
     expect(forkResponse.result).toMatchObject({
       newSessionId: 'sess_web_fork',
-      forkedFrom: 'sess_terminal',
+      forkedFromSessionId: 'sess_terminal',
     });
 
     // Step 3: Rewind original after bad approach
     const rewindResponse = await handler.handle({
       id: 'rewind_1',
       method: 'session.rewind',
-      params: { sessionId: 'sess_terminal', toMessageIndex: 1 },
+      params: { sessionId: 'sess_terminal', toEventId: 'evt_1' },
     });
     expect(rewindResponse.success).toBe(true);
     expect(rewindResponse.result).toMatchObject({
       sessionId: 'sess_terminal',
-      removedCount: 2,
+      newHeadEventId: 'evt_1',
     });
 
     // Step 4: Get handoffs for context

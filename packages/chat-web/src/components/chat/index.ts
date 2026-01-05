@@ -20,3 +20,11 @@ export { StatusBar } from './StatusBar.js';
 
 // Main chat area
 export { ChatArea, type ChatAreaProps } from './ChatArea.js';
+
+// Session history
+export {
+  SessionHistoryPanel,
+  HistoryButton,
+  type SessionHistoryPanelProps,
+  type HistoryButtonProps,
+} from './SessionHistoryPanel.js';

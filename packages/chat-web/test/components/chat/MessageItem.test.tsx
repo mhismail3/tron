@@ -46,31 +46,22 @@ describe('MessageItem', () => {
   });
 
   describe('user messages', () => {
-    it('should display user prefix icon', () => {
-      const message = createMessage('user', 'User message');
-      const { container } = renderWithProvider(<MessageItem message={message} />);
-
-      expect(container.querySelector('.message-prefix.user')).toBeInTheDocument();
-    });
-
     it('should have user role styling', () => {
       const message = createMessage('user', 'User message');
       const { container } = renderWithProvider(<MessageItem message={message} />);
 
       expect(container.querySelector('.message-item')).toHaveClass('role-user');
     });
+
+    it('should display user message content', () => {
+      const message = createMessage('user', 'User message');
+      renderWithProvider(<MessageItem message={message} />);
+
+      expect(screen.getByText('User message')).toBeInTheDocument();
+    });
   });
 
   describe('assistant messages', () => {
-    it('should display assistant prefix icon', () => {
-      const message = createMessage('assistant', 'Assistant response');
-      const { container } = renderWithProvider(<MessageItem message={message} />);
-
-      expect(
-        container.querySelector('.message-prefix.assistant'),
-      ).toBeInTheDocument();
-    });
-
     it('should have assistant role styling', () => {
       const message = createMessage('assistant', 'Response');
       const { container } = renderWithProvider(<MessageItem message={message} />);
@@ -89,15 +80,6 @@ describe('MessageItem', () => {
   });
 
   describe('system messages', () => {
-    it('should display system prefix icon', () => {
-      const message = createMessage('system', 'System notification');
-      const { container } = renderWithProvider(<MessageItem message={message} />);
-
-      expect(
-        container.querySelector('.message-prefix.system'),
-      ).toBeInTheDocument();
-    });
-
     it('should have system role styling', () => {
       const message = createMessage('system', 'System message');
       const { container } = renderWithProvider(<MessageItem message={message} />);
@@ -107,14 +89,14 @@ describe('MessageItem', () => {
   });
 
   describe('tool messages', () => {
-    it('should display tool prefix icon', () => {
+    it('should display tool header with name', () => {
       const message = createMessage('tool', 'Tool output', {
         toolName: 'Read',
         toolStatus: 'success',
       });
       const { container } = renderWithProvider(<MessageItem message={message} />);
 
-      expect(container.querySelector('.message-prefix.tool')).toBeInTheDocument();
+      expect(container.querySelector('.tool-header')).toBeInTheDocument();
     });
 
     it('should show tool name', () => {

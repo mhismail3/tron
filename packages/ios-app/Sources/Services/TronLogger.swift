@@ -238,4 +238,4 @@ final class TronLogger: @unchecked Sendable {
 
 // MARK: - Global Convenience
 
-nonisolated(unsafe) let log = TronLogger.shared
+let logger = TronLogger.shared

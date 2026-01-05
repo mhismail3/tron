@@ -5,6 +5,16 @@
  * clients (TUI, Web) and the server.
  */
 
+import type {
+  EventType,
+  SessionEvent,
+  Message,
+  TokenUsage,
+} from '../events/types.js';
+
+// Re-export branded types for convenience
+export type { EventId, SessionId, WorkspaceId, BranchId } from '../events/types.js';
+
 // =============================================================================
 // Request/Response Pattern
 // =============================================================================
@@ -80,6 +90,25 @@ export type RpcMethod =
   | 'session.delete'
   | 'session.fork'
   | 'session.rewind'
+  | 'session.getHead'
+  | 'session.getState'
+  // Worktree operations
+  | 'worktree.getStatus'
+  | 'worktree.commit'
+  | 'worktree.merge'
+  | 'worktree.list'
+  // Event operations
+  | 'events.getHistory'
+  | 'events.getSince'
+  | 'events.subscribe'
+  | 'events.unsubscribe'
+  | 'events.append'
+  // Tree operations
+  | 'tree.getVisualization'
+  | 'tree.getBranches'
+  | 'tree.getSubtree'
+  | 'tree.getAncestors'
+  | 'tree.compareBranches'
   // Agent interaction
   | 'agent.prompt'
   | 'agent.abort'
@@ -97,6 +126,9 @@ export type RpcMethod =
   // Filesystem operations
   | 'filesystem.listDir'
   | 'filesystem.getHome'
+  // Search
+  | 'search.content'
+  | 'search.events'
   // System
   | 'system.ping'
   | 'system.getInfo'
@@ -166,30 +198,65 @@ export interface SessionDeleteResult {
   deleted: boolean;
 }
 
-/** Fork session */
+/** Fork session from specific event */
 export interface SessionForkParams {
   sessionId: string;
-  /** Optional: fork from specific message index */
-  fromMessageIndex?: number;
+  /** Event ID to fork from (uses session head if not specified) */
+  fromEventId?: string;
+  /** Name for the forked session */
+  name?: string;
+  /** Model for the forked session (inherits from source if not specified) */
+  model?: string;
 }
 
 export interface SessionForkResult {
   newSessionId: string;
-  forkedFrom: string;
-  messageCount: number;
+  rootEventId: string;
+  forkedFromEventId: string;
+  forkedFromSessionId: string;
 }
 
-/** Rewind session */
+/** Rewind session to specific event */
 export interface SessionRewindParams {
   sessionId: string;
-  /** Rewind to this message index (0-based) */
-  toMessageIndex: number;
+  /** Event ID to rewind to (must be ancestor of current head) */
+  toEventId: string;
 }
 
 export interface SessionRewindResult {
   sessionId: string;
-  newMessageCount: number;
-  removedCount: number;
+  newHeadEventId: string;
+  previousHeadEventId: string;
+}
+
+/** Get session head event */
+export interface SessionGetHeadParams {
+  sessionId: string;
+}
+
+export interface SessionGetHeadResult {
+  sessionId: string;
+  headEventId: string;
+  headEvent: SessionEvent;
+}
+
+/** Get full session state at head */
+export interface SessionGetStateParams {
+  sessionId: string;
+  /** Optional: get state at specific event (defaults to head) */
+  atEventId?: string;
+}
+
+export interface SessionGetStateResult {
+  sessionId: string;
+  workspaceId: string;
+  headEventId: string;
+  model: string;
+  workingDirectory: string;
+  messages: Message[];
+  tokenUsage: TokenUsage;
+  turnCount: number;
+  eventCount: number;
 }
 
 // =============================================================================
@@ -357,6 +424,256 @@ export interface SkillListResult {
 }
 
 // =============================================================================
+// Event Methods
+// =============================================================================
+
+/** Get event history for a session */
+export interface EventsGetHistoryParams {
+  sessionId: string;
+  /** Filter by event types */
+  types?: EventType[];
+  /** Limit number of events returned */
+  limit?: number;
+  /** Include events from before this event ID */
+  beforeEventId?: string;
+}
+
+export interface EventsGetHistoryResult {
+  events: SessionEvent[];
+  hasMore: boolean;
+  oldestEventId?: string;
+}
+
+/** Get events since a cursor (for sync) */
+export interface EventsGetSinceParams {
+  /** Session to get events from */
+  sessionId?: string;
+  /** Workspace to get events from (all sessions in workspace) */
+  workspaceId?: string;
+  /** Get events after this event ID (cursor) */
+  afterEventId?: string;
+  /** Get events after this timestamp */
+  afterTimestamp?: string;
+  /** Limit number of events */
+  limit?: number;
+}
+
+export interface EventsGetSinceResult {
+  events: SessionEvent[];
+  /** Cursor for next request */
+  nextCursor?: string;
+  /** Whether more events are available */
+  hasMore: boolean;
+}
+
+/** Subscribe to event stream */
+export interface EventsSubscribeParams {
+  /** Session IDs to subscribe to */
+  sessionIds?: string[];
+  /** Workspace ID to subscribe to (all sessions) */
+  workspaceId?: string;
+  /** Event types to filter */
+  types?: EventType[];
+}
+
+export interface EventsSubscribeResult {
+  subscriptionId: string;
+  subscribed: boolean;
+}
+
+/** Unsubscribe from event stream */
+export interface EventsUnsubscribeParams {
+  subscriptionId: string;
+}
+
+export interface EventsUnsubscribeResult {
+  unsubscribed: boolean;
+}
+
+/** Append a new event (for client-side event creation) */
+export interface EventsAppendParams {
+  sessionId: string;
+  type: EventType;
+  payload: Record<string, unknown>;
+  /** Parent event ID (defaults to session head) */
+  parentId?: string;
+}
+
+export interface EventsAppendResult {
+  event: SessionEvent;
+  newHeadEventId: string;
+}
+
+// =============================================================================
+// Tree Methods
+// =============================================================================
+
+/** Tree node for visualization */
+export interface TreeNodeCompact {
+  id: string;
+  parentId: string | null;
+  type: EventType;
+  timestamp: string;
+  /** Summary of event content (first 100 chars) */
+  summary: string;
+  hasChildren: boolean;
+  childCount: number;
+  depth: number;
+  isBranchPoint: boolean;
+  isHead: boolean;
+  /** Branch name if this is a fork point */
+  branchName?: string;
+}
+
+/** Get tree visualization for a session */
+export interface TreeGetVisualizationParams {
+  sessionId: string;
+  /** Max depth to fetch (for lazy loading) */
+  maxDepth?: number;
+  /** Only include message events for compact view */
+  messagesOnly?: boolean;
+}
+
+export interface TreeGetVisualizationResult {
+  sessionId: string;
+  rootEventId: string;
+  headEventId: string;
+  nodes: TreeNodeCompact[];
+  /** Total event count in session */
+  totalEvents: number;
+}
+
+/** Get branches for a session */
+export interface TreeGetBranchesParams {
+  sessionId: string;
+}
+
+export interface TreeBranchInfo {
+  sessionId: string;
+  name?: string;
+  forkEventId: string;
+  headEventId: string;
+  messageCount: number;
+  createdAt: string;
+  lastActivity: string;
+}
+
+export interface TreeGetBranchesResult {
+  /** Original session */
+  mainBranch: TreeBranchInfo;
+  /** Forked sessions */
+  forks: TreeBranchInfo[];
+}
+
+/** Get subtree starting from an event */
+export interface TreeGetSubtreeParams {
+  eventId: string;
+  /** Max depth to fetch */
+  maxDepth?: number;
+  /** Direction: 'descendants' (default) or 'ancestors' */
+  direction?: 'descendants' | 'ancestors';
+}
+
+export interface TreeGetSubtreeResult {
+  rootEventId: string;
+  nodes: TreeNodeCompact[];
+  hasMore: boolean;
+}
+
+/** Get ancestors of an event */
+export interface TreeGetAncestorsParams {
+  eventId: string;
+  /** Limit number of ancestors */
+  limit?: number;
+}
+
+export interface TreeGetAncestorsResult {
+  ancestors: SessionEvent[];
+  /** The event requested */
+  targetEvent: SessionEvent;
+}
+
+/** Compare two branches */
+export interface TreeCompareBranchesParams {
+  /** First session/branch */
+  sessionId1: string;
+  /** Second session/branch */
+  sessionId2: string;
+}
+
+export interface TreeCompareBranchesResult {
+  /** Common ancestor event */
+  commonAncestorEventId: string | null;
+  /** Events unique to first branch */
+  uniqueToFirst: number;
+  /** Events unique to second branch */
+  uniqueToSecond: number;
+  /** Shared events (before divergence) */
+  sharedEvents: number;
+  /** Divergence point event */
+  divergenceEventId: string | null;
+}
+
+// =============================================================================
+// Search Methods
+// =============================================================================
+
+/** Search content across events */
+export interface SearchContentParams {
+  /** Search query (FTS5 syntax supported) */
+  query: string;
+  /** Limit to specific workspace */
+  workspaceId?: string;
+  /** Limit to specific session */
+  sessionId?: string;
+  /** Filter by event types */
+  types?: EventType[];
+  /** Max results */
+  limit?: number;
+}
+
+export interface SearchContentResult {
+  results: Array<{
+    eventId: string;
+    sessionId: string;
+    workspaceId: string;
+    type: EventType;
+    /** Highlighted snippet with matches */
+    snippet: string;
+    /** Relevance score */
+    score: number;
+    timestamp: string;
+  }>;
+  totalCount: number;
+}
+
+/** Search events by structured criteria */
+export interface SearchEventsParams {
+  /** Filter by workspace */
+  workspaceId?: string;
+  /** Filter by session */
+  sessionId?: string;
+  /** Filter by event types */
+  types?: EventType[];
+  /** Filter by time range - start */
+  afterTimestamp?: string;
+  /** Filter by time range - end */
+  beforeTimestamp?: string;
+  /** Text search within event content */
+  contentQuery?: string;
+  /** Limit results */
+  limit?: number;
+  /** Offset for pagination */
+  offset?: number;
+}
+
+export interface SearchEventsResult {
+  events: SessionEvent[];
+  totalCount: number;
+  hasMore: boolean;
+}
+
+// =============================================================================
 // System Methods
 // =============================================================================
 
@@ -460,6 +777,14 @@ export type RpcEventType =
   | 'session.created'
   | 'session.ended'
   | 'session.updated'
+  | 'session.forked'
+  | 'session.rewound'
+  // Event sync events (for real-time event broadcasting)
+  | 'events.new'
+  | 'events.batch'
+  // Tree events
+  | 'tree.updated'
+  | 'tree.branch_created'
   // System events
   | 'system.connected'
   | 'system.disconnected'
@@ -512,6 +837,143 @@ export interface AgentCompleteEvent {
   };
   success: boolean;
   error?: string;
+}
+
+/**
+ * Event data for session fork notification
+ */
+export interface SessionForkedEvent {
+  sourceSessionId: string;
+  sourceEventId: string;
+  newSessionId: string;
+  newRootEventId: string;
+  name?: string;
+}
+
+/**
+ * Event data for session rewind notification
+ */
+export interface SessionRewoundEvent {
+  sessionId: string;
+  previousHeadEventId: string;
+  newHeadEventId: string;
+}
+
+/**
+ * Event data for new session event broadcast
+ */
+export interface EventsNewEvent {
+  event: SessionEvent;
+  sessionId: string;
+}
+
+/**
+ * Event data for batch event broadcast
+ */
+export interface EventsBatchEvent {
+  events: SessionEvent[];
+  sessionId: string;
+  syncCursor: string;
+}
+
+/**
+ * Event data for tree structure update
+ */
+export interface TreeUpdatedEvent {
+  sessionId: string;
+  headEventId: string;
+  affectedEventIds: string[];
+}
+
+/**
+ * Event data for branch creation
+ */
+export interface TreeBranchCreatedEvent {
+  sourceSessionId: string;
+  newSessionId: string;
+  forkEventId: string;
+  branchName?: string;
+}
+
+// =============================================================================
+// Worktree Methods
+// =============================================================================
+
+/**
+ * Worktree information returned by worktree operations
+ */
+export interface WorktreeInfoRpc {
+  /** Whether this session uses an isolated worktree */
+  isolated: boolean;
+  /** Git branch name */
+  branch: string;
+  /** Base commit hash when worktree was created */
+  baseCommit: string;
+  /** Filesystem path to the working directory */
+  path: string;
+  /** Whether there are uncommitted changes */
+  hasUncommittedChanges?: boolean;
+  /** Number of commits since base */
+  commitCount?: number;
+}
+
+/** Get worktree status for a session */
+export interface WorktreeGetStatusParams {
+  sessionId: string;
+}
+
+export interface WorktreeGetStatusResult {
+  /** Session has a worktree */
+  hasWorktree: boolean;
+  /** Worktree info if available */
+  worktree?: WorktreeInfoRpc;
+}
+
+/** Commit changes in a session's worktree */
+export interface WorktreeCommitParams {
+  sessionId: string;
+  /** Commit message */
+  message: string;
+}
+
+export interface WorktreeCommitResult {
+  success: boolean;
+  /** Commit hash if successful */
+  commitHash?: string;
+  /** Files that were changed */
+  filesChanged?: string[];
+  /** Error message if failed */
+  error?: string;
+}
+
+/** Merge a session's worktree to a target branch */
+export interface WorktreeMergeParams {
+  sessionId: string;
+  /** Target branch to merge into */
+  targetBranch: string;
+  /** Merge strategy */
+  strategy?: 'merge' | 'rebase' | 'squash';
+}
+
+export interface WorktreeMergeResult {
+  success: boolean;
+  /** Merge commit hash if successful */
+  mergeCommit?: string;
+  /** Conflicting files if merge failed due to conflicts */
+  conflicts?: string[];
+  /** Error message if failed */
+  error?: string;
+}
+
+/** List all worktrees */
+export interface WorktreeListParams {}
+
+export interface WorktreeListResult {
+  worktrees: Array<{
+    path: string;
+    branch: string;
+    sessionId?: string;
+  }>;
 }
 
 // =============================================================================

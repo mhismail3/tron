@@ -2,35 +2,17 @@
  * @fileoverview Built-in Hooks Module
  *
  * Exports all built-in hooks for the agent lifecycle.
- * These hooks integrate the memory layer with the agent loop.
  *
  * Built-in hooks provide:
- * - SessionStart: Load ledger and handoff context
- * - SessionEnd: Create handoffs and extract learnings
- * - PreCompact: Auto-checkpoint before context compaction
+ * - SessionStart: Initialize session context
+ * - SessionEnd: Log session completion
+ * - PreCompact: Checkpoint before context compaction
  * - PostToolUse: Track file modifications
  *
- * @example
- * ```typescript
- * import {
- *   createSessionStartHook,
- *   createSessionEndHook,
- *   createPreCompactHook,
- *   createPostToolUseHook,
- *   registerBuiltinHooks,
- * } from '@tron/core/hooks/builtin';
- *
- * // Register all built-in hooks
- * registerBuiltinHooks(engine, {
- *   ledgerManager,
- *   handoffManager,
- * });
- * ```
+ * Note: Session history is preserved via the event-sourced system.
  */
 
 import type { HookEngine } from '../engine.js';
-import type { LedgerManager } from '../../memory/ledger-manager.js';
-import type { HandoffManager } from '../../memory/handoff-manager.js';
 import { createLogger } from '../../logging/logger.js';
 
 // Export individual hook creators
@@ -62,23 +44,16 @@ const logger = createLogger('hooks:builtin');
  * Configuration for registering all built-in hooks
  */
 export interface BuiltinHooksConfig {
-  /** Ledger manager for session state */
-  ledgerManager: LedgerManager;
-  /** Handoff manager for persistence */
-  handoffManager: HandoffManager;
   /** Options for individual hooks */
   options?: {
     sessionStart?: {
-      handoffLimit?: number;
-      includeWorkingFiles?: boolean;
+      initialContext?: string;
     };
     sessionEnd?: {
-      minMessagesForHandoff?: number;
-      clearLedgerOnEnd?: boolean;
+      minMessagesForProcessing?: number;
     };
     preCompact?: {
-      blockUntilHandoff?: boolean;
-      autoHandoffThreshold?: number;
+      checkpointThreshold?: number;
     };
     postToolUse?: {
       trackFiles?: boolean;
@@ -95,9 +70,9 @@ export interface BuiltinHooksConfig {
  */
 export function registerBuiltinHooks(
   engine: HookEngine,
-  config: BuiltinHooksConfig
+  config: BuiltinHooksConfig = {}
 ): void {
-  const { ledgerManager, handoffManager, options = {} } = config;
+  const { options = {} } = config;
 
   // Import hook creators dynamically to avoid circular dependencies
   const { createSessionStartHook } = require('./session-start.js');
@@ -108,8 +83,6 @@ export function registerBuiltinHooks(
   // Register SessionStart hook
   engine.register(
     createSessionStartHook({
-      ledgerManager,
-      handoffManager,
       ...options.sessionStart,
     })
   );
@@ -117,8 +90,6 @@ export function registerBuiltinHooks(
   // Register SessionEnd hook
   engine.register(
     createSessionEndHook({
-      handoffManager,
-      ledgerManager,
       ...options.sessionEnd,
     })
   );
@@ -126,8 +97,6 @@ export function registerBuiltinHooks(
   // Register PreCompact hook
   engine.register(
     createPreCompactHook({
-      handoffManager,
-      ledgerManager,
       ...options.preCompact,
     })
   );
@@ -135,7 +104,6 @@ export function registerBuiltinHooks(
   // Register PostToolUse hook
   engine.register(
     createPostToolUseHook({
-      ledgerManager,
       ...options.postToolUse,
     })
   );

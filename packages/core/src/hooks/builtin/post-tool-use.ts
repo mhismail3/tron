@@ -2,24 +2,11 @@
  * @fileoverview PostToolUse Built-in Hook
  *
  * Executes after each tool use. Responsibilities:
- * - Track file modifications in the ledger
- * - Index changes for later retrieval
+ * - Track file modifications
+ * - Log tool usage patterns
  * - Update session statistics
- * - Detect patterns in tool usage
  *
  * This hook maintains awareness of what files are being worked on.
- *
- * @example
- * ```typescript
- * import { createPostToolUseHook } from './post-tool-use';
- *
- * const hook = createPostToolUseHook({
- *   ledgerManager,
- *   trackFiles: true,
- * });
- *
- * engine.register(hook);
- * ```
  */
 
 import type {
@@ -27,7 +14,6 @@ import type {
   PostToolHookContext,
   HookResult,
 } from '../types.js';
-import type { LedgerManager } from '../../memory/ledger-manager.js';
 import { createLogger } from '../../logging/logger.js';
 
 const logger = createLogger('hooks:post-tool-use');
@@ -36,11 +22,9 @@ const logger = createLogger('hooks:post-tool-use');
  * Configuration for PostToolUse hook
  */
 export interface PostToolUseHookConfig {
-  /** Ledger manager for tracking files */
-  ledgerManager?: LedgerManager;
   /** Whether to track file modifications (default: true) */
   trackFiles?: boolean;
-  /** Maximum files to track in ledger (default: 20) */
+  /** Maximum files to track (default: 20) */
   maxTrackedFiles?: number;
   /** Tools that modify files */
   fileModifyingTools?: string[];
@@ -65,15 +49,13 @@ const DEFAULT_FILE_READING_TOOLS = ['read', 'Read'];
  *
  * This hook runs after each tool use and:
  * 1. Extracts file paths from tool arguments
- * 2. Updates the ledger's working files list
- * 3. Tracks tool usage patterns
- * 4. Logs tool performance metrics
+ * 2. Tracks tool usage patterns
+ * 3. Logs tool performance metrics
  */
 export function createPostToolUseHook(
   config: PostToolUseHookConfig = {}
 ): HookDefinition {
   const {
-    ledgerManager,
     trackFiles = true,
     maxTrackedFiles = 20,
     fileModifyingTools = DEFAULT_FILE_MODIFYING_TOOLS,
@@ -133,18 +115,6 @@ export function createPostToolUseHook(
       if (recentFiles.size > maxTrackedFiles * 2) {
         const toRemove = Array.from(recentFiles).slice(0, maxTrackedFiles);
         toRemove.forEach(f => recentFiles.delete(f));
-      }
-
-      // Update ledger if available
-      if (ledgerManager && isModifyingTool) {
-        try {
-          await ledgerManager.addWorkingFile(filePath);
-          logger.debug('Added working file to ledger', { filePath });
-        } catch (error) {
-          logger.warn('Failed to update ledger', {
-            error: error instanceof Error ? error.message : String(error),
-          });
-        }
       }
 
       // Log metrics

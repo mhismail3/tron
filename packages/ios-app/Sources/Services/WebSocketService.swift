@@ -79,49 +79,49 @@ final class WebSocketService: ObservableObject {
 
     func connect() async {
         guard !isConnectedFlag else {
-            log.debug("Already connected, skipping connect request", category: .websocket)
+            logger.debug("Already connected, skipping connect request", category: .websocket)
             return
         }
 
         connectionState = .connecting
-        log.logWebSocketState("Connecting", details: serverURL.absoluteString)
-        log.info("Connecting to \(self.serverURL.absoluteString)", category: .websocket)
+        logger.logWebSocketState("Connecting", details: serverURL.absoluteString)
+        logger.info("Connecting to \(self.serverURL.absoluteString)", category: .websocket)
 
         let configuration = URLSessionConfiguration.default
         configuration.timeoutIntervalForRequest = 30
         configuration.timeoutIntervalForResource = 300
-        log.verbose("URLSession config: requestTimeout=30s, resourceTimeout=300s", category: .websocket)
+        logger.verbose("URLSession config: requestTimeout=30s, resourceTimeout=300s", category: .websocket)
 
         let session = URLSession(configuration: configuration)
 
         var request = URLRequest(url: serverURL)
         request.timeoutInterval = 30
 
-        log.verbose("Creating WebSocket task...", category: .websocket)
+        logger.verbose("Creating WebSocket task...", category: .websocket)
         webSocketTask = session.webSocketTask(with: request)
         webSocketTask?.resume()
-        log.verbose("WebSocket task resumed", category: .websocket)
+        logger.verbose("WebSocket task resumed", category: .websocket)
 
         isConnectedFlag = true
         reconnectAttempts = 0
         connectionState = .connected
-        log.logWebSocketState("Connected", details: "Successfully connected to \(serverURL.host ?? "unknown")")
-        log.info("Connected successfully to \(self.serverURL.absoluteString)", category: .websocket)
+        logger.logWebSocketState("Connected", details: "Successfully connected to \(serverURL.host ?? "unknown")")
+        logger.info("Connected successfully to \(self.serverURL.absoluteString)", category: .websocket)
 
         receiveTask = Task { [weak self] in
             await self?.receiveLoop()
         }
-        log.verbose("Receive loop started", category: .websocket)
+        logger.verbose("Receive loop started", category: .websocket)
 
         pingTask = Task { [weak self] in
             await self?.heartbeatLoop()
         }
-        log.verbose("Heartbeat loop started", category: .websocket)
+        logger.verbose("Heartbeat loop started", category: .websocket)
     }
 
     func disconnect() {
-        log.logWebSocketState("Disconnecting")
-        log.info("Disconnecting from server", category: .websocket)
+        logger.logWebSocketState("Disconnecting")
+        logger.info("Disconnecting from server", category: .websocket)
         isConnectedFlag = false
         pingTask?.cancel()
         pingTask = nil
@@ -132,14 +132,14 @@ final class WebSocketService: ObservableObject {
 
         let pendingCount = pendingRequests.count
         for (id, continuation) in pendingRequests {
-            log.warning("Cancelling pending request id=\(id)", category: .websocket)
+            logger.warning("Cancelling pending request id=\(id)", category: .websocket)
             continuation.resume(throwing: WebSocketError.notConnected)
         }
         pendingRequests.removeAll()
-        log.debug("Cleared \(pendingCount) pending requests", category: .websocket)
+        logger.debug("Cleared \(pendingCount) pending requests", category: .websocket)
 
         connectionState = .disconnected
-        log.logWebSocketState("Disconnected")
+        logger.logWebSocketState("Disconnected")
     }
 
     // MARK: - Request/Response
@@ -151,7 +151,7 @@ final class WebSocketService: ObservableObject {
         let startTime = CFAbsoluteTimeGetCurrent()
 
         guard isConnectedFlag, let task = webSocketTask else {
-            log.error("Cannot send \(method): not connected (isConnectedFlag=\(isConnectedFlag), task=\(webSocketTask != nil ? "exists" : "nil"))", category: .websocket)
+            logger.error("Cannot send \(method): not connected (isConnectedFlag=\(isConnectedFlag), task=\(webSocketTask != nil ? "exists" : "nil"))", category: .websocket)
             throw WebSocketError.notConnected
         }
 
@@ -159,33 +159,33 @@ final class WebSocketService: ObservableObject {
         let requestId = request.id
 
         guard let data = try? JSONEncoder().encode(request) else {
-            log.error("Failed to encode request for \(method)", category: .websocket)
+            logger.error("Failed to encode request for \(method)", category: .websocket)
             throw WebSocketError.encodingError
         }
 
-        log.logRPCRequest(method: method, params: params, id: Int(requestId) ?? 0)
-        log.logWebSocketMessage(direction: "→ SEND", type: method, size: data.count, preview: String(data: data, encoding: .utf8))
+        logger.logRPCRequest(method: method, params: params, id: Int(requestId) ?? 0)
+        logger.logWebSocketMessage(direction: "→ SEND", type: method, size: data.count, preview: String(data: data, encoding: .utf8))
 
         let message = URLSessionWebSocketTask.Message.data(data)
         do {
             try await task.send(message)
-            log.verbose("Message sent successfully for \(method) id=\(requestId)", category: .websocket)
+            logger.verbose("Message sent successfully for \(method) id=\(requestId)", category: .websocket)
         } catch {
-            log.error("Failed to send message for \(method): \(error.localizedDescription)", category: .websocket)
+            logger.error("Failed to send message for \(method): \(error.localizedDescription)", category: .websocket)
             throw error
         }
 
-        log.verbose("Waiting for response to \(method) id=\(requestId)...", category: .websocket)
+        logger.verbose("Waiting for response to \(method) id=\(requestId)...", category: .websocket)
 
         let responseData = try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Data, Error>) in
             pendingRequests[requestId] = continuation
-            log.verbose("Registered pending request id=\(requestId), total pending: \(pendingRequests.count)", category: .websocket)
+            logger.verbose("Registered pending request id=\(requestId), total pending: \(pendingRequests.count)", category: .websocket)
 
             Task { [weak self] in
                 try? await Task.sleep(for: .seconds(self?.requestTimeout ?? 30))
                 await MainActor.run {
                     if let pending = self?.pendingRequests.removeValue(forKey: requestId) {
-                        log.error("Request timeout for \(method) id=\(requestId) after \(self?.requestTimeout ?? 30)s", category: .websocket)
+                        logger.error("Request timeout for \(method) id=\(requestId) after \(self?.requestTimeout ?? 30)s", category: .websocket)
                         pending.resume(throwing: WebSocketError.timeout)
                     }
                 }
@@ -193,29 +193,29 @@ final class WebSocketService: ObservableObject {
         }
 
         let duration = CFAbsoluteTimeGetCurrent() - startTime
-        log.logWebSocketMessage(direction: "← RECV", type: method, size: responseData.count, preview: String(data: responseData, encoding: .utf8))
+        logger.logWebSocketMessage(direction: "← RECV", type: method, size: responseData.count, preview: String(data: responseData, encoding: .utf8))
 
         let decoder = JSONDecoder()
         do {
             let response = try decoder.decode(RPCResponse<R>.self, from: responseData)
             if response.success, let result = response.result {
-                log.logRPCResponse(method: method, id: Int(requestId) ?? 0, success: true, duration: duration, result: result)
+                logger.logRPCResponse(method: method, id: Int(requestId) ?? 0, success: true, duration: duration, result: result)
                 return result
             } else if let error = response.error {
-                log.logRPCResponse(method: method, id: Int(requestId) ?? 0, success: false, duration: duration, error: error.message)
+                logger.logRPCResponse(method: method, id: Int(requestId) ?? 0, success: false, duration: duration, error: error.message)
                 throw error
             } else {
-                log.logRPCResponse(method: method, id: Int(requestId) ?? 0, success: false, duration: duration, error: "Invalid response structure")
+                logger.logRPCResponse(method: method, id: Int(requestId) ?? 0, success: false, duration: duration, error: "Invalid response structure")
                 throw WebSocketError.invalidResponse
             }
         } catch let error as RPCError {
-            log.logRPCResponse(method: method, id: Int(requestId) ?? 0, success: false, duration: duration, error: error.message)
+            logger.logRPCResponse(method: method, id: Int(requestId) ?? 0, success: false, duration: duration, error: error.message)
             throw error
         } catch let error as WebSocketError {
-            log.logRPCResponse(method: method, id: Int(requestId) ?? 0, success: false, duration: duration, error: error.localizedDescription)
+            logger.logRPCResponse(method: method, id: Int(requestId) ?? 0, success: false, duration: duration, error: error.localizedDescription)
             throw error
         } catch {
-            log.logRPCResponse(method: method, id: Int(requestId) ?? 0, success: false, duration: duration, error: error.localizedDescription)
+            logger.logRPCResponse(method: method, id: Int(requestId) ?? 0, success: false, duration: duration, error: error.localizedDescription)
             throw WebSocketError.decodingError(error.localizedDescription)
         }
     }
@@ -223,13 +223,13 @@ final class WebSocketService: ObservableObject {
     // MARK: - Receive Loop
 
     private func receiveLoop() async {
-        log.verbose("Receive loop running...", category: .websocket)
+        logger.verbose("Receive loop running...", category: .websocket)
         var messageCount = 0
 
         while isConnectedFlag {
             do {
                 guard let message = try await webSocketTask?.receive() else {
-                    log.warning("Receive returned nil, exiting loop", category: .websocket)
+                    logger.warning("Receive returned nil, exiting loop", category: .websocket)
                     break
                 }
 
@@ -238,16 +238,16 @@ final class WebSocketService: ObservableObject {
                 switch message {
                 case .data(let d):
                     data = d
-                    log.verbose("Received binary message #\(messageCount): \(d.count) bytes", category: .websocket)
+                    logger.verbose("Received binary message #\(messageCount): \(d.count) bytes", category: .websocket)
                 case .string(let text):
                     guard let d = text.data(using: .utf8) else {
-                        log.warning("Failed to convert string message to data", category: .websocket)
+                        logger.warning("Failed to convert string message to data", category: .websocket)
                         continue
                     }
                     data = d
-                    log.verbose("Received string message #\(messageCount): \(text.prefix(200))", category: .websocket)
+                    logger.verbose("Received string message #\(messageCount): \(text.prefix(200))", category: .websocket)
                 @unknown default:
-                    log.warning("Received unknown message type", category: .websocket)
+                    logger.warning("Received unknown message type", category: .websocket)
                     continue
                 }
 
@@ -255,20 +255,20 @@ final class WebSocketService: ObservableObject {
 
             } catch {
                 if isConnectedFlag {
-                    log.error("Receive loop error: \(error.localizedDescription)", category: .websocket)
+                    logger.error("Receive loop error: \(error.localizedDescription)", category: .websocket)
                     await handleDisconnect()
                 } else {
-                    log.debug("Receive loop ended (disconnected)", category: .websocket)
+                    logger.debug("Receive loop ended (disconnected)", category: .websocket)
                 }
                 break
             }
         }
-        log.verbose("Receive loop exited after \(messageCount) messages", category: .websocket)
+        logger.verbose("Receive loop exited after \(messageCount) messages", category: .websocket)
     }
 
     private func handleMessage(_ data: Data) {
         guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-            log.warning("Received non-JSON message: \(String(data: data, encoding: .utf8) ?? "binary")", category: .websocket)
+            logger.warning("Received non-JSON message: \(String(data: data, encoding: .utf8) ?? "binary")", category: .websocket)
             return
         }
 
@@ -276,25 +276,25 @@ final class WebSocketService: ObservableObject {
             // This is an RPC response
             if let continuation = pendingRequests.removeValue(forKey: id) {
                 continuation.resume(returning: data)
-                log.debug("Resolved RPC response for id=\(id), remaining pending: \(pendingRequests.count)", category: .websocket)
+                logger.debug("Resolved RPC response for id=\(id), remaining pending: \(pendingRequests.count)", category: .websocket)
             } else {
-                log.warning("Received response for unknown/expired id=\(id)", category: .websocket)
+                logger.warning("Received response for unknown/expired id=\(id)", category: .websocket)
             }
         } else if let type = json["type"] as? String {
             // This is an event
             let sessionId = json["sessionId"] as? String
             let eventData = json["data"]
-            log.logEvent(type: type, sessionId: sessionId, data: eventData.map { String(describing: $0).prefix(300).description })
+            logger.logEvent(type: type, sessionId: sessionId, data: eventData.map { String(describing: $0).prefix(300).description })
             onEvent?(data)
         } else {
-            log.debug("Received message without id or type: \(String(describing: json.keys))", category: .websocket)
+            logger.debug("Received message without id or type: \(String(describing: json.keys))", category: .websocket)
         }
     }
 
     // MARK: - Heartbeat
 
     private func heartbeatLoop() async {
-        log.verbose("Heartbeat loop running (interval: 30s)...", category: .websocket)
+        logger.verbose("Heartbeat loop running (interval: 30s)...", category: .websocket)
         var pingCount = 0
 
         while isConnectedFlag {
@@ -314,45 +314,45 @@ final class WebSocketService: ObservableObject {
                     }
                 }
                 let pingDuration = (CFAbsoluteTimeGetCurrent() - pingStart) * 1000
-                log.verbose("Ping #\(pingCount) successful (\(String(format: "%.1f", pingDuration))ms)", category: .websocket)
+                logger.verbose("Ping #\(pingCount) successful (\(String(format: "%.1f", pingDuration))ms)", category: .websocket)
             } catch {
-                log.warning("Ping #\(pingCount) failed: \(error.localizedDescription)", category: .websocket)
+                logger.warning("Ping #\(pingCount) failed: \(error.localizedDescription)", category: .websocket)
             }
         }
-        log.verbose("Heartbeat loop exited after \(pingCount) pings", category: .websocket)
+        logger.verbose("Heartbeat loop exited after \(pingCount) pings", category: .websocket)
     }
 
     // MARK: - Reconnection
 
     private func handleDisconnect() async {
-        log.warning("Handling disconnect...", category: .websocket)
+        logger.warning("Handling disconnect...", category: .websocket)
         isConnectedFlag = false
         webSocketTask?.cancel(with: .abnormalClosure, reason: nil)
         webSocketTask = nil
 
         let pendingCount = pendingRequests.count
         for (id, continuation) in pendingRequests {
-            log.debug("Failing pending request id=\(id) due to disconnect", category: .websocket)
+            logger.debug("Failing pending request id=\(id) due to disconnect", category: .websocket)
             continuation.resume(throwing: WebSocketError.connectionFailed("Disconnected"))
         }
         pendingRequests.removeAll()
-        log.debug("Cleared \(pendingCount) pending requests due to disconnect", category: .websocket)
+        logger.debug("Cleared \(pendingCount) pending requests due to disconnect", category: .websocket)
 
         if reconnectAttempts < maxReconnectAttempts {
             reconnectAttempts += 1
             let delay = reconnectDelay * pow(1.5, Double(reconnectAttempts - 1))
             connectionState = .reconnecting(attempt: reconnectAttempts)
 
-            log.info("Reconnecting in \(String(format: "%.1f", delay))s (attempt \(reconnectAttempts)/\(maxReconnectAttempts))", category: .websocket)
+            logger.info("Reconnecting in \(String(format: "%.1f", delay))s (attempt \(reconnectAttempts)/\(maxReconnectAttempts))", category: .websocket)
             try? await Task.sleep(for: .seconds(delay))
 
             if !isConnectedFlag {
-                log.info("Starting reconnection attempt \(reconnectAttempts)...", category: .websocket)
+                logger.info("Starting reconnection attempt \(reconnectAttempts)...", category: .websocket)
                 await connect()
             }
         } else {
             connectionState = .failed(reason: "Max reconnection attempts reached")
-            log.error("Max reconnection attempts (\(maxReconnectAttempts)) reached, giving up", category: .websocket)
+            logger.error("Max reconnection attempts (\(maxReconnectAttempts)) reached, giving up", category: .websocket)
         }
     }
 }

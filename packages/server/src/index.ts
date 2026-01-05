@@ -2,10 +2,11 @@
  * @fileoverview Tron Server Entry Point
  *
  * Main entry point for the Tron WebSocket server.
+ * Uses event-sourced session management via EventStoreOrchestrator.
  */
-import { createLogger, getSettings, resolveTronPath, getTronDataDir, type RpcContext } from '@tron/core';
+import { createLogger, getSettings, resolveTronPath, getTronDataDir, type RpcContext, type EventStoreManager, type WorktreeRpcManager } from '@tron/core';
 import { TronWebSocketServer, type WebSocketServerConfig } from './websocket.js';
-import { SessionOrchestrator, type OrchestratorConfig } from './orchestrator.js';
+import { EventStoreOrchestrator, type EventStoreOrchestratorConfig } from './event-store-orchestrator.js';
 import { HealthServer, type HealthServerConfig } from './health.js';
 
 // Get server settings (loaded lazily on first access)
@@ -20,10 +21,9 @@ const logger = createLogger('server');
 // =============================================================================
 
 /**
- * Creates an RpcContext adapter from SessionOrchestrator
- * This adapts the orchestrator's interfaces to what RpcHandler expects
+ * Creates an RpcContext adapter from EventStoreOrchestrator
  */
-function createRpcContext(orchestrator: SessionOrchestrator): RpcContext {
+function createRpcContext(orchestrator: EventStoreOrchestrator): RpcContext {
   return {
     sessionManager: {
       async createSession(params) {
@@ -32,7 +32,7 @@ function createRpcContext(orchestrator: SessionOrchestrator): RpcContext {
           model: params.model,
         });
         return {
-          sessionId: session.id,
+          sessionId: session.sessionId,
           model: session.model,
           createdAt: session.createdAt,
         };
@@ -40,15 +40,22 @@ function createRpcContext(orchestrator: SessionOrchestrator): RpcContext {
       async getSession(sessionId) {
         const session = await orchestrator.getSession(sessionId);
         if (!session) return null;
+
+        // Get messages from event store
+        const messages = await orchestrator.getSessionMessages(sessionId);
+
         return {
-          sessionId: session.id,
+          sessionId: session.sessionId,
           workingDirectory: session.workingDirectory,
           model: session.model,
-          messageCount: session.messages?.length ?? 0,
+          messageCount: session.messageCount,
           createdAt: session.createdAt,
-          lastActivity: session.lastActivityAt ?? session.createdAt,
-          isActive: session.isActive ?? true,
-          messages: session.messages ?? [],
+          lastActivity: session.lastActivity,
+          isActive: session.isActive,
+          messages: messages.map(m => ({
+            role: m.role,
+            content: m.content,
+          })),
         };
       },
       async listSessions(params) {
@@ -57,25 +64,36 @@ function createRpcContext(orchestrator: SessionOrchestrator): RpcContext {
           limit: params.limit,
         });
         return sessions.map(s => ({
-          sessionId: s.id,
+          sessionId: s.sessionId,
           workingDirectory: s.workingDirectory,
           model: s.model,
-          messageCount: s.messages?.length ?? 0,
+          messageCount: s.messageCount,
           createdAt: s.createdAt,
-          lastActivity: s.lastActivityAt ?? s.createdAt,
-          isActive: s.isActive ?? true,
-          messages: s.messages ?? [],
+          lastActivity: s.lastActivity,
+          isActive: s.isActive,
+          messages: [],
         }));
       },
       async deleteSession(sessionId) {
-        await orchestrator.endSession(sessionId, 'completed');
+        await orchestrator.endSession(sessionId);
         return true;
       },
-      async forkSession(sessionId, fromIndex) {
-        return orchestrator.forkSession(sessionId, fromIndex);
+      async forkSession(sessionId, fromEventId) {
+        const result = await orchestrator.forkSession(sessionId, fromEventId);
+        return {
+          newSessionId: result.newSessionId,
+          rootEventId: result.rootEventId,
+          forkedFromEventId: result.forkedFromEventId,
+          forkedFromSessionId: result.forkedFromSessionId,
+        };
       },
-      async rewindSession(sessionId, toIndex) {
-        return orchestrator.rewindSession(sessionId, toIndex);
+      async rewindSession(sessionId, toEventId) {
+        const result = await orchestrator.rewindSession(sessionId, toEventId);
+        return {
+          sessionId: result.sessionId,
+          newHeadEventId: result.newHeadEventId,
+          previousHeadEventId: result.previousHeadEventId,
+        };
       },
       async switchModel(sessionId, model) {
         return orchestrator.switchModel(sessionId, model);
@@ -103,56 +121,260 @@ function createRpcContext(orchestrator: SessionOrchestrator): RpcContext {
         return {
           isRunning: active?.isProcessing ?? false,
           currentTurn: 0,
-          messageCount: active?.session.messages?.length ?? session?.messages?.length ?? 0,
-          tokenUsage: {
-            input: session?.tokenUsage?.inputTokens ?? 0,
-            output: session?.tokenUsage?.outputTokens ?? 0,
-          },
+          messageCount: session?.messageCount ?? 0,
+          tokenUsage: { input: 0, output: 0 },
           model: session?.model ?? 'unknown',
-          tools: [], // Tools list would come from agent config
+          tools: [],
         };
       },
     },
+    // Memory operations are deprecated - use event store search instead
     memoryStore: {
-      async searchEntries(params) {
-        const results = await orchestrator.searchMemory({
-          query: params.searchText ?? '',
-          type: params.type as 'pattern' | 'decision' | 'lesson' | 'context' | 'preference' | undefined,
-          limit: params.limit,
-        });
-        return {
-          entries: results.map(r => ({
-            id: r.id,
-            content: r.content,
-            type: 'pattern' as const,
-            source: 'project' as const,
-            relevance: r.score,
-            timestamp: new Date().toISOString(),
-          })),
-          totalCount: results.length,
-        };
+      async searchEntries(_params) {
+        return { entries: [], totalCount: 0 };
       },
-      async addEntry(params) {
-        // Map 'error' to 'lesson' since orchestrator doesn't support 'error' type
-        const validType = params.type === 'error' ? 'lesson' : params.type;
-        const id = await orchestrator.storeMemory({
-          workingDirectory: process.cwd(),
-          content: params.content,
-          type: validType as 'pattern' | 'decision' | 'lesson' | 'context' | 'preference',
-        });
-        return { id };
+      async addEntry(_params) {
+        return { id: '' };
       },
-      async listHandoffs(_workingDirectory, limit) {
-        const handoffs = await orchestrator.listHandoffs(limit ?? 10);
-        return handoffs.map((h) => ({
-          id: h.id,
-          sessionId: h.sessionId,
-          summary: h.summary,
-          createdAt: h.timestamp.toISOString(),
-        }));
+      async listHandoffs(_workingDirectory, _limit) {
+        return [];
       },
     },
   };
+}
+
+/**
+ * Creates an EventStoreManager adapter from EventStoreOrchestrator
+ */
+function createEventStoreManager(orchestrator: EventStoreOrchestrator): EventStoreManager {
+  const eventStore = orchestrator.getEventStore();
+
+  return {
+    async getEventHistory(sessionId, options) {
+      const events = await orchestrator.getSessionEvents(sessionId);
+
+      let filtered = events;
+      if (options?.types?.length) {
+        filtered = events.filter(e => options.types!.includes(e.type));
+      }
+
+      const reversed = [...filtered].reverse();
+      const limit = options?.limit ?? 100;
+      const sliced = reversed.slice(0, limit);
+
+      return {
+        events: sliced,
+        hasMore: filtered.length > limit,
+        oldestEventId: sliced.at(-1)?.id,
+      };
+    },
+
+    async getEventsSince(options) {
+      const events = options.sessionId
+        ? await orchestrator.getSessionEvents(options.sessionId)
+        : [];
+
+      let filtered = events;
+      if (options.afterEventId) {
+        const idx = events.findIndex(e => e.id === options.afterEventId);
+        if (idx >= 0) {
+          filtered = events.slice(idx + 1);
+        }
+      } else if (options.afterTimestamp) {
+        filtered = events.filter(e => e.timestamp > options.afterTimestamp!);
+      }
+
+      const limit = options.limit ?? 100;
+      const sliced = filtered.slice(0, limit);
+
+      return {
+        events: sliced,
+        nextCursor: sliced.at(-1)?.id,
+        hasMore: filtered.length > limit,
+      };
+    },
+
+    async appendEvent(sessionId, type, payload, parentId) {
+      const event = await orchestrator.appendEvent({
+        sessionId: sessionId as any,
+        type: type as any,
+        payload,
+        parentId: parentId as any,
+      });
+
+      const session = await eventStore.getSession(sessionId as any);
+
+      return {
+        event,
+        newHeadEventId: session?.headEventId ?? event.id,
+      };
+    },
+
+    async getTreeVisualization(sessionId, options) {
+      const session = await eventStore.getSession(sessionId as any);
+      if (!session) {
+        throw new Error(`Session not found: ${sessionId}`);
+      }
+
+      const events = await orchestrator.getSessionEvents(sessionId);
+
+      const nodes = events.map(e => ({
+        id: e.id,
+        parentId: e.parentId,
+        type: e.type,
+        timestamp: e.timestamp,
+        summary: getEventSummary(e),
+        hasChildren: events.some(other => other.parentId === e.id),
+        childCount: events.filter(other => other.parentId === e.id).length,
+        depth: getEventDepth(e, events),
+        isBranchPoint: events.filter(other => other.parentId === e.id).length > 1,
+        isHead: e.id === session.headEventId,
+      }));
+
+      const filtered = options?.messagesOnly
+        ? nodes.filter(n => n.type.startsWith('message.'))
+        : nodes;
+
+      return {
+        sessionId,
+        rootEventId: session.rootEventId ?? '',
+        headEventId: session.headEventId ?? '',
+        nodes: filtered,
+        totalEvents: events.length,
+      };
+    },
+
+    async getBranches(sessionId) {
+      const events = await orchestrator.getSessionEvents(sessionId);
+      const session = await eventStore.getSession(sessionId as any);
+
+      const branchPoints = events.filter(e =>
+        events.filter(other => other.parentId === e.id).length > 1
+      );
+
+      const branches = branchPoints.flatMap(bp => {
+        const children = events.filter(e => e.parentId === bp.id);
+        return children.map((child, idx) => ({
+          branchPointEventId: bp.id,
+          firstEventId: child.id,
+          isMain: child.id === session?.headEventId || idx === 0,
+          eventCount: getDescendantCount(child.id, events),
+        }));
+      });
+
+      if (branches.length === 0 && events.length > 0) {
+        const mainBranch = {
+          branchPointEventId: null,
+          firstEventId: events[0]?.id,
+          isMain: true,
+          eventCount: events.length,
+        };
+        return { mainBranch, forks: [] };
+      }
+
+      return {
+        mainBranch: branches.find(b => b.isMain) ?? branches[0],
+        forks: branches.filter(b => !b.isMain),
+      };
+    },
+
+    async getSubtree(eventId, options) {
+      if (options?.direction === 'ancestors') {
+        const ancestors = await orchestrator.getAncestors(eventId);
+        return { nodes: ancestors };
+      }
+
+      const descendants = await getDescendantsRecursive(eventId, eventStore);
+      return { nodes: descendants };
+    },
+
+    async getAncestors(eventId) {
+      const ancestors = await orchestrator.getAncestors(eventId);
+      return { events: ancestors };
+    },
+
+    async searchContent(query, options) {
+      const results = await orchestrator.searchEvents(query, {
+        sessionId: options?.sessionId,
+        workspaceId: options?.workspaceId,
+        types: options?.types,
+        limit: options?.limit,
+      });
+
+      return {
+        results,
+        totalCount: results.length,
+      };
+    },
+  };
+}
+
+/**
+ * Creates a WorktreeRpcManager adapter from EventStoreOrchestrator
+ */
+function createWorktreeManager(orchestrator: EventStoreOrchestrator): WorktreeRpcManager {
+  return {
+    async getWorktreeStatus(sessionId) {
+      return orchestrator.getWorktreeStatus(sessionId);
+    },
+    async commitWorktree(sessionId, message) {
+      return orchestrator.commitWorktree(sessionId, message);
+    },
+    async mergeWorktree(sessionId, targetBranch, strategy) {
+      return orchestrator.mergeWorktree(sessionId, targetBranch, strategy);
+    },
+    async listWorktrees() {
+      return orchestrator.listWorktrees();
+    },
+  };
+}
+
+// Helper functions for tree visualization
+function getDescendantCount(eventId: string, allEvents: any[]): number {
+  const children = allEvents.filter(e => e.parentId === eventId);
+  return children.length + children.reduce((sum, child) =>
+    sum + getDescendantCount(child.id, allEvents), 0);
+}
+
+async function getDescendantsRecursive(eventId: string, eventStore: any): Promise<any[]> {
+  const children = await eventStore.getChildren(eventId);
+  const descendants = [...children];
+  for (const child of children) {
+    const childDescendants = await getDescendantsRecursive(child.id, eventStore);
+    descendants.push(...childDescendants);
+  }
+  return descendants;
+}
+
+function getEventSummary(event: any): string {
+  switch (event.type) {
+    case 'session.start':
+      return 'Session started';
+    case 'session.end':
+      return 'Session ended';
+    case 'session.fork':
+      return `Forked: ${event.payload?.name ?? 'unnamed'}`;
+    case 'message.user':
+      return event.payload?.content ? String(event.payload.content).slice(0, 50) : 'User message';
+    case 'message.assistant':
+      return 'Assistant response';
+    case 'tool.call':
+      return `Tool: ${event.payload?.name ?? 'unknown'}`;
+    case 'tool.result':
+      return `Tool result (${event.payload?.isError ? 'error' : 'success'})`;
+    default:
+      return event.type;
+  }
+}
+
+function getEventDepth(event: any, allEvents: any[]): number {
+  let depth = 0;
+  let current = event;
+  while (current?.parentId) {
+    depth++;
+    current = allEvents.find(e => e.id === current.parentId);
+  }
+  return depth;
 }
 
 // =============================================================================
@@ -166,10 +388,8 @@ export interface TronServerConfig {
   healthPort: number;
   /** Host to bind to */
   host?: string;
-  /** Sessions directory */
-  sessionsDir?: string;
-  /** Memory database path */
-  memoryDbPath?: string;
+  /** Event store database path */
+  eventStoreDbPath?: string;
   /** Default model */
   defaultModel?: string;
   /** Default provider */
@@ -186,7 +406,7 @@ export interface TronServerConfig {
 
 export class TronServer {
   private config: TronServerConfig;
-  private orchestrator: SessionOrchestrator | null = null;
+  private orchestrator: EventStoreOrchestrator | null = null;
   private wsServer: TronWebSocketServer | null = null;
   private healthServer: HealthServer | null = null;
   private isRunning = false;
@@ -195,9 +415,6 @@ export class TronServer {
     this.config = config;
   }
 
-  /**
-   * Start the server
-   */
   async start(): Promise<void> {
     if (this.isRunning) {
       throw new Error('Server is already running');
@@ -206,25 +423,26 @@ export class TronServer {
     logger.info('Starting Tron server...');
 
     // Resolve paths to canonical ~/.tron directory
-    // This ensures all clients (TUI, web, etc.) work with the same data files
     const tronDir = getTronDataDir();
-    const sessionsDir = resolveTronPath(this.config.sessionsDir ?? 'sessions', tronDir);
-    const memoryDbPath = resolveTronPath(this.config.memoryDbPath ?? 'memory.db', tronDir);
+    const eventStoreDbPath = resolveTronPath(this.config.eventStoreDbPath ?? 'events.db', tronDir);
 
-    // Initialize orchestrator
-    const orchestratorConfig: OrchestratorConfig = {
-      sessionsDir,
-      memoryDbPath,
+    // Initialize EventStore orchestrator
+    const orchestratorConfig: EventStoreOrchestratorConfig = {
+      eventStoreDbPath,
       defaultModel: this.config.defaultModel ?? 'claude-sonnet-4-20250514',
       defaultProvider: this.config.defaultProvider ?? 'anthropic',
       maxConcurrentSessions: this.config.maxConcurrentSessions,
     };
 
-    this.orchestrator = new SessionOrchestrator(orchestratorConfig);
+    this.orchestrator = new EventStoreOrchestrator(orchestratorConfig);
     await this.orchestrator.initialize();
 
     // Create RpcContext adapter
-    const rpcContext = createRpcContext(this.orchestrator);
+    const rpcContext: RpcContext = {
+      ...createRpcContext(this.orchestrator),
+      eventStore: createEventStoreManager(this.orchestrator),
+      worktreeManager: createWorktreeManager(this.orchestrator),
+    };
 
     // Initialize WebSocket server
     const wsConfig: WebSocketServerConfig = {
@@ -243,22 +461,38 @@ export class TronServer {
     };
 
     this.healthServer = new HealthServer(healthConfig);
-    this.healthServer.setOrchestrator(this.orchestrator);
+    this.healthServer.setEventStoreOrchestrator(this.orchestrator);
     this.healthServer.setWsClientCount(() => this.wsServer?.getClientCount() ?? 0);
     await this.healthServer.start();
 
     // Forward orchestrator events to WebSocket clients
-    this.orchestrator.on('session_created', (session) => {
+    this.orchestrator.on('session_created', (data) => {
       this.wsServer?.broadcastEvent({
         type: 'session.created',
         timestamp: new Date().toISOString(),
-        data: { session },
+        data,
       });
     });
 
     this.orchestrator.on('session_ended', (data) => {
       this.wsServer?.broadcastEvent({
         type: 'session.ended',
+        timestamp: new Date().toISOString(),
+        data,
+      });
+    });
+
+    this.orchestrator.on('session_forked', (data) => {
+      this.wsServer?.broadcastEvent({
+        type: 'session.forked',
+        timestamp: new Date().toISOString(),
+        data,
+      });
+    });
+
+    this.orchestrator.on('session_rewound', (data) => {
+      this.wsServer?.broadcastEvent({
+        type: 'session.rewound',
         timestamp: new Date().toISOString(),
         data,
       });
@@ -273,7 +507,6 @@ export class TronServer {
       });
     });
 
-    // Forward streaming agent events to WebSocket clients
     this.orchestrator.on('agent_event', (event) => {
       this.wsServer?.broadcastEvent({
         type: event.type,
@@ -283,18 +516,25 @@ export class TronServer {
       });
     });
 
+    this.orchestrator.on('event_new', (data) => {
+      this.wsServer?.broadcastEvent({
+        type: 'event.new',
+        sessionId: data.sessionId,
+        timestamp: new Date().toISOString(),
+        data: { event: data.event },
+      });
+    });
+
     this.isRunning = true;
 
     logger.info('Tron server started', {
       wsPort: this.config.wsPort,
       healthPort: this.config.healthPort,
       host: this.config.host ?? '0.0.0.0',
+      eventStoreDb: eventStoreDbPath,
     });
   }
 
-  /**
-   * Stop the server
-   */
   async stop(): Promise<void> {
     if (!this.isRunning) {
       return;
@@ -302,7 +542,6 @@ export class TronServer {
 
     logger.info('Stopping Tron server...');
 
-    // Stop in reverse order
     if (this.healthServer) {
       await this.healthServer.stop();
       this.healthServer = null;
@@ -322,17 +561,11 @@ export class TronServer {
     logger.info('Tron server stopped');
   }
 
-  /**
-   * Check if server is running
-   */
   getIsRunning(): boolean {
     return this.isRunning;
   }
 
-  /**
-   * Get orchestrator (for direct access in tests)
-   */
-  getOrchestrator(): SessionOrchestrator | null {
+  getOrchestrator(): EventStoreOrchestrator | null {
     return this.orchestrator;
   }
 }
@@ -348,8 +581,7 @@ async function main(): Promise<void> {
     wsPort: parseInt(process.env.TRON_WS_PORT ?? String(settings.wsPort), 10),
     healthPort: parseInt(process.env.TRON_HEALTH_PORT ?? String(settings.healthPort), 10),
     host: process.env.TRON_HOST ?? settings.host,
-    sessionsDir: process.env.TRON_SESSIONS_DIR ?? settings.sessionsDir,
-    memoryDbPath: process.env.TRON_MEMORY_DB ?? settings.memoryDbPath,
+    eventStoreDbPath: process.env.TRON_EVENT_STORE_DB,
     defaultModel: process.env.TRON_DEFAULT_MODEL ?? settings.defaultModel,
     defaultProvider: process.env.TRON_DEFAULT_PROVIDER ?? settings.defaultProvider,
     maxConcurrentSessions: process.env.TRON_MAX_SESSIONS
@@ -362,7 +594,6 @@ async function main(): Promise<void> {
 
   const server = new TronServer(config);
 
-  // Handle shutdown signals
   const shutdown = async (signal: string) => {
     logger.info(`Received ${signal}, shutting down...`);
     await server.stop();
@@ -372,7 +603,6 @@ async function main(): Promise<void> {
   process.on('SIGINT', () => shutdown('SIGINT'));
   process.on('SIGTERM', () => shutdown('SIGTERM'));
 
-  // Handle uncaught errors
   process.on('uncaughtException', (error) => {
     logger.error('Uncaught exception', error);
     process.exit(1);
@@ -388,7 +618,6 @@ async function main(): Promise<void> {
   logger.info('Server ready. Press Ctrl+C to stop.');
 }
 
-// Run if this is the main module
 const isMain = process.argv[1]?.endsWith('index.js') || process.argv[1]?.endsWith('index.ts');
 if (isMain) {
   main().catch((error) => {
@@ -403,7 +632,16 @@ if (isMain) {
 
 export { TronWebSocketServer } from './websocket.js';
 export type { WebSocketServerConfig, ClientConnection } from './websocket.js';
-export { SessionOrchestrator } from './orchestrator.js';
-export type { OrchestratorConfig, ActiveSession, AgentRunOptions, AgentEvent } from './orchestrator.js';
+export { EventStoreOrchestrator } from './event-store-orchestrator.js';
+export type {
+  EventStoreOrchestratorConfig,
+  ActiveSession,
+  AgentRunOptions,
+  AgentEvent,
+  CreateSessionOptions,
+  SessionInfo,
+  ForkResult,
+  RewindResult,
+} from './event-store-orchestrator.js';
 export { HealthServer } from './health.js';
 export type { HealthServerConfig, HealthResponse } from './health.js';

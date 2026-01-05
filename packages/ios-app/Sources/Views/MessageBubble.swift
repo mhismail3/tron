@@ -1,6 +1,6 @@
 import SwiftUI
 
-// MARK: - Message Bubble
+// MARK: - Message Bubble (Terminal-style matching web UI)
 
 struct MessageBubble: View {
     let message: ChatMessage
@@ -10,67 +10,14 @@ struct MessageBubble: View {
     }
 
     var body: some View {
-        HStack(alignment: .top, spacing: 10) {
-            if isUserMessage {
-                Spacer(minLength: 60)
-            } else {
-                avatarView
-            }
+        VStack(alignment: .leading, spacing: 4) {
+            contentView
 
-            VStack(alignment: isUserMessage ? .trailing : .leading, spacing: 4) {
-                contentView
-
-                if let usage = message.tokenUsage {
-                    TokenBadge(usage: usage)
-                }
-            }
-
-            if isUserMessage {
-                // No avatar for user - cleaner look
-            } else {
-                Spacer(minLength: 60)
+            if let usage = message.tokenUsage {
+                TokenBadge(usage: usage)
             }
         }
-    }
-
-    // MARK: - Avatar
-
-    @ViewBuilder
-    private var avatarView: some View {
-        ZStack {
-            Circle()
-                .fill(avatarColor)
-                .frame(width: 28, height: 28)
-
-            avatarIcon
-        }
-    }
-
-    private var avatarColor: Color {
-        switch message.role {
-        case .user: return .tronEmerald
-        case .assistant: return .tronSurfaceElevated
-        case .system: return .tronSurface
-        case .toolResult: return .tronInfo.opacity(0.2)
-        }
-    }
-
-    @ViewBuilder
-    private var avatarIcon: some View {
-        switch message.role {
-        case .user:
-            TronIconView(icon: .user, size: 14, color: .white)
-        case .assistant:
-            if message.isStreaming {
-                WaveformIcon(size: 14, color: .tronEmerald)
-            } else {
-                TronIconView(icon: .assistant, size: 14, color: .tronEmerald)
-            }
-        case .system:
-            TronIconView(icon: .system, size: 14, color: .tronTextMuted)
-        case .toolResult:
-            TronIconView(icon: .toolSuccess, size: 14)
-        }
+        .frame(maxWidth: .infinity, alignment: isUserMessage ? .trailing : .leading)
     }
 
     // MARK: - Content
@@ -88,10 +35,10 @@ struct MessageBubble: View {
             ThinkingContentView(content: visible, isExpanded: isExpanded)
 
         case .toolUse(let tool):
-            ToolUseView(tool: tool)
+            ToolResultRouter(tool: tool)
 
         case .toolResult(let result):
-            ToolResultView(result: result)
+            StandaloneToolResultView(result: result)
 
         case .error(let errorMessage):
             ErrorContentView(message: errorMessage)
@@ -102,7 +49,7 @@ struct MessageBubble: View {
     }
 }
 
-// MARK: - Text Content View
+// MARK: - Text Content View (Terminal-style)
 
 struct TextContentView: View {
     let text: String
@@ -111,48 +58,57 @@ struct TextContentView: View {
     private var isUser: Bool { role == .user }
 
     var body: some View {
-        Text(LocalizedStringKey(text))
-            .font(.body)
-            .foregroundStyle(isUser ? .white : .tronTextPrimary)
-            .textSelection(.enabled)
-            .padding(.horizontal, 14)
-            .padding(.vertical, 10)
-            .background(bubbleBackground)
-            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-    }
+        HStack(alignment: .top, spacing: 0) {
+            // Green vertical accent line for assistant messages (matching web UI)
+            if role == .assistant {
+                Rectangle()
+                    .fill(Color.tronEmerald)
+                    .frame(width: 2)
+                    .padding(.trailing, 12)
+            }
 
-    private var bubbleBackground: Color {
-        switch role {
-        case .user: return .tronEmerald
-        case .assistant: return .tronSurfaceElevated
-        case .system: return .tronSurface
-        case .toolResult: return .toolBubble
+            Text(LocalizedStringKey(text))
+                .font(.system(size: 14, design: .monospaced))
+                .foregroundStyle(isUser ? .tronEmerald : .tronTextPrimary)
+                .textSelection(.enabled)
+                .lineSpacing(4)
         }
+        .padding(.vertical, 4)
+        .padding(.horizontal, isUser ? 0 : 4)
+        .frame(maxWidth: isUser ? nil : .infinity, alignment: .leading)
     }
 }
 
-// MARK: - Streaming Content View
+// MARK: - Streaming Content View (Terminal-style)
 
 struct StreamingContentView: View {
     let text: String
 
     var body: some View {
-        HStack(alignment: .bottom, spacing: 2) {
-            if text.isEmpty {
-                Text(" ")
-                    .font(.body)
-            } else {
-                Text(LocalizedStringKey(text))
-                    .font(.body)
-                    .foregroundStyle(.tronTextPrimary)
-            }
+        HStack(alignment: .top, spacing: 0) {
+            // Green vertical accent line (matching web UI)
+            Rectangle()
+                .fill(Color.tronEmerald)
+                .frame(width: 2)
+                .padding(.trailing, 12)
 
-            StreamingCursor()
+            HStack(alignment: .bottom, spacing: 2) {
+                if text.isEmpty {
+                    Text(" ")
+                        .font(.system(size: 14, design: .monospaced))
+                } else {
+                    Text(LocalizedStringKey(text))
+                        .font(.system(size: 14, design: .monospaced))
+                        .foregroundStyle(.tronTextPrimary)
+                        .lineSpacing(4)
+                }
+
+                StreamingCursor()
+            }
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 10)
-        .background(Color.tronSurfaceElevated)
-        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .padding(.vertical, 4)
+        .padding(.horizontal, 4)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 
@@ -206,155 +162,144 @@ struct ThinkingContentView: View {
     }
 }
 
-// MARK: - Tool Use View
+// MARK: - Standalone Tool Result View (for .toolResult content type)
 
-struct ToolUseView: View {
-    let tool: ToolUseData
+struct StandaloneToolResultView: View {
+    let result: ToolResultData
+    @State private var isExpanded = false
+
+    private var lines: [String] {
+        result.content.components(separatedBy: "\n")
+    }
+
+    private var displayLines: [String] {
+        isExpanded ? lines : Array(lines.prefix(8))
+    }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 6) {
-                statusIcon
-                Text(tool.displayName)
-                    .font(.caption.weight(.medium).monospaced())
-                    .foregroundStyle(.tronTextPrimary)
-                    .lineLimit(1)
+        VStack(alignment: .leading, spacing: 0) {
+            // Header
+            HStack(spacing: 8) {
+                Image(systemName: result.isError ? "xmark" : "checkmark")
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundStyle(result.isError ? .tronError : .tronSuccess)
+
+                Text(result.isError ? "error" : "result")
+                    .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(result.isError ? .tronError : .tronTextPrimary)
 
                 Spacer()
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .background(Color.tronSurfaceElevated)
 
-                if let duration = tool.formattedDuration {
-                    Text(duration)
-                        .font(.caption2.monospaced())
-                        .foregroundStyle(.tronTextMuted)
+            // Content lines
+            ScrollView(.horizontal, showsIndicators: false) {
+                VStack(alignment: .leading, spacing: 0) {
+                    ForEach(Array(displayLines.enumerated()), id: \.offset) { index, line in
+                        HStack(spacing: 0) {
+                            // Line number
+                            Text("\(index + 1)")
+                                .font(.system(size: 10, design: .monospaced))
+                                .foregroundStyle(.tronTextMuted)
+                                .frame(width: 32, alignment: .trailing)
+                                .padding(.trailing, 8)
+                                .background(Color.tronSurface)
+
+                            // Line content
+                            Text(line.isEmpty ? " " : line)
+                                .font(.system(size: 11, design: .monospaced))
+                                .foregroundStyle(.tronTextSecondary)
+                        }
+                        .frame(minHeight: 18)
+                    }
+                }
+                .padding(.vertical, 4)
+            }
+            .frame(maxHeight: isExpanded ? .infinity : 160)
+
+            // Expand/collapse button
+            if lines.count > 8 {
+                Button {
+                    withAnimation(.tronFast) {
+                        isExpanded.toggle()
+                    }
+                } label: {
+                    HStack {
+                        Text(isExpanded ? "Show less" : "Show more (\(lines.count) lines)")
+                            .font(.system(size: 11, design: .monospaced))
+                        Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
+                            .font(.system(size: 10))
+                    }
+                    .foregroundStyle(.tronTextMuted)
+                    .padding(.vertical, 6)
+                    .frame(maxWidth: .infinity)
+                    .background(Color.tronSurface)
                 }
             }
-
-            if !tool.arguments.isEmpty {
-                Text(tool.truncatedArguments)
-                    .font(.caption2.monospaced())
-                    .foregroundStyle(.tronTextMuted)
-                    .lineLimit(2)
-            }
-
-            if let result = tool.result {
-                Divider()
-                    .background(Color.tronBorder)
-
-                Text(result.prefix(200) + (result.count > 200 ? "..." : ""))
-                    .font(.caption2.monospaced())
-                    .foregroundStyle(.tronTextSecondary)
-                    .lineLimit(4)
-            }
         }
-        .padding(10)
-        .background(Color.tronSurface)
-        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .background(Color.tronSurface.opacity(0.5))
+        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .stroke(statusBorder, lineWidth: 1)
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .stroke(result.isError ? Color.tronError.opacity(0.3) : Color.tronBorder.opacity(0.3), lineWidth: 0.5)
         )
-    }
-
-    @ViewBuilder
-    private var statusIcon: some View {
-        switch tool.status {
-        case .running:
-            RotatingIcon(icon: .toolRunning, size: 12, color: .tronInfo)
-        case .success:
-            TronIconView(icon: .toolSuccess, size: 12, color: .tronSuccess)
-        case .error:
-            TronIconView(icon: .toolError, size: 12, color: .tronError)
-        }
-    }
-
-    private var statusBorder: Color {
-        switch tool.status {
-        case .running: return .tronInfo.opacity(0.4)
-        case .success: return .tronBorder
-        case .error: return .tronError.opacity(0.4)
-        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 
-// MARK: - Tool Result View
-
-struct ToolResultView: View {
-    let result: ToolResultData
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack(spacing: 4) {
-                TronIconView(
-                    icon: result.isError ? .toolError : .toolSuccess,
-                    size: 12,
-                    color: result.isError ? .tronError : .tronSuccess
-                )
-                Text(result.isError ? "Error" : "Result")
-                    .font(.caption2.weight(.medium))
-                    .foregroundStyle(result.isError ? .tronError : .tronTextMuted)
-            }
-
-            Text(result.truncatedContent)
-                .font(.caption2.monospaced())
-                .foregroundStyle(.tronTextSecondary)
-                .lineLimit(4)
-        }
-        .padding(10)
-        .background(Color.tronSurface)
-        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .stroke(result.isError ? Color.tronError.opacity(0.3) : Color.tronBorder, lineWidth: 0.5)
-        )
-    }
-}
-
-// MARK: - Error Content View
+// MARK: - Error Content View (Terminal-style)
 
 struct ErrorContentView: View {
     let message: String
 
     var body: some View {
-        HStack(spacing: 6) {
-            TronIconView(icon: .error, size: 14, color: .tronError)
+        HStack(spacing: 8) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .font(.system(size: 12))
+                .foregroundStyle(.tronError)
             Text(message)
-                .font(.caption)
+                .font(.system(size: 12, design: .monospaced))
                 .foregroundStyle(.tronTextSecondary)
         }
         .padding(10)
         .background(Color.tronError.opacity(0.1))
-        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .stroke(Color.tronError.opacity(0.3), lineWidth: 1)
+            RoundedRectangle(cornerRadius: 4, style: .continuous)
+                .stroke(Color.tronError.opacity(0.3), lineWidth: 0.5)
         )
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 
-// MARK: - Images Content View
+// MARK: - Images Content View (Terminal-style)
 
 struct ImagesContentView: View {
     let images: [ImageContent]
 
     var body: some View {
-        HStack(spacing: 6) {
+        HStack(spacing: 8) {
             ForEach(images) { image in
                 if let uiImage = UIImage(data: image.data) {
                     Image(uiImage: uiImage)
                         .resizable()
                         .aspectRatio(contentMode: .fill)
-                        .frame(width: 80, height: 80)
-                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        .frame(width: 72, height: 72)
+                        .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 4, style: .continuous)
+                                .stroke(Color.tronBorder.opacity(0.5), lineWidth: 0.5)
+                        )
                 }
             }
         }
         .padding(4)
-        .background(Color.tronEmerald.opacity(0.1))
-        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
     }
 }
 
-// MARK: - Token Badge
+// MARK: - Token Badge (Terminal-style)
 
 struct TokenBadge: View {
     let usage: TokenUsage
@@ -363,17 +308,17 @@ struct TokenBadge: View {
         HStack(spacing: 8) {
             HStack(spacing: 2) {
                 Image(systemName: "arrow.down")
-                    .font(.system(size: 8, weight: .bold))
+                    .font(.system(size: 8, weight: .medium))
                 Text(usage.formattedInput)
             }
 
             HStack(spacing: 2) {
                 Image(systemName: "arrow.up")
-                    .font(.system(size: 8, weight: .bold))
+                    .font(.system(size: 8, weight: .medium))
                 Text(usage.formattedOutput)
             }
         }
-        .font(.caption2.monospaced())
+        .font(.system(size: 10, design: .monospaced))
         .foregroundStyle(.tronTextMuted)
     }
 }
