@@ -58,12 +58,9 @@ struct SessionSidebar: View {
             ToolbarItem(placement: .topBarTrailing) {
                 Button(action: onSettings) {
                     Image(systemName: "gearshape")
-                        .font(.system(size: 14, weight: .medium))
-                        .foregroundStyle(.white)
-                        .frame(width: 32, height: 32)
-                        .contentShape(Circle())
+                        .font(.system(size: 16, weight: .medium))
+                        .foregroundStyle(.white.opacity(0.9))
                 }
-                .glassEffect(.regular.interactive(), in: .circle)
             }
         }
     }
@@ -83,7 +80,7 @@ struct FloatingNewSessionButton: View {
                 .frame(width: 56, height: 56)
                 .contentShape(Circle())
         }
-        .glassEffect(.regular.tint(Color.tronEmerald).interactive(), in: .circle)
+        .glassEffect(.regular.tint(Color.tronPhthaloGreen.opacity(0.8)).interactive(), in: .circle)
     }
 }
 
@@ -95,37 +92,37 @@ struct CachedSessionSidebarRow: View {
     let isSelected: Bool
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: 6) {
             // Title row
             HStack(spacing: 6) {
                 Text(session.displayTitle)
-                    .font(.subheadline.weight(.medium))
+                    .font(.system(size: 14, weight: .medium, design: .monospaced))
                     .foregroundStyle(.white.opacity(0.95))
                     .lineLimit(1)
 
                 Spacer()
 
                 Text(session.formattedDate)
-                    .font(.caption2)
+                    .font(.system(size: 10, weight: .regular, design: .monospaced))
                     .foregroundStyle(.white.opacity(0.5))
             }
 
             // Meta row: model badge + message count
-            HStack(spacing: 6) {
+            HStack(spacing: 8) {
                 // Model badge with glass effect
                 Text(session.shortModel)
-                    .font(.system(size: 10, weight: .medium))
+                    .font(.system(size: 10, weight: .medium, design: .monospaced))
                     .foregroundStyle(.white.opacity(0.8))
                     .padding(.horizontal, 6)
                     .padding(.vertical, 2)
                     .glassEffect(.regular.tint(Color.tronPhthaloGreen.opacity(0.4)), in: .capsule)
 
                 // Message count
-                HStack(spacing: 2) {
+                HStack(spacing: 3) {
                     Image(systemName: "bubble.left")
                         .font(.system(size: 9))
                     Text("\(session.messageCount)")
-                        .font(.system(size: 10))
+                        .font(.system(size: 10, weight: .regular, design: .monospaced))
                 }
                 .foregroundStyle(.white.opacity(0.5))
 
@@ -134,13 +131,13 @@ struct CachedSessionSidebarRow: View {
 
             // Working directory (truncated)
             Text(session.displayDirectory)
-                .font(.caption2)
+                .font(.system(size: 10, weight: .regular, design: .monospaced))
                 .foregroundStyle(.white.opacity(0.4))
                 .lineLimit(1)
                 .truncationMode(.head)
         }
-        .padding(.vertical, 6)
-        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .padding(.horizontal, 14)
         .glassEffect(
             isSelected
                 ? .regular.tint(Color.tronEmerald.opacity(0.4)).interactive()

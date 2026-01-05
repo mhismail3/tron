@@ -11,7 +11,6 @@ struct ChatView: View {
     @State private var scrollProxy: ScrollViewProxy?
     @State private var showModelSwitcher = false
     @State private var showSessionStats = false
-    @State private var showHelp = false
     @State private var showContextAudit = false
     @State private var showSessionHistory = false
 
@@ -90,9 +89,6 @@ struct ChatView: View {
                 tokenUsage: viewModel.totalTokenUsage
             )
         }
-        .sheet(isPresented: $showHelp) {
-            HelpSheet()
-        }
         .sheet(isPresented: $showContextAudit) {
             ContextAuditView(
                 rpcClient: rpcClient,
@@ -161,12 +157,6 @@ struct ChatView: View {
             // Settings section
             Section {
                 Button {
-                    showHelp = true
-                } label: {
-                    Label("Help", systemImage: "questionmark.circle")
-                }
-
-                Button {
                     viewModel.showSettings = true
                 } label: {
                     Label("Settings", systemImage: TronIcon.settings.systemName)
@@ -174,13 +164,10 @@ struct ChatView: View {
             }
         } label: {
             Image(systemName: "gearshape")
-                .font(.system(size: 14, weight: .medium))
-                .foregroundStyle(.white)
-                .frame(width: 32, height: 32)
-                .contentShape(Circle())
+                .font(.system(size: 16, weight: .medium))
+                .foregroundStyle(.white.opacity(0.9))
         }
         .menuIndicator(.hidden)
-        .glassEffect(.regular.interactive(), in: .circle)
     }
 
     // Note: Status bar (model pill, token stats) is now integrated into InputBar
@@ -337,31 +324,40 @@ struct SessionStatsView: View {
             List {
                 if let session = session {
                     Section("Session") {
-                        LabeledContent("ID", value: String(session.id.prefix(8)) + "...")
-                        LabeledContent("Model", value: session.shortModel)
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("ID")
+                                .font(.subheadline)
+                                .foregroundStyle(.tronTextSecondary)
+                            Text(session.id)
+                                .font(.system(size: 12, design: .monospaced))
+                                .foregroundStyle(.tronTextPrimary)
+                                .textSelection(.enabled)
+                        }
+                        .padding(.vertical, 4)
+
                         LabeledContent("Messages", value: "\(session.messageCount)")
-                        LabeledContent("Created", value: session.createdAt)
-                        LabeledContent("Last Activity", value: session.formattedDate)
+                        LabeledContent("Created", value: session.humanReadableCreatedAt)
+                        LabeledContent("Last Activity", value: session.humanReadableLastActivity)
                     }
 
                     Section("Workspace") {
                         Text(session.workingDirectory)
-                            .font(.caption)
-                            .foregroundStyle(.tronTextSecondary)
+                            .font(.subheadline)
+                            .foregroundStyle(.tronTextPrimary)
                     }
 
-                    Section("Token Usage (Session)") {
-                        LabeledContent("Input", value: "\(session.inputTokens)")
-                        LabeledContent("Output", value: "\(session.outputTokens)")
-                        LabeledContent("Total", value: "\(session.inputTokens + session.outputTokens)")
+                    Section("Token Usage") {
+                        LabeledContent("Input", value: formatTokenCount(session.inputTokens))
+                        LabeledContent("Output", value: formatTokenCount(session.outputTokens))
+                        LabeledContent("Total", value: formatTokenCount(session.inputTokens + session.outputTokens))
                     }
                 }
 
                 if let usage = tokenUsage {
-                    Section("Token Usage (Current)") {
-                        LabeledContent("Input", value: usage.formattedInput)
-                        LabeledContent("Output", value: usage.formattedOutput)
-                        LabeledContent("Total", value: usage.formattedTotal)
+                    Section("Current Request") {
+                        LabeledContent("Input", value: formatTokenCount(usage.inputTokens))
+                        LabeledContent("Output", value: formatTokenCount(usage.outputTokens))
+                        LabeledContent("Total", value: formatTokenCount(usage.totalTokens))
                     }
                 }
             }
@@ -369,8 +365,7 @@ struct SessionStatsView: View {
             .background(Color.tronBackground)
             .navigationTitle("Session Info")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbarBackground(Color.tronSurface, for: .navigationBar)
-            .toolbarBackground(.visible, for: .navigationBar)
+            .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("Done") { dismiss() }
@@ -379,74 +374,70 @@ struct SessionStatsView: View {
         }
         .preferredColorScheme(.dark)
     }
-}
 
-// MARK: - Help Sheet
-
-struct HelpSheet: View {
-    @Environment(\.dismiss) private var dismiss
-
-    var body: some View {
-        NavigationStack {
-            List {
-                Section("Capabilities") {
-                    FeatureHelpRow(icon: "folder", title: "File Access", description: "Read and write files in your workspace")
-                    FeatureHelpRow(icon: "terminal", title: "Shell Commands", description: "Execute terminal commands")
-                    FeatureHelpRow(icon: "pencil.and.outline", title: "Code Editing", description: "Make precise changes to your code")
-                    FeatureHelpRow(icon: "photo", title: "Image Input", description: "Send images for analysis")
-                }
-
-                Section("Tips") {
-                    Text("Use the menu to switch models, view session info, or access settings.")
-                        .font(.subheadline)
-                        .foregroundStyle(.tronTextSecondary)
-
-                    Text("The status bar shows your connection state and token usage.")
-                        .font(.subheadline)
-                        .foregroundStyle(.tronTextSecondary)
-                }
-
-                Section("About") {
-                    LabeledContent("Version", value: "1.0.0")
-                }
-            }
-            .scrollContentBackground(.hidden)
-            .background(Color.tronBackground)
-            .navigationTitle("Help")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbarBackground(Color.tronSurface, for: .navigationBar)
-            .toolbarBackground(.visible, for: .navigationBar)
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button("Done") { dismiss() }
-                }
-            }
+    private func formatTokenCount(_ count: Int) -> String {
+        if count >= 1_000_000 {
+            return String(format: "%.1fM", Double(count) / 1_000_000)
+        } else if count >= 1_000 {
+            return String(format: "%.1fK", Double(count) / 1_000)
         }
-        .preferredColorScheme(.dark)
+        return "\(count)"
     }
 }
 
-struct FeatureHelpRow: View {
-    let icon: String
-    let title: String
-    let description: String
-
-    var body: some View {
-        HStack(spacing: 12) {
-            Image(systemName: icon)
-                .font(.title3)
-                .foregroundStyle(.tronEmerald)
-                .frame(width: 28)
-
-            VStack(alignment: .leading, spacing: 2) {
-                Text(title)
-                    .font(.headline)
-                    .foregroundStyle(.tronTextPrimary)
-                Text(description)
-                    .font(.caption)
-                    .foregroundStyle(.tronTextSecondary)
-            }
+// Extension for human-readable dates
+extension CachedSession {
+    var humanReadableCreatedAt: String {
+        // Parse ISO date and format nicely
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let date = formatter.date(from: createdAt) {
+            return date.humanReadable
         }
+        // Try without fractional seconds
+        formatter.formatOptions = [.withInternetDateTime]
+        if let date = formatter.date(from: createdAt) {
+            return date.humanReadable
+        }
+        return createdAt
+    }
+
+    var humanReadableLastActivity: String {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let date = formatter.date(from: lastActivityAt) {
+            return date.humanReadable
+        }
+        formatter.formatOptions = [.withInternetDateTime]
+        if let date = formatter.date(from: lastActivityAt) {
+            return date.humanReadable
+        }
+        return formattedDate
+    }
+}
+
+extension Date {
+    var humanReadable: String {
+        let now = Date()
+        let calendar = Calendar.current
+        let components = calendar.dateComponents([.minute, .hour, .day], from: self, to: now)
+
+        if let days = components.day, days > 0 {
+            if days == 1 { return "Yesterday" }
+            if days < 7 {
+                let formatter = DateFormatter()
+                formatter.dateFormat = "EEEE"
+                return formatter.string(from: self)
+            }
+            let formatter = DateFormatter()
+            formatter.dateFormat = "MMM d, yyyy"
+            return formatter.string(from: self)
+        } else if let hours = components.hour, hours > 0 {
+            return "\(hours) hour\(hours == 1 ? "" : "s") ago"
+        } else if let minutes = components.minute, minutes > 0 {
+            return "\(minutes) min ago"
+        }
+        return "Just now"
     }
 }
 

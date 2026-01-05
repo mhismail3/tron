@@ -65,23 +65,63 @@ struct SessionEvent: Identifiable, Codable {
             return "Forked: \(name)"
         case .messageUser:
             if let content = payload["content"]?.value as? String {
-                return String(content.prefix(50))
+                return String(content.prefix(60)).trimmingCharacters(in: .whitespacesAndNewlines)
             }
             return "User message"
         case .messageAssistant:
+            // Extract actual content from the response
+            if let content = payload["content"]?.value as? String, !content.isEmpty {
+                let preview = content.prefix(80).trimmingCharacters(in: .whitespacesAndNewlines)
+                return preview + (content.count > 80 ? "..." : "")
+            } else if let text = payload["text"]?.value as? String, !text.isEmpty {
+                let preview = text.prefix(80).trimmingCharacters(in: .whitespacesAndNewlines)
+                return preview + (text.count > 80 ? "..." : "")
+            }
             return "Assistant response"
         case .toolCall:
             let name = (payload["name"]?.value as? String) ?? "unknown"
             return "Tool: \(name)"
         case .toolResult:
             let isError = (payload["isError"]?.value as? Bool) ?? false
-            return "Tool result (\(isError ? "error" : "success"))"
+            return "Result (\(isError ? "error" : "success"))"
         case .ledgerUpdate:
             return "Ledger updated"
+        case .configModelSwitch:
+            let model = (payload["model"]?.value as? String) ?? "unknown"
+            return "Switched to \(model.shortModelName)"
+        case .compactBoundary:
+            return "Context compacted"
         case .unknown:
             return type
         default:
             return type
+        }
+    }
+
+    /// Extended content for expanded view
+    var expandedContent: String? {
+        switch eventType {
+        case .messageAssistant:
+            if let content = payload["content"]?.value as? String {
+                return content
+            } else if let text = payload["text"]?.value as? String {
+                return text
+            }
+            return nil
+        case .toolCall:
+            if let input = payload["input"]?.value {
+                return "Input: \(input)"
+            }
+            return nil
+        case .toolResult:
+            if let content = payload["content"]?.value as? String {
+                return content
+            } else if let result = payload["result"]?.value as? String {
+                return result
+            }
+            return nil
+        default:
+            return nil
         }
     }
 }

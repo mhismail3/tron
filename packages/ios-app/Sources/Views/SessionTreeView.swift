@@ -272,41 +272,59 @@ struct TreeNodeRow: View {
             )
             .clipShape(RoundedRectangle(cornerRadius: 6))
 
-            // Expanded actions
-            if isExpanded && !isHead {
-                HStack(spacing: 12) {
-                    Spacer()
-                        .frame(width: CGFloat(depth) * 20 + 28)
-
-                    Button(action: onFork) {
-                        HStack(spacing: 4) {
-                            Image(systemName: "arrow.triangle.branch")
-                                .font(.system(size: 11))
-                            Text("Fork")
-                                .font(.caption)
-                        }
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 6)
-                        .background(Color.tronAmber)
-                        .clipShape(Capsule())
+            // Expanded content and actions
+            if isExpanded {
+                VStack(alignment: .leading, spacing: 8) {
+                    // Show expanded content if available
+                    if let content = event.expandedContent {
+                        Text(content)
+                            .font(.system(size: 12, design: .monospaced))
+                            .foregroundStyle(.tronTextSecondary)
+                            .lineLimit(10)
+                            .padding(.horizontal, CGFloat(depth) * 20 + 28)
+                            .padding(.vertical, 8)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(Color.tronSurfaceElevated.opacity(0.5))
+                            .clipShape(RoundedRectangle(cornerRadius: 6))
                     }
 
-                    Button(action: onRewind) {
-                        HStack(spacing: 4) {
-                            Image(systemName: "arrow.uturn.backward")
-                                .font(.system(size: 11))
-                            Text("Rewind")
-                                .font(.caption)
-                        }
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 6)
-                        .background(Color.tronPurple)
-                        .clipShape(Capsule())
-                    }
+                    // Actions (only show if not HEAD)
+                    if !isHead {
+                        HStack(spacing: 12) {
+                            Spacer()
+                                .frame(width: CGFloat(depth) * 20 + 28)
 
-                    Spacer()
+                            Button(action: onFork) {
+                                HStack(spacing: 4) {
+                                    Image(systemName: "arrow.triangle.branch")
+                                        .font(.system(size: 11))
+                                    Text("Fork")
+                                        .font(.caption)
+                                }
+                                .foregroundStyle(.white)
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 6)
+                                .background(Color.tronAmber)
+                                .clipShape(Capsule())
+                            }
+
+                            Button(action: onRewind) {
+                                HStack(spacing: 4) {
+                                    Image(systemName: "arrow.uturn.backward")
+                                        .font(.system(size: 11))
+                                    Text("Rewind")
+                                        .font(.caption)
+                                }
+                                .foregroundStyle(.white)
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 6)
+                                .background(Color.tronPurple)
+                                .clipShape(Capsule())
+                            }
+
+                            Spacer()
+                        }
+                    }
                 }
                 .padding(.vertical, 8)
                 .transition(.opacity.combined(with: .move(edge: .top)))
@@ -534,8 +552,7 @@ struct SessionHistorySheet: View {
             }
             .navigationTitle("Session History")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbarBackground(Color.tronSurface, for: .navigationBar)
-            .toolbarBackground(.visible, for: .navigationBar)
+            .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("Done") { dismiss() }

@@ -297,12 +297,9 @@ struct WelcomePage: View {
                 Spacer()
                 Button(action: onSettings) {
                     Image(systemName: "gearshape")
-                        .font(.system(size: 14, weight: .medium))
-                        .foregroundStyle(.white)
-                        .frame(width: 32, height: 32)
-                        .contentShape(Circle())
+                        .font(.system(size: 16, weight: .medium))
+                        .foregroundStyle(.white.opacity(0.9))
                 }
-                .glassEffect(.regular.interactive(), in: .circle)
                 .padding()
             }
 

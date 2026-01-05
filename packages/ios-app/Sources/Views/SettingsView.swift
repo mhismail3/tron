@@ -8,7 +8,7 @@ struct SettingsView: View {
     @AppStorage("serverPort") private var serverPort = "8080"
     @AppStorage("useTLS") private var useTLS = false
     @AppStorage("workingDirectory") private var workingDirectory = ""
-    @AppStorage("defaultModel") private var defaultModel = "claude-sonnet-4-20250514"
+    @AppStorage("defaultModel") private var defaultModel = "claude-opus-4-5-20251101"
 
     @State private var showingResetAlert = false
     @State private var showLogViewer = false
@@ -40,9 +40,14 @@ struct SettingsView: View {
                         .autocorrectionDisabled()
 
                     Picker("Default Model", selection: $defaultModel) {
-                        Text("Claude Sonnet 4").tag("claude-sonnet-4-20250514")
+                        // Opus models
+                        Text("Claude Opus 4.5").tag("claude-opus-4-5-20251101")
                         Text("Claude Opus 4").tag("claude-opus-4-20250514")
-                        Text("Claude Haiku").tag("claude-3-5-haiku-20241022")
+                        // Sonnet models
+                        Text("Claude Sonnet 4").tag("claude-sonnet-4-20250514")
+                        Text("Claude Sonnet 4 (Thinking)").tag("claude-sonnet-4-20250514-thinking")
+                        // Haiku models
+                        Text("Claude Haiku 3.5").tag("claude-3-5-haiku-20241022")
                     }
                 } header: {
                     Text("Session Defaults")
@@ -92,15 +97,21 @@ struct SettingsView: View {
                         }
                     }
 
-                    Picker("Log Level", selection: Binding(
-                        get: { logger.minimumLevel },
-                        set: { logger.setLevel($0) }
-                    )) {
-                        Text("Verbose").tag(LogLevel.verbose)
-                        Text("Debug").tag(LogLevel.debug)
-                        Text("Info").tag(LogLevel.info)
-                        Text("Warning").tag(LogLevel.warning)
-                        Text("Error").tag(LogLevel.error)
+                    HStack {
+                        Label("Log Level", systemImage: "list.bullet.rectangle")
+                        Spacer()
+                        Picker("", selection: Binding(
+                            get: { logger.minimumLevel },
+                            set: { logger.setLevel($0) }
+                        )) {
+                            Text("Verbose").tag(LogLevel.verbose)
+                            Text("Debug").tag(LogLevel.debug)
+                            Text("Info").tag(LogLevel.info)
+                            Text("Warning").tag(LogLevel.warning)
+                            Text("Error").tag(LogLevel.error)
+                        }
+                        .labelsHidden()
+                        .pickerStyle(.menu)
                     }
                 } header: {
                     Text("Debug")
@@ -126,8 +137,7 @@ struct SettingsView: View {
             .background(Color.tronBackground)
             .navigationTitle("Settings")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbarBackground(Color.tronSurface, for: .navigationBar)
-            .toolbarBackground(.visible, for: .navigationBar)
+            .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("Done") { dismiss() }
@@ -159,7 +169,7 @@ struct SettingsView: View {
         serverPort = "8080"
         useTLS = false
         workingDirectory = ""
-        defaultModel = "claude-sonnet-4-20250514"
+        defaultModel = "claude-opus-4-5-20251101"
     }
 }
 
