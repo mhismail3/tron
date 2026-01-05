@@ -23,6 +23,14 @@ interface StatusBarProps {
   contextPercent?: number;
   /** Callback when model is changed */
   onModelChange?: (model: string) => void;
+  /** Event count for history display */
+  eventCount?: number;
+  /** Branch count for history display */
+  branchCount?: number;
+  /** Callback when history button is clicked */
+  onHistoryClick?: () => void;
+  /** Callback when browse sessions button is clicked */
+  onBrowseSessionsClick?: () => void;
 }
 
 const THEME_ICONS: Record<Theme, string> = {
@@ -107,6 +115,10 @@ export function StatusBar({
   tokenUsage,
   contextPercent = 0,
   onModelChange,
+  eventCount = 0,
+  branchCount = 0,
+  onHistoryClick,
+  onBrowseSessionsClick,
 }: StatusBarProps): React.ReactElement {
   const [showModelPicker, setShowModelPicker] = useState(false);
   const { theme, cycleTheme } = useTheme();
@@ -272,8 +284,79 @@ export function StatusBar({
         </div>
       </div>
 
-      {/* Right side: Theme toggle + Directory */}
+      {/* Right side: History + Theme toggle + Directory */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-md)' }}>
+        {/* Browse Past Sessions Button */}
+        {onBrowseSessionsClick && (
+          <button
+            onClick={onBrowseSessionsClick}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 'var(--space-xs)',
+              padding: 'var(--space-xs) var(--space-sm)',
+              background: 'transparent',
+              border: '1px solid var(--border-subtle)',
+              borderRadius: 'var(--radius-sm)',
+              color: 'var(--text-muted)',
+              fontSize: 'var(--text-xs)',
+              fontFamily: 'var(--font-mono)',
+              cursor: 'pointer',
+              transition: 'all var(--transition-fast)',
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.borderColor = 'var(--border-default)';
+              e.currentTarget.style.color = 'var(--text-secondary)';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.borderColor = 'var(--border-subtle)';
+              e.currentTarget.style.color = 'var(--text-muted)';
+            }}
+            title="Browse past sessions"
+            type="button"
+          >
+            <span>⎇</span>
+            <span>Sessions</span>
+          </button>
+        )}
+
+        {/* History Button */}
+        {onHistoryClick && (
+          <button
+            onClick={onHistoryClick}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 'var(--space-xs)',
+              padding: 'var(--space-xs) var(--space-sm)',
+              background: 'transparent',
+              border: '1px solid var(--border-subtle)',
+              borderRadius: 'var(--radius-sm)',
+              color: 'var(--text-muted)',
+              fontSize: 'var(--text-xs)',
+              fontFamily: 'var(--font-mono)',
+              cursor: 'pointer',
+              transition: 'all var(--transition-fast)',
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.borderColor = 'var(--border-default)';
+              e.currentTarget.style.color = 'var(--text-secondary)';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.borderColor = 'var(--border-subtle)';
+              e.currentTarget.style.color = 'var(--text-muted)';
+            }}
+            title="View session history"
+            type="button"
+          >
+            <span>◇</span>
+            <span>
+              {eventCount} events
+              {branchCount > 0 && ` • ${branchCount} branches`}
+            </span>
+          </button>
+        )}
+
         {/* Theme Toggle */}
         <button
           onClick={cycleTheme}

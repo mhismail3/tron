@@ -144,8 +144,7 @@ export function ChatPage(): React.ReactElement {
       {/* Status bar */}
       <StatusBar
         model="claude-sonnet-4"
-        inputTokens={tokenUsage.input}
-        outputTokens={tokenUsage.output}
+        tokenUsage={tokenUsage}
         contextPercent={Math.min(100, Math.round((tokenUsage.input + tokenUsage.output) / 2000))}
       />
 

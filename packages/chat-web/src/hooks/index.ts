@@ -19,3 +19,10 @@ export {
   type EventStoreState,
   type UseEventStoreReturn,
 } from './useEventStore.js';
+export {
+  useSessionHistory,
+  type UseSessionHistoryOptions,
+  type UseSessionHistoryReturn,
+  type TreeBranchInfo,
+  type BranchesResult,
+} from './useSessionHistory.js';

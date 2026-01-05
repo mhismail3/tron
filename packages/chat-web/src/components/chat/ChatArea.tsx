@@ -10,9 +10,13 @@ import { useChat, useChatDispatch } from '../../store/context.js';
 import { MessageList } from './MessageList.js';
 import { InputBar } from './InputBar.js';
 import { StatusBar } from './StatusBar.js';
+import { SessionHistoryPanel } from './SessionHistoryPanel.js';
+import { SessionBrowser } from '../session/SessionBrowser.js';
 import { CommandPalette } from '../overlay/CommandPalette.js';
+import { useSessionHistory } from '../../hooks/index.js';
 import { isCommand, parseCommand, findCommand } from '../../commands/index.js';
 import type { Command } from '../../commands/index.js';
+import type { SessionSummary } from '../../store/types.js';
 import './ChatArea.css';
 
 // =============================================================================
@@ -28,6 +32,10 @@ export interface ChatAreaProps {
   onStop?: () => void;
   /** Called when user changes the model */
   onModelChange?: (model: string) => void;
+  /** RPC call function for server communication */
+  rpcCall?: <T>(method: string, params?: unknown) => Promise<T>;
+  /** Called when user forks to a new session */
+  onSessionChange?: (sessionId: string) => void;
 }
 
 // =============================================================================
@@ -45,7 +53,7 @@ const MODEL_CONTEXT_SIZES: Record<string, number> = {
   'claude-3-haiku-20240307': 200000,
 };
 
-export function ChatArea({ onSubmit, onCommand, onStop, onModelChange }: ChatAreaProps) {
+export function ChatArea({ onSubmit, onCommand, onStop, onModelChange, rpcCall, onSessionChange }: ChatAreaProps) {
   const state = useChat();
   const dispatch = useChatDispatch();
 
@@ -55,8 +63,108 @@ export function ChatArea({ onSubmit, onCommand, onStop, onModelChange }: ChatAre
   const contextPercent = Math.round((totalTokens / contextSize) * 100);
 
   const [showCommandPalette, setShowCommandPalette] = useState(false);
+  const [showHistoryPanel, setShowHistoryPanel] = useState(false);
+  const [showSessionBrowser, setShowSessionBrowser] = useState(false);
+  const [pastSessions, setPastSessions] = useState<SessionSummary[]>([]);
   const [commandQuery, setCommandQuery] = useState('');
   const inputRef = useRef<HTMLTextAreaElement>(null);
+
+  // Session history hook - only active if we have rpcCall
+  const noopRpcCall = useCallback(
+    async <T,>(): Promise<T> => ({ events: [], hasMore: false }) as T,
+    []
+  );
+  const sessionHistory = useSessionHistory({
+    sessionId: state.sessionId,
+    rpcCall: rpcCall ?? noopRpcCall,
+    headEventId: state.headEventId ?? null,
+    includeBranches: showHistoryPanel,
+  });
+
+  // Handle fork
+  const handleFork = useCallback(
+    async (eventId: string) => {
+      const result = await sessionHistory.fork(eventId);
+      if (result?.newSessionId) {
+        onSessionChange?.(result.newSessionId);
+        setShowHistoryPanel(false);
+      }
+    },
+    [sessionHistory, onSessionChange]
+  );
+
+  // Handle rewind
+  const handleRewind = useCallback(
+    async (eventId: string) => {
+      const success = await sessionHistory.rewind(eventId);
+      if (success) {
+        // Refresh the messages after rewind
+        dispatch({ type: 'REWIND_TO_EVENT', payload: eventId });
+        setShowHistoryPanel(false);
+      }
+    },
+    [sessionHistory, dispatch]
+  );
+
+  // Fetch past sessions when browser is opened
+  useEffect(() => {
+    if (showSessionBrowser && rpcCall) {
+      rpcCall<{ sessions: Array<{
+        sessionId: string;
+        workingDirectory: string;
+        model: string;
+        messageCount: number;
+        createdAt: string;
+        lastActivity: string;
+        isActive: boolean;
+        title?: string;
+      }> }>('session.list', { includeEnded: true, limit: 100 })
+        .then((result) => {
+          const sessions: SessionSummary[] = result.sessions.map((s) => ({
+            id: s.sessionId,
+            title: s.title || `Session ${s.sessionId.slice(0, 8)}`,
+            workingDirectory: s.workingDirectory,
+            model: s.model,
+            messageCount: s.messageCount,
+            lastActivity: s.lastActivity,
+          }));
+          setPastSessions(sessions);
+        })
+        .catch((err) => {
+          console.error('[ChatArea] Failed to fetch sessions:', err);
+        });
+    }
+  }, [showSessionBrowser, rpcCall]);
+
+  // Handle session selection from browser (just display, not fork)
+  const handleSelectSession = useCallback((_sessionId: string) => {
+    // Just selecting to view history - no action needed
+  }, []);
+
+  // Handle fork from past session
+  const handleForkFromPastSession = useCallback(
+    async (sessionId: string, eventId: string) => {
+      if (!rpcCall) return;
+
+      try {
+        const result = await rpcCall<{
+          newSessionId: string;
+          rootEventId: string;
+        }>('session.fork', {
+          sessionId,
+          fromEventId: eventId,
+        });
+
+        if (result.newSessionId) {
+          onSessionChange?.(result.newSessionId);
+          setShowSessionBrowser(false);
+        }
+      } catch (err) {
+        console.error('[ChatArea] Failed to fork session:', err);
+      }
+    },
+    [rpcCall, onSessionChange]
+  );
 
   // Handle input changes - detect slash commands
   const handleInputChange = useCallback((value: string) => {
@@ -209,6 +317,10 @@ export function ChatArea({ onSubmit, onCommand, onStop, onModelChange }: ChatAre
           tokenUsage={state.tokenUsage}
           contextPercent={contextPercent}
           onModelChange={onModelChange}
+          eventCount={sessionHistory.events.length}
+          branchCount={sessionHistory.branchCount}
+          onHistoryClick={rpcCall ? () => setShowHistoryPanel(true) : undefined}
+          onBrowseSessionsClick={rpcCall ? () => setShowSessionBrowser(true) : undefined}
         />
       </div>
 
@@ -218,6 +330,29 @@ export function ChatArea({ onSubmit, onCommand, onStop, onModelChange }: ChatAre
         onClose={handleCommandPaletteClose}
         onSelect={handleCommandSelect}
         initialQuery={commandQuery}
+      />
+
+      {/* Session History Panel */}
+      <SessionHistoryPanel
+        isOpen={showHistoryPanel}
+        onClose={() => setShowHistoryPanel(false)}
+        events={sessionHistory.events}
+        headEventId={sessionHistory.headEventId}
+        sessionId={state.sessionId}
+        onFork={handleFork}
+        onRewind={handleRewind}
+        isLoading={sessionHistory.isLoading}
+      />
+
+      {/* Session Browser for past sessions */}
+      <SessionBrowser
+        isOpen={showSessionBrowser}
+        onClose={() => setShowSessionBrowser(false)}
+        sessions={pastSessions}
+        rpcCall={rpcCall ?? noopRpcCall}
+        onSelectSession={handleSelectSession}
+        onForkFromEvent={handleForkFromPastSession}
+        currentSessionId={state.sessionId ?? undefined}
       />
     </div>
   );

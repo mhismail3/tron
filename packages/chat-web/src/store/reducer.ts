@@ -24,6 +24,7 @@ export const initialState: AppState = {
   input: '',
   isProcessing: false,
   sessionId: null,
+  headEventId: null,
   messages: [],
   status: 'Initializing',
   error: null,
@@ -401,6 +402,17 @@ export function reducer(state: AppState, action: AppAction): AppState {
         ...state,
         sessions: state.sessions.filter((s) => s.id !== action.payload),
       };
+
+    // =========================================================================
+    // Session History (Web-specific)
+    // =========================================================================
+
+    case 'SET_HEAD_EVENT':
+      return { ...state, headEventId: action.payload };
+
+    case 'REWIND_TO_EVENT':
+      // Update the head event ID; the UI will need to refetch messages
+      return { ...state, headEventId: action.payload };
 
     // =========================================================================
     // UI (Web-specific)

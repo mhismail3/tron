@@ -51,6 +51,9 @@ Object.defineProperty(import.meta, 'env', {
   },
 });
 
+// Mock scrollIntoView (not available in JSDOM)
+Element.prototype.scrollIntoView = () => {};
+
 // Mock window.matchMedia for theme detection
 Object.defineProperty(window, 'matchMedia', {
   writable: true,

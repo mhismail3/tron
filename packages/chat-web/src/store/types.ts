@@ -80,6 +80,7 @@ export interface AppState {
   input: string;
   isProcessing: boolean;
   sessionId: string | null;
+  headEventId: string | null;
   messages: DisplayMessage[];
   status: string;
   error: string | null;
@@ -189,6 +190,10 @@ export type AppAction =
   | { type: 'SET_SESSIONS'; payload: SessionSummary[] }
   | { type: 'ADD_SESSION'; payload: SessionSummary }
   | { type: 'REMOVE_SESSION'; payload: string }
+
+  // Session history (Web-specific)
+  | { type: 'SET_HEAD_EVENT'; payload: string | null }
+  | { type: 'REWIND_TO_EVENT'; payload: string }
 
   // UI (Web-specific)
   | { type: 'SET_SIDEBAR_OPEN'; payload: boolean }

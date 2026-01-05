@@ -26,7 +26,7 @@ import type { DisplayMessage } from '../store/types.js';
 
 export interface UseEventStoreOptions {
   /** RPC call function for server communication */
-  rpcCall?: <T>(method: string, params?: Record<string, unknown>) => Promise<T>;
+  rpcCall?: <T>(method: string, params?: unknown) => Promise<T>;
   /** Enable auto-sync with server */
   autoSync?: boolean;
   /** Sync interval in milliseconds (default: 30000) */

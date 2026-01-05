@@ -59,8 +59,13 @@ function AppContent() {
   const persistence = useSessionPersistence();
 
   // Memoize RPC call to prevent infinite re-renders in useEventStore
+  // Create wrapper to accept generic string method names
   const rpcCall = useMemo(
-    () => (client ? client.request.bind(client) : undefined),
+    () =>
+      client
+        ? <T,>(method: string, params?: unknown): Promise<T> =>
+            client.request<T>(method as import('@tron/core').RpcMethod, params)
+        : undefined,
     [client]
   );
 
@@ -906,6 +911,15 @@ function AppContent() {
     />
   );
 
+  // Handle session change (from fork)
+  const handleSessionChange = useCallback(
+    async (newSessionId: string) => {
+      // Resume the new session
+      await resumeSession(newSessionId);
+    },
+    [resumeSession]
+  );
+
   // Main chat area with stop handler
   const main = (
     <ChatArea
@@ -913,6 +927,8 @@ function AppContent() {
       onCommand={handleCommand}
       onStop={handleStop}
       onModelChange={handleModelChange}
+      rpcCall={rpcCall}
+      onSessionChange={handleSessionChange}
     />
   );
 
