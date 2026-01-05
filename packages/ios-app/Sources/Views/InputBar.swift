@@ -25,19 +25,19 @@ struct InputBar: View {
     @State private var showingImagePicker = false
 
     var body: some View {
-        VStack(spacing: 8) {
+        VStack(spacing: 10) {
             // Attached images preview
             if !attachedImages.isEmpty {
                 attachedImagesRow
             }
 
-            // Status pills row - liquid glass style
+            // Status pills row - floating liquid glass elements
             if !modelName.isEmpty || tokenUsage != nil {
                 statusPillsRow
-                    .padding(.horizontal)
+                    .padding(.horizontal, 16)
             }
 
-            // Input row - liquid glass style
+            // Input row - floating liquid glass elements
             HStack(alignment: .bottom, spacing: 12) {
                 // Text field with glass background
                 textFieldGlass
@@ -45,9 +45,10 @@ struct InputBar: View {
                 // Send/Abort button - liquid glass
                 actionButtonGlass
             }
-            .padding(.horizontal)
-            .padding(.vertical, 8)
+            .padding(.horizontal, 16)
+            .padding(.bottom, 8)
         }
+        // iOS 26: No background - elements float with glass effects only
     }
 
     // MARK: - Status Pills Row (iOS 26 Liquid Glass)
@@ -66,9 +67,9 @@ struct InputBar: View {
                     .foregroundStyle(.white.opacity(0.9))
                     .padding(.horizontal, 10)
                     .padding(.vertical, 5)
+                    .contentShape(Capsule())
                 }
-                .buttonStyle(.plain)
-                .glassEffect(.regular.tint(Color.tronPhthaloGreen).interactive(), in: .capsule)
+                .glassEffect(.regular.tint(Color.tronPhthaloGreen.opacity(0.4)).interactive(), in: .capsule)
             }
 
             Spacer()
@@ -98,7 +99,7 @@ struct InputBar: View {
                 .foregroundStyle(.white.opacity(0.7))
                 .padding(.horizontal, 10)
                 .padding(.vertical, 5)
-                .glassEffect(.regular.tint(Color.tronPhthaloGreen), in: .capsule)
+                .glassEffect(.regular.tint(Color.tronPhthaloGreen.opacity(0.4)), in: .capsule)
             }
         }
     }
@@ -183,8 +184,9 @@ struct InputBar: View {
             .font(.subheadline)
             .foregroundStyle(.white.opacity(0.9))
             .padding(.horizontal, 14)
-            .padding(.vertical, 12)
-            .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+            .padding(.vertical, 10)
+            .frame(minHeight: 40)
+            .glassEffect(.regular.tint(Color.tronPhthaloGreen.opacity(0.3)), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
             .lineLimit(1...8)
             .focused($isFocused)
             .disabled(isProcessing)
@@ -327,12 +329,10 @@ struct InputBar: View {
                 }
             }
             .frame(width: 40, height: 40)
+            .contentShape(Circle())
         }
-        .buttonStyle(.plain)
         .glassEffect(
-            canSend && !isProcessing
-                ? .regular.tint(Color.tronEmerald).interactive()
-                : .regular,
+            .regular.tint(canSend && !isProcessing ? Color.tronEmerald : Color.tronPhthaloGreen.opacity(0.3)).interactive(),
             in: .circle
         )
         .disabled(!isProcessing && !canSend)

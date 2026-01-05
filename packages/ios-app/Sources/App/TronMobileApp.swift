@@ -160,6 +160,7 @@ struct ContentView: View {
                     }
                 }
                 .navigationSplitViewStyle(.balanced)
+                .scrollContentBackground(.hidden)
             }
         }
         .tint(.tronEmerald)
@@ -253,8 +254,8 @@ struct ContentView: View {
                         .foregroundStyle(.white)
                         .padding(.horizontal, 24)
                         .padding(.vertical, 12)
+                        .contentShape(Capsule())
                 }
-                .buttonStyle(.plain)
                 .glassEffect(.regular.tint(Color.tronEmerald).interactive(), in: .capsule)
                 .padding(.top, 8)
             }
@@ -297,11 +298,11 @@ struct WelcomePage: View {
                 Button(action: onSettings) {
                     Image(systemName: "gearshape")
                         .font(.system(size: 14, weight: .medium))
-                        .foregroundStyle(.white.opacity(0.85))
+                        .foregroundStyle(.white)
                         .frame(width: 32, height: 32)
+                        .contentShape(Circle())
                 }
-                .buttonStyle(.plain)
-                .glassEffect(.regular.tint(Color.tronPhthaloGreen).interactive(), in: .circle)
+                .glassEffect(.regular.interactive(), in: .circle)
                 .padding()
             }
 
@@ -370,8 +371,8 @@ struct WelcomePage: View {
                     .foregroundStyle(.white)
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 16)
+                    .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
             }
-            .buttonStyle(.plain)
             .glassEffect(.regular.tint(Color.tronEmerald).interactive(), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
             .padding(.horizontal, 32)
             .padding(.bottom, 32)
@@ -452,8 +453,8 @@ struct NewSessionFlow: View {
                                 }
                                 .padding(.horizontal, 16)
                                 .padding(.vertical, 14)
+                                .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                             }
-                            .buttonStyle(.plain)
                             .glassEffect(.regular.tint(Color.tronPhthaloGreen).interactive(), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
 
                             Text("The directory where the agent will operate")
@@ -568,8 +569,8 @@ struct NewSessionFlow: View {
                     }
                     .frame(maxWidth: .infinity)
                     .frame(height: 50)
+                    .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                 }
-                .buttonStyle(.plain)
                 .glassEffect(
                     (isCreating || workingDirectory.isEmpty)
                         ? .regular.tint(Color.tronPhthaloGreen)

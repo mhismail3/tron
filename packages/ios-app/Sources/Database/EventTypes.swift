@@ -160,9 +160,24 @@ struct CachedSession: Identifiable, Codable {
 
     var formattedDate: String {
         if let date = ISO8601DateFormatter().date(from: lastActivityAt) {
-            let formatter = RelativeDateTimeFormatter()
-            formatter.unitsStyle = .abbreviated
-            return formatter.localizedString(for: date, relativeTo: Date())
+            let now = Date()
+            let interval = now.timeIntervalSince(date)
+
+            // Within last 24 hours - use relative time like "7 minutes ago"
+            if interval < 86400 {
+                let formatter = RelativeDateTimeFormatter()
+                formatter.unitsStyle = .full
+                return formatter.localizedString(for: date, relativeTo: now)
+            }
+
+            // Beyond 24 hours - use readable date format
+            let dateFormatter = DateFormatter()
+            if Calendar.current.isDate(date, equalTo: now, toGranularity: .year) {
+                dateFormatter.dateFormat = "MMM d"  // e.g., "Jan 5"
+            } else {
+                dateFormatter.dateFormat = "MMM d, yyyy"  // e.g., "Jan 5, 2025"
+            }
+            return dateFormatter.string(from: date)
         }
         return lastActivityAt
     }

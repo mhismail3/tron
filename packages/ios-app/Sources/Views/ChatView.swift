@@ -8,7 +8,6 @@ struct ChatView: View {
     @EnvironmentObject var eventStoreManager: EventStoreManager
     @StateObject private var viewModel: ChatViewModel
     @StateObject private var inputHistory = InputHistoryStore()
-    @FocusState private var isInputFocused: Bool
     @State private var scrollProxy: ScrollViewProxy?
     @State private var showModelSwitcher = false
     @State private var showSessionStats = false
@@ -26,44 +25,45 @@ struct ChatView: View {
     }
 
     var body: some View {
-        VStack(spacing: 0) {
-            // Messages
-            messagesScrollView
+        // Main content with floating input bar using safeAreaInset
+        messagesScrollView
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                // Floating input area - iOS 26 liquid glass, no backgrounds
+                VStack(spacing: 8) {
+                    // Thinking indicator
+                    if !viewModel.thinkingText.isEmpty {
+                        ThinkingBanner(
+                            text: viewModel.thinkingText,
+                            isExpanded: $viewModel.isThinkingExpanded
+                        )
+                    }
 
-            // Thinking indicator
-            if !viewModel.thinkingText.isEmpty {
-                ThinkingBanner(
-                    text: viewModel.thinkingText,
-                    isExpanded: $viewModel.isThinkingExpanded
-                )
+                    // Input area with integrated status pills
+                    InputBar(
+                        text: $viewModel.inputText,
+                        isProcessing: viewModel.isProcessing,
+                        attachedImages: $viewModel.attachedImages,
+                        selectedImages: $viewModel.selectedImages,
+                        onSend: {
+                            inputHistory.addToHistory(viewModel.inputText)
+                            viewModel.sendMessage()
+                        },
+                        onAbort: viewModel.abortAgent,
+                        onRemoveImage: viewModel.removeAttachedImage,
+                        inputHistory: inputHistory,
+                        onHistoryNavigate: { newText in
+                            viewModel.inputText = newText
+                        },
+                        modelName: viewModel.currentModel,
+                        onModelTap: { showModelSwitcher = true },
+                        tokenUsage: viewModel.totalTokenUsage,
+                        contextPercentage: viewModel.contextPercentage
+                    )
+                }
             }
-
-            // Input area with integrated status pills (liquid glass style)
-            InputBar(
-                text: $viewModel.inputText,
-                isProcessing: viewModel.isProcessing,
-                attachedImages: $viewModel.attachedImages,
-                selectedImages: $viewModel.selectedImages,
-                onSend: {
-                    // Add to history before sending
-                    inputHistory.addToHistory(viewModel.inputText)
-                    viewModel.sendMessage()
-                    // Message count is now tracked in EventDatabase via EventStoreManager
-                },
-                onAbort: viewModel.abortAgent,
-                onRemoveImage: viewModel.removeAttachedImage,
-                inputHistory: inputHistory,
-                onHistoryNavigate: { newText in
-                    viewModel.inputText = newText
-                },
-                modelName: viewModel.currentModel,
-                onModelTap: { showModelSwitcher = true },
-                tokenUsage: viewModel.totalTokenUsage,
-                contextPercentage: viewModel.contextPercentage
-            )
-            .focused($isInputFocused)
-        }
-        .navigationTitle(eventStoreManager.activeSession?.displayTitle ?? "Chat")
+            .scrollContentBackground(.hidden)
+            .background(.clear)
+            .navigationTitle(eventStoreManager.activeSession?.displayTitle ?? "Chat")
         .navigationBarTitleDisplayMode(.inline)
         .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
         .toolbar {
@@ -175,11 +175,12 @@ struct ChatView: View {
         } label: {
             Image(systemName: "gearshape")
                 .font(.system(size: 14, weight: .medium))
-                .foregroundStyle(.white.opacity(0.85))
+                .foregroundStyle(.white)
                 .frame(width: 32, height: 32)
+                .contentShape(Circle())
         }
-        .buttonStyle(.plain)
-        .glassEffect(.regular.tint(Color.tronPhthaloGreen).interactive(), in: .circle)
+        .menuIndicator(.hidden)
+        .glassEffect(.regular.interactive(), in: .circle)
     }
 
     // Note: Status bar (model pill, token stats) is now integrated into InputBar

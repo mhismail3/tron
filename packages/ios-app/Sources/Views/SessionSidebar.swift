@@ -59,11 +59,11 @@ struct SessionSidebar: View {
                 Button(action: onSettings) {
                     Image(systemName: "gearshape")
                         .font(.system(size: 14, weight: .medium))
-                        .foregroundStyle(.white.opacity(0.85))
+                        .foregroundStyle(.white)
                         .frame(width: 32, height: 32)
+                        .contentShape(Circle())
                 }
-                .buttonStyle(.plain)
-                .glassEffect(.regular.tint(Color.tronPhthaloGreen).interactive(), in: .circle)
+                .glassEffect(.regular.interactive(), in: .circle)
             }
         }
     }
@@ -81,9 +81,9 @@ struct FloatingNewSessionButton: View {
                 .font(.system(size: 22, weight: .semibold))
                 .foregroundStyle(.white)
                 .frame(width: 56, height: 56)
+                .contentShape(Circle())
         }
-        .buttonStyle(.plain)
-        .glassEffect(.regular.tint(Color.tronPhthaloGreen).interactive(), in: .circle)
+        .glassEffect(.regular.tint(Color.tronEmerald).interactive(), in: .circle)
     }
 }
 
@@ -96,18 +96,12 @@ struct CachedSessionSidebarRow: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            // Title row with status dot
+            // Title row
             HStack(spacing: 6) {
                 Text(session.displayTitle)
                     .font(.subheadline.weight(.medium))
                     .foregroundStyle(.white.opacity(0.95))
                     .lineLimit(1)
-
-                if session.status == .active {
-                    Circle()
-                        .fill(Color.tronSuccess)
-                        .frame(width: 6, height: 6)
-                }
 
                 Spacer()
 
@@ -124,7 +118,7 @@ struct CachedSessionSidebarRow: View {
                     .foregroundStyle(.white.opacity(0.8))
                     .padding(.horizontal, 6)
                     .padding(.vertical, 2)
-                    .glassEffect(.regular.tint(Color.tronPhthaloGreen), in: .capsule)
+                    .glassEffect(.regular.tint(Color.tronPhthaloGreen.opacity(0.4)), in: .capsule)
 
                 // Message count
                 HStack(spacing: 2) {
@@ -149,8 +143,8 @@ struct CachedSessionSidebarRow: View {
         .padding(.horizontal, 12)
         .glassEffect(
             isSelected
-                ? .regular.tint(Color.tronEmerald.opacity(0.3)).interactive()
-                : .regular.tint(Color.tronPhthaloGreen.opacity(0.2)),
+                ? .regular.tint(Color.tronEmerald.opacity(0.4)).interactive()
+                : .regular.tint(Color.tronPhthaloGreen.opacity(0.15)),
             in: RoundedRectangle(cornerRadius: 12, style: .continuous)
         )
     }
@@ -202,8 +196,8 @@ struct EmptySessionsView: View {
                 .foregroundStyle(.white)
                 .padding(.horizontal, 20)
                 .padding(.vertical, 10)
+                .contentShape(Capsule())
             }
-            .buttonStyle(.plain)
             .glassEffect(.regular.tint(Color.tronEmerald).interactive(), in: .capsule)
         }
         .padding(32)
