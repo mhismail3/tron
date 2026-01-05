@@ -20,6 +20,7 @@ import {
   GrepTool,
   FindTool,
   LsTool,
+  loadServerAuth,
   type AgentConfig,
   type TurnResult,
   type TronEvent,
@@ -32,6 +33,7 @@ import {
   type SessionId,
   type WorkingDirectory,
   type WorktreeCoordinatorConfig,
+  type ServerAuth,
 } from '@tron/core';
 
 const logger = createLogger('event-store-orchestrator');
@@ -171,6 +173,7 @@ export class EventStoreOrchestrator extends EventEmitter {
   private activeSessions: Map<string, ActiveSession> = new Map();
   private cleanupTimer: ReturnType<typeof setInterval> | null = null;
   private initialized = false;
+  private cachedAuth: ServerAuth | null = null;
 
   constructor(config: EventStoreOrchestratorConfig) {
     super();
@@ -200,6 +203,18 @@ export class EventStoreOrchestrator extends EventEmitter {
 
   async initialize(): Promise<void> {
     if (this.initialized) return;
+
+    // Load auth from ~/.tron/auth.json (supports Claude Max OAuth)
+    // IMPORTANT: Does NOT check ANTHROPIC_API_KEY env var - that would override OAuth
+    this.cachedAuth = await loadServerAuth();
+    if (!this.cachedAuth) {
+      logger.warn('No authentication configured - run tron login to authenticate');
+    } else {
+      logger.info('Authentication loaded', {
+        type: this.cachedAuth.type,
+        isOAuth: this.cachedAuth.type === 'oauth',
+      });
+    }
 
     await this.eventStore.initialize();
     this.startCleanupTimer();
@@ -811,7 +826,15 @@ export class EventStoreOrchestrator extends EventEmitter {
     model: string,
     systemPrompt?: string
   ): Promise<TronAgent> {
-    const apiKey = process.env.ANTHROPIC_API_KEY ?? '';
+    // Use cached auth from ~/.tron/auth.json (supports Claude Max OAuth)
+    // Refresh cache if needed (OAuth tokens expire)
+    if (!this.cachedAuth || (this.cachedAuth.type === 'oauth' && this.cachedAuth.expiresAt < Date.now())) {
+      this.cachedAuth = await loadServerAuth();
+    }
+
+    if (!this.cachedAuth) {
+      throw new Error('No authentication configured. Run `tron login` to authenticate with Claude Max or set up API key.');
+    }
 
     const tools: TronTool[] = [
       new ReadTool({ workingDirectory }),
@@ -830,12 +853,14 @@ export class EventStoreOrchestrator extends EventEmitter {
       sessionId,
       workingDirectory,
       toolCount: tools.length,
+      authType: this.cachedAuth.type,
+      isOAuth: this.cachedAuth.type === 'oauth',
     });
 
     const agentConfig: AgentConfig = {
       provider: {
         model,
-        auth: { type: 'api_key' as const, apiKey },
+        auth: this.cachedAuth, // Use OAuth or API key from ~/.tron/auth.json
       },
       tools,
       systemPrompt: prompt,

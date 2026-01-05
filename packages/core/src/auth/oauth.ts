@@ -302,3 +302,119 @@ export function shouldRefreshTokens(tokens: OAuthTokens): boolean {
 export function isOAuthToken(token: string): boolean {
   return token.startsWith('sk-ant-oat');
 }
+
+// =============================================================================
+// Server-side Auth Loading
+// =============================================================================
+
+/**
+ * Stored auth format in ~/.tron/auth.json
+ */
+export interface StoredAuth {
+  tokens?: OAuthTokens;
+  apiKey?: string;
+  lastUpdated: string;
+}
+
+/**
+ * Server-side authentication result
+ * Uses a discriminated union for type safety
+ */
+export type ServerAuth =
+  | { type: 'oauth'; accessToken: string; refreshToken: string; expiresAt: number }
+  | { type: 'api_key'; apiKey: string };
+
+/**
+ * Load authentication for server use (Claude Max subscription)
+ *
+ * IMPORTANT: This function does NOT check ANTHROPIC_API_KEY environment variable.
+ * This is intentional - when using Claude Max subscription, you MUST unset
+ * ANTHROPIC_API_KEY to prevent it from being used instead of OAuth tokens.
+ *
+ * Priority:
+ * 1. OAuth tokens from ~/.tron/auth.json (refreshed if needed)
+ * 2. API key from ~/.tron/auth.json (fallback)
+ * 3. null if no auth configured
+ *
+ * @returns ServerAuth if authenticated, null if login needed
+ */
+export async function loadServerAuth(): Promise<ServerAuth | null> {
+  const fs = await import('fs/promises');
+  const path = await import('path');
+  const os = await import('os');
+
+  const authFilePath = path.join(os.homedir(), '.tron', 'auth.json');
+
+  let stored: StoredAuth | null = null;
+  try {
+    const data = await fs.readFile(authFilePath, 'utf-8');
+    stored = JSON.parse(data) as StoredAuth;
+  } catch {
+    logger.warn('No auth.json found at', { path: authFilePath });
+    return null;
+  }
+
+  if (!stored) {
+    return null;
+  }
+
+  // Check OAuth tokens first (preferred for Claude Max)
+  if (stored.tokens) {
+    // Check if tokens need refresh (with 5 min buffer)
+    const expiryBuffer = getExpiryBuffer() * 1000; // Convert to ms
+    if (stored.tokens.expiresAt - expiryBuffer < Date.now()) {
+      logger.info('OAuth tokens expired, refreshing...');
+      try {
+        const newTokens = await refreshOAuthToken(stored.tokens.refreshToken);
+
+        // Save refreshed tokens back to file
+        await saveServerAuth({
+          tokens: newTokens,
+          lastUpdated: new Date().toISOString(),
+        }, authFilePath);
+
+        return {
+          type: 'oauth',
+          accessToken: newTokens.accessToken,
+          refreshToken: newTokens.refreshToken,
+          expiresAt: newTokens.expiresAt,
+        };
+      } catch (error) {
+        logger.error('Failed to refresh OAuth tokens', { error });
+        // Tokens are expired and refresh failed - need to re-login
+        return null;
+      }
+    }
+
+    return {
+      type: 'oauth',
+      accessToken: stored.tokens.accessToken,
+      refreshToken: stored.tokens.refreshToken,
+      expiresAt: stored.tokens.expiresAt,
+    };
+  }
+
+  // Fallback to API key in auth.json
+  if (stored.apiKey) {
+    logger.info('Using API key from auth.json');
+    return { type: 'api_key', apiKey: stored.apiKey };
+  }
+
+  return null;
+}
+
+/**
+ * Save server auth to file
+ */
+async function saveServerAuth(auth: StoredAuth, filePath: string): Promise<void> {
+  const fs = await import('fs/promises');
+  const path = await import('path');
+
+  const dir = path.dirname(filePath);
+  await fs.mkdir(dir, { recursive: true });
+  await fs.writeFile(filePath, JSON.stringify(auth, null, 2), {
+    mode: 0o600, // Owner read/write only
+  });
+
+  logger.info('Saved refreshed auth tokens');
+}

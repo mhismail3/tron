@@ -223,26 +223,24 @@ async function refreshTokens(refreshToken: string): Promise<OAuthTokens> {
 /**
  * Get authentication for the CLI
  * Returns stored auth if valid, or null if login is needed
+ *
+ * IMPORTANT: This function does NOT check ANTHROPIC_API_KEY environment variable.
+ * This is intentional - when using Claude Max subscription, you MUST unset
+ * ANTHROPIC_API_KEY to prevent it from being used instead of OAuth tokens.
+ *
+ * Priority:
+ * 1. OAuth tokens from ~/.tron/auth.json (refreshed if needed)
+ * 2. API key from ~/.tron/auth.json
+ * 3. null if no auth configured
  */
 export async function getAuth(): Promise<AnthropicAuth | null> {
-  // First, check for API key in environment
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (apiKey) {
-    return { type: 'api_key', apiKey };
-  }
-
-  // Then check stored auth
+  // Load stored auth from ~/.tron/auth.json
   const stored = await loadStoredAuth();
   if (!stored) {
     return null;
   }
 
-  // API key takes precedence
-  if (stored.apiKey) {
-    return { type: 'api_key', apiKey: stored.apiKey };
-  }
-
-  // Check OAuth tokens
+  // OAuth tokens take precedence (for Claude Max users)
   if (stored.tokens) {
     // Check if access token is expired (with 5 min buffer)
     if (stored.tokens.expiresAt - 5 * 60 * 1000 < Date.now()) {
@@ -271,6 +269,11 @@ export async function getAuth(): Promise<AnthropicAuth | null> {
       refreshToken: stored.tokens.refreshToken,
       expiresAt: stored.tokens.expiresAt,
     };
+  }
+
+  // Fallback to API key in auth.json
+  if (stored.apiKey) {
+    return { type: 'api_key', apiKey: stored.apiKey };
   }
 
   return null;
