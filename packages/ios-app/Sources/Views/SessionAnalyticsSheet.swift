@@ -59,7 +59,7 @@ struct SessionAnalyticsSheet: View {
                     }
                 }
             }
-            .background(Color.tronBackground)
+            .background(Color.tronSurface)
             .navigationTitle("Session Analytics")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
