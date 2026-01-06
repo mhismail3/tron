@@ -34,15 +34,23 @@ struct ModelPickerMenu: View {
 
                 // OpenAI section
                 Section("OpenAI") {
+                    // GPT-5 series (flagship)
                     comingSoonModel("GPT-5.2")
                     comingSoonModel("GPT-5.2 Mini")
+                    comingSoonModel("GPT-5.2-Codex")
+                    // Reasoning models
                     comingSoonModel("o3")
+                    comingSoonModel("o3-pro")
                     comingSoonModel("o4-mini")
-                    comingSoonModel("Codex")
                 }
 
                 // Google section
                 Section("Google") {
+                    // Gemini 3 series (latest)
+                    comingSoonModel("Gemini 3 Pro")
+                    comingSoonModel("Gemini 3 Flash")
+                    comingSoonModel("Gemini 3 Deep Think")
+                    // Gemini 2.5 series (stable)
                     comingSoonModel("Gemini 2.5 Pro")
                     comingSoonModel("Gemini 2.5 Flash")
                 }
