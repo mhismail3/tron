@@ -163,19 +163,17 @@ export async function exchangeCodeForTokens(
   const tokenUrl = getTokenUrl();
   const expiryBuffer = getExpiryBuffer();
 
-  const body = new URLSearchParams({
-    grant_type: 'authorization_code',
-    code,
-    code_verifier: verifier,
-    client_id: clientId,
-  });
-
   const response = await fetch(tokenUrl, {
     method: 'POST',
     headers: {
-      'Content-Type': 'application/x-www-form-urlencoded',
+      'Content-Type': 'application/json',
     },
-    body: body.toString(),
+    body: JSON.stringify({
+      grant_type: 'authorization_code',
+      code,
+      code_verifier: verifier,
+      client_id: clientId,
+    }),
   });
 
   if (!response.ok) {
@@ -231,18 +229,16 @@ export async function refreshOAuthToken(refreshToken: string): Promise<OAuthToke
   const tokenUrl = getTokenUrl();
   const expiryBuffer = getExpiryBuffer();
 
-  const body = new URLSearchParams({
-    grant_type: 'refresh_token',
-    refresh_token: refreshToken,
-    client_id: clientId,
-  });
-
   const response = await fetch(tokenUrl, {
     method: 'POST',
     headers: {
-      'Content-Type': 'application/x-www-form-urlencoded',
+      'Content-Type': 'application/json',
     },
-    body: body.toString(),
+    body: JSON.stringify({
+      grant_type: 'refresh_token',
+      refresh_token: refreshToken,
+      client_id: clientId,
+    }),
   });
 
   if (!response.ok) {

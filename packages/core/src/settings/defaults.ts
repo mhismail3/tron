@@ -64,7 +64,7 @@ export const DEFAULT_SETTINGS: TronSettings = {
     anthropic: {
       authUrl: 'https://claude.ai/oauth/authorize',
       tokenUrl: 'https://console.anthropic.com/v1/oauth/token',
-      clientId: 'tron-agent',
+      clientId: '9d1c250a-e61b-44d9-88ed-5944d1962f5e', // Claude CLI OAuth client ID
       scopes: ['user:inference', 'user:profile'],
       systemPromptPrefix: "You are Claude Code, Anthropic's official CLI for Claude.",
       oauthBetaHeaders: 'oauth-2025-04-20,interleaved-thinking-2025-05-14,fine-grained-tool-streaming-2025-05-14',
