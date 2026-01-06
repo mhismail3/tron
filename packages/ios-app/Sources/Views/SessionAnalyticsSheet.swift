@@ -14,6 +14,10 @@ struct SessionAnalyticsSheet: View {
     @State private var events: [SessionEvent] = []
     @State private var isLoading = true
 
+    private var session: CachedSession? {
+        eventStoreManager.sessions.first { $0.id == sessionId }
+    }
+
     var body: some View {
         NavigationStack {
             Group {
@@ -23,6 +27,11 @@ struct SessionAnalyticsSheet: View {
                 } else {
                     ScrollView {
                         VStack(spacing: 24) {
+                            // Session info header
+                            if let session = session {
+                                SessionInfoHeader(session: session)
+                            }
+
                             // Summary stats
                             SummaryStatsRow(analytics: analytics)
 
@@ -523,6 +532,117 @@ struct ErrorLogSection: View {
         let formatter = DateFormatter()
         formatter.dateFormat = "HH:mm"
         return formatter.string(from: date)
+    }
+}
+
+// MARK: - Session Info Header
+
+struct SessionInfoHeader: View {
+    let session: CachedSession
+
+    var body: some View {
+        VStack(spacing: 12) {
+            // Session ID row (compact, copyable)
+            HStack {
+                Image(systemName: "number.circle")
+                    .font(.system(size: 12))
+                    .foregroundStyle(.tronTextMuted)
+
+                Text(session.id)
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundStyle(.tronTextSecondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .textSelection(.enabled)
+
+                Spacer()
+
+                // Token usage badge
+                Text(formatTokens(session.inputTokens + session.outputTokens))
+                    .font(.system(size: 10, weight: .medium, design: .monospaced))
+                    .foregroundStyle(.tronEmerald)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(Color.tronEmerald.opacity(0.15))
+                    .clipShape(Capsule())
+            }
+
+            Divider()
+                .background(Color.tronBorder.opacity(0.5))
+
+            // Info grid
+            HStack(spacing: 0) {
+                InfoColumn(
+                    icon: "folder",
+                    label: "Workspace",
+                    value: workspaceName
+                )
+
+                InfoColumn(
+                    icon: "calendar",
+                    label: "Created",
+                    value: session.humanReadableCreatedAt
+                )
+
+                InfoColumn(
+                    icon: "clock",
+                    label: "Activity",
+                    value: session.humanReadableLastActivity
+                )
+
+                InfoColumn(
+                    icon: "message",
+                    label: "Messages",
+                    value: "\(session.messageCount)"
+                )
+            }
+        }
+        .padding(16)
+        .background(Color.tronSurface.opacity(0.5))
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+    }
+
+    private var workspaceName: String {
+        // Get last path component
+        let path = session.workingDirectory
+        if let lastComponent = path.split(separator: "/").last {
+            return String(lastComponent)
+        }
+        return path
+    }
+
+    private func formatTokens(_ tokens: Int) -> String {
+        if tokens >= 1_000_000 {
+            return String(format: "%.1fM tokens", Double(tokens) / 1_000_000)
+        } else if tokens >= 1_000 {
+            return String(format: "%.1fK tokens", Double(tokens) / 1_000)
+        }
+        return "\(tokens) tokens"
+    }
+}
+
+struct InfoColumn: View {
+    let icon: String
+    let label: String
+    let value: String
+
+    var body: some View {
+        VStack(spacing: 4) {
+            Image(systemName: icon)
+                .font(.system(size: 12))
+                .foregroundStyle(.tronTextMuted)
+
+            Text(value)
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(.tronTextPrimary)
+                .lineLimit(1)
+                .truncationMode(.tail)
+
+            Text(label)
+                .font(.system(size: 9))
+                .foregroundStyle(.tronTextMuted)
+        }
+        .frame(maxWidth: .infinity)
     }
 }
 

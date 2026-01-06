@@ -20,7 +20,6 @@ struct ChatView: View {
     @StateObject private var viewModel: ChatViewModel
     @StateObject private var inputHistory = InputHistoryStore()
     @State private var scrollProxy: ScrollViewProxy?
-    @State private var showSessionStats = false
     @State private var showContextAudit = false
     @State private var showSessionHistory = false
     @State private var showSessionAnalytics = false
@@ -116,12 +115,6 @@ struct ChatView: View {
         }
         .sheet(isPresented: $viewModel.showSettings) {
             SettingsView()
-        }
-        .sheet(isPresented: $showSessionStats) {
-            SessionStatsView(
-                session: eventStoreManager.activeSession,
-                tokenUsage: viewModel.totalTokenUsage
-            )
         }
         .sheet(isPresented: $showContextAudit) {
             ContextAuditView(
@@ -246,9 +239,9 @@ struct ChatView: View {
             // Session section
             Section("Session") {
                 Button {
-                    showSessionStats = true
+                    showSessionAnalytics = true
                 } label: {
-                    Label("Session Info", systemImage: "info.circle")
+                    Label("Analytics", systemImage: "chart.bar.xaxis")
                 }
 
                 Button {
@@ -261,12 +254,6 @@ struct ChatView: View {
                     showContextAudit = true
                 } label: {
                     Label("Memory & Context", systemImage: "brain")
-                }
-
-                Button {
-                    showSessionAnalytics = true
-                } label: {
-                    Label("Analytics", systemImage: "chart.bar.xaxis")
                 }
 
                 Button {
@@ -583,81 +570,7 @@ struct ThinkingBanner: View {
     }
 }
 
-// MARK: - Session Stats View
-
-struct SessionStatsView: View {
-    let session: CachedSession?
-    let tokenUsage: TokenUsage?
-
-    @Environment(\.dismiss) private var dismiss
-
-    var body: some View {
-        NavigationStack {
-            List {
-                if let session = session {
-                    Section("Session") {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text("ID")
-                                .font(.subheadline)
-                                .foregroundStyle(.tronTextSecondary)
-                            Text(session.id)
-                                .font(.system(size: 12, design: .monospaced))
-                                .foregroundStyle(.tronTextPrimary)
-                                .textSelection(.enabled)
-                        }
-                        .padding(.vertical, 4)
-
-                        LabeledContent("Messages", value: "\(session.messageCount)")
-                        LabeledContent("Created", value: session.humanReadableCreatedAt)
-                        LabeledContent("Last Activity", value: session.humanReadableLastActivity)
-                    }
-
-                    Section("Workspace") {
-                        Text(session.workingDirectory)
-                            .font(.subheadline)
-                            .foregroundStyle(.tronTextPrimary)
-                    }
-
-                    Section("Token Usage") {
-                        LabeledContent("Input", value: formatTokenCount(session.inputTokens))
-                        LabeledContent("Output", value: formatTokenCount(session.outputTokens))
-                        LabeledContent("Total", value: formatTokenCount(session.inputTokens + session.outputTokens))
-                    }
-                }
-
-                if let usage = tokenUsage {
-                    Section("Current Request") {
-                        LabeledContent("Input", value: formatTokenCount(usage.inputTokens))
-                        LabeledContent("Output", value: formatTokenCount(usage.outputTokens))
-                        LabeledContent("Total", value: formatTokenCount(usage.totalTokens))
-                    }
-                }
-            }
-            .scrollContentBackground(.hidden)
-            .background(Color.tronBackground)
-            .navigationTitle("Session Info")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button("Done") { dismiss() }
-                }
-            }
-        }
-        .preferredColorScheme(.dark)
-    }
-
-    private func formatTokenCount(_ count: Int) -> String {
-        if count >= 1_000_000 {
-            return String(format: "%.1fM", Double(count) / 1_000_000)
-        } else if count >= 1_000 {
-            return String(format: "%.1fK", Double(count) / 1_000)
-        }
-        return "\(count)"
-    }
-}
-
-// Extension for human-readable dates
+// MARK: - Human-Readable Dates
 extension CachedSession {
     var humanReadableCreatedAt: String {
         // Parse ISO date and format nicely
