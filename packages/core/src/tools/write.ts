@@ -40,7 +40,21 @@ export class WriteTool implements TronTool {
   }
 
   async execute(args: Record<string, unknown>): Promise<TronToolResult> {
-    const filePath = this.resolvePath(args.file_path as string);
+    // Validate required parameters (defense against truncated tool calls)
+    if (!args.file_path || typeof args.file_path !== 'string') {
+      return {
+        content: 'Missing required parameter: file_path. The tool call may have been truncated.',
+        isError: true,
+      };
+    }
+    if (args.content === undefined || args.content === null) {
+      return {
+        content: 'Missing required parameter: content. The tool call may have been truncated.',
+        isError: true,
+      };
+    }
+
+    const filePath = this.resolvePath(args.file_path);
     const content = args.content as string;
 
     logger.debug('Writing file', { filePath, contentLength: content.length });

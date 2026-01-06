@@ -79,6 +79,16 @@ export class BashTool implements TronTool {
     }
 
     const command = args.command as string;
+
+    // Validate required parameter (defense against truncated tool calls)
+    if (!command || typeof command !== 'string') {
+      return {
+        content: 'Missing required parameter: command. The tool call may have been truncated.',
+        isError: true,
+        details: { command },
+      };
+    }
+
     const settings = getBashSettings();
     const timeout = Math.min(
       (args.timeout as number) ?? this.config.defaultTimeout ?? settings.defaultTimeoutMs,

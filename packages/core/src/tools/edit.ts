@@ -121,7 +121,27 @@ export class EditTool implements TronTool {
   }
 
   async execute(args: Record<string, unknown>): Promise<TronToolResult> {
-    const filePath = this.resolvePath(args.file_path as string);
+    // Validate required parameters (defense against truncated tool calls)
+    if (!args.file_path || typeof args.file_path !== 'string') {
+      return {
+        content: 'Missing required parameter: file_path. The tool call may have been truncated.',
+        isError: true,
+      };
+    }
+    if (args.old_string === undefined || args.old_string === null) {
+      return {
+        content: 'Missing required parameter: old_string. The tool call may have been truncated.',
+        isError: true,
+      };
+    }
+    if (args.new_string === undefined || args.new_string === null) {
+      return {
+        content: 'Missing required parameter: new_string. The tool call may have been truncated.',
+        isError: true,
+      };
+    }
+
+    const filePath = this.resolvePath(args.file_path);
     const oldString = args.old_string as string;
     const newString = args.new_string as string;
     const replaceAll = (args.replace_all as boolean) ?? false;
