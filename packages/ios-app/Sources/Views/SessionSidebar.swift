@@ -93,31 +93,14 @@ struct CachedSessionSidebarRow: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            // Title row
+            // Title row with message count
             HStack(spacing: 6) {
                 Text(session.displayTitle)
                     .font(.system(size: 14, weight: .medium, design: .monospaced))
                     .foregroundStyle(.white.opacity(0.95))
                     .lineLimit(1)
 
-                Spacer()
-
-                Text(session.formattedDate)
-                    .font(.system(size: 10, weight: .regular, design: .monospaced))
-                    .foregroundStyle(.white.opacity(0.5))
-            }
-
-            // Meta row: model badge + message count
-            HStack(spacing: 8) {
-                // Model badge with glass effect
-                Text(session.shortModel)
-                    .font(.system(size: 10, weight: .medium, design: .monospaced))
-                    .foregroundStyle(.white.opacity(0.8))
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 2)
-                    .glassEffect(.regular.tint(Color.tronPhthaloGreen.opacity(0.4)), in: .capsule)
-
-                // Message count
+                // Message count (moved to right of title)
                 HStack(spacing: 3) {
                     Image(systemName: "bubble.left")
                         .font(.system(size: 9))
@@ -127,6 +110,10 @@ struct CachedSessionSidebarRow: View {
                 .foregroundStyle(.white.opacity(0.5))
 
                 Spacer()
+
+                Text(session.formattedDate)
+                    .font(.system(size: 10, weight: .regular, design: .monospaced))
+                    .foregroundStyle(.white.opacity(0.5))
             }
 
             // Working directory (truncated)

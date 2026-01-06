@@ -153,7 +153,6 @@ struct TreeStatsHeader: View {
         }
         .padding(.horizontal)
         .padding(.vertical, 12)
-        .background(Color.tronSurfaceElevated)
     }
 }
 

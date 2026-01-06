@@ -271,13 +271,45 @@ struct MarkdownTableParser {
 struct MarkdownTableView: View {
     let table: MarkdownTable
 
+    /// Calculate column widths based on content
+    private var columnWidths: [CGFloat] {
+        var widths: [CGFloat] = Array(repeating: 0, count: table.headers.count)
+
+        // Check header widths
+        for (index, header) in table.headers.enumerated() {
+            widths[index] = max(widths[index], estimateWidth(for: header, isHeader: true))
+        }
+
+        // Check all row data
+        for row in table.rows {
+            for (index, cell) in row.enumerated() where index < widths.count {
+                widths[index] = max(widths[index], estimateWidth(for: cell, isHeader: false))
+            }
+        }
+
+        return widths
+    }
+
+    /// Estimate width needed for text (monospaced font)
+    private func estimateWidth(for text: String, isHeader: Bool) -> CGFloat {
+        let charWidth: CGFloat = 7.5 // Approximate char width for 12pt monospaced
+        let padding: CGFloat = 20 // Horizontal padding
+        let minWidth: CGFloat = 50
+        return max(minWidth, CGFloat(text.count) * charWidth + padding)
+    }
+
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             VStack(alignment: .leading, spacing: 0) {
                 // Header row
                 HStack(spacing: 0) {
                     ForEach(Array(table.headers.enumerated()), id: \.offset) { index, header in
-                        tableCellView(header, isHeader: true, column: index)
+                        tableCellView(
+                            header,
+                            isHeader: true,
+                            column: index,
+                            width: columnWidths[safe: index] ?? 80
+                        )
                     }
                 }
                 .background(Color.tronSurfaceElevated)
@@ -290,8 +322,14 @@ struct MarkdownTableView: View {
                 // Data rows
                 ForEach(Array(table.rows.enumerated()), id: \.offset) { rowIndex, row in
                     HStack(spacing: 0) {
-                        ForEach(Array(row.enumerated()), id: \.offset) { colIndex, cell in
-                            tableCellView(cell, isHeader: false, column: colIndex)
+                        ForEach(0..<table.headers.count, id: \.self) { colIndex in
+                            let cell = row[safe: colIndex] ?? ""
+                            tableCellView(
+                                cell,
+                                isHeader: false,
+                                column: colIndex,
+                                width: columnWidths[safe: colIndex] ?? 80
+                            )
                         }
                     }
                     .background(rowIndex % 2 == 0 ? Color.tronSurface.opacity(0.3) : Color.clear)
@@ -306,8 +344,9 @@ struct MarkdownTableView: View {
     }
 
     @ViewBuilder
-    private func tableCellView(_ content: String, isHeader: Bool, column: Int) -> some View {
+    private func tableCellView(_ content: String, isHeader: Bool, column: Int, width: CGFloat) -> some View {
         let alignment = column < table.alignments.count ? table.alignments[column] : .left
+        let isLastColumn = column == table.headers.count - 1
 
         Text(content)
             .font(.system(size: 12, weight: isHeader ? .semibold : .regular, design: .monospaced))
@@ -316,11 +355,15 @@ struct MarkdownTableView: View {
             .multilineTextAlignment(textAlignment(for: alignment))
             .padding(.horizontal, 10)
             .padding(.vertical, 6)
-            .frame(minWidth: 60, alignment: frameAlignment(for: alignment))
+            .frame(width: width, alignment: frameAlignment(for: alignment))
             .overlay(
-                Rectangle()
-                    .fill(Color.tronBorder.opacity(0.3))
-                    .frame(width: 1),
+                Group {
+                    if !isLastColumn {
+                        Rectangle()
+                            .fill(Color.tronBorder.opacity(0.3))
+                            .frame(width: 1)
+                    }
+                },
                 alignment: .trailing
             )
     }
@@ -339,6 +382,14 @@ struct MarkdownTableView: View {
         case .center: return .center
         case .right: return .trailing
         }
+    }
+}
+
+// MARK: - Safe Array Access
+
+private extension Array {
+    subscript(safe index: Int) -> Element? {
+        return indices.contains(index) ? self[index] : nil
     }
 }
 

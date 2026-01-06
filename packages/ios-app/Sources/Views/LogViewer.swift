@@ -72,7 +72,7 @@ struct LogViewer: View {
     // MARK: - Filter Bar
 
     private var filterBar: some View {
-        VStack(spacing: 8) {
+        VStack(spacing: 12) {
             // Level picker
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 8) {
@@ -88,6 +88,7 @@ struct LogViewer: View {
                     }
                 }
                 .padding(.horizontal)
+                .padding(.vertical, 4)
             }
 
             // Category picker
@@ -114,11 +115,19 @@ struct LogViewer: View {
                     }
                 }
                 .padding(.horizontal)
+                .padding(.vertical, 4)
             }
 
-            // Auto-scroll toggle
-            HStack {
-                Toggle("Auto-scroll", isOn: $autoScroll)
+            // Auto-scroll toggle (toggle moved to left of label)
+            HStack(spacing: 8) {
+                Toggle(isOn: $autoScroll) {
+                    EmptyView()
+                }
+                .toggleStyle(SwitchToggleStyle(tint: .tronEmerald))
+                .labelsHidden()
+                .fixedSize()
+
+                Text("Auto-scroll")
                     .font(.caption)
                     .foregroundStyle(.gray)
 
@@ -130,8 +139,7 @@ struct LogViewer: View {
             }
             .padding(.horizontal)
         }
-        .padding(.vertical, 8)
-        .background(Color(white: 0.1))
+        .padding(.vertical, 12)
     }
 
     // MARK: - Log List
