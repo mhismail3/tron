@@ -169,6 +169,7 @@ struct ToolResultRouter: View {
         case "write":
             WriteResultViewer(
                 filePath: extractFilePath(from: tool.arguments),
+                content: extractContent(from: tool.arguments),
                 result: result
             )
         case "edit":
@@ -247,6 +248,18 @@ struct ToolResultRouter: View {
         return ""
     }
 
+    private func extractContent(from args: String) -> String {
+        // Try to extract content field from JSON arguments
+        // Handle escaped content in JSON
+        if let match = args.firstMatch(of: /"content"\s*:\s*"((?:[^"\\]|\\.)*)"/) {
+            return String(match.1)
+                .replacingOccurrences(of: "\\n", with: "\n")
+                .replacingOccurrences(of: "\\t", with: "\t")
+                .replacingOccurrences(of: "\\\"", with: "\"")
+        }
+        return ""
+    }
+
     /// Shorten a file path to just the filename for display
     private func shortenPath(_ path: String) -> String {
         guard !path.isEmpty else { return "" }
@@ -275,32 +288,39 @@ struct BashResultViewer: View {
         isExpanded ? lines : Array(lines.prefix(8))
     }
 
+    /// Calculate optimal width for line numbers based on total lines
+    private var lineNumWidth: CGFloat {
+        let maxNum = lines.count
+        let digits = String(maxNum).count
+        return CGFloat(max(digits * 8, 14)) // ~8pt per digit, min 14pt
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            // Output lines
+            // Output lines - compact layout
             ScrollView(.horizontal, showsIndicators: false) {
                 VStack(alignment: .leading, spacing: 0) {
                     ForEach(Array(displayLines.enumerated()), id: \.offset) { index, line in
                         HStack(spacing: 0) {
-                            // Line number
+                            // Compact line number
                             Text("\(index + 1)")
-                                .font(.system(size: 10, design: .monospaced))
-                                .foregroundStyle(.tronTextMuted)
-                                .frame(width: 32, alignment: .trailing)
-                                .padding(.trailing, 8)
-                                .background(Color.tronSurface)
+                                .font(.system(size: 9, design: .monospaced))
+                                .foregroundStyle(.tronTextMuted.opacity(0.5))
+                                .frame(width: lineNumWidth, alignment: .trailing)
+                                .padding(.trailing, 5)
 
                             // Line content
                             Text(line.isEmpty ? " " : line)
                                 .font(.system(size: 11, design: .monospaced))
                                 .foregroundStyle(.tronTextSecondary)
                         }
-                        .frame(minHeight: 18)
+                        .frame(minHeight: 17)
                     }
                 }
                 .padding(.vertical, 4)
+                .padding(.leading, 4)
             }
-            .frame(maxHeight: isExpanded ? .infinity : 160)
+            .frame(maxHeight: isExpanded ? .infinity : 150)
 
             // Expand/collapse button
             if lines.count > 8 {
@@ -332,12 +352,19 @@ struct ReadResultViewer: View {
     let content: String
     @Binding var isExpanded: Bool
 
-    private var lines: [String] {
-        content.components(separatedBy: "\n")
+    /// Parse lines, stripping server-side line number prefixes like "1→", "42→" etc.
+    private var parsedLines: [(lineNum: Int, content: String)] {
+        content.components(separatedBy: "\n").enumerated().map { index, line in
+            // Check for server-side line number prefix pattern: "123→" or "1→"
+            if let match = line.firstMatch(of: /^(\d+)→(.*)/) {
+                return (Int(match.1) ?? (index + 1), String(match.2))
+            }
+            return (index + 1, line)
+        }
     }
 
-    private var displayLines: [String] {
-        isExpanded ? lines : Array(lines.prefix(12))
+    private var displayLines: [(lineNum: Int, content: String)] {
+        isExpanded ? parsedLines : Array(parsedLines.prefix(12))
     }
 
     private var fileExtension: String {
@@ -362,6 +389,13 @@ struct ReadResultViewer: View {
         case "yaml", "yml": return Color(hex: "#CB171E")
         default: return .tronEmerald
         }
+    }
+
+    /// Calculate optimal width for line numbers based on max line number
+    private var lineNumWidth: CGFloat {
+        let maxNum = parsedLines.last?.lineNum ?? parsedLines.count
+        let digits = String(maxNum).count
+        return CGFloat(max(digits * 8, 16)) // ~8pt per digit, min 16pt
     }
 
     var body: some View {
@@ -389,7 +423,7 @@ struct ReadResultViewer: View {
 
                 Spacer()
 
-                Text("\(lines.count) lines")
+                Text("\(parsedLines.count) lines")
                     .font(.system(size: 10, design: .monospaced))
                     .foregroundStyle(.tronTextMuted)
             }
@@ -403,33 +437,33 @@ struct ReadResultViewer: View {
                 alignment: .leading
             )
 
-            // Content lines
+            // Content lines - compact layout
             ScrollView(.horizontal, showsIndicators: false) {
                 VStack(alignment: .leading, spacing: 0) {
-                    ForEach(Array(displayLines.enumerated()), id: \.offset) { index, line in
+                    ForEach(Array(displayLines.enumerated()), id: \.offset) { _, line in
                         HStack(spacing: 0) {
-                            // Line number
-                            Text("\(index + 1)")
+                            // Compact line number
+                            Text("\(line.lineNum)")
                                 .font(.system(size: 10, design: .monospaced))
-                                .foregroundStyle(.tronTextMuted)
-                                .frame(width: 40, alignment: .trailing)
-                                .padding(.trailing, 8)
-                                .background(Color.tronSurface)
+                                .foregroundStyle(.tronTextMuted.opacity(0.6))
+                                .frame(width: lineNumWidth, alignment: .trailing)
+                                .padding(.trailing, 6)
 
-                            // Line content
-                            Text(line.isEmpty ? " " : line)
+                            // Line content (cleaned)
+                            Text(line.content.isEmpty ? " " : line.content)
                                 .font(.system(size: 11, design: .monospaced))
                                 .foregroundStyle(.tronTextSecondary)
                         }
-                        .frame(minHeight: 18)
+                        .frame(minHeight: 17)
                     }
                 }
                 .padding(.vertical, 4)
+                .padding(.leading, 4)
             }
-            .frame(maxHeight: isExpanded ? .infinity : 220)
+            .frame(maxHeight: isExpanded ? .infinity : 210)
 
             // Expand/collapse button
-            if lines.count > 12 {
+            if parsedLines.count > 12 {
                 Button {
                     withAnimation(.tronFast) {
                         isExpanded.toggle()
@@ -626,35 +660,36 @@ struct DiffLineView: View {
 
     var body: some View {
         HStack(spacing: 0) {
-            // Old line number
-            Text(oldLineNum.map { String($0) } ?? "")
-                .font(.system(size: 10, design: .monospaced))
-                .foregroundStyle(lineNumColor)
-                .frame(width: 32, alignment: .trailing)
-                .padding(.trailing, 4)
-                .background(lineNumBackground)
+            // Compact line number column (combined old/new)
+            HStack(spacing: 0) {
+                // Old line number
+                Text(oldLineNum.map { String($0) } ?? "")
+                    .font(.system(size: 9, design: .monospaced))
+                    .foregroundStyle(lineNumColor.opacity(0.8))
+                    .frame(width: 20, alignment: .trailing)
 
-            // New line number
-            Text(newLineNum.map { String($0) } ?? "")
-                .font(.system(size: 10, design: .monospaced))
-                .foregroundStyle(lineNumColor)
-                .frame(width: 32, alignment: .trailing)
-                .padding(.trailing, 4)
-                .background(lineNumBackground)
+                // New line number
+                Text(newLineNum.map { String($0) } ?? "")
+                    .font(.system(size: 9, design: .monospaced))
+                    .foregroundStyle(lineNumColor.opacity(0.8))
+                    .frame(width: 20, alignment: .trailing)
+            }
+            .padding(.trailing, 4)
+            .background(lineNumBackground)
 
             // Marker
             Text(marker)
                 .font(.system(size: 11, weight: .semibold, design: .monospaced))
                 .foregroundStyle(markerColor)
-                .frame(width: 16)
+                .frame(width: 12)
 
             // Content
             Text(content.isEmpty ? " " : content)
                 .font(.system(size: 11, design: .monospaced))
                 .foregroundStyle(contentColor)
-                .padding(.leading, 4)
+                .padding(.leading, 2)
         }
-        .frame(minHeight: 18)
+        .frame(minHeight: 17)
         .background(lineBackground)
     }
 
@@ -815,6 +850,7 @@ struct FindResultViewer: View {
 
 // MARK: - Ls Result Viewer
 // Shows directory listing with file details
+// Supports both custom [D]/[F] format and standard ls -la format
 
 struct LsResultViewer: View {
     let path: String
@@ -831,24 +867,52 @@ struct LsResultViewer: View {
         isExpanded ? entries : Array(entries.prefix(12))
     }
 
-    /// Parse an ls -la style line into structured data
+    /// Parse ls output line - handles both custom [D]/[F] format and standard ls -la
     private func parseLsEntry(_ line: String) -> LsEntry? {
         // Skip "total" line
         if line.hasPrefix("total") { return nil }
 
-        // Try to parse ls -la format: drwxr-xr-x  5 user staff  160 Jan  4 10:00 name
-        let components = line.split(separator: " ", omittingEmptySubsequences: true)
-        guard components.count >= 9 else {
-            // Simple format - just the name
-            return LsEntry(name: line.trimmingCharacters(in: .whitespaces), isDirectory: false, size: nil, permissions: nil)
+        let trimmed = line.trimmingCharacters(in: .whitespaces)
+
+        // Try custom [D]/[F] format: [D]  128  Dec 27  2025  dirname/
+        // or: [F]  601  Dec 27  2025  filename.ext
+        if trimmed.hasPrefix("[D]") || trimmed.hasPrefix("[F]") {
+            let isDir = trimmed.hasPrefix("[D]")
+            let afterMarker = String(trimmed.dropFirst(3)).trimmingCharacters(in: .whitespaces)
+            let components = afterMarker.split(separator: " ", omittingEmptySubsequences: true)
+
+            // Format: size month day year/time name
+            if components.count >= 4 {
+                let size = Int(components[0])
+                // Name is everything after the date parts (month day year/time)
+                let name = components.dropFirst(4).joined(separator: " ")
+                if !name.isEmpty {
+                    return LsEntry(name: name, isDirectory: isDir, size: size, dateStr: formatDateParts(Array(components[1..<4])))
+                }
+            }
+            // Fallback: just extract the name (last component)
+            if let lastName = components.last {
+                return LsEntry(name: String(lastName), isDirectory: isDir, size: Int(components.first ?? ""), dateStr: nil)
+            }
         }
 
-        let permissions = String(components[0])
-        let isDir = permissions.hasPrefix("d")
-        let size = Int(components[4])
-        let name = components.dropFirst(8).joined(separator: " ")
+        // Try standard ls -la format: drwxr-xr-x  5 user staff  160 Jan  4 10:00 name
+        let components = line.split(separator: " ", omittingEmptySubsequences: true)
+        if components.count >= 9 {
+            let permissions = String(components[0])
+            let isDir = permissions.hasPrefix("d")
+            let size = Int(components[4])
+            let name = components.dropFirst(8).joined(separator: " ")
+            return LsEntry(name: name, isDirectory: isDir, size: size, dateStr: nil)
+        }
 
-        return LsEntry(name: name, isDirectory: isDir, size: size, permissions: permissions)
+        // Simple format - just the name
+        return LsEntry(name: trimmed, isDirectory: trimmed.hasSuffix("/"), size: nil, dateStr: nil)
+    }
+
+    private func formatDateParts(_ parts: [String.SubSequence]) -> String? {
+        guard parts.count >= 3 else { return nil }
+        return parts.joined(separator: " ")
     }
 
     var body: some View {
@@ -864,29 +928,22 @@ struct LsResultViewer: View {
                     .foregroundStyle(.tronTextMuted)
 
                 Spacer()
-
-                if !path.isEmpty && path != "." {
-                    Text(path)
-                        .font(.system(size: 10, design: .monospaced))
-                        .foregroundStyle(.tronTextMuted)
-                        .lineLimit(1)
-                }
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 6)
             .background(Color.tronSurface)
 
-            // Directory listing
+            // Directory listing - filename first
             VStack(alignment: .leading, spacing: 0) {
                 ForEach(displayEntries, id: \.name) { entry in
-                    HStack(spacing: 8) {
+                    HStack(spacing: 6) {
                         // Icon
                         Image(systemName: entry.isDirectory ? "folder.fill" : entryIcon(for: entry.name))
                             .font(.system(size: 10))
                             .foregroundStyle(entry.isDirectory ? .yellow : entryIconColor(for: entry.name))
                             .frame(width: 14)
 
-                        // Name
+                        // Name (first, most prominent)
                         Text(entry.name)
                             .font(.system(size: 11, design: .monospaced))
                             .foregroundStyle(entry.isDirectory ? .tronTextPrimary : .tronTextSecondary)
@@ -894,15 +951,22 @@ struct LsResultViewer: View {
 
                         Spacer()
 
-                        // Size (if available)
+                        // Size
                         if let size = entry.size {
                             Text(formatSize(size))
                                 .font(.system(size: 10, design: .monospaced))
                                 .foregroundStyle(.tronTextMuted)
                         }
+
+                        // Date
+                        if let dateStr = entry.dateStr {
+                            Text(dateStr)
+                                .font(.system(size: 10, design: .monospaced))
+                                .foregroundStyle(.tronTextMuted)
+                        }
                     }
                     .padding(.horizontal, 12)
-                    .padding(.vertical, 4)
+                    .padding(.vertical, 3)
                 }
             }
 
@@ -941,6 +1005,10 @@ struct LsResultViewer: View {
             return "paintbrush"
         case "png", "jpg", "jpeg", "gif", "svg":
             return "photo"
+        case "sh":
+            return "terminal"
+        case "txt":
+            return "doc.plaintext"
         default:
             return "doc"
         }
@@ -953,14 +1021,16 @@ struct LsResultViewer: View {
         case "ts", "tsx": return Color(hex: "#3178C6")
         case "js", "jsx": return Color(hex: "#F7DF1E")
         case "py": return Color(hex: "#3776AB")
+        case "sh": return .tronEmerald
+        case "md": return Color(hex: "#083FA1")
         default: return .tronTextMuted
         }
     }
 
     private func formatSize(_ bytes: Int) -> String {
-        if bytes < 1024 { return "\(bytes) B" }
-        if bytes < 1024 * 1024 { return "\(bytes / 1024) KB" }
-        return "\(bytes / (1024 * 1024)) MB"
+        if bytes < 1024 { return "\(bytes)" }
+        if bytes < 1024 * 1024 { return "\(bytes / 1024)K" }
+        return "\(bytes / (1024 * 1024))M"
     }
 }
 
@@ -970,7 +1040,7 @@ private struct LsEntry: Identifiable {
     let name: String
     let isDirectory: Bool
     let size: Int?
-    let permissions: String?
+    let dateStr: String?
 }
 
 // MARK: - Grep Result Viewer
@@ -994,29 +1064,28 @@ struct GrepResultViewer: View {
     /// Parse a grep output line into structured data
     /// Handles formats like: file.swift:42:matched text
     private func parseGrepLine(_ line: String) -> GrepMatch {
+        let trimmed = line.trimmingCharacters(in: .whitespaces)
+
         // Try to parse file:line:content format
-        let parts = line.split(separator: ":", maxSplits: 2)
+        let parts = trimmed.split(separator: ":", maxSplits: 2)
         if parts.count >= 3 {
             let file = String(parts[0])
             let lineNum = Int(parts[1])
-            let content = String(parts[2])
+            let content = String(parts[2]).trimmingCharacters(in: .whitespaces)
             return GrepMatch(file: file, line: lineNum, content: content, raw: line)
         } else if parts.count == 2, let lineNum = Int(parts[1]) {
             // file:line format without content
             return GrepMatch(file: String(parts[0]), line: lineNum, content: nil, raw: line)
         }
         // Fallback - just the raw line
-        return GrepMatch(file: nil, line: nil, content: line, raw: line)
+        return GrepMatch(file: nil, line: nil, content: trimmed, raw: line)
     }
 
-    /// Group matches by file for display
-    private var matchesByFile: [(file: String, matches: [GrepMatch])] {
-        var grouped: [String: [GrepMatch]] = [:]
-        for match in matches {
-            let key = match.file ?? "(unknown)"
-            grouped[key, default: []].append(match)
-        }
-        return grouped.map { ($0.key, $0.value) }.sorted { $0.file < $1.file }
+    /// Max line number width for alignment
+    private var maxLineNumWidth: CGFloat {
+        let maxNum = matches.compactMap { $0.line }.max() ?? 0
+        let digits = max(String(maxNum).count, 2)
+        return CGFloat(digits * 7 + 4) // ~7pt per digit + padding
     }
 
     var body: some View {
@@ -1044,41 +1113,57 @@ struct GrepResultViewer: View {
             .padding(.vertical, 6)
             .background(Color.tronSurface)
 
-            // Results
+            // Results - consistent format per row
             ScrollView(.horizontal, showsIndicators: false) {
                 VStack(alignment: .leading, spacing: 0) {
                     ForEach(Array(displayMatches.enumerated()), id: \.offset) { _, match in
                         HStack(spacing: 0) {
-                            // File name (shortened)
-                            if let file = match.file {
-                                Text(URL(fileURLWithPath: file).lastPathComponent)
-                                    .font(.system(size: 10, design: .monospaced))
-                                    .foregroundStyle(.purple)
-                                    .frame(minWidth: 80, alignment: .leading)
-                            }
-
-                            // Line number
+                            // Line number (consistent width, right-aligned)
                             if let lineNum = match.line {
-                                Text(":\(lineNum)")
+                                Text("\(lineNum)")
                                     .font(.system(size: 10, design: .monospaced))
-                                    .foregroundStyle(.tronTextMuted)
-                                    .frame(width: 40, alignment: .trailing)
+                                    .foregroundStyle(.tronTextMuted.opacity(0.7))
+                                    .frame(width: maxLineNumWidth, alignment: .trailing)
+                            } else {
+                                Text("")
+                                    .frame(width: maxLineNumWidth)
                             }
 
-                            // Content
+                            // Separator
+                            Text(":")
+                                .font(.system(size: 10, design: .monospaced))
+                                .foregroundStyle(.tronTextMuted.opacity(0.4))
+                                .padding(.horizontal, 2)
+
+                            // Content (primary focus)
                             if let content = match.content {
                                 Text(content)
                                     .font(.system(size: 11, design: .monospaced))
                                     .foregroundStyle(.tronTextSecondary)
-                                    .padding(.leading, 8)
                             }
                         }
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 3)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 2)
                     }
                 }
+                .padding(.vertical, 4)
             }
             .frame(maxHeight: isExpanded ? .infinity : 200)
+
+            // File path section (collapsed by default, shows when expanded)
+            if !matches.isEmpty, let firstFile = matches.first?.file {
+                HStack(spacing: 4) {
+                    Image(systemName: "doc.text")
+                        .font(.system(size: 9))
+                        .foregroundStyle(.tronTextMuted.opacity(0.6))
+                    Text(firstFile)
+                        .font(.system(size: 9, design: .monospaced))
+                        .foregroundStyle(.tronTextMuted.opacity(0.6))
+                        .lineLimit(1)
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 4)
+            }
 
             // Expand/collapse button
             if matches.count > 10 {
@@ -1115,21 +1200,91 @@ private struct GrepMatch {
 
 struct WriteResultViewer: View {
     let filePath: String
+    let content: String
     let result: String
+    @State private var isExpanded = false
+
+    private var contentLines: [String] {
+        content.components(separatedBy: "\n")
+    }
+
+    private var displayLines: [String] {
+        isExpanded ? contentLines : Array(contentLines.prefix(6))
+    }
+
+    private var hasContent: Bool {
+        !content.isEmpty
+    }
 
     var body: some View {
-        HStack(spacing: 8) {
-            Image(systemName: "checkmark.circle.fill")
-                .font(.system(size: 12))
-                .foregroundStyle(.tronSuccess)
+        VStack(alignment: .leading, spacing: 0) {
+            // Success message
+            HStack(spacing: 8) {
+                Image(systemName: "checkmark.circle.fill")
+                    .font(.system(size: 12))
+                    .foregroundStyle(.tronSuccess)
 
-            Text(result)
-                .font(.system(size: 11, design: .monospaced))
-                .foregroundStyle(.tronTextSecondary)
-                .lineLimit(2)
+                Text(result)
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundStyle(.tronTextSecondary)
+                    .lineLimit(2)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+
+            // Content preview (expandable)
+            if hasContent {
+                VStack(alignment: .leading, spacing: 0) {
+                    // Divider
+                    Rectangle()
+                        .fill(Color.tronBorder.opacity(0.3))
+                        .frame(height: 0.5)
+
+                    // Content preview
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        VStack(alignment: .leading, spacing: 0) {
+                            ForEach(Array(displayLines.enumerated()), id: \.offset) { index, line in
+                                HStack(spacing: 0) {
+                                    Text("\(index + 1)")
+                                        .font(.system(size: 9, design: .monospaced))
+                                        .foregroundStyle(.tronTextMuted.opacity(0.5))
+                                        .frame(width: 20, alignment: .trailing)
+                                        .padding(.trailing, 4)
+
+                                    Text(line.isEmpty ? " " : line)
+                                        .font(.system(size: 10, design: .monospaced))
+                                        .foregroundStyle(.tronTextMuted)
+                                }
+                                .frame(minHeight: 15)
+                            }
+                        }
+                        .padding(.vertical, 4)
+                        .padding(.leading, 8)
+                    }
+                    .frame(maxHeight: isExpanded ? .infinity : 100)
+
+                    // Expand/collapse button
+                    if contentLines.count > 6 {
+                        Button {
+                            withAnimation(.tronFast) {
+                                isExpanded.toggle()
+                            }
+                        } label: {
+                            HStack {
+                                Text(isExpanded ? "Hide content" : "Show all \(contentLines.count) lines")
+                                    .font(.system(size: 10, design: .monospaced))
+                                Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
+                                    .font(.system(size: 9))
+                            }
+                            .foregroundStyle(.tronTextMuted)
+                            .padding(.vertical, 5)
+                            .frame(maxWidth: .infinity)
+                            .background(Color.tronSurface)
+                        }
+                    }
+                }
+            }
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
     }
 }
 
@@ -1197,7 +1352,7 @@ struct GenericResultViewer: View {
             ToolResultRouter(tool: ToolUseData(
                 toolName: "Write",
                 toolCallId: "write-123",
-                arguments: "{\"file_path\": \"/Users/test/config.json\"}",
+                arguments: "{\"file_path\": \"/Users/test/config.json\", \"content\": \"{\\n  \\\"name\\\": \\\"MyApp\\\",\\n  \\\"version\\\": \\\"1.0.0\\\",\\n  \\\"debug\\\": true\\n}\"}",
                 status: .success,
                 result: "Successfully wrote 256 bytes to config.json",
                 durationMs: 8
