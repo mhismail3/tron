@@ -804,17 +804,32 @@ export class EventStoreOrchestrator extends EventEmitter {
       active.lastActivity = new Date();
 
       // Record assistant response event
-      // Combine ALL assistant message content blocks to preserve tool_use history
-      // In multi-turn agentic runs, tool_use blocks are in earlier assistant messages
-      const allAssistantContent = runResult.messages
-        .filter(m => m.role === 'assistant')
-        .flatMap(m => Array.isArray(m.content) ? m.content : [{ type: 'text' as const, text: String(m.content) }]);
+      // Only store assistant content from the CURRENT turn (after the last user message)
+      // This preserves tool_use blocks within a turn while avoiding cross-turn accumulation
+      let lastUserIndex = -1;
+      for (let i = runResult.messages.length - 1; i >= 0; i--) {
+        const msg = runResult.messages[i];
+        if (msg && msg.role === 'user') {
+          lastUserIndex = i;
+          break;
+        }
+      }
+
+      // Get all assistant messages after the last user message (current turn only)
+      const currentTurnAssistantMessages = runResult.messages
+        .slice(lastUserIndex + 1)
+        .filter((m: any) => m.role === 'assistant');
+
+      // Combine all content blocks from current turn's assistant messages
+      const currentTurnContent = currentTurnAssistantMessages.flatMap((m: any) =>
+        Array.isArray(m.content) ? m.content : [{ type: 'text' as const, text: String(m.content) }]
+      );
 
       // DEBUG: Log RAW content blocks BEFORE normalization
-      const toolUseBlocks = allAssistantContent.filter((b: any) => b.type === 'tool_use');
+      const toolUseBlocks = currentTurnContent.filter((b: any) => b.type === 'tool_use');
       logger.debug('RAW assistant content before normalization', {
         sessionId: active.sessionId,
-        totalBlocks: allAssistantContent.length,
+        totalBlocks: currentTurnContent.length,
         toolUseBlocks: toolUseBlocks.length,
         toolUseDetails: toolUseBlocks.map((b: any) => ({
           name: b.name,
@@ -828,7 +843,7 @@ export class EventStoreOrchestrator extends EventEmitter {
       });
 
       // Normalize content blocks to ensure consistent structure and apply truncation
-      const normalizedAssistantContent = normalizeContentBlocks(allAssistantContent);
+      const normalizedAssistantContent = normalizeContentBlocks(currentTurnContent);
 
       logger.debug('Storing assistant content', {
         sessionId: active.sessionId,
@@ -851,12 +866,15 @@ export class EventStoreOrchestrator extends EventEmitter {
 
       // Also record tool_result blocks from tool result messages
       // TronAgent stores these as ToolResultMessage with role: 'toolResult'
-      // We need to convert them to content blocks for storage
-      const toolResultMessages = runResult.messages.filter(m => m.role === 'toolResult') as any[];
+      // Only get tool results from the CURRENT turn (after the last user message)
+      // Note: toolResult messages come BETWEEN assistant messages, not after them
+      const currentTurnToolResults = runResult.messages
+        .slice(lastUserIndex + 1)
+        .filter((m: any) => m.role === 'toolResult') as any[];
 
-      if (toolResultMessages.length > 0) {
+      if (currentTurnToolResults.length > 0) {
         // Convert ToolResultMessage format to tool_result content blocks
-        const toolResultBlocks = toolResultMessages.map(m => ({
+        const toolResultBlocks = currentTurnToolResults.map(m => ({
           type: 'tool_result' as const,
           tool_use_id: m.toolCallId,
           content: typeof m.content === 'string' ? m.content :

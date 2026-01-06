@@ -69,6 +69,8 @@ class ChatViewModel: ObservableObject {
     private static let additionalMessageBatchSize = 30
     /// Current number of messages displayed (from the end)
     private var displayedMessageCount = 0
+    /// Whether initial history has been loaded (prevents redundant loads on view re-entry)
+    private var hasInitiallyLoaded = false
 
     init(rpcClient: RPCClient, sessionId: String, eventStoreManager: EventStoreManager? = nil) {
         self.rpcClient = rpcClient
@@ -79,20 +81,27 @@ class ChatViewModel: ObservableObject {
     }
 
     /// Set the event store manager reference (used when injected via environment)
-    func setEventStoreManager(_ manager: EventStoreManager, workspaceId: String) {
+    /// This method is async and should be awaited to ensure history is fully loaded
+    /// before allowing user interaction (prevents race conditions with streaming)
+    func setEventStoreManager(_ manager: EventStoreManager, workspaceId: String) async {
         self.eventStoreManager = manager
         self.workspaceId = workspaceId
         // Sync from server first (to get any events that happened while we were away),
-        // then load persisted messages asynchronously to avoid blocking UI
-        Task { @MainActor in
-            await syncAndLoadMessages()
-        }
+        // then load persisted messages - awaited to prevent race conditions
+        await syncAndLoadMessages()
     }
 
     /// Sync events from server, then load messages from local database
     /// This ensures we see events that happened while we were away from this session
     private func syncAndLoadMessages() async {
         guard let manager = eventStoreManager else { return }
+
+        // Skip if already loaded and we have messages (re-entering view after navigation)
+        // The streaming guard in loadPersistedMessagesAsync handles the mid-stream case
+        if hasInitiallyLoaded && !messages.isEmpty && !isProcessing {
+            logger.info("Skipping redundant sync/load - already have \(messages.count) messages", category: .session)
+            return
+        }
 
         // First sync from server to get any events that happened while we were away
         do {
@@ -105,11 +114,19 @@ class ChatViewModel: ObservableObject {
 
         // Now load from local database (which now includes synced events)
         await loadPersistedMessagesAsync()
+        hasInitiallyLoaded = true
     }
 
     /// Load messages from EventDatabase asynchronously to avoid blocking UI
     private func loadPersistedMessagesAsync() async {
         guard let manager = eventStoreManager else { return }
+
+        // Don't replace messages if actively streaming - user is in the middle of a turn
+        // This protects mid-stream content that hasn't been persisted to event store yet
+        if isProcessing || streamingMessageId != nil {
+            logger.info("Skipping history load - streaming in progress, preserving current content", category: .session)
+            return
+        }
 
         // Yield to let UI render first
         await Task.yield()

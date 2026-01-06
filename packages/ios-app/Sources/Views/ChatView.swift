@@ -147,19 +147,11 @@ struct ChatView: View {
             }
         }
         .task {
-            // Sync events from server to ensure local EventDatabase has latest state
-            // This ensures tool calls and results are properly persisted
-            do {
-                try await eventStoreManager.syncSessionEvents(sessionId: sessionId)
-            } catch {
-                // Non-fatal: continue with local data if sync fails (offline mode)
-                print("Event sync failed (using local cache): \(error.localizedDescription)")
-            }
-
             // Inject event store manager for event-sourced persistence
-            // This loads messages from EventDatabase (now synced with server)
+            // This syncs from server and loads messages - MUST be awaited to prevent
+            // race conditions where user sends a message before history is loaded
             let workspaceId = eventStoreManager.activeSession?.workspaceId ?? ""
-            viewModel.setEventStoreManager(eventStoreManager, workspaceId: workspaceId)
+            await viewModel.setEventStoreManager(eventStoreManager, workspaceId: workspaceId)
             await viewModel.connectAndResume()
 
             // Pre-fetch models in background for faster ModelSwitcher opening
