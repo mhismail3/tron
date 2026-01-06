@@ -9,6 +9,7 @@ struct LogViewer: View {
     @State private var selectedCategory: LogCategory?
     @State private var autoScroll = true
     @State private var searchText = ""
+    @State private var sheetDetent: PresentationDetent = .large
 
     private let timer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
 
@@ -21,42 +22,21 @@ struct LogViewer: View {
                 // Log list
                 logList
             }
-            .background(Color.black)
+            .background(Color.tronSurface)
             .navigationTitle("Logs")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     Button("Done") { dismiss() }
+                        .font(.subheadline.weight(.medium))
                 }
 
                 ToolbarItem(placement: .topBarTrailing) {
-                    Menu {
-                        Button("Copy All Logs") {
-                            UIPasteboard.general.string = logger.exportLogs()
-                        }
-
-                        Button("Clear Logs") {
-                            logger.clearBuffer()
-                            refreshLogs()
-                        }
-
-                        Divider()
-
-                        ForEach(LogLevel.allCases.filter { $0 != .none }, id: \.self) { level in
-                            Button {
-                                logger.setLevel(level)
-                                refreshLogs()
-                            } label: {
-                                if logger.minimumLevel == level {
-                                    Label("Level: \(String(describing: level))", systemImage: "checkmark")
-                                } else {
-                                    Text("Level: \(String(describing: level))")
-                                }
-                            }
-                        }
-                    } label: {
-                        Image(systemName: "ellipsis.circle")
+                    Button("Copy Logs") {
+                        copyFilteredLogs()
                     }
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(.tronEmerald)
                 }
             }
             .onAppear { refreshLogs() }
@@ -66,6 +46,9 @@ struct LogViewer: View {
                 }
             }
         }
+        .presentationDetents([.medium, .large], selection: $sheetDetent)
+        .presentationDragIndicator(.visible)
+        .tint(.tronEmerald)
         .preferredColorScheme(.dark)
     }
 
@@ -127,7 +110,7 @@ struct LogViewer: View {
                 .labelsHidden()
                 .fixedSize()
 
-                Text("Auto-scroll")
+                Text("Auto-refresh")
                     .font(.caption)
                     .foregroundStyle(.gray)
 
@@ -179,6 +162,21 @@ struct LogViewer: View {
 
     private func refreshLogs() {
         logs = logger.getRecentLogs(count: 500, level: selectedLevel, category: selectedCategory)
+    }
+
+    private func copyFilteredLogs() {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "HH:mm:ss.SSS"
+
+        let logText = filteredLogs.map { entry in
+            let timestamp = formatter.string(from: entry.0)
+            let category = entry.1.rawValue
+            let level = String(describing: entry.2).uppercased()
+            let message = entry.3
+            return "\(timestamp) [\(level)] [\(category)] \(message)"
+        }.joined(separator: "\n")
+
+        UIPasteboard.general.string = logText
     }
 
     private func colorForLevel(_ level: LogLevel) -> Color {

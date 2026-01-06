@@ -427,162 +427,151 @@ struct NewSessionFlow: View {
     @State private var availableModels: [ModelInfo] = []
     @State private var isLoadingModels = false
 
+    private var canCreate: Bool {
+        !isCreating && !workingDirectory.isEmpty && !selectedModel.isEmpty
+    }
+
     var body: some View {
         NavigationStack {
-            VStack(spacing: 0) {
-                // Main content area
-                ScrollView {
-                    VStack(spacing: 24) {
-                        // Workspace section
-                        VStack(alignment: .leading, spacing: 12) {
-                            Text("Workspace")
-                                .font(.subheadline.weight(.medium))
-                                .foregroundStyle(.white.opacity(0.6))
+            ScrollView {
+                VStack(spacing: 24) {
+                    // Workspace section
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text("Workspace")
+                            .font(.subheadline.weight(.medium))
+                            .foregroundStyle(.white.opacity(0.6))
 
-                            Button {
-                                showWorkspaceSelector = true
-                            } label: {
-                                HStack {
-                                    if workingDirectory.isEmpty {
-                                        Text("Select Workspace")
-                                            .foregroundStyle(.white.opacity(0.4))
-                                    } else {
-                                        Text(workingDirectory)
-                                            .foregroundStyle(.white.opacity(0.9))
-                                            .lineLimit(1)
-                                            .truncationMode(.head)
-                                    }
-                                    Spacer()
-                                    Image(systemName: "folder.fill")
-                                        .foregroundStyle(.tronEmerald)
-                                }
-                                .padding(.horizontal, 16)
-                                .padding(.vertical, 14)
-                                .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                            }
-                            .glassEffect(.regular.tint(Color.tronPhthaloGreen).interactive(), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-
-                            Text("The directory where the agent will operate")
-                                .font(.caption)
-                                .foregroundStyle(.white.opacity(0.4))
-                        }
-
-                        // Model section - dynamically loaded from server
-                        VStack(alignment: .leading, spacing: 12) {
-                            Text("Model")
-                                .font(.subheadline.weight(.medium))
-                                .foregroundStyle(.white.opacity(0.6))
-
-                            Menu {
-                                if isLoadingModels && availableModels.isEmpty {
-                                    Text("Loading models...")
+                        Button {
+                            showWorkspaceSelector = true
+                        } label: {
+                            HStack {
+                                if workingDirectory.isEmpty {
+                                    Text("Select Workspace")
+                                        .foregroundStyle(.white.opacity(0.4))
                                 } else {
-                                    // Latest models (4.5 family) - grouped by tier
-                                    Section("Latest") {
-                                        ForEach(latestModels) { model in
+                                    Text(workingDirectory)
+                                        .foregroundStyle(.white.opacity(0.9))
+                                        .lineLimit(1)
+                                        .truncationMode(.head)
+                                }
+                                Spacer()
+                                Image(systemName: "folder.fill")
+                                    .foregroundStyle(.tronEmerald)
+                            }
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 14)
+                            .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        }
+                        .glassEffect(.regular.tint(Color.tronPhthaloGreen).interactive(), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+
+                        Text("The directory where the agent will operate")
+                            .font(.caption)
+                            .foregroundStyle(.white.opacity(0.4))
+                    }
+
+                    // Model section - dynamically loaded from server
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text("Model")
+                            .font(.subheadline.weight(.medium))
+                            .foregroundStyle(.white.opacity(0.6))
+
+                        Menu {
+                            if isLoadingModels && availableModels.isEmpty {
+                                Text("Loading models...")
+                            } else {
+                                // Latest models (4.5 family) - grouped by tier
+                                Section("Latest") {
+                                    ForEach(latestModels) { model in
+                                        Button {
+                                            selectedModel = model.id
+                                        } label: {
+                                            HStack {
+                                                Text(model.formattedModelName)
+                                                if selectedModel == model.id {
+                                                    Image(systemName: "checkmark")
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+
+                                // Legacy models
+                                if !legacyModels.isEmpty {
+                                    Section("Legacy") {
+                                        ForEach(legacyModels) { model in
                                             Button {
                                                 selectedModel = model.id
                                             } label: {
-                                                HStack {
-                                                    Text(model.formattedModelName)
-                                                    if selectedModel == model.id {
-                                                        Image(systemName: "checkmark")
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-
-                                    // Legacy models
-                                    if !legacyModels.isEmpty {
-                                        Section("Legacy") {
-                                            ForEach(legacyModels) { model in
-                                                Button {
-                                                    selectedModel = model.id
-                                                } label: {
-                                                    Text(model.formattedModelName)
-                                                }
+                                                Text(model.formattedModelName)
                                             }
                                         }
                                     }
                                 }
-                            } label: {
-                                HStack {
-                                    if isLoadingModels && selectedModel.isEmpty {
-                                        Text("Loading...")
-                                            .foregroundStyle(.white.opacity(0.4))
-                                    } else {
-                                        Text(selectedModel.shortModelName)
-                                            .foregroundStyle(.white.opacity(0.9))
-                                    }
-                                    Spacer()
-                                    Image(systemName: "chevron.up.chevron.down")
-                                        .font(.caption)
-                                        .foregroundStyle(.white.opacity(0.6))
-                                }
-                                .padding(.horizontal, 16)
-                                .padding(.vertical, 14)
                             }
-                            .glassEffect(.regular.tint(Color.tronPhthaloGreen).interactive(), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-
-                            Text(modelDescription)
-                                .font(.caption)
-                                .foregroundStyle(.white.opacity(0.4))
-                        }
-
-                        // Error message
-                        if let error = errorMessage {
+                        } label: {
                             HStack {
-                                Image(systemName: "exclamationmark.triangle.fill")
-                                    .foregroundStyle(.tronError)
-                                Text(error)
-                                    .font(.subheadline)
-                                    .foregroundStyle(.tronError)
+                                if isLoadingModels && selectedModel.isEmpty {
+                                    Text("Loading...")
+                                        .foregroundStyle(.white.opacity(0.4))
+                                } else {
+                                    Text(selectedModel.shortModelName)
+                                        .foregroundStyle(.white.opacity(0.9))
+                                }
+                                Spacer()
+                                Image(systemName: "chevron.up.chevron.down")
+                                    .font(.caption)
+                                    .foregroundStyle(.white.opacity(0.6))
                             }
-                            .padding()
-                            .glassEffect(.regular.tint(Color.tronError.opacity(0.3)), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 14)
                         }
+                        .glassEffect(.regular.tint(Color.tronPhthaloGreen).interactive(), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
 
-                        Spacer(minLength: 100)
+                        Text(modelDescription)
+                            .font(.caption)
+                            .foregroundStyle(.white.opacity(0.4))
                     }
-                    .padding(.horizontal, 20)
-                    .padding(.top, 20)
-                }
 
-                // Create button - liquid glass style
-                Button {
-                    createSession()
-                } label: {
-                    HStack(spacing: 8) {
-                        if isCreating {
-                            ProgressView()
-                                .tint(.white)
-                        } else {
-                            Text("Create Session")
-                                .font(.headline)
-                                .foregroundStyle(.white)
+                    // Error message
+                    if let error = errorMessage {
+                        HStack {
+                            Image(systemName: "exclamationmark.triangle.fill")
+                                .foregroundStyle(.tronError)
+                            Text(error)
+                                .font(.subheadline)
+                                .foregroundStyle(.tronError)
                         }
+                        .padding()
+                        .glassEffect(.regular.tint(Color.tronError.opacity(0.3)), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
                     }
-                    .frame(maxWidth: .infinity)
-                    .frame(height: 50)
-                    .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                 }
-                .glassEffect(
-                    (isCreating || workingDirectory.isEmpty || selectedModel.isEmpty)
-                        ? .regular.tint(Color.tronPhthaloGreen)
-                        : .regular.tint(Color.tronEmerald).interactive(),
-                    in: RoundedRectangle(cornerRadius: 12, style: .continuous)
-                )
-                .disabled(isCreating || workingDirectory.isEmpty || selectedModel.isEmpty)
                 .padding(.horizontal, 20)
-                .padding(.bottom, 16)
+                .padding(.top, 20)
             }
+            .background(Color.tronSurface)
             .navigationTitle("New Session")
             .navigationBarTitleDisplayMode(.inline)
             .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     Button("Cancel") { dismiss() }
+                        .font(.subheadline.weight(.medium))
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button {
+                        createSession()
+                    } label: {
+                        if isCreating {
+                            ProgressView()
+                                .tint(.tronEmerald)
+                                .scaleEffect(0.8)
+                        } else {
+                            Text("Create")
+                                .font(.subheadline.weight(.medium))
+                                .foregroundStyle(canCreate ? .tronEmerald : .white.opacity(0.3))
+                        }
+                    }
+                    .disabled(!canCreate)
                 }
             }
             .sheet(isPresented: $showWorkspaceSelector) {
@@ -598,6 +587,9 @@ struct NewSessionFlow: View {
                 showWorkspaceSelector = true
             }
         }
+        .presentationDetents([.medium, .large])
+        .presentationDragIndicator(.visible)
+        .tint(.tronEmerald)
         .preferredColorScheme(.dark)
     }
 
