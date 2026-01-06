@@ -207,6 +207,12 @@ struct ContentView: View {
                eventStoreManager.sessionExists(activeId) {
                 selectedSessionId = activeId
             }
+            // Start polling for session processing states when dashboard is visible
+            eventStoreManager.startDashboardPolling()
+        }
+        .onDisappear {
+            // Stop polling when leaving the dashboard
+            eventStoreManager.stopDashboardPolling()
         }
         .onChange(of: selectedSessionId) { _, newValue in
             if let id = newValue {

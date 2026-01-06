@@ -28,7 +28,7 @@ class RPCClient: ObservableObject {
     @Published private(set) var currentSessionId: String?
     @Published private(set) var currentModel: String = "claude-opus-4-5-20251101"
 
-    // Event callbacks
+    // Event callbacks (for current session)
     var onTextDelta: ((String) -> Void)?
     var onThinkingDelta: ((String) -> Void)?
     var onToolStart: ((ToolStartEvent) -> Void)?
@@ -38,6 +38,11 @@ class RPCClient: ObservableObject {
     var onAgentTurn: ((AgentTurnEvent) -> Void)?
     var onComplete: (() -> Void)?
     var onError: ((String) -> Void)?
+
+    // Global event callbacks (for ALL sessions - used by dashboard)
+    var onGlobalComplete: ((String) -> Void)?  // sessionId
+    var onGlobalError: ((String, String) -> Void)?  // sessionId, message
+    var onGlobalProcessingStart: ((String) -> Void)?  // sessionId
 
     private let serverURL: URL
 
@@ -120,6 +125,10 @@ class RPCClient: ObservableObject {
             onToolEnd?(e)
 
         case .turnStart(let e):
+            // Always notify global listeners for dashboard updates
+            if let sessionId = e.sessionId {
+                onGlobalProcessingStart?(sessionId)
+            }
             guard checkSession(e.sessionId) else { return }
             onTurnStart?(e)
 
@@ -132,10 +141,18 @@ class RPCClient: ObservableObject {
             onAgentTurn?(e)
 
         case .complete(let e):
+            // Always notify global listeners for dashboard updates
+            if let sessionId = e.sessionId {
+                onGlobalComplete?(sessionId)
+            }
             guard checkSession(e.sessionId) else { return }
             onComplete?()
 
         case .error(let e):
+            // Always notify global listeners for dashboard updates
+            if let sessionId = e.sessionId {
+                onGlobalError?(sessionId, e.message)
+            }
             guard checkSession(e.sessionId) else { return }
             onError?(e.message)
 
@@ -289,6 +306,16 @@ class RPCClient: ObservableObject {
         guard let ws = webSocket,
               let sessionId = currentSessionId else {
             throw RPCClientError.noActiveSession
+        }
+
+        let params = AgentStateParams(sessionId: sessionId)
+        return try await ws.send(method: "agent.getState", params: params)
+    }
+
+    /// Get agent state for a specific session (used for dashboard polling)
+    func getAgentStateForSession(sessionId: String) async throws -> AgentStateResult {
+        guard let ws = webSocket else {
+            throw RPCClientError.connectionNotEstablished
         }
 
         let params = AgentStateParams(sessionId: sessionId)

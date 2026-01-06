@@ -52,6 +52,44 @@ class EventStoreManager: ObservableObject {
     init(eventDB: EventDatabase, rpcClient: RPCClient) {
         self.eventDB = eventDB
         self.rpcClient = rpcClient
+
+        // Subscribe to global events for real-time dashboard updates
+        setupGlobalEventHandlers()
+    }
+
+    /// Set up handlers for global events (events from all sessions)
+    private func setupGlobalEventHandlers() {
+        // When any session starts processing
+        rpcClient.onGlobalProcessingStart = { [weak self] sessionId in
+            Task { @MainActor in
+                self?.logger.info("Global: Session \(sessionId) started processing")
+                self?.setSessionProcessing(sessionId, isProcessing: true)
+            }
+        }
+
+        // When any session completes processing
+        rpcClient.onGlobalComplete = { [weak self] sessionId in
+            Task { @MainActor in
+                self?.logger.info("Global: Session \(sessionId) completed processing")
+                self?.setSessionProcessing(sessionId, isProcessing: false)
+                // Sync to get the latest response for the dashboard
+                try? await self?.syncSessionEvents(sessionId: sessionId)
+                self?.extractDashboardInfoFromEvents(sessionId: sessionId)
+            }
+        }
+
+        // When any session has an error
+        rpcClient.onGlobalError = { [weak self] sessionId, message in
+            Task { @MainActor in
+                self?.logger.info("Global: Session \(sessionId) error: \(message)")
+                self?.setSessionProcessing(sessionId, isProcessing: false)
+                // Update dashboard with error message
+                self?.updateSessionDashboardInfo(
+                    sessionId: sessionId,
+                    lastAssistantResponse: "Error: \(String(message.prefix(100)))"
+                )
+            }
+        }
     }
 
     // MARK: - Session List (from EventDatabase)
@@ -581,7 +619,18 @@ class EventStoreManager: ObservableObject {
     // MARK: - Session Processing State
 
     /// Track which sessions are currently processing
-    private var processingSessionIds: Set<String> = []
+    private var processingSessionIds: Set<String> = [] {
+        didSet {
+            // Persist to UserDefaults
+            UserDefaults.standard.set(Array(processingSessionIds), forKey: "tron.processingSessionIds")
+        }
+    }
+
+    /// Polling task for dashboard processing state
+    private var pollingTask: Task<Void, Never>?
+
+    /// Whether polling is currently active
+    private var isPollingActive = false
 
     /// Mark a session as processing (agent is thinking)
     func setSessionProcessing(_ sessionId: String, isProcessing: Bool) {
@@ -594,6 +643,108 @@ class EventStoreManager: ObservableObject {
         // Update the session's processing flag
         if let index = sessions.firstIndex(where: { $0.id == sessionId }) {
             sessions[index].isProcessing = isProcessing
+        }
+    }
+
+    /// Restore processing session IDs from persistence
+    private func restoreProcessingSessionIds() {
+        if let ids = UserDefaults.standard.array(forKey: "tron.processingSessionIds") as? [String] {
+            processingSessionIds = Set(ids)
+            // Update session flags
+            for sessionId in processingSessionIds {
+                if let index = sessions.firstIndex(where: { $0.id == sessionId }) {
+                    sessions[index].isProcessing = true
+                }
+            }
+            let count = processingSessionIds.count
+            logger.info("Restored \(count) processing session IDs")
+        }
+    }
+
+    // MARK: - Dashboard Polling
+
+    /// Start polling for session processing states (call when dashboard is visible)
+    func startDashboardPolling() {
+        guard !isPollingActive else { return }
+        isPollingActive = true
+        logger.info("Starting dashboard polling for session states")
+
+        pollingTask = Task { [weak self] in
+            while !Task.isCancelled {
+                await self?.pollAllSessionStates()
+                try? await Task.sleep(for: .seconds(2)) // Poll every 2 seconds
+            }
+        }
+    }
+
+    /// Stop polling (call when leaving dashboard)
+    func stopDashboardPolling() {
+        guard isPollingActive else { return }
+        isPollingActive = false
+        pollingTask?.cancel()
+        pollingTask = nil
+        logger.info("Stopped dashboard polling")
+    }
+
+    /// Poll all sessions to check their processing state
+    private func pollAllSessionStates() async {
+        // Only check sessions that we think might be processing OR all sessions periodically
+        // For efficiency, prioritize sessions marked as processing
+        let sessionsToCheck = sessions.filter { session in
+            // Check sessions marked as processing, or recently active sessions
+            session.isProcessing == true || processingSessionIds.contains(session.id)
+        }
+
+        // Also do a periodic full check every 10 polls
+        let shouldCheckAll = Int.random(in: 0..<10) == 0
+        let checkList = shouldCheckAll ? sessions : (sessionsToCheck.isEmpty ? Array(sessions.prefix(3)) : sessionsToCheck)
+
+        for session in checkList {
+            await checkSessionProcessingState(sessionId: session.id)
+        }
+    }
+
+    /// Check a single session's processing state from the server
+    private func checkSessionProcessingState(sessionId: String) async {
+        do {
+            // Ensure we're connected
+            if !rpcClient.isConnected {
+                await rpcClient.connect()
+                if !rpcClient.isConnected {
+                    return
+                }
+            }
+
+            // Need to temporarily resume the session to get its state
+            // First save current session if any
+            let previousSessionId = rpcClient.currentSessionId
+
+            // Get agent state for this session
+            let state = try await rpcClient.getAgentStateForSession(sessionId: sessionId)
+
+            // Check if processing state changed
+            let wasProcessing = processingSessionIds.contains(sessionId) || (sessions.first(where: { $0.id == sessionId })?.isProcessing == true)
+            let isNowProcessing = state.isRunning
+
+            if wasProcessing != isNowProcessing {
+                logger.info("Session \(sessionId) processing state changed: \(wasProcessing) -> \(isNowProcessing)")
+                setSessionProcessing(sessionId, isProcessing: isNowProcessing)
+
+                // If processing just ended, sync to get latest content
+                if wasProcessing && !isNowProcessing {
+                    try? await syncSessionEvents(sessionId: sessionId)
+                    extractDashboardInfoFromEvents(sessionId: sessionId)
+                }
+            }
+
+            // Restore previous session if needed
+            if let prevId = previousSessionId, prevId != sessionId {
+                // Note: We don't need to re-resume since getAgentStateForSession
+                // should work without changing the active session
+            }
+        } catch {
+            // Silently fail - this is background polling
+            logger.debug("Failed to check session \(sessionId) state: \(error.localizedDescription)")
         }
     }
 
@@ -872,6 +1023,10 @@ class EventStoreManager: ObservableObject {
 
         // Load sessions from local DB
         loadSessions()
+
+        // Restore which sessions were processing when app was closed
+        // This allows us to resume checking their state
+        restoreProcessingSessionIds()
 
         logger.info("EventStoreManager initialized with \(self.sessions.count) sessions")
     }
