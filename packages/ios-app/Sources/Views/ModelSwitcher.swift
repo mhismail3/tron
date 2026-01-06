@@ -3,6 +3,7 @@ import SwiftUI
 // MARK: - Model Picker Menu (iOS 26 Liquid Glass Popup)
 
 /// Popup menu for selecting models - replaces the old sheet-based picker
+/// Organized by provider: Anthropic, OpenAI, Google
 /// Used inline in InputBar for fast model switching
 @available(iOS 26.0, *)
 struct ModelPickerMenu: View {
@@ -16,38 +17,36 @@ struct ModelPickerMenu: View {
             if isLoading && models.isEmpty {
                 Text("Loading models...")
             } else {
-                // Latest 4.5 models section
-                let latestModels = models.filter { $0.is45Model }.uniqueByFormattedName().sortedByTier()
-                if !latestModels.isEmpty {
-                    Section("Latest") {
-                        ForEach(latestModels) { model in
-                            modelButton(model)
-                        }
+                // Anthropic section
+                Section("Anthropic") {
+                    // Latest models first (4.5 series)
+                    let latestAnthropicModels = anthropicModels.filter { $0.is45Model }
+                        .uniqueByFormattedName().sortedByTier()
+                    ForEach(latestAnthropicModels) { model in
+                        modelButton(model, isLatest: true)
+                    }
+
+                    // Legacy models (Claude 4 non-4.5)
+                    let legacyAnthropicModels = anthropicModels.filter { !$0.is45Model }
+                        .uniqueByFormattedName().sortedByTier()
+                    ForEach(legacyAnthropicModels) { model in
+                        modelButton(model, isLatest: false)
                     }
                 }
 
-                // Claude 4 models section (non-4.5)
-                let claude4Models = models.filter { isClaude4NotLatest($0) }.uniqueByFormattedName().sortedByTier()
-                if !claude4Models.isEmpty {
-                    Section("Claude 4") {
-                        ForEach(claude4Models) { model in
-                            modelButton(model)
-                        }
-                    }
+                // OpenAI section
+                Section("OpenAI") {
+                    comingSoonModel("GPT-5.2")
+                    comingSoonModel("GPT-5.2 Mini")
+                    comingSoonModel("o3")
+                    comingSoonModel("o4-mini")
+                    comingSoonModel("Codex")
                 }
 
-                // Coming Soon - OpenAI and Gemini placeholders
-                Section("Coming Soon") {
-                    // OpenAI models
-                    disabledModelRow("GPT-5.2", provider: "OpenAI")
-                    disabledModelRow("GPT-5.2 Mini", provider: "OpenAI")
-                    disabledModelRow("o3", provider: "OpenAI")
-                    disabledModelRow("o4-mini", provider: "OpenAI")
-                    disabledModelRow("Codex", provider: "OpenAI")
-
-                    // Gemini models
-                    disabledModelRow("Gemini 2.5 Pro", provider: "Google")
-                    disabledModelRow("Gemini 2.5 Flash", provider: "Google")
+                // Google section
+                Section("Google") {
+                    comingSoonModel("Gemini 2.5 Pro")
+                    comingSoonModel("Gemini 2.5 Flash")
                 }
             }
         } label: {
@@ -67,43 +66,59 @@ struct ModelPickerMenu: View {
         .glassEffect(.regular.tint(Color.tronPhthaloGreen.opacity(0.4)).interactive(), in: .capsule)
     }
 
+    // MARK: - Computed Properties
+
+    /// All Anthropic models from the available models list
+    private var anthropicModels: [ModelInfo] {
+        models.filter { $0.provider.lowercased() == "anthropic" || $0.id.lowercased().contains("claude") }
+    }
+
+    // MARK: - Model Button
+
     @ViewBuilder
-    private func modelButton(_ model: ModelInfo) -> some View {
+    private func modelButton(_ model: ModelInfo, isLatest: Bool) -> some View {
+        let isSelected = model.id == currentModel
+
         Button {
             onSelect(model)
         } label: {
             HStack {
+                // Model name (always left-aligned)
                 Text(model.formattedModelName)
-                if model.id == currentModel {
-                    Spacer()
+
+                // Legacy label if not latest
+                if !isLatest {
+                    Text("(Legacy)")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                Spacer()
+
+                // Checkmark right-aligned
+                if isSelected {
                     Image(systemName: "checkmark")
+                        .font(.system(size: 13, weight: .semibold))
                         .foregroundStyle(.tronEmerald)
                 }
             }
         }
-        .disabled(model.id == currentModel)
+        .disabled(isSelected)
     }
 
+    // MARK: - Coming Soon Model
+
     @ViewBuilder
-    private func disabledModelRow(_ name: String, provider: String) -> some View {
+    private func comingSoonModel(_ name: String) -> some View {
         HStack {
             Text(name)
                 .foregroundStyle(.secondary)
-            Spacer()
-            Text(provider)
+            Text("(Coming Soon)")
                 .font(.caption)
                 .foregroundStyle(.tertiary)
+            Spacer()
         }
         .disabled(true)
-    }
-
-    /// Check if model is Claude 4 but not 4.5
-    private func isClaude4NotLatest(_ model: ModelInfo) -> Bool {
-        let lowerId = model.id.lowercased()
-        // Is Claude 4 (has -4- or ends with -4) but not 4.5
-        let isClaude4 = (lowerId.contains("-4-") || lowerId.contains("sonnet-4") || lowerId.contains("opus-4") || lowerId.contains("haiku-4"))
-        let is45 = lowerId.contains("4-5") || lowerId.contains("4.5")
-        return isClaude4 && !is45
     }
 }
 
