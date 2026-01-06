@@ -894,10 +894,14 @@ class ChatViewModel: ObservableObject {
     private func handleTurnEnd(_ event: TurnEndEvent) {
         logger.info("Turn ended, tokens: in=\(event.tokenUsage?.inputTokens ?? 0) out=\(event.tokenUsage?.outputTokens ?? 0)", category: .events)
 
-        // Update token usage on the streaming message
+        // Update token usage, model, and latency on the streaming message
         if let id = streamingMessageId,
            let index = messages.firstIndex(where: { $0.id == id }) {
             messages[index].tokenUsage = event.tokenUsage
+            messages[index].model = currentModel
+            messages[index].latencyMs = event.data?.duration
+            messages[index].stopReason = event.stopReason
+            messages[index].turnNumber = event.turnNumber
         }
 
         // Accumulate token usage

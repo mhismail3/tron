@@ -712,6 +712,11 @@ struct MessageMetadataBadge: View {
         usage != nil && (model != nil || latency != nil || hasThinking == true)
     }
 
+    /// Check if we need a separator between model and latency
+    private var needsModelLatencySeparator: Bool {
+        model != nil && latency != nil
+    }
+
     var body: some View {
         HStack(spacing: 8) {
             // Token usage (existing format)
@@ -719,7 +724,7 @@ struct MessageMetadataBadge: View {
                 TokenBadge(usage: usage)
             }
 
-            // Separator
+            // Separator after tokens
             if needsSeparator {
                 Text("•")
                     .font(.system(size: 10, design: .monospaced))
@@ -730,6 +735,13 @@ struct MessageMetadataBadge: View {
             if let model = model {
                 Text(model)
                     .font(.system(size: 10, weight: .medium, design: .monospaced))
+                    .foregroundStyle(.tronTextMuted)
+            }
+
+            // Separator between model and latency
+            if needsModelLatencySeparator {
+                Text("•")
+                    .font(.system(size: 10, design: .monospaced))
                     .foregroundStyle(.tronTextMuted)
             }
 
