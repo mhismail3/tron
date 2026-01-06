@@ -146,6 +146,7 @@ struct CachedSessionSidebarRow: View {
                         .font(.system(size: 8))
                         .foregroundStyle(.tronEmerald.opacity(0.8))
                         .frame(width: 12)
+                        .offset(y: 2)
 
                     Text(response)
                         .font(.system(size: 11, design: .monospaced))
@@ -157,7 +158,7 @@ struct CachedSessionSidebarRow: View {
 
                     // Tool count badge
                     if let toolCount = session.lastToolCount, toolCount > 0 {
-                        Text("(\(toolCount) tools)")
+                        Text("(\(toolCount) \(toolCount == 1 ? "tool" : "tools"))")
                             .font(.system(size: 9, weight: .medium, design: .monospaced))
                             .foregroundStyle(.tronEmerald.opacity(0.7))
                     }
