@@ -458,6 +458,10 @@ export class EventStore {
     await this.backend.updateSessionStatus(sessionId, 'ended');
   }
 
+  async updateSessionModel(sessionId: SessionId, model: string): Promise<void> {
+    await this.backend.updateSessionModel(sessionId, model);
+  }
+
   // ===========================================================================
   // Workspace
   // ===========================================================================

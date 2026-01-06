@@ -124,6 +124,13 @@ export class TronAgent {
       throw new Error('Cannot switch model while agent is running');
     }
 
+    logger.info('Switching model', {
+      sessionId: this.sessionId,
+      previousModel: this.config.provider.model,
+      newModel: model,
+      messageCountPreserved: this.messages.length,
+    });
+
     const newProviderType = providerType ?? detectProviderFromModel(model);
 
     // Create new provider
@@ -300,6 +307,14 @@ export class TronAgent {
           parameters: tool.parameters,
         })),
       };
+
+      // Debug: Log message count being sent to provider
+      logger.debug('Building context for turn', {
+        sessionId: this.sessionId,
+        turn: this.currentTurn,
+        messageCount: this.messages.length,
+        messageRoles: this.messages.map(m => m.role),
+      });
 
       // Stream response
       let assistantMessage: AssistantMessage | undefined;

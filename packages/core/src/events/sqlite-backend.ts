@@ -523,6 +523,16 @@ export class SQLiteBackend {
     `).run(status, status === 'ended' ? now : null, now, sessionId);
   }
 
+  async updateSessionModel(sessionId: SessionId, model: string): Promise<void> {
+    const db = this.getDb();
+    const now = new Date().toISOString();
+    db.prepare(`
+      UPDATE sessions
+      SET model = ?, last_activity_at = ?
+      WHERE id = ?
+    `).run(model, now, sessionId);
+  }
+
   async incrementSessionCounters(sessionId: SessionId, counters: IncrementCountersOptions): Promise<void> {
     const db = this.getDb();
     const updates: string[] = [];

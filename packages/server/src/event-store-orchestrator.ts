@@ -590,14 +590,25 @@ export class EventStoreOrchestrator extends EventEmitter {
       throw new Error('Cannot end session while processing');
     }
 
-    // Append session end event
-    await this.eventStore.append({
+    // Append session end event (linearized)
+    // Note: 'active' is already defined above from the isProcessing check
+    const sessionEndParentId = active?.pendingHeadEventId ?? undefined;
+    const sessionEndEvent = await this.eventStore.append({
       sessionId: sessionId as SessionId,
       type: 'session.end',
       payload: {
         reason: 'completed',
         timestamp: new Date().toISOString(),
       },
+      parentId: sessionEndParentId,
+    });
+    if (active) {
+      active.pendingHeadEventId = sessionEndEvent.id;
+    }
+    logger.debug('[LINEARIZE] session.end appended', {
+      sessionId,
+      eventId: sessionEndEvent.id,
+      parentId: sessionEndParentId,
     });
 
     // Release working directory through coordinator
@@ -817,11 +828,24 @@ export class EventStoreOrchestrator extends EventEmitter {
     active.lastActivity = new Date();
 
     try {
-      // Record user message event
-      await this.eventStore.append({
+      // CRITICAL: Wait for any pending stream events to complete before appending message events
+      // This prevents race conditions where stream events (turn_start, etc.) capture wrong parentId
+      await active.appendPromiseChain;
+
+      // Record user message event (linearized to prevent spurious branches)
+      // CRITICAL: Pass parentId from in-memory state, then update it after append
+      const userMsgParentId = active.pendingHeadEventId ?? undefined;
+      const userMsgEvent = await this.eventStore.append({
         sessionId: active.sessionId,
         type: 'message.user',
         payload: { content: options.prompt },
+        parentId: userMsgParentId,
+      });
+      active.pendingHeadEventId = userMsgEvent.id;
+      logger.debug('[LINEARIZE] message.user appended', {
+        sessionId: active.sessionId,
+        eventId: userMsgEvent.id,
+        parentId: userMsgParentId,
       });
 
       // Track timing for latency measurement (Phase 1)
@@ -895,8 +919,12 @@ export class EventStoreOrchestrator extends EventEmitter {
         hasThinking,
       });
 
-      // Phase 1: Store enriched assistant message with all metadata
-      await this.eventStore.append({
+      // Phase 1: Store enriched assistant message with all metadata (linearized)
+      // CRITICAL: Wait for stream events (turn_start, tool events, turn_end) to complete
+      await active.appendPromiseChain;
+      // CRITICAL: Pass parentId from in-memory state, then update it after append
+      const assistantMsgParentId = active.pendingHeadEventId;
+      const assistantMsgEvent = await this.eventStore.append({
         sessionId: active.sessionId,
         type: 'message.assistant',
         payload: {
@@ -909,6 +937,13 @@ export class EventStoreOrchestrator extends EventEmitter {
           latency: runLatency,
           hasThinking,
         },
+        parentId: assistantMsgParentId,
+      });
+      active.pendingHeadEventId = assistantMsgEvent.id;
+      logger.debug('[LINEARIZE] message.assistant appended', {
+        sessionId: active.sessionId,
+        eventId: assistantMsgEvent.id,
+        parentId: assistantMsgParentId,
       });
 
       // Also record tool_result blocks from tool result messages
@@ -943,10 +978,21 @@ export class EventStoreOrchestrator extends EventEmitter {
           })),
         });
 
-        await this.eventStore.append({
+        // Store tool results as user message (linearized)
+        // CRITICAL: Wait for any pending events before appending
+        await active.appendPromiseChain;
+        const toolResultParentId = active.pendingHeadEventId;
+        const toolResultEvent = await this.eventStore.append({
           sessionId: active.sessionId,
           type: 'message.user',
           payload: { content: normalizedToolResults },
+          parentId: toolResultParentId,
+        });
+        active.pendingHeadEventId = toolResultEvent.id;
+        logger.debug('[LINEARIZE] message.user (tool results) appended', {
+          sessionId: active.sessionId,
+          eventId: toolResultEvent.id,
+          parentId: toolResultParentId,
         });
       }
 
@@ -971,9 +1017,12 @@ export class EventStoreOrchestrator extends EventEmitter {
     } catch (error) {
       logger.error('Agent run error', { sessionId: options.sessionId, error });
 
-      // Phase 3: Store error.agent event for agent-level errors
+      // Phase 3: Store error.agent event for agent-level errors (linearized)
       try {
-        await this.eventStore.append({
+        // CRITICAL: Wait for any pending events before appending
+        await active.appendPromiseChain;
+        const errorParentId = active.pendingHeadEventId ?? undefined;
+        const errorEvent = await this.eventStore.append({
           sessionId: active.sessionId,
           type: 'error.agent',
           payload: {
@@ -981,6 +1030,13 @@ export class EventStoreOrchestrator extends EventEmitter {
             code: error instanceof Error ? error.name : undefined,
             recoverable: false,
           },
+          parentId: errorParentId,
+        });
+        active.pendingHeadEventId = errorEvent.id;
+        logger.debug('[LINEARIZE] error.agent appended', {
+          sessionId: active.sessionId,
+          eventId: errorEvent.id,
+          parentId: errorParentId,
         });
       } catch (storeErr) {
         logger.error('Failed to store error.agent event', { storeErr, sessionId: options.sessionId });
@@ -1024,25 +1080,46 @@ export class EventStoreOrchestrator extends EventEmitter {
 
     const previousModel = session.model;
 
-    // Record model switch event
-    await this.eventStore.append({
+    // Get active session first to access pendingHeadEventId for linearization
+    const active = this.activeSessions.get(sessionId);
+
+    // CRITICAL: Wait for any pending events before appending model switch
+    if (active) {
+      await active.appendPromiseChain;
+    }
+
+    // Record model switch event (linearized)
+    const modelSwitchParentId = active?.pendingHeadEventId ?? undefined;
+    const modelSwitchEvent = await this.eventStore.append({
       sessionId: sessionId as SessionId,
       type: 'config.model_switch',
       payload: {
         previousModel,
         newModel: model,
       },
+      parentId: modelSwitchParentId,
+    });
+    if (active) {
+      active.pendingHeadEventId = modelSwitchEvent.id;
+    }
+    logger.debug('[LINEARIZE] config.model_switch appended', {
+      sessionId,
+      eventId: modelSwitchEvent.id,
+      parentId: modelSwitchParentId,
     });
 
+    // CRITICAL: Persist model change to session in database
+    // Without this, the model reverts when session is reloaded
+    await this.eventStore.updateSessionModel(sessionId as SessionId, model);
+    logger.debug('[MODEL_SWITCH] Model persisted to database', { sessionId, model });
+
     // Update active session if exists
-    const active = this.activeSessions.get(sessionId);
     if (active) {
       active.model = model;
-      active.agent = await this.createAgentForSession(
-        active.sessionId,
-        active.workingDirectory,
-        model
-      );
+      // CRITICAL: Use agent's switchModel() to preserve conversation history
+      // Creating a new agent would lose all messages in this.messages
+      active.agent.switchModel(model);
+      logger.debug('[MODEL_SWITCH] Agent model switched (preserving messages)', { sessionId, model });
     }
 
     logger.info('Model switched', { sessionId, previousModel, newModel: model });
@@ -1231,15 +1308,14 @@ export class EventStoreOrchestrator extends EventEmitter {
 
   /**
    * Append an event with linearized ordering per session.
-   * Uses in-memory head tracking to prevent race conditions where
-   * multiple events fire before DB updates complete.
+   * Uses promise chaining to serialize event appends.
    *
-   * CRITICAL: This solves the spurious branching bug where events
-   * A, B, C all read the same headEventId before any updates.
+   * CRITICAL: This solves the spurious branching bug where rapid events
+   * A, B, C all capture the same parentId before any updates.
    *
-   * The key insight: we update pendingHeadEventId SYNCHRONOUSLY before
-   * any async DB operation, ensuring each subsequent event gets the
-   * correct parentId even if the previous DB write hasn't finished.
+   * The key insight: parentId is captured INSIDE the .then() callback,
+   * which only runs AFTER the previous event's promise resolves.
+   * This ensures each event correctly chains to the previous one.
    */
   private appendEventLinearized(
     sessionId: SessionId,
@@ -1257,20 +1333,25 @@ export class EventStoreOrchestrator extends EventEmitter {
       return;
     }
 
-    // Capture the parent ID from our in-memory state (NOT from DB)
-    const parentId = active.pendingHeadEventId;
-
-    // Chain this append to the previous one, passing the actual event ID back
+    // Chain this append to the previous one
+    // CRITICAL: parentId must be captured INSIDE .then() to get updated value
     active.appendPromiseChain = active.appendPromiseChain
       .then(async () => {
+        // Capture parent ID HERE - after previous event has updated pendingHeadEventId
+        const parentId = active.pendingHeadEventId;
+        if (!parentId) {
+          logger.error('Cannot append event: no pending head event ID in chain', { sessionId, type });
+          return;
+        }
+
         try {
           const event = await this.eventStore.append({
             sessionId,
             type,
             payload,
-            parentId, // Use our tracked parent, not DB head
+            parentId,
           });
-          // Update in-memory head with the ACTUAL event ID from DB
+          // Update in-memory head for the next event in the chain
           active.pendingHeadEventId = event.id;
         } catch (err) {
           logger.error(`Failed to store ${type} event`, { err, sessionId });

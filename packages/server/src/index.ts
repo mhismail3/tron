@@ -139,11 +139,16 @@ function createRpcContext(orchestrator: EventStoreOrchestrator): RpcContext {
       async getState(sessionId) {
         const active = orchestrator.getActiveSession(sessionId);
         const session = await orchestrator.getSession(sessionId);
+        // Get ACTUAL agent message count (not just DB count) for debugging
+        const agentState = active?.agent.getState();
         return {
           isRunning: active?.isProcessing ?? false,
-          currentTurn: 0,
-          messageCount: session?.messageCount ?? 0,
-          tokenUsage: { input: 0, output: 0 },
+          currentTurn: agentState?.currentTurn ?? 0,
+          messageCount: agentState?.messages.length ?? session?.messageCount ?? 0,
+          tokenUsage: {
+            input: agentState?.tokenUsage?.inputTokens ?? 0,
+            output: agentState?.tokenUsage?.outputTokens ?? 0,
+          },
           model: session?.model ?? 'unknown',
           tools: [],
         };
