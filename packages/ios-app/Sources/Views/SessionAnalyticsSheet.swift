@@ -7,38 +7,48 @@ import Charts
 /// Following Apple's Human Interface Guidelines for Sheets
 struct SessionAnalyticsSheet: View {
     @Environment(\.dismiss) private var dismiss
+    @EnvironmentObject var eventStoreManager: EventStoreManager
 
     let sessionId: String
-    let events: [SessionEvent]
+
+    @State private var events: [SessionEvent] = []
+    @State private var isLoading = true
 
     var body: some View {
         NavigationStack {
-            ScrollView {
-                VStack(spacing: 24) {
-                    // Summary stats
-                    SummaryStatsRow(analytics: analytics)
+            Group {
+                if isLoading {
+                    ProgressView("Loading analytics...")
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else {
+                    ScrollView {
+                        VStack(spacing: 24) {
+                            // Summary stats
+                            SummaryStatsRow(analytics: analytics)
 
-                    // Turn breakdown
-                    if !analytics.turns.isEmpty {
-                        TurnBreakdownSection(turns: analytics.turns)
-                    }
+                            // Turn breakdown
+                            if !analytics.turns.isEmpty {
+                                TurnBreakdownSection(turns: analytics.turns)
+                            }
 
-                    // Tool usage
-                    if !analytics.toolUsage.isEmpty {
-                        ToolUsageSection(tools: analytics.toolUsage)
-                    }
+                            // Tool usage
+                            if !analytics.toolUsage.isEmpty {
+                                ToolUsageSection(tools: analytics.toolUsage)
+                            }
 
-                    // Model usage
-                    if analytics.modelUsage.count > 1 {
-                        ModelUsageSection(models: analytics.modelUsage)
-                    }
+                            // Model usage
+                            if analytics.modelUsage.count > 1 {
+                                ModelUsageSection(models: analytics.modelUsage)
+                            }
 
-                    // Errors
-                    if !analytics.errors.isEmpty {
-                        ErrorLogSection(errors: analytics.errors)
+                            // Errors
+                            if !analytics.errors.isEmpty {
+                                ErrorLogSection(errors: analytics.errors)
+                            }
+                        }
+                        .padding()
                     }
                 }
-                .padding()
             }
             .background(Color.tronBackground)
             .navigationTitle("Session Analytics")
@@ -52,6 +62,18 @@ struct SessionAnalyticsSheet: View {
         }
         .presentationDetents([.medium, .large])
         .presentationDragIndicator(.visible)
+        .task {
+            await loadEvents()
+        }
+    }
+
+    private func loadEvents() async {
+        do {
+            events = try eventStoreManager.getSessionEvents(sessionId)
+        } catch {
+            // Events will remain empty, showing zeros
+        }
+        isLoading = false
     }
 
     private var analytics: SessionAnalytics {
@@ -504,12 +526,3 @@ struct ErrorLogSection: View {
     }
 }
 
-// MARK: - Preview
-
-#Preview {
-    SessionAnalyticsSheet(
-        sessionId: "test-session",
-        events: []
-    )
-    .preferredColorScheme(.dark)
-}
