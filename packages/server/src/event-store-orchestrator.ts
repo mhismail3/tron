@@ -321,6 +321,11 @@ export interface ActiveSession {
    * Each append chains to the previous one, ensuring ordered persistence.
    */
   appendPromiseChain: Promise<void>;
+  /**
+   * P0 FIX: Track append errors to prevent malformed event trees.
+   * If an append fails, subsequent appends are skipped to preserve chain integrity.
+   */
+  lastAppendError?: Error;
 }
 
 export interface AgentRunOptions {
@@ -590,26 +595,51 @@ export class EventStoreOrchestrator extends EventEmitter {
       throw new Error('Cannot end session while processing');
     }
 
-    // Append session end event (linearized)
-    // Note: 'active' is already defined above from the isProcessing check
-    const sessionEndParentId = active?.pendingHeadEventId ?? undefined;
-    const sessionEndEvent = await this.eventStore.append({
-      sessionId: sessionId as SessionId,
-      type: 'session.end',
-      payload: {
-        reason: 'completed',
-        timestamp: new Date().toISOString(),
-      },
-      parentId: sessionEndParentId,
-    });
+    // Chain the session.end event append to ensure proper linearization
+    // CRITICAL: Previous code had the same race condition as switchModel() where
+    // concurrent calls could capture the same pendingHeadEventId
     if (active) {
-      active.pendingHeadEventId = sessionEndEvent.id;
+      const appendPromise = active.appendPromiseChain.then(async () => {
+        // Capture parent ID INSIDE the chain callback - after previous events complete
+        const parentId = active.pendingHeadEventId ?? undefined;
+
+        const event = await this.eventStore.append({
+          sessionId: sessionId as SessionId,
+          type: 'session.end',
+          payload: {
+            reason: 'completed',
+            timestamp: new Date().toISOString(),
+          },
+          parentId,
+        });
+
+        active.pendingHeadEventId = event.id;
+        logger.debug('[LINEARIZE] session.end appended', {
+          sessionId,
+          eventId: event.id,
+          parentId,
+        });
+      });
+
+      // Update the chain and wait for this specific event
+      active.appendPromiseChain = appendPromise;
+      await appendPromise;
+    } else {
+      // Session not active - direct append is safe (no concurrent events)
+      const event = await this.eventStore.append({
+        sessionId: sessionId as SessionId,
+        type: 'session.end',
+        payload: {
+          reason: 'completed',
+          timestamp: new Date().toISOString(),
+        },
+      });
+      logger.debug('[LINEARIZE] session.end appended (inactive session)', {
+        sessionId,
+        eventId: event.id,
+        parentId: event.parentId,
+      });
     }
-    logger.debug('[LINEARIZE] session.end appended', {
-      sessionId,
-      eventId: sessionEndEvent.id,
-      parentId: sessionEndParentId,
-    });
 
     // Release working directory through coordinator
     await this.worktreeCoordinator.release(sessionId as SessionId, {
@@ -643,9 +673,13 @@ export class EventStoreOrchestrator extends EventEmitter {
         .filter(a => !options.workingDirectory || a.workingDirectory === options.workingDirectory)
         .slice(0, options.limit ?? 50);
 
+      // P2 FIX: Batch fetch sessions to prevent N+1 queries
+      const sessionIds = active.map(a => a.sessionId);
+      const sessionsMap = await this.eventStore.getSessionsByIds(sessionIds);
+
       const sessions: SessionInfo[] = [];
       for (const a of active) {
-        const session = await this.eventStore.getSession(a.sessionId);
+        const session = sessionsMap.get(a.sessionId);
         if (session) {
           sessions.push(this.sessionRowToInfo(session, true, a.workingDir));
         }
@@ -744,6 +778,14 @@ export class EventStoreOrchestrator extends EventEmitter {
       throw new Error(`Session not found: ${sessionId}`);
     }
 
+    // P0 FIX: Prevent rewind during active agent processing
+    // Rewinding pendingHeadEventId while stream events are queued would cause
+    // queued events to chain to rewind point instead of being abandoned
+    const active = this.activeSessions.get(sessionId);
+    if (active?.isProcessing) {
+      throw new Error('Cannot rewind session while agent is processing');
+    }
+
     const previousHeadEventId = session.headEventId!;
 
     await this.eventStore.rewind(sessionId as SessionId, toEventId as EventId);
@@ -751,7 +793,6 @@ export class EventStoreOrchestrator extends EventEmitter {
     // If this is an active session, refresh the cached data
     // CRITICAL: Sync in-memory head after rewind to prevent race conditions
     // Without this, the next event would chain to the old head instead of rewind point
-    const active = this.activeSessions.get(sessionId);
     if (active) {
       active.lastActivity = new Date();
       active.pendingHeadEventId = toEventId as EventId;
@@ -1083,28 +1124,59 @@ export class EventStoreOrchestrator extends EventEmitter {
     // Get active session first to access pendingHeadEventId for linearization
     const active = this.activeSessions.get(sessionId);
 
-    // CRITICAL: Wait for any pending events before appending model switch
-    if (active) {
-      await active.appendPromiseChain;
+    // P0 FIX: Prevent model switch during active agent processing
+    // Modifying agent.model while agent.run() is in-flight causes inconsistent model usage
+    if (active?.isProcessing) {
+      throw new Error('Cannot switch model while agent is processing');
     }
 
-    // Record model switch event (linearized)
-    const modelSwitchParentId = active?.pendingHeadEventId ?? undefined;
-    const modelSwitchEvent = await this.eventStore.append({
-      sessionId: sessionId as SessionId,
-      type: 'config.model_switch',
-      payload: {
-        previousModel,
-        newModel: model,
-      },
-      parentId: modelSwitchParentId,
-    });
+    // Chain the model switch event append to the existing promise chain
+    // This ensures it waits for pending events and captures the correct parentId
+    // CRITICAL: Previous code had a race condition where concurrent switchModel() calls
+    // would both capture the same pendingHeadEventId, creating spurious branches
+    let modelSwitchEventId: EventId | null = null;
+    let modelSwitchParentId: EventId | undefined;
+
     if (active) {
-      active.pendingHeadEventId = modelSwitchEvent.id;
+      const appendPromise = active.appendPromiseChain.then(async () => {
+        // Capture parent ID INSIDE the chain callback - after previous events complete
+        modelSwitchParentId = active.pendingHeadEventId ?? undefined;
+
+        const event = await this.eventStore.append({
+          sessionId: sessionId as SessionId,
+          type: 'config.model_switch',
+          payload: {
+            previousModel,
+            newModel: model,
+          },
+          parentId: modelSwitchParentId,
+        });
+
+        // Update in-memory head for next event
+        active.pendingHeadEventId = event.id;
+        modelSwitchEventId = event.id;
+      });
+
+      // Update the chain and wait for this specific event
+      active.appendPromiseChain = appendPromise;
+      await appendPromise;
+    } else {
+      // Session not active - direct append is safe (no concurrent events)
+      const event = await this.eventStore.append({
+        sessionId: sessionId as SessionId,
+        type: 'config.model_switch',
+        payload: {
+          previousModel,
+          newModel: model,
+        },
+      });
+      modelSwitchEventId = event.id;
+      modelSwitchParentId = event.parentId ?? undefined;
     }
+
     logger.debug('[LINEARIZE] config.model_switch appended', {
       sessionId,
-      eventId: modelSwitchEvent.id,
+      eventId: modelSwitchEventId,
       parentId: modelSwitchParentId,
     });
 
@@ -1328,6 +1400,17 @@ export class EventStoreOrchestrator extends EventEmitter {
       return;
     }
 
+    // P0 FIX: Skip appends if prior append failed to prevent malformed event trees
+    // If turn_start fails but turn_end succeeds, the tree becomes inconsistent
+    if (active.lastAppendError) {
+      logger.warn('Skipping append due to prior error', {
+        sessionId,
+        type,
+        priorError: active.lastAppendError.message,
+      });
+      return;
+    }
+
     if (!active.pendingHeadEventId) {
       logger.error('Cannot append event: no pending head event ID', { sessionId, type });
       return;
@@ -1337,6 +1420,16 @@ export class EventStoreOrchestrator extends EventEmitter {
     // CRITICAL: parentId must be captured INSIDE .then() to get updated value
     active.appendPromiseChain = active.appendPromiseChain
       .then(async () => {
+        // Check again inside chain - error may have occurred in previous chain link
+        if (active.lastAppendError) {
+          logger.warn('Skipping append in chain due to prior error', {
+            sessionId,
+            type,
+            priorError: active.lastAppendError.message,
+          });
+          return;
+        }
+
         // Capture parent ID HERE - after previous event has updated pendingHeadEventId
         const parentId = active.pendingHeadEventId;
         if (!parentId) {
@@ -1355,7 +1448,8 @@ export class EventStoreOrchestrator extends EventEmitter {
           active.pendingHeadEventId = event.id;
         } catch (err) {
           logger.error(`Failed to store ${type} event`, { err, sessionId });
-          // Don't rethrow - allow subsequent events to proceed
+          // P0 FIX: Track error to prevent subsequent appends from creating orphaned events
+          active.lastAppendError = err instanceof Error ? err : new Error(String(err));
         }
       });
   }
@@ -1588,11 +1682,14 @@ export class EventStoreOrchestrator extends EventEmitter {
     }
   }
 
-  private cleanupInactiveSessions(): void {
+  private async cleanupInactiveSessions(): Promise<void> {
     const inactiveThreshold = 30 * 60 * 1000; // 30 minutes
     const now = Date.now();
 
-    for (const [sessionId, active] of this.activeSessions.entries()) {
+    // P2 FIX: Create snapshot to avoid modification during iteration
+    const entries = Array.from(this.activeSessions.entries());
+
+    for (const [sessionId, active] of entries) {
       if (active.isProcessing) continue;
 
       const inactiveTime = now - active.lastActivity.getTime();
@@ -1601,7 +1698,14 @@ export class EventStoreOrchestrator extends EventEmitter {
           sessionId,
           inactiveMinutes: Math.floor(inactiveTime / 60000),
         });
-        this.activeSessions.delete(sessionId);
+
+        // P2 FIX: Full cleanup including worktree release and session.end event
+        try {
+          await this.endSession(sessionId);
+        } catch (err) {
+          logger.error('Failed to end inactive session, removing from memory only', { sessionId, err });
+          this.activeSessions.delete(sessionId);
+        }
       }
     }
   }

@@ -462,6 +462,23 @@ export class SQLiteBackend {
     return this.rowToSession(row);
   }
 
+  /**
+   * P2 FIX: Batch fetch sessions by IDs to prevent N+1 queries
+   */
+  async getSessionsByIds(sessionIds: SessionId[]): Promise<Map<SessionId, SessionRow>> {
+    const result = new Map<SessionId, SessionRow>();
+    if (sessionIds.length === 0) return result;
+
+    const db = this.getDb();
+    const placeholders = sessionIds.map(() => '?').join(',');
+    const rows = db.prepare(`SELECT * FROM sessions WHERE id IN (${placeholders})`).all(...sessionIds) as any[];
+
+    for (const row of rows) {
+      result.set(row.id as SessionId, this.rowToSession(row));
+    }
+    return result;
+  }
+
   async listSessions(options: ListSessionsOptions): Promise<SessionRow[]> {
     const db = this.getDb();
     let sql = 'SELECT * FROM sessions WHERE 1=1';
@@ -739,6 +756,7 @@ export class SQLiteBackend {
     // Use recursive CTE to get all ancestors
     // The CTE walks from target to root via parent_id, so we track depth
     // and order by depth DESC to get chronological order (root first)
+    // P3 FIX: Added depth limit (10000) to prevent infinite loops from data corruption
     const rows = db.prepare(`
       WITH RECURSIVE ancestors(id, parent_id, session_id, workspace_id, type, timestamp, sequence, payload, content_blob_id, input_tokens, output_tokens, checksum, depth) AS (
         SELECT id, parent_id, session_id, workspace_id, type, timestamp, sequence, payload, content_blob_id, input_tokens, output_tokens, checksum, 0
@@ -747,6 +765,7 @@ export class SQLiteBackend {
         SELECT e.id, e.parent_id, e.session_id, e.workspace_id, e.type, e.timestamp, e.sequence, e.payload, e.content_blob_id, e.input_tokens, e.output_tokens, e.checksum, a.depth + 1
         FROM events e
         INNER JOIN ancestors a ON e.id = a.parent_id
+        WHERE a.depth < 10000
       )
       SELECT * FROM ancestors ORDER BY depth DESC
     `).all(eventId) as any[];
@@ -1009,9 +1028,21 @@ export class SQLiteBackend {
   /**
    * Execute an async function with manual transaction control.
    * Uses BEGIN/COMMIT/ROLLBACK for async operations.
+   *
+   * Note: If a transaction is already in progress (from concurrent calls),
+   * this will execute without a new transaction to avoid nested transaction errors.
+   * For true atomicity, callers should serialize access via promise chains.
    */
   async transactionAsync<T>(fn: () => Promise<T>): Promise<T> {
     const db = this.getDb();
+
+    // Check if we're already in a transaction
+    const inTransaction = db.inTransaction;
+    if (inTransaction) {
+      // Already in a transaction, just execute (SAVEPOINT would add complexity)
+      return fn();
+    }
+
     db.exec('BEGIN IMMEDIATE');
     try {
       const result = await fn();

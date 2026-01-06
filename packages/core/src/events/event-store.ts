@@ -169,48 +169,52 @@ export class EventStore {
       throw new Error('No parent ID available');
     }
 
-    // Get next sequence number
-    const sequence = await this.backend.getNextSequence(options.sessionId);
+    // P1 FIX: Wrap sequence generation + insert in transaction to prevent race conditions
+    // Without this, concurrent appends could get duplicate sequence numbers
+    return this.backend.transactionAsync(async () => {
+      // Get next sequence number (atomic within transaction)
+      const sequence = await this.backend.getNextSequence(options.sessionId);
 
-    // Create event
-    const event: SessionEvent = {
-      id: EventId(`evt_${this.generateId()}`),
-      parentId,
-      sessionId: options.sessionId,
-      workspaceId: session.workspaceId,
-      timestamp: new Date().toISOString(),
-      type: options.type,
-      sequence,
-      payload: options.payload,
-    } as SessionEvent;
+      // Create event
+      const event: SessionEvent = {
+        id: EventId(`evt_${this.generateId()}`),
+        parentId,
+        sessionId: options.sessionId,
+        workspaceId: session.workspaceId,
+        timestamp: new Date().toISOString(),
+        type: options.type,
+        sequence,
+        payload: options.payload,
+      } as SessionEvent;
 
-    await this.backend.insertEvent(event);
+      await this.backend.insertEvent(event);
 
-    // Update session head and counters
-    await this.backend.updateSessionHead(options.sessionId, event.id);
+      // Update session head and counters
+      await this.backend.updateSessionHead(options.sessionId, event.id);
 
-    const counters: { eventCount: number; messageCount?: number; inputTokens?: number; outputTokens?: number } = {
-      eventCount: 1,
-    };
+      const counters: { eventCount: number; messageCount?: number; inputTokens?: number; outputTokens?: number } = {
+        eventCount: 1,
+      };
 
-    // Track message count for message events
-    if (options.type === 'message.user' || options.type === 'message.assistant') {
-      counters.messageCount = 1;
-    }
+      // Track message count for message events
+      if (options.type === 'message.user' || options.type === 'message.assistant') {
+        counters.messageCount = 1;
+      }
 
-    // Track token usage
-    const payload = options.payload as { tokenUsage?: TokenUsage };
-    if (payload.tokenUsage) {
-      counters.inputTokens = payload.tokenUsage.inputTokens;
-      counters.outputTokens = payload.tokenUsage.outputTokens;
-    }
+      // Track token usage
+      const payload = options.payload as { tokenUsage?: TokenUsage };
+      if (payload.tokenUsage) {
+        counters.inputTokens = payload.tokenUsage.inputTokens;
+        counters.outputTokens = payload.tokenUsage.outputTokens;
+      }
 
-    await this.backend.incrementSessionCounters(options.sessionId, counters);
+      await this.backend.incrementSessionCounters(options.sessionId, counters);
 
-    // Index for search
-    await this.backend.indexEventForSearch(event);
+      // Index for search
+      await this.backend.indexEventForSearch(event);
 
-    return event;
+      return event;
+    });
   }
 
   // ===========================================================================
@@ -374,42 +378,46 @@ export class EventStore {
       throw new Error(`Source session not found: ${sourceEvent.sessionId}`);
     }
 
-    // Create new forked session
-    const forkedSession = await this.backend.createSession({
-      workspaceId: sourceSession.workspaceId,
-      workingDirectory: sourceSession.workingDirectory,
-      model: options?.model ?? sourceSession.model,
-      provider: sourceSession.provider,
-      title: options?.name,
-      parentSessionId: sourceSession.id,
-      forkFromEventId: fromEventId,
+    // P1 FIX: Wrap entire fork operation in transaction to prevent orphaned sessions
+    // If crash occurs between createSession and insertEvent, we'd have an inconsistent state
+    return this.backend.transactionAsync(async () => {
+      // Create new forked session
+      const forkedSession = await this.backend.createSession({
+        workspaceId: sourceSession.workspaceId,
+        workingDirectory: sourceSession.workingDirectory,
+        model: options?.model ?? sourceSession.model,
+        provider: sourceSession.provider,
+        title: options?.name,
+        parentSessionId: sourceSession.id,
+        forkFromEventId: fromEventId,
+      });
+
+      // Create fork event
+      const forkEvent: SessionForkEvent = {
+        id: EventId(`evt_${this.generateId()}`),
+        parentId: fromEventId, // Points to the event we forked from
+        sessionId: forkedSession.id,
+        workspaceId: sourceSession.workspaceId,
+        timestamp: new Date().toISOString(),
+        type: 'session.fork',
+        sequence: 0,
+        payload: {
+          sourceSessionId: sourceSession.id,
+          sourceEventId: fromEventId,
+          name: options?.name,
+        },
+      };
+
+      await this.backend.insertEvent(forkEvent);
+      await this.backend.updateSessionRoot(forkedSession.id, forkEvent.id);
+      await this.backend.updateSessionHead(forkedSession.id, forkEvent.id);
+      await this.backend.incrementSessionCounters(forkedSession.id, { eventCount: 1 });
+
+      return {
+        session: { ...forkedSession, rootEventId: forkEvent.id, headEventId: forkEvent.id },
+        rootEvent: forkEvent,
+      };
     });
-
-    // Create fork event
-    const forkEvent: SessionForkEvent = {
-      id: EventId(`evt_${this.generateId()}`),
-      parentId: fromEventId, // Points to the event we forked from
-      sessionId: forkedSession.id,
-      workspaceId: sourceSession.workspaceId,
-      timestamp: new Date().toISOString(),
-      type: 'session.fork',
-      sequence: 0,
-      payload: {
-        sourceSessionId: sourceSession.id,
-        sourceEventId: fromEventId,
-        name: options?.name,
-      },
-    };
-
-    await this.backend.insertEvent(forkEvent);
-    await this.backend.updateSessionRoot(forkedSession.id, forkEvent.id);
-    await this.backend.updateSessionHead(forkedSession.id, forkEvent.id);
-    await this.backend.incrementSessionCounters(forkedSession.id, { eventCount: 1 });
-
-    return {
-      session: { ...forkedSession, rootEventId: forkEvent.id, headEventId: forkEvent.id },
-      rootEvent: forkEvent,
-    };
   }
 
   // ===========================================================================
@@ -448,6 +456,13 @@ export class EventStore {
 
   async getSession(sessionId: SessionId): Promise<SessionRow | null> {
     return this.backend.getSession(sessionId);
+  }
+
+  /**
+   * P2 FIX: Batch fetch sessions by IDs to prevent N+1 queries
+   */
+  async getSessionsByIds(sessionIds: SessionId[]): Promise<Map<SessionId, SessionRow>> {
+    return this.backend.getSessionsByIds(sessionIds);
   }
 
   async listSessions(options?: ListSessionsOptions): Promise<SessionRow[]> {

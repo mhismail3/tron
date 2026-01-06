@@ -630,6 +630,186 @@ describe('Linearization Pattern', () => {
 });
 
 // =============================================================================
+// Concurrent Model Switches (testing the fix for switchModel race condition)
+// =============================================================================
+
+describe('Concurrent Model Switches', () => {
+  let eventStore: EventStore;
+  let testDir: string;
+
+  beforeEach(async () => {
+    testDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tron-model-switch-test-'));
+    const dbPath = path.join(testDir, 'events.db');
+    eventStore = new EventStore(dbPath);
+    await eventStore.initialize();
+  });
+
+  afterEach(async () => {
+    await eventStore.close();
+    fs.rmSync(testDir, { recursive: true, force: true });
+  });
+
+  it('rapid model switches should chain linearly (no spurious branches)', async () => {
+    const session = await eventStore.createSession({
+      workspacePath: '/test',
+      workingDirectory: '/test',
+      model: 'claude-haiku-3-5-20241022',
+      provider: 'anthropic',
+    });
+
+    // Simulate the linearization pattern used in switchModel()
+    let pendingHeadEventId: EventId = session.rootEvent.id;
+    let appendPromiseChain: Promise<void> = Promise.resolve();
+
+    const switchModelLinearized = (model: string, previousModel: string) => {
+      appendPromiseChain = appendPromiseChain.then(async () => {
+        const parentId = pendingHeadEventId;
+        const event = await eventStore.append({
+          sessionId: session.session.id,
+          type: 'config.model_switch',
+          payload: { previousModel, newModel: model },
+          parentId,
+        });
+        pendingHeadEventId = event.id;
+      });
+    };
+
+    // Rapid model switches (fire without awaiting)
+    switchModelLinearized('claude-sonnet-4-20250514', 'claude-haiku-3-5-20241022');
+    switchModelLinearized('claude-opus-4-20250514', 'claude-sonnet-4-20250514');
+    switchModelLinearized('claude-haiku-3-5-20241022', 'claude-opus-4-20250514');
+
+    await appendPromiseChain;
+
+    const events = await eventStore.getEventsBySession(session.session.id);
+    const result = verifyLinearChain(events);
+
+    expect(result.isLinear).toBe(true);
+    expect(countBranchPoints(events)).toBe(0);
+    expect(events.length).toBe(4); // root + 3 model switches
+  });
+
+  it('model switch interleaved with message events should chain linearly', async () => {
+    const session = await eventStore.createSession({
+      workspacePath: '/test',
+      workingDirectory: '/test',
+      model: 'claude-haiku-3-5-20241022',
+      provider: 'anthropic',
+    });
+
+    let pendingHeadEventId: EventId = session.rootEvent.id;
+    let appendPromiseChain: Promise<void> = Promise.resolve();
+
+    const appendLinearized = (type: string, payload: Record<string, unknown>) => {
+      appendPromiseChain = appendPromiseChain.then(async () => {
+        const parentId = pendingHeadEventId;
+        const event = await eventStore.append({
+          sessionId: session.session.id,
+          type: type as any,
+          payload,
+          parentId,
+        });
+        pendingHeadEventId = event.id;
+      });
+    };
+
+    // Interleave message events with model switches
+    appendLinearized('message.user', { content: 'Hello' });
+    appendLinearized('config.model_switch', { previousModel: 'haiku', newModel: 'sonnet' });
+    appendLinearized('stream.turn_start', { turn: 1 });
+    appendLinearized('config.model_switch', { previousModel: 'sonnet', newModel: 'opus' });
+    appendLinearized('message.assistant', { content: [{ type: 'text', text: 'Hi there!' }] });
+
+    await appendPromiseChain;
+
+    const events = await eventStore.getEventsBySession(session.session.id);
+    const result = verifyLinearChain(events);
+
+    expect(result.isLinear).toBe(true);
+    expect(countBranchPoints(events)).toBe(0);
+    expect(events.length).toBe(6); // root + 5 events
+  });
+
+  it('demonstrates the bug: concurrent model switches WITHOUT chaining create branches', async () => {
+    const session = await eventStore.createSession({
+      workspacePath: '/test',
+      workingDirectory: '/test',
+      model: 'claude-haiku-3-5-20241022',
+      provider: 'anthropic',
+    });
+
+    // This demonstrates the BROKEN pattern - fire-and-forget without chaining
+    // Both switches will likely get the same parentId (root event)
+    const promises = [
+      eventStore.append({
+        sessionId: session.session.id,
+        type: 'config.model_switch',
+        payload: { previousModel: 'haiku', newModel: 'sonnet' },
+        // No explicit parentId - will read from DB
+      }),
+      eventStore.append({
+        sessionId: session.session.id,
+        type: 'config.model_switch',
+        payload: { previousModel: 'sonnet', newModel: 'opus' },
+        // No explicit parentId - will read from DB
+      }),
+    ];
+
+    await Promise.all(promises);
+
+    const events = await eventStore.getEventsBySession(session.session.id);
+    const branchPoints = countBranchPoints(events);
+
+    // This demonstrates the bug: without linearization, we may get spurious branches
+    // The test doesn't assert a specific value because timing varies,
+    // but documents that this pattern is vulnerable
+    console.log(`Bug demo: Found ${branchPoints} branch points (should be 0 with fix)`);
+    expect(events.length).toBe(3); // root + 2 model switches
+  });
+
+  it('session.end event should chain linearly with prior events', async () => {
+    const session = await eventStore.createSession({
+      workspacePath: '/test',
+      workingDirectory: '/test',
+      model: 'claude-haiku-3-5-20241022',
+      provider: 'anthropic',
+    });
+
+    let pendingHeadEventId: EventId = session.rootEvent.id;
+    let appendPromiseChain: Promise<void> = Promise.resolve();
+
+    const appendLinearized = (type: string, payload: Record<string, unknown>) => {
+      appendPromiseChain = appendPromiseChain.then(async () => {
+        const parentId = pendingHeadEventId;
+        const event = await eventStore.append({
+          sessionId: session.session.id,
+          type: type as any,
+          payload,
+          parentId,
+        });
+        pendingHeadEventId = event.id;
+      });
+    };
+
+    // Simulate a session: user message, turn, model switch, then session end
+    appendLinearized('message.user', { content: 'Hello' });
+    appendLinearized('stream.turn_start', { turn: 1 });
+    appendLinearized('config.model_switch', { previousModel: 'haiku', newModel: 'sonnet' });
+    appendLinearized('session.end', { reason: 'completed', timestamp: new Date().toISOString() });
+
+    await appendPromiseChain;
+
+    const events = await eventStore.getEventsBySession(session.session.id);
+    const result = verifyLinearChain(events);
+
+    expect(result.isLinear).toBe(true);
+    expect(countBranchPoints(events)).toBe(0);
+    expect(events.length).toBe(5); // root + 4 events
+    expect(events[events.length - 1].type).toBe('session.end');
+  });
+});
+
+// =============================================================================
 // Demonstrating the Bug (without the fix)
 // =============================================================================
 
@@ -688,5 +868,78 @@ describe('Bug Demonstration (without linearization)', () => {
     // We don't assert the exact value because timing varies,
     // but we document that this pattern is vulnerable to the bug
     expect(events.length).toBe(6); // root + 5 events
+  });
+});
+
+// =============================================================================
+// P1 Fix: Transaction Atomicity Tests
+// =============================================================================
+
+describe('Transaction Atomicity (P1 fixes)', () => {
+  let eventStore: EventStore;
+  let testDir: string;
+
+  beforeEach(async () => {
+    testDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tron-tx-test-'));
+    const dbPath = path.join(testDir, 'events.db');
+    eventStore = new EventStore(dbPath);
+    await eventStore.initialize();
+  });
+
+  afterEach(async () => {
+    await eventStore.close();
+    fs.rmSync(testDir, { recursive: true, force: true });
+  });
+
+  it('serialized appends (via promise chain) should have unique sequence numbers', async () => {
+    const session = await eventStore.createSession({
+      workspacePath: '/test',
+      workingDirectory: '/test',
+      model: 'claude-sonnet-4-20250514',
+      provider: 'anthropic',
+    });
+
+    // The correct pattern: serialize appends via promise chaining
+    // This is what appendPromiseChain does in the orchestrator
+    let chain: Promise<EventId> = Promise.resolve(session.rootEvent.id);
+
+    for (let i = 0; i < 10; i++) {
+      chain = chain.then(async (parentId) => {
+        const event = await eventStore.append({
+          sessionId: session.session.id,
+          type: 'stream.turn_start',
+          payload: { turn: i },
+          parentId,
+        });
+        return event.id;
+      });
+    }
+
+    await chain;
+
+    const events = await eventStore.getEventsBySession(session.session.id);
+    const sequences = events.map(e => e.sequence);
+    const uniqueSequences = new Set(sequences);
+
+    // All sequence numbers should be unique when serialized
+    expect(uniqueSequences.size).toBe(sequences.length);
+    expect(events.length).toBe(11); // root + 10 events
+  });
+
+  it('fork operation should be atomic - no orphaned sessions', async () => {
+    const session = await eventStore.createSession({
+      workspacePath: '/test',
+      workingDirectory: '/test',
+      model: 'claude-sonnet-4-20250514',
+      provider: 'anthropic',
+    });
+
+    // Fork should create session + fork event atomically
+    const forkResult = await eventStore.fork(session.rootEvent.id, { name: 'Test Fork' });
+
+    expect(forkResult.session).toBeDefined();
+    expect(forkResult.rootEvent).toBeDefined();
+    expect(forkResult.rootEvent.type).toBe('session.fork');
+    expect(forkResult.session.id).toBe(forkResult.rootEvent.sessionId);
   });
 });

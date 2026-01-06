@@ -39,6 +39,10 @@ export interface ClientConnection {
   isAlive: boolean;
   sessionId?: string;
   connectedAt: Date;
+  /** P1 FIX: Track pending messages for backpressure handling */
+  pendingMessages: number;
+  /** Maximum pending messages before dropping events */
+  maxPendingMessages: number;
 }
 
 // =============================================================================
@@ -149,13 +153,32 @@ export class TronWebSocketServer extends EventEmitter {
     const message = JSON.stringify(event);
 
     for (const client of this.clients.values()) {
-      if (client.socket.readyState === WebSocket.OPEN) {
-        // Filter by sessionId if present
-        if (event.sessionId && client.sessionId && event.sessionId !== client.sessionId) {
-          continue;
-        }
-        client.socket.send(message);
+      if (client.socket.readyState !== WebSocket.OPEN) {
+        continue;
       }
+
+      // Filter by sessionId if present
+      if (event.sessionId && client.sessionId && event.sessionId !== client.sessionId) {
+        continue;
+      }
+
+      // P1 FIX: Backpressure check - drop events for slow clients
+      if (client.pendingMessages >= client.maxPendingMessages) {
+        logger.warn('Client message queue full, dropping event', {
+          clientId: client.id,
+          pending: client.pendingMessages,
+          eventType: event.type,
+        });
+        continue;
+      }
+
+      client.pendingMessages++;
+      client.socket.send(message, (err) => {
+        client.pendingMessages--;
+        if (err) {
+          logger.error('Failed to send to client', { clientId: client.id, error: err.message });
+        }
+      });
     }
   }
 
@@ -183,6 +206,8 @@ export class TronWebSocketServer extends EventEmitter {
       socket,
       isAlive: true,
       connectedAt: new Date(),
+      pendingMessages: 0,
+      maxPendingMessages: 100, // P1 FIX: Limit to prevent memory exhaustion
     };
 
     this.clients.set(clientId, client);
