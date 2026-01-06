@@ -99,6 +99,12 @@ class EventStoreManager: ObservableObject {
         do {
             sessions = try eventDB.getAllSessions()
             logger.info("Loaded \(self.sessions.count) sessions from EventDatabase")
+
+            // Extract dashboard info (prompt/response) for each session
+            // so the 2-row containers are always populated
+            for session in sessions {
+                extractDashboardInfoFromEvents(sessionId: session.id)
+            }
         } catch {
             logger.error("Failed to load sessions: \(error.localizedDescription)")
             sessions = []

@@ -82,10 +82,29 @@ class ChatViewModel: ObservableObject {
     func setEventStoreManager(_ manager: EventStoreManager, workspaceId: String) {
         self.eventStoreManager = manager
         self.workspaceId = workspaceId
-        // Load persisted messages asynchronously to avoid blocking UI
+        // Sync from server first (to get any events that happened while we were away),
+        // then load persisted messages asynchronously to avoid blocking UI
         Task { @MainActor in
-            await loadPersistedMessagesAsync()
+            await syncAndLoadMessages()
         }
+    }
+
+    /// Sync events from server, then load messages from local database
+    /// This ensures we see events that happened while we were away from this session
+    private func syncAndLoadMessages() async {
+        guard let manager = eventStoreManager else { return }
+
+        // First sync from server to get any events that happened while we were away
+        do {
+            try await manager.syncSessionEvents(sessionId: sessionId)
+            logger.info("Synced events from server before loading messages", category: .session)
+        } catch {
+            // Don't fail - we can still show what we have locally
+            logger.warning("Failed to sync events from server: \(error.localizedDescription)", category: .session)
+        }
+
+        // Now load from local database (which now includes synced events)
+        await loadPersistedMessagesAsync()
     }
 
     /// Load messages from EventDatabase asynchronously to avoid blocking UI

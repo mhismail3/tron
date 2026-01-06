@@ -176,8 +176,17 @@ struct AgentStateResult: Decodable {
     let isRunning: Bool
     let currentTurn: Int
     let messageCount: Int
-    let tokenUsage: TokenUsage?
+    let tokenUsage: AgentStateTokenUsage?
     let model: String
+    let tools: [String]?  // Server returns this but we don't need it
+}
+
+/// Token usage specifically for agent.getState response (uses different field names)
+struct AgentStateTokenUsage: Decodable {
+    let input: Int
+    let output: Int
+
+    var totalTokens: Int { input + output }
 }
 
 struct TokenUsage: Decodable, Equatable {
