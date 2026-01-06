@@ -34,6 +34,7 @@ import {
   type WorkingDirectory,
   type WorktreeCoordinatorConfig,
   type ServerAuth,
+  type EventType,
 } from '@tron/core';
 
 const logger = createLogger('event-store-orchestrator');
@@ -309,6 +310,17 @@ export interface ActiveSession {
   workingDir?: WorkingDirectory;
   /** Current turn number (tracked for discrete event storage) */
   currentTurn: number;
+  /**
+   * In-memory head event ID for linearizing event appends.
+   * Updated synchronously BEFORE async DB writes to prevent race conditions
+   * where multiple rapid events all read the same headEventId from DB.
+   */
+  pendingHeadEventId: EventId | null;
+  /**
+   * Promise chain that serializes event appends for this session.
+   * Each append chains to the previous one, ensuring ordered persistence.
+   */
+  appendPromiseChain: Promise<void>;
 }
 
 export interface AgentRunOptions {
@@ -498,6 +510,9 @@ export class EventStoreOrchestrator extends EventEmitter {
       model,
       workingDir,
       currentTurn: 0,
+      // Initialize linearization tracking with root event as head
+      pendingHeadEventId: result.rootEvent.id,
+      appendPromiseChain: Promise.resolve(),
     });
 
     this.emit('session_created', {
@@ -553,6 +568,9 @@ export class EventStoreOrchestrator extends EventEmitter {
       model: session.model,
       workingDir,
       currentTurn: session.turnCount ?? 0,
+      // Initialize linearization tracking from session's current head
+      pendingHeadEventId: session.headEventId ?? null,
+      appendPromiseChain: Promise.resolve(),
     });
 
     logger.info('Session resumed', {
@@ -720,9 +738,12 @@ export class EventStoreOrchestrator extends EventEmitter {
     await this.eventStore.rewind(sessionId as SessionId, toEventId as EventId);
 
     // If this is an active session, refresh the cached data
+    // CRITICAL: Sync in-memory head after rewind to prevent race conditions
+    // Without this, the next event would chain to the old head instead of rewind point
     const active = this.activeSessions.get(sessionId);
     if (active) {
       active.lastActivity = new Date();
+      active.pendingHeadEventId = toEventId as EventId;
     }
 
     this.emit('session_rewound', {
@@ -1204,6 +1225,80 @@ export class EventStoreOrchestrator extends EventEmitter {
     return agent;
   }
 
+  // ===========================================================================
+  // Linearized Event Appending
+  // ===========================================================================
+
+  /**
+   * Append an event with linearized ordering per session.
+   * Uses in-memory head tracking to prevent race conditions where
+   * multiple events fire before DB updates complete.
+   *
+   * CRITICAL: This solves the spurious branching bug where events
+   * A, B, C all read the same headEventId before any updates.
+   *
+   * The key insight: we update pendingHeadEventId SYNCHRONOUSLY before
+   * any async DB operation, ensuring each subsequent event gets the
+   * correct parentId even if the previous DB write hasn't finished.
+   */
+  private appendEventLinearized(
+    sessionId: SessionId,
+    type: EventType,
+    payload: Record<string, unknown>
+  ): void {
+    const active = this.activeSessions.get(sessionId);
+    if (!active) {
+      logger.error('Cannot append event: session not active', { sessionId, type });
+      return;
+    }
+
+    if (!active.pendingHeadEventId) {
+      logger.error('Cannot append event: no pending head event ID', { sessionId, type });
+      return;
+    }
+
+    // Capture the parent ID from our in-memory state (NOT from DB)
+    const parentId = active.pendingHeadEventId;
+
+    // Chain this append to the previous one, passing the actual event ID back
+    active.appendPromiseChain = active.appendPromiseChain
+      .then(async () => {
+        try {
+          const event = await this.eventStore.append({
+            sessionId,
+            type,
+            payload,
+            parentId, // Use our tracked parent, not DB head
+          });
+          // Update in-memory head with the ACTUAL event ID from DB
+          active.pendingHeadEventId = event.id;
+        } catch (err) {
+          logger.error(`Failed to store ${type} event`, { err, sessionId });
+          // Don't rethrow - allow subsequent events to proceed
+        }
+      });
+  }
+
+  /**
+   * Wait for all pending event appends to complete for a session.
+   * Useful for tests and ensuring DB state is consistent before queries.
+   */
+  async flushPendingEvents(sessionId: SessionId): Promise<void> {
+    const active = this.activeSessions.get(sessionId);
+    if (active) {
+      await active.appendPromiseChain;
+    }
+  }
+
+  /**
+   * Flush all active sessions' pending events.
+   */
+  async flushAllPendingEvents(): Promise<void> {
+    const flushes = Array.from(this.activeSessions.values())
+      .map(s => s.appendPromiseChain);
+    await Promise.all(flushes);
+  }
+
   private forwardAgentEvent(sessionId: SessionId, event: TronEvent): void {
     const timestamp = new Date().toISOString();
     const active = this.activeSessions.get(sessionId);
@@ -1222,12 +1317,8 @@ export class EventStoreOrchestrator extends EventEmitter {
           data: { turn: event.turn },
         });
 
-        // Phase 4: Store turn start event
-        this.eventStore.append({
-          sessionId,
-          type: 'stream.turn_start',
-          payload: { turn: event.turn },
-        }).catch(err => logger.error('Failed to store stream.turn_start event', { err, sessionId }));
+        // Store turn start event (linearized to prevent spurious branches)
+        this.appendEventLinearized(sessionId, 'stream.turn_start', { turn: event.turn });
         break;
 
       case 'turn_end':
@@ -1242,15 +1333,11 @@ export class EventStoreOrchestrator extends EventEmitter {
           },
         });
 
-        // Phase 4: Store turn end event with token usage
-        this.eventStore.append({
-          sessionId,
-          type: 'stream.turn_end',
-          payload: {
-            turn: event.turn,
-            tokenUsage: event.tokenUsage ?? { inputTokens: 0, outputTokens: 0 },
-          },
-        }).catch(err => logger.error('Failed to store stream.turn_end event', { err, sessionId }));
+        // Phase 4: Store turn end event with token usage (linearized)
+        this.appendEventLinearized(sessionId, 'stream.turn_end', {
+          turn: event.turn,
+          tokenUsage: event.tokenUsage ?? { inputTokens: 0, outputTokens: 0 },
+        });
         break;
 
       case 'message_update':
@@ -1274,17 +1361,13 @@ export class EventStoreOrchestrator extends EventEmitter {
           },
         });
 
-        // Phase 2: Store discrete tool.call event
-        this.eventStore.append({
-          sessionId,
-          type: 'tool.call',
-          payload: {
-            toolCallId: event.toolCallId,
-            name: event.toolName,
-            arguments: event.arguments ?? {},
-            turn: active?.currentTurn ?? 0,
-          },
-        }).catch(err => logger.error('Failed to store tool.call event', { err, sessionId }));
+        // Phase 2: Store discrete tool.call event (linearized)
+        this.appendEventLinearized(sessionId, 'tool.call', {
+          toolCallId: event.toolCallId,
+          name: event.toolName,
+          arguments: event.arguments ?? {},
+          turn: active?.currentTurn ?? 0,
+        });
         break;
 
       case 'tool_execution_end': {
@@ -1306,34 +1389,26 @@ export class EventStoreOrchestrator extends EventEmitter {
           },
         });
 
-        // Phase 2: Store discrete tool.result event
-        this.eventStore.append({
-          sessionId,
-          type: 'tool.result',
-          payload: {
-            toolCallId: event.toolCallId,
-            content: truncateString(resultContent, MAX_TOOL_RESULT_SIZE),
-            isError: event.isError ?? false,
-            duration: event.duration,
-            truncated: resultContent.length > MAX_TOOL_RESULT_SIZE,
-          },
-        }).catch(err => logger.error('Failed to store tool.result event', { err, sessionId }));
+        // Phase 2: Store discrete tool.result event (linearized)
+        this.appendEventLinearized(sessionId, 'tool.result', {
+          toolCallId: event.toolCallId,
+          content: truncateString(resultContent, MAX_TOOL_RESULT_SIZE),
+          isError: event.isError ?? false,
+          duration: event.duration,
+          truncated: resultContent.length > MAX_TOOL_RESULT_SIZE,
+        });
         break;
       }
 
       case 'api_retry':
-        // Phase 3: Store provider error event for API retries
-        this.eventStore.append({
-          sessionId,
-          type: 'error.provider',
-          payload: {
-            provider: this.config.defaultProvider,
-            error: event.errorMessage,
-            code: event.errorCategory,
-            retryable: true,
-            retryAfter: event.delayMs,
-          },
-        }).catch(err => logger.error('Failed to store error.provider event', { err, sessionId }));
+        // Phase 3: Store provider error event for API retries (linearized)
+        this.appendEventLinearized(sessionId, 'error.provider', {
+          provider: this.config.defaultProvider,
+          error: event.errorMessage,
+          code: event.errorCategory,
+          retryable: true,
+          retryAfter: event.delayMs,
+        });
         break;
 
       case 'agent_start':

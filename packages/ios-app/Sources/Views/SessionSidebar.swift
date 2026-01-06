@@ -27,8 +27,9 @@ struct SessionSidebar: View {
                         Button(role: .destructive) {
                             onDeleteSession(session.id)
                         } label: {
-                            Label("Delete", systemImage: "trash")
+                            Image(systemName: "archivebox")
                         }
+                        .tint(.tronEmerald)
                     }
                 }
             }

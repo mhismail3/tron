@@ -118,9 +118,10 @@ struct ContentView: View {
     @State private var selectedSessionId: String?
     @State private var columnVisibility: NavigationSplitViewVisibility = .automatic
     @State private var showNewSessionSheet = false
-    @State private var showDeleteConfirmation = false
-    @State private var sessionToDelete: String?
     @State private var showSettings = false
+    @State private var showArchiveConfirmation = false
+    @State private var sessionToArchive: String?
+    @AppStorage("confirmArchive") private var confirmArchive = true
 
     var body: some View {
         Group {
@@ -137,8 +138,12 @@ struct ContentView: View {
                         selectedSessionId: $selectedSessionId,
                         onNewSession: { showNewSessionSheet = true },
                         onDeleteSession: { sessionId in
-                            sessionToDelete = sessionId
-                            showDeleteConfirmation = true
+                            if confirmArchive {
+                                sessionToArchive = sessionId
+                                showArchiveConfirmation = true
+                            } else {
+                                deleteSession(sessionId)
+                            }
                         },
                         onSettings: { showSettings = true }
                     )
@@ -188,15 +193,15 @@ struct ContentView: View {
         .sheet(isPresented: $showSettings) {
             SettingsView()
         }
-        .alert("Delete Session?", isPresented: $showDeleteConfirmation) {
+        .alert("Archive Session?", isPresented: $showArchiveConfirmation) {
             Button("Cancel", role: .cancel) {
-                sessionToDelete = nil
+                sessionToArchive = nil
             }
-            Button("Delete", role: .destructive) {
-                if let sessionId = sessionToDelete {
+            Button("Archive", role: .destructive) {
+                if let sessionId = sessionToArchive {
                     deleteSession(sessionId)
                 }
-                sessionToDelete = nil
+                sessionToArchive = nil
             }
         } message: {
             Text("This will remove the session from your device. The session data on the server will remain.")
@@ -294,116 +299,52 @@ struct WelcomePage: View {
     let onNewSession: () -> Void
     let onSettings: () -> Void
 
-    @EnvironmentObject var appState: AppState
-
     var body: some View {
-        VStack(spacing: 32) {
-            // Settings button at top
-            HStack {
-                Spacer()
-                Button(action: onSettings) {
-                    Image(systemName: "gearshape")
-                        .font(.system(size: 16, weight: .medium))
-                        .foregroundStyle(.white.opacity(0.9))
+        NavigationStack {
+            ZStack(alignment: .bottomTrailing) {
+                // Centered content - positioned higher
+                VStack(spacing: 16) {
+                    // Circuit moose logo
+                    Image("TronLogo")
+                        .resizable()
+                        .aspectRatio(contentMode: .fit)
+                        .frame(height: 80)
+
+                    // Subtle tagline
+                    Text("Start talking to Tron")
+                        .font(.system(size: 14, weight: .regular, design: .monospaced))
+                        .foregroundStyle(.white.opacity(0.4))
                 }
-                .padding()
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .offset(y: -60)
+
+                // Floating + button (same as SessionSidebar)
+                FloatingNewSessionButton(action: onNewSession)
+                    .padding(.trailing, 20)
+                    .padding(.bottom, 24)
             }
-
-            Spacer()
-
-            // Logo
-            VStack(spacing: 20) {
-                Image("TronLogo")
-                    .resizable()
-                    .aspectRatio(contentMode: .fit)
-                    .frame(height: 80)
-
-                Text("TRON")
-                    .font(.system(size: 32, weight: .bold, design: .monospaced))
-                    .foregroundStyle(.tronEmerald)
-                    .tracking(4)
-
-                Text("AI-powered coding assistant")
-                    .font(.subheadline)
-                    .foregroundStyle(.white.opacity(0.6))
-            }
-
-            // Server connection info
-            HStack(spacing: 8) {
-                Image(systemName: "server.rack")
-                    .font(.caption)
-                Text(appState.serverURL.host ?? "localhost")
-                    .font(.caption.weight(.medium))
-                Text(":\(appState.serverURL.port ?? 8080)")
-                    .font(.caption)
-            }
-            .foregroundStyle(.white.opacity(0.6))
-            .padding(.horizontal, 12)
-            .padding(.vertical, 6)
-            .glassEffect(.regular.tint(Color.tronPhthaloGreen).interactive(), in: .capsule)
-            .onTapGesture {
-                onSettings()
-            }
-
-            // Features
-            VStack(alignment: .leading, spacing: 16) {
-                FeatureRow(
-                    icon: "folder",
-                    title: "Full File Access",
-                    description: "Read and write files in your project"
-                )
-                FeatureRow(
-                    icon: "terminal",
-                    title: "Shell Commands",
-                    description: "Execute commands directly"
-                )
-                FeatureRow(
-                    icon: "pencil.and.outline",
-                    title: "Code Editing",
-                    description: "Make precise code changes"
-                )
-            }
-            .padding(.horizontal, 32)
-
-            Spacer()
-
-            // CTA
-            Button(action: onNewSession) {
-                Label("Start New Session", systemImage: TronIcon.newSession.systemName)
-                    .font(.headline)
-                    .foregroundStyle(.white)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 16)
-                    .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-            }
-            .glassEffect(.regular.tint(Color.tronEmerald).interactive(), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-            .padding(.horizontal, 32)
-            .padding(.bottom, 32)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-    }
-}
-
-@available(iOS 26.0, *)
-struct FeatureRow: View {
-    let icon: String
-    let title: String
-    let description: String
-
-    var body: some View {
-        HStack(spacing: 16) {
-            Image(systemName: icon)
-                .font(.title2)
-                .foregroundStyle(.tronEmerald)
-                .frame(width: 32)
-
-            VStack(alignment: .leading, spacing: 2) {
-                Text(title)
-                    .font(.headline)
-                    .foregroundStyle(.white.opacity(0.9))
-                Text(description)
-                    .font(.caption)
-                    .foregroundStyle(.white.opacity(0.5))
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Image("TronLogo")
+                        .resizable()
+                        .aspectRatio(contentMode: .fit)
+                        .frame(height: 28)
+                }
+                ToolbarItem(placement: .principal) {
+                    Text("TRON")
+                        .font(.system(size: 16, weight: .bold, design: .monospaced))
+                        .foregroundStyle(.tronEmerald)
+                        .tracking(2)
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button(action: onSettings) {
+                        Image(systemName: "gearshape")
+                            .font(.system(size: 16, weight: .medium))
+                            .foregroundStyle(.white.opacity(0.9))
+                    }
+                }
             }
         }
     }
@@ -558,20 +499,19 @@ struct NewSessionFlow: View {
                         .font(.subheadline.weight(.medium))
                 }
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button {
-                        createSession()
-                    } label: {
-                        if isCreating {
-                            ProgressView()
-                                .tint(.tronEmerald)
-                                .scaleEffect(0.8)
-                        } else {
+                    if isCreating {
+                        ProgressView()
+                            .tint(.tronEmerald)
+                    } else {
+                        Button {
+                            createSession()
+                        } label: {
                             Text("Create")
                                 .font(.subheadline.weight(.medium))
                                 .foregroundStyle(canCreate ? .tronEmerald : .white.opacity(0.3))
                         }
+                        .disabled(!canCreate)
                     }
-                    .disabled(!canCreate)
                 }
             }
             .sheet(isPresented: $showWorkspaceSelector) {

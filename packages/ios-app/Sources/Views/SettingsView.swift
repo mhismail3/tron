@@ -7,6 +7,7 @@ struct SettingsView: View {
     @AppStorage("serverHost") private var serverHost = "localhost"
     @AppStorage("serverPort") private var serverPort = "8080"
     @AppStorage("useTLS") private var useTLS = false
+    @AppStorage("confirmArchive") private var confirmArchive = true
 
     @State private var showingResetAlert = false
     @State private var showLogViewer = false
@@ -33,6 +34,18 @@ struct SettingsView: View {
                         .font(.caption)
                 } footer: {
                     Text("Connect to your Tron server. Default is localhost:8080.")
+                        .font(.caption2)
+                }
+
+                // Preferences Section
+                Section {
+                    Toggle("Confirm before archiving", isOn: $confirmArchive)
+                        .font(.subheadline)
+                } header: {
+                    Text("Preferences")
+                        .font(.caption)
+                } footer: {
+                    Text("Show a confirmation dialog when archiving sessions.")
                         .font(.caption2)
                 }
 
@@ -132,6 +145,7 @@ struct SettingsView: View {
         serverHost = "localhost"
         serverPort = "8080"
         useTLS = false
+        confirmArchive = true
     }
 }
 
