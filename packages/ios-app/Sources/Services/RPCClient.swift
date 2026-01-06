@@ -53,11 +53,29 @@ class RPCClient: ObservableObject {
     // MARK: - Connection
 
     func connect() async {
-        // Don't reconnect if already connected
-        if webSocket != nil && connectionState.isConnected {
+        // Prevent duplicate connections - check if WebSocket already exists.
+        // This prevents race conditions where multiple connect() calls happen
+        // before the first one completes (common during app startup when
+        // multiple views call connect() simultaneously).
+        if webSocket != nil {
             logger.debug("Already connected, skipping connect", category: .rpc)
             return
         }
+
+        // Also check connection state to prevent races during state transitions.
+        // If we're already connecting or reconnecting, don't start another connection.
+        switch connectionState {
+        case .connected, .connecting, .reconnecting:
+            logger.debug("Connection already in progress (\(connectionState)), skipping", category: .rpc)
+            return
+        case .disconnected, .failed:
+            break
+        }
+
+        // Set connecting state BEFORE creating WebSocket to prevent concurrent attempts.
+        // This is critical: if another connect() call comes in during the await below,
+        // it will see .connecting state and bail out.
+        connectionState = .connecting
 
         logger.info("Initializing connection to \(self.serverURL.absoluteString)", category: .rpc)
 
@@ -85,6 +103,10 @@ class RPCClient: ObservableObject {
         currentSessionId = nil
         webSocket?.disconnect()
         webSocket = nil
+        // Explicitly reset state to allow future connections.
+        // The Combine subscription may not have delivered the .disconnected state yet
+        // when webSocket is set to nil, leaving connectionState stale.
+        connectionState = .disconnected
     }
 
     func reconnect() async {
