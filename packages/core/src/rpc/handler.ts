@@ -124,6 +124,7 @@ export interface EventStoreManager {
 interface SessionManager {
   createSession(params: SessionCreateParams): Promise<SessionCreateResult>;
   getSession(sessionId: string): Promise<SessionInfo | null>;
+  resumeSession(sessionId: string): Promise<SessionInfo>;
   listSessions(params: SessionListParams): Promise<SessionInfo[]>;
   deleteSession(sessionId: string): Promise<boolean>;
   // Updated to use EventId-based operations (EventStore integration)
@@ -368,19 +369,24 @@ export class RpcHandler extends EventEmitter {
       return this.errorResponse(request.id, 'INVALID_PARAMS', 'sessionId is required');
     }
 
-    const session = await this.context.sessionManager.getSession(params.sessionId);
-    if (!session) {
-      return this.errorResponse(request.id, 'SESSION_NOT_FOUND', 'Session does not exist');
+    try {
+      // Resume the session (activates it for agent operations)
+      const session = await this.context.sessionManager.resumeSession(params.sessionId);
+
+      const result: SessionResumeResult = {
+        sessionId: session.sessionId,
+        model: session.model,
+        messageCount: session.messages.length,
+        lastActivity: session.lastActivity,
+      };
+
+      return this.successResponse(request.id, result);
+    } catch (error) {
+      if (error instanceof Error && error.message.includes('not found')) {
+        return this.errorResponse(request.id, 'SESSION_NOT_FOUND', 'Session does not exist');
+      }
+      throw error;
     }
-
-    const result: SessionResumeResult = {
-      sessionId: session.sessionId,
-      model: session.model,
-      messageCount: session.messages.length,
-      lastActivity: session.lastActivity,
-    };
-
-    return this.successResponse(request.id, result);
   }
 
   private async handleSessionList(request: RpcRequest): Promise<RpcResponse> {

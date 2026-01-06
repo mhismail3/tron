@@ -24,6 +24,13 @@ describe('RpcHandler', () => {
           messages: [],
           workingDirectory: '/test',
         }),
+        resumeSession: vi.fn().mockResolvedValue({
+          sessionId: 'sess_123',
+          model: 'claude-sonnet-4-20250514',
+          messages: [],
+          workingDirectory: '/test',
+          lastActivity: new Date().toISOString(),
+        }),
         listSessions: vi.fn().mockResolvedValue([]),
         deleteSession: vi.fn().mockResolvedValue(true),
         forkSession: vi.fn().mockResolvedValue({

@@ -58,6 +58,27 @@ function createRpcContext(orchestrator: EventStoreOrchestrator): RpcContext {
           })),
         };
       },
+      async resumeSession(sessionId) {
+        // Resume the session - this activates it in the orchestrator
+        const session = await orchestrator.resumeSession(sessionId);
+
+        // Get messages from event store
+        const messages = await orchestrator.getSessionMessages(sessionId);
+
+        return {
+          sessionId: session.sessionId,
+          workingDirectory: session.workingDirectory,
+          model: session.model,
+          messageCount: session.messageCount,
+          createdAt: session.createdAt,
+          lastActivity: session.lastActivity,
+          isActive: session.isActive,
+          messages: messages.map(m => ({
+            role: m.role,
+            content: m.content,
+          })),
+        };
+      },
       async listSessions(params) {
         const sessions = await orchestrator.listSessions({
           workingDirectory: params.workingDirectory,
