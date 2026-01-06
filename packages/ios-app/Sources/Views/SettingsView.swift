@@ -7,140 +7,101 @@ struct SettingsView: View {
     @AppStorage("serverHost") private var serverHost = "localhost"
     @AppStorage("serverPort") private var serverPort = "8080"
     @AppStorage("useTLS") private var useTLS = false
-    @AppStorage("workingDirectory") private var workingDirectory = ""
-    @AppStorage("defaultModel") private var defaultModel = "claude-opus-4-5-20251101"
 
     @State private var showingResetAlert = false
     @State private var showLogViewer = false
 
     var body: some View {
         NavigationStack {
-            Form {
-                // Server Configuration
+            List {
+                // Server Section
                 Section {
                     TextField("Host", text: $serverHost)
+                        .font(.subheadline)
                         .textContentType(.URL)
                         .autocapitalization(.none)
                         .autocorrectionDisabled()
 
                     TextField("Port", text: $serverPort)
+                        .font(.subheadline)
                         .keyboardType(.numberPad)
 
                     Toggle("Use TLS (wss://)", isOn: $useTLS)
+                        .font(.subheadline)
                 } header: {
                     Text("Server")
+                        .font(.caption)
                 } footer: {
                     Text("Connect to your Tron server. Default is localhost:8080.")
+                        .font(.caption2)
                 }
 
-                // Session Defaults
-                Section {
-                    TextField("Working Directory", text: $workingDirectory)
-                        .autocapitalization(.none)
-                        .autocorrectionDisabled()
-
-                    Picker("Default Model", selection: $defaultModel) {
-                        // Opus models
-                        Text("Claude Opus 4.5").tag("claude-opus-4-5-20251101")
-                        Text("Claude Opus 4").tag("claude-opus-4-20250514")
-                        // Sonnet models
-                        Text("Claude Sonnet 4").tag("claude-sonnet-4-20250514")
-                        Text("Claude Sonnet 4 (Thinking)").tag("claude-sonnet-4-20250514-thinking")
-                        // Haiku models
-                        Text("Claude Haiku 3.5").tag("claude-3-5-haiku-20241022")
-                    }
-                } header: {
-                    Text("Session Defaults")
-                } footer: {
-                    Text("Working directory for new sessions. Leave empty to use app documents folder.")
-                }
-
-                // About
-                Section {
-                    HStack {
-                        Text("Version")
-                        Spacer()
-                        Text("1.0.0")
-                            .foregroundStyle(.tronTextSecondary)
-                    }
-
-                    HStack {
-                        Text("Protocol")
-                        Spacer()
-                        Text("JSON-RPC over WebSocket")
-                            .foregroundStyle(.tronTextSecondary)
-                    }
-
-                    Link(destination: URL(string: "https://github.com/yourusername/tron")!) {
-                        HStack {
-                            Text("GitHub Repository")
-                            Spacer()
-                            Image(systemName: "arrow.up.right.square")
-                                .foregroundStyle(.tronTextMuted)
-                        }
-                    }
-                } header: {
-                    Text("About")
-                }
-
-                // Debug
+                // Debug Section
                 Section {
                     Button {
                         showLogViewer = true
                     } label: {
                         HStack {
                             Label("View Logs", systemImage: "doc.text.magnifyingglass")
+                                .font(.subheadline)
                             Spacer()
-                            Text("Level: \(String(describing: logger.minimumLevel).capitalized)")
-                                .font(.caption)
-                                .foregroundStyle(.tronTextMuted)
+                            Image(systemName: "chevron.right")
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundStyle(.tertiary)
                         }
                     }
-
-                    HStack {
-                        Label("Log Level", systemImage: "list.bullet.rectangle")
-                        Spacer()
-                        Picker("", selection: Binding(
-                            get: { logger.minimumLevel },
-                            set: { logger.setLevel($0) }
-                        )) {
-                            Text("Verbose").tag(LogLevel.verbose)
-                            Text("Debug").tag(LogLevel.debug)
-                            Text("Info").tag(LogLevel.info)
-                            Text("Warning").tag(LogLevel.warning)
-                            Text("Error").tag(LogLevel.error)
-                        }
-                        .labelsHidden()
-                        .pickerStyle(.menu)
-                    }
+                    .tint(.primary)
                 } header: {
                     Text("Debug")
-                } footer: {
-                    Text("View real-time logs for debugging connection and message issues.")
+                        .font(.caption)
                 }
 
-                // Advanced
+                // Advanced Section
                 Section {
                     Button(role: .destructive) {
                         showingResetAlert = true
                     } label: {
-                        Text("Reset All Settings")
+                        Label("Reset All Settings", systemImage: "arrow.counterclockwise")
+                            .font(.subheadline)
                     }
                 } header: {
                     Text("Advanced")
+                        .font(.caption)
+                }
+
+                // Footer
+                Section {
+                    EmptyView()
+                } footer: {
+                    VStack(spacing: 4) {
+                        Text("v0.0.1")
+                            .font(.caption2)
+                        Link(destination: URL(string: "https://github.com/yourusername/tron")!) {
+                            HStack(spacing: 3) {
+                                Text("GitHub")
+                                    .font(.caption2)
+                                Image(systemName: "arrow.up.right")
+                                    .font(.system(size: 8))
+                            }
+                        }
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.top, 16)
                 }
             }
+            .listStyle(.insetGrouped)
+            .scrollContentBackground(.hidden)
+            .background(Color.tronBackground)
+            .environment(\.defaultMinListRowHeight, 40)
             .sheet(isPresented: $showLogViewer) {
                 LogViewer()
             }
-            .scrollContentBackground(.hidden)
-            .background(Color.tronBackground)
             .navigationTitle("Settings")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("Done") { dismiss() }
+                        .font(.subheadline.weight(.medium))
                 }
             }
             .alert("Reset Settings?", isPresented: $showingResetAlert) {
@@ -152,6 +113,9 @@ struct SettingsView: View {
                 Text("This will reset all settings to their default values.")
             }
         }
+        .presentationDetents([.medium, .large])
+        .presentationDragIndicator(.visible)
+        .tint(.tronEmerald)
         .preferredColorScheme(.dark)
     }
 
@@ -168,8 +132,6 @@ struct SettingsView: View {
         serverHost = "localhost"
         serverPort = "8080"
         useTLS = false
-        workingDirectory = ""
-        defaultModel = "claude-opus-4-5-20251101"
     }
 }
 
