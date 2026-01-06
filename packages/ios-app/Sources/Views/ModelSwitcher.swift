@@ -17,20 +17,18 @@ struct ModelPickerMenu: View {
             if isLoading && models.isEmpty {
                 Text("Loading models...")
             } else {
-                // Anthropic section
+                // Anthropic section - latest models first, then legacy
                 Section("Anthropic") {
-                    // Latest models first (4.5 series)
-                    let latestAnthropicModels = anthropicModels.filter { $0.is45Model }
+                    let latestModels = anthropicModels.filter { $0.is45Model }
                         .uniqueByFormattedName().sortedByTier()
-                    ForEach(latestAnthropicModels) { model in
-                        modelButton(model, isLatest: true)
-                    }
+                    let legacyModels = anthropicModels.filter { !$0.is45Model }
+                        .uniqueByFormattedName().sortedByTier()
 
-                    // Legacy models (Claude 4 non-4.5)
-                    let legacyAnthropicModels = anthropicModels.filter { !$0.is45Model }
-                        .uniqueByFormattedName().sortedByTier()
-                    ForEach(legacyAnthropicModels) { model in
-                        modelButton(model, isLatest: false)
+                    ForEach(latestModels) { model in
+                        modelButton(model)
+                    }
+                    ForEach(legacyModels) { model in
+                        modelButton(model)
                     }
                 }
 
@@ -76,26 +74,15 @@ struct ModelPickerMenu: View {
     // MARK: - Model Button
 
     @ViewBuilder
-    private func modelButton(_ model: ModelInfo, isLatest: Bool) -> some View {
+    private func modelButton(_ model: ModelInfo) -> some View {
         let isSelected = model.id == currentModel
 
         Button {
             onSelect(model)
         } label: {
             HStack {
-                // Model name (always left-aligned)
                 Text(model.formattedModelName)
-
-                // Legacy label if not latest
-                if !isLatest {
-                    Text("(Legacy)")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-
                 Spacer()
-
-                // Checkmark right-aligned
                 if isSelected {
                     Image(systemName: "checkmark")
                         .font(.system(size: 13, weight: .semibold))
@@ -106,19 +93,12 @@ struct ModelPickerMenu: View {
         .disabled(isSelected)
     }
 
-    // MARK: - Coming Soon Model
+    // MARK: - Coming Soon Model (greyed out, disabled)
 
     @ViewBuilder
     private func comingSoonModel(_ name: String) -> some View {
-        HStack {
-            Text(name)
-                .foregroundStyle(.secondary)
-            Text("(Coming Soon)")
-                .font(.caption)
-                .foregroundStyle(.tertiary)
-            Spacer()
-        }
-        .disabled(true)
+        Text(name)
+            .foregroundStyle(.tertiary)
     }
 }
 
