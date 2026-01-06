@@ -578,6 +578,92 @@ class EventStoreManager: ObservableObject {
         return event
     }
 
+    // MARK: - Session Processing State
+
+    /// Track which sessions are currently processing
+    private var processingSessionIds: Set<String> = []
+
+    /// Mark a session as processing (agent is thinking)
+    func setSessionProcessing(_ sessionId: String, isProcessing: Bool) {
+        if isProcessing {
+            processingSessionIds.insert(sessionId)
+        } else {
+            processingSessionIds.remove(sessionId)
+        }
+
+        // Update the session's processing flag
+        if let index = sessions.firstIndex(where: { $0.id == sessionId }) {
+            sessions[index].isProcessing = isProcessing
+        }
+    }
+
+    /// Update dashboard display fields for a session (last prompt, response, tool count)
+    func updateSessionDashboardInfo(
+        sessionId: String,
+        lastUserPrompt: String? = nil,
+        lastAssistantResponse: String? = nil,
+        lastToolCount: Int? = nil
+    ) {
+        if let index = sessions.firstIndex(where: { $0.id == sessionId }) {
+            if let prompt = lastUserPrompt {
+                sessions[index].lastUserPrompt = prompt
+            }
+            if let response = lastAssistantResponse {
+                sessions[index].lastAssistantResponse = response
+            }
+            if let toolCount = lastToolCount {
+                sessions[index].lastToolCount = toolCount
+            }
+        }
+    }
+
+    /// Extract dashboard info from events after sync
+    func extractDashboardInfoFromEvents(sessionId: String) {
+        do {
+            let events = try eventDB.getEventsBySession(sessionId)
+
+            // Find the last user message
+            if let lastUserEvent = events.last(where: { $0.type == "message.user" }) {
+                if let content = lastUserEvent.payload["content"]?.value as? String {
+                    updateSessionDashboardInfo(sessionId: sessionId, lastUserPrompt: content)
+                }
+            }
+
+            // Find the last assistant message and count tools
+            if let lastAssistantEvent = events.last(where: { $0.type == "message.assistant" }) {
+                var responseText = ""
+                var toolCount = 0
+
+                if let content = lastAssistantEvent.payload["content"]?.value {
+                    if let text = content as? String {
+                        responseText = text
+                    } else if let blocks = content as? [[String: Any]] {
+                        // Count tool blocks and extract text
+                        for block in blocks {
+                            if let type = block["type"] as? String {
+                                if type == "tool_use" {
+                                    toolCount += 1
+                                } else if type == "text", let text = block["text"] as? String {
+                                    if responseText.isEmpty {
+                                        responseText = text
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                updateSessionDashboardInfo(
+                    sessionId: sessionId,
+                    lastAssistantResponse: responseText,
+                    lastToolCount: toolCount > 0 ? toolCount : nil
+                )
+            }
+        } catch {
+            logger.error("Failed to extract dashboard info for session \(sessionId): \(error.localizedDescription)")
+        }
+    }
+
     // MARK: - Turn Content Caching
 
     /// Cache full turn content from agent.turn event

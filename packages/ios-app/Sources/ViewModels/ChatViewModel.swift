@@ -606,6 +606,11 @@ class ChatViewModel: ObservableObject {
         isProcessing = true
         thinkingText = ""
 
+        // Update dashboard processing state
+        eventStoreManager?.setSessionProcessing(sessionId, isProcessing: true)
+        // Update dashboard with the prompt we just sent
+        eventStoreManager?.updateSessionDashboardInfo(sessionId: sessionId, lastUserPrompt: text)
+
         // Create streaming placeholder
         let streamingMessage = ChatMessage.streaming()
         messages.append(streamingMessage)
@@ -642,6 +647,11 @@ class ChatViewModel: ObservableObject {
             do {
                 try await rpcClient.abortAgent()
                 isProcessing = false
+                eventStoreManager?.setSessionProcessing(sessionId, isProcessing: false)
+                eventStoreManager?.updateSessionDashboardInfo(
+                    sessionId: sessionId,
+                    lastAssistantResponse: "Interrupted"
+                )
                 finalizeStreamingMessage()
                 messages.append(.system("Agent aborted"))
                 logger.info("Agent aborted successfully", category: .chat)
@@ -885,6 +895,15 @@ class ChatViewModel: ObservableObject {
         isProcessing = false
         finalizeStreamingMessage()
         thinkingText = ""
+
+        // Update dashboard with final response and tool count
+        eventStoreManager?.setSessionProcessing(sessionId, isProcessing: false)
+        eventStoreManager?.updateSessionDashboardInfo(
+            sessionId: sessionId,
+            lastAssistantResponse: streamingText.isEmpty ? nil : String(streamingText.prefix(200)),
+            lastToolCount: currentTurnToolCalls.isEmpty ? nil : currentTurnToolCalls.count
+        )
+
         currentToolMessages.removeAll()
         currentTurnToolCalls.removeAll()  // Clear tool calls for next turn
 
@@ -913,6 +932,11 @@ class ChatViewModel: ObservableObject {
     private func handleError(_ message: String) {
         logger.error("Agent error: \(message)", category: .events)
         isProcessing = false
+        eventStoreManager?.setSessionProcessing(sessionId, isProcessing: false)
+        eventStoreManager?.updateSessionDashboardInfo(
+            sessionId: sessionId,
+            lastAssistantResponse: "Error: \(String(message.prefix(100)))"
+        )
         finalizeStreamingMessage()
         messages.append(.error(message))
         thinkingText = ""
@@ -949,7 +973,8 @@ class ChatViewModel: ObservableObject {
 
     // MARK: - Error Handling
 
-    private func showErrorAlert(_ message: String) {
+    /// Show error alert (accessible from external callers like ChatView)
+    func showErrorAlert(_ message: String) {
         errorMessage = message
         showError = true
     }
@@ -963,6 +988,16 @@ class ChatViewModel: ObservableObject {
 
     func clearMessages() {
         messages = []
+    }
+
+    /// Add an in-chat notification when model is switched
+    func addModelChangeNotification(from previousModel: String, to newModel: String) {
+        let notification = ChatMessage.modelChange(
+            from: previousModel.shortModelName,
+            to: newModel.shortModelName
+        )
+        messages.append(notification)
+        logger.info("Model switched from \(previousModel) to \(newModel)", category: .session)
     }
 
     // MARK: - Computed Properties

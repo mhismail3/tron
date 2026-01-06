@@ -45,7 +45,50 @@ struct MessageBubble: View {
 
         case .images(let images):
             ImagesContentView(images: images)
+
+        case .modelChange(let from, let to):
+            ModelChangeNotificationView(from: from, to: to)
         }
+    }
+}
+
+// MARK: - Model Change Notification View (Pill-style in-chat notification)
+
+struct ModelChangeNotificationView: View {
+    let from: String
+    let to: String
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "cpu")
+                .font(.system(size: 10, weight: .medium))
+                .foregroundStyle(.tronEmerald)
+
+            Text("Switched from")
+                .font(.system(size: 11, design: .monospaced))
+                .foregroundStyle(.tronTextMuted)
+
+            Text(from)
+                .font(.system(size: 11, weight: .medium, design: .monospaced))
+                .foregroundStyle(.tronTextSecondary)
+
+            Image(systemName: "arrow.right")
+                .font(.system(size: 9, weight: .medium))
+                .foregroundStyle(.tronTextMuted)
+
+            Text(to)
+                .font(.system(size: 11, weight: .medium, design: .monospaced))
+                .foregroundStyle(.tronEmerald)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(Color.tronSurface.opacity(0.6))
+        .clipShape(Capsule())
+        .overlay(
+            Capsule()
+                .stroke(Color.tronEmerald.opacity(0.3), lineWidth: 0.5)
+        )
+        .frame(maxWidth: .infinity, alignment: .center)
     }
 }
 

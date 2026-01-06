@@ -61,6 +61,8 @@ enum MessageContent: Equatable {
     case toolResult(ToolResultData)
     case error(String)
     case images([ImageContent])
+    /// In-chat notification for model change
+    case modelChange(from: String, to: String)
 
     var textContent: String {
         switch self {
@@ -76,12 +78,23 @@ enum MessageContent: Equatable {
             return message
         case .images:
             return "[Images]"
+        case .modelChange(let from, let to):
+            return "Switched from \(from) to \(to)"
         }
     }
 
     var isToolRelated: Bool {
         switch self {
         case .toolUse, .toolResult:
+            return true
+        default:
+            return false
+        }
+    }
+
+    var isNotification: Bool {
+        switch self {
+        case .modelChange:
             return true
         default:
             return false
@@ -197,5 +210,10 @@ extension ChatMessage {
 
     static func error(_ text: String) -> ChatMessage {
         ChatMessage(role: .assistant, content: .error(text))
+    }
+
+    /// In-chat notification for model changes
+    static func modelChange(from: String, to: String) -> ChatMessage {
+        ChatMessage(role: .system, content: .modelChange(from: from, to: to))
     }
 }

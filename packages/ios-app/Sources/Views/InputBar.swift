@@ -17,9 +17,16 @@ struct InputBar: View {
 
     // Status bar info
     var modelName: String = ""
-    var onModelTap: (() -> Void)?
     var tokenUsage: TokenUsage?
     var contextPercentage: Int = 0
+
+    // Model picker integration
+    var cachedModels: [ModelInfo] = []
+    var isLoadingModels: Bool = false
+    var onModelSelect: ((ModelInfo) -> Void)?
+
+    /// Binding to control focus (used to prevent keyboard after response)
+    @Binding var shouldFocus: Bool
 
     @FocusState private var isFocused: Bool
     @State private var showingImagePicker = false
@@ -49,27 +56,33 @@ struct InputBar: View {
             .padding(.bottom, 8)
         }
         // iOS 26: No background - elements float with glass effects only
+        // Sync focus state with parent control
+        .onChange(of: shouldFocus) { _, newValue in
+            if newValue && !isProcessing {
+                isFocused = true
+            } else if !newValue {
+                isFocused = false
+            }
+        }
+        .onChange(of: isFocused) { _, newValue in
+            shouldFocus = newValue
+        }
     }
 
     // MARK: - Status Pills Row (iOS 26 Liquid Glass)
 
     private var statusPillsRow: some View {
         HStack {
-            // Model pill - tappable with liquid glass
+            // Model picker menu - popup style (replaces old button)
             if !modelName.isEmpty {
-                Button(action: { onModelTap?() }) {
-                    HStack(spacing: 4) {
-                        Image(systemName: "cpu")
-                            .font(.system(size: 9, weight: .medium))
-                        Text(modelName.shortModelName)
-                            .font(.system(size: 11, weight: .medium))
+                ModelPickerMenu(
+                    currentModel: modelName,
+                    models: cachedModels,
+                    isLoading: isLoadingModels,
+                    onSelect: { model in
+                        onModelSelect?(model)
                     }
-                    .foregroundStyle(.white.opacity(0.9))
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 5)
-                    .contentShape(Capsule())
-                }
-                .glassEffect(.regular.tint(Color.tronPhthaloGreen.opacity(0.4)).interactive(), in: .capsule)
+                )
             }
 
             Spacer()
@@ -394,7 +407,12 @@ struct AttachedImageThumbnail: View {
             onAbort: {},
             onRemoveImage: { _ in },
             inputHistory: nil,
-            onHistoryNavigate: nil
+            onHistoryNavigate: nil,
+            modelName: "claude-sonnet-4-5-20260105",
+            cachedModels: [],
+            isLoadingModels: false,
+            onModelSelect: nil,
+            shouldFocus: .constant(false)
         )
     }
     .preferredColorScheme(.dark)

@@ -92,7 +92,7 @@ struct CachedSessionSidebarRow: View {
     let isSelected: Bool
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: 8) {
             // Title row with message count
             HStack(spacing: 6) {
                 Text(session.displayTitle)
@@ -116,6 +116,58 @@ struct CachedSessionSidebarRow: View {
                     .foregroundStyle(.white.opacity(0.5))
             }
 
+            // Recent prompt (user's last message)
+            if let prompt = session.lastUserPrompt, !prompt.isEmpty {
+                HStack(alignment: .top, spacing: 6) {
+                    Image(systemName: "person.fill")
+                        .font(.system(size: 8))
+                        .foregroundStyle(.tronEmerald.opacity(0.6))
+                        .frame(width: 12)
+
+                    Text(prompt)
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundStyle(.white.opacity(0.7))
+                        .lineLimit(2)
+                        .truncationMode(.tail)
+                }
+                .padding(.horizontal, 8)
+                .padding(.vertical, 6)
+                .background(Color.white.opacity(0.03))
+                .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+            }
+
+            // Latest action/response or processing state
+            if session.isProcessing == true {
+                // Thinking indicator with pulse animation
+                SessionProcessingIndicator()
+            } else if let response = session.lastAssistantResponse, !response.isEmpty {
+                HStack(alignment: .top, spacing: 6) {
+                    Image(systemName: "cpu")
+                        .font(.system(size: 8))
+                        .foregroundStyle(.tronEmerald.opacity(0.8))
+                        .frame(width: 12)
+
+                    Text(response)
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundStyle(.white.opacity(0.6))
+                        .lineLimit(2)
+                        .truncationMode(.tail)
+
+                    Spacer(minLength: 0)
+
+                    // Tool count badge
+                    if let toolCount = session.lastToolCount, toolCount > 0 {
+                        Text("(\(toolCount) tools)")
+                            .font(.system(size: 9, weight: .medium, design: .monospaced))
+                            .foregroundStyle(.tronEmerald.opacity(0.7))
+                    }
+                }
+                .padding(.horizontal, 8)
+                .padding(.vertical, 6)
+                .background(Color.white.opacity(0.03))
+                .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+            }
+
             // Working directory (truncated)
             Text(session.displayDirectory)
                 .font(.system(size: 10, weight: .regular, design: .monospaced))
@@ -131,6 +183,37 @@ struct CachedSessionSidebarRow: View {
                 : .regular.tint(Color.tronPhthaloGreen.opacity(0.15)),
             in: RoundedRectangle(cornerRadius: 12, style: .continuous)
         )
+    }
+}
+
+// MARK: - Session Processing Indicator (Pulsing "Thinking...")
+
+@available(iOS 26.0, *)
+struct SessionProcessingIndicator: View {
+    @State private var isPulsing = false
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "brain")
+                .font(.system(size: 10))
+                .foregroundStyle(.tronEmerald)
+                .symbolEffect(.pulse, options: .repeating, value: isPulsing)
+
+            Text("Thinking...")
+                .font(.system(size: 11, weight: .medium, design: .monospaced))
+                .foregroundStyle(.tronEmerald.opacity(0.9))
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .background(Color.tronEmerald.opacity(0.1))
+        .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                .stroke(Color.tronEmerald.opacity(0.3), lineWidth: 0.5)
+        )
+        .onAppear {
+            isPulsing = true
+        }
     }
 }
 

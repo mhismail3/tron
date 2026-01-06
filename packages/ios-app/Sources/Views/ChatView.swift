@@ -20,12 +20,16 @@ struct ChatView: View {
     @StateObject private var viewModel: ChatViewModel
     @StateObject private var inputHistory = InputHistoryStore()
     @State private var scrollProxy: ScrollViewProxy?
-    @State private var showModelSwitcher = false
     @State private var showSessionStats = false
     @State private var showContextAudit = false
     @State private var showSessionHistory = false
-    /// Cached models for faster ModelSwitcher opening
+    /// Cached models for model picker menu
     @State private var cachedModels: [ModelInfo] = []
+    @State private var isLoadingModels = false
+    /// Optimistic model name for instant UI update
+    @State private var optimisticModelName: String?
+    /// Controls input field focus - set to false after response to prevent keyboard
+    @State private var inputFocused = false
 
     // MARK: - Smart Auto-Scroll State
     /// Whether to auto-scroll to bottom on new content
@@ -47,6 +51,11 @@ struct ChatView: View {
         _viewModel = StateObject(wrappedValue: ChatViewModel(rpcClient: rpcClient, sessionId: sessionId))
     }
 
+    /// Current model name (optimistic if pending, else actual)
+    private var displayModelName: String {
+        optimisticModelName ?? viewModel.currentModel
+    }
+
     var body: some View {
         // Main content with floating input bar using safeAreaInset
         messagesScrollView
@@ -61,7 +70,7 @@ struct ChatView: View {
                         )
                     }
 
-                    // Input area with integrated status pills
+                    // Input area with integrated status pills and model picker
                     InputBar(
                         text: $viewModel.inputText,
                         isProcessing: viewModel.isProcessing,
@@ -82,10 +91,15 @@ struct ChatView: View {
                         onHistoryNavigate: { newText in
                             viewModel.inputText = newText
                         },
-                        modelName: viewModel.currentModel,
-                        onModelTap: { showModelSwitcher = true },
+                        modelName: displayModelName,
                         tokenUsage: viewModel.totalTokenUsage,
-                        contextPercentage: viewModel.contextPercentage
+                        contextPercentage: viewModel.contextPercentage,
+                        cachedModels: cachedModels,
+                        isLoadingModels: isLoadingModels,
+                        onModelSelect: { model in
+                            switchModel(to: model)
+                        },
+                        shouldFocus: $inputFocused
                     )
                 }
             }
@@ -101,17 +115,6 @@ struct ChatView: View {
         }
         .sheet(isPresented: $viewModel.showSettings) {
             SettingsView()
-        }
-        .sheet(isPresented: $showModelSwitcher) {
-            ModelSwitcher(
-                rpcClient: rpcClient,
-                currentModel: viewModel.currentModel,
-                sessionId: sessionId,
-                onModelChanged: { newModel in
-                    // Model changed - update cache
-                },
-                cachedModels: cachedModels.isEmpty ? nil : cachedModels
-            )
         }
         .sheet(isPresented: $showSessionStats) {
             SessionStatsView(
@@ -136,6 +139,13 @@ struct ChatView: View {
         } message: {
             Text(viewModel.errorMessage ?? "Unknown error")
         }
+        // Prevent keyboard from auto-opening after response completes
+        .onChange(of: viewModel.isProcessing) { wasProcessing, isNowProcessing in
+            if wasProcessing && !isNowProcessing {
+                // Response just finished - dismiss keyboard
+                inputFocused = false
+            }
+        }
         .task {
             // Sync events from server to ensure local EventDatabase has latest state
             // This ensures tool calls and results are properly persisted
@@ -157,10 +167,73 @@ struct ChatView: View {
         }
     }
 
-    /// Pre-fetch models for faster ModelSwitcher opening
+    /// Pre-fetch models for model picker menu
     private func prefetchModels() async {
+        isLoadingModels = true
         if let models = try? await rpcClient.listModels() {
             cachedModels = models
+        }
+        isLoadingModels = false
+    }
+
+    /// Switch model with optimistic UI update for instant feedback
+    private func switchModel(to model: ModelInfo) {
+        let previousModel = viewModel.currentModel
+
+        // Optimistic update - UI updates instantly
+        optimisticModelName = model.id
+
+        // Fire the actual switch in background
+        Task {
+            do {
+                let result = try await rpcClient.switchModel(sessionId, model: model.id)
+                await MainActor.run {
+                    // Clear optimistic update - real value now in viewModel.currentModel
+                    optimisticModelName = nil
+
+                    // Add in-chat notification for model change
+                    viewModel.addModelChangeNotification(
+                        from: previousModel,
+                        to: result.newModel
+                    )
+
+                    // Capture model change event in event store
+                    captureModelChangeEvent(from: previousModel, to: result.newModel)
+                }
+            } catch {
+                await MainActor.run {
+                    // Revert optimistic update on failure
+                    optimisticModelName = nil
+                    viewModel.showErrorAlert("Failed to switch model: \(error.localizedDescription)")
+                }
+            }
+        }
+    }
+
+    /// Capture model change as an event in the event store for persistence
+    private func captureModelChangeEvent(from previousModel: String, to newModel: String) {
+        guard let session = eventStoreManager.activeSession else { return }
+
+        let event = SessionEvent(
+            id: "evt_\(UUID().uuidString.lowercased().replacingOccurrences(of: "-", with: ""))",
+            parentId: session.headEventId,
+            sessionId: sessionId,
+            workspaceId: session.workspaceId,
+            type: SessionEventType.configModelSwitch.rawValue,
+            timestamp: ISO8601DateFormatter().string(from: Date()),
+            sequence: session.eventCount + 1,
+            payload: [
+                "previousModel": AnyCodable(previousModel),
+                "newModel": AnyCodable(newModel),
+                "model": AnyCodable(newModel)
+            ]
+        )
+
+        do {
+            try eventStoreManager.cacheStreamingEvent(event)
+        } catch {
+            // Log but don't fail - this is informational
+            print("Failed to cache model change event: \(error)")
         }
     }
 
@@ -168,13 +241,9 @@ struct ChatView: View {
 
     private var commandsMenu: some View {
         Menu {
-            // Model section
+            // Model info (read-only, selection is via InputBar popup)
             Section {
-                Button {
-                    showModelSwitcher = true
-                } label: {
-                    Label(viewModel.currentModel.shortModelName, systemImage: "cpu")
-                }
+                Label(displayModelName.shortModelName, systemImage: "cpu")
             }
 
             // Session section

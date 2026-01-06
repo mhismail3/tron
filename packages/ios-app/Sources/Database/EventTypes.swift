@@ -189,6 +189,12 @@ struct CachedSession: Identifiable, Codable {
     var inputTokens: Int
     var outputTokens: Int
 
+    // Dashboard display fields
+    var lastUserPrompt: String?
+    var lastAssistantResponse: String?
+    var lastToolCount: Int?
+    var isProcessing: Bool?
+
     var totalTokens: Int { inputTokens + outputTokens }
 
     var displayTitle: String {

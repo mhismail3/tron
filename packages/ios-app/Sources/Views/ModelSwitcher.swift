@@ -1,6 +1,145 @@
 import SwiftUI
 
-// MARK: - Model Switcher
+// MARK: - Model Picker Menu (iOS 26 Liquid Glass Popup)
+
+/// Popup menu for selecting models - replaces the old sheet-based picker
+/// Used inline in InputBar for fast model switching
+@available(iOS 26.0, *)
+struct ModelPickerMenu: View {
+    let currentModel: String
+    let models: [ModelInfo]
+    let isLoading: Bool
+    let onSelect: (ModelInfo) -> Void
+
+    var body: some View {
+        Menu {
+            if isLoading && models.isEmpty {
+                Text("Loading models...")
+            } else {
+                // Latest 4.5 models section
+                let latestModels = models.filter { $0.is45Model }.uniqueByFormattedName().sortedByTier()
+                if !latestModels.isEmpty {
+                    Section("Latest") {
+                        ForEach(latestModels) { model in
+                            modelButton(model)
+                        }
+                    }
+                }
+
+                // Claude 4 models section (non-4.5)
+                let claude4Models = models.filter { isClaude4NotLatest($0) }.uniqueByFormattedName().sortedByTier()
+                if !claude4Models.isEmpty {
+                    Section("Claude 4") {
+                        ForEach(claude4Models) { model in
+                            modelButton(model)
+                        }
+                    }
+                }
+
+                // Coming Soon - OpenAI and Gemini placeholders
+                Section("Coming Soon") {
+                    // OpenAI models
+                    disabledModelRow("GPT-5.2", provider: "OpenAI")
+                    disabledModelRow("GPT-5.2 Mini", provider: "OpenAI")
+                    disabledModelRow("o3", provider: "OpenAI")
+                    disabledModelRow("o4-mini", provider: "OpenAI")
+                    disabledModelRow("Codex", provider: "OpenAI")
+
+                    // Gemini models
+                    disabledModelRow("Gemini 2.5 Pro", provider: "Google")
+                    disabledModelRow("Gemini 2.5 Flash", provider: "Google")
+                }
+            }
+        } label: {
+            HStack(spacing: 4) {
+                Image(systemName: "cpu")
+                    .font(.system(size: 9, weight: .medium))
+                Text(currentModel.shortModelName)
+                    .font(.system(size: 11, weight: .medium))
+                Image(systemName: "chevron.up.chevron.down")
+                    .font(.system(size: 8, weight: .medium))
+            }
+            .foregroundStyle(.white.opacity(0.9))
+            .padding(.horizontal, 10)
+            .padding(.vertical, 5)
+            .contentShape(Capsule())
+        }
+        .glassEffect(.regular.tint(Color.tronPhthaloGreen.opacity(0.4)).interactive(), in: .capsule)
+    }
+
+    @ViewBuilder
+    private func modelButton(_ model: ModelInfo) -> some View {
+        Button {
+            onSelect(model)
+        } label: {
+            HStack {
+                Text(model.formattedModelName)
+                if model.id == currentModel {
+                    Spacer()
+                    Image(systemName: "checkmark")
+                        .foregroundStyle(.tronEmerald)
+                }
+            }
+        }
+        .disabled(model.id == currentModel)
+    }
+
+    @ViewBuilder
+    private func disabledModelRow(_ name: String, provider: String) -> some View {
+        HStack {
+            Text(name)
+                .foregroundStyle(.secondary)
+            Spacer()
+            Text(provider)
+                .font(.caption)
+                .foregroundStyle(.tertiary)
+        }
+        .disabled(true)
+    }
+
+    /// Check if model is Claude 4 but not 4.5
+    private func isClaude4NotLatest(_ model: ModelInfo) -> Bool {
+        let lowerId = model.id.lowercased()
+        // Is Claude 4 (has -4- or ends with -4) but not 4.5
+        let isClaude4 = (lowerId.contains("-4-") || lowerId.contains("sonnet-4") || lowerId.contains("opus-4") || lowerId.contains("haiku-4"))
+        let is45 = lowerId.contains("4-5") || lowerId.contains("4.5")
+        return isClaude4 && !is45
+    }
+}
+
+// MARK: - Array Extensions for Model Filtering
+
+extension Array where Element == ModelInfo {
+    /// Remove duplicate models by formatted name (keeps first occurrence)
+    func uniqueByFormattedName() -> [ModelInfo] {
+        var seen = Set<String>()
+        return filter { model in
+            let name = model.formattedModelName
+            if seen.contains(name) {
+                return false
+            }
+            seen.insert(name)
+            return true
+        }
+    }
+
+    /// Sort by tier priority: Opus > Sonnet > Haiku
+    func sortedByTier() -> [ModelInfo] {
+        sorted { m1, m2 in
+            tierPriority(m1) < tierPriority(m2)
+        }
+    }
+
+    private func tierPriority(_ model: ModelInfo) -> Int {
+        let id = model.id.lowercased()
+        if id.contains("opus") { return 0 }
+        if id.contains("sonnet") { return 1 }
+        if id.contains("haiku") { return 2 }
+        return 3
+    }
+}
+
+// MARK: - Legacy Model Switcher (Sheet-based, kept for reference)
 
 struct ModelSwitcher: View {
     let rpcClient: RPCClient
