@@ -10,6 +10,7 @@ struct LogViewer: View {
     @State private var autoScroll = true
     @State private var searchText = ""
     @State private var sheetDetent: PresentationDetent = .large
+    @State private var entryLimit: Int? = nil  // nil means no limit
 
     private let timer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
 
@@ -55,10 +56,10 @@ struct LogViewer: View {
     // MARK: - Filter Bar
 
     private var filterBar: some View {
-        VStack(spacing: 12) {
+        VStack(spacing: 4) {
             // Level picker
             ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 8) {
+                HStack(spacing: 6) {
                     ForEach(LogLevel.allCases.filter { $0 != .none }, id: \.self) { level in
                         FilterChip(
                             title: String(describing: level).capitalized,
@@ -71,12 +72,12 @@ struct LogViewer: View {
                     }
                 }
                 .padding(.horizontal)
-                .padding(.vertical, 4)
+                .padding(.vertical, 3)
             }
 
             // Category picker
             ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 8) {
+                HStack(spacing: 6) {
                     FilterChip(
                         title: "All",
                         isSelected: selectedCategory == nil,
@@ -98,10 +99,35 @@ struct LogViewer: View {
                     }
                 }
                 .padding(.horizontal)
-                .padding(.vertical, 4)
+                .padding(.vertical, 3)
             }
 
-            // Auto-scroll toggle (toggle moved to left of label)
+            // Entry limit picker
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 6) {
+                    FilterChip(
+                        title: "All",
+                        isSelected: entryLimit == nil,
+                        color: .tronEmerald
+                    ) {
+                        entryLimit = nil
+                    }
+
+                    ForEach([50, 100, 250, 500], id: \.self) { limit in
+                        FilterChip(
+                            title: "Last \(limit)",
+                            isSelected: entryLimit == limit,
+                            color: .tronEmerald
+                        ) {
+                            entryLimit = limit
+                        }
+                    }
+                }
+                .padding(.horizontal)
+                .padding(.vertical, 3)
+            }
+
+            // Auto-refresh toggle and entry count
             HStack(spacing: 8) {
                 Toggle(isOn: $autoScroll) {
                     EmptyView()
@@ -116,13 +142,14 @@ struct LogViewer: View {
 
                 Spacer()
 
-                Text("\(logs.count) entries")
+                Text("\(filteredLogs.count) entries")
                     .font(.caption)
                     .foregroundStyle(.gray)
             }
             .padding(.horizontal)
+            .padding(.top, 4)
         }
-        .padding(.vertical, 12)
+        .padding(.vertical, 8)
     }
 
     // MARK: - Log List
@@ -150,18 +177,26 @@ struct LogViewer: View {
     }
 
     private var filteredLogs: [(Date, LogCategory, LogLevel, String)] {
-        logs.filter { entry in
+        var result = logs.filter { entry in
             if !searchText.isEmpty {
                 return entry.3.localizedCaseInsensitiveContains(searchText)
             }
             return true
         }
+
+        // Apply entry limit if set
+        if let limit = entryLimit {
+            result = Array(result.suffix(limit))
+        }
+
+        return result
     }
 
     // MARK: - Helpers
 
     private func refreshLogs() {
-        logs = logger.getRecentLogs(count: 500, level: selectedLevel, category: selectedCategory)
+        // Each category maintains its own buffer of 250 entries, so we can request more
+        logs = logger.getRecentLogs(count: 1000, level: selectedLevel, category: selectedCategory)
     }
 
     private func copyFilteredLogs() {

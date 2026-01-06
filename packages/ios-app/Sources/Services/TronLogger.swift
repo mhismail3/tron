@@ -66,10 +66,19 @@ final class TronLogger: @unchecked Sendable {
     // Enable/disable categories entirely
     var enabledCategories: Set<LogCategory> = Set(LogCategory.allCases)
 
-    // In-memory log buffer for viewing in-app
-    private var logBuffer: [(Date, LogCategory, LogLevel, String)] = []
-    private let maxBufferSize = 1000
+    // In-memory log buffers - separate per category to prevent chatty categories from pushing out quieter ones
+    private var categoryBuffers: [LogCategory: [(Date, LogCategory, LogLevel, String)]] = [:]
     private let bufferLock = NSLock()
+
+    // Per-category buffer sizes - WebSocket and RPC get more since they contain important info
+    private func maxBufferSize(for category: LogCategory) -> Int {
+        switch category {
+        case .websocket, .rpc:
+            return 1000
+        default:
+            return 250
+        }
+    }
 
     // OS Loggers by category
     private var loggers: [LogCategory: Logger] = [:]
@@ -121,12 +130,15 @@ final class TronLogger: @unchecked Sendable {
         // Also print to console for Xcode debugging
         print(formattedMessage)
 
-        // Add to in-memory buffer
+        // Add to category-specific buffer
         bufferLock.lock()
-        logBuffer.append((Date(), category, level, message))
-        if logBuffer.count > maxBufferSize {
-            logBuffer.removeFirst(logBuffer.count - maxBufferSize)
+        var buffer = categoryBuffers[category] ?? []
+        buffer.append((Date(), category, level, message))
+        let maxSize = maxBufferSize(for: category)
+        if buffer.count > maxSize {
+            buffer.removeFirst(buffer.count - maxSize)
         }
+        categoryBuffers[category] = buffer
         bufferLock.unlock()
     }
 
@@ -203,22 +215,28 @@ final class TronLogger: @unchecked Sendable {
         bufferLock.lock()
         defer { bufferLock.unlock() }
 
-        var filtered = logBuffer
-
-        if let level = level {
-            filtered = filtered.filter { $0.2 >= level }
-        }
+        var result: [(Date, LogCategory, LogLevel, String)]
 
         if let category = category {
-            filtered = filtered.filter { $0.1 == category }
+            // Get from specific category buffer only
+            result = categoryBuffers[category] ?? []
+        } else {
+            // Merge all category buffers
+            result = categoryBuffers.values.flatMap { $0 }
         }
 
-        return Array(filtered.suffix(count))
+        // Filter by level
+        if let level = level {
+            result = result.filter { $0.2 >= level }
+        }
+
+        // Sort by timestamp and return most recent
+        return Array(result.sorted { $0.0 < $1.0 }.suffix(count))
     }
 
     func clearBuffer() {
         bufferLock.lock()
-        logBuffer.removeAll()
+        categoryBuffers.removeAll()
         bufferLock.unlock()
     }
 
@@ -229,7 +247,10 @@ final class TronLogger: @unchecked Sendable {
         let formatter = DateFormatter()
         formatter.dateFormat = "yyyy-MM-dd HH:mm:ss.SSS"
 
-        return logBuffer.map { entry in
+        // Merge all buffers and sort by timestamp
+        let allLogs = categoryBuffers.values.flatMap { $0 }.sorted { $0.0 < $1.0 }
+
+        return allLogs.map { entry in
             let (date, category, level, message) = entry
             return "[\(formatter.string(from: date))] \(level.prefix) [\(category.rawValue)] \(message)"
         }.joined(separator: "\n")
