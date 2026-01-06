@@ -123,6 +123,7 @@ struct CachedSessionSidebarRow: View {
                         .font(.system(size: 8))
                         .foregroundStyle(.tronEmerald.opacity(0.6))
                         .frame(width: 12)
+                        .offset(y: 2)
 
                     Text(prompt)
                         .font(.system(size: 11, design: .monospaced))
@@ -223,10 +224,15 @@ struct SessionProcessingIndicator: View {
 extension CachedSession {
     var displayDirectory: String {
         let path = workingDirectory
-        // Show just the last two path components
-        let components = path.split(separator: "/")
-        if components.count >= 2 {
-            return "~/" + components.suffix(2).joined(separator: "/")
+
+        // Replace /Users/<username>/ with ~/
+        let components = path.split(separator: "/", omittingEmptySubsequences: false)
+        if components.count >= 3,
+           components[0] == "",
+           components[1] == "Users" {
+            // Path is /Users/<username>/...
+            let afterUser = components.dropFirst(3).joined(separator: "/")
+            return afterUser.isEmpty ? "~" : "~/" + afterUser
         }
         return path
     }
