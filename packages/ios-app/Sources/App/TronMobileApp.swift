@@ -418,6 +418,8 @@ struct NewSessionFlow: View {
     @State private var isCreating = false
     @State private var errorMessage: String?
     @State private var showWorkspaceSelector = false
+    @State private var availableModels: [ModelInfo] = []
+    @State private var isLoadingModels = false
 
     var body: some View {
         NavigationStack {
@@ -459,63 +461,54 @@ struct NewSessionFlow: View {
                                 .foregroundStyle(.white.opacity(0.4))
                         }
 
-                        // Model section
+                        // Model section - dynamically loaded from server
                         VStack(alignment: .leading, spacing: 12) {
                             Text("Model")
                                 .font(.subheadline.weight(.medium))
                                 .foregroundStyle(.white.opacity(0.6))
 
                             Menu {
-                                Button {
-                                    selectedModel = "claude-opus-4-5-20251101"
-                                } label: {
-                                    HStack {
-                                        Text("Claude Opus 4.5")
-                                        if selectedModel == "claude-opus-4-5-20251101" {
-                                            Image(systemName: "checkmark")
+                                if isLoadingModels && availableModels.isEmpty {
+                                    Text("Loading models...")
+                                } else {
+                                    // Latest models (4.5 family) - grouped by tier
+                                    Section("Latest") {
+                                        ForEach(latestModels) { model in
+                                            Button {
+                                                selectedModel = model.id
+                                            } label: {
+                                                HStack {
+                                                    Text(model.formattedModelName)
+                                                    if selectedModel == model.id {
+                                                        Image(systemName: "checkmark")
+                                                    }
+                                                }
+                                            }
                                         }
                                     }
-                                }
 
-                                Button {
-                                    selectedModel = "claude-sonnet-4-5-20251101"
-                                } label: {
-                                    HStack {
-                                        Text("Claude Sonnet 4.5")
-                                        if selectedModel == "claude-sonnet-4-5-20251101" {
-                                            Image(systemName: "checkmark")
+                                    // Legacy models
+                                    if !legacyModels.isEmpty {
+                                        Section("Legacy") {
+                                            ForEach(legacyModels) { model in
+                                                Button {
+                                                    selectedModel = model.id
+                                                } label: {
+                                                    Text(model.formattedModelName)
+                                                }
+                                            }
                                         }
                                     }
-                                }
-
-                                Button {
-                                    selectedModel = "claude-haiku-4-5-20251101"
-                                } label: {
-                                    HStack {
-                                        Text("Claude Haiku 4.5")
-                                        if selectedModel == "claude-haiku-4-5-20251101" {
-                                            Image(systemName: "checkmark")
-                                        }
-                                    }
-                                }
-
-                                Divider()
-
-                                Button {
-                                    selectedModel = "claude-sonnet-4-20250514"
-                                } label: {
-                                    Text("Claude Sonnet 4 (Legacy)")
-                                }
-
-                                Button {
-                                    selectedModel = "claude-3-5-haiku-20241022"
-                                } label: {
-                                    Text("Claude Haiku 3.5 (Legacy)")
                                 }
                             } label: {
                                 HStack {
-                                    Text(selectedModel.shortModelName)
-                                        .foregroundStyle(.white.opacity(0.9))
+                                    if isLoadingModels && selectedModel.isEmpty {
+                                        Text("Loading...")
+                                            .foregroundStyle(.white.opacity(0.4))
+                                    } else {
+                                        Text(selectedModel.shortModelName)
+                                            .foregroundStyle(.white.opacity(0.9))
+                                    }
                                     Spacer()
                                     Image(systemName: "chevron.up.chevron.down")
                                         .font(.caption)
@@ -569,12 +562,12 @@ struct NewSessionFlow: View {
                     .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                 }
                 .glassEffect(
-                    (isCreating || workingDirectory.isEmpty)
+                    (isCreating || workingDirectory.isEmpty || selectedModel.isEmpty)
                         ? .regular.tint(Color.tronPhthaloGreen)
                         : .regular.tint(Color.tronEmerald).interactive(),
                     in: RoundedRectangle(cornerRadius: 12, style: .continuous)
                 )
-                .disabled(isCreating || workingDirectory.isEmpty)
+                .disabled(isCreating || workingDirectory.isEmpty || selectedModel.isEmpty)
                 .padding(.horizontal, 20)
                 .padding(.bottom, 16)
             }
@@ -592,12 +585,32 @@ struct NewSessionFlow: View {
                     selectedPath: $workingDirectory
                 )
             }
+            .task {
+                await loadModels()
+            }
             .onAppear {
-                selectedModel = defaultModel
                 showWorkspaceSelector = true
             }
         }
         .preferredColorScheme(.dark)
+    }
+
+    // MARK: - Computed Properties
+
+    /// Latest (4.5) models sorted by tier: Opus, Sonnet, Haiku
+    private var latestModels: [ModelInfo] {
+        availableModels
+            .filter { $0.is45Model }
+            .uniqueByFormattedName()
+            .sortedByTier()
+    }
+
+    /// Legacy models sorted by tier
+    private var legacyModels: [ModelInfo] {
+        availableModels
+            .filter { !$0.is45Model }
+            .uniqueByFormattedName()
+            .sortedByTier()
     }
 
     private var modelDescription: String {
@@ -609,6 +622,45 @@ struct NewSessionFlow: View {
             return "Claude Haiku is optimized for speed"
         }
         return ""
+    }
+
+    // MARK: - Actions
+
+    private func loadModels() async {
+        isLoadingModels = true
+
+        // Ensure connection is established
+        await rpcClient.connect()
+        if !rpcClient.isConnected {
+            try? await Task.sleep(for: .milliseconds(100))
+        }
+
+        do {
+            let models = try await rpcClient.listModels()
+            await MainActor.run {
+                availableModels = models
+
+                // Set default model - prefer the passed defaultModel if valid,
+                // otherwise use the first recommended model
+                if let defaultMatch = models.first(where: { $0.id == defaultModel }) {
+                    selectedModel = defaultMatch.id
+                } else if let recommended = models.first(where: { $0.is45Model && $0.id.contains("opus") }) {
+                    // Fallback to Opus 4.5
+                    selectedModel = recommended.id
+                } else if let first = models.first {
+                    selectedModel = first.id
+                }
+
+                isLoadingModels = false
+            }
+        } catch {
+            await MainActor.run {
+                // On error, set a sensible default that matches server
+                // These are the actual server model IDs from core/providers/models.ts
+                selectedModel = defaultModel.isEmpty ? "claude-opus-4-5-20251101" : defaultModel
+                isLoadingModels = false
+            }
+        }
     }
 
     private func createSession() {
