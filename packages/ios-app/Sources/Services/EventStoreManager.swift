@@ -97,13 +97,36 @@ class EventStoreManager: ObservableObject {
     /// Load sessions from local EventDatabase
     func loadSessions() {
         do {
+            // Preserve existing transient state before reloading
+            var preservedDashboardInfo: [String: (prompt: String?, response: String?, toolCount: Int?, isProcessing: Bool?)] = [:]
+            for session in sessions {
+                preservedDashboardInfo[session.id] = (
+                    session.lastUserPrompt,
+                    session.lastAssistantResponse,
+                    session.lastToolCount,
+                    session.isProcessing
+                )
+            }
+
             sessions = try eventDB.getAllSessions()
             logger.info("Loaded \(self.sessions.count) sessions from EventDatabase")
 
-            // Extract dashboard info (prompt/response) for each session
-            // so the 2-row containers are always populated
-            for session in sessions {
-                extractDashboardInfoFromEvents(sessionId: session.id)
+            // Restore preserved transient state and extract dashboard info
+            for i in sessions.indices {
+                let sessionId = sessions[i].id
+
+                // Restore processing state (not stored in DB)
+                if let preserved = preservedDashboardInfo[sessionId] {
+                    sessions[i].isProcessing = preserved.isProcessing
+                }
+
+                // Also check processingSessionIds set
+                if processingSessionIds.contains(sessionId) {
+                    sessions[i].isProcessing = true
+                }
+
+                // Extract dashboard info from events (this will update prompt/response)
+                extractDashboardInfoFromEvents(sessionId: sessionId)
             }
         } catch {
             logger.error("Failed to load sessions: \(error.localizedDescription)")
@@ -781,8 +804,9 @@ class EventStoreManager: ObservableObject {
 
             // Find the last user message
             if let lastUserEvent = events.last(where: { $0.type == "message.user" }) {
-                if let content = lastUserEvent.payload["content"]?.value as? String {
-                    updateSessionDashboardInfo(sessionId: sessionId, lastUserPrompt: content)
+                let userPrompt = extractTextFromContent(lastUserEvent.payload["content"]?.value)
+                if !userPrompt.isEmpty {
+                    updateSessionDashboardInfo(sessionId: sessionId, lastUserPrompt: userPrompt)
                 }
             }
 
@@ -807,6 +831,20 @@ class EventStoreManager: ObservableObject {
                                 }
                             }
                         }
+                    } else if let blocks = content as? [Any] {
+                        // Handle [Any] from AnyCodable decoding
+                        for element in blocks {
+                            if let block = element as? [String: Any],
+                               let type = block["type"] as? String {
+                                if type == "tool_use" {
+                                    toolCount += 1
+                                } else if type == "text", let text = block["text"] as? String {
+                                    if responseText.isEmpty {
+                                        responseText = text
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
 
@@ -819,6 +857,43 @@ class EventStoreManager: ObservableObject {
         } catch {
             logger.error("Failed to extract dashboard info for session \(sessionId): \(error.localizedDescription)")
         }
+    }
+
+    /// Helper to extract text from content which can be String or array of content blocks
+    private func extractTextFromContent(_ content: Any?) -> String {
+        guard let content = content else { return "" }
+
+        // Direct string
+        if let text = content as? String {
+            return text
+        }
+
+        // Array of content blocks [[String: Any]]
+        if let blocks = content as? [[String: Any]] {
+            var texts: [String] = []
+            for block in blocks {
+                if let type = block["type"] as? String, type == "text",
+                   let text = block["text"] as? String {
+                    texts.append(text)
+                }
+            }
+            return texts.joined()
+        }
+
+        // Array of [Any] (from AnyCodable decoding)
+        if let blocks = content as? [Any] {
+            var texts: [String] = []
+            for element in blocks {
+                if let block = element as? [String: Any],
+                   let type = block["type"] as? String, type == "text",
+                   let text = block["text"] as? String {
+                    texts.append(text)
+                }
+            }
+            return texts.joined()
+        }
+
+        return ""
     }
 
     // MARK: - Turn Content Caching

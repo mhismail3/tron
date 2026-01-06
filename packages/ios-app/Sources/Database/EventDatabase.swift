@@ -600,8 +600,11 @@ class EventDatabase: ObservableObject {
     }
 
     func getStateAtHead(_ sessionId: String) throws -> ReconstructedSessionState {
-        guard let session = try getSession(sessionId),
-              let headEventId = session.headEventId else {
+        // Use sequence-based reconstruction instead of parent chain walking
+        // This is more robust when parent chains are incomplete or broken
+        let events = try getEventsBySession(sessionId)
+
+        if events.isEmpty {
             return ReconstructedSessionState(
                 messages: [],
                 tokenUsage: TokenUsage(inputTokens: 0, outputTokens: 0, cacheReadTokens: nil, cacheCreationTokens: nil),
@@ -610,14 +613,14 @@ class EventDatabase: ObservableObject {
             )
         }
 
-        let ancestors = try getAncestors(headEventId)
         var messages: [ReconstructedMessage] = []
         var inputTokens = 0
         var outputTokens = 0
         var turnCount = 0
         var ledger: ReconstructedLedger?
 
-        for event in ancestors {
+        // Events are already ordered by sequence ASC from getEventsBySession
+        for event in events {
             switch event.type {
             case "message.user":
                 // Content can be an array of content blocks (with tool_result) or a simple string
