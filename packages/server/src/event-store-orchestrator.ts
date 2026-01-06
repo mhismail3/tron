@@ -307,6 +307,8 @@ export interface ActiveSession {
   model: string;
   /** WorkingDirectory abstraction (if worktree coordination is enabled) */
   workingDir?: WorkingDirectory;
+  /** Current turn number (tracked for discrete event storage) */
+  currentTurn: number;
 }
 
 export interface AgentRunOptions {
@@ -495,6 +497,7 @@ export class EventStoreOrchestrator extends EventEmitter {
       workingDirectory: workingDir.path,
       model,
       workingDir,
+      currentTurn: 0,
     });
 
     this.emit('session_created', {
@@ -549,6 +552,7 @@ export class EventStoreOrchestrator extends EventEmitter {
       workingDirectory: workingDir.path,
       model: session.model,
       workingDir,
+      currentTurn: session.turnCount ?? 0,
     });
 
     logger.info('Session resumed', {
@@ -799,9 +803,15 @@ export class EventStoreOrchestrator extends EventEmitter {
         payload: { content: options.prompt },
       });
 
+      // Track timing for latency measurement (Phase 1)
+      const runStartTime = Date.now();
+
       // Run agent
       const runResult = await active.agent.run(options.prompt);
       active.lastActivity = new Date();
+
+      // Calculate latency (Phase 1)
+      const runLatency = Date.now() - runStartTime;
 
       // Record assistant response event
       // Only store assistant content from the CURRENT turn (after the last user message)
@@ -845,6 +855,9 @@ export class EventStoreOrchestrator extends EventEmitter {
       // Normalize content blocks to ensure consistent structure and apply truncation
       const normalizedAssistantContent = normalizeContentBlocks(currentTurnContent);
 
+      // Detect if content has thinking blocks (Phase 1)
+      const hasThinking = currentTurnContent.some((b: any) => b.type === 'thinking');
+
       logger.debug('Storing assistant content', {
         sessionId: active.sessionId,
         blockCount: normalizedAssistantContent.length,
@@ -853,14 +866,27 @@ export class EventStoreOrchestrator extends EventEmitter {
         hasInputs: normalizedAssistantContent
           .filter(b => b.type === 'tool_use')
           .map(b => ({ name: b.name, hasInput: !!b.input && Object.keys(b.input as object).length > 0 })),
+        // Phase 1 enrichment logging
+        turn: runResult.turns,
+        model: active.model,
+        stopReason: runResult.stoppedReason,
+        latency: runLatency,
+        hasThinking,
       });
 
+      // Phase 1: Store enriched assistant message with all metadata
       await this.eventStore.append({
         sessionId: active.sessionId,
         type: 'message.assistant',
         payload: {
           content: normalizedAssistantContent,
           tokenUsage: runResult.totalTokenUsage,
+          // Phase 1: Enriched fields
+          turn: runResult.turns,
+          model: active.model,
+          stopReason: runResult.stoppedReason ?? 'end_turn',
+          latency: runLatency,
+          hasThinking,
         },
       });
 
@@ -923,6 +949,21 @@ export class EventStoreOrchestrator extends EventEmitter {
       return [runResult] as unknown as TurnResult[];
     } catch (error) {
       logger.error('Agent run error', { sessionId: options.sessionId, error });
+
+      // Phase 3: Store error.agent event for agent-level errors
+      try {
+        await this.eventStore.append({
+          sessionId: active.sessionId,
+          type: 'error.agent',
+          payload: {
+            error: error instanceof Error ? error.message : String(error),
+            code: error instanceof Error ? error.name : undefined,
+            recoverable: false,
+          },
+        });
+      } catch (storeErr) {
+        logger.error('Failed to store error.agent event', { storeErr, sessionId: options.sessionId });
+      }
 
       if (options.onEvent) {
         options.onEvent({
@@ -1165,15 +1206,28 @@ export class EventStoreOrchestrator extends EventEmitter {
 
   private forwardAgentEvent(sessionId: SessionId, event: TronEvent): void {
     const timestamp = new Date().toISOString();
+    const active = this.activeSessions.get(sessionId);
 
     switch (event.type) {
       case 'turn_start':
+        // Update current turn for tool event tracking
+        if (active) {
+          active.currentTurn = event.turn;
+        }
+
         this.emit('agent_event', {
           type: 'agent.turn_start',
           sessionId,
           timestamp,
           data: { turn: event.turn },
         });
+
+        // Phase 4: Store turn start event
+        this.eventStore.append({
+          sessionId,
+          type: 'stream.turn_start',
+          payload: { turn: event.turn },
+        }).catch(err => logger.error('Failed to store stream.turn_start event', { err, sessionId }));
         break;
 
       case 'turn_end':
@@ -1187,6 +1241,16 @@ export class EventStoreOrchestrator extends EventEmitter {
             tokenUsage: event.tokenUsage,
           },
         });
+
+        // Phase 4: Store turn end event with token usage
+        this.eventStore.append({
+          sessionId,
+          type: 'stream.turn_end',
+          payload: {
+            turn: event.turn,
+            tokenUsage: event.tokenUsage ?? { inputTokens: 0, outputTokens: 0 },
+          },
+        }).catch(err => logger.error('Failed to store stream.turn_end event', { err, sessionId }));
         break;
 
       case 'message_update':
@@ -1209,6 +1273,18 @@ export class EventStoreOrchestrator extends EventEmitter {
             arguments: event.arguments,
           },
         });
+
+        // Phase 2: Store discrete tool.call event
+        this.eventStore.append({
+          sessionId,
+          type: 'tool.call',
+          payload: {
+            toolCallId: event.toolCallId,
+            name: event.toolName,
+            arguments: event.arguments ?? {},
+            turn: active?.currentTurn ?? 0,
+          },
+        }).catch(err => logger.error('Failed to store tool.call event', { err, sessionId }));
         break;
 
       case 'tool_execution_end': {
@@ -1229,8 +1305,36 @@ export class EventStoreOrchestrator extends EventEmitter {
             duration: event.duration,
           },
         });
+
+        // Phase 2: Store discrete tool.result event
+        this.eventStore.append({
+          sessionId,
+          type: 'tool.result',
+          payload: {
+            toolCallId: event.toolCallId,
+            content: truncateString(resultContent, MAX_TOOL_RESULT_SIZE),
+            isError: event.isError ?? false,
+            duration: event.duration,
+            truncated: resultContent.length > MAX_TOOL_RESULT_SIZE,
+          },
+        }).catch(err => logger.error('Failed to store tool.result event', { err, sessionId }));
         break;
       }
+
+      case 'api_retry':
+        // Phase 3: Store provider error event for API retries
+        this.eventStore.append({
+          sessionId,
+          type: 'error.provider',
+          payload: {
+            provider: this.config.defaultProvider,
+            error: event.errorMessage,
+            code: event.errorCategory,
+            retryable: true,
+            retryAfter: event.delayMs,
+          },
+        }).catch(err => logger.error('Failed to store error.provider event', { err, sessionId }));
+        break;
 
       case 'agent_start':
         this.emit('agent_event', {
