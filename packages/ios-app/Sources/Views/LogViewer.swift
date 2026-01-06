@@ -243,29 +243,22 @@ struct LogRow: View {
     private var message: String { entry.3 }
 
     var body: some View {
-        HStack(alignment: .top, spacing: 4) {
-            // Timestamp
-            Text(formatTime(date))
-                .font(.system(size: 9, design: .monospaced))
-                .foregroundStyle(.gray)
-
-            // Level indicator
-            Circle()
-                .fill(levelColor)
-                .frame(width: 6, height: 6)
-                .padding(.top, 4)
-
-            // Category
-            Text("[\(category.rawValue)]")
-                .font(.system(size: 10, design: .monospaced))
-                .foregroundStyle(categoryColor)
-
-            // Message
-            Text(message)
-                .font(.system(size: 11, design: .monospaced))
-                .foregroundStyle(levelColor)
-                .lineLimit(nil)
-        }
+        // Use Text concatenation so continuation lines wrap to leading edge
+        // instead of being indented to align with message start
+        (Text(formatTime(date))
+            .font(.system(size: 9, design: .monospaced))
+            .foregroundColor(.gray)
+        + Text(" ● ")
+            .font(.system(size: 8, design: .monospaced))
+            .foregroundColor(levelColor)
+        + Text("[\(category.rawValue)] ")
+            .font(.system(size: 10, design: .monospaced))
+            .foregroundColor(categoryColor)
+        + Text(message)
+            .font(.system(size: 11, design: .monospaced))
+            .foregroundColor(levelColor))
+        .lineLimit(nil)
+        .fixedSize(horizontal: false, vertical: true)
         .padding(.vertical, 2)
     }
 
