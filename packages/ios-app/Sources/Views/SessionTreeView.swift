@@ -111,10 +111,9 @@ struct SessionTreeView: View {
                 let siblings = childrenOf[parentId] ?? []
 
                 if siblings.count > 1 {
-                    // This is a branch point - increment depth
-                    // Each sibling gets parent depth + 1 + their index among siblings
-                    let siblingIndex = siblings.firstIndex(of: event.id) ?? 0
-                    depths[event.id] = parentDepth + 1 + siblingIndex
+                    // This is a branch point - all siblings get same depth (parent + 1)
+                    // The "+siblingIndex" was causing a staircase effect - removed
+                    depths[event.id] = parentDepth + 1
                 } else {
                     // Linear chain - same depth as parent
                     depths[event.id] = parentDepth
@@ -686,22 +685,47 @@ struct SessionHistorySheet: View {
     }
 
     private func performFork(_ eventId: String) async {
+        print("[FORK-UI] User initiated fork: sessionId=\(sessionId), fromEventId=\(eventId)")
+
+        // Find the event for context logging
+        if let event = events.first(where: { $0.id == eventId }) {
+            print("[FORK-UI] Fork point: type=\(event.type), sequence=\(event.sequence)")
+        }
+
         do {
             let newSessionId = try await eventStoreManager.forkSession(sessionId, fromEventId: eventId)
+            print("[FORK-UI] Fork succeeded: newSessionId=\(newSessionId)")
             eventStoreManager.setActiveSession(newSessionId)
+            print("[FORK-UI] Switched to new session, dismissing sheet")
             dismiss()
         } catch {
-            print("Fork failed: \(error)")
+            print("[FORK-UI] Fork FAILED: \(error)")
             actionConfirm = nil
         }
     }
 
     private func performRewind(_ eventId: String) async {
+        print("[REWIND-UI] User initiated rewind: sessionId=\(sessionId), toEventId=\(eventId)")
+
+        // Find the event for context logging
+        if let event = events.first(where: { $0.id == eventId }) {
+            print("[REWIND-UI] Rewind target: type=\(event.type), sequence=\(event.sequence)")
+        }
+
+        // Log current HEAD for comparison
+        let currentHeadId = eventStoreManager.activeSession?.headEventId
+        if let headId = currentHeadId, let currentHead = events.first(where: { $0.id == headId }) {
+            print("[REWIND-UI] Current HEAD: type=\(currentHead.type), sequence=\(currentHead.sequence)")
+        } else {
+            print("[REWIND-UI] Current HEAD: \(currentHeadId ?? "unknown")")
+        }
+
         do {
             try await eventStoreManager.rewindSession(sessionId, toEventId: eventId)
+            print("[REWIND-UI] Rewind succeeded, dismissing sheet")
             dismiss()
         } catch {
-            print("Rewind failed: \(error)")
+            print("[REWIND-UI] Rewind FAILED: \(error)")
             actionConfirm = nil
         }
     }

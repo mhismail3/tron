@@ -233,24 +233,25 @@ struct SessionDeleteResult: Decodable {
 
 struct SessionForkParams: Encodable {
     let sessionId: String
-    let fromMessageIndex: Int?
+    let fromEventId: String?  // Event ID to fork from (nil = fork from HEAD)
 }
 
 struct SessionForkResult: Decodable {
     let newSessionId: String
-    let forkedFrom: String
-    let messageCount: Int
+    let forkedFromEventId: String?  // The event that was forked from
+    let forkedFromSessionId: String?  // The source session
+    let rootEventId: String?  // The fork event in the new session
 }
 
 struct SessionRewindParams: Encodable {
     let sessionId: String
-    let toMessageIndex: Int
+    let toEventId: String  // Event ID to rewind to
 }
 
 struct SessionRewindResult: Decodable {
     let sessionId: String
-    let newMessageCount: Int
-    let removedCount: Int
+    let newHeadEventId: String  // The new HEAD after rewind
+    let previousHeadEventId: String?  // The previous HEAD before rewind
 }
 
 // MARK: - Model Methods

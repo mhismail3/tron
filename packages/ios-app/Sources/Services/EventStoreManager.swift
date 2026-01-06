@@ -1017,32 +1017,83 @@ class EventStoreManager: ObservableObject {
 
     // MARK: - Tree Operations (Fork/Rewind)
 
-    /// Fork a session at a specific event (or head)
+    /// Fork a session at a specific event (or HEAD if nil)
+    /// Creates a new independent session branching from the specified point
     func forkSession(_ sessionId: String, fromEventId: String? = nil) async throws -> String {
-        // For now, delegate to server and sync back
-        let result = try await rpcClient.forkSession(sessionId)
+        logger.info("[FORK] Starting fork: sessionId=\(sessionId), fromEventId=\(fromEventId ?? "HEAD")")
 
-        // Sync the new session
+        // Get current session state for logging
+        if let session = try? eventDB.getSession(sessionId) {
+            logger.info("[FORK] Source session state: headEventId=\(session.headEventId ?? "nil"), eventCount=\(session.eventCount)")
+        }
+
+        // Call server with the specific event ID
+        let result = try await rpcClient.forkSession(sessionId, fromEventId: fromEventId)
+
+        logger.info("[FORK] Server returned: newSessionId=\(result.newSessionId)")
+
+        // Sync the new forked session to get all its events
+        logger.info("[FORK] Syncing new session events...")
         try await fullSyncSession(result.newSessionId)
 
+        // Verify the sync worked
+        if let newSession = try? eventDB.getSession(result.newSessionId) {
+            let events = try? eventDB.getEventsBySession(result.newSessionId)
+            logger.info("[FORK] New session synced: headEventId=\(newSession.headEventId ?? "nil"), eventCount=\(events?.count ?? 0)")
+        }
+
+        logger.info("[FORK] Fork complete: \(sessionId) → \(result.newSessionId) from event \(fromEventId ?? "HEAD")")
         return result.newSessionId
     }
 
     /// Rewind a session to a specific event
+    /// Moves the HEAD pointer back, making events after this point "orphaned"
+    /// Events are NOT deleted - they remain accessible in history
     func rewindSession(_ sessionId: String, toEventId: String) async throws {
-        // Update the local session HEAD
+        logger.info("[REWIND] Starting rewind: sessionId=\(sessionId), toEventId=\(toEventId)")
+
+        // Get current session state for comparison
         guard var session = try eventDB.getSession(sessionId) else {
+            logger.error("[REWIND] Session not found: \(sessionId)")
             throw EventStoreError.sessionNotFound
         }
 
+        let previousHeadEventId = session.headEventId
+        logger.info("[REWIND] Current HEAD: \(previousHeadEventId ?? "nil")")
+
+        // Validate the target event exists and is an ancestor
+        guard let targetEvent = try eventDB.getEvent(toEventId) else {
+            logger.error("[REWIND] Target event not found: \(toEventId)")
+            throw EventStoreError.eventNotFound(toEventId)
+        }
+
+        // Verify target belongs to this session
+        guard targetEvent.sessionId == sessionId else {
+            logger.error("[REWIND] Target event \(toEventId) belongs to different session: \(targetEvent.sessionId)")
+            throw EventStoreError.invalidEventId(toEventId)
+        }
+
+        logger.info("[REWIND] Target event valid: type=\(targetEvent.type), sequence=\(targetEvent.sequence)")
+
+        // Call server FIRST to ensure server state is updated
+        logger.info("[REWIND] Calling server to update HEAD...")
+        let result = try await rpcClient.rewindSession(sessionId, toEventId: toEventId)
+        logger.info("[REWIND] Server confirmed: newHeadEventId=\(result.newHeadEventId), previousHead=\(result.previousHeadEventId ?? "unknown")")
+
+        // Now update local state to match server
         session.headEventId = toEventId
         try eventDB.insertSession(session)
+        logger.info("[REWIND] Local HEAD updated: \(previousHeadEventId ?? "nil") → \(toEventId)")
 
-        // Notify views
+        // Log the ancestor chain for verification
+        let ancestors = try eventDB.getAncestors(toEventId)
+        logger.info("[REWIND] New ancestor chain has \(ancestors.count) events")
+
+        // Notify views to refresh
         sessionUpdated.send(sessionId)
         loadSessions()
 
-        logger.info("Rewound session \(sessionId) to event \(toEventId)")
+        logger.info("[REWIND] Rewind complete: session \(sessionId) HEAD moved from \(previousHeadEventId ?? "nil") to \(toEventId)")
     }
 
     /// Get events for a session
@@ -1171,17 +1222,23 @@ struct DisplayMessage: Identifiable, Equatable {
 
 enum EventStoreError: LocalizedError {
     case sessionNotFound
-    case eventNotFound
+    case eventNotFound(String)
+    case invalidEventId(String)
     case operationFailed(String)
+    case serverSyncFailed(String)
 
     var errorDescription: String? {
         switch self {
         case .sessionNotFound:
             return "Session not found"
-        case .eventNotFound:
-            return "Event not found"
+        case .eventNotFound(let eventId):
+            return "Event not found: \(eventId)"
+        case .invalidEventId(let eventId):
+            return "Invalid event ID: \(eventId)"
         case .operationFailed(let message):
             return "Operation failed: \(message)"
+        case .serverSyncFailed(let message):
+            return "Server sync failed: \(message)"
         }
     }
 }

@@ -217,13 +217,21 @@ class EventDatabase: ObservableObject {
     func getAncestors(_ eventId: String) throws -> [SessionEvent] {
         var ancestors: [SessionEvent] = []
         var currentId: String? = eventId
+        var depth = 0
+
+        logger.debug("[ANCESTORS] Walking chain from \(eventId)")
 
         while let id = currentId {
-            guard let event = try getEvent(id) else { break }
+            guard let event = try getEvent(id) else {
+                logger.warning("[ANCESTORS] Event not found at depth \(depth): \(id)")
+                break
+            }
             ancestors.insert(event, at: 0)
+            depth += 1
             currentId = event.parentId
         }
 
+        logger.debug("[ANCESTORS] Chain complete: \(ancestors.count) events, types: \(ancestors.map { $0.type }.joined(separator: "→"))")
         return ancestors
     }
 
@@ -600,16 +608,48 @@ class EventDatabase: ObservableObject {
     }
 
     func getStateAtHead(_ sessionId: String) throws -> ReconstructedSessionState {
-        // Use sequence-based reconstruction instead of parent chain walking
-        // This is more robust when parent chains are incomplete or broken
-        let events = try getEventsBySession(sessionId)
+        // CRITICAL: Use ancestor chain from headEventId, NOT all events
+        // This ensures rewind/fork properly exclude orphaned events
 
-        if events.isEmpty {
+        guard let session = try getSession(sessionId) else {
+            logger.info("[STATE] Session not found: \(sessionId)")
             return ReconstructedSessionState(
                 messages: [],
                 tokenUsage: TokenUsage(inputTokens: 0, outputTokens: 0, cacheReadTokens: nil, cacheCreationTokens: nil),
                 turnCount: 0,
-                ledger: nil
+                ledger: nil,
+                currentModel: nil
+            )
+        }
+
+        // Get the HEAD event ID - this is the current tip of the session's event chain
+        guard let headEventId = session.headEventId else {
+            logger.info("[STATE] Session \(sessionId) has no headEventId, returning empty state")
+            return ReconstructedSessionState(
+                messages: [],
+                tokenUsage: TokenUsage(inputTokens: 0, outputTokens: 0, cacheReadTokens: nil, cacheCreationTokens: nil),
+                turnCount: 0,
+                ledger: nil,
+                currentModel: nil
+            )
+        }
+
+        logger.info("[STATE] Reconstructing state for session \(sessionId) at HEAD=\(headEventId)")
+
+        // Get ONLY the ancestors of HEAD (walking the parentId chain back to root)
+        // This excludes any orphaned events after a rewind
+        let events = try getAncestors(headEventId)
+
+        logger.info("[STATE] Found \(events.count) ancestors in chain from HEAD")
+
+        if events.isEmpty {
+            logger.info("[STATE] No ancestors found for HEAD \(headEventId)")
+            return ReconstructedSessionState(
+                messages: [],
+                tokenUsage: TokenUsage(inputTokens: 0, outputTokens: 0, cacheReadTokens: nil, cacheCreationTokens: nil),
+                turnCount: 0,
+                ledger: nil,
+                currentModel: nil
             )
         }
 
@@ -618,10 +658,26 @@ class EventDatabase: ObservableObject {
         var outputTokens = 0
         var turnCount = 0
         var ledger: ReconstructedLedger?
+        var currentModel: String?
 
-        // Events are already ordered by sequence ASC from getEventsBySession
+        // Events from getAncestors are already ordered root→head
         for event in events {
             switch event.type {
+            case "session.start":
+                // Extract initial model from session start event
+                if let model = event.payload["model"]?.value as? String {
+                    currentModel = model
+                    logger.debug("[STATE] Initial model from session.start: \(model)")
+                }
+
+            case "config.model_switch":
+                // Track model changes through the event chain
+                if let newModel = event.payload["newModel"]?.value as? String {
+                    let previousModel = currentModel ?? "unknown"
+                    currentModel = newModel
+                    logger.info("[STATE] Model switched: \(previousModel) → \(newModel)")
+                }
+
             case "message.user":
                 // Content can be an array of content blocks (with tool_result) or a simple string
                 let content: Any
@@ -740,7 +796,8 @@ class EventDatabase: ObservableObject {
             messages: messages,
             tokenUsage: TokenUsage(inputTokens: inputTokens, outputTokens: outputTokens, cacheReadTokens: nil, cacheCreationTokens: nil),
             turnCount: turnCount,
-            ledger: ledger
+            ledger: ledger,
+            currentModel: currentModel
         )
     }
 

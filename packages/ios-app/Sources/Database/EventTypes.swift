@@ -544,6 +544,8 @@ struct ReconstructedSessionState {
     var tokenUsage: TokenUsage
     var turnCount: Int
     var ledger: ReconstructedLedger?
+    /// Current model after processing all config.model_switch events in the chain
+    var currentModel: String?
 }
 
 struct ReconstructedMessage {

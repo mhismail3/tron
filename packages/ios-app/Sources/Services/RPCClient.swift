@@ -389,33 +389,39 @@ class RPCClient: ObservableObject {
         return result.deleted
     }
 
-    func forkSession(_ sessionId: String, fromIndex: Int? = nil) async throws -> SessionForkResult {
+    func forkSession(_ sessionId: String, fromEventId: String? = nil) async throws -> SessionForkResult {
         guard let ws = webSocket else {
+            logger.error("[FORK] Cannot fork - WebSocket not connected", category: .session)
             throw RPCClientError.connectionNotEstablished
         }
 
-        let params = SessionForkParams(sessionId: sessionId, fromMessageIndex: fromIndex)
+        let params = SessionForkParams(sessionId: sessionId, fromEventId: fromEventId)
+        logger.info("[FORK] Sending fork request: sessionId=\(sessionId), fromEventId=\(fromEventId ?? "HEAD")", category: .session)
+
         let result: SessionForkResult = try await ws.send(
             method: "session.fork",
             params: params
         )
 
-        logger.info("Forked session \(sessionId) to \(result.newSessionId)", category: .session)
+        logger.info("[FORK] Fork succeeded: newSessionId=\(result.newSessionId), forkedFromEventId=\(result.forkedFromEventId ?? "unknown"), rootEventId=\(result.rootEventId ?? "unknown")", category: .session)
         return result
     }
 
-    func rewindSession(_ sessionId: String, toIndex: Int) async throws -> SessionRewindResult {
+    func rewindSession(_ sessionId: String, toEventId: String) async throws -> SessionRewindResult {
         guard let ws = webSocket else {
+            logger.error("[REWIND] Cannot rewind - WebSocket not connected", category: .session)
             throw RPCClientError.connectionNotEstablished
         }
 
-        let params = SessionRewindParams(sessionId: sessionId, toMessageIndex: toIndex)
+        let params = SessionRewindParams(sessionId: sessionId, toEventId: toEventId)
+        logger.info("[REWIND] Sending rewind request: sessionId=\(sessionId), toEventId=\(toEventId)", category: .session)
+
         let result: SessionRewindResult = try await ws.send(
             method: "session.rewind",
             params: params
         )
 
-        logger.info("Rewound session \(sessionId) to message \(toIndex)", category: .session)
+        logger.info("[REWIND] Rewind succeeded: newHeadEventId=\(result.newHeadEventId), previousHeadEventId=\(result.previousHeadEventId ?? "unknown")", category: .session)
         return result
     }
 
