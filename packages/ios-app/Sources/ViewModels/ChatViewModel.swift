@@ -158,7 +158,17 @@ class ChatViewModel: ObservableObject {
                 logger.debug("[DEBUG] ChatVM loadPersisted: role=\(reconstructed.role) content type=\(type(of: reconstructed.content))", category: .session)
                 if let textContent = reconstructed.content as? String {
                     logger.debug("[DEBUG] ChatVM: parsed as String, length: \(textContent.count)", category: .session)
-                    loadedMessages.append(ChatMessage(role: role, content: .text(textContent)))
+                    // Create message with enriched metadata (for assistant messages)
+                    loadedMessages.append(ChatMessage(
+                        role: role,
+                        content: .text(textContent),
+                        tokenUsage: reconstructed.tokenUsage,
+                        model: reconstructed.model,
+                        latencyMs: reconstructed.latencyMs,
+                        turnNumber: reconstructed.turnNumber,
+                        hasThinking: reconstructed.hasThinking,
+                        stopReason: reconstructed.stopReason
+                    ))
                 } else if let contentBlocks = convertToContentBlocks(reconstructed.content) {
                     logger.debug("[DEBUG] ChatVM: parsed as content blocks, count: \(contentBlocks.count)", category: .session)
                     // Parse content blocks for text and tool_use blocks
@@ -174,7 +184,17 @@ class ChatViewModel: ObservableObject {
                             if !textParts.isEmpty {
                                 let combinedText = textParts.joined()
                                 if !combinedText.isEmpty {
-                                    loadedMessages.append(ChatMessage(role: role, content: .text(combinedText)))
+                                    // Create message with enriched metadata (for assistant messages)
+                                    loadedMessages.append(ChatMessage(
+                                        role: role,
+                                        content: .text(combinedText),
+                                        tokenUsage: reconstructed.tokenUsage,
+                                        model: reconstructed.model,
+                                        latencyMs: reconstructed.latencyMs,
+                                        turnNumber: reconstructed.turnNumber,
+                                        hasThinking: reconstructed.hasThinking,
+                                        stopReason: reconstructed.stopReason
+                                    ))
                                 }
                                 textParts = []
                             }
@@ -248,7 +268,17 @@ class ChatViewModel: ObservableObject {
                     if !textParts.isEmpty {
                         let combinedText = textParts.joined()
                         if !combinedText.isEmpty {
-                            loadedMessages.append(ChatMessage(role: role, content: .text(combinedText)))
+                            // Create message with enriched metadata (for assistant messages)
+                            loadedMessages.append(ChatMessage(
+                                role: role,
+                                content: .text(combinedText),
+                                tokenUsage: reconstructed.tokenUsage,
+                                model: reconstructed.model,
+                                latencyMs: reconstructed.latencyMs,
+                                turnNumber: reconstructed.turnNumber,
+                                hasThinking: reconstructed.hasThinking,
+                                stopReason: reconstructed.stopReason
+                            ))
                         }
                     }
                 } else {
@@ -351,7 +381,17 @@ class ChatViewModel: ObservableObject {
 
                 // Handle content which could be a string or array of content blocks
                 if let textContent = reconstructed.content as? String {
-                    loadedMessages.append(ChatMessage(role: role, content: .text(textContent)))
+                    // Create message with enriched metadata (for assistant messages)
+                    loadedMessages.append(ChatMessage(
+                        role: role,
+                        content: .text(textContent),
+                        tokenUsage: reconstructed.tokenUsage,
+                        model: reconstructed.model,
+                        latencyMs: reconstructed.latencyMs,
+                        turnNumber: reconstructed.turnNumber,
+                        hasThinking: reconstructed.hasThinking,
+                        stopReason: reconstructed.stopReason
+                    ))
                 } else if let contentBlocks = convertToContentBlocks(reconstructed.content) {
                     // Parse content blocks for text and tool_use blocks
                     var textParts: [String] = []
@@ -366,7 +406,17 @@ class ChatViewModel: ObservableObject {
                             if !textParts.isEmpty {
                                 let combinedText = textParts.joined()
                                 if !combinedText.isEmpty {
-                                    loadedMessages.append(ChatMessage(role: role, content: .text(combinedText)))
+                                    // Create message with enriched metadata (for assistant messages)
+                                    loadedMessages.append(ChatMessage(
+                                        role: role,
+                                        content: .text(combinedText),
+                                        tokenUsage: reconstructed.tokenUsage,
+                                        model: reconstructed.model,
+                                        latencyMs: reconstructed.latencyMs,
+                                        turnNumber: reconstructed.turnNumber,
+                                        hasThinking: reconstructed.hasThinking,
+                                        stopReason: reconstructed.stopReason
+                                    ))
                                 }
                                 textParts = []
                             }
@@ -427,7 +477,17 @@ class ChatViewModel: ObservableObject {
                     if !textParts.isEmpty {
                         let combinedText = textParts.joined()
                         if !combinedText.isEmpty {
-                            loadedMessages.append(ChatMessage(role: role, content: .text(combinedText)))
+                            // Create message with enriched metadata (for assistant messages)
+                            loadedMessages.append(ChatMessage(
+                                role: role,
+                                content: .text(combinedText),
+                                tokenUsage: reconstructed.tokenUsage,
+                                model: reconstructed.model,
+                                latencyMs: reconstructed.latencyMs,
+                                turnNumber: reconstructed.turnNumber,
+                                hasThinking: reconstructed.hasThinking,
+                                stopReason: reconstructed.stopReason
+                            ))
                         }
                     }
                 }

@@ -334,13 +334,15 @@ struct TreeNodeRow: View {
 
     // MARK: - Computed Properties
 
+    // MARK: - Event Icon (Phase 3 enhanced)
+
     private var eventIcon: some View {
         Group {
             switch event.eventType {
             case .sessionStart:
                 Image(systemName: "play.circle.fill")
             case .sessionEnd:
-                Image(systemName: "stop.circle")
+                Image(systemName: "stop.circle.fill")
             case .sessionFork:
                 Image(systemName: "arrow.triangle.branch")
             case .messageUser:
@@ -348,11 +350,26 @@ struct TreeNodeRow: View {
             case .messageAssistant:
                 Image(systemName: "cpu")
             case .toolCall:
-                Image(systemName: "wrench.fill")
+                Image(systemName: "wrench.and.screwdriver")
             case .toolResult:
-                Image(systemName: "checkmark.circle.fill")
+                // Different icon based on success/error
+                if (event.payload["isError"]?.value as? Bool) == true {
+                    Image(systemName: "xmark.circle.fill")
+                } else {
+                    Image(systemName: "checkmark.circle.fill")
+                }
+            case .streamTurnStart:
+                Image(systemName: "arrow.right.circle")
+            case .streamTurnEnd:
+                Image(systemName: "arrow.down.circle")
+            case .errorAgent:
+                Image(systemName: "exclamationmark.triangle.fill")
+            case .errorProvider:
+                Image(systemName: "arrow.clockwise.circle")
+            case .errorTool:
+                Image(systemName: "xmark.octagon")
             case .configModelSwitch:
-                Image(systemName: "gearshape.fill")
+                Image(systemName: "arrow.left.arrow.right")
             case .compactBoundary:
                 Image(systemName: "arrow.down.right.and.arrow.up.left")
             default:
@@ -361,20 +378,38 @@ struct TreeNodeRow: View {
         }
     }
 
+    // MARK: - Icon Color (Phase 3 enhanced)
+
     private var iconColor: Color {
         switch event.eventType {
         case .sessionStart:
             return .tronSuccess
         case .sessionEnd:
-            return .tronError
+            return .tronTextMuted
         case .sessionFork:
             return .tronAmber
         case .messageUser:
             return .tronBlue
         case .messageAssistant:
             return .tronPurple
-        case .toolCall, .toolResult:
+        case .toolCall:
             return .tronCyan
+        case .toolResult:
+            // Different color based on success/error
+            if (event.payload["isError"]?.value as? Bool) == true {
+                return .tronError
+            }
+            return .tronSuccess
+        case .streamTurnStart, .streamTurnEnd:
+            return .tronBlue
+        case .errorAgent, .errorTool:
+            return .tronError
+        case .errorProvider:
+            return .tronAmber
+        case .configModelSwitch:
+            return .tronEmerald
+        case .compactBoundary:
+            return .tronTextMuted
         default:
             return .tronTextMuted
         }

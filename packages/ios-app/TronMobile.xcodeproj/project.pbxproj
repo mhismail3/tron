@@ -35,6 +35,7 @@
 		EED3EB5C8DA4800D10BC6AEA /* MessageBubble.swift in Sources */ = {isa = PBXBuildFile; fileRef = C37E248C562712A416669C61 /* MessageBubble.swift */; };
 		F7C7E361C09D466FAEE1AAEE /* ToolResultViewers.swift in Sources */ = {isa = PBXBuildFile; fileRef = 69203645DAFCA91156124C1F /* ToolResultViewers.swift */; };
 		F8A1B2C3D4E5F6A7B8C9D0E1 /* SessionTreeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F6A7B8C9D0E1F2 /* SessionTreeView.swift */; };
+		F9B0C1D2E3F4A5B6C7D8E9F0 /* SessionAnalyticsSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0C1D2E3F4A5B6C7D8E9F0A1 /* SessionAnalyticsSheet.swift */; };
 		FACF3272EAAA614047FA83C8 /* EventDatabaseTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A013DFE849DA84E8EA5F545C /* EventDatabaseTests.swift */; };
 		FE3D89D152521876D2DDF464 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 8347F0B7D54B1F1EAA6C762C /* Assets.xcassets */; };
 /* End PBXBuildFile section */
@@ -72,6 +73,7 @@
 		8971117216C73AD12FB3D632 /* EventStoreManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EventStoreManager.swift; sourceTree = "<group>"; };
 		A013DFE849DA84E8EA5F545C /* EventDatabaseTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EventDatabaseTests.swift; sourceTree = "<group>"; };
 		A1B2C3D4E5F6A7B8C9D0E1F2 /* SessionTreeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionTreeView.swift; sourceTree = "<group>"; };
+		B0C1D2E3F4A5B6C7D8E9F0A1 /* SessionAnalyticsSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionAnalyticsSheet.swift; sourceTree = "<group>"; };
 		AB4071D0B8C943D30748238A /* Date+Extensions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Date+Extensions.swift"; sourceTree = "<group>"; };
 		AD61CD33CD78B1F23CDBABD7 /* LogViewer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LogViewer.swift; sourceTree = "<group>"; };
 		B018ED18CE376F88F9C442F4 /* TronMobileApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TronMobileApp.swift; sourceTree = "<group>"; };
@@ -151,6 +153,7 @@
 				C37E248C562712A416669C61 /* MessageBubble.swift */,
 				7F6BD19519452787421FD54D /* ModelSwitcher.swift */,
 				766753AA2F765B13E1B4676A /* SessionSidebar.swift */,
+				B0C1D2E3F4A5B6C7D8E9F0A1 /* SessionAnalyticsSheet.swift */,
 				A1B2C3D4E5F6A7B8C9D0E1F2 /* SessionTreeView.swift */,
 				42E47B6EAD030227C54F0028 /* SettingsView.swift */,
 				69203645DAFCA91156124C1F /* ToolResultViewers.swift */,
@@ -322,6 +325,7 @@
 				A3BCE182EB003CB62D1D96E6 /* RPCClient.swift in Sources */,
 				0186B0083110F291EA235935 /* RPCTypes.swift in Sources */,
 				834644A22FBBDC1872C1DE2A /* SessionSidebar.swift in Sources */,
+				F9B0C1D2E3F4A5B6C7D8E9F0 /* SessionAnalyticsSheet.swift in Sources */,
 				F8A1B2C3D4E5F6A7B8C9D0E1 /* SessionTreeView.swift in Sources */,
 				E15F1F436AB442E18295074D /* EventStoreManager.swift in Sources */,
 				482423A54FE0C25BA4414CCA /* SettingsView.swift in Sources */,

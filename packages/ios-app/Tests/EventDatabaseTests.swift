@@ -371,4 +371,156 @@ final class EventDatabaseTests: XCTestCase {
         XCTAssertEqual(retrieved?.lastSyncedEventId, "event-5")
         XCTAssertEqual(retrieved?.pendingEventIds.count, 2)
     }
+
+    // MARK: - Phase 1: Enriched Message Metadata
+
+    @MainActor
+    func testEnrichedAssistantMessageMetadata() async throws {
+        let events = [
+            SessionEvent(id: "e1", parentId: nil, sessionId: "s1", workspaceId: "/test", type: "session.start", timestamp: "2024-01-01T00:00:00Z", sequence: 1, payload: [:]),
+            SessionEvent(id: "e2", parentId: "e1", sessionId: "s1", workspaceId: "/test", type: "message.user", timestamp: "2024-01-01T00:01:00Z", sequence: 2, payload: [
+                "content": AnyCodable("Hello")
+            ]),
+            SessionEvent(id: "e3", parentId: "e2", sessionId: "s1", workspaceId: "/test", type: "message.assistant", timestamp: "2024-01-01T00:02:00Z", sequence: 3, payload: [
+                "content": AnyCodable("Hi there!"),
+                "model": AnyCodable("claude-sonnet-4-20250514"),
+                "latency": AnyCodable(1234),
+                "turn": AnyCodable(1),
+                "hasThinking": AnyCodable(true),
+                "stopReason": AnyCodable("end_turn"),
+                "tokenUsage": AnyCodable(["inputTokens": 100, "outputTokens": 200])
+            ])
+        ]
+
+        try database.insertEvents(events)
+        try database.insertSession(CachedSession(
+            id: "s1", workspaceId: "/test", rootEventId: "e1", headEventId: "e3",
+            status: .active, title: "Test", model: "claude-sonnet-4",
+            provider: "anthropic", workingDirectory: "/test",
+            createdAt: "2024-01-01", lastActivityAt: "2024-01-01",
+            eventCount: 3, messageCount: 2, inputTokens: 0, outputTokens: 0
+        ))
+
+        let state = try database.getStateAtHead("s1")
+        XCTAssertEqual(state.messages.count, 2)
+
+        let assistantMessage = state.messages[1]
+        XCTAssertEqual(assistantMessage.role, "assistant")
+        XCTAssertEqual(assistantMessage.model, "claude-sonnet-4-20250514")
+        XCTAssertEqual(assistantMessage.latencyMs, 1234)
+        XCTAssertEqual(assistantMessage.turnNumber, 1)
+        XCTAssertEqual(assistantMessage.hasThinking, true)
+        XCTAssertEqual(assistantMessage.stopReason, "end_turn")
+    }
+
+    // MARK: - Phase 3: Event Summary Tests
+
+    func testEventTypeSummaries() {
+        // Test message.user summary
+        let userEvent = SessionEvent(id: "e1", parentId: nil, sessionId: "s1", workspaceId: "/test", type: "message.user", timestamp: "2024-01-01T00:00:00Z", sequence: 1, payload: [
+            "content": AnyCodable("Hello world")
+        ])
+        XCTAssertTrue(userEvent.summary.contains("Hello world"))
+
+        // Test message.assistant summary with model
+        let assistantEvent = SessionEvent(id: "e2", parentId: nil, sessionId: "s1", workspaceId: "/test", type: "message.assistant", timestamp: "2024-01-01T00:00:00Z", sequence: 2, payload: [
+            "content": AnyCodable("Response text"),
+            "model": AnyCodable("claude-sonnet-4-20250514")
+        ])
+        XCTAssertTrue(assistantEvent.summary.contains("sonnet-4"))
+
+        // Test tool.call summary
+        let toolEvent = SessionEvent(id: "e3", parentId: nil, sessionId: "s1", workspaceId: "/test", type: "tool.call", timestamp: "2024-01-01T00:00:00Z", sequence: 3, payload: [
+            "name": AnyCodable("Read"),
+            "arguments": AnyCodable(["file_path": "/src/main.ts"])
+        ])
+        XCTAssertTrue(toolEvent.summary.contains("Read"))
+        XCTAssertTrue(toolEvent.summary.contains("main.ts"))
+
+        // Test session.start summary
+        let startEvent = SessionEvent(id: "e4", parentId: nil, sessionId: "s1", workspaceId: "/test", type: "session.start", timestamp: "2024-01-01T00:00:00Z", sequence: 4, payload: [
+            "model": AnyCodable("claude-opus-4")
+        ])
+        XCTAssertTrue(startEvent.summary.contains("opus-4"))
+
+        // Test config.model_switch summary
+        let switchEvent = SessionEvent(id: "e5", parentId: nil, sessionId: "s1", workspaceId: "/test", type: "config.model_switch", timestamp: "2024-01-01T00:00:00Z", sequence: 5, payload: [
+            "previousModel": AnyCodable("claude-sonnet-4"),
+            "newModel": AnyCodable("claude-opus-4")
+        ])
+        XCTAssertTrue(switchEvent.summary.contains("→"))
+    }
+
+    // MARK: - Phase 4: Session Analytics Tests
+
+    func testSessionAnalyticsComputation() {
+        let events = [
+            SessionEvent(id: "e1", parentId: nil, sessionId: "s1", workspaceId: "/test", type: "session.start", timestamp: "2024-01-01T00:00:00Z", sequence: 1, payload: [
+                "model": AnyCodable("claude-sonnet-4")
+            ]),
+            SessionEvent(id: "e2", parentId: "e1", sessionId: "s1", workspaceId: "/test", type: "message.user", timestamp: "2024-01-01T00:01:00Z", sequence: 2, payload: [
+                "content": AnyCodable("Hello")
+            ]),
+            SessionEvent(id: "e3", parentId: "e2", sessionId: "s1", workspaceId: "/test", type: "message.assistant", timestamp: "2024-01-01T00:02:00Z", sequence: 3, payload: [
+                "content": AnyCodable("Hi!"),
+                "model": AnyCodable("claude-sonnet-4-20250514"),
+                "latency": AnyCodable(500),
+                "turn": AnyCodable(1),
+                "tokenUsage": AnyCodable(["inputTokens": 50, "outputTokens": 100])
+            ]),
+            SessionEvent(id: "e4", parentId: "e3", sessionId: "s1", workspaceId: "/test", type: "tool.call", timestamp: "2024-01-01T00:03:00Z", sequence: 4, payload: [
+                "name": AnyCodable("Read"),
+                "toolCallId": AnyCodable("tc1")
+            ]),
+            SessionEvent(id: "e5", parentId: "e4", sessionId: "s1", workspaceId: "/test", type: "tool.result", timestamp: "2024-01-01T00:03:01Z", sequence: 5, payload: [
+                "toolCallId": AnyCodable("tc1"),
+                "isError": AnyCodable(false),
+                "duration": AnyCodable(100)
+            ]),
+            SessionEvent(id: "e6", parentId: "e5", sessionId: "s1", workspaceId: "/test", type: "message.assistant", timestamp: "2024-01-01T00:04:00Z", sequence: 6, payload: [
+                "content": AnyCodable("Here's the file content"),
+                "model": AnyCodable("claude-sonnet-4-20250514"),
+                "latency": AnyCodable(300),
+                "turn": AnyCodable(2),
+                "tokenUsage": AnyCodable(["inputTokens": 100, "outputTokens": 150])
+            ])
+        ]
+
+        let analytics = SessionAnalytics(from: events)
+
+        // Verify turn count
+        XCTAssertEqual(analytics.totalTurns, 2)
+
+        // Verify tool usage
+        XCTAssertEqual(analytics.toolUsage.count, 1)
+        XCTAssertEqual(analytics.toolUsage.first?.name, "Read")
+        XCTAssertEqual(analytics.toolUsage.first?.count, 1)
+
+        // Verify average latency (500 + 300) / 2 = 400
+        XCTAssertEqual(analytics.avgLatency, 400)
+
+        // Verify no errors
+        XCTAssertEqual(analytics.totalErrors, 0)
+    }
+
+    func testSessionAnalyticsErrorTracking() {
+        let events = [
+            SessionEvent(id: "e1", parentId: nil, sessionId: "s1", workspaceId: "/test", type: "session.start", timestamp: "2024-01-01T00:00:00Z", sequence: 1, payload: [:]),
+            SessionEvent(id: "e2", parentId: "e1", sessionId: "s1", workspaceId: "/test", type: "error.agent", timestamp: "2024-01-01T00:01:00Z", sequence: 2, payload: [
+                "error": AnyCodable("Something went wrong"),
+                "recoverable": AnyCodable(true)
+            ]),
+            SessionEvent(id: "e3", parentId: "e2", sessionId: "s1", workspaceId: "/test", type: "error.provider", timestamp: "2024-01-01T00:02:00Z", sequence: 3, payload: [
+                "error": AnyCodable("Rate limit exceeded"),
+                "retryable": AnyCodable(true)
+            ])
+        ]
+
+        let analytics = SessionAnalytics(from: events)
+
+        XCTAssertEqual(analytics.totalErrors, 2)
+        XCTAssertEqual(analytics.errors[0].type, "agent")
+        XCTAssertEqual(analytics.errors[0].isRecoverable, true)
+        XCTAssertEqual(analytics.errors[1].type, "provider")
+    }
 }

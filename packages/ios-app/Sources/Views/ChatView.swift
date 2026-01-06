@@ -23,6 +23,9 @@ struct ChatView: View {
     @State private var showSessionStats = false
     @State private var showContextAudit = false
     @State private var showSessionHistory = false
+    @State private var showSessionAnalytics = false
+    /// Events for analytics sheet (loaded lazily)
+    @State private var analyticsEvents: [SessionEvent] = []
     /// Cached models for model picker menu
     @State private var cachedModels: [ModelInfo] = []
     @State private var isLoadingModels = false
@@ -132,6 +135,12 @@ struct ChatView: View {
             SessionHistorySheet(
                 sessionId: sessionId,
                 rpcClient: rpcClient
+            )
+        }
+        .sheet(isPresented: $showSessionAnalytics) {
+            SessionAnalyticsSheet(
+                sessionId: sessionId,
+                events: analyticsEvents
             )
         }
         .alert("Error", isPresented: $viewModel.showError) {
@@ -256,6 +265,19 @@ struct ChatView: View {
                     showContextAudit = true
                 } label: {
                     Label("Memory & Context", systemImage: "brain")
+                }
+
+                Button {
+                    Task {
+                        do {
+                            analyticsEvents = try eventStoreManager.getSessionEvents(sessionId)
+                            showSessionAnalytics = true
+                        } catch {
+                            viewModel.showErrorAlert("Failed to load analytics: \(error.localizedDescription)")
+                        }
+                    }
+                } label: {
+                    Label("Analytics", systemImage: "chart.bar.xaxis")
                 }
 
                 Button {

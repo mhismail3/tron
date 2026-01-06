@@ -9,11 +9,28 @@ struct MessageBubble: View {
         message.role == .user
     }
 
+    /// Check if we have any metadata to display
+    private var hasMetadata: Bool {
+        message.tokenUsage != nil ||
+        message.shortModelName != nil ||
+        message.formattedLatency != nil ||
+        message.hasThinking == true
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             contentView
 
-            if let usage = message.tokenUsage {
+            // Show enriched metadata badge for assistant messages with metadata
+            if !isUserMessage && hasMetadata {
+                MessageMetadataBadge(
+                    usage: message.tokenUsage,
+                    model: message.shortModelName,
+                    latency: message.formattedLatency,
+                    hasThinking: message.hasThinking
+                )
+            } else if let usage = message.tokenUsage {
+                // Fallback to simple token badge for user messages
                 TokenBadge(usage: usage)
             }
         }
@@ -677,6 +694,59 @@ struct TokenBadge: View {
         }
         .font(.system(size: 10, design: .monospaced))
         .foregroundStyle(.tronTextMuted)
+    }
+}
+
+// MARK: - Message Metadata Badge (Enriched Phase 1)
+
+/// Displays comprehensive metadata beneath assistant messages:
+/// Token usage, model name, latency, and thinking indicator
+struct MessageMetadataBadge: View {
+    let usage: TokenUsage?
+    let model: String?
+    let latency: String?
+    let hasThinking: Bool?
+
+    /// Check if we need a separator before additional metadata
+    private var needsSeparator: Bool {
+        usage != nil && (model != nil || latency != nil || hasThinking == true)
+    }
+
+    var body: some View {
+        HStack(spacing: 8) {
+            // Token usage (existing format)
+            if let usage = usage {
+                TokenBadge(usage: usage)
+            }
+
+            // Separator
+            if needsSeparator {
+                Text("•")
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundStyle(.tronTextMuted)
+            }
+
+            // Model name pill
+            if let model = model {
+                Text(model)
+                    .font(.system(size: 10, weight: .medium, design: .monospaced))
+                    .foregroundStyle(.tronTextMuted)
+            }
+
+            // Latency pill
+            if let latency = latency {
+                Text(latency)
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundStyle(.tronTextMuted)
+            }
+
+            // Thinking indicator (text, not emoji)
+            if hasThinking == true {
+                Text("Thinking")
+                    .font(.system(size: 10, weight: .medium, design: .monospaced))
+                    .foregroundStyle(.tronAmber)
+            }
+        }
     }
 }
 

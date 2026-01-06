@@ -53,76 +53,297 @@ struct SessionEvent: Identifiable, Codable {
         SessionEventType(rawValue: type) ?? .unknown
     }
 
-    /// Human-readable summary of the event
+    /// Human-readable summary of the event (Phase 3 enhanced)
     var summary: String {
         switch eventType {
         case .sessionStart:
-            return "Session started"
+            let model = (payload["model"]?.value as? String) ?? "unknown"
+            return "Session started • \(model.shortModelName)"
+
         case .sessionEnd:
-            return "Session ended"
+            let reason = (payload["reason"]?.value as? String) ?? "completed"
+            return "Session ended (\(reason))"
+
         case .sessionFork:
-            let name = (payload["name"]?.value as? String) ?? "unnamed"
-            return "Forked: \(name)"
+            return "Forked session"
+
         case .messageUser:
             if let content = payload["content"]?.value as? String {
-                return String(content.prefix(60)).trimmingCharacters(in: .whitespacesAndNewlines)
+                return String(content.prefix(50)).trimmingCharacters(in: .whitespacesAndNewlines)
             }
             return "User message"
+
         case .messageAssistant:
-            // Extract actual content from the response
-            if let content = payload["content"]?.value as? String, !content.isEmpty {
-                let preview = content.prefix(80).trimmingCharacters(in: .whitespacesAndNewlines)
-                return preview + (content.count > 80 ? "..." : "")
+            // Extract text content
+            var content = ""
+            if let text = payload["content"]?.value as? String, !text.isEmpty {
+                content = String(text.prefix(40)).trimmingCharacters(in: .whitespacesAndNewlines)
             } else if let text = payload["text"]?.value as? String, !text.isEmpty {
-                let preview = text.prefix(80).trimmingCharacters(in: .whitespacesAndNewlines)
-                return preview + (text.count > 80 ? "..." : "")
+                content = String(text.prefix(40)).trimmingCharacters(in: .whitespacesAndNewlines)
+            } else {
+                content = "Assistant response"
             }
-            return "Assistant response"
+
+            // Add metadata indicators
+            var indicators: [String] = []
+            if let latency = payload["latency"]?.value as? Int {
+                indicators.append(formatLatency(latency))
+            }
+            if payload["hasThinking"]?.value as? Bool == true {
+                indicators.append("Thinking")
+            }
+
+            if !indicators.isEmpty {
+                content += " • " + indicators.joined(separator: " • ")
+            }
+            return content
+
         case .toolCall:
             let name = (payload["name"]?.value as? String) ?? "unknown"
-            return "Tool: \(name)"
+            let args = payload["arguments"]?.value as? [String: Any] ?? [:]
+            let keyArg = extractKeyArgument(toolName: name, from: args)
+            if !keyArg.isEmpty {
+                return "\(name): \(keyArg)"
+            }
+            return name
+
         case .toolResult:
             let isError = (payload["isError"]?.value as? Bool) ?? false
-            return "Result (\(isError ? "error" : "success"))"
+            let duration = payload["duration"]?.value as? Int
+            let status = isError ? "error" : "success"
+            if let duration = duration {
+                return "\(duration)ms • \(status)"
+            }
+            return status
+
+        case .streamTurnStart:
+            let turn = (payload["turn"]?.value as? Int) ?? 0
+            return "Turn \(turn) started"
+
+        case .streamTurnEnd:
+            let turn = (payload["turn"]?.value as? Int) ?? 0
+            if let tokenUsage = payload["tokenUsage"]?.value as? [String: Any],
+               let input = tokenUsage["inputTokens"] as? Int,
+               let output = tokenUsage["outputTokens"] as? Int {
+                return "Turn \(turn) • \(formatTokens(input + output)) tokens"
+            }
+            return "Turn \(turn) ended"
+
+        case .errorAgent:
+            let code = (payload["code"]?.value as? String) ?? "ERROR"
+            let error = (payload["error"]?.value as? String) ?? "Unknown error"
+            return "\(code): \(String(error.prefix(30)))"
+
+        case .errorProvider:
+            let provider = (payload["provider"]?.value as? String) ?? "provider"
+            let retryable = (payload["retryable"]?.value as? Bool) ?? false
+            if retryable, let delay = payload["retryAfter"]?.value as? Int {
+                return "\(provider) • retry in \(delay)ms"
+            }
+            return "\(provider) error"
+
+        case .errorTool:
+            let toolName = (payload["toolName"]?.value as? String) ?? "tool"
+            return "\(toolName) failed"
+
         case .ledgerUpdate:
             return "Ledger updated"
+
         case .configModelSwitch:
-            let model = (payload["model"]?.value as? String) ?? "unknown"
-            return "Switched to \(model.shortModelName)"
+            let from = (payload["previousModel"]?.value as? String)?.shortModelName ?? "?"
+            let to = (payload["newModel"]?.value as? String)?.shortModelName ??
+                     (payload["model"]?.value as? String)?.shortModelName ?? "?"
+            return "\(from) → \(to)"
+
         case .compactBoundary:
             return "Context compacted"
+
         case .unknown:
             return type
+
         default:
             return type
         }
     }
 
-    /// Extended content for expanded view
+    /// Helper to extract key argument for tool display
+    private func extractKeyArgument(toolName: String, from args: [String: Any]) -> String {
+        switch toolName.lowercased() {
+        case "read", "write", "edit":
+            if let path = args["file_path"] as? String ?? args["path"] as? String {
+                return URL(fileURLWithPath: path).lastPathComponent
+            }
+        case "bash":
+            if let cmd = args["command"] as? String {
+                return String(cmd.prefix(25))
+            }
+        case "grep":
+            if let pattern = args["pattern"] as? String {
+                return "\"\(String(pattern.prefix(20)))\""
+            }
+        case "glob", "find":
+            if let pattern = args["pattern"] as? String {
+                return pattern
+            }
+        default:
+            break
+        }
+        return ""
+    }
+
+    private func formatLatency(_ ms: Int) -> String {
+        if ms < 1000 {
+            return "\(ms)ms"
+        } else {
+            return String(format: "%.1fs", Double(ms) / 1000.0)
+        }
+    }
+
+    private func formatTokens(_ tokens: Int) -> String {
+        if tokens < 1000 {
+            return "\(tokens)"
+        } else {
+            return String(format: "%.1fK", Double(tokens) / 1000.0)
+        }
+    }
+
+    /// Extended content for expanded view (Phase 3 enhanced)
     var expandedContent: String? {
         switch eventType {
         case .messageAssistant:
-            if let content = payload["content"]?.value as? String {
-                return content
-            } else if let text = payload["text"]?.value as? String {
-                return text
+            var lines: [String] = []
+
+            // Model info
+            if let model = payload["model"]?.value as? String {
+                lines.append("Model: \(model)")
             }
-            return nil
+
+            // Turn info
+            if let turn = payload["turn"]?.value as? Int {
+                lines.append("Turn: \(turn)")
+            }
+
+            // Latency
+            if let latency = payload["latency"]?.value as? Int {
+                lines.append("Latency: \(formatLatency(latency))")
+            }
+
+            // Stop reason
+            if let stopReason = payload["stopReason"]?.value as? String {
+                lines.append("Stop reason: \(stopReason)")
+            }
+
+            // Extended thinking
+            if payload["hasThinking"]?.value as? Bool == true {
+                lines.append("Extended thinking: Yes")
+            }
+
+            // Token usage
+            if let tokenUsage = payload["tokenUsage"]?.value as? [String: Any] {
+                if let input = tokenUsage["inputTokens"] as? Int,
+                   let output = tokenUsage["outputTokens"] as? Int {
+                    lines.append("Tokens: ↓\(formatTokens(input)) ↑\(formatTokens(output))")
+                }
+            }
+
+            return lines.isEmpty ? nil : lines.joined(separator: "\n")
+
         case .toolCall:
-            if let input = payload["input"]?.value {
-                return "Input: \(input)"
+            let name = (payload["name"]?.value as? String) ?? "unknown"
+            let turn = (payload["turn"]?.value as? Int) ?? 0
+            var lines = ["Tool: \(name)", "Turn: \(turn)"]
+
+            // Format arguments if present and not too long
+            if let args = payload["arguments"]?.value {
+                let argsStr = formatJSON(args)
+                if argsStr.count < 200 {
+                    lines.append("Arguments:\n\(argsStr)")
+                }
             }
-            return nil
+            return lines.joined(separator: "\n")
+
         case .toolResult:
-            if let content = payload["content"]?.value as? String {
-                return content
-            } else if let result = payload["result"]?.value as? String {
-                return result
+            var lines: [String] = []
+
+            // Duration
+            if let duration = payload["duration"]?.value as? Int {
+                lines.append("Duration: \(duration)ms")
             }
-            return nil
+
+            // Status
+            let isError = (payload["isError"]?.value as? Bool) ?? false
+            lines.append("Status: \(isError ? "Error" : "Success")")
+
+            // Truncated flag
+            if payload["truncated"]?.value as? Bool == true {
+                lines.append("Content: Truncated")
+            }
+
+            // Content preview
+            if let content = payload["content"]?.value as? String {
+                let preview = String(content.prefix(200))
+                lines.append("\n\(preview)")
+            }
+            return lines.joined(separator: "\n")
+
+        case .errorAgent, .errorProvider, .errorTool:
+            var lines: [String] = []
+
+            // Error message
+            if let error = payload["error"]?.value as? String {
+                lines.append("Error: \(error)")
+            }
+
+            // Error code
+            if let code = payload["code"]?.value as? String {
+                lines.append("Code: \(code)")
+            }
+
+            // Recoverable
+            if let recoverable = payload["recoverable"]?.value as? Bool {
+                lines.append("Recoverable: \(recoverable ? "Yes" : "No")")
+            }
+
+            // Retryable
+            if let retryable = payload["retryable"]?.value as? Bool {
+                lines.append("Retryable: \(retryable ? "Yes" : "No")")
+            }
+
+            // Retry after
+            if let retryAfter = payload["retryAfter"]?.value as? Int {
+                lines.append("Retry after: \(retryAfter)ms")
+            }
+
+            return lines.joined(separator: "\n")
+
+        case .streamTurnEnd:
+            var lines: [String] = []
+
+            if let turn = payload["turn"]?.value as? Int {
+                lines.append("Turn: \(turn)")
+            }
+
+            if let tokenUsage = payload["tokenUsage"]?.value as? [String: Any] {
+                if let input = tokenUsage["inputTokens"] as? Int {
+                    lines.append("Input tokens: \(formatTokens(input))")
+                }
+                if let output = tokenUsage["outputTokens"] as? Int {
+                    lines.append("Output tokens: \(formatTokens(output))")
+                }
+            }
+            return lines.isEmpty ? nil : lines.joined(separator: "\n")
+
         default:
             return nil
         }
+    }
+
+    private func formatJSON(_ value: Any) -> String {
+        if let data = try? JSONSerialization.data(withJSONObject: value, options: [.prettyPrinted, .sortedKeys]),
+           let str = String(data: data, encoding: .utf8) {
+            return str
+        }
+        return String(describing: value)
     }
 }
 
@@ -328,6 +549,47 @@ struct ReconstructedSessionState {
 struct ReconstructedMessage {
     let role: String
     let content: Any
+
+    // MARK: - Enriched Metadata (Phase 1)
+    // These fields come from server-side event store enhancements
+
+    /// Model that generated this response (for assistant messages)
+    var model: String?
+
+    /// Response latency in milliseconds
+    var latencyMs: Int?
+
+    /// Turn number in the agent loop
+    var turnNumber: Int?
+
+    /// Whether extended thinking was used
+    var hasThinking: Bool?
+
+    /// Why the turn ended (end_turn, tool_use, max_tokens)
+    var stopReason: String?
+
+    /// Token usage for this message
+    var tokenUsage: TokenUsage?
+
+    init(
+        role: String,
+        content: Any,
+        model: String? = nil,
+        latencyMs: Int? = nil,
+        turnNumber: Int? = nil,
+        hasThinking: Bool? = nil,
+        stopReason: String? = nil,
+        tokenUsage: TokenUsage? = nil
+    ) {
+        self.role = role
+        self.content = content
+        self.model = model
+        self.latencyMs = latencyMs
+        self.turnNumber = turnNumber
+        self.hasThinking = hasThinking
+        self.stopReason = stopReason
+        self.tokenUsage = tokenUsage
+    }
 }
 
 struct ReconstructedLedger {

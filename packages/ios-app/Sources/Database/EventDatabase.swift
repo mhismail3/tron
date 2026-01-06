@@ -672,14 +672,41 @@ class EventDatabase: ObservableObject {
                     logger.debug("[DEBUG] message.assistant has no content field")
                     content = ""
                 }
-                messages.append(ReconstructedMessage(role: "assistant", content: content))
 
+                // Extract enriched metadata (Phase 1 enhancements)
+                let model = event.payload["model"]?.value as? String
+                let latencyMs = event.payload["latency"]?.value as? Int
+                let turn = event.payload["turn"]?.value as? Int
+                let hasThinking = event.payload["hasThinking"]?.value as? Bool
+                let stopReason = event.payload["stopReason"]?.value as? String
+
+                // Extract message-level token usage
+                var msgTokenUsage: TokenUsage?
                 if let usage = event.payload["tokenUsage"]?.value as? [String: Any] {
-                    inputTokens += (usage["inputTokens"] as? Int) ?? 0
-                    outputTokens += (usage["outputTokens"] as? Int) ?? 0
+                    let msgInputTokens = (usage["inputTokens"] as? Int) ?? 0
+                    let msgOutputTokens = (usage["outputTokens"] as? Int) ?? 0
+                    inputTokens += msgInputTokens
+                    outputTokens += msgOutputTokens
+                    msgTokenUsage = TokenUsage(
+                        inputTokens: msgInputTokens,
+                        outputTokens: msgOutputTokens,
+                        cacheReadTokens: usage["cacheReadTokens"] as? Int,
+                        cacheCreationTokens: usage["cacheCreationTokens"] as? Int
+                    )
                 }
 
-                if let turn = event.payload["turn"]?.value as? Int, turn > turnCount {
+                messages.append(ReconstructedMessage(
+                    role: "assistant",
+                    content: content,
+                    model: model,
+                    latencyMs: latencyMs,
+                    turnNumber: turn,
+                    hasThinking: hasThinking,
+                    stopReason: stopReason,
+                    tokenUsage: msgTokenUsage
+                ))
+
+                if let turn = turn, turn > turnCount {
                     turnCount = turn
                 }
 

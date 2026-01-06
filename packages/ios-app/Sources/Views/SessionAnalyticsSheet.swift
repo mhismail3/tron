@@ -1,0 +1,515 @@
+import SwiftUI
+import Charts
+
+// MARK: - Session Analytics Sheet
+
+/// Modal sheet showing comprehensive session analytics
+/// Following Apple's Human Interface Guidelines for Sheets
+struct SessionAnalyticsSheet: View {
+    @Environment(\.dismiss) private var dismiss
+
+    let sessionId: String
+    let events: [SessionEvent]
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(spacing: 24) {
+                    // Summary stats
+                    SummaryStatsRow(analytics: analytics)
+
+                    // Turn breakdown
+                    if !analytics.turns.isEmpty {
+                        TurnBreakdownSection(turns: analytics.turns)
+                    }
+
+                    // Tool usage
+                    if !analytics.toolUsage.isEmpty {
+                        ToolUsageSection(tools: analytics.toolUsage)
+                    }
+
+                    // Model usage
+                    if analytics.modelUsage.count > 1 {
+                        ModelUsageSection(models: analytics.modelUsage)
+                    }
+
+                    // Errors
+                    if !analytics.errors.isEmpty {
+                        ErrorLogSection(errors: analytics.errors)
+                    }
+                }
+                .padding()
+            }
+            .background(Color.tronBackground)
+            .navigationTitle("Session Analytics")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Done") { dismiss() }
+                        .foregroundStyle(.tronEmerald)
+                }
+            }
+        }
+        .presentationDetents([.medium, .large])
+        .presentationDragIndicator(.visible)
+    }
+
+    private var analytics: SessionAnalytics {
+        SessionAnalytics(from: events)
+    }
+}
+
+// MARK: - Analytics Data Model
+
+struct SessionAnalytics {
+    struct TurnData: Identifiable {
+        let id = UUID()
+        let turn: Int
+        let inputTokens: Int
+        let outputTokens: Int
+        var totalTokens: Int { inputTokens + outputTokens }
+    }
+
+    struct ToolData: Identifiable {
+        let id = UUID()
+        let name: String
+        var count: Int
+        var totalDuration: Int
+        var avgDuration: Int { count > 0 ? totalDuration / count : 0 }
+        var errorCount: Int
+    }
+
+    struct ModelData: Identifiable {
+        let id = UUID()
+        let model: String
+        var tokenCount: Int
+    }
+
+    struct ErrorData: Identifiable {
+        let id = UUID()
+        let timestamp: Date
+        let type: String
+        let message: String
+        let isRecoverable: Bool
+    }
+
+    let turns: [TurnData]
+    let toolUsage: [ToolData]
+    let modelUsage: [ModelData]
+    let errors: [ErrorData]
+
+    var totalTurns: Int { turns.count }
+    var totalTokens: Int { turns.reduce(0) { $0 + $1.totalTokens } }
+    var totalErrors: Int { errors.count }
+    var avgLatency: Int
+
+    init(from events: [SessionEvent]) {
+        var turnData: [Int: (input: Int, output: Int)] = [:]
+        var toolData: [String: (count: Int, duration: Int, errors: Int)] = [:]
+        var modelData: [String: Int] = [:]
+        var errorList: [ErrorData] = []
+        var latencySum = 0
+        var latencyCount = 0
+
+        let isoFormatter = ISO8601DateFormatter()
+        isoFormatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+
+        for event in events {
+            switch event.eventType {
+            case .messageAssistant:
+                // Track turn token usage
+                if let turn = event.payload["turn"]?.value as? Int,
+                   let tokenUsage = event.payload["tokenUsage"]?.value as? [String: Any],
+                   let input = tokenUsage["inputTokens"] as? Int,
+                   let output = tokenUsage["outputTokens"] as? Int {
+                    let existing = turnData[turn] ?? (input: 0, output: 0)
+                    turnData[turn] = (input: existing.input + input, output: existing.output + output)
+                }
+
+                // Track model usage
+                if let model = event.payload["model"]?.value as? String {
+                    let shortModel = model.shortModelName
+                    if let tokenUsage = event.payload["tokenUsage"]?.value as? [String: Any],
+                       let input = tokenUsage["inputTokens"] as? Int,
+                       let output = tokenUsage["outputTokens"] as? Int {
+                        modelData[shortModel, default: 0] += input + output
+                    }
+                }
+
+                // Track latency
+                if let latency = event.payload["latency"]?.value as? Int {
+                    latencySum += latency
+                    latencyCount += 1
+                }
+
+            case .streamTurnEnd:
+                // Alternative way to get turn data
+                if let turn = event.payload["turn"]?.value as? Int,
+                   let tokenUsage = event.payload["tokenUsage"]?.value as? [String: Any],
+                   let input = tokenUsage["inputTokens"] as? Int,
+                   let output = tokenUsage["outputTokens"] as? Int {
+                    let existing = turnData[turn] ?? (input: 0, output: 0)
+                    // Only add if not already present from message.assistant
+                    if existing.input == 0 && existing.output == 0 {
+                        turnData[turn] = (input: input, output: output)
+                    }
+                }
+
+            case .toolCall:
+                let name = (event.payload["name"]?.value as? String) ?? "unknown"
+                let existing = toolData[name] ?? (count: 0, duration: 0, errors: 0)
+                toolData[name] = (count: existing.count + 1, duration: existing.duration, errors: existing.errors)
+
+            case .toolResult:
+                // Match back to tool call by toolCallId if available
+                let isError = (event.payload["isError"]?.value as? Bool) ?? false
+                let duration = (event.payload["duration"]?.value as? Int) ?? 0
+
+                // We need to track tool results - for simplicity, update the most recent tool
+                // In a real implementation, we'd match by toolCallId
+                if let toolName = Self.findToolNameForResult(event, in: events) {
+                    let existing = toolData[toolName] ?? (count: 0, duration: 0, errors: 0)
+                    toolData[toolName] = (
+                        count: existing.count,
+                        duration: existing.duration + duration,
+                        errors: existing.errors + (isError ? 1 : 0)
+                    )
+                }
+
+            case .errorAgent:
+                let error = (event.payload["error"]?.value as? String) ?? "Unknown error"
+                let recoverable = (event.payload["recoverable"]?.value as? Bool) ?? false
+                let timestamp = isoFormatter.date(from: event.timestamp) ?? Date()
+                errorList.append(ErrorData(timestamp: timestamp, type: "agent", message: error, isRecoverable: recoverable))
+
+            case .errorProvider:
+                let error = (event.payload["error"]?.value as? String) ?? "Provider error"
+                let retryable = (event.payload["retryable"]?.value as? Bool) ?? false
+                let timestamp = isoFormatter.date(from: event.timestamp) ?? Date()
+                errorList.append(ErrorData(timestamp: timestamp, type: "provider", message: error, isRecoverable: retryable))
+
+            case .errorTool:
+                let error = (event.payload["error"]?.value as? String) ?? "Tool error"
+                let toolName = (event.payload["toolName"]?.value as? String) ?? "tool"
+                let timestamp = isoFormatter.date(from: event.timestamp) ?? Date()
+                errorList.append(ErrorData(timestamp: timestamp, type: "tool", message: "\(toolName): \(error)", isRecoverable: false))
+
+            default:
+                break
+            }
+        }
+
+        // Convert to arrays
+        self.turns = turnData.sorted { $0.key < $1.key }.map {
+            TurnData(turn: $0.key, inputTokens: $0.value.input, outputTokens: $0.value.output)
+        }
+
+        self.toolUsage = toolData.map {
+            ToolData(name: $0.key, count: $0.value.count, totalDuration: $0.value.duration, errorCount: $0.value.errors)
+        }.sorted { $0.count > $1.count }
+
+        self.modelUsage = modelData.map {
+            ModelData(model: $0.key, tokenCount: $0.value)
+        }.sorted { $0.tokenCount > $1.tokenCount }
+
+        self.errors = errorList.sorted { $0.timestamp < $1.timestamp }
+
+        self.avgLatency = latencyCount > 0 ? latencySum / latencyCount : 0
+    }
+
+    private static func findToolNameForResult(_ resultEvent: SessionEvent, in events: [SessionEvent]) -> String? {
+        guard let toolCallId = resultEvent.payload["toolCallId"]?.value as? String else { return nil }
+
+        for event in events {
+            if event.eventType == .toolCall,
+               event.payload["toolCallId"]?.value as? String == toolCallId {
+                return event.payload["name"]?.value as? String
+            }
+        }
+        return nil
+    }
+}
+
+// MARK: - Summary Stats Row
+
+struct SummaryStatsRow: View {
+    let analytics: SessionAnalytics
+
+    var body: some View {
+        HStack(spacing: 0) {
+            StatCard(value: "\(analytics.totalTurns)", label: "turns")
+            StatCard(value: formatLatency(analytics.avgLatency), label: "avg latency")
+            StatCard(value: "\(analytics.totalErrors)", label: "errors")
+            StatCard(value: formatTokens(analytics.totalTokens), label: "tokens")
+        }
+        .padding(.vertical, 16)
+        .background(Color.tronSurface)
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+    }
+
+    private func formatLatency(_ ms: Int) -> String {
+        if ms == 0 { return "-" }
+        if ms < 1000 {
+            return "\(ms)ms"
+        } else {
+            return String(format: "%.1fs", Double(ms) / 1000.0)
+        }
+    }
+
+    private func formatTokens(_ tokens: Int) -> String {
+        if tokens < 1000 {
+            return "\(tokens)"
+        } else {
+            return String(format: "%.1fK", Double(tokens) / 1000.0)
+        }
+    }
+}
+
+struct StatCard: View {
+    let value: String
+    let label: String
+
+    var body: some View {
+        VStack(spacing: 4) {
+            Text(value)
+                .font(.system(size: 20, weight: .bold, design: .monospaced))
+                .foregroundStyle(.tronEmerald)
+            Text(label)
+                .font(.system(size: 11))
+                .foregroundStyle(.tronTextMuted)
+        }
+        .frame(maxWidth: .infinity)
+    }
+}
+
+// MARK: - Turn Breakdown Section
+
+struct TurnBreakdownSection: View {
+    let turns: [SessionAnalytics.TurnData]
+
+    private var maxTokens: Int {
+        turns.map(\.totalTokens).max() ?? 1
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Turn Breakdown")
+                .font(.headline)
+                .foregroundStyle(.tronTextPrimary)
+
+            VStack(spacing: 8) {
+                ForEach(turns) { turn in
+                    HStack(spacing: 12) {
+                        Text("Turn \(turn.turn)")
+                            .font(.system(size: 12, design: .monospaced))
+                            .foregroundStyle(.tronTextSecondary)
+                            .frame(width: 50, alignment: .leading)
+
+                        GeometryReader { geo in
+                            HStack(spacing: 0) {
+                                // Input tokens (darker)
+                                Rectangle()
+                                    .fill(Color.tronEmerald.opacity(0.6))
+                                    .frame(width: geo.size.width * ratio(turn.inputTokens))
+
+                                // Output tokens (lighter)
+                                Rectangle()
+                                    .fill(Color.tronEmerald)
+                                    .frame(width: geo.size.width * ratio(turn.outputTokens))
+                            }
+                        }
+                        .frame(height: 16)
+                        .background(Color.tronSurface)
+                        .clipShape(RoundedRectangle(cornerRadius: 4))
+
+                        Text(formatTokens(turn.totalTokens))
+                            .font(.system(size: 11, design: .monospaced))
+                            .foregroundStyle(.tronTextMuted)
+                            .frame(width: 50, alignment: .trailing)
+                    }
+                }
+            }
+        }
+        .padding(16)
+        .background(Color.tronSurface.opacity(0.5))
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+    }
+
+    private func ratio(_ tokens: Int) -> CGFloat {
+        guard maxTokens > 0 else { return 0 }
+        return CGFloat(tokens) / CGFloat(maxTokens)
+    }
+
+    private func formatTokens(_ tokens: Int) -> String {
+        if tokens < 1000 {
+            return "\(tokens)"
+        } else {
+            return String(format: "%.1fK", Double(tokens) / 1000.0)
+        }
+    }
+}
+
+// MARK: - Tool Usage Section
+
+struct ToolUsageSection: View {
+    let tools: [SessionAnalytics.ToolData]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Tool Usage")
+                .font(.headline)
+                .foregroundStyle(.tronTextPrimary)
+
+            VStack(spacing: 8) {
+                ForEach(tools) { tool in
+                    HStack(spacing: 12) {
+                        Image(systemName: "wrench.and.screwdriver")
+                            .font(.system(size: 12))
+                            .foregroundStyle(.tronCyan)
+
+                        Text(tool.name)
+                            .font(.system(size: 13, weight: .medium, design: .monospaced))
+                            .foregroundStyle(.tronTextPrimary)
+
+                        Spacer()
+
+                        Text("×\(tool.count)")
+                            .font(.system(size: 12, design: .monospaced))
+                            .foregroundStyle(.tronTextSecondary)
+
+                        Text("avg \(tool.avgDuration)ms")
+                            .font(.system(size: 11, design: .monospaced))
+                            .foregroundStyle(.tronTextMuted)
+
+                        if tool.errorCount > 0 {
+                            Text("\(tool.errorCount) err")
+                                .font(.system(size: 10, weight: .medium))
+                                .foregroundStyle(.tronError)
+                        }
+                    }
+                    .padding(.vertical, 6)
+                }
+            }
+        }
+        .padding(16)
+        .background(Color.tronSurface.opacity(0.5))
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+    }
+}
+
+// MARK: - Model Usage Section
+
+struct ModelUsageSection: View {
+    let models: [SessionAnalytics.ModelData]
+
+    private var totalTokens: Int {
+        models.reduce(0) { $0 + $1.tokenCount }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Model Usage")
+                .font(.headline)
+                .foregroundStyle(.tronTextPrimary)
+
+            VStack(spacing: 8) {
+                ForEach(models) { model in
+                    HStack(spacing: 12) {
+                        Text(model.model)
+                            .font(.system(size: 13, weight: .medium, design: .monospaced))
+                            .foregroundStyle(.tronTextPrimary)
+                            .frame(width: 80, alignment: .leading)
+
+                        GeometryReader { geo in
+                            Rectangle()
+                                .fill(Color.tronPurple)
+                                .frame(width: geo.size.width * percentage(model.tokenCount))
+                        }
+                        .frame(height: 12)
+                        .background(Color.tronSurface)
+                        .clipShape(RoundedRectangle(cornerRadius: 3))
+
+                        Text("\(percentageString(model.tokenCount))%")
+                            .font(.system(size: 11, design: .monospaced))
+                            .foregroundStyle(.tronTextMuted)
+                            .frame(width: 40, alignment: .trailing)
+                    }
+                }
+            }
+        }
+        .padding(16)
+        .background(Color.tronSurface.opacity(0.5))
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+    }
+
+    private func percentage(_ tokens: Int) -> CGFloat {
+        guard totalTokens > 0 else { return 0 }
+        return CGFloat(tokens) / CGFloat(totalTokens)
+    }
+
+    private func percentageString(_ tokens: Int) -> Int {
+        guard totalTokens > 0 else { return 0 }
+        return Int(round(Double(tokens) / Double(totalTokens) * 100))
+    }
+}
+
+// MARK: - Error Log Section
+
+struct ErrorLogSection: View {
+    let errors: [SessionAnalytics.ErrorData]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Errors")
+                .font(.headline)
+                .foregroundStyle(.tronTextPrimary)
+
+            VStack(spacing: 8) {
+                ForEach(errors) { error in
+                    HStack(spacing: 12) {
+                        Image(systemName: error.isRecoverable
+                            ? "exclamationmark.triangle.fill"
+                            : "xmark.circle.fill")
+                            .font(.system(size: 12))
+                            .foregroundStyle(error.isRecoverable ? .tronAmber : .tronError)
+
+                        Text(formatTime(error.timestamp))
+                            .font(.system(size: 11, design: .monospaced))
+                            .foregroundStyle(.tronTextMuted)
+
+                        Text(error.type.capitalized)
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundStyle(.tronTextSecondary)
+
+                        Text(error.message)
+                            .font(.system(size: 12))
+                            .foregroundStyle(.tronTextSecondary)
+                            .lineLimit(1)
+
+                        Spacer()
+                    }
+                    .padding(.vertical, 4)
+                }
+            }
+        }
+        .padding(16)
+        .background(Color.tronSurface.opacity(0.5))
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+    }
+
+    private func formatTime(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "HH:mm"
+        return formatter.string(from: date)
+    }
+}
+
+// MARK: - Preview
+
+#Preview {
+    SessionAnalyticsSheet(
+        sessionId: "test-session",
+        events: []
+    )
+    .preferredColorScheme(.dark)
+}

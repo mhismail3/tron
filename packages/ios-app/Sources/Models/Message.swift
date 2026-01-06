@@ -10,13 +10,36 @@ struct ChatMessage: Identifiable, Equatable {
     var isStreaming: Bool
     var tokenUsage: TokenUsage?
 
+    // MARK: - Enriched Metadata (Phase 1)
+    // These fields come from server-side event store enhancements
+
+    /// Model that generated this response (e.g., "claude-sonnet-4-20250514")
+    var model: String?
+
+    /// Response latency in milliseconds
+    var latencyMs: Int?
+
+    /// Turn number in the agent loop
+    var turnNumber: Int?
+
+    /// Whether extended thinking was used
+    var hasThinking: Bool?
+
+    /// Why the turn ended (end_turn, tool_use, max_tokens)
+    var stopReason: String?
+
     init(
         id: UUID = UUID(),
         role: MessageRole,
         content: MessageContent,
         timestamp: Date = Date(),
         isStreaming: Bool = false,
-        tokenUsage: TokenUsage? = nil
+        tokenUsage: TokenUsage? = nil,
+        model: String? = nil,
+        latencyMs: Int? = nil,
+        turnNumber: Int? = nil,
+        hasThinking: Bool? = nil,
+        stopReason: String? = nil
     ) {
         self.id = id
         self.role = role
@@ -24,12 +47,71 @@ struct ChatMessage: Identifiable, Equatable {
         self.timestamp = timestamp
         self.isStreaming = isStreaming
         self.tokenUsage = tokenUsage
+        self.model = model
+        self.latencyMs = latencyMs
+        self.turnNumber = turnNumber
+        self.hasThinking = hasThinking
+        self.stopReason = stopReason
     }
 
     var formattedTimestamp: String {
         let formatter = DateFormatter()
         formatter.timeStyle = .short
         return formatter.string(from: timestamp)
+    }
+
+    // MARK: - Formatted Metadata Helpers
+
+    /// Format latency as human-readable string (e.g., "2.3s" or "450ms")
+    var formattedLatency: String? {
+        guard let ms = latencyMs else { return nil }
+        if ms < 1000 {
+            return "\(ms)ms"
+        } else {
+            return String(format: "%.1fs", Double(ms) / 1000.0)
+        }
+    }
+
+    /// Short model name (e.g., "claude-sonnet-4-20250514" -> "sonnet-4")
+    var shortModelName: String? {
+        guard let model = model else { return nil }
+        return formatModelName(model)
+    }
+
+    /// Format model name to short form
+    private func formatModelName(_ model: String) -> String {
+        let lowered = model.lowercased()
+
+        // Determine tier
+        let tier: String
+        if lowered.contains("opus") {
+            tier = "opus"
+        } else if lowered.contains("sonnet") {
+            tier = "sonnet"
+        } else if lowered.contains("haiku") {
+            tier = "haiku"
+        } else {
+            // Fallback: return first two components
+            let parts = model.components(separatedBy: "-")
+            if parts.count >= 2 {
+                return parts.prefix(2).joined(separator: "-")
+            }
+            return model
+        }
+
+        // Determine version
+        if lowered.contains("4-5") || lowered.contains("4.5") {
+            return "\(tier)-4.5"
+        }
+        if lowered.contains("-4-") || lowered.contains("sonnet-4") ||
+           lowered.contains("opus-4") || lowered.contains("haiku-4") {
+            return "\(tier)-4"
+        }
+        if lowered.contains("3-5") || lowered.contains("3.5") {
+            return "\(tier)-3.5"
+        }
+
+        return tier
     }
 }
 
