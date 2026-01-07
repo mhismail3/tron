@@ -526,6 +526,37 @@ final class UnifiedEventTransformerTests: XCTestCase {
         }
     }
 
+    func testToolUseWithoutMatchingToolCallEvent() {
+        // Edge case: tool_use in content blocks but NO separate tool.call event
+        // This tests the fallback code path where we use content block info directly
+        let events = [
+            sessionEvent(type: "message.user", payload: ["content": AnyCodable("Hello")], timestamp: timestamp(0), sequence: 1),
+            // NO tool.call event - only tool_use in message.assistant content
+            sessionEvent(type: "message.assistant", payload: [
+                "content": AnyCodable([
+                    ["type": "text", "text": "Let me read that file:"],
+                    ["type": "tool_use", "id": "orphan-tool-id", "name": "Read", "input": ["file_path": "/test.txt"]]
+                ]),
+                "turn": AnyCodable(1)
+            ], timestamp: timestamp(1), sequence: 2)
+        ]
+
+        let messages = UnifiedEventTransformer.transformPersistedEvents(events)
+
+        // Should produce: user + text + tool (from content block fallback) = 3 messages
+        XCTAssertEqual(messages.count, 3, "Should have 3 messages even without tool.call event")
+
+        // Verify the tool uses fallback data from content block
+        if case .toolUse(let tool) = messages[2].content {
+            XCTAssertEqual(tool.toolCallId, "orphan-tool-id")
+            XCTAssertEqual(tool.toolName, "Read")  // From content block
+            XCTAssertTrue(tool.arguments.contains("file_path"))  // Serialized from content block
+            XCTAssertEqual(tool.status, .running)  // No result = running
+        } else {
+            XCTFail("Expected toolUse content at index 2")
+        }
+    }
+
     // MARK: - Session State Reconstruction Tests
 
     func testReconstructSessionStateBasic() {

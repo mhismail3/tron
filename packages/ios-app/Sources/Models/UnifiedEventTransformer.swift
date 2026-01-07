@@ -298,36 +298,55 @@ struct UnifiedEventTransformer {
                     stopReason: messages.isEmpty ? parsed.stopReason?.rawValue : nil
                 ))
             } else if blockType == "tool_use", let toolUseId = block["id"] as? String {
-                // Find matching tool.call and combine with tool.result
-                if let toolCall = toolCalls[toolUseId] {
-                    let result = toolResults[toolUseId]
-                    let status: ToolStatus
-                    if let result = result {
-                        status = result.isError ? .error : .success
-                    } else {
-                        status = .running
-                    }
-                    let resultContent: String?
-                    if let result = result {
-                        resultContent = result.content.isEmpty ? "(no output)" : result.content
-                    } else {
-                        resultContent = nil
-                    }
+                // Find matching tool.call for full details, fall back to content block info
+                let toolCall = toolCalls[toolUseId]
+                let result = toolResults[toolUseId]
 
-                    messages.append(ChatMessage(
-                        role: .assistant,
-                        content: .toolUse(ToolUseData(
-                            toolName: toolCall.name,
-                            toolCallId: toolCall.toolCallId,
-                            arguments: toolCall.arguments,
-                            status: status,
-                            result: resultContent,
-                            durationMs: result?.durationMs
-                        )),
-                        timestamp: timestamp,
-                        turnNumber: toolCall.turn
-                    ))
+                // Determine status based on result
+                let status: ToolStatus
+                if let result = result {
+                    status = result.isError ? .error : .success
+                } else {
+                    status = .running
                 }
+
+                // Format result content - show "(no output)" if result is empty
+                let resultContent: String?
+                if let result = result {
+                    resultContent = result.content.isEmpty ? "(no output)" : result.content
+                } else {
+                    resultContent = nil
+                }
+
+                // Use tool.call details if available, otherwise fall back to content block
+                let toolName = toolCall?.name ?? (block["name"] as? String) ?? "Unknown"
+                let turn = toolCall?.turn ?? parsed.turn
+
+                // Arguments: use tool.call string if available, else serialize content block input
+                let arguments: String
+                if let toolCallArgs = toolCall?.arguments {
+                    arguments = toolCallArgs
+                } else if let inputDict = block["input"] as? [String: Any],
+                          let jsonData = try? JSONSerialization.data(withJSONObject: inputDict, options: [.sortedKeys]),
+                          let jsonString = String(data: jsonData, encoding: .utf8) {
+                    arguments = jsonString
+                } else {
+                    arguments = "{}"
+                }
+
+                messages.append(ChatMessage(
+                    role: .assistant,
+                    content: .toolUse(ToolUseData(
+                        toolName: toolName,
+                        toolCallId: toolUseId,
+                        arguments: arguments,
+                        status: status,
+                        result: resultContent,
+                        durationMs: result?.durationMs
+                    )),
+                    timestamp: timestamp,
+                    turnNumber: turn
+                ))
             }
             // Skip thinking blocks and other types - they're handled elsewhere
         }
@@ -367,50 +386,6 @@ struct UnifiedEventTransformer {
         )
     }
 
-    /// Transform a tool.call event with its matching tool.result combined.
-    ///
-    /// This creates a single ChatMessage that includes both the tool invocation
-    /// details and its result, matching the streaming UI behavior.
-    private static func transformToolCallWithResult(
-        _ payload: [String: AnyCodable],
-        timestamp: Date,
-        toolResults: [String: ToolResultPayload]
-    ) -> ChatMessage? {
-        guard let parsed = ToolCallPayload(from: payload) else { return nil }
-
-        // Look up the matching result
-        let result = toolResults[parsed.toolCallId]
-
-        // Determine status based on result
-        let status: ToolStatus
-        if let result = result {
-            status = result.isError ? .error : .success
-        } else {
-            status = .running  // No result yet (tool still running or result missing)
-        }
-
-        // Format result content - show "(no output)" if result is empty
-        let resultContent: String?
-        if let result = result {
-            resultContent = result.content.isEmpty ? "(no output)" : result.content
-        } else {
-            resultContent = nil
-        }
-
-        return ChatMessage(
-            role: .assistant,
-            content: .toolUse(ToolUseData(
-                toolName: parsed.name,
-                toolCallId: parsed.toolCallId,
-                arguments: parsed.arguments,
-                status: status,
-                result: resultContent,
-                durationMs: result?.durationMs
-            )),
-            timestamp: timestamp,
-            turnNumber: parsed.turn
-        )
-    }
 
     private static func transformToolResult(
         _ payload: [String: AnyCodable],
