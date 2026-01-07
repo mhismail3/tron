@@ -192,6 +192,26 @@ struct TreeNodeRow: View {
         event.expandedContent != nil || !isHead
     }
 
+    /// Background color based on selection state
+    private var rowBackgroundColor: Color {
+        if isSelected {
+            return Color.tronEmerald.opacity(0.2)
+        } else if isOnPath {
+            return Color.tronPhthaloGreen.opacity(0.15)
+        } else {
+            return Color.tronPhthaloGreen.opacity(0.08)
+        }
+    }
+
+    /// Border color based on selection state
+    private var rowBorderColor: Color {
+        if isSelected {
+            return Color.tronEmerald.opacity(0.4)
+        } else {
+            return Color.tronBorder.opacity(0.2)
+        }
+    }
+
     init(event: SessionEvent, isHead: Bool, isSelected: Bool, isOnPath: Bool, isBranchPoint: Bool, depth: Int, hasNextSibling: Bool = false, onSelect: @escaping () -> Void, onFork: @escaping () -> Void, onRewind: @escaping () -> Void) {
         self.event = event
         self.isHead = isHead
@@ -274,19 +294,11 @@ struct TreeNodeRow: View {
             }
             .background(
                 RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .fill(
-                        isSelected ? Color.tronEmerald.opacity(0.2) :
-                        isOnPath ? Color.tronPhthaloGreen.opacity(0.15) :
-                        Color.tronPhthaloGreen.opacity(0.08)
-                    )
+                    .fill(rowBackgroundColor)
             )
             .overlay(
                 RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .stroke(
-                        isSelected ? Color.tronEmerald.opacity(0.4) :
-                        Color.tronBorder.opacity(0.2),
-                        lineWidth: 0.5
-                    )
+                    .stroke(rowBorderColor, lineWidth: 0.5)
             )
 
             // Expanded content and actions
