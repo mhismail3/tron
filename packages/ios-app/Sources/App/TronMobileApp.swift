@@ -342,7 +342,7 @@ struct WelcomePage: View {
                     Button(action: onSettings) {
                         Image(systemName: "gearshape")
                             .font(.system(size: 16, weight: .medium))
-                            .foregroundStyle(.white.opacity(0.9))
+                            .foregroundStyle(.tronEmerald)
                     }
                 }
             }

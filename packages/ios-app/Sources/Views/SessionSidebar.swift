@@ -60,7 +60,7 @@ struct SessionSidebar: View {
                 Button(action: onSettings) {
                     Image(systemName: "gearshape")
                         .font(.system(size: 16, weight: .medium))
-                        .foregroundStyle(.white.opacity(0.9))
+                        .foregroundStyle(.tronEmerald)
                 }
             }
         }
@@ -77,7 +77,7 @@ struct FloatingNewSessionButton: View {
         Button(action: action) {
             Image(systemName: "plus")
                 .font(.system(size: 22, weight: .semibold))
-                .foregroundStyle(.white)
+                .foregroundStyle(.tronEmerald)
                 .frame(width: 56, height: 56)
                 .contentShape(Circle())
         }
@@ -98,7 +98,7 @@ struct CachedSessionSidebarRow: View {
             HStack(spacing: 6) {
                 Text(session.displayTitle)
                     .font(.system(size: 14, weight: .medium, design: .monospaced))
-                    .foregroundStyle(.white.opacity(0.95))
+                    .foregroundStyle(.tronEmerald)
                     .lineLimit(1)
 
                 // Message count (moved to right of title)

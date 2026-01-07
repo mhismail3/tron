@@ -16,6 +16,7 @@ private struct ScrollOffsetPreferenceKey: PreferenceKey {
 
 @available(iOS 26.0, *)
 struct ChatView: View {
+    @Environment(\.dismiss) private var dismiss
     @EnvironmentObject var eventStoreManager: EventStoreManager
     @StateObject private var viewModel: ChatViewModel
     @StateObject private var inputHistory = InputHistoryStore()
@@ -105,14 +106,28 @@ struct ChatView: View {
             }
             .scrollContentBackground(.hidden)
             .background(.clear)
-            .navigationTitle(eventStoreManager.activeSession?.displayTitle ?? "Chat")
-        .navigationBarTitleDisplayMode(.inline)
+            .navigationBarTitleDisplayMode(.inline)
         .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
         .toolbar {
+            ToolbarItem(placement: .topBarLeading) {
+                Button {
+                    dismiss()
+                } label: {
+                    Image(systemName: "chevron.left")
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(.tronEmerald)
+                }
+            }
+            ToolbarItem(placement: .principal) {
+                Text(eventStoreManager.activeSession?.displayTitle ?? "Chat")
+                    .font(.system(size: 16, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(.tronEmerald)
+            }
             ToolbarItem(placement: .topBarTrailing) {
                 commandsMenu
             }
         }
+        .navigationBarBackButtonHidden(true)
         .sheet(isPresented: $viewModel.showSettings) {
             SettingsView()
         }
@@ -274,7 +289,7 @@ struct ChatView: View {
         } label: {
             Image(systemName: "gearshape")
                 .font(.system(size: 16, weight: .medium))
-                .foregroundStyle(.white.opacity(0.9))
+                .foregroundStyle(.tronEmerald)
         }
         .menuIndicator(.hidden)
     }
