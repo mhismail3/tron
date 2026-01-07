@@ -420,9 +420,9 @@ struct NewSessionFlow: View {
             ScrollView {
                 VStack(spacing: 24) {
                     // Workspace section
-                    VStack(alignment: .leading, spacing: 12) {
+                    VStack(alignment: .leading, spacing: 10) {
                         Text("Workspace")
-                            .font(.subheadline.weight(.medium))
+                            .font(.system(size: 12, weight: .medium, design: .monospaced))
                             .foregroundStyle(.white.opacity(0.6))
 
                         Button {
@@ -431,15 +431,18 @@ struct NewSessionFlow: View {
                             HStack {
                                 if workingDirectory.isEmpty {
                                     Text("Select Workspace")
-                                        .foregroundStyle(.white.opacity(0.4))
+                                        .font(.system(size: 14, weight: .regular, design: .monospaced))
+                                        .foregroundStyle(.tronEmerald.opacity(0.4))
                                 } else {
-                                    Text(workingDirectory)
-                                        .foregroundStyle(.white.opacity(0.9))
+                                    Text(displayWorkspacePath)
+                                        .font(.system(size: 14, weight: .regular, design: .monospaced))
+                                        .foregroundStyle(.tronEmerald)
                                         .lineLimit(1)
-                                        .truncationMode(.head)
+                                        .truncationMode(.middle)
                                 }
                                 Spacer()
                                 Image(systemName: "folder.fill")
+                                    .font(.system(size: 14))
                                     .foregroundStyle(.tronEmerald)
                             }
                             .padding(.horizontal, 16)
@@ -449,14 +452,14 @@ struct NewSessionFlow: View {
                         .glassEffect(.regular.tint(Color.tronPhthaloGreen.opacity(0.15)).interactive(), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
 
                         Text("The directory where the agent will operate")
-                            .font(.caption)
+                            .font(.system(size: 11, design: .monospaced))
                             .foregroundStyle(.white.opacity(0.4))
                     }
 
                     // Model section - dynamically loaded from server
-                    VStack(alignment: .leading, spacing: 12) {
+                    VStack(alignment: .leading, spacing: 10) {
                         Text("Model")
-                            .font(.subheadline.weight(.medium))
+                            .font(.system(size: 12, weight: .medium, design: .monospaced))
                             .foregroundStyle(.white.opacity(0.6))
 
                         Menu {
@@ -496,15 +499,17 @@ struct NewSessionFlow: View {
                             HStack {
                                 if isLoadingModels && selectedModel.isEmpty {
                                     Text("Loading...")
-                                        .foregroundStyle(.white.opacity(0.4))
+                                        .font(.system(size: 14, weight: .regular, design: .monospaced))
+                                        .foregroundStyle(.tronEmerald.opacity(0.4))
                                 } else {
-                                    Text(selectedModel.shortModelName)
-                                        .foregroundStyle(.white.opacity(0.9))
+                                    Text(selectedModelDisplayName)
+                                        .font(.system(size: 14, weight: .regular, design: .monospaced))
+                                        .foregroundStyle(.tronEmerald)
                                 }
                                 Spacer()
                                 Image(systemName: "chevron.up.chevron.down")
-                                    .font(.caption)
-                                    .foregroundStyle(.white.opacity(0.6))
+                                    .font(.system(size: 10))
+                                    .foregroundStyle(.tronEmerald.opacity(0.5))
                             }
                             .padding(.horizontal, 16)
                             .padding(.vertical, 14)
@@ -512,21 +517,22 @@ struct NewSessionFlow: View {
                         .glassEffect(.regular.tint(Color.tronPhthaloGreen.opacity(0.15)).interactive(), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
 
                         Text(modelDescription)
-                            .font(.caption)
+                            .font(.system(size: 11, design: .monospaced))
                             .foregroundStyle(.white.opacity(0.4))
                     }
 
                     // Divider (only show if we have remote sessions to display)
                     if !filteredRecentSessions.isEmpty || isLoadingServerSessions {
-                        HStack {
+                        HStack(spacing: 12) {
                             Rectangle()
-                                .fill(.white.opacity(0.2))
+                                .fill(.white.opacity(0.15))
                                 .frame(height: 1)
-                            Text("OR CONTINUE EXISTING")
-                                .font(.caption2.weight(.medium))
-                                .foregroundStyle(.white.opacity(0.4))
+                            Text("OR")
+                                .font(.system(size: 10, weight: .medium, design: .monospaced))
+                                .foregroundStyle(.white.opacity(0.3))
+                                .fixedSize()
                             Rectangle()
-                                .fill(.white.opacity(0.2))
+                                .fill(.white.opacity(0.15))
                                 .frame(height: 1)
                         }
                     }
@@ -632,6 +638,24 @@ struct NewSessionFlow: View {
             .filter { !$0.is45Model }
             .uniqueByFormattedName()
             .sortedByTier()
+    }
+
+    /// Display name for the selected model - uses ModelInfo.formattedModelName if available
+    private var selectedModelDisplayName: String {
+        if let model = availableModels.first(where: { $0.id == selectedModel }) {
+            return model.formattedModelName
+        }
+        // Fallback to String extension if models not yet loaded
+        return selectedModel.shortModelName
+    }
+
+    /// Workspace path formatted for display (truncates /Users/<user>/ to ~/)
+    private var displayWorkspacePath: String {
+        workingDirectory.replacingOccurrences(
+            of: "^/Users/[^/]+/",
+            with: "~/",
+            options: .regularExpression
+        )
     }
 
     private var modelDescription: String {
@@ -747,10 +771,10 @@ struct NewSessionFlow: View {
     // MARK: - Recent Sessions Section
 
     private var recentSessionsSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 10) {
             HStack {
                 Text("Recent Sessions")
-                    .font(.subheadline.weight(.medium))
+                    .font(.system(size: 12, weight: .medium, design: .monospaced))
                     .foregroundStyle(.white.opacity(0.6))
 
                 Spacer()
@@ -801,7 +825,7 @@ struct NewSessionFlow: View {
                 .padding(.vertical, 16)
             } else {
                 // Sessions list - tap to preview
-                VStack(spacing: 6) {
+                VStack(spacing: 4) {
                     ForEach(filteredRecentSessions) { session in
                         RecentSessionRow(session: session) {
                             previewSession = session
@@ -823,55 +847,45 @@ struct RecentSessionRow: View {
     var body: some View {
         Button(action: onTap) {
             HStack {
-                VStack(alignment: .leading, spacing: 4) {
+                VStack(alignment: .leading, spacing: 2) {
                     HStack {
                         Text(session.displayName)
-                            .font(.system(size: 14, weight: .medium, design: .monospaced))
-                            .foregroundStyle(.white.opacity(0.9))
+                            .font(.system(size: 13, weight: .medium, design: .monospaced))
+                            .foregroundStyle(.tronEmerald)
                             .lineLimit(1)
                         Spacer()
                         Text(session.formattedDate)
-                            .font(.system(size: 10, design: .monospaced))
+                            .font(.system(size: 9, design: .monospaced))
                             .foregroundStyle(.white.opacity(0.4))
                     }
 
-                    // Working directory preview
-                    if let dir = session.workingDirectory {
-                        Text(dir.replacingOccurrences(of: "/Users/[^/]+/", with: "~/", options: .regularExpression))
-                            .font(.system(size: 11, design: .monospaced))
-                            .foregroundStyle(.white.opacity(0.5))
-                            .lineLimit(1)
-                            .truncationMode(.head)
-                    }
-
-                    // Model + message count
-                    HStack(spacing: 8) {
+                    // Model + message count + chevron on same row
+                    HStack(spacing: 6) {
                         Text(session.model.shortModelName)
                             .font(.system(size: 10, weight: .medium, design: .monospaced))
-                            .foregroundStyle(.tronEmerald.opacity(0.7))
+                            .foregroundStyle(.tronEmerald.opacity(0.6))
 
                         HStack(spacing: 2) {
                             Image(systemName: "bubble.left")
-                                .font(.system(size: 8))
+                                .font(.system(size: 7))
                             Text("\(session.messageCount)")
-                                .font(.system(size: 10, design: .monospaced))
+                                .font(.system(size: 9, design: .monospaced))
                         }
-                        .foregroundStyle(.white.opacity(0.4))
+                        .foregroundStyle(.white.opacity(0.35))
 
                         Spacer()
 
-                        // Chevron to indicate tap-to-preview
                         Image(systemName: "chevron.right")
-                            .font(.system(size: 10, weight: .medium))
-                            .foregroundStyle(.white.opacity(0.3))
+                            .font(.system(size: 9, weight: .medium))
+                            .foregroundStyle(.white.opacity(0.25))
                     }
                 }
             }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 14)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
         }
         .buttonStyle(.plain)
-        .glassEffect(.regular.tint(Color.tronPhthaloGreen.opacity(0.15)).interactive(), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .glassEffect(.regular.tint(Color.tronPhthaloGreen.opacity(0.12)).interactive(), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
     }
 }
 
@@ -895,7 +909,7 @@ struct SessionPreviewSheet: View {
     var body: some View {
         NavigationStack {
             ZStack {
-                Color.tronBackground.ignoresSafeArea()
+                Color.tronSurface.ignoresSafeArea()
 
                 if isLoading {
                     VStack(spacing: 16) {
@@ -964,10 +978,6 @@ struct SessionPreviewSheet: View {
                     }
                 }
             }
-            .safeAreaInset(edge: .bottom) {
-                // Fork action bar at bottom
-                forkActionBar
-            }
         }
         .task {
             await loadHistory()
@@ -989,9 +999,6 @@ struct SessionPreviewSheet: View {
                 ForEach(displayMessages) { message in
                     MessageBubble(message: message)
                 }
-
-                // Bottom spacer for action bar
-                Color.clear.frame(height: 80)
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
@@ -1048,47 +1055,6 @@ struct SessionPreviewSheet: View {
         .padding()
         .frame(maxWidth: .infinity, alignment: .leading)
         .glassEffect(.regular.tint(Color.tronPhthaloGreen.opacity(0.1)), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-    }
-
-    // MARK: - Fork Action Bar
-
-    private var forkActionBar: some View {
-        VStack(spacing: 8) {
-            if let error = forkError {
-                Text(error)
-                    .font(.caption)
-                    .foregroundStyle(.tronError)
-            }
-
-            Button {
-                forkSession()
-            } label: {
-                HStack(spacing: 8) {
-                    if isForking {
-                        ProgressView()
-                            .tint(.white)
-                            .scaleEffect(0.8)
-                    } else {
-                        Image(systemName: "arrow.branch")
-                            .font(.system(size: 14, weight: .semibold))
-                    }
-                    Text(isForking ? "Forking..." : "Fork & Continue Session")
-                        .font(.subheadline.weight(.semibold))
-                }
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 14)
-                .foregroundStyle(.white)
-            }
-            .disabled(isForking)
-            .glassEffect(.regular.tint(Color.tronEmerald.opacity(0.8)).interactive(), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-
-            Text("Creates a new session with this history")
-                .font(.caption2)
-                .foregroundStyle(.white.opacity(0.4))
-        }
-        .padding(.horizontal, 20)
-        .padding(.vertical, 12)
-        .background(.ultraThinMaterial)
     }
 
     // MARK: - Display Messages
@@ -1169,15 +1135,17 @@ struct WorkspaceSelector: View {
     @State private var currentPath = ""
     @State private var entries: [DirectoryEntry] = []
     @State private var isLoading = false
+    @State private var isNavigating = false
     @State private var errorMessage: String?
     @State private var showHidden = false
 
     var body: some View {
         NavigationStack {
             ZStack {
-                Color.tronBackground.ignoresSafeArea()
+                Color.tronSurface.ignoresSafeArea()
 
-                if isLoading {
+                if isLoading && entries.isEmpty {
+                    // Only show full loading on initial load
                     ProgressView()
                         .tint(.tronEmerald)
                 } else if let error = errorMessage {
@@ -1185,6 +1153,8 @@ struct WorkspaceSelector: View {
                     connectionErrorView(error)
                 } else {
                     directoryList
+                        .opacity(isNavigating ? 0.6 : 1.0)
+                        .animation(.easeInOut(duration: 0.15), value: isNavigating)
                 }
             }
             .navigationBarTitleDisplayMode(.inline)
@@ -1261,22 +1231,23 @@ struct WorkspaceSelector: View {
 
     private var directoryList: some View {
         VStack(spacing: 0) {
-            // Current path header
+            // Current path header - same dark background as list
             HStack {
                 Image(systemName: "folder.fill")
+                    .font(.system(size: 12))
                     .foregroundStyle(.tronEmerald)
                 Text(currentPath)
-                    .font(.caption)
-                    .foregroundStyle(.tronTextSecondary)
+                    .font(.system(size: 11, weight: .regular, design: .monospaced))
+                    .foregroundStyle(.tronEmerald.opacity(0.7))
                     .lineLimit(1)
                     .truncationMode(.head)
                 Spacer()
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 12)
-            .background(Color.tronSurfaceElevated)
+            .background(Color.tronSurface)
 
-            // Directory entries - full height gray background
+            // Directory entries
             ScrollView {
                 LazyVStack(spacing: 0) {
                     // Go up
@@ -1286,17 +1257,19 @@ struct WorkspaceSelector: View {
                         } label: {
                             HStack {
                                 Image(systemName: "arrow.up.circle")
+                                    .font(.system(size: 14))
                                     .foregroundStyle(.tronEmerald)
                                 Text("Go Up")
-                                    .foregroundStyle(.tronTextPrimary)
+                                    .font(.system(size: 13, weight: .medium, design: .monospaced))
+                                    .foregroundStyle(.tronEmerald)
                                 Spacer()
                             }
                             .padding(.horizontal, 16)
-                            .padding(.vertical, 14)
+                            .padding(.vertical, 12)
                         }
 
                         Divider()
-                            .background(Color.tronBorder)
+                            .background(Color.tronBorder.opacity(0.5))
                             .padding(.leading, 48)
                     }
 
@@ -1307,21 +1280,23 @@ struct WorkspaceSelector: View {
                         } label: {
                             HStack {
                                 Image(systemName: "folder.fill")
+                                    .font(.system(size: 14))
                                     .foregroundStyle(.tronEmerald)
                                 Text(entry.name)
-                                    .foregroundStyle(.tronTextPrimary)
+                                    .font(.system(size: 13, weight: .regular, design: .monospaced))
+                                    .foregroundStyle(.tronEmerald)
                                 Spacer()
                                 Image(systemName: "chevron.right")
-                                    .font(.caption)
-                                    .foregroundStyle(.tronTextMuted)
+                                    .font(.system(size: 10))
+                                    .foregroundStyle(.tronEmerald.opacity(0.4))
                             }
                             .padding(.horizontal, 16)
-                            .padding(.vertical, 14)
+                            .padding(.vertical, 12)
                         }
 
                         if entry.id != entries.filter({ $0.isDirectory }).last?.id {
                             Divider()
-                                .background(Color.tronBorder)
+                                .background(Color.tronBorder.opacity(0.5))
                                 .padding(.leading, 48)
                         }
                     }
@@ -1355,8 +1330,12 @@ struct WorkspaceSelector: View {
     private func loadDirectory(_ path: String) async {
         do {
             let result = try await rpcClient.listDirectory(path: path, showHidden: showHidden)
-            entries = result.entries
-            currentPath = result.path
+            await MainActor.run {
+                withAnimation(.tronFast) {
+                    entries = result.entries
+                    currentPath = result.path
+                }
+            }
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -1364,9 +1343,9 @@ struct WorkspaceSelector: View {
 
     private func navigateTo(_ path: String) {
         Task {
-            isLoading = true
+            isNavigating = true
             await loadDirectory(path)
-            isLoading = false
+            isNavigating = false
         }
     }
 
