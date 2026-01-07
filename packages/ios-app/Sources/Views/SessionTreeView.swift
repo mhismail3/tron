@@ -3,7 +3,6 @@ import SwiftUI
 // MARK: - Session Tree View
 
 /// Tree visualization for session history showing events, branch points, and fork/rewind capabilities.
-@available(iOS 26.0, *)
 struct SessionTreeView: View {
     let events: [SessionEvent]
     let headEventId: String?
@@ -174,7 +173,6 @@ struct StatBadge: View {
 
 // MARK: - Tree Node Row
 
-@available(iOS 26.0, *)
 struct TreeNodeRow: View {
     let event: SessionEvent
     let isHead: Bool
@@ -210,12 +208,12 @@ struct TreeNodeRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             // Main row with glass effect
-            HStack(spacing: 8) {
-                // Event sequence number
+            HStack(spacing: 6) {
+                // Event sequence number - left aligned with same margin as chevron on right
                 Text("\(event.sequence)")
                     .font(.system(size: 10, weight: .medium, design: .monospaced))
                     .foregroundStyle(.tronTextMuted)
-                    .frame(width: 24, alignment: .trailing)
+                    .frame(minWidth: 20, alignment: .trailing)
 
                 // Indentation for branched events only
                 if depth > 0 {
@@ -233,57 +231,62 @@ struct TreeNodeRow: View {
                 eventIcon
                     .font(.system(size: 12))
                     .foregroundStyle(iconColor)
-                    .frame(width: 20)
+                    .frame(width: 18)
 
                 // Content
-                VStack(alignment: .leading, spacing: 2) {
-                    HStack(spacing: 6) {
-                        Text(event.summary)
-                            .font(.system(size: 13, weight: .medium, design: .monospaced))
-                            .foregroundStyle(.tronTextPrimary)
-                            .lineLimit(1)
+                Text(event.summary)
+                    .font(.system(size: 13, weight: .medium, design: .monospaced))
+                    .foregroundStyle(.tronTextPrimary)
+                    .lineLimit(1)
 
-                        if isHead {
-                            Text("HEAD")
-                                .font(.system(size: 9, weight: .bold))
-                                .foregroundStyle(.white)
-                                .padding(.horizontal, 5)
-                                .padding(.vertical, 2)
-                                .background(Color.tronEmerald)
-                                .clipShape(Capsule())
-                        }
+                if isHead {
+                    Text("HEAD")
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 2)
+                        .background(Color.tronEmerald)
+                        .clipShape(Capsule())
+                }
 
-                        if isBranchPoint {
-                            Image(systemName: "arrow.triangle.branch")
-                                .font(.system(size: 10))
-                                .foregroundStyle(.tronAmber)
-                        }
+                if isBranchPoint {
+                    Image(systemName: "arrow.triangle.branch")
+                        .font(.system(size: 10))
+                        .foregroundStyle(.tronAmber)
+                }
 
-                        Spacer()
+                Spacer(minLength: 4)
 
-                        // Expandable indicator
-                        if hasExpandableContent {
-                            Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
-                                .font(.system(size: 10, weight: .medium))
-                                .foregroundStyle(.tronTextMuted)
-                        }
-                    }
+                // Expandable indicator
+                if hasExpandableContent {
+                    Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundStyle(.tronTextMuted)
                 }
             }
             .padding(.vertical, 10)
-            .padding(.horizontal, 12)
+            .padding(.horizontal, 14)
             .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
             .onTapGesture {
-                withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
+                withAnimation(.easeInOut(duration: 0.2)) {
                     isExpanded.toggle()
                 }
-                onSelect()
             }
-            .glassEffect(
-                isSelected ? .regular.tint(Color.tronEmerald.opacity(0.4)).interactive() :
-                isOnPath ? .regular.tint(Color.tronPhthaloGreen.opacity(0.2)) :
-                .regular.tint(Color.tronPhthaloGreen.opacity(0.1)),
-                in: RoundedRectangle(cornerRadius: 12, style: .continuous)
+            .background(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(
+                        isSelected ? Color.tronEmerald.opacity(0.2) :
+                        isOnPath ? Color.tronPhthaloGreen.opacity(0.15) :
+                        Color.tronPhthaloGreen.opacity(0.08)
+                    )
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .stroke(
+                        isSelected ? Color.tronEmerald.opacity(0.4) :
+                        Color.tronBorder.opacity(0.2),
+                        lineWidth: 0.5
+                    )
             )
 
             // Expanded content and actions
@@ -564,7 +567,6 @@ struct CompactTreeView: View {
 
 // MARK: - Session History Sheet
 
-@available(iOS 26.0, *)
 struct SessionHistorySheet: View {
     @EnvironmentObject var eventStoreManager: EventStoreManager
     @Environment(\.dismiss) private var dismiss
