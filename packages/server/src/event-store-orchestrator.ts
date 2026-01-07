@@ -335,7 +335,7 @@ export interface AgentRunOptions {
 }
 
 export interface AgentEvent {
-  type: 'text' | 'tool_start' | 'tool_end' | 'turn_complete' | 'error';
+  type: 'text' | 'tool_start' | 'tool_end' | 'turn_complete' | 'turn_interrupted' | 'error';
   sessionId: string;
   timestamp: string;
   data: unknown;
@@ -896,6 +896,32 @@ export class EventStoreOrchestrator extends EventEmitter {
       const runResult = await active.agent.run(options.prompt);
       active.lastActivity = new Date();
 
+      // Handle interrupted runs - don't store incomplete content
+      // Note: The agent already emits 'agent_interrupted' via abort() which gets
+      // forwarded as 'agent.complete' with interrupted=true to clients
+      if (runResult.interrupted) {
+        logger.info('Agent run interrupted', {
+          sessionId: options.sessionId,
+          turn: runResult.turns,
+          hasPartialContent: !!runResult.partialContent,
+        });
+
+        // Notify the RPC caller (if any) about the interruption
+        if (options.onEvent) {
+          options.onEvent({
+            type: 'turn_interrupted',
+            sessionId: options.sessionId,
+            timestamp: new Date().toISOString(),
+            data: {
+              interrupted: true,
+              partialContent: runResult.partialContent,
+            },
+          });
+        }
+
+        return [runResult] as unknown as TurnResult[];
+      }
+
       // Calculate latency (Phase 1)
       const runLatency = Date.now() - runStartTime;
 
@@ -1104,7 +1130,11 @@ export class EventStoreOrchestrator extends EventEmitter {
       return false;
     }
 
+    // Actually abort the agent - triggers AbortController and interrupts execution
+    active.agent.abort();
+
     active.isProcessing = false;
+    active.lastActivity = new Date();
     logger.info('Agent cancelled', { sessionId });
     return true;
   }
