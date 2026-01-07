@@ -346,6 +346,12 @@ export interface ActiveSession {
    */
   currentTurnToolCalls: CurrentTurnToolCall[];
   /**
+   * Content sequence tracking the order of text and tool calls.
+   * Each entry is either {type: 'text', text: string} or {type: 'tool_ref', toolCallId: string}.
+   * This preserves the interleaving order for proper reconstruction on interrupt.
+   */
+  currentTurnContentSequence: Array<{type: 'text', text: string} | {type: 'tool_ref', toolCallId: string}>;
+  /**
    * Flag indicating if this session was interrupted by user.
    * Used to inform clients that the session ended due to interruption.
    */
@@ -547,6 +553,7 @@ export class EventStoreOrchestrator extends EventEmitter {
       // Initialize current turn tracking for resume support
       currentTurnAccumulatedText: '',
       currentTurnToolCalls: [],
+      currentTurnContentSequence: [],
     });
 
     this.emit('session_created', {
@@ -608,6 +615,7 @@ export class EventStoreOrchestrator extends EventEmitter {
       // Initialize current turn tracking for resume support
       currentTurnAccumulatedText: '',
       currentTurnToolCalls: [],
+      currentTurnContentSequence: [],
     });
 
     logger.info('Session resumed', {
@@ -976,35 +984,103 @@ export class EventStoreOrchestrator extends EventEmitter {
         }
 
         // CRITICAL: Persist partial content so it survives session resume
-        // Build content from accumulated streaming data
-        // Build comprehensive ledger of ALL content that was displayed
+        // Build content from the content sequence to preserve exact interleaving order
+        // The sequence tracks text and tool_refs in the order they were received
         const assistantContent: any[] = [];
         const toolResultContent: any[] = [];
 
-        // Add any accumulated text
-        const partialText = active.currentTurnAccumulatedText || runResult.partialContent || '';
-        if (partialText) {
-          assistantContent.push({ type: 'text', text: partialText });
+        // Build a lookup map for tool calls by ID for efficient access
+        const toolCallMap = new Map<string, CurrentTurnToolCall>();
+        if (active.currentTurnToolCalls) {
+          for (const tc of active.currentTurnToolCalls) {
+            toolCallMap.set(tc.toolCallId, tc);
+          }
         }
 
-        // Add tool calls with their results - comprehensive ledger approach
-        // Each tool_use is followed by its tool_result (if completed)
-        if (active.currentTurnToolCalls && active.currentTurnToolCalls.length > 0) {
-          for (const tc of active.currentTurnToolCalls) {
-            // Calculate duration if we have timing info
+        // Iterate through the content sequence to preserve exact order
+        // This ensures text and tools appear in the same order as they were displayed
+        if (active.currentTurnContentSequence && active.currentTurnContentSequence.length > 0) {
+          for (const item of active.currentTurnContentSequence) {
+            if (item.type === 'text') {
+              // Add text block directly
+              if (item.text) {
+                assistantContent.push({ type: 'text', text: item.text });
+              }
+            } else if (item.type === 'tool_ref') {
+              // Look up the tool call and add tool_use block
+              const tc = toolCallMap.get(item.toolCallId);
+              if (tc) {
+                // Calculate duration if we have timing info
+                const durationMs = tc.completedAt && tc.startedAt
+                  ? new Date(tc.completedAt).getTime() - new Date(tc.startedAt).getTime()
+                  : undefined;
+
+                // Add tool_use block with status metadata
+                // Mark interrupted tools so iOS can show red X
+                const isInterrupted = tc.status === 'running' || tc.status === 'pending';
+                assistantContent.push({
+                  type: 'tool_use',
+                  id: tc.toolCallId,
+                  name: tc.toolName,
+                  input: tc.arguments,
+                  // Extended metadata for comprehensive ledger
+                  _meta: {
+                    status: tc.status,
+                    interrupted: isInterrupted,
+                    durationMs,
+                  },
+                });
+
+                // Add tool_result for completed/error tools
+                // This ensures results are visible when session is restored
+                if (tc.status === 'completed' || tc.status === 'error') {
+                  toolResultContent.push({
+                    type: 'tool_result',
+                    tool_use_id: tc.toolCallId,
+                    content: tc.result ?? (tc.isError ? 'Error' : '(no output)'),
+                    is_error: tc.isError ?? false,
+                    // Extended metadata
+                    _meta: {
+                      durationMs,
+                      toolName: tc.toolName,
+                    },
+                  });
+                } else if (isInterrupted) {
+                  // Add interrupted tool_result so the UI shows "interrupted" message
+                  toolResultContent.push({
+                    type: 'tool_result',
+                    tool_use_id: tc.toolCallId,
+                    content: 'Command interrupted (no output captured)',
+                    is_error: false,
+                    _meta: {
+                      interrupted: true,
+                      durationMs,
+                      toolName: tc.toolName,
+                    },
+                  });
+                }
+              }
+            }
+          }
+        } else {
+          // Fallback: If no sequence tracking, use old method (text first, then tools)
+          // This handles edge cases where sequence wasn't populated
+          const partialText = active.currentTurnAccumulatedText || runResult.partialContent || '';
+          if (partialText) {
+            assistantContent.push({ type: 'text', text: partialText });
+          }
+
+          for (const tc of toolCallMap.values()) {
             const durationMs = tc.completedAt && tc.startedAt
               ? new Date(tc.completedAt).getTime() - new Date(tc.startedAt).getTime()
               : undefined;
 
-            // Add tool_use block with status metadata
-            // Mark interrupted tools so iOS can show red X
             const isInterrupted = tc.status === 'running' || tc.status === 'pending';
             assistantContent.push({
               type: 'tool_use',
               id: tc.toolCallId,
               name: tc.toolName,
               input: tc.arguments,
-              // Extended metadata for comprehensive ledger
               _meta: {
                 status: tc.status,
                 interrupted: isInterrupted,
@@ -1012,32 +1088,21 @@ export class EventStoreOrchestrator extends EventEmitter {
               },
             });
 
-            // Add tool_result for completed/error tools
-            // This ensures results are visible when session is restored
             if (tc.status === 'completed' || tc.status === 'error') {
               toolResultContent.push({
                 type: 'tool_result',
                 tool_use_id: tc.toolCallId,
                 content: tc.result ?? (tc.isError ? 'Error' : '(no output)'),
                 is_error: tc.isError ?? false,
-                // Extended metadata
-                _meta: {
-                  durationMs,
-                  toolName: tc.toolName,
-                },
+                _meta: { durationMs, toolName: tc.toolName },
               });
             } else if (isInterrupted) {
-              // Add interrupted tool_result so the UI shows "interrupted" message
               toolResultContent.push({
                 type: 'tool_result',
                 tool_use_id: tc.toolCallId,
                 content: 'Command interrupted (no output captured)',
                 is_error: false,
-                _meta: {
-                  interrupted: true,
-                  durationMs,
-                  toolName: tc.toolName,
-                },
+                _meta: { interrupted: true, durationMs, toolName: tc.toolName },
               });
             }
           }
@@ -1072,7 +1137,7 @@ export class EventStoreOrchestrator extends EventEmitter {
               sessionId: active.sessionId,
               eventId: assistantMsgEvent.id,
               contentBlocks: normalizedAssistantContent.length,
-              textLength: partialText.length,
+              sequenceItems: active.currentTurnContentSequence?.length ?? 0,
               toolCalls: active.currentTurnToolCalls?.length ?? 0,
             });
           }
@@ -1123,6 +1188,7 @@ export class EventStoreOrchestrator extends EventEmitter {
         // Clear turn tracking state
         active.currentTurnAccumulatedText = '';
         active.currentTurnToolCalls = [];
+        active.currentTurnContentSequence = [];
 
         return [runResult] as unknown as TurnResult[];
       }
@@ -1770,6 +1836,15 @@ export class EventStoreOrchestrator extends EventEmitter {
         // Accumulate text for resume support
         if (active && typeof event.content === 'string') {
           active.currentTurnAccumulatedText += event.content;
+
+          // Track in content sequence for proper interleaving on interrupt
+          // If the last item is a text item, append to it; otherwise add new text item
+          const lastItem = active.currentTurnContentSequence[active.currentTurnContentSequence.length - 1];
+          if (lastItem && lastItem.type === 'text') {
+            lastItem.text += event.content;
+          } else {
+            active.currentTurnContentSequence.push({ type: 'text', text: event.content });
+          }
         }
 
         this.emit('agent_event', {
@@ -1789,6 +1864,12 @@ export class EventStoreOrchestrator extends EventEmitter {
             arguments: event.arguments ?? {},
             status: 'running',
             startedAt: timestamp,
+          });
+
+          // Track in content sequence for proper interleaving on interrupt
+          active.currentTurnContentSequence.push({
+            type: 'tool_ref',
+            toolCallId: event.toolCallId,
           });
         }
 
@@ -1872,6 +1953,7 @@ export class EventStoreOrchestrator extends EventEmitter {
         if (active) {
           active.currentTurnAccumulatedText = '';
           active.currentTurnToolCalls = [];
+          active.currentTurnContentSequence = [];
         }
 
         this.emit('agent_event', {
@@ -1888,6 +1970,7 @@ export class EventStoreOrchestrator extends EventEmitter {
         if (active) {
           active.currentTurnAccumulatedText = '';
           active.currentTurnToolCalls = [];
+          active.currentTurnContentSequence = [];
         }
 
         this.emit('agent_event', {
