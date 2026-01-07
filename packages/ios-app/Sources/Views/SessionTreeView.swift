@@ -227,79 +227,82 @@ struct TreeNodeRow: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            // Main row with glass effect
-            HStack(spacing: 6) {
-                // Event sequence number - left aligned with same margin as chevron on right
+            // Main row - number outside, content inside container
+            HStack(alignment: .center, spacing: 8) {
+                // Event sequence number - outside the container
                 Text("\(event.sequence)")
                     .font(.system(size: 10, weight: .medium, design: .monospaced))
                     .foregroundStyle(.tronTextMuted)
-                    .frame(minWidth: 20, alignment: .trailing)
+                    .frame(width: 20, alignment: .trailing)
 
-                // Indentation for branched events only
-                if depth > 0 {
-                    HStack(spacing: 0) {
-                        ForEach(0..<depth, id: \.self) { _ in
-                            Rectangle()
-                                .fill(Color.tronBorder.opacity(0.5))
-                                .frame(width: 1)
-                                .padding(.horizontal, 9)
+                // Content container
+                HStack(spacing: 6) {
+                    // Indentation for branched events only
+                    if depth > 0 {
+                        HStack(spacing: 0) {
+                            ForEach(0..<depth, id: \.self) { _ in
+                                Rectangle()
+                                    .fill(Color.tronBorder.opacity(0.5))
+                                    .frame(width: 1)
+                                    .padding(.horizontal, 9)
+                            }
                         }
                     }
+
+                    // Node icon
+                    eventIcon
+                        .font(.system(size: 12))
+                        .foregroundStyle(iconColor)
+                        .frame(width: 18)
+
+                    // Content
+                    Text(event.summary)
+                        .font(.system(size: 13, weight: .medium, design: .monospaced))
+                        .foregroundStyle(.tronTextPrimary)
+                        .lineLimit(1)
+
+                    if isHead {
+                        Text("HEAD")
+                            .font(.system(size: 9, weight: .bold))
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 5)
+                            .padding(.vertical, 2)
+                            .background(Color.tronEmerald)
+                            .clipShape(Capsule())
+                    }
+
+                    if isBranchPoint {
+                        Image(systemName: "arrow.triangle.branch")
+                            .font(.system(size: 10))
+                            .foregroundStyle(.tronAmber)
+                    }
+
+                    Spacer(minLength: 4)
+
+                    // Expandable indicator
+                    if hasExpandableContent {
+                        Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
+                            .font(.system(size: 10, weight: .medium))
+                            .foregroundStyle(.tronTextMuted)
+                    }
                 }
-
-                // Node icon
-                eventIcon
-                    .font(.system(size: 12))
-                    .foregroundStyle(iconColor)
-                    .frame(width: 18)
-
-                // Content
-                Text(event.summary)
-                    .font(.system(size: 13, weight: .medium, design: .monospaced))
-                    .foregroundStyle(.tronTextPrimary)
-                    .lineLimit(1)
-
-                if isHead {
-                    Text("HEAD")
-                        .font(.system(size: 9, weight: .bold))
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, 5)
-                        .padding(.vertical, 2)
-                        .background(Color.tronEmerald)
-                        .clipShape(Capsule())
-                }
-
-                if isBranchPoint {
-                    Image(systemName: "arrow.triangle.branch")
-                        .font(.system(size: 10))
-                        .foregroundStyle(.tronAmber)
-                }
-
-                Spacer(minLength: 4)
-
-                // Expandable indicator
-                if hasExpandableContent {
-                    Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
-                        .font(.system(size: 10, weight: .medium))
-                        .foregroundStyle(.tronTextMuted)
+                .padding(.vertical, 10)
+                .padding(.horizontal, 12)
+                .background(
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .fill(rowBackgroundColor)
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .stroke(rowBorderColor, lineWidth: 0.5)
+                )
+                .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .onTapGesture {
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        isExpanded.toggle()
+                    }
                 }
             }
-            .padding(.vertical, 10)
-            .padding(.horizontal, 14)
-            .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-            .onTapGesture {
-                withAnimation(.easeInOut(duration: 0.2)) {
-                    isExpanded.toggle()
-                }
-            }
-            .background(
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .fill(rowBackgroundColor)
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .stroke(rowBorderColor, lineWidth: 0.5)
-            )
 
             // Expanded content and actions
             if isExpanded {
