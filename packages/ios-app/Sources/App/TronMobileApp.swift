@@ -1100,134 +1100,15 @@ struct SessionPreviewSheet: View {
 
     // MARK: - Display Messages
 
-    /// Convert raw events to ChatMessage objects for rendering with MessageBubble
+    /// Convert raw events to ChatMessage objects using the unified transformer.
+    ///
+    /// This uses UnifiedEventTransformer which provides 1:1 mapping with server events
+    /// and ensures consistent rendering across all views (preview, chat, history).
+    ///
+    /// Key principle: Tool calls come from tool.call events, NOT from tool_use
+    /// blocks embedded in message.assistant events. This eliminates duplication.
     private var displayMessages: [ChatMessage] {
-        var messages: [ChatMessage] = []
-
-        for event in events {
-            switch event.type {
-            case "message.user":
-                // User message
-                if let content = event.payload["content"]?.value as? String, !content.isEmpty {
-                    messages.append(ChatMessage(
-                        role: .user,
-                        content: .text(content)
-                    ))
-                }
-
-            case "message.assistant":
-                // Assistant message - may have text content or content blocks with tool_use
-                if let content = event.payload["content"]?.value as? String, !content.isEmpty {
-                    messages.append(ChatMessage(
-                        role: .assistant,
-                        content: .text(content)
-                    ))
-                } else if let text = event.payload["text"]?.value as? String, !text.isEmpty {
-                    messages.append(ChatMessage(
-                        role: .assistant,
-                        content: .text(text)
-                    ))
-                } else if let contentBlocks = event.payload["content"]?.value as? [[String: Any]] {
-                    // Parse content blocks for text and tool_use
-                    for block in contentBlocks {
-                        if let blockType = block["type"] as? String {
-                            if blockType == "text", let text = block["text"] as? String, !text.isEmpty {
-                                messages.append(ChatMessage(
-                                    role: .assistant,
-                                    content: .text(text)
-                                ))
-                            } else if blockType == "tool_use" {
-                                let name = block["name"] as? String ?? "unknown"
-                                let id = block["id"] as? String ?? ""
-                                let args = (block["input"] as? [String: Any]).flatMap { try? JSONSerialization.data(withJSONObject: $0) }.flatMap { String(data: $0, encoding: .utf8) } ?? "{}"
-                                messages.append(ChatMessage(
-                                    role: .assistant,
-                                    content: .toolUse(ToolUseData(
-                                        toolName: name,
-                                        toolCallId: id,
-                                        arguments: args,
-                                        status: .success
-                                    ))
-                                ))
-                            }
-                        }
-                    }
-                }
-
-            case "tool.call":
-                // Tool call event - parse arguments dict to JSON string
-                let name = event.payload["name"]?.value as? String ?? "unknown"
-                let id = event.payload["id"]?.value as? String ?? ""
-                var argsString = "{}"
-                if let argsDict = event.payload["arguments"]?.value as? [String: Any],
-                   let jsonData = try? JSONSerialization.data(withJSONObject: argsDict),
-                   let jsonString = String(data: jsonData, encoding: .utf8) {
-                    argsString = jsonString
-                } else if let argsStr = event.payload["arguments"]?.value as? String {
-                    argsString = argsStr
-                }
-                messages.append(ChatMessage(
-                    role: .assistant,
-                    content: .toolUse(ToolUseData(
-                        toolName: name,
-                        toolCallId: id,
-                        arguments: argsString,
-                        status: .success
-                    ))
-                ))
-
-            case "tool.result":
-                // Tool result - render with StandaloneToolResultView via MessageBubble
-                let toolName = event.payload["name"]?.value as? String
-                let toolCallId = event.payload["toolCallId"]?.value as? String ?? ""
-                let content = event.payload["content"]?.value as? String ?? ""
-                let isError = event.payload["isError"]?.value as? Bool ?? false
-                let durationMs = event.payload["durationMs"]?.value as? Int
-                    ?? event.payload["duration"]?.value as? Int
-                // Parse arguments - could be dict or string
-                var argsString: String? = nil
-                if let argsDict = event.payload["arguments"]?.value as? [String: Any],
-                   let jsonData = try? JSONSerialization.data(withJSONObject: argsDict),
-                   let jsonStr = String(data: jsonData, encoding: .utf8) {
-                    argsString = jsonStr
-                } else if let argsStr = event.payload["arguments"]?.value as? String {
-                    argsString = argsStr
-                }
-                messages.append(ChatMessage(
-                    role: .toolResult,
-                    content: .toolResult(ToolResultData(
-                        toolCallId: toolCallId,
-                        content: content,
-                        isError: isError,
-                        toolName: toolName,
-                        arguments: argsString,
-                        durationMs: durationMs
-                    ))
-                ))
-
-            case "notification.interrupted":
-                messages.append(ChatMessage(
-                    role: .system,
-                    content: .interrupted
-                ))
-
-            case "config.model_switch":
-                // Payload uses previousModel and newModel (or model) fields
-                let from = event.payload["previousModel"]?.value as? String ?? ""
-                let to = event.payload["newModel"]?.value as? String
-                    ?? event.payload["model"]?.value as? String ?? ""
-                messages.append(ChatMessage(
-                    role: .system,
-                    content: .modelChange(from: formatModelDisplayName(from), to: formatModelDisplayName(to))
-                ))
-
-            default:
-                // Skip other event types for preview
-                break
-            }
-        }
-
-        return messages
+        UnifiedEventTransformer.transformPersistedEvents(events)
     }
 
     // MARK: - Actions
@@ -1245,18 +1126,13 @@ struct SessionPreviewSheet: View {
             )
 
             await MainActor.run {
-                // Sort events by timestamp for correct chronological order
-                // (sequence reflects write order which may differ from logical order)
-                let sorted = result.events.sorted { $0.timestamp < $1.timestamp }
-
-                // Debug: log event order
-                print("[SessionPreview] Loaded \(sorted.count) events:")
-                for (idx, evt) in sorted.enumerated() {
-                    print("  [\(idx)] seq=\(evt.sequence) ts=\(evt.timestamp) type=\(evt.type)")
-                }
-
-                events = sorted
+                // Store raw events - UnifiedEventTransformer handles sorting and filtering
+                events = result.events
                 isLoading = false
+
+                #if DEBUG
+                print("[SessionPreview] Loaded \(result.events.count) events for session \(session.sessionId.prefix(8))")
+                #endif
             }
         } catch {
             await MainActor.run {

@@ -243,10 +243,10 @@ final class EventDatabaseTests: XCTestCase {
         XCTAssertNil(session)
     }
 
-    // MARK: - State Reconstruction
+    // MARK: - State Reconstruction (Unified Transformer)
 
     @MainActor
-    func testGetMessagesAt() async throws {
+    func testTransformEventsToMessages() async throws {
         let events = [
             SessionEvent(id: "e1", parentId: nil, sessionId: "s1", workspaceId: "/test", type: "session.start", timestamp: "2024-01-01T00:00:00Z", sequence: 1, payload: [:]),
             SessionEvent(id: "e2", parentId: "e1", sessionId: "s1", workspaceId: "/test", type: "message.user", timestamp: "2024-01-01T00:01:00Z", sequence: 2, payload: ["content": AnyCodable("Hello")]),
@@ -255,14 +255,17 @@ final class EventDatabaseTests: XCTestCase {
 
         try database.insertEvents(events)
 
-        let messages = try database.getMessagesAt("e3")
+        // Use unified transformer to get messages
+        let ancestors = try database.getAncestors("e3")
+        let messages = UnifiedEventTransformer.transformPersistedEvents(ancestors)
+
         XCTAssertEqual(messages.count, 2)
-        XCTAssertEqual(messages[0].role, "user")
-        XCTAssertEqual(messages[1].role, "assistant")
+        XCTAssertEqual(messages[0].role, .user)
+        XCTAssertEqual(messages[1].role, .assistant)
     }
 
     @MainActor
-    func testGetStateAtHead() async throws {
+    func testReconstructSessionState() async throws {
         let events = [
             SessionEvent(id: "e1", parentId: nil, sessionId: "s1", workspaceId: "/test", type: "session.start", timestamp: "2024-01-01T00:00:00Z", sequence: 1, payload: [:]),
             SessionEvent(id: "e2", parentId: "e1", sessionId: "s1", workspaceId: "/test", type: "message.user", timestamp: "2024-01-01T00:01:00Z", sequence: 2, payload: [
@@ -285,9 +288,12 @@ final class EventDatabaseTests: XCTestCase {
             eventCount: 3, messageCount: 2, inputTokens: 0, outputTokens: 0
         ))
 
-        let state = try database.getStateAtHead("s1")
+        // Use unified transformer to reconstruct state
+        let ancestors = try database.getAncestors("e3")
+        let state = UnifiedEventTransformer.reconstructSessionState(from: ancestors)
+
         XCTAssertEqual(state.messages.count, 2)
-        XCTAssertEqual(state.turnCount, 1)
+        XCTAssertEqual(state.currentTurn, 1)
     }
 
     // MARK: - Tree Visualization
@@ -401,11 +407,14 @@ final class EventDatabaseTests: XCTestCase {
             eventCount: 3, messageCount: 2, inputTokens: 0, outputTokens: 0
         ))
 
-        let state = try database.getStateAtHead("s1")
+        // Use unified transformer to reconstruct state
+        let ancestors = try database.getAncestors("e3")
+        let state = UnifiedEventTransformer.reconstructSessionState(from: ancestors)
+
         XCTAssertEqual(state.messages.count, 2)
 
         let assistantMessage = state.messages[1]
-        XCTAssertEqual(assistantMessage.role, "assistant")
+        XCTAssertEqual(assistantMessage.role, .assistant)
         XCTAssertEqual(assistantMessage.model, "claude-sonnet-4-20250514")
         XCTAssertEqual(assistantMessage.latencyMs, 1234)
         XCTAssertEqual(assistantMessage.turnNumber, 1)
@@ -422,12 +431,12 @@ final class EventDatabaseTests: XCTestCase {
         ])
         XCTAssertTrue(userEvent.summary.contains("Hello world"))
 
-        // Test message.assistant summary with model
+        // Test message.assistant summary with content (note: model is not shown in summary)
         let assistantEvent = SessionEvent(id: "e2", parentId: nil, sessionId: "s1", workspaceId: "/test", type: "message.assistant", timestamp: "2024-01-01T00:00:00Z", sequence: 2, payload: [
             "content": AnyCodable("Response text"),
             "model": AnyCodable("claude-sonnet-4-20250514")
         ])
-        XCTAssertTrue(assistantEvent.summary.contains("sonnet-4"))
+        XCTAssertTrue(assistantEvent.summary.contains("Response text"))
 
         // Test tool.call summary
         let toolEvent = SessionEvent(id: "e3", parentId: nil, sessionId: "s1", workspaceId: "/test", type: "tool.call", timestamp: "2024-01-01T00:00:00Z", sequence: 3, payload: [
@@ -437,11 +446,11 @@ final class EventDatabaseTests: XCTestCase {
         XCTAssertTrue(toolEvent.summary.contains("Read"))
         XCTAssertTrue(toolEvent.summary.contains("main.ts"))
 
-        // Test session.start summary
+        // Test session.start summary (shortModelName returns "Opus 4" for "claude-opus-4")
         let startEvent = SessionEvent(id: "e4", parentId: nil, sessionId: "s1", workspaceId: "/test", type: "session.start", timestamp: "2024-01-01T00:00:00Z", sequence: 4, payload: [
             "model": AnyCodable("claude-opus-4")
         ])
-        XCTAssertTrue(startEvent.summary.contains("opus-4"))
+        XCTAssertTrue(startEvent.summary.contains("Opus 4"))
 
         // Test config.model_switch summary
         let switchEvent = SessionEvent(id: "e5", parentId: nil, sessionId: "s1", workspaceId: "/test", type: "config.model_switch", timestamp: "2024-01-01T00:00:00Z", sequence: 5, payload: [

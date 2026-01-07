@@ -1197,26 +1197,67 @@ export class EventStoreOrchestrator extends EventEmitter {
       const runLatency = Date.now() - runStartTime;
 
       // Record assistant response event
-      // Only store assistant content from the CURRENT turn (after the last user message)
-      // This preserves tool_use blocks within a turn while avoiding cross-turn accumulation
-      let lastUserIndex = -1;
-      for (let i = runResult.messages.length - 1; i >= 0; i--) {
-        const msg = runResult.messages[i];
-        if (msg && msg.role === 'user') {
-          lastUserIndex = i;
-          break;
+      // Use currentTurnContentSequence if available - it preserves exact streaming order
+      // This ensures text and tool_use blocks appear in the same order as they streamed
+      let currentTurnContent: any[] = [];
+
+      if (active.currentTurnContentSequence && active.currentTurnContentSequence.length > 0) {
+        // Build content from the streaming sequence (preserves interleaving order)
+        const toolCallMap = new Map<string, CurrentTurnToolCall>();
+        if (active.currentTurnToolCalls) {
+          for (const tc of active.currentTurnToolCalls) {
+            toolCallMap.set(tc.toolCallId, tc);
+          }
         }
+
+        for (const item of active.currentTurnContentSequence) {
+          if (item.type === 'text') {
+            if (item.text) {
+              currentTurnContent.push({ type: 'text', text: item.text });
+            }
+          } else if (item.type === 'tool_ref') {
+            const tc = toolCallMap.get(item.toolCallId);
+            if (tc) {
+              currentTurnContent.push({
+                type: 'tool_use',
+                id: tc.toolCallId,
+                name: tc.toolName,
+                input: tc.arguments,
+              });
+            }
+          }
+        }
+
+        logger.debug('Using currentTurnContentSequence for assistant content', {
+          sessionId: active.sessionId,
+          sequenceLength: active.currentTurnContentSequence.length,
+          resultBlocks: currentTurnContent.length,
+        });
+      } else {
+        // Fallback: use runResult.messages (may not preserve exact interleaving)
+        let lastUserIndex = -1;
+        for (let i = runResult.messages.length - 1; i >= 0; i--) {
+          const msg = runResult.messages[i];
+          if (msg && msg.role === 'user') {
+            lastUserIndex = i;
+            break;
+          }
+        }
+
+        const currentTurnAssistantMessages = runResult.messages
+          .slice(lastUserIndex + 1)
+          .filter((m: any) => m.role === 'assistant');
+
+        currentTurnContent = currentTurnAssistantMessages.flatMap((m: any) =>
+          Array.isArray(m.content) ? m.content : [{ type: 'text' as const, text: String(m.content) }]
+        );
+
+        logger.debug('Using runResult.messages fallback for assistant content', {
+          sessionId: active.sessionId,
+          assistantMessages: currentTurnAssistantMessages.length,
+          resultBlocks: currentTurnContent.length,
+        });
       }
-
-      // Get all assistant messages after the last user message (current turn only)
-      const currentTurnAssistantMessages = runResult.messages
-        .slice(lastUserIndex + 1)
-        .filter((m: any) => m.role === 'assistant');
-
-      // Combine all content blocks from current turn's assistant messages
-      const currentTurnContent = currentTurnAssistantMessages.flatMap((m: any) =>
-        Array.isArray(m.content) ? m.content : [{ type: 'text' as const, text: String(m.content) }]
-      );
 
       // DEBUG: Log RAW content blocks BEFORE normalization
       const toolUseBlocks = currentTurnContent.filter((b: any) => b.type === 'tool_use');

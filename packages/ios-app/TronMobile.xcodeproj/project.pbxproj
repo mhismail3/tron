@@ -37,7 +37,11 @@
 		F8A1B2C3D4E5F6A7B8C9D0E1 /* SessionTreeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F6A7B8C9D0E1F2 /* SessionTreeView.swift */; };
 		F9B0C1D2E3F4A5B6C7D8E9F0 /* SessionAnalyticsSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0C1D2E3F4A5B6C7D8E9F0A1 /* SessionAnalyticsSheet.swift */; };
 		FACF3272EAAA614047FA83C8 /* EventDatabaseTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A013DFE849DA84E8EA5F545C /* EventDatabaseTests.swift */; };
+		D3E4F5A6B7C8D9E0F1A2B3C4 /* UnifiedEventTransformerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4F5A6B7C8D9E0F1A2B3C4D5 /* UnifiedEventTransformerTests.swift */; };
 		FE3D89D152521876D2DDF464 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 8347F0B7D54B1F1EAA6C762C /* Assets.xcassets */; };
+		A0B1C2D3E4F5A6B7C8D9E0F1 /* EventTypeRegistry.swift in Sources */ = {isa = PBXBuildFile; fileRef = D1E2F3A4B5C6D7E8F9A0B1C2 /* EventTypeRegistry.swift */; };
+		B1C2D3E4F5A6B7C8D9E0F1A2 /* EventPayloads.swift in Sources */ = {isa = PBXBuildFile; fileRef = E2F3A4B5C6D7E8F9A0B1C2D3 /* EventPayloads.swift */; };
+		C2D3E4F5A6B7C8D9E0F1A2B3 /* UnifiedEventTransformer.swift in Sources */ = {isa = PBXBuildFile; fileRef = F3A4B5C6D7E8F9A0B1C2D3E4 /* UnifiedEventTransformer.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -85,6 +89,10 @@
 		CC00489C0CFF17B0531219D9 /* Events.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Events.swift; sourceTree = "<group>"; };
 		E5C3B6B3DA1A77E2A09976D5 /* InputHistoryStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InputHistoryStore.swift; sourceTree = "<group>"; };
 		F2B298578C85F2293B9568BA /* TronMobile.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = TronMobile.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		D1E2F3A4B5C6D7E8F9A0B1C2 /* EventTypeRegistry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EventTypeRegistry.swift; sourceTree = "<group>"; };
+		E2F3A4B5C6D7E8F9A0B1C2D3 /* EventPayloads.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EventPayloads.swift; sourceTree = "<group>"; };
+		F3A4B5C6D7E8F9A0B1C2D3E4 /* UnifiedEventTransformer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UnifiedEventTransformer.swift; sourceTree = "<group>"; };
+		E4F5A6B7C8D9E0F1A2B3C4D5 /* UnifiedEventTransformerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UnifiedEventTransformerTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXGroup section */
@@ -92,6 +100,7 @@
 			isa = PBXGroup;
 			children = (
 				A013DFE849DA84E8EA5F545C /* EventDatabaseTests.swift */,
+				E4F5A6B7C8D9E0F1A2B3C4D5 /* UnifiedEventTransformerTests.swift */,
 			);
 			path = Tests;
 			sourceTree = "<group>";
@@ -200,9 +209,12 @@
 			isa = PBXGroup;
 			children = (
 				30CFDC8D8AA4B77F61F2AF71 /* AnyCodable.swift */,
+				E2F3A4B5C6D7E8F9A0B1C2D3 /* EventPayloads.swift */,
+				D1E2F3A4B5C6D7E8F9A0B1C2 /* EventTypeRegistry.swift */,
 				CC00489C0CFF17B0531219D9 /* Events.swift */,
 				67E30FC4A871038322F79EB0 /* Message.swift */,
 				B082B6CE011A17ED14F3393B /* RPCTypes.swift */,
+				F3A4B5C6D7E8F9A0B1C2D3E4 /* UnifiedEventTransformer.swift */,
 			);
 			path = Models;
 			sourceTree = "<group>";
@@ -337,6 +349,9 @@
 				8D03520968C046CF0A0C5CC9 /* TronMobileApp.swift in Sources */,
 				AA0AC5B4C07C617F0612C7FA /* View+Extensions.swift in Sources */,
 				DB84AFFF8F9ADCC50F75B33B /* WebSocketService.swift in Sources */,
+				A0B1C2D3E4F5A6B7C8D9E0F1 /* EventTypeRegistry.swift in Sources */,
+				B1C2D3E4F5A6B7C8D9E0F1A2 /* EventPayloads.swift in Sources */,
+				C2D3E4F5A6B7C8D9E0F1A2B3 /* UnifiedEventTransformer.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -345,6 +360,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				FACF3272EAAA614047FA83C8 /* EventDatabaseTests.swift in Sources */,
+				D3E4F5A6B7C8D9E0F1A2B3C4 /* UnifiedEventTransformerTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -363,6 +379,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
+				GENERATE_INFOPLIST_FILE = YES;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
@@ -465,6 +482,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
+				GENERATE_INFOPLIST_FILE = YES;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",

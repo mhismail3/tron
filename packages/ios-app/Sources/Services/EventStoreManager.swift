@@ -369,37 +369,49 @@ class EventStoreManager: ObservableObject {
         loadSessions()
     }
 
-    // MARK: - State Reconstruction
+    // MARK: - State Reconstruction (Unified Transformer)
 
-    /// Get messages at the current head of a session
-    func getMessagesAtHead(_ sessionId: String) throws -> [DisplayMessage] {
-        let state = try eventDB.getStateAtHead(sessionId)
-        return state.messages.map { msg in
-            DisplayMessage(
-                id: UUID().uuidString,
-                role: msg.role,
-                content: msg.content,
-                timestamp: Date()
-            )
+    /// Get ChatMessages for a session using the unified transformer.
+    ///
+    /// This uses the ancestor chain from HEAD, properly handling rewinds/forks
+    /// by walking the parentId chain back to root.
+    ///
+    /// Uses `UnifiedEventTransformer` which provides consistent 1:1 server event mapping:
+    /// - Tool calls come from `tool.call` events (not embedded `tool_use` blocks)
+    /// - All events are transformed consistently across views
+    ///
+    /// - Parameter sessionId: The session ID
+    /// - Returns: Array of ChatMessages in chronological order
+    func getChatMessages(sessionId: String) throws -> [ChatMessage] {
+        guard let session = try eventDB.getSession(sessionId),
+              let headEventId = session.headEventId else {
+            return []
         }
+
+        let events = try eventDB.getAncestors(headEventId)
+        return UnifiedEventTransformer.transformPersistedEvents(events)
     }
 
-    /// Get full reconstructed state at head
-    func getStateAtHead(_ sessionId: String) throws -> ReconstructedSessionState {
-        try eventDB.getStateAtHead(sessionId)
-    }
-
-    /// Get messages at a specific event
-    func getMessagesAtEvent(_ eventId: String) throws -> [DisplayMessage] {
-        let messages = try eventDB.getMessagesAt(eventId)
-        return messages.map { msg in
-            DisplayMessage(
-                id: UUID().uuidString,
-                role: msg.role,
-                content: msg.content,
-                timestamp: Date()
-            )
+    /// Get full reconstructed session state using the unified transformer.
+    ///
+    /// This returns the complete state needed for displaying a session:
+    /// - Chat messages (using unified transformer - no duplicates)
+    /// - Accumulated token usage
+    /// - Current turn count
+    /// - Current model (after any switches)
+    /// - Ledger state
+    /// - Working directory
+    ///
+    /// - Parameter sessionId: The session ID
+    /// - Returns: Fully reconstructed session state
+    func getReconstructedState(sessionId: String) throws -> UnifiedEventTransformer.ReconstructedState {
+        guard let session = try eventDB.getSession(sessionId),
+              let headEventId = session.headEventId else {
+            return UnifiedEventTransformer.ReconstructedState()
         }
+
+        let events = try eventDB.getAncestors(headEventId)
+        return UnifiedEventTransformer.reconstructSessionState(from: events)
     }
 
     // MARK: - Session Processing State
@@ -982,20 +994,6 @@ class EventStoreManager: ObservableObject {
         } catch {
             logger.error("Failed to repair session \(sessionId): \(error.localizedDescription)")
         }
-    }
-}
-
-// MARK: - Display Message
-
-/// Message for display in UI (simplified from events)
-struct DisplayMessage: Identifiable, Equatable {
-    let id: String
-    let role: String
-    let content: Any
-    let timestamp: Date
-
-    static func == (lhs: DisplayMessage, rhs: DisplayMessage) -> Bool {
-        lhs.id == rhs.id && lhs.role == rhs.role
     }
 }
 

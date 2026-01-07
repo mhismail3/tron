@@ -120,7 +120,12 @@ class ChatViewModel: ObservableObject {
         hasInitiallyLoaded = true
     }
 
-    /// Load messages from EventDatabase asynchronously to avoid blocking UI
+    /// Load messages from EventDatabase using the unified transformer.
+    ///
+    /// This uses `UnifiedEventTransformer` which:
+    /// - Provides 1:1 mapping from server events to ChatMessages
+    /// - Tool calls come from `tool.call` events (not embedded `tool_use` blocks)
+    /// - Eliminates duplicate tool display and inconsistent transformations
     private func loadPersistedMessagesAsync() async {
         guard let manager = eventStoreManager else { return }
 
@@ -141,216 +146,13 @@ class ChatViewModel: ObservableObject {
         await Task.yield()
 
         do {
-            let state = try manager.getStateAtHead(sessionId)
+            // Use unified transformer - returns ChatMessages directly, no conversion needed!
+            // This fixes the duplicate tool call bug by sourcing tool calls from tool.call events
+            // instead of extracting them from message.assistant content blocks.
+            let state = try manager.getReconstructedState(sessionId: sessionId)
 
-            // Process messages with periodic yields to keep UI responsive
-            var loadedMessages: [ChatMessage] = []
-            var messageCount = 0
-
-            for reconstructed in state.messages {
-                messageCount += 1
-                // Yield every 10 messages to allow UI updates
-                if messageCount % 10 == 0 {
-                    await Task.yield()
-                }
-
-                // Handle notification events (persisted pill notifications)
-                if reconstructed.role == "notification" {
-                    if let contentDict = reconstructed.content as? [String: String] {
-                        switch contentDict["type"] {
-                        case "interrupted":
-                            loadedMessages.append(.interrupted())
-                        case "modelChange":
-                            if let fromModel = contentDict["from"],
-                               let toModel = contentDict["to"] {
-                                // Format model IDs into friendly display names
-                                loadedMessages.append(.modelChange(
-                                    from: formatModelDisplayName(fromModel),
-                                    to: formatModelDisplayName(toModel)
-                                ))
-                            }
-                        default:
-                            break
-                        }
-                    }
-                    continue
-                }
-
-                let role: MessageRole
-                switch reconstructed.role {
-                case "user": role = .user
-                case "assistant": role = .assistant
-                case "system": role = .system
-                case "toolResult": role = .toolResult
-                default: role = .assistant
-                }
-
-                // Handle content which could be a string or array of content blocks
-                logger.debug("[DEBUG] ChatVM loadPersisted: role=\(reconstructed.role) content type=\(type(of: reconstructed.content))", category: .session)
-                if let textContent = reconstructed.content as? String {
-                    logger.debug("[DEBUG] ChatVM: parsed as String, length: \(textContent.count)", category: .session)
-                    // Create message with enriched metadata (for assistant messages)
-                    loadedMessages.append(ChatMessage(
-                        role: role,
-                        content: .text(textContent),
-                        tokenUsage: reconstructed.tokenUsage,
-                        model: reconstructed.model,
-                        latencyMs: reconstructed.latencyMs,
-                        turnNumber: reconstructed.turnNumber,
-                        hasThinking: reconstructed.hasThinking,
-                        stopReason: reconstructed.stopReason
-                    ))
-                } else if let contentBlocks = convertToContentBlocks(reconstructed.content) {
-                    logger.debug("[DEBUG] ChatVM: parsed as content blocks, count: \(contentBlocks.count)", category: .session)
-                    // Parse content blocks for text and tool_use blocks
-                    var textParts: [String] = []
-
-                    for block in contentBlocks {
-                        let blockType = block["type"] as? String
-
-                        if blockType == "text", let text = block["text"] as? String {
-                            textParts.append(text)
-                        } else if blockType == "tool_use" {
-                            // Flush any accumulated text before the tool use
-                            if !textParts.isEmpty {
-                                let combinedText = textParts.joined()
-                                if !combinedText.isEmpty {
-                                    // Create message with enriched metadata (for assistant messages)
-                                    loadedMessages.append(ChatMessage(
-                                        role: role,
-                                        content: .text(combinedText),
-                                        tokenUsage: reconstructed.tokenUsage,
-                                        model: reconstructed.model,
-                                        latencyMs: reconstructed.latencyMs,
-                                        turnNumber: reconstructed.turnNumber,
-                                        hasThinking: reconstructed.hasThinking,
-                                        stopReason: reconstructed.stopReason
-                                    ))
-                                }
-                                textParts = []
-                            }
-
-                            // Parse tool_use block
-                            let toolName = block["name"] as? String ?? "Unknown"
-                            let toolCallId = block["id"] as? String ?? UUID().uuidString
-
-                            // Extract extended metadata from _meta field (for interrupted sessions)
-                            let meta = block["_meta"] as? [String: Any]
-                            let isInterrupted = meta?["interrupted"] as? Bool ?? false
-                            let metaStatus = meta?["status"] as? String
-                            let metaDurationMs = meta?["durationMs"] as? Int
-
-                            // Determine status from metadata
-                            let status: ToolStatus
-                            if isInterrupted {
-                                status = .error  // Will show red X for interrupted tools
-                            } else if metaStatus == "error" {
-                                status = .error
-                            } else if metaStatus == "completed" {
-                                status = .success
-                            } else {
-                                status = .success  // Default for loaded tools
-                            }
-
-                            // Format arguments as JSON string - handle multiple possible types
-                            var argsString = "{}"
-                            let inputValue = block["input"]
-                            logger.debug("[DEBUG] tool_use '\(toolName)' input type: \(type(of: inputValue as Any)) interrupted: \(isInterrupted)", category: .session)
-
-                            if let inputDict = inputValue as? [String: Any] {
-                                if let jsonData = try? JSONSerialization.data(withJSONObject: inputDict, options: [.prettyPrinted, .sortedKeys]),
-                                   let jsonStr = String(data: jsonData, encoding: .utf8) {
-                                    argsString = jsonStr
-                                }
-                            } else if let inputDict = inputValue as? [String: AnyCodable] {
-                                // Handle case where AnyCodable wraps nested dictionaries
-                                let unwrapped = inputDict.mapValues { $0.value }
-                                if let jsonData = try? JSONSerialization.data(withJSONObject: unwrapped, options: [.prettyPrinted, .sortedKeys]),
-                                   let jsonStr = String(data: jsonData, encoding: .utf8) {
-                                    argsString = jsonStr
-                                }
-                            }
-                            logger.debug("[DEBUG] tool_use '\(toolName)' argsString: \(argsString.prefix(100))", category: .session)
-
-                            let tool = ToolUseData(
-                                toolName: toolName,
-                                toolCallId: toolCallId,
-                                arguments: argsString,
-                                status: status,
-                                result: nil,
-                                durationMs: metaDurationMs
-                            )
-                            loadedMessages.append(ChatMessage(role: .assistant, content: .toolUse(tool)))
-                        } else if blockType == "tool_result" {
-                            // Tool results - update the corresponding tool message
-                            let toolUseId = block["tool_use_id"] as? String ?? ""
-                            let isError = block["is_error"] as? Bool ?? false
-
-                            // Extract extended metadata from _meta field
-                            let meta = block["_meta"] as? [String: Any]
-                            let isInterrupted = meta?["interrupted"] as? Bool ?? false
-                            let metaDurationMs = meta?["durationMs"] as? Int
-
-                            logger.debug("[DEBUG] tool_result for '\(toolUseId)', isError: \(isError), interrupted: \(isInterrupted)", category: .session)
-                            var resultContent = ""
-
-                            if let content = block["content"] as? String {
-                                resultContent = content
-                            } else if let contentArray = block["content"] as? [[String: Any]] {
-                                for contentBlock in contentArray {
-                                    if let text = contentBlock["text"] as? String {
-                                        resultContent += text
-                                    }
-                                }
-                            }
-                            logger.debug("[DEBUG] tool_result content length: \(resultContent.count)", category: .session)
-
-                            // Find and update the tool message with this result
-                            if let index = loadedMessages.lastIndex(where: {
-                                if case .toolUse(let tool) = $0.content {
-                                    return tool.toolCallId == toolUseId
-                                }
-                                return false
-                            }) {
-                                if case .toolUse(var tool) = loadedMessages[index].content {
-                                    tool.result = resultContent
-                                    // Update status based on error/interrupted flags
-                                    if isInterrupted {
-                                        tool.status = .error  // Red X for interrupted
-                                    } else if isError {
-                                        tool.status = .error
-                                    }
-                                    // Update duration if available
-                                    if let duration = metaDurationMs {
-                                        tool.durationMs = duration
-                                    }
-                                    loadedMessages[index].content = .toolUse(tool)
-                                }
-                            }
-                        }
-                    }
-
-                    // Flush any remaining text after all blocks
-                    if !textParts.isEmpty {
-                        let combinedText = textParts.joined()
-                        if !combinedText.isEmpty {
-                            // Create message with enriched metadata (for assistant messages)
-                            loadedMessages.append(ChatMessage(
-                                role: role,
-                                content: .text(combinedText),
-                                tokenUsage: reconstructed.tokenUsage,
-                                model: reconstructed.model,
-                                latencyMs: reconstructed.latencyMs,
-                                turnNumber: reconstructed.turnNumber,
-                                hasThinking: reconstructed.hasThinking,
-                                stopReason: reconstructed.stopReason
-                            ))
-                        }
-                    }
-                } else {
-                    logger.warning("[DEBUG] ChatVM: content was neither String nor convertible to blocks! type=\(type(of: reconstructed.content))", category: .session)
-                }
-            }
+            // Messages are already [ChatMessage] - no conversion needed!
+            let loadedMessages = state.messages
 
             // Store all messages for pagination
             allReconstructedMessages = loadedMessages
@@ -374,20 +176,16 @@ class ChatViewModel: ObservableObject {
                 logger.info("Restored \(catchUpMessagesToRestore.count) catch-up messages after loading \(loadedMessages.count) historical messages", category: .session)
             }
 
-            // Update turn counter and token usage
-            currentTurn = state.turnCount
-            if state.tokenUsage.inputTokens > 0 || state.tokenUsage.outputTokens > 0 {
-                accumulatedInputTokens = state.tokenUsage.inputTokens
-                accumulatedOutputTokens = state.tokenUsage.outputTokens
-                totalTokenUsage = TokenUsage(
-                    inputTokens: accumulatedInputTokens,
-                    outputTokens: accumulatedOutputTokens,
-                    cacheReadTokens: nil,
-                    cacheCreationTokens: nil
-                )
+            // Update turn counter and token usage from unified state
+            currentTurn = state.currentTurn
+            let usage = state.totalTokenUsage
+            if usage.inputTokens > 0 || usage.outputTokens > 0 {
+                accumulatedInputTokens = usage.inputTokens
+                accumulatedOutputTokens = usage.outputTokens
+                totalTokenUsage = usage
             }
 
-            logger.info("Loaded \(loadedMessages.count) messages, displaying latest \(batchSize) for session \(sessionId)", category: .session)
+            logger.info("Loaded \(loadedMessages.count) messages via UnifiedEventTransformer, displaying latest \(batchSize) for session \(sessionId)", category: .session)
         } catch {
             logger.error("Failed to load messages from EventDatabase: \(error.localizedDescription)", category: .session)
         }
@@ -433,212 +231,25 @@ class ChatViewModel: ObservableObject {
         // New messages are persisted via EventDatabase and will be in the snapshot next session
     }
 
-    /// Load messages from EventDatabase via state reconstruction (sync version - kept for compatibility)
+    /// Load messages from EventDatabase via unified transformer (sync version - kept for compatibility)
     private func loadPersistedMessages() {
         guard let manager = eventStoreManager else { return }
 
         do {
-            let state = try manager.getStateAtHead(sessionId)
+            // Use unified transformer - returns ChatMessages directly!
+            let state = try manager.getReconstructedState(sessionId: sessionId)
+            messages = state.messages
 
-            var loadedMessages: [ChatMessage] = []
-
-            for reconstructed in state.messages {
-                // Handle notification events (persisted pill notifications)
-                if reconstructed.role == "notification" {
-                    if let contentDict = reconstructed.content as? [String: String] {
-                        switch contentDict["type"] {
-                        case "interrupted":
-                            loadedMessages.append(.interrupted())
-                        case "modelChange":
-                            if let fromModel = contentDict["from"],
-                               let toModel = contentDict["to"] {
-                                // Format model IDs into friendly display names
-                                loadedMessages.append(.modelChange(
-                                    from: formatModelDisplayName(fromModel),
-                                    to: formatModelDisplayName(toModel)
-                                ))
-                            }
-                        default:
-                            break
-                        }
-                    }
-                    continue
-                }
-
-                let role: MessageRole
-                switch reconstructed.role {
-                case "user": role = .user
-                case "assistant": role = .assistant
-                case "system": role = .system
-                case "toolResult": role = .toolResult
-                default: role = .assistant
-                }
-
-                // Handle content which could be a string or array of content blocks
-                if let textContent = reconstructed.content as? String {
-                    // Create message with enriched metadata (for assistant messages)
-                    loadedMessages.append(ChatMessage(
-                        role: role,
-                        content: .text(textContent),
-                        tokenUsage: reconstructed.tokenUsage,
-                        model: reconstructed.model,
-                        latencyMs: reconstructed.latencyMs,
-                        turnNumber: reconstructed.turnNumber,
-                        hasThinking: reconstructed.hasThinking,
-                        stopReason: reconstructed.stopReason
-                    ))
-                } else if let contentBlocks = convertToContentBlocks(reconstructed.content) {
-                    // Parse content blocks for text and tool_use blocks
-                    var textParts: [String] = []
-
-                    for block in contentBlocks {
-                        let blockType = block["type"] as? String
-
-                        if blockType == "text", let text = block["text"] as? String {
-                            textParts.append(text)
-                        } else if blockType == "tool_use" {
-                            // Flush any accumulated text before the tool use
-                            if !textParts.isEmpty {
-                                let combinedText = textParts.joined()
-                                if !combinedText.isEmpty {
-                                    // Create message with enriched metadata (for assistant messages)
-                                    loadedMessages.append(ChatMessage(
-                                        role: role,
-                                        content: .text(combinedText),
-                                        tokenUsage: reconstructed.tokenUsage,
-                                        model: reconstructed.model,
-                                        latencyMs: reconstructed.latencyMs,
-                                        turnNumber: reconstructed.turnNumber,
-                                        hasThinking: reconstructed.hasThinking,
-                                        stopReason: reconstructed.stopReason
-                                    ))
-                                }
-                                textParts = []
-                            }
-
-                            // Parse tool_use block
-                            let toolName = block["name"] as? String ?? "Unknown"
-                            let toolCallId = block["id"] as? String ?? UUID().uuidString
-
-                            // Extract extended metadata from _meta field (for interrupted sessions)
-                            let meta = block["_meta"] as? [String: Any]
-                            let isInterrupted = meta?["interrupted"] as? Bool ?? false
-                            let metaStatus = meta?["status"] as? String
-                            let metaDurationMs = meta?["durationMs"] as? Int
-
-                            // Determine status from metadata
-                            let status: ToolStatus
-                            if isInterrupted {
-                                status = .error  // Will show red X for interrupted tools
-                            } else if metaStatus == "error" {
-                                status = .error
-                            } else if metaStatus == "completed" {
-                                status = .success
-                            } else {
-                                status = .success  // Default for loaded tools
-                            }
-
-                            // Format arguments as JSON string
-                            var argsString = "{}"
-                            if let inputDict = block["input"] as? [String: Any],
-                               let jsonData = try? JSONSerialization.data(withJSONObject: inputDict, options: [.prettyPrinted, .sortedKeys]),
-                               let jsonStr = String(data: jsonData, encoding: .utf8) {
-                                argsString = jsonStr
-                            }
-
-                            let tool = ToolUseData(
-                                toolName: toolName,
-                                toolCallId: toolCallId,
-                                arguments: argsString,
-                                status: status,
-                                result: nil,
-                                durationMs: metaDurationMs
-                            )
-                            loadedMessages.append(ChatMessage(role: .assistant, content: .toolUse(tool)))
-                        } else if blockType == "tool_result" {
-                            // Tool results - update the corresponding tool message
-                            let toolUseId = block["tool_use_id"] as? String ?? ""
-                            let isError = block["is_error"] as? Bool ?? false
-
-                            // Extract extended metadata from _meta field
-                            let meta = block["_meta"] as? [String: Any]
-                            let isInterrupted = meta?["interrupted"] as? Bool ?? false
-                            let metaDurationMs = meta?["durationMs"] as? Int
-
-                            var resultContent = ""
-
-                            if let content = block["content"] as? String {
-                                resultContent = content
-                            } else if let contentArray = block["content"] as? [[String: Any]] {
-                                // Handle array of content blocks
-                                for contentBlock in contentArray {
-                                    if let text = contentBlock["text"] as? String {
-                                        resultContent += text
-                                    }
-                                }
-                            }
-
-                            // Find and update the tool message with this result
-                            if let index = loadedMessages.lastIndex(where: {
-                                if case .toolUse(let tool) = $0.content {
-                                    return tool.toolCallId == toolUseId
-                                }
-                                return false
-                            }) {
-                                if case .toolUse(var tool) = loadedMessages[index].content {
-                                    tool.result = resultContent
-                                    // Update status based on error/interrupted flags
-                                    if isInterrupted {
-                                        tool.status = .error  // Red X for interrupted
-                                    } else if isError {
-                                        tool.status = .error
-                                    }
-                                    // Update duration if available
-                                    if let duration = metaDurationMs {
-                                        tool.durationMs = duration
-                                    }
-                                    loadedMessages[index].content = .toolUse(tool)
-                                }
-                            }
-                        }
-                    }
-
-                    // Flush any remaining text after all blocks
-                    if !textParts.isEmpty {
-                        let combinedText = textParts.joined()
-                        if !combinedText.isEmpty {
-                            // Create message with enriched metadata (for assistant messages)
-                            loadedMessages.append(ChatMessage(
-                                role: role,
-                                content: .text(combinedText),
-                                tokenUsage: reconstructed.tokenUsage,
-                                model: reconstructed.model,
-                                latencyMs: reconstructed.latencyMs,
-                                turnNumber: reconstructed.turnNumber,
-                                hasThinking: reconstructed.hasThinking,
-                                stopReason: reconstructed.stopReason
-                            ))
-                        }
-                    }
-                }
+            // Update turn counter and token usage from unified state
+            currentTurn = state.currentTurn
+            let usage = state.totalTokenUsage
+            if usage.inputTokens > 0 || usage.outputTokens > 0 {
+                accumulatedInputTokens = usage.inputTokens
+                accumulatedOutputTokens = usage.outputTokens
+                totalTokenUsage = usage
             }
 
-            messages = loadedMessages
-
-            // Update turn counter and token usage
-            currentTurn = state.turnCount
-            if state.tokenUsage.inputTokens > 0 || state.tokenUsage.outputTokens > 0 {
-                accumulatedInputTokens = state.tokenUsage.inputTokens
-                accumulatedOutputTokens = state.tokenUsage.outputTokens
-                totalTokenUsage = TokenUsage(
-                    inputTokens: accumulatedInputTokens,
-                    outputTokens: accumulatedOutputTokens,
-                    cacheReadTokens: nil,
-                    cacheCreationTokens: nil
-                )
-            }
-
-            logger.info("Loaded \(messages.count) messages from EventDatabase for session \(sessionId)", category: .session)
+            logger.info("Loaded \(messages.count) messages via UnifiedEventTransformer for session \(sessionId)", category: .session)
         } catch {
             logger.error("Failed to load messages from EventDatabase: \(error.localizedDescription)", category: .session)
         }
@@ -910,54 +521,6 @@ class ChatViewModel: ObservableObject {
             role: role,
             content: .text(history.content)
         )
-    }
-
-    /// Safely convert Any to content blocks array.
-    /// Handles JSON type erasure where arrays become [Any] instead of [[String: Any]].
-    /// Also handles NSArray from Objective-C bridging.
-    private func convertToContentBlocks(_ value: Any) -> [[String: Any]]? {
-        logger.debug("[DEBUG] convertToContentBlocks: input type=\(type(of: value))", category: .session)
-
-        // Direct cast (works if already properly typed)
-        if let blocks = value as? [[String: Any]] {
-            logger.debug("[DEBUG] convertToContentBlocks: direct cast to [[String: Any]] succeeded, \(blocks.count) blocks", category: .session)
-            return blocks
-        }
-
-        // Handle [Any] arrays (common after JSON decoding)
-        if let anyArray = value as? [Any] {
-            logger.debug("[DEBUG] convertToContentBlocks: cast to [Any] succeeded, \(anyArray.count) elements", category: .session)
-            var result: [[String: Any]] = []
-            for (idx, element) in anyArray.enumerated() {
-                logger.debug("[DEBUG] convertToContentBlocks: element[\(idx)] type=\(type(of: element))", category: .session)
-                if let dict = element as? [String: Any] {
-                    result.append(dict)
-                }
-            }
-            // Only return if we successfully converted all elements
-            if !result.isEmpty {
-                logger.debug("[DEBUG] convertToContentBlocks: converted to \(result.count) blocks", category: .session)
-                return result
-            }
-        }
-
-        // Handle NSArray (Objective-C bridging)
-        if let nsArray = value as? NSArray {
-            var result: [[String: Any]] = []
-            for element in nsArray {
-                if let dict = element as? [String: Any] {
-                    result.append(dict)
-                } else if let nsDict = element as? NSDictionary as? [String: Any] {
-                    result.append(nsDict)
-                }
-            }
-            if !result.isEmpty {
-                return result
-            }
-        }
-
-        logger.warning("[DEBUG] convertToContentBlocks: all conversion attempts failed for type \(type(of: value))", category: .session)
-        return nil
     }
 
     // MARK: - Message Sending
