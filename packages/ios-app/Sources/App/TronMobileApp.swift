@@ -177,6 +177,7 @@ struct ContentView: View {
             NewSessionFlow(
                 rpcClient: appState.rpcClient,
                 defaultModel: appState.defaultModel,
+                eventStoreManager: eventStoreManager,
                 onSessionCreated: { sessionId, workspaceId, model, workingDirectory in
                     // Cache the new session in EventStoreManager
                     do {
@@ -192,6 +193,11 @@ struct ContentView: View {
                         #endif
                     }
                     selectedSessionId = sessionId
+                    showNewSessionSheet = false
+                },
+                onSessionForked: { newSessionId in
+                    // Forked session is already synced by EventStoreManager
+                    selectedSessionId = newSessionId
                     showNewSessionSheet = false
                 }
             )
@@ -364,8 +370,11 @@ struct WelcomePage: View {
 struct NewSessionFlow: View {
     let rpcClient: RPCClient
     let defaultModel: String
+    let eventStoreManager: EventStoreManager
     /// Callback with (sessionId, workspaceId, model, workingDirectory)
     let onSessionCreated: (String, String, String, String) -> Void
+    /// Callback when an existing session is forked - receives the NEW forked session ID
+    let onSessionForked: (String) -> Void
 
     @Environment(\.dismiss) private var dismiss
     @State private var workingDirectory = ""
@@ -376,14 +385,59 @@ struct NewSessionFlow: View {
     @State private var availableModels: [ModelInfo] = []
     @State private var isLoadingModels = false
 
+    // Server sessions state (sessions from ALL devices, not just local)
+    @State private var serverSessions: [SessionInfo] = []
+    @State private var isLoadingServerSessions = false
+    @State private var serverSessionsError: String? = nil
+
+    // Session preview navigation
+    @State private var previewSession: SessionInfo? = nil
+
     private var canCreate: Bool {
         !isCreating && !workingDirectory.isEmpty && !selectedModel.isEmpty
+    }
+
+    /// Recent sessions from SERVER, excluding sessions already on this device
+    /// Filtered by workspace if one is selected
+    private var filteredRecentSessions: [SessionInfo] {
+        // Get IDs of sessions already on this device
+        let localSessionIds = Set(eventStoreManager.sessions.map { $0.id })
+
+        // Filter out local sessions - show only sessions NOT on this device
+        var filtered = serverSessions.filter { !localSessionIds.contains($0.sessionId) }
+
+        // Filter by workspace if selected
+        if !workingDirectory.isEmpty {
+            filtered = filtered.filter { $0.workingDirectory == workingDirectory }
+        }
+
+        // Return up to 10 most recent
+        return Array(filtered.prefix(10))
     }
 
     var body: some View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: 24) {
+                    // Recent Sessions section (always shown - handles loading/empty states internally)
+                    recentSessionsSection
+
+                    // Divider (only show if we have remote sessions to display)
+                    if !filteredRecentSessions.isEmpty || isLoadingServerSessions {
+                        HStack {
+                            Rectangle()
+                                .fill(.white.opacity(0.2))
+                                .frame(height: 1)
+                            Text("OR START NEW")
+                                .font(.caption2.weight(.medium))
+                                .foregroundStyle(.white.opacity(0.4))
+                            Rectangle()
+                                .fill(.white.opacity(0.2))
+                                .frame(height: 1)
+                        }
+                        .padding(.horizontal, 20)
+                    }
+
                     // Workspace section
                     VStack(alignment: .leading, spacing: 12) {
                         Text("Workspace")
@@ -532,11 +586,29 @@ struct NewSessionFlow: View {
                     selectedPath: $workingDirectory
                 )
             }
+            .sheet(item: $previewSession) { session in
+                SessionPreviewSheet(
+                    session: session,
+                    rpcClient: rpcClient,
+                    eventStoreManager: eventStoreManager,
+                    onFork: { newSessionId in
+                        previewSession = nil
+                        onSessionForked(newSessionId)
+                    },
+                    onDismiss: {
+                        previewSession = nil
+                    }
+                )
+            }
             .task {
                 await loadModels()
+                await loadServerSessions()
             }
             .onAppear {
-                showWorkspaceSelector = true
+                // Only auto-open workspace selector if no recent sessions AND no server sessions
+                if eventStoreManager.sessions.isEmpty && serverSessions.isEmpty {
+                    showWorkspaceSelector = true
+                }
             }
         }
         .presentationDetents([.medium, .large])
@@ -613,6 +685,37 @@ struct NewSessionFlow: View {
         }
     }
 
+    /// Load sessions from SERVER (all devices, all workspaces)
+    private func loadServerSessions() async {
+        isLoadingServerSessions = true
+        serverSessionsError = nil
+
+        // Ensure connection is established
+        await rpcClient.connect()
+        if !rpcClient.isConnected {
+            try? await Task.sleep(for: .milliseconds(100))
+        }
+
+        do {
+            // Fetch all sessions from server (no workspace filter, include ended)
+            let sessions = try await rpcClient.listSessions(
+                workingDirectory: nil,
+                limit: 50,
+                includeEnded: true
+            )
+
+            await MainActor.run {
+                serverSessions = sessions
+                isLoadingServerSessions = false
+            }
+        } catch {
+            await MainActor.run {
+                serverSessionsError = error.localizedDescription
+                isLoadingServerSessions = false
+            }
+        }
+    }
+
     private func createSession() {
         isCreating = true
         errorMessage = nil
@@ -639,6 +742,670 @@ struct NewSessionFlow: View {
                     isCreating = false
                 }
             }
+        }
+    }
+
+    // MARK: - Recent Sessions Section
+
+    private var recentSessionsSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text("Recent Sessions")
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(.white.opacity(0.6))
+
+                Spacer()
+
+                if isLoadingServerSessions {
+                    ProgressView()
+                        .scaleEffect(0.7)
+                        .tint(.tronEmerald)
+                }
+            }
+
+            // Loading state
+            if isLoadingServerSessions && serverSessions.isEmpty {
+                HStack {
+                    Spacer()
+                    ProgressView()
+                        .tint(.tronEmerald)
+                    Text("Loading sessions...")
+                        .font(.caption)
+                        .foregroundStyle(.white.opacity(0.5))
+                    Spacer()
+                }
+                .padding(.vertical, 20)
+            } else if let error = serverSessionsError {
+                // Error loading sessions
+                HStack {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.tronError)
+                    Text(error)
+                        .font(.caption)
+                        .foregroundStyle(.tronError)
+                }
+                .padding()
+                .glassEffect(.regular.tint(Color.tronError.opacity(0.2)), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            } else if filteredRecentSessions.isEmpty {
+                // Empty state
+                VStack(spacing: 8) {
+                    Image(systemName: "clock.arrow.circlepath")
+                        .font(.title2)
+                        .foregroundStyle(.white.opacity(0.3))
+                    Text(workingDirectory.isEmpty
+                        ? "No other device sessions found"
+                        : "No sessions in this workspace")
+                        .font(.caption)
+                        .foregroundStyle(.white.opacity(0.4))
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 16)
+            } else {
+                // Sessions list - tap to preview
+                VStack(spacing: 6) {
+                    ForEach(filteredRecentSessions) { session in
+                        RecentSessionRow(session: session) {
+                            previewSession = session
+                        }
+                    }
+                }
+            }
+        }
+        .padding(.horizontal, 12)
+    }
+}
+
+// MARK: - Recent Session Row (Server Session)
+
+@available(iOS 26.0, *)
+struct RecentSessionRow: View {
+    let session: SessionInfo
+    let onTap: () -> Void
+
+    var body: some View {
+        Button(action: onTap) {
+            HStack(spacing: 12) {
+                // Status dot - green for active, gray for ended
+                Circle()
+                    .fill(session.isActive ? Color.tronEmerald : Color.white.opacity(0.3))
+                    .frame(width: 8, height: 8)
+
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack {
+                        Text(session.displayName)
+                            .font(.system(size: 14, weight: .medium, design: .monospaced))
+                            .foregroundStyle(.white.opacity(0.9))
+                            .lineLimit(1)
+                        Spacer()
+                        Text(session.formattedDate)
+                            .font(.system(size: 10, design: .monospaced))
+                            .foregroundStyle(.white.opacity(0.4))
+                    }
+
+                    // Working directory preview
+                    if let dir = session.workingDirectory {
+                        Text(dir.replacingOccurrences(of: "/Users/[^/]+/", with: "~/", options: .regularExpression))
+                            .font(.system(size: 11, design: .monospaced))
+                            .foregroundStyle(.white.opacity(0.5))
+                            .lineLimit(1)
+                            .truncationMode(.head)
+                    }
+
+                    // Model + message count
+                    HStack(spacing: 8) {
+                        Text(session.model.shortModelName)
+                            .font(.system(size: 10, weight: .medium, design: .monospaced))
+                            .foregroundStyle(.tronEmerald.opacity(0.7))
+
+                        HStack(spacing: 2) {
+                            Image(systemName: "bubble.left")
+                                .font(.system(size: 8))
+                            Text("\(session.messageCount)")
+                                .font(.system(size: 10, design: .monospaced))
+                        }
+                        .foregroundStyle(.white.opacity(0.4))
+
+                        Spacer()
+
+                        // Chevron to indicate tap-to-preview
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 10, weight: .medium))
+                            .foregroundStyle(.white.opacity(0.3))
+                    }
+                }
+            }
+            .padding(.vertical, 10)
+            .padding(.horizontal, 12)
+        }
+        .buttonStyle(.plain)
+        .glassEffect(.regular.tint(Color.tronPhthaloGreen.opacity(0.1)), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+    }
+}
+
+// MARK: - Session Preview Sheet
+
+/// Preview a session's history before forking. Shows read-only chat history with Fork/Back options.
+@available(iOS 26.0, *)
+struct SessionPreviewSheet: View {
+    let session: SessionInfo
+    let rpcClient: RPCClient
+    let eventStoreManager: EventStoreManager
+    let onFork: (String) -> Void
+    let onDismiss: () -> Void
+
+    @State private var events: [RawEvent] = []
+    @State private var isLoading = true
+    @State private var loadError: String? = nil
+    @State private var isForking = false
+    @State private var forkError: String? = nil
+
+    var body: some View {
+        NavigationStack {
+            ZStack {
+                Color.tronBackground.ignoresSafeArea()
+
+                if isLoading {
+                    VStack(spacing: 16) {
+                        ProgressView()
+                            .tint(.tronEmerald)
+                        Text("Loading session history...")
+                            .font(.subheadline)
+                            .foregroundStyle(.white.opacity(0.6))
+                    }
+                } else if let error = loadError {
+                    VStack(spacing: 16) {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .font(.largeTitle)
+                            .foregroundStyle(.tronError)
+                        Text("Failed to load history")
+                            .font(.headline)
+                            .foregroundStyle(.white.opacity(0.9))
+                        Text(error)
+                            .font(.subheadline)
+                            .foregroundStyle(.white.opacity(0.6))
+                            .multilineTextAlignment(.center)
+                        Button("Retry") {
+                            Task { await loadHistory() }
+                        }
+                        .foregroundStyle(.tronEmerald)
+                    }
+                    .padding()
+                } else {
+                    historyContent
+                }
+            }
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button("Back") { onDismiss() }
+                        .font(.subheadline.weight(.medium))
+                        .foregroundStyle(.tronEmerald)
+                }
+                ToolbarItem(placement: .principal) {
+                    VStack(spacing: 2) {
+                        Text(session.displayName)
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundStyle(.tronEmerald)
+                        Text("\(session.messageCount) messages")
+                            .font(.system(size: 10))
+                            .foregroundStyle(.white.opacity(0.5))
+                    }
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    if isForking {
+                        ProgressView()
+                            .tint(.tronEmerald)
+                    } else {
+                        Button {
+                            forkSession()
+                        } label: {
+                            HStack(spacing: 4) {
+                                Image(systemName: "arrow.branch")
+                                    .font(.system(size: 12))
+                                Text("Fork")
+                                    .font(.subheadline.weight(.semibold))
+                            }
+                            .foregroundStyle(.tronEmerald)
+                        }
+                    }
+                }
+            }
+            .safeAreaInset(edge: .bottom) {
+                // Fork action bar at bottom
+                forkActionBar
+            }
+        }
+        .task {
+            await loadHistory()
+        }
+        .presentationDetents([.large])
+        .presentationDragIndicator(.visible)
+        .preferredColorScheme(.dark)
+    }
+
+    // MARK: - History Content
+
+    private var historyContent: some View {
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 12) {
+                // Session info header
+                sessionInfoHeader
+
+                // Display items
+                ForEach(Array(displayItems.enumerated()), id: \.offset) { _, item in
+                    PreviewDisplayItemView(item: item)
+                }
+
+                // Bottom spacer for action bar
+                Color.clear.frame(height: 80)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+        }
+    }
+
+    private var sessionInfoHeader: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if let dir = session.workingDirectory {
+                HStack(spacing: 6) {
+                    Image(systemName: "folder.fill")
+                        .font(.system(size: 12))
+                        .foregroundStyle(.tronEmerald.opacity(0.7))
+                    Text(dir.replacingOccurrences(of: "/Users/[^/]+/", with: "~/", options: .regularExpression))
+                        .font(.system(size: 12, design: .monospaced))
+                        .foregroundStyle(.white.opacity(0.6))
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
+            }
+
+            HStack(spacing: 12) {
+                HStack(spacing: 4) {
+                    Image(systemName: "cpu")
+                        .font(.system(size: 10))
+                    Text(session.model.shortModelName)
+                        .font(.system(size: 11, weight: .medium, design: .monospaced))
+                }
+                .foregroundStyle(.tronEmerald.opacity(0.8))
+
+                Text(session.formattedDate)
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundStyle(.white.opacity(0.4))
+
+                if session.isActive {
+                    Text("ACTIVE")
+                        .font(.system(size: 9, weight: .bold, design: .monospaced))
+                        .foregroundStyle(.tronEmerald)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(Color.tronEmerald.opacity(0.2))
+                        .clipShape(Capsule())
+                } else {
+                    Text("ENDED")
+                        .font(.system(size: 9, weight: .bold, design: .monospaced))
+                        .foregroundStyle(.white.opacity(0.5))
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(Color.white.opacity(0.1))
+                        .clipShape(Capsule())
+                }
+            }
+        }
+        .padding()
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .glassEffect(.regular.tint(Color.tronPhthaloGreen.opacity(0.1)), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+    }
+
+    // MARK: - Fork Action Bar
+
+    private var forkActionBar: some View {
+        VStack(spacing: 8) {
+            if let error = forkError {
+                Text(error)
+                    .font(.caption)
+                    .foregroundStyle(.tronError)
+            }
+
+            Button {
+                forkSession()
+            } label: {
+                HStack(spacing: 8) {
+                    if isForking {
+                        ProgressView()
+                            .tint(.white)
+                            .scaleEffect(0.8)
+                    } else {
+                        Image(systemName: "arrow.branch")
+                            .font(.system(size: 14, weight: .semibold))
+                    }
+                    Text(isForking ? "Forking..." : "Fork & Continue Session")
+                        .font(.subheadline.weight(.semibold))
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 14)
+                .foregroundStyle(.white)
+            }
+            .disabled(isForking)
+            .glassEffect(.regular.tint(Color.tronEmerald.opacity(0.8)).interactive(), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+
+            Text("Creates a new session with this history")
+                .font(.caption2)
+                .foregroundStyle(.white.opacity(0.4))
+        }
+        .padding(.horizontal, 20)
+        .padding(.vertical, 12)
+        .background(.ultraThinMaterial)
+    }
+
+    // MARK: - Display Items
+
+    /// Displayable items converted from raw events
+    private var displayItems: [PreviewDisplayItem] {
+        var items: [PreviewDisplayItem] = []
+
+        for event in events {
+            switch event.type {
+            case "message.user":
+                // User message - extract content
+                if let content = event.payload["content"]?.value as? String, !content.isEmpty {
+                    items.append(.userMessage(content))
+                }
+
+            case "message.assistant":
+                // Assistant message - may have text content or content blocks with tool_use
+                if let content = event.payload["content"]?.value as? String, !content.isEmpty {
+                    items.append(.assistantMessage(content))
+                } else if let text = event.payload["text"]?.value as? String, !text.isEmpty {
+                    items.append(.assistantMessage(text))
+                } else if let contentBlocks = event.payload["content"]?.value as? [[String: Any]] {
+                    // Parse content blocks for text and tool_use
+                    for block in contentBlocks {
+                        if let blockType = block["type"] as? String {
+                            if blockType == "text", let text = block["text"] as? String, !text.isEmpty {
+                                items.append(.assistantMessage(text))
+                            } else if blockType == "tool_use" {
+                                let name = block["name"] as? String ?? "unknown"
+                                let id = block["id"] as? String ?? ""
+                                items.append(.toolUse(name: name, id: id))
+                            }
+                        }
+                    }
+                }
+
+            case "tool.call":
+                // Tool call event
+                let name = event.payload["name"]?.value as? String ?? "unknown"
+                let id = event.payload["id"]?.value as? String ?? ""
+                items.append(.toolUse(name: name, id: id))
+
+            case "tool.result":
+                // Tool result
+                let toolName = event.payload["name"]?.value as? String
+                let content = event.payload["content"]?.value as? String ?? ""
+                let isError = event.payload["isError"]?.value as? Bool ?? false
+                let truncated = content.count > 300 ? String(content.prefix(300)) + "..." : content
+                items.append(.toolResult(name: toolName, content: truncated, isError: isError))
+
+            case "notification.interrupted":
+                items.append(.notification(type: "interrupted", detail: nil))
+
+            case "config.model_switch":
+                let from = event.payload["from"]?.value as? String ?? ""
+                let to = event.payload["to"]?.value as? String ?? ""
+                items.append(.notification(type: "modelSwitch", detail: "\(from.shortModelName) → \(to.shortModelName)"))
+
+            case "session.start":
+                let model = event.payload["model"]?.value as? String ?? "unknown"
+                items.append(.notification(type: "sessionStart", detail: model.shortModelName))
+
+            default:
+                // Skip other event types for preview
+                break
+            }
+        }
+
+        return items
+    }
+
+    // MARK: - Actions
+
+    private func loadHistory() async {
+        isLoading = true
+        loadError = nil
+
+        do {
+            // Fetch ALL events from server (no type filter) to show complete history
+            let result = try await rpcClient.getEventHistory(
+                sessionId: session.sessionId,
+                types: nil,  // No filter - get everything
+                limit: 1000
+            )
+
+            await MainActor.run {
+                // Events come in reverse chronological, reverse them for display
+                events = result.events.reversed()
+                isLoading = false
+            }
+        } catch {
+            await MainActor.run {
+                loadError = error.localizedDescription
+                isLoading = false
+            }
+        }
+    }
+
+    private func forkSession() {
+        guard !isForking else { return }
+
+        isForking = true
+        forkError = nil
+
+        Task {
+            do {
+                let newSessionId = try await eventStoreManager.forkSession(session.sessionId, fromEventId: nil)
+
+                await MainActor.run {
+                    isForking = false
+                    onFork(newSessionId)
+                }
+            } catch {
+                await MainActor.run {
+                    isForking = false
+                    forkError = error.localizedDescription
+                }
+            }
+        }
+    }
+}
+
+// MARK: - Preview Display Item
+
+/// Types of displayable items in session preview
+enum PreviewDisplayItem {
+    case userMessage(String)
+    case assistantMessage(String)
+    case toolUse(name: String, id: String)
+    case toolResult(name: String?, content: String, isError: Bool)
+    case notification(type: String, detail: String?)
+}
+
+@available(iOS 26.0, *)
+struct PreviewDisplayItemView: View {
+    let item: PreviewDisplayItem
+
+    var body: some View {
+        switch item {
+        case .userMessage(let content):
+            userMessageView(content)
+
+        case .assistantMessage(let content):
+            assistantMessageView(content)
+
+        case .toolUse(let name, _):
+            toolUseView(name)
+
+        case .toolResult(let name, let content, let isError):
+            toolResultView(name: name, content: content, isError: isError)
+
+        case .notification(let type, let detail):
+            notificationView(type: type, detail: detail)
+        }
+    }
+
+    // MARK: - User Message
+
+    private func userMessageView(_ content: String) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: "person.fill")
+                .font(.system(size: 11))
+                .foregroundStyle(.tronEmerald)
+                .frame(width: 22, height: 22)
+                .background(Color.tronEmerald.opacity(0.2))
+                .clipShape(Circle())
+
+            Text(content)
+                .font(.system(size: 13, design: .monospaced))
+                .foregroundStyle(.white.opacity(0.9))
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(10)
+        .glassEffect(.regular.tint(Color.tronEmerald.opacity(0.08)), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+    }
+
+    // MARK: - Assistant Message
+
+    private func assistantMessageView(_ content: String) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: "cpu")
+                .font(.system(size: 11))
+                .foregroundStyle(.tronEmerald)
+                .frame(width: 22, height: 22)
+                .background(Color.tronPhthaloGreen.opacity(0.3))
+                .clipShape(Circle())
+
+            Text(content)
+                .font(.system(size: 13, design: .monospaced))
+                .foregroundStyle(.white.opacity(0.8))
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(10)
+        .glassEffect(.regular.tint(Color.tronPhthaloGreen.opacity(0.06)), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+    }
+
+    // MARK: - Tool Use
+
+    private func toolUseView(_ name: String) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: "wrench.and.screwdriver.fill")
+                .font(.system(size: 10))
+                .foregroundStyle(.tronEmerald.opacity(0.8))
+
+            Text(toolDisplayName(name))
+                .font(.system(size: 11, weight: .medium, design: .monospaced))
+                .foregroundStyle(.tronEmerald.opacity(0.9))
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .glassEffect(.regular.tint(Color.tronEmerald.opacity(0.15)), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+    }
+
+    // MARK: - Tool Result
+
+    private func toolResultView(name: String?, content: String, isError: Bool) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 4) {
+                Image(systemName: isError ? "xmark.circle.fill" : "checkmark.circle.fill")
+                    .font(.system(size: 10))
+                    .foregroundStyle(isError ? .tronError : .tronEmerald.opacity(0.7))
+
+                if let name = name {
+                    Text(toolDisplayName(name))
+                        .font(.system(size: 10, weight: .medium, design: .monospaced))
+                        .foregroundStyle(.white.opacity(0.5))
+                }
+
+                Text(isError ? "error" : "result")
+                    .font(.system(size: 9, design: .monospaced))
+                    .foregroundStyle(.white.opacity(0.4))
+            }
+
+            if !content.isEmpty {
+                Text(content)
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundStyle(.white.opacity(0.6))
+                    .lineLimit(5)
+            }
+        }
+        .padding(8)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.white.opacity(0.03))
+        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .stroke(isError ? Color.tronError.opacity(0.3) : Color.white.opacity(0.1), lineWidth: 0.5)
+        )
+    }
+
+    // MARK: - Notification
+
+    private func notificationView(type: String, detail: String?) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: notificationIcon(type))
+                .font(.system(size: 10))
+
+            Text(notificationText(type: type, detail: detail))
+                .font(.system(size: 10, weight: .medium, design: .monospaced))
+        }
+        .foregroundStyle(notificationColor(type))
+        .padding(.horizontal, 10)
+        .padding(.vertical, 5)
+        .frame(maxWidth: .infinity)
+        .background(notificationColor(type).opacity(0.1))
+        .clipShape(Capsule())
+    }
+
+    // MARK: - Helpers
+
+    private func toolDisplayName(_ name: String) -> String {
+        switch name.lowercased() {
+        case "read": return "Read"
+        case "write": return "Write"
+        case "edit": return "Edit"
+        case "bash": return "Bash"
+        case "glob": return "Glob"
+        case "grep": return "Grep"
+        case "task": return "Task"
+        case "webfetch": return "WebFetch"
+        case "websearch": return "WebSearch"
+        default: return name
+        }
+    }
+
+    private func notificationIcon(_ type: String) -> String {
+        switch type {
+        case "interrupted": return "pause.circle.fill"
+        case "modelSwitch": return "arrow.triangle.swap"
+        case "sessionStart": return "play.circle.fill"
+        default: return "info.circle.fill"
+        }
+    }
+
+    private func notificationText(type: String, detail: String?) -> String {
+        switch type {
+        case "interrupted": return "Session interrupted"
+        case "modelSwitch": return detail ?? "Model changed"
+        case "sessionStart": return "Started with \(detail ?? "unknown")"
+        default: return detail ?? type
+        }
+    }
+
+    private func notificationColor(_ type: String) -> Color {
+        switch type {
+        case "interrupted": return .orange
+        case "modelSwitch": return .tronEmerald
+        case "sessionStart": return .tronEmerald.opacity(0.7)
+        default: return .white.opacity(0.6)
         }
     }
 }
