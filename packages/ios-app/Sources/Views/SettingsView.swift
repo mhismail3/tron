@@ -109,12 +109,18 @@ struct SettingsView: View {
             .sheet(isPresented: $showLogViewer) {
                 LogViewer()
             }
-            .navigationTitle("Settings")
             .navigationBarTitleDisplayMode(.inline)
+            .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
             .toolbar {
+                ToolbarItem(placement: .principal) {
+                    Text("Settings")
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(.tronEmerald)
+                }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("Done") { dismiss() }
                         .font(.subheadline.weight(.medium))
+                        .foregroundStyle(.tronEmerald)
                 }
             }
             .alert("Reset Settings?", isPresented: $showingResetAlert) {

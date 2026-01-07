@@ -24,12 +24,19 @@ struct LogViewer: View {
                 logList
             }
             .background(Color.tronSurface)
-            .navigationTitle("Logs")
             .navigationBarTitleDisplayMode(.inline)
+            .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     Button("Done") { dismiss() }
                         .font(.subheadline.weight(.medium))
+                        .foregroundStyle(.tronEmerald)
+                }
+
+                ToolbarItem(placement: .principal) {
+                    Text("Logs")
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(.tronEmerald)
                 }
 
                 ToolbarItem(placement: .topBarTrailing) {

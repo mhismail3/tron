@@ -3,6 +3,7 @@ import SwiftUI
 // MARK: - Session Tree View
 
 /// Tree visualization for session history showing events, branch points, and fork/rewind capabilities.
+@available(iOS 26.0, *)
 struct SessionTreeView: View {
     let events: [SessionEvent]
     let headEventId: String?
@@ -173,6 +174,7 @@ struct StatBadge: View {
 
 // MARK: - Tree Node Row
 
+@available(iOS 26.0, *)
 struct TreeNodeRow: View {
     let event: SessionEvent
     let isHead: Bool
@@ -186,6 +188,11 @@ struct TreeNodeRow: View {
     let onRewind: () -> Void
 
     @State private var isExpanded = false
+
+    /// Whether this event has expandable content to show
+    private var hasExpandableContent: Bool {
+        event.expandedContent != nil || !isHead
+    }
 
     init(event: SessionEvent, isHead: Bool, isSelected: Bool, isOnPath: Bool, isBranchPoint: Bool, depth: Int, hasNextSibling: Bool = false, onSelect: @escaping () -> Void, onFork: @escaping () -> Void, onRewind: @escaping () -> Void) {
         self.event = event
@@ -202,8 +209,14 @@ struct TreeNodeRow: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            // Main row
+            // Main row with glass effect
             HStack(spacing: 8) {
+                // Event sequence number
+                Text("\(event.sequence)")
+                    .font(.system(size: 10, weight: .medium, design: .monospaced))
+                    .foregroundStyle(.tronTextMuted)
+                    .frame(width: 24, alignment: .trailing)
+
                 // Indentation for branched events only
                 if depth > 0 {
                     HStack(spacing: 0) {
@@ -226,7 +239,7 @@ struct TreeNodeRow: View {
                 VStack(alignment: .leading, spacing: 2) {
                     HStack(spacing: 6) {
                         Text(event.summary)
-                            .font(.subheadline)
+                            .font(.system(size: 13, weight: .medium, design: .monospaced))
                             .foregroundStyle(.tronTextPrimary)
                             .lineLimit(1)
 
@@ -248,60 +261,63 @@ struct TreeNodeRow: View {
 
                         Spacer()
 
-                        Text(formattedTime)
-                            .font(.caption2)
-                            .foregroundStyle(.tronTextMuted)
+                        // Expandable indicator
+                        if hasExpandableContent {
+                            Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
+                                .font(.system(size: 10, weight: .medium))
+                                .foregroundStyle(.tronTextMuted)
+                        }
                     }
-                }
-                .contentShape(Rectangle())
-                .onTapGesture {
-                    withAnimation(.easeInOut(duration: 0.2)) {
-                        isExpanded.toggle()
-                    }
-                    onSelect()
                 }
             }
-            .padding(.vertical, 8)
-            .padding(.horizontal, 4)
-            .background(
-                isSelected ? Color.tronEmerald.opacity(0.15) :
-                isOnPath ? Color.tronEmerald.opacity(0.05) :
-                Color.clear
+            .padding(.vertical, 10)
+            .padding(.horizontal, 12)
+            .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .onTapGesture {
+                withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
+                    isExpanded.toggle()
+                }
+                onSelect()
+            }
+            .glassEffect(
+                isSelected ? .regular.tint(Color.tronEmerald.opacity(0.4)).interactive() :
+                isOnPath ? .regular.tint(Color.tronPhthaloGreen.opacity(0.2)) :
+                .regular.tint(Color.tronPhthaloGreen.opacity(0.1)),
+                in: RoundedRectangle(cornerRadius: 12, style: .continuous)
             )
-            .clipShape(RoundedRectangle(cornerRadius: 6))
 
             // Expanded content and actions
             if isExpanded {
-                VStack(alignment: .leading, spacing: 8) {
+                VStack(alignment: .leading, spacing: 10) {
                     // Show expanded content if available
                     if let content = event.expandedContent {
                         Text(content)
-                            .font(.system(size: 12, design: .monospaced))
+                            .font(.system(size: 11, design: .monospaced))
                             .foregroundStyle(.tronTextSecondary)
-                            .lineLimit(10)
-                            .padding(.horizontal, CGFloat(depth) * 20 + 28)
-                            .padding(.vertical, 8)
+                            .lineLimit(12)
+                            .padding(12)
                             .frame(maxWidth: .infinity, alignment: .leading)
-                            .background(Color.tronSurfaceElevated.opacity(0.5))
-                            .clipShape(RoundedRectangle(cornerRadius: 6))
+                            .background(Color.tronSurfaceElevated.opacity(0.6))
+                            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                    .stroke(Color.tronBorder.opacity(0.3), lineWidth: 0.5)
+                            )
                     }
 
                     // Actions (only show if not HEAD)
                     if !isHead {
                         HStack(spacing: 12) {
-                            Spacer()
-                                .frame(width: CGFloat(depth) * 20 + 28)
-
                             Button(action: onFork) {
                                 HStack(spacing: 4) {
                                     Image(systemName: "arrow.triangle.branch")
                                         .font(.system(size: 11))
                                     Text("Fork")
-                                        .font(.caption)
+                                        .font(.system(size: 12, weight: .medium))
                                 }
                                 .foregroundStyle(.white)
-                                .padding(.horizontal, 12)
-                                .padding(.vertical, 6)
+                                .padding(.horizontal, 14)
+                                .padding(.vertical, 8)
                                 .background(Color.tronAmber)
                                 .clipShape(Capsule())
                             }
@@ -311,11 +327,11 @@ struct TreeNodeRow: View {
                                     Image(systemName: "arrow.uturn.backward")
                                         .font(.system(size: 11))
                                     Text("Rewind")
-                                        .font(.caption)
+                                        .font(.system(size: 12, weight: .medium))
                                 }
                                 .foregroundStyle(.white)
-                                .padding(.horizontal, 12)
-                                .padding(.vertical, 6)
+                                .padding(.horizontal, 14)
+                                .padding(.vertical, 8)
                                 .background(Color.tronPurple)
                                 .clipShape(Capsule())
                             }
@@ -324,10 +340,16 @@ struct TreeNodeRow: View {
                         }
                     }
                 }
-                .padding(.vertical, 8)
-                .transition(.opacity.combined(with: .move(edge: .top)))
+                .padding(.top, 8)
+                .padding(.horizontal, 12)
+                .padding(.bottom, 4)
+                .transition(.asymmetric(
+                    insertion: .opacity.animation(.easeOut(duration: 0.25).delay(0.1)),
+                    removal: .opacity.animation(.easeIn(duration: 0.15))
+                ))
             }
         }
+        .padding(.vertical, 2)
         .id(event.id)
     }
 
@@ -542,6 +564,7 @@ struct CompactTreeView: View {
 
 // MARK: - Session History Sheet
 
+@available(iOS 26.0, *)
 struct SessionHistorySheet: View {
     @EnvironmentObject var eventStoreManager: EventStoreManager
     @Environment(\.dismiss) private var dismiss
@@ -583,12 +606,17 @@ struct SessionHistorySheet: View {
                     )
                 }
             }
-            .navigationTitle("Session History")
             .navigationBarTitleDisplayMode(.inline)
             .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
             .toolbar {
+                ToolbarItem(placement: .principal) {
+                    Text("Session History")
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(.tronEmerald)
+                }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("Done") { dismiss() }
+                        .foregroundStyle(.tronEmerald)
                 }
             }
         }

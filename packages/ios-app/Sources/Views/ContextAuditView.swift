@@ -26,13 +26,17 @@ struct ContextAuditView: View {
                     contentView
                 }
             }
-            .navigationTitle("Context & Memory")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbarBackground(Color.tronSurface, for: .navigationBar)
-            .toolbarBackground(.visible, for: .navigationBar)
+            .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
             .toolbar {
+                ToolbarItem(placement: .principal) {
+                    Text("Context & Memory")
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(.tronEmerald)
+                }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("Done") { dismiss() }
+                        .foregroundStyle(.tronEmerald)
                 }
             }
             .alert("Error", isPresented: .constant(errorMessage != nil)) {

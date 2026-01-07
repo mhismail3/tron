@@ -60,9 +60,14 @@ struct SessionAnalyticsSheet: View {
                 }
             }
             .background(Color.tronSurface)
-            .navigationTitle("Session Analytics")
             .navigationBarTitleDisplayMode(.inline)
+            .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
             .toolbar {
+                ToolbarItem(placement: .principal) {
+                    Text("Session Analytics")
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(.tronEmerald)
+                }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("Done") { dismiss() }
                         .foregroundStyle(.tronEmerald)

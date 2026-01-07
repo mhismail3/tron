@@ -663,13 +663,18 @@ struct WorkspaceSelector: View {
                     directoryList
                 }
             }
-            .navigationTitle("Select Workspace")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbarBackground(Color.tronSurface, for: .navigationBar)
-            .toolbarBackground(.visible, for: .navigationBar)
+            .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     Button("Cancel") { dismiss() }
+                        .foregroundStyle(.tronEmerald)
+                }
+
+                ToolbarItem(placement: .principal) {
+                    Text("Select Workspace")
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(.tronEmerald)
                 }
 
                 ToolbarItem(placement: .topBarTrailing) {
@@ -681,6 +686,7 @@ struct WorkspaceSelector: View {
                             .fontWeight(.semibold)
                     }
                     .disabled(currentPath.isEmpty)
+                    .foregroundStyle(currentPath.isEmpty ? .white.opacity(0.3) : .tronEmerald)
                 }
             }
             .task {
