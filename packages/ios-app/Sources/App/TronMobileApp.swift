@@ -419,25 +419,6 @@ struct NewSessionFlow: View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: 24) {
-                    // Recent Sessions section (always shown - handles loading/empty states internally)
-                    recentSessionsSection
-
-                    // Divider (only show if we have remote sessions to display)
-                    if !filteredRecentSessions.isEmpty || isLoadingServerSessions {
-                        HStack {
-                            Rectangle()
-                                .fill(.white.opacity(0.2))
-                                .frame(height: 1)
-                            Text("OR START NEW")
-                                .font(.caption2.weight(.medium))
-                                .foregroundStyle(.white.opacity(0.4))
-                            Rectangle()
-                                .fill(.white.opacity(0.2))
-                                .frame(height: 1)
-                        }
-                        .padding(.horizontal, 20)
-                    }
-
                     // Workspace section
                     VStack(alignment: .leading, spacing: 12) {
                         Text("Workspace")
@@ -535,6 +516,24 @@ struct NewSessionFlow: View {
                             .foregroundStyle(.white.opacity(0.4))
                     }
 
+                    // Divider (only show if we have remote sessions to display)
+                    if !filteredRecentSessions.isEmpty || isLoadingServerSessions {
+                        HStack {
+                            Rectangle()
+                                .fill(.white.opacity(0.2))
+                                .frame(height: 1)
+                            Text("OR CONTINUE EXISTING")
+                                .font(.caption2.weight(.medium))
+                                .foregroundStyle(.white.opacity(0.4))
+                            Rectangle()
+                                .fill(.white.opacity(0.2))
+                                .frame(height: 1)
+                        }
+                    }
+
+                    // Recent Sessions section (at the bottom)
+                    recentSessionsSection
+
                     // Error message
                     if let error = errorMessage {
                         HStack {
@@ -612,7 +611,7 @@ struct NewSessionFlow: View {
             }
         }
         .presentationDetents([.medium, .large])
-        .presentationDragIndicator(.visible)
+        .presentationDragIndicator(.hidden)
         .tint(.tronEmerald)
         .preferredColorScheme(.dark)
     }
@@ -811,7 +810,6 @@ struct NewSessionFlow: View {
                 }
             }
         }
-        .padding(.horizontal, 12)
     }
 }
 
@@ -824,12 +822,7 @@ struct RecentSessionRow: View {
 
     var body: some View {
         Button(action: onTap) {
-            HStack(spacing: 12) {
-                // Status dot - green for active, gray for ended
-                Circle()
-                    .fill(session.isActive ? Color.tronEmerald : Color.white.opacity(0.3))
-                    .frame(width: 8, height: 8)
-
+            HStack {
                 VStack(alignment: .leading, spacing: 4) {
                     HStack {
                         Text(session.displayName)
@@ -874,11 +867,11 @@ struct RecentSessionRow: View {
                     }
                 }
             }
-            .padding(.vertical, 10)
-            .padding(.horizontal, 12)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 14)
         }
         .buttonStyle(.plain)
-        .glassEffect(.regular.tint(Color.tronPhthaloGreen.opacity(0.1)), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .glassEffect(.regular.tint(Color.tronPhthaloGreen.opacity(0.15)).interactive(), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 }
 
@@ -980,7 +973,7 @@ struct SessionPreviewSheet: View {
             await loadHistory()
         }
         .presentationDetents([.large])
-        .presentationDragIndicator(.visible)
+        .presentationDragIndicator(.hidden)
         .preferredColorScheme(.dark)
     }
 

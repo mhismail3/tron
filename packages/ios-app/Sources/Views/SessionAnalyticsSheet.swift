@@ -75,7 +75,7 @@ struct SessionAnalyticsSheet: View {
             }
         }
         .presentationDetents([.medium, .large])
-        .presentationDragIndicator(.visible)
+        .presentationDragIndicator(.hidden)
         .task {
             await loadEvents()
         }

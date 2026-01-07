@@ -133,7 +133,7 @@ struct SettingsView: View {
             }
         }
         .presentationDetents([.medium, .large])
-        .presentationDragIndicator(.visible)
+        .presentationDragIndicator(.hidden)
         .tint(.tronEmerald)
         .preferredColorScheme(.dark)
     }

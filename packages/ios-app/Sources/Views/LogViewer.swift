@@ -55,7 +55,7 @@ struct LogViewer: View {
             }
         }
         .presentationDetents([.medium, .large], selection: $sheetDetent)
-        .presentationDragIndicator(.visible)
+        .presentationDragIndicator(.hidden)
         .tint(.tronEmerald)
         .preferredColorScheme(.dark)
     }
