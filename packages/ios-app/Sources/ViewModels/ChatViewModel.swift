@@ -124,18 +124,17 @@ class ChatViewModel: ObservableObject {
     private func loadPersistedMessagesAsync() async {
         guard let manager = eventStoreManager else { return }
 
-        // If streaming is in progress, we need to preserve the streaming message
-        // but still load history so user can see past messages
-        let preserveStreamingMessage = isProcessing || streamingMessageId != nil
-        var streamingMessageToRestore: ChatMessage?
+        // If streaming/processing is in progress, we need to preserve ALL messages
+        // created during catch-up (tool messages, streaming message, etc.)
+        // These exist in UI but are not yet in persisted history
+        let preserveStreamingState = isProcessing || streamingMessageId != nil
+        var catchUpMessagesToRestore: [ChatMessage] = []
 
-        if preserveStreamingMessage {
-            // Save the streaming message to restore after loading history
-            if let streamingId = streamingMessageId,
-               let existingStreamingMsg = messages.first(where: { $0.id == streamingId }) {
-                streamingMessageToRestore = existingStreamingMsg
-            }
-            logger.info("Loading history while preserving streaming state (isProcessing=\(isProcessing))", category: .session)
+        if preserveStreamingState {
+            // Save ALL current messages - these were created during catch-up in connectAndResume()
+            // and need to be restored after we load persisted history
+            catchUpMessagesToRestore = messages
+            logger.info("Preserving \(catchUpMessagesToRestore.count) catch-up messages before loading history (isProcessing=\(isProcessing))", category: .session)
         }
 
         // Yield to let UI render first
@@ -311,11 +310,11 @@ class ChatViewModel: ObservableObject {
                 messages = []
             }
 
-            // Restore streaming message at the end if we were preserving it
-            // This ensures user sees both history and the in-progress response
-            if let streamingMsg = streamingMessageToRestore {
-                messages.append(streamingMsg)
-                logger.info("Restored streaming message after loading \(loadedMessages.count) historical messages", category: .session)
+            // Restore ALL catch-up messages at the end
+            // This ensures user sees history + in-progress tool calls + streaming response
+            if !catchUpMessagesToRestore.isEmpty {
+                messages.append(contentsOf: catchUpMessagesToRestore)
+                logger.info("Restored \(catchUpMessagesToRestore.count) catch-up messages after loading \(loadedMessages.count) historical messages", category: .session)
             }
 
             // Update turn counter and token usage
@@ -629,15 +628,37 @@ class ChatViewModel: ObservableObject {
 
                 logger.info("Resume catch-up: \(accumulatedText.count) chars text, \(toolCalls.count) tool calls", category: .session)
 
-                // Create streaming message with accumulated content
-                let streamingMessage = ChatMessage.streaming()
-                messages.append(streamingMessage)
-                streamingMessageId = streamingMessage.id
-                streamingText = accumulatedText
+                // Split accumulated text by turn boundaries (newlines separate turns from server)
+                // Each turn follows pattern: text → tool(s)
+                // So we interleave: textSegments[i] before toolCalls[i]
+                let textSegments = accumulatedText.components(separatedBy: "\n")
+                logger.debug("Resume catch-up: split into \(textSegments.count) text segments", category: .session)
 
-                // Process tool calls that happened before we connected
+                // Process tool calls with interleaved text
                 // IMPORTANT: We need to create UI messages for each tool call, not just track them
-                for toolCall in toolCalls {
+                for (index, toolCall) in toolCalls.enumerated() {
+                    // Add text segment BEFORE this tool if available
+                    // (Each turn has text explaining what it's about to do, then the tool call)
+                    if index < textSegments.count && !textSegments[index].isEmpty {
+                        let segmentText = textSegments[index]
+
+                        if toolCall.status == "completed" || toolCall.status == "error" {
+                            // Completed turn: create finalized text message
+                            let textMessage = ChatMessage(role: .assistant, content: .text(segmentText))
+                            messages.append(textMessage)
+                            logger.debug("Resume catch-up: created finalized text message for turn \(index + 1)", category: .session)
+                        } else {
+                            // Current/running turn: create streaming message for this text
+                            let streamingMessage = ChatMessage.streaming()
+                            messages.append(streamingMessage)
+                            streamingMessageId = streamingMessage.id
+                            streamingText = segmentText
+                            updateStreamingMessage(with: .streaming(segmentText))
+                            logger.debug("Resume catch-up: created streaming message for current turn", category: .session)
+                        }
+                    }
+
+                    // Now process the tool call
                     logger.info("Resume catch-up: tool call \(toolCall.toolName) status=\(toolCall.status)", category: .session)
 
                     // Format arguments as string for display
@@ -684,10 +705,24 @@ class ChatViewModel: ObservableObject {
 
                     // If tool call is already completed, update the message with result
                     if toolCall.status == "completed" || toolCall.status == "error" {
+                        // Calculate duration from timestamps if available
+                        var durationMs: Int? = nil
+                        if let completedAt = toolCall.completedAt {
+                            let formatter = ISO8601DateFormatter()
+                            formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+                            if let startDate = formatter.date(from: toolCall.startedAt),
+                               let endDate = formatter.date(from: completedAt) {
+                                durationMs = Int(endDate.timeIntervalSince(startDate) * 1000)
+                            }
+                        }
+
                         let resultData = ToolResultData(
                             toolCallId: toolCall.toolCallId,
                             content: toolCall.result ?? (toolCall.isError == true ? "Error" : "(no output)"),
-                            isError: toolCall.isError ?? false
+                            isError: toolCall.isError ?? false,
+                            toolName: toolCall.toolName,
+                            arguments: argsString,
+                            durationMs: durationMs
                         )
                         toolMessage.content = .toolResult(resultData)
                         logger.debug("Resume catch-up: tool \(toolCall.toolName) already completed, updated with result", category: .session)
@@ -698,12 +733,36 @@ class ChatViewModel: ObservableObject {
                     logger.info("Resume catch-up: created UI message for tool \(toolCall.toolName)", category: .session)
                 }
 
-                // Update streaming message with accumulated text
-                if !accumulatedText.isEmpty {
-                    updateStreamingMessage(with: .streaming(streamingText))
+                // Handle any remaining text segments after all tools
+                // (e.g., if the current turn has text but no tool call yet)
+                if textSegments.count > toolCalls.count {
+                    let remainingSegments = Array(textSegments[toolCalls.count...])
+                    let remainingText = remainingSegments.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
+
+                    if !remainingText.isEmpty {
+                        // If we don't have a streaming message yet, create one for the current turn
+                        if streamingMessageId == nil {
+                            let streamingMessage = ChatMessage.streaming()
+                            messages.append(streamingMessage)
+                            streamingMessageId = streamingMessage.id
+                            streamingText = remainingText
+                            updateStreamingMessage(with: .streaming(remainingText))
+                            logger.debug("Resume catch-up: created streaming message for remaining text", category: .session)
+                        }
+                    }
                 }
 
-                logger.info("Created streaming message with catch-up content for in-progress turn", category: .session)
+                // If there were NO tool calls but there is text, create streaming message
+                if toolCalls.isEmpty && !accumulatedText.isEmpty && streamingMessageId == nil {
+                    let streamingMessage = ChatMessage.streaming()
+                    messages.append(streamingMessage)
+                    streamingMessageId = streamingMessage.id
+                    streamingText = accumulatedText
+                    updateStreamingMessage(with: .streaming(accumulatedText))
+                    logger.debug("Resume catch-up: created streaming message for text-only catch-up", category: .session)
+                }
+
+                logger.info("Created \(messages.count) catch-up messages for in-progress turn", category: .session)
             } else {
                 logger.debug("Agent is not running - normal session resume", category: .session)
             }
@@ -1005,11 +1064,23 @@ class ChatViewModel: ObservableObject {
     private func handleTurnStart(_ event: TurnStartEvent) {
         logger.info("Turn \(event.turnNumber) started", category: .events)
 
-        // Safety: clear any stale data from incomplete previous turns
-        // (e.g., if connection dropped mid-turn)
-        if !currentTurnToolCalls.isEmpty || !currentToolMessages.isEmpty {
-            logger.warning("Clearing \(currentTurnToolCalls.count) uncleaned tool calls and \(currentToolMessages.count) tool messages from previous turn", category: .events)
+        // Finalize any streaming text from the previous turn
+        // This ensures each turn gets its own text message bubble
+        if streamingMessageId != nil && !streamingText.isEmpty {
+            flushPendingTextUpdates()
+            finalizeStreamingMessage()
+            streamingText = ""
+        }
+
+        // Clear tool tracking for the new turn
+        // Note: The tool MESSAGES stay in the messages array and remain visible
+        // We only clear the tracking dictionaries used for updating in-progress tools
+        if !currentTurnToolCalls.isEmpty {
+            logger.debug("Starting Turn \(event.turnNumber), clearing \(currentTurnToolCalls.count) completed tool records from previous turn", category: .events)
             currentTurnToolCalls.removeAll()
+        }
+        if !currentToolMessages.isEmpty {
+            logger.debug("Clearing \(currentToolMessages.count) tool message references from previous turn", category: .events)
             currentToolMessages.removeAll()
         }
     }

@@ -328,15 +328,19 @@ export interface ActiveSession {
    */
   lastAppendError?: Error;
   /**
-   * Accumulated text content from current in-progress turn.
+   * Accumulated text content from ALL turns in the current agent run.
    * Used to provide catch-up content when client resumes into running session.
-   * Reset at turn_start, accumulated on message_update, cleared on turn_end.
+   * Cleared at agent_start, accumulated on message_update across all turns,
+   * cleared at agent_end. NOT reset at turn boundaries so resuming during
+   * Turn N shows content from Turn 1, 2, ..., N.
    */
   currentTurnAccumulatedText: string;
   /**
-   * Tool calls from current in-progress turn.
+   * Tool calls from ALL turns in the current agent run.
    * Used to provide catch-up content when client resumes into running session.
-   * Reset at turn_start, updated on tool_start/tool_end, cleared on turn_end.
+   * Cleared at agent_start, updated on tool_start/tool_end across all turns,
+   * cleared at agent_end. NOT reset at turn boundaries so resuming during
+   * Turn N shows tools from Turn 1, 2, ..., N.
    */
   currentTurnToolCalls: CurrentTurnToolCall[];
 }
@@ -1532,9 +1536,17 @@ export class EventStoreOrchestrator extends EventEmitter {
         // Update current turn for tool event tracking
         if (active) {
           active.currentTurn = event.turn;
-          // Reset current turn accumulation for new turn
-          active.currentTurnAccumulatedText = '';
-          active.currentTurnToolCalls = [];
+          // NOTE: We do NOT reset accumulation here anymore!
+          // We accumulate content across ALL turns within an agent run so that
+          // when a client resumes into a running session, they get ALL content
+          // from the current runAgent call (Turn 1, Turn 2, etc.), not just
+          // the current turn. Accumulation is cleared at agent_start/agent_end.
+
+          // Add a newline separator between turns (if there's existing content)
+          // This ensures text from different turns doesn't run together
+          if (event.turn > 1 && active.currentTurnAccumulatedText.length > 0) {
+            active.currentTurnAccumulatedText += '\n';
+          }
         }
 
         this.emit('agent_event', {
@@ -1549,11 +1561,10 @@ export class EventStoreOrchestrator extends EventEmitter {
         break;
 
       case 'turn_end':
-        // Clear current turn accumulation (turn complete, content now persisted)
-        if (active) {
-          active.currentTurnAccumulatedText = '';
-          active.currentTurnToolCalls = [];
-        }
+        // NOTE: We do NOT clear accumulation here anymore!
+        // Content is kept so that if user resumes during a later turn,
+        // they get ALL content from Turn 1, Turn 2, etc.
+        // Accumulation is cleared at agent_start/agent_end instead.
 
         this.emit('agent_event', {
           type: 'agent.turn_end',
@@ -1674,6 +1685,13 @@ export class EventStoreOrchestrator extends EventEmitter {
         break;
 
       case 'agent_start':
+        // Clear accumulation at the start of a new agent run
+        // This ensures fresh tracking for the new runAgent call
+        if (active) {
+          active.currentTurnAccumulatedText = '';
+          active.currentTurnToolCalls = [];
+        }
+
         this.emit('agent_event', {
           type: 'agent.turn_start',
           sessionId,
@@ -1683,6 +1701,13 @@ export class EventStoreOrchestrator extends EventEmitter {
         break;
 
       case 'agent_end':
+        // Clear accumulation when agent run completes
+        // Content is now persisted in EventStore, no need for catch-up tracking
+        if (active) {
+          active.currentTurnAccumulatedText = '';
+          active.currentTurnToolCalls = [];
+        }
+
         this.emit('agent_event', {
           type: 'agent.complete',
           sessionId,

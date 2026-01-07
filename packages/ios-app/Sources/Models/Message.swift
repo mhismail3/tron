@@ -248,6 +248,18 @@ struct ToolResultData: Equatable {
     let toolCallId: String
     let content: String
     let isError: Bool
+    let toolName: String?
+    let arguments: String?
+    let durationMs: Int?
+
+    init(toolCallId: String, content: String, isError: Bool, toolName: String? = nil, arguments: String? = nil, durationMs: Int? = nil) {
+        self.toolCallId = toolCallId
+        self.content = content
+        self.isError = isError
+        self.toolName = toolName
+        self.arguments = arguments
+        self.durationMs = durationMs
+    }
 
     var truncatedContent: String {
         if content.count > 500 {
