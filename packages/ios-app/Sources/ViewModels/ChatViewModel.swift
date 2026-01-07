@@ -230,10 +230,28 @@ class ChatViewModel: ObservableObject {
                             let toolName = block["name"] as? String ?? "Unknown"
                             let toolCallId = block["id"] as? String ?? UUID().uuidString
 
+                            // Extract extended metadata from _meta field (for interrupted sessions)
+                            let meta = block["_meta"] as? [String: Any]
+                            let isInterrupted = meta?["interrupted"] as? Bool ?? false
+                            let metaStatus = meta?["status"] as? String
+                            let metaDurationMs = meta?["durationMs"] as? Int
+
+                            // Determine status from metadata
+                            let status: ToolStatus
+                            if isInterrupted {
+                                status = .error  // Will show red X for interrupted tools
+                            } else if metaStatus == "error" {
+                                status = .error
+                            } else if metaStatus == "completed" {
+                                status = .success
+                            } else {
+                                status = .success  // Default for loaded tools
+                            }
+
                             // Format arguments as JSON string - handle multiple possible types
                             var argsString = "{}"
                             let inputValue = block["input"]
-                            logger.debug("[DEBUG] tool_use '\(toolName)' input type: \(type(of: inputValue as Any))", category: .session)
+                            logger.debug("[DEBUG] tool_use '\(toolName)' input type: \(type(of: inputValue as Any)) interrupted: \(isInterrupted)", category: .session)
 
                             if let inputDict = inputValue as? [String: Any] {
                                 if let jsonData = try? JSONSerialization.data(withJSONObject: inputDict, options: [.prettyPrinted, .sortedKeys]),
@@ -254,15 +272,22 @@ class ChatViewModel: ObservableObject {
                                 toolName: toolName,
                                 toolCallId: toolCallId,
                                 arguments: argsString,
-                                status: .success,
+                                status: status,
                                 result: nil,
-                                durationMs: nil
+                                durationMs: metaDurationMs
                             )
                             loadedMessages.append(ChatMessage(role: .assistant, content: .toolUse(tool)))
                         } else if blockType == "tool_result" {
                             // Tool results - update the corresponding tool message
                             let toolUseId = block["tool_use_id"] as? String ?? ""
-                            logger.debug("[DEBUG] tool_result for '\(toolUseId)', content type: \(type(of: block["content"] as Any))", category: .session)
+                            let isError = block["is_error"] as? Bool ?? false
+
+                            // Extract extended metadata from _meta field
+                            let meta = block["_meta"] as? [String: Any]
+                            let isInterrupted = meta?["interrupted"] as? Bool ?? false
+                            let metaDurationMs = meta?["durationMs"] as? Int
+
+                            logger.debug("[DEBUG] tool_result for '\(toolUseId)', isError: \(isError), interrupted: \(isInterrupted)", category: .session)
                             var resultContent = ""
 
                             if let content = block["content"] as? String {
@@ -285,6 +310,16 @@ class ChatViewModel: ObservableObject {
                             }) {
                                 if case .toolUse(var tool) = loadedMessages[index].content {
                                     tool.result = resultContent
+                                    // Update status based on error/interrupted flags
+                                    if isInterrupted {
+                                        tool.status = .error  // Red X for interrupted
+                                    } else if isError {
+                                        tool.status = .error
+                                    }
+                                    // Update duration if available
+                                    if let duration = metaDurationMs {
+                                        tool.durationMs = duration
+                                    }
                                     loadedMessages[index].content = .toolUse(tool)
                                 }
                             }
@@ -477,6 +512,24 @@ class ChatViewModel: ObservableObject {
                             let toolName = block["name"] as? String ?? "Unknown"
                             let toolCallId = block["id"] as? String ?? UUID().uuidString
 
+                            // Extract extended metadata from _meta field (for interrupted sessions)
+                            let meta = block["_meta"] as? [String: Any]
+                            let isInterrupted = meta?["interrupted"] as? Bool ?? false
+                            let metaStatus = meta?["status"] as? String
+                            let metaDurationMs = meta?["durationMs"] as? Int
+
+                            // Determine status from metadata
+                            let status: ToolStatus
+                            if isInterrupted {
+                                status = .error  // Will show red X for interrupted tools
+                            } else if metaStatus == "error" {
+                                status = .error
+                            } else if metaStatus == "completed" {
+                                status = .success
+                            } else {
+                                status = .success  // Default for loaded tools
+                            }
+
                             // Format arguments as JSON string
                             var argsString = "{}"
                             if let inputDict = block["input"] as? [String: Any],
@@ -489,14 +542,21 @@ class ChatViewModel: ObservableObject {
                                 toolName: toolName,
                                 toolCallId: toolCallId,
                                 arguments: argsString,
-                                status: .success,  // Completed tools from history are always done
-                                result: nil,       // Result will be in a separate tool_result block
-                                durationMs: nil
+                                status: status,
+                                result: nil,
+                                durationMs: metaDurationMs
                             )
                             loadedMessages.append(ChatMessage(role: .assistant, content: .toolUse(tool)))
                         } else if blockType == "tool_result" {
                             // Tool results - update the corresponding tool message
                             let toolUseId = block["tool_use_id"] as? String ?? ""
+                            let isError = block["is_error"] as? Bool ?? false
+
+                            // Extract extended metadata from _meta field
+                            let meta = block["_meta"] as? [String: Any]
+                            let isInterrupted = meta?["interrupted"] as? Bool ?? false
+                            let metaDurationMs = meta?["durationMs"] as? Int
+
                             var resultContent = ""
 
                             if let content = block["content"] as? String {
@@ -519,6 +579,16 @@ class ChatViewModel: ObservableObject {
                             }) {
                                 if case .toolUse(var tool) = loadedMessages[index].content {
                                     tool.result = resultContent
+                                    // Update status based on error/interrupted flags
+                                    if isInterrupted {
+                                        tool.status = .error  // Red X for interrupted
+                                    } else if isError {
+                                        tool.status = .error
+                                    }
+                                    // Update duration if available
+                                    if let duration = metaDurationMs {
+                                        tool.durationMs = duration
+                                    }
                                     loadedMessages[index].content = .toolUse(tool)
                                 }
                             }

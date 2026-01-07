@@ -977,56 +977,126 @@ export class EventStoreOrchestrator extends EventEmitter {
 
         // CRITICAL: Persist partial content so it survives session resume
         // Build content from accumulated streaming data
-        const interruptedContent: any[] = [];
+        // Build comprehensive ledger of ALL content that was displayed
+        const assistantContent: any[] = [];
+        const toolResultContent: any[] = [];
 
         // Add any accumulated text
         const partialText = active.currentTurnAccumulatedText || runResult.partialContent || '';
         if (partialText) {
-          interruptedContent.push({ type: 'text', text: partialText });
+          assistantContent.push({ type: 'text', text: partialText });
         }
 
-        // Add any in-progress tool calls
+        // Add tool calls with their results - comprehensive ledger approach
+        // Each tool_use is followed by its tool_result (if completed)
         if (active.currentTurnToolCalls && active.currentTurnToolCalls.length > 0) {
           for (const tc of active.currentTurnToolCalls) {
-            interruptedContent.push({
+            // Calculate duration if we have timing info
+            const durationMs = tc.completedAt && tc.startedAt
+              ? new Date(tc.completedAt).getTime() - new Date(tc.startedAt).getTime()
+              : undefined;
+
+            // Add tool_use block with status metadata
+            // Mark interrupted tools so iOS can show red X
+            const isInterrupted = tc.status === 'running' || tc.status === 'pending';
+            assistantContent.push({
               type: 'tool_use',
               id: tc.toolCallId,
               name: tc.toolName,
               input: tc.arguments,
+              // Extended metadata for comprehensive ledger
+              _meta: {
+                status: tc.status,
+                interrupted: isInterrupted,
+                durationMs,
+              },
             });
+
+            // Add tool_result for completed/error tools
+            // This ensures results are visible when session is restored
+            if (tc.status === 'completed' || tc.status === 'error') {
+              toolResultContent.push({
+                type: 'tool_result',
+                tool_use_id: tc.toolCallId,
+                content: tc.result ?? (tc.isError ? 'Error' : '(no output)'),
+                is_error: tc.isError ?? false,
+                // Extended metadata
+                _meta: {
+                  durationMs,
+                  toolName: tc.toolName,
+                },
+              });
+            } else if (isInterrupted) {
+              // Add interrupted tool_result so the UI shows "interrupted" message
+              toolResultContent.push({
+                type: 'tool_result',
+                tool_use_id: tc.toolCallId,
+                content: 'Command interrupted (no output captured)',
+                is_error: false,
+                _meta: {
+                  interrupted: true,
+                  durationMs,
+                  toolName: tc.toolName,
+                },
+              });
+            }
           }
         }
 
         // Only persist if there's actual content
-        if (interruptedContent.length > 0) {
+        if (assistantContent.length > 0 || toolResultContent.length > 0) {
           // Wait for any pending stream events
           await active.appendPromiseChain;
 
-          const normalizedContent = normalizeContentBlocks(interruptedContent);
-          const interruptedParentId = active.pendingHeadEventId;
+          // 1. Persist assistant message with tool_use blocks
+          if (assistantContent.length > 0) {
+            const normalizedAssistantContent = normalizeContentBlocks(assistantContent);
+            const assistantParentId = active.pendingHeadEventId;
 
-          const interruptedMsgEvent = await this.eventStore.append({
-            sessionId: active.sessionId,
-            type: 'message.assistant',
-            payload: {
-              content: normalizedContent,
-              tokenUsage: runResult.totalTokenUsage,
-              turn: runResult.turns || 1,
-              model: active.model,
-              stopReason: 'interrupted',
-              interrupted: true,  // Flag to identify interrupted messages
-            },
-            parentId: interruptedParentId,
-          });
-          active.pendingHeadEventId = interruptedMsgEvent.id;
+            const assistantMsgEvent = await this.eventStore.append({
+              sessionId: active.sessionId,
+              type: 'message.assistant',
+              payload: {
+                content: normalizedAssistantContent,
+                tokenUsage: runResult.totalTokenUsage,
+                turn: runResult.turns || 1,
+                model: active.model,
+                stopReason: 'interrupted',
+                interrupted: true,
+              },
+              parentId: assistantParentId,
+            });
+            active.pendingHeadEventId = assistantMsgEvent.id;
 
-          logger.info('Persisted interrupted assistant message', {
-            sessionId: active.sessionId,
-            eventId: interruptedMsgEvent.id,
-            contentBlocks: normalizedContent.length,
-            textLength: partialText.length,
-            toolCalls: active.currentTurnToolCalls?.length ?? 0,
-          });
+            logger.info('Persisted interrupted assistant message', {
+              sessionId: active.sessionId,
+              eventId: assistantMsgEvent.id,
+              contentBlocks: normalizedAssistantContent.length,
+              textLength: partialText.length,
+              toolCalls: active.currentTurnToolCalls?.length ?? 0,
+            });
+          }
+
+          // 2. Persist tool results as user message (like normal flow)
+          // This ensures tool results appear in the session history
+          if (toolResultContent.length > 0) {
+            const normalizedToolResults = normalizeContentBlocks(toolResultContent);
+            const toolResultParentId = active.pendingHeadEventId;
+
+            const toolResultEvent = await this.eventStore.append({
+              sessionId: active.sessionId,
+              type: 'message.user',
+              payload: { content: normalizedToolResults },
+              parentId: toolResultParentId,
+            });
+            active.pendingHeadEventId = toolResultEvent.id;
+
+            logger.info('Persisted tool results for interrupted session', {
+              sessionId: active.sessionId,
+              eventId: toolResultEvent.id,
+              resultCount: normalizedToolResults.length,
+            });
+          }
         }
 
         // Persist notification.interrupted event as first-class ledger entry
