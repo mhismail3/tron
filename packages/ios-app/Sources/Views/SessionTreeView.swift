@@ -304,7 +304,7 @@ struct TreeNodeRow: View {
                 }
             }
 
-            // Expanded content and actions
+            // Expanded content and actions - aligned under the row container
             if isExpanded {
                 VStack(alignment: .leading, spacing: 10) {
                     // Show expanded content if available
@@ -359,7 +359,8 @@ struct TreeNodeRow: View {
                     }
                 }
                 .padding(.top, 8)
-                .padding(.horizontal, 12)
+                .padding(.leading, 28)  // Align under container (20px number + 8px spacing)
+                .padding(.trailing, 0)
                 .padding(.bottom, 4)
                 .transition(.asymmetric(
                     insertion: .opacity.animation(.easeOut(duration: 0.25).delay(0.1)),
