@@ -236,7 +236,7 @@ struct TreeNodeRow: View {
                     .frame(width: 20, alignment: .trailing)
 
                 // Content container
-                HStack(spacing: 6) {
+                HStack(spacing: 5) {
                     // Indentation for branched events only
                     if depth > 0 {
                         HStack(spacing: 0) {
@@ -244,59 +244,59 @@ struct TreeNodeRow: View {
                                 Rectangle()
                                     .fill(Color.tronBorder.opacity(0.5))
                                     .frame(width: 1)
-                                    .padding(.horizontal, 9)
+                                    .padding(.horizontal, 6)
                             }
                         }
                     }
 
                     // Node icon
                     eventIcon
-                        .font(.system(size: 12))
+                        .font(.system(size: 11))
                         .foregroundStyle(iconColor)
-                        .frame(width: 18)
+                        .frame(width: 16)
 
                     // Content
                     Text(event.summary)
-                        .font(.system(size: 13, weight: .medium, design: .monospaced))
+                        .font(.system(size: 12, weight: .medium, design: .monospaced))
                         .foregroundStyle(.tronTextPrimary)
                         .lineLimit(1)
 
                     if isHead {
                         Text("HEAD")
-                            .font(.system(size: 9, weight: .bold))
+                            .font(.system(size: 8, weight: .bold))
                             .foregroundStyle(.white)
-                            .padding(.horizontal, 5)
-                            .padding(.vertical, 2)
+                            .padding(.horizontal, 4)
+                            .padding(.vertical, 1)
                             .background(Color.tronEmerald)
                             .clipShape(Capsule())
                     }
 
                     if isBranchPoint {
                         Image(systemName: "arrow.triangle.branch")
-                            .font(.system(size: 10))
+                            .font(.system(size: 9))
                             .foregroundStyle(.tronAmber)
                     }
 
-                    Spacer(minLength: 4)
+                    Spacer(minLength: 2)
 
                     // Expandable indicator
                     if hasExpandableContent {
                         Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
-                            .font(.system(size: 10, weight: .medium))
+                            .font(.system(size: 9, weight: .medium))
                             .foregroundStyle(.tronTextMuted)
                     }
                 }
-                .padding(.vertical, 10)
-                .padding(.horizontal, 12)
+                .padding(.vertical, 6)
+                .padding(.horizontal, 10)
                 .background(
-                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
                         .fill(rowBackgroundColor)
                 )
                 .overlay(
-                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
                         .stroke(rowBorderColor, lineWidth: 0.5)
                 )
-                .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                 .onTapGesture {
                     withAnimation(.easeInOut(duration: 0.2)) {
                         isExpanded.toggle()
@@ -306,50 +306,50 @@ struct TreeNodeRow: View {
 
             // Expanded content and actions - aligned under the row container
             if isExpanded {
-                VStack(alignment: .leading, spacing: 10) {
+                VStack(alignment: .leading, spacing: 6) {
                     // Show expanded content if available
                     if let content = event.expandedContent {
                         Text(content)
-                            .font(.system(size: 11, design: .monospaced))
+                            .font(.system(size: 10, design: .monospaced))
                             .foregroundStyle(.tronTextSecondary)
-                            .lineLimit(12)
-                            .padding(12)
+                            .lineLimit(10)
+                            .padding(8)
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .background(Color.tronSurfaceElevated.opacity(0.6))
-                            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                            .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
                             .overlay(
-                                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                RoundedRectangle(cornerRadius: 6, style: .continuous)
                                     .stroke(Color.tronBorder.opacity(0.3), lineWidth: 0.5)
                             )
                     }
 
                     // Actions (only show if not HEAD)
                     if !isHead {
-                        HStack(spacing: 12) {
+                        HStack(spacing: 8) {
                             Button(action: onFork) {
-                                HStack(spacing: 4) {
+                                HStack(spacing: 3) {
                                     Image(systemName: "arrow.triangle.branch")
-                                        .font(.system(size: 11))
+                                        .font(.system(size: 10))
                                     Text("Fork")
-                                        .font(.system(size: 12, weight: .medium))
+                                        .font(.system(size: 11, weight: .medium))
                                 }
                                 .foregroundStyle(.white)
-                                .padding(.horizontal, 14)
-                                .padding(.vertical, 8)
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 5)
                                 .background(Color.tronAmber)
                                 .clipShape(Capsule())
                             }
 
                             Button(action: onRewind) {
-                                HStack(spacing: 4) {
+                                HStack(spacing: 3) {
                                     Image(systemName: "arrow.uturn.backward")
-                                        .font(.system(size: 11))
+                                        .font(.system(size: 10))
                                     Text("Rewind")
-                                        .font(.system(size: 12, weight: .medium))
+                                        .font(.system(size: 11, weight: .medium))
                                 }
                                 .foregroundStyle(.white)
-                                .padding(.horizontal, 14)
-                                .padding(.vertical, 8)
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 5)
                                 .background(Color.tronPurple)
                                 .clipShape(Capsule())
                             }
@@ -358,17 +358,17 @@ struct TreeNodeRow: View {
                         }
                     }
                 }
-                .padding(.top, 8)
+                .padding(.top, 4)
                 .padding(.leading, 28)  // Align under container (20px number + 8px spacing)
                 .padding(.trailing, 0)
-                .padding(.bottom, 4)
+                .padding(.bottom, 2)
                 .transition(.asymmetric(
                     insertion: .opacity.animation(.easeOut(duration: 0.25).delay(0.1)),
                     removal: .opacity.animation(.easeIn(duration: 0.15))
                 ))
             }
         }
-        .padding(.vertical, 2)
+        .padding(.vertical, 1)
         .id(event.id)
     }
 
