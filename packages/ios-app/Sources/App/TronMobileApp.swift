@@ -1245,8 +1245,17 @@ struct SessionPreviewSheet: View {
             )
 
             await MainActor.run {
-                // Sort events by sequence number for correct chronological order
-                events = result.events.sorted { $0.sequence < $1.sequence }
+                // Sort events by timestamp for correct chronological order
+                // (sequence reflects write order which may differ from logical order)
+                let sorted = result.events.sorted { $0.timestamp < $1.timestamp }
+
+                // Debug: log event order
+                print("[SessionPreview] Loaded \(sorted.count) events:")
+                for (idx, evt) in sorted.enumerated() {
+                    print("  [\(idx)] seq=\(evt.sequence) ts=\(evt.timestamp) type=\(evt.type)")
+                }
+
+                events = sorted
                 isLoading = false
             }
         } catch {
