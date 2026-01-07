@@ -201,9 +201,7 @@ struct ChatView: View {
                         from: previousModel,
                         to: result.newModel
                     )
-
-                    // Capture model change event in event store
-                    captureModelChangeEvent(from: previousModel, to: result.newModel)
+                    // Note: Model switch event is created by server and syncs automatically
                 }
             } catch {
                 await MainActor.run {
@@ -212,33 +210,6 @@ struct ChatView: View {
                     viewModel.showErrorAlert("Failed to switch model: \(error.localizedDescription)")
                 }
             }
-        }
-    }
-
-    /// Capture model change as an event in the event store for persistence
-    private func captureModelChangeEvent(from previousModel: String, to newModel: String) {
-        guard let session = eventStoreManager.activeSession else { return }
-
-        let event = SessionEvent(
-            id: "evt_\(UUID().uuidString.lowercased().replacingOccurrences(of: "-", with: ""))",
-            parentId: session.headEventId,
-            sessionId: sessionId,
-            workspaceId: session.workspaceId,
-            type: SessionEventType.configModelSwitch.rawValue,
-            timestamp: ISO8601DateFormatter().string(from: Date()),
-            sequence: session.eventCount + 1,
-            payload: [
-                "previousModel": AnyCodable(previousModel),
-                "newModel": AnyCodable(newModel),
-                "model": AnyCodable(newModel)
-            ]
-        )
-
-        do {
-            try eventStoreManager.cacheStreamingEvent(event)
-        } catch {
-            // Log but don't fail - this is informational
-            print("Failed to cache model change event: \(error)")
         }
     }
 
