@@ -328,13 +328,27 @@ export type ServerAuth =
  * ANTHROPIC_API_KEY to prevent it from being used instead of OAuth tokens.
  *
  * Priority:
- * 1. OAuth tokens from ~/.tron/auth.json (refreshed if needed)
- * 2. API key from ~/.tron/auth.json (fallback)
- * 3. null if no auth configured
+ * 1. CLAUDE_CODE_OAUTH_TOKEN env var (long-lived 1-year token from `claude setup-token`)
+ * 2. OAuth tokens from ~/.tron/auth.json (refreshed if needed)
+ * 3. API key from ~/.tron/auth.json (fallback)
+ * 4. null if no auth configured
  *
  * @returns ServerAuth if authenticated, null if login needed
  */
 export async function loadServerAuth(): Promise<ServerAuth | null> {
+  // Priority 1: Long-lived token from environment (1 year, from `claude setup-token`)
+  // This bypasses the broken OAuth refresh mechanism - see https://github.com/anthropics/claude-code/issues/12447
+  const envToken = process.env.CLAUDE_CODE_OAUTH_TOKEN;
+  if (envToken) {
+    logger.info('Using CLAUDE_CODE_OAUTH_TOKEN from environment (long-lived token)');
+    return {
+      type: 'oauth',
+      accessToken: envToken,
+      refreshToken: '', // Not needed for long-lived tokens
+      expiresAt: Date.now() + 365 * 24 * 60 * 60 * 1000, // 1 year from now
+    };
+  }
+
   const fs = await import('fs/promises');
   const path = await import('path');
   const os = await import('os');
