@@ -163,7 +163,11 @@ class ChatViewModel: ObservableObject {
                         case "modelChange":
                             if let fromModel = contentDict["from"],
                                let toModel = contentDict["to"] {
-                                loadedMessages.append(.modelChange(from: fromModel, to: toModel))
+                                // Format model IDs into friendly display names
+                                loadedMessages.append(.modelChange(
+                                    from: formatModelDisplayName(fromModel),
+                                    to: formatModelDisplayName(toModel)
+                                ))
                             }
                         default:
                             break
@@ -448,7 +452,11 @@ class ChatViewModel: ObservableObject {
                         case "modelChange":
                             if let fromModel = contentDict["from"],
                                let toModel = contentDict["to"] {
-                                loadedMessages.append(.modelChange(from: fromModel, to: toModel))
+                                // Format model IDs into friendly display names
+                                loadedMessages.append(.modelChange(
+                                    from: formatModelDisplayName(fromModel),
+                                    to: formatModelDisplayName(toModel)
+                                ))
                             }
                         default:
                             break

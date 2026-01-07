@@ -1,5 +1,46 @@
 import Foundation
 
+// MARK: - Model Name Formatting
+
+/// Central mapping of model IDs to human-readable display names
+private let modelDisplayNames: [String: String] = [
+    // Claude 4.5 family
+    "claude-opus-4-5-20251101": "Opus 4.5",
+    "claude-sonnet-4-5-20250929": "Sonnet 4.5",
+    "claude-haiku-4-5-20251001": "Haiku 4.5",
+
+    // Claude 4.1 family
+    "claude-opus-4-1-20250805": "Opus 4.1",
+
+    // Claude 4 family
+    "claude-opus-4-20250514": "Opus 4",
+    "claude-sonnet-4-20250514": "Sonnet 4",
+
+    // Claude 3.7 family
+    "claude-3-7-sonnet-20250219": "Sonnet 3.7",
+
+    // Claude 3.5 family
+    "claude-3-5-sonnet-20241022": "Sonnet 3.5",
+    "claude-3-5-sonnet-20240620": "Sonnet 3.5",
+    "claude-3-5-haiku-20241022": "Haiku 3.5",
+
+    // Claude 3 family
+    "claude-3-opus-20240229": "Opus 3",
+    "claude-3-sonnet-20240229": "Sonnet 3",
+    "claude-3-haiku-20240307": "Haiku 3",
+]
+
+/// Formats a model ID into a friendly display name using the central mapping
+func formatModelDisplayName(_ modelId: String) -> String {
+    // Direct lookup first
+    if let displayName = modelDisplayNames[modelId] {
+        return displayName
+    }
+
+    // Fallback: truncate long model IDs
+    return modelId.count > 15 ? String(modelId.prefix(15)) + "…" : modelId
+}
+
 // MARK: - Chat Message Model
 
 struct ChatMessage: Identifiable, Equatable {
