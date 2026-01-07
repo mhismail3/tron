@@ -988,13 +988,13 @@ struct SessionPreviewSheet: View {
 
     private var historyContent: some View {
         ScrollView {
-            LazyVStack(alignment: .leading, spacing: 12) {
+            LazyVStack(alignment: .leading, spacing: 8) {
                 // Session info header
                 sessionInfoHeader
 
-                // Display items
-                ForEach(Array(displayItems.enumerated()), id: \.offset) { _, item in
-                    PreviewDisplayItemView(item: item)
+                // Messages rendered with MessageBubble for visual parity with ChatView
+                ForEach(displayMessages) { message in
+                    MessageBubble(message: message)
                 }
 
                 // Bottom spacer for action bar
@@ -1098,36 +1098,57 @@ struct SessionPreviewSheet: View {
         .background(.ultraThinMaterial)
     }
 
-    // MARK: - Display Items
+    // MARK: - Display Messages
 
-    /// Displayable items converted from raw events
-    private var displayItems: [PreviewDisplayItem] {
-        var items: [PreviewDisplayItem] = []
+    /// Convert raw events to ChatMessage objects for rendering with MessageBubble
+    private var displayMessages: [ChatMessage] {
+        var messages: [ChatMessage] = []
 
         for event in events {
             switch event.type {
             case "message.user":
-                // User message - extract content
+                // User message
                 if let content = event.payload["content"]?.value as? String, !content.isEmpty {
-                    items.append(.userMessage(content))
+                    messages.append(ChatMessage(
+                        role: .user,
+                        content: .text(content)
+                    ))
                 }
 
             case "message.assistant":
                 // Assistant message - may have text content or content blocks with tool_use
                 if let content = event.payload["content"]?.value as? String, !content.isEmpty {
-                    items.append(.assistantMessage(content))
+                    messages.append(ChatMessage(
+                        role: .assistant,
+                        content: .text(content)
+                    ))
                 } else if let text = event.payload["text"]?.value as? String, !text.isEmpty {
-                    items.append(.assistantMessage(text))
+                    messages.append(ChatMessage(
+                        role: .assistant,
+                        content: .text(text)
+                    ))
                 } else if let contentBlocks = event.payload["content"]?.value as? [[String: Any]] {
                     // Parse content blocks for text and tool_use
                     for block in contentBlocks {
                         if let blockType = block["type"] as? String {
                             if blockType == "text", let text = block["text"] as? String, !text.isEmpty {
-                                items.append(.assistantMessage(text))
+                                messages.append(ChatMessage(
+                                    role: .assistant,
+                                    content: .text(text)
+                                ))
                             } else if blockType == "tool_use" {
                                 let name = block["name"] as? String ?? "unknown"
                                 let id = block["id"] as? String ?? ""
-                                items.append(.toolUse(name: name, id: id))
+                                let args = (block["input"] as? [String: Any]).flatMap { try? JSONSerialization.data(withJSONObject: $0) }.flatMap { String(data: $0, encoding: .utf8) } ?? "{}"
+                                messages.append(ChatMessage(
+                                    role: .assistant,
+                                    content: .toolUse(ToolUseData(
+                                        toolName: name,
+                                        toolCallId: id,
+                                        arguments: args,
+                                        status: .success
+                                    ))
+                                ))
                             }
                         }
                     }
@@ -1137,27 +1158,50 @@ struct SessionPreviewSheet: View {
                 // Tool call event
                 let name = event.payload["name"]?.value as? String ?? "unknown"
                 let id = event.payload["id"]?.value as? String ?? ""
-                items.append(.toolUse(name: name, id: id))
+                let args = event.payload["arguments"]?.value as? String ?? "{}"
+                messages.append(ChatMessage(
+                    role: .assistant,
+                    content: .toolUse(ToolUseData(
+                        toolName: name,
+                        toolCallId: id,
+                        arguments: args,
+                        status: .success
+                    ))
+                ))
 
             case "tool.result":
-                // Tool result
+                // Tool result - render with StandaloneToolResultView via MessageBubble
                 let toolName = event.payload["name"]?.value as? String
+                let toolCallId = event.payload["toolCallId"]?.value as? String ?? ""
                 let content = event.payload["content"]?.value as? String ?? ""
                 let isError = event.payload["isError"]?.value as? Bool ?? false
-                let truncated = content.count > 300 ? String(content.prefix(300)) + "..." : content
-                items.append(.toolResult(name: toolName, content: truncated, isError: isError))
+                let durationMs = event.payload["durationMs"]?.value as? Int
+                let arguments = event.payload["arguments"]?.value as? String
+                messages.append(ChatMessage(
+                    role: .toolResult,
+                    content: .toolResult(ToolResultData(
+                        toolCallId: toolCallId,
+                        content: content,
+                        isError: isError,
+                        toolName: toolName,
+                        arguments: arguments,
+                        durationMs: durationMs
+                    ))
+                ))
 
             case "notification.interrupted":
-                items.append(.notification(type: "interrupted", detail: nil))
+                messages.append(ChatMessage(
+                    role: .system,
+                    content: .interrupted
+                ))
 
             case "config.model_switch":
                 let from = event.payload["from"]?.value as? String ?? ""
                 let to = event.payload["to"]?.value as? String ?? ""
-                items.append(.notification(type: "modelSwitch", detail: "\(from.shortModelName) → \(to.shortModelName)"))
-
-            case "session.start":
-                let model = event.payload["model"]?.value as? String ?? "unknown"
-                items.append(.notification(type: "sessionStart", detail: model.shortModelName))
+                messages.append(ChatMessage(
+                    role: .system,
+                    content: .modelChange(from: formatModelDisplayName(from), to: formatModelDisplayName(to))
+                ))
 
             default:
                 // Skip other event types for preview
@@ -1165,7 +1209,7 @@ struct SessionPreviewSheet: View {
             }
         }
 
-        return items
+        return messages
     }
 
     // MARK: - Actions
@@ -1215,197 +1259,6 @@ struct SessionPreviewSheet: View {
                     forkError = error.localizedDescription
                 }
             }
-        }
-    }
-}
-
-// MARK: - Preview Display Item
-
-/// Types of displayable items in session preview
-enum PreviewDisplayItem {
-    case userMessage(String)
-    case assistantMessage(String)
-    case toolUse(name: String, id: String)
-    case toolResult(name: String?, content: String, isError: Bool)
-    case notification(type: String, detail: String?)
-}
-
-@available(iOS 26.0, *)
-struct PreviewDisplayItemView: View {
-    let item: PreviewDisplayItem
-
-    var body: some View {
-        switch item {
-        case .userMessage(let content):
-            userMessageView(content)
-
-        case .assistantMessage(let content):
-            assistantMessageView(content)
-
-        case .toolUse(let name, _):
-            toolUseView(name)
-
-        case .toolResult(let name, let content, let isError):
-            toolResultView(name: name, content: content, isError: isError)
-
-        case .notification(let type, let detail):
-            notificationView(type: type, detail: detail)
-        }
-    }
-
-    // MARK: - User Message
-
-    private func userMessageView(_ content: String) -> some View {
-        HStack(alignment: .top, spacing: 10) {
-            Image(systemName: "person.fill")
-                .font(.system(size: 11))
-                .foregroundStyle(.tronEmerald)
-                .frame(width: 22, height: 22)
-                .background(Color.tronEmerald.opacity(0.2))
-                .clipShape(Circle())
-
-            Text(content)
-                .font(.system(size: 13, design: .monospaced))
-                .foregroundStyle(.white.opacity(0.9))
-                .frame(maxWidth: .infinity, alignment: .leading)
-        }
-        .padding(10)
-        .glassEffect(.regular.tint(Color.tronEmerald.opacity(0.08)), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-    }
-
-    // MARK: - Assistant Message
-
-    private func assistantMessageView(_ content: String) -> some View {
-        HStack(alignment: .top, spacing: 10) {
-            Image(systemName: "cpu")
-                .font(.system(size: 11))
-                .foregroundStyle(.tronEmerald)
-                .frame(width: 22, height: 22)
-                .background(Color.tronPhthaloGreen.opacity(0.3))
-                .clipShape(Circle())
-
-            Text(content)
-                .font(.system(size: 13, design: .monospaced))
-                .foregroundStyle(.white.opacity(0.8))
-                .frame(maxWidth: .infinity, alignment: .leading)
-        }
-        .padding(10)
-        .glassEffect(.regular.tint(Color.tronPhthaloGreen.opacity(0.06)), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-    }
-
-    // MARK: - Tool Use
-
-    private func toolUseView(_ name: String) -> some View {
-        HStack(spacing: 6) {
-            Image(systemName: "wrench.and.screwdriver.fill")
-                .font(.system(size: 10))
-                .foregroundStyle(.tronEmerald.opacity(0.8))
-
-            Text(toolDisplayName(name))
-                .font(.system(size: 11, weight: .medium, design: .monospaced))
-                .foregroundStyle(.tronEmerald.opacity(0.9))
-        }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 6)
-        .glassEffect(.regular.tint(Color.tronEmerald.opacity(0.15)), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-    }
-
-    // MARK: - Tool Result
-
-    private func toolResultView(name: String?, content: String, isError: Bool) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack(spacing: 4) {
-                Image(systemName: isError ? "xmark.circle.fill" : "checkmark.circle.fill")
-                    .font(.system(size: 10))
-                    .foregroundStyle(isError ? .tronError : .tronEmerald.opacity(0.7))
-
-                if let name = name {
-                    Text(toolDisplayName(name))
-                        .font(.system(size: 10, weight: .medium, design: .monospaced))
-                        .foregroundStyle(.white.opacity(0.5))
-                }
-
-                Text(isError ? "error" : "result")
-                    .font(.system(size: 9, design: .monospaced))
-                    .foregroundStyle(.white.opacity(0.4))
-            }
-
-            if !content.isEmpty {
-                Text(content)
-                    .font(.system(size: 11, design: .monospaced))
-                    .foregroundStyle(.white.opacity(0.6))
-                    .lineLimit(5)
-            }
-        }
-        .padding(8)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.white.opacity(0.03))
-        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .stroke(isError ? Color.tronError.opacity(0.3) : Color.white.opacity(0.1), lineWidth: 0.5)
-        )
-    }
-
-    // MARK: - Notification
-
-    private func notificationView(type: String, detail: String?) -> some View {
-        HStack(spacing: 6) {
-            Image(systemName: notificationIcon(type))
-                .font(.system(size: 10))
-
-            Text(notificationText(type: type, detail: detail))
-                .font(.system(size: 10, weight: .medium, design: .monospaced))
-        }
-        .foregroundStyle(notificationColor(type))
-        .padding(.horizontal, 10)
-        .padding(.vertical, 5)
-        .frame(maxWidth: .infinity)
-        .background(notificationColor(type).opacity(0.1))
-        .clipShape(Capsule())
-    }
-
-    // MARK: - Helpers
-
-    private func toolDisplayName(_ name: String) -> String {
-        switch name.lowercased() {
-        case "read": return "Read"
-        case "write": return "Write"
-        case "edit": return "Edit"
-        case "bash": return "Bash"
-        case "glob": return "Glob"
-        case "grep": return "Grep"
-        case "task": return "Task"
-        case "webfetch": return "WebFetch"
-        case "websearch": return "WebSearch"
-        default: return name
-        }
-    }
-
-    private func notificationIcon(_ type: String) -> String {
-        switch type {
-        case "interrupted": return "pause.circle.fill"
-        case "modelSwitch": return "arrow.triangle.swap"
-        case "sessionStart": return "play.circle.fill"
-        default: return "info.circle.fill"
-        }
-    }
-
-    private func notificationText(type: String, detail: String?) -> String {
-        switch type {
-        case "interrupted": return "Session interrupted"
-        case "modelSwitch": return detail ?? "Model changed"
-        case "sessionStart": return "Started with \(detail ?? "unknown")"
-        default: return detail ?? type
-        }
-    }
-
-    private func notificationColor(_ type: String) -> Color {
-        switch type {
-        case "interrupted": return .orange
-        case "modelSwitch": return .tronEmerald
-        case "sessionStart": return .tronEmerald.opacity(0.7)
-        default: return .white.opacity(0.6)
         }
     }
 }
