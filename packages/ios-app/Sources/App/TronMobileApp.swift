@@ -403,7 +403,7 @@ struct NewSessionFlow: View {
                             .padding(.vertical, 14)
                             .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                         }
-                        .glassEffect(.regular.tint(Color.tronPhthaloGreen).interactive(), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        .glassEffect(.regular.tint(Color.tronPhthaloGreen.opacity(0.15)).interactive(), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
 
                         Text("The directory where the agent will operate")
                             .font(.caption)
@@ -466,7 +466,7 @@ struct NewSessionFlow: View {
                             .padding(.horizontal, 16)
                             .padding(.vertical, 14)
                         }
-                        .glassEffect(.regular.tint(Color.tronPhthaloGreen).interactive(), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        .glassEffect(.regular.tint(Color.tronPhthaloGreen.opacity(0.15)).interactive(), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
 
                         Text(modelDescription)
                             .font(.caption)
@@ -490,13 +490,17 @@ struct NewSessionFlow: View {
                 .padding(.top, 20)
             }
             .background(Color.tronSurface)
-            .navigationTitle("New Session")
             .navigationBarTitleDisplayMode(.inline)
             .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     Button("Cancel") { dismiss() }
                         .font(.subheadline.weight(.medium))
+                }
+                ToolbarItem(placement: .principal) {
+                    Text("New Session")
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(.tronEmerald)
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     if isCreating {
