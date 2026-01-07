@@ -172,6 +172,18 @@ struct AgentStateParams: Encodable {
     let sessionId: String
 }
 
+/// Tool call info for in-progress turn (for resume support)
+struct CurrentTurnToolCall: Decodable {
+    let toolCallId: String
+    let toolName: String
+    let arguments: [String: AnyCodable]?
+    let status: String  // "pending" | "running" | "completed" | "error"
+    let result: String?
+    let isError: Bool?
+    let startedAt: String
+    let completedAt: String?
+}
+
 struct AgentStateResult: Decodable {
     let isRunning: Bool
     let currentTurn: Int
@@ -179,6 +191,10 @@ struct AgentStateResult: Decodable {
     let tokenUsage: AgentStateTokenUsage?
     let model: String
     let tools: [String]?  // Server returns this but we don't need it
+    /// Accumulated text from current in-progress turn (for resume)
+    let currentTurnText: String?
+    /// Tool calls from current in-progress turn (for resume)
+    let currentTurnToolCalls: [CurrentTurnToolCall]?
 }
 
 /// Token usage specifically for agent.getState response (uses different field names)

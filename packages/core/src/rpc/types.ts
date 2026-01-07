@@ -295,6 +295,18 @@ export interface AgentGetStateParams {
   sessionId: string;
 }
 
+/** Tool call info for in-progress turn */
+export interface CurrentTurnToolCall {
+  toolCallId: string;
+  toolName: string;
+  arguments: Record<string, unknown>;
+  status: 'pending' | 'running' | 'completed' | 'error';
+  result?: string;
+  isError?: boolean;
+  startedAt: string;
+  completedAt?: string;
+}
+
 export interface AgentGetStateResult {
   isRunning: boolean;
   currentTurn: number;
@@ -305,6 +317,10 @@ export interface AgentGetStateResult {
   };
   model: string;
   tools: string[];
+  /** Accumulated text from current in-progress turn (for resume) */
+  currentTurnText?: string;
+  /** Tool calls from current in-progress turn (for resume) */
+  currentTurnToolCalls?: CurrentTurnToolCall[];
 }
 
 // =============================================================================

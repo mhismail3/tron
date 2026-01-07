@@ -151,6 +151,9 @@ function createRpcContext(orchestrator: EventStoreOrchestrator): RpcContext {
           },
           model: session?.model ?? 'unknown',
           tools: [],
+          // Include current turn content for resume support (only when agent is running)
+          currentTurnText: active?.isProcessing ? active.currentTurnAccumulatedText : undefined,
+          currentTurnToolCalls: active?.isProcessing ? active.currentTurnToolCalls : undefined,
         };
       },
     },

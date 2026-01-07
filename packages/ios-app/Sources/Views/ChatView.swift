@@ -160,12 +160,14 @@ struct ChatView: View {
             }
         }
         .task {
-            // Inject event store manager for event-sourced persistence
-            // This syncs from server and loads messages - MUST be awaited to prevent
-            // race conditions where user sends a message before history is loaded
+            // Order is critical for handling in-progress sessions:
+            // 1. Set manager reference first (so connectAndResume can update processing state)
+            // 2. Connect and resume (checks if agent is running, sets isProcessing)
+            // 3. Load messages (respects isProcessing flag to preserve streaming state)
             let workspaceId = eventStoreManager.activeSession?.workspaceId ?? ""
-            await viewModel.setEventStoreManager(eventStoreManager, workspaceId: workspaceId)
+            viewModel.setEventStoreManager(eventStoreManager, workspaceId: workspaceId)
             await viewModel.connectAndResume()
+            await viewModel.syncAndLoadMessagesForResume()
 
             // Pre-fetch models in background for faster ModelSwitcher opening
             await prefetchModels()

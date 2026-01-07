@@ -56,6 +56,7 @@ export type {
   AgentAbortResult,
   AgentGetStateParams,
   AgentGetStateResult,
+  CurrentTurnToolCall,
   // Model types
   ModelSwitchParams,
   ModelSwitchResult,

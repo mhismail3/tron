@@ -81,13 +81,16 @@ class ChatViewModel: ObservableObject {
     }
 
     /// Set the event store manager reference (used when injected via environment)
-    /// This method is async and should be awaited to ensure history is fully loaded
-    /// before allowing user interaction (prevents race conditions with streaming)
-    func setEventStoreManager(_ manager: EventStoreManager, workspaceId: String) async {
+    /// Call this BEFORE connectAndResume() so agent state check can update processing state
+    func setEventStoreManager(_ manager: EventStoreManager, workspaceId: String) {
         self.eventStoreManager = manager
         self.workspaceId = workspaceId
-        // Sync from server first (to get any events that happened while we were away),
-        // then load persisted messages - awaited to prevent race conditions
+    }
+
+    /// Sync events from server and load persisted messages
+    /// Call this AFTER connectAndResume() so isProcessing flag is already set if agent is running
+    /// This ensures the streaming guard in loadPersistedMessagesAsync works correctly
+    func syncAndLoadMessagesForResume() async {
         await syncAndLoadMessages()
     }
 
@@ -121,11 +124,18 @@ class ChatViewModel: ObservableObject {
     private func loadPersistedMessagesAsync() async {
         guard let manager = eventStoreManager else { return }
 
-        // Don't replace messages if actively streaming - user is in the middle of a turn
-        // This protects mid-stream content that hasn't been persisted to event store yet
-        if isProcessing || streamingMessageId != nil {
-            logger.info("Skipping history load - streaming in progress, preserving current content", category: .session)
-            return
+        // If streaming is in progress, we need to preserve the streaming message
+        // but still load history so user can see past messages
+        let preserveStreamingMessage = isProcessing || streamingMessageId != nil
+        var streamingMessageToRestore: ChatMessage?
+
+        if preserveStreamingMessage {
+            // Save the streaming message to restore after loading history
+            if let streamingId = streamingMessageId,
+               let existingStreamingMsg = messages.first(where: { $0.id == streamingId }) {
+                streamingMessageToRestore = existingStreamingMsg
+            }
+            logger.info("Loading history while preserving streaming state (isProcessing=\(isProcessing))", category: .session)
         }
 
         // Yield to let UI render first
@@ -299,6 +309,13 @@ class ChatViewModel: ObservableObject {
                 messages = Array(loadedMessages[startIndex...])
             } else {
                 messages = []
+            }
+
+            // Restore streaming message at the end if we were preserving it
+            // This ensures user sees both history and the in-progress response
+            if let streamingMsg = streamingMessageToRestore {
+                messages.append(streamingMsg)
+                logger.info("Restored streaming message after loading \(loadedMessages.count) historical messages", category: .session)
             }
 
             // Update turn counter and token usage
@@ -595,6 +612,104 @@ class ChatViewModel: ObservableObject {
             logger.error("Failed to resume session: \(error.localizedDescription)", category: .session)
             showErrorAlert("Failed to resume session: \(error.localizedDescription)")
             return
+        }
+
+        // CRITICAL: Check if agent is currently running (handles resuming into in-progress session)
+        // This must happen BEFORE loading messages so isProcessing flag is set correctly
+        do {
+            let agentState = try await rpcClient.getAgentStateForSession(sessionId: sessionId)
+            if agentState.isRunning {
+                logger.info("Agent is currently running - setting up streaming state for in-progress session", category: .session)
+                isProcessing = true
+                eventStoreManager?.setSessionProcessing(sessionId, isProcessing: true)
+
+                // Use accumulated content from server if available (catch-up content)
+                let accumulatedText = agentState.currentTurnText ?? ""
+                let toolCalls = agentState.currentTurnToolCalls ?? []
+
+                logger.info("Resume catch-up: \(accumulatedText.count) chars text, \(toolCalls.count) tool calls", category: .session)
+
+                // Create streaming message with accumulated content
+                let streamingMessage = ChatMessage.streaming()
+                messages.append(streamingMessage)
+                streamingMessageId = streamingMessage.id
+                streamingText = accumulatedText
+
+                // Process tool calls that happened before we connected
+                // IMPORTANT: We need to create UI messages for each tool call, not just track them
+                for toolCall in toolCalls {
+                    logger.info("Resume catch-up: tool call \(toolCall.toolName) status=\(toolCall.status)", category: .session)
+
+                    // Format arguments as string for display
+                    var argsString = "{}"
+                    if let args = toolCall.arguments {
+                        if let argsData = try? JSONEncoder().encode(args),
+                           let argsJson = String(data: argsData, encoding: .utf8) {
+                            argsString = argsJson
+                        }
+                    }
+
+                    // Add to current turn tool calls for tracking
+                    var record = ToolCallRecord(
+                        toolCallId: toolCall.toolCallId,
+                        toolName: toolCall.toolName,
+                        arguments: argsString
+                    )
+                    record.result = toolCall.result
+                    record.isError = toolCall.isError ?? false
+                    currentTurnToolCalls.append(record)
+
+                    // Create UI message for the tool call (this is what was missing!)
+                    // Use the toolCallId as the message UUID so we can update it later
+                    let messageId = UUID(uuidString: toolCall.toolCallId) ?? UUID()
+
+                    let toolUseData = ToolUseData(
+                        toolName: toolCall.toolName,
+                        toolCallId: toolCall.toolCallId,
+                        arguments: argsString,
+                        status: toolCall.status == "running" ? .running : (toolCall.isError == true ? .error : .success),
+                        result: toolCall.result,
+                        durationMs: nil
+                    )
+
+                    var toolMessage = ChatMessage(
+                        id: messageId,
+                        role: .assistant,
+                        content: .toolUse(toolUseData),
+                        timestamp: Date()
+                    )
+
+                    // Track in currentToolMessages for result updates
+                    currentToolMessages[messageId] = toolMessage
+
+                    // If tool call is already completed, update the message with result
+                    if toolCall.status == "completed" || toolCall.status == "error" {
+                        let resultData = ToolResultData(
+                            toolCallId: toolCall.toolCallId,
+                            content: toolCall.result ?? (toolCall.isError == true ? "Error" : "(no output)"),
+                            isError: toolCall.isError ?? false
+                        )
+                        toolMessage.content = .toolResult(resultData)
+                        logger.debug("Resume catch-up: tool \(toolCall.toolName) already completed, updated with result", category: .session)
+                    }
+
+                    // Add to messages array so it appears in UI
+                    messages.append(toolMessage)
+                    logger.info("Resume catch-up: created UI message for tool \(toolCall.toolName)", category: .session)
+                }
+
+                // Update streaming message with accumulated text
+                if !accumulatedText.isEmpty {
+                    updateStreamingMessage(with: .streaming(streamingText))
+                }
+
+                logger.info("Created streaming message with catch-up content for in-progress turn", category: .session)
+            } else {
+                logger.debug("Agent is not running - normal session resume", category: .session)
+            }
+        } catch {
+            // Non-fatal - we can still use the session, just won't have accurate processing state
+            logger.warning("Failed to check agent state: \(error.localizedDescription)", category: .session)
         }
 
         // NOTE: We intentionally do NOT fetch server history here.

@@ -35,6 +35,7 @@ import {
   type WorktreeCoordinatorConfig,
   type ServerAuth,
   type EventType,
+  type CurrentTurnToolCall,
 } from '@tron/core';
 
 const logger = createLogger('event-store-orchestrator');
@@ -326,6 +327,18 @@ export interface ActiveSession {
    * If an append fails, subsequent appends are skipped to preserve chain integrity.
    */
   lastAppendError?: Error;
+  /**
+   * Accumulated text content from current in-progress turn.
+   * Used to provide catch-up content when client resumes into running session.
+   * Reset at turn_start, accumulated on message_update, cleared on turn_end.
+   */
+  currentTurnAccumulatedText: string;
+  /**
+   * Tool calls from current in-progress turn.
+   * Used to provide catch-up content when client resumes into running session.
+   * Reset at turn_start, updated on tool_start/tool_end, cleared on turn_end.
+   */
+  currentTurnToolCalls: CurrentTurnToolCall[];
 }
 
 export interface AgentRunOptions {
@@ -518,6 +531,9 @@ export class EventStoreOrchestrator extends EventEmitter {
       // Initialize linearization tracking with root event as head
       pendingHeadEventId: result.rootEvent.id,
       appendPromiseChain: Promise.resolve(),
+      // Initialize current turn tracking for resume support
+      currentTurnAccumulatedText: '',
+      currentTurnToolCalls: [],
     });
 
     this.emit('session_created', {
@@ -576,6 +592,9 @@ export class EventStoreOrchestrator extends EventEmitter {
       // Initialize linearization tracking from session's current head
       pendingHeadEventId: session.headEventId ?? null,
       appendPromiseChain: Promise.resolve(),
+      // Initialize current turn tracking for resume support
+      currentTurnAccumulatedText: '',
+      currentTurnToolCalls: [],
     });
 
     logger.info('Session resumed', {
@@ -1513,6 +1532,9 @@ export class EventStoreOrchestrator extends EventEmitter {
         // Update current turn for tool event tracking
         if (active) {
           active.currentTurn = event.turn;
+          // Reset current turn accumulation for new turn
+          active.currentTurnAccumulatedText = '';
+          active.currentTurnToolCalls = [];
         }
 
         this.emit('agent_event', {
@@ -1527,6 +1549,12 @@ export class EventStoreOrchestrator extends EventEmitter {
         break;
 
       case 'turn_end':
+        // Clear current turn accumulation (turn complete, content now persisted)
+        if (active) {
+          active.currentTurnAccumulatedText = '';
+          active.currentTurnToolCalls = [];
+        }
+
         this.emit('agent_event', {
           type: 'agent.turn_end',
           sessionId,
@@ -1546,6 +1574,11 @@ export class EventStoreOrchestrator extends EventEmitter {
         break;
 
       case 'message_update':
+        // Accumulate text for resume support
+        if (active && typeof event.content === 'string') {
+          active.currentTurnAccumulatedText += event.content;
+        }
+
         this.emit('agent_event', {
           type: 'agent.text_delta',
           sessionId,
@@ -1555,6 +1588,17 @@ export class EventStoreOrchestrator extends EventEmitter {
         break;
 
       case 'tool_execution_start':
+        // Track tool call for resume support
+        if (active) {
+          active.currentTurnToolCalls.push({
+            toolCallId: event.toolCallId,
+            toolName: event.toolName,
+            arguments: event.arguments ?? {},
+            status: 'running',
+            startedAt: timestamp,
+          });
+        }
+
         this.emit('agent_event', {
           type: 'agent.tool_start',
           sessionId,
@@ -1579,6 +1623,19 @@ export class EventStoreOrchestrator extends EventEmitter {
         const resultContent = typeof event.result === 'object' && event.result !== null
           ? (event.result as { content?: string }).content ?? JSON.stringify(event.result)
           : String(event.result ?? '');
+
+        // Update tool call tracking for resume support
+        if (active) {
+          const toolCall = active.currentTurnToolCalls.find(
+            tc => tc.toolCallId === event.toolCallId
+          );
+          if (toolCall) {
+            toolCall.status = event.isError ? 'error' : 'completed';
+            toolCall.result = resultContent;
+            toolCall.isError = event.isError ?? false;
+            toolCall.completedAt = timestamp;
+          }
+        }
 
         this.emit('agent_event', {
           type: 'agent.tool_end',
