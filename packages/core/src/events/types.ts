@@ -58,6 +58,8 @@ export type EventType =
   // Model/config changes
   | 'config.model_switch'
   | 'config.prompt_update'
+  // Notifications (in-chat pill notifications)
+  | 'notification.interrupted'
   // Ledger/state
   | 'ledger.update'
   | 'ledger.goal'

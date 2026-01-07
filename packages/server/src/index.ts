@@ -141,6 +141,14 @@ function createRpcContext(orchestrator: EventStoreOrchestrator): RpcContext {
         const session = await orchestrator.getSession(sessionId);
         // Get ACTUAL agent message count (not just DB count) for debugging
         const agentState = active?.agent.getState();
+
+        // Check if session was interrupted (from active session flag or from persisted events)
+        let wasInterrupted = active?.wasInterrupted ?? false;
+        if (!wasInterrupted && session) {
+          // Check if the last assistant message was interrupted
+          wasInterrupted = await orchestrator.wasSessionInterrupted(sessionId);
+        }
+
         return {
           isRunning: active?.isProcessing ?? false,
           currentTurn: agentState?.currentTurn ?? 0,
@@ -154,6 +162,8 @@ function createRpcContext(orchestrator: EventStoreOrchestrator): RpcContext {
           // Include current turn content for resume support (only when agent is running)
           currentTurnText: active?.isProcessing ? active.currentTurnAccumulatedText : undefined,
           currentTurnToolCalls: active?.isProcessing ? active.currentTurnToolCalls : undefined,
+          // Flag indicating session was interrupted
+          wasInterrupted,
         };
       },
     },

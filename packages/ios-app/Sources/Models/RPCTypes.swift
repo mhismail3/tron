@@ -195,6 +195,8 @@ struct AgentStateResult: Decodable {
     let currentTurnText: String?
     /// Tool calls from current in-progress turn (for resume)
     let currentTurnToolCalls: [CurrentTurnToolCall]?
+    /// Whether the session was interrupted (last assistant message has interrupted flag)
+    let wasInterrupted: Bool?
 }
 
 /// Token usage specifically for agent.getState response (uses different field names)

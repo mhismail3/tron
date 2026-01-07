@@ -65,6 +65,9 @@ struct MessageBubble: View {
 
         case .modelChange(let from, let to):
             ModelChangeNotificationView(from: from, to: to)
+
+        case .interrupted:
+            InterruptedNotificationView()
         }
     }
 }
@@ -104,6 +107,31 @@ struct ModelChangeNotificationView: View {
         .overlay(
             Capsule()
                 .stroke(Color.tronEmerald.opacity(0.3), lineWidth: 0.5)
+        )
+        .frame(maxWidth: .infinity, alignment: .center)
+    }
+}
+
+// MARK: - Interrupted Notification View (Red pill-style in-chat notification)
+
+struct InterruptedNotificationView: View {
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "stop.circle.fill")
+                .font(.system(size: 10, weight: .medium))
+                .foregroundStyle(.red)
+
+            Text("Session interrupted")
+                .font(.system(size: 11, weight: .medium, design: .monospaced))
+                .foregroundStyle(.red.opacity(0.9))
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(Color.red.opacity(0.1))
+        .clipShape(Capsule())
+        .overlay(
+            Capsule()
+                .stroke(Color.red.opacity(0.3), lineWidth: 0.5)
         )
         .frame(maxWidth: .infinity, alignment: .center)
     }

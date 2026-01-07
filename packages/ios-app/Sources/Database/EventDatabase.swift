@@ -671,11 +671,16 @@ class EventDatabase: ObservableObject {
                 }
 
             case "config.model_switch":
-                // Track model changes through the event chain
+                // Track model changes through the event chain AND create notification message
                 if let newModel = event.payload["newModel"]?.value as? String {
                     let previousModel = currentModel ?? "unknown"
                     currentModel = newModel
                     logger.info("[STATE] Model switched: \(previousModel) → \(newModel)")
+                    // Create notification message for model change
+                    messages.append(ReconstructedMessage(
+                        role: "notification",
+                        content: ["type": "modelChange", "from": previousModel, "to": newModel]
+                    ))
                 }
 
             case "message.user":
@@ -786,6 +791,13 @@ class EventDatabase: ObservableObject {
                     if let constraints = updates["constraints"] as? [String] { ledger?.constraints = constraints }
                     if let files = updates["workingFiles"] as? [String] { ledger?.workingFiles = files }
                 }
+
+            case "notification.interrupted":
+                // Persist notification as system message with special marker
+                messages.append(ReconstructedMessage(
+                    role: "notification",
+                    content: ["type": "interrupted"]
+                ))
 
             default:
                 break

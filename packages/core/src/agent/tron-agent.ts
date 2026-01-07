@@ -422,8 +422,19 @@ export class TronAgent {
 
       // Execute tool calls if any
       let toolCallsExecuted = 0;
+      let wasInterruptedDuringTools = false;
       if (toolCalls.length > 0) {
         for (const toolCall of toolCalls) {
+          // Check for abort BEFORE executing each tool
+          if (this.abortController?.signal.aborted) {
+            wasInterruptedDuringTools = true;
+            logger.info('Abort detected before tool execution', {
+              sessionId: this.sessionId,
+              toolName: toolCall.name,
+            });
+            break;
+          }
+
           const result = await this.executeTool({
             toolCallId: toolCall.id,
             toolName: toolCall.name,
@@ -439,7 +450,42 @@ export class TronAgent {
           };
           this.messages.push(toolResultMessage);
           toolCallsExecuted++;
+
+          // Check for abort AFTER tool execution (tool may have been interrupted)
+          if (this.abortController?.signal.aborted) {
+            wasInterruptedDuringTools = true;
+            logger.info('Abort detected after tool execution', {
+              sessionId: this.sessionId,
+              toolName: toolCall.name,
+              wasInterrupted: (result.result.details as Record<string, unknown>)?.interrupted,
+            });
+            break;
+          }
+
+          // Also check if the tool itself reported being interrupted
+          const details = result.result.details as Record<string, unknown> | undefined;
+          if (details?.interrupted) {
+            wasInterruptedDuringTools = true;
+            logger.info('Tool reported interruption', {
+              sessionId: this.sessionId,
+              toolName: toolCall.name,
+            });
+            break;
+          }
         }
+      }
+
+      // If interrupted during tool execution, return early
+      if (wasInterruptedDuringTools) {
+        this.isRunning = false;
+        return {
+          success: false,
+          error: 'Interrupted by user',
+          tokenUsage: this.tokenUsage,
+          interrupted: true,
+          partialContent: this.streamingContent || undefined,
+          toolCallsExecuted,
+        };
       }
 
       const turnDuration = Date.now() - turnStartTime;

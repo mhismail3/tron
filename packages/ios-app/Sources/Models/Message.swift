@@ -145,6 +145,8 @@ enum MessageContent: Equatable {
     case images([ImageContent])
     /// In-chat notification for model change
     case modelChange(from: String, to: String)
+    /// In-chat notification for interrupted session
+    case interrupted
 
     var textContent: String {
         switch self {
@@ -162,6 +164,8 @@ enum MessageContent: Equatable {
             return "[Images]"
         case .modelChange(let from, let to):
             return "Switched from \(from) to \(to)"
+        case .interrupted:
+            return "Session interrupted"
         }
     }
 
@@ -176,7 +180,7 @@ enum MessageContent: Equatable {
 
     var isNotification: Bool {
         switch self {
-        case .modelChange:
+        case .modelChange, .interrupted:
             return true
         default:
             return false
@@ -309,5 +313,10 @@ extension ChatMessage {
     /// In-chat notification for model changes
     static func modelChange(from: String, to: String) -> ChatMessage {
         ChatMessage(role: .system, content: .modelChange(from: from, to: to))
+    }
+
+    /// In-chat notification for session interruption
+    static func interrupted() -> ChatMessage {
+        ChatMessage(role: .system, content: .interrupted)
     }
 }

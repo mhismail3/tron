@@ -154,6 +154,24 @@ class ChatViewModel: ObservableObject {
                     await Task.yield()
                 }
 
+                // Handle notification events (persisted pill notifications)
+                if reconstructed.role == "notification" {
+                    if let contentDict = reconstructed.content as? [String: String] {
+                        switch contentDict["type"] {
+                        case "interrupted":
+                            loadedMessages.append(.interrupted())
+                        case "modelChange":
+                            if let fromModel = contentDict["from"],
+                               let toModel = contentDict["to"] {
+                                loadedMessages.append(.modelChange(from: fromModel, to: toModel))
+                            }
+                        default:
+                            break
+                        }
+                    }
+                    continue
+                }
+
                 let role: MessageRole
                 switch reconstructed.role {
                 case "user": role = .user
@@ -386,6 +404,24 @@ class ChatViewModel: ObservableObject {
             var loadedMessages: [ChatMessage] = []
 
             for reconstructed in state.messages {
+                // Handle notification events (persisted pill notifications)
+                if reconstructed.role == "notification" {
+                    if let contentDict = reconstructed.content as? [String: String] {
+                        switch contentDict["type"] {
+                        case "interrupted":
+                            loadedMessages.append(.interrupted())
+                        case "modelChange":
+                            if let fromModel = contentDict["from"],
+                               let toModel = contentDict["to"] {
+                                loadedMessages.append(.modelChange(from: fromModel, to: toModel))
+                            }
+                        default:
+                            break
+                        }
+                    }
+                    continue
+                }
+
                 let role: MessageRole
                 switch reconstructed.role {
                 case "user": role = .user
@@ -765,6 +801,7 @@ class ChatViewModel: ObservableObject {
                 logger.info("Created \(messages.count) catch-up messages for in-progress turn", category: .session)
             } else {
                 logger.debug("Agent is not running - normal session resume", category: .session)
+                // Interrupted notifications are now persisted as events and loaded from EventDatabase
             }
         } catch {
             // Non-fatal - we can still use the session, just won't have accurate processing state
@@ -923,7 +960,7 @@ class ChatViewModel: ObservableObject {
                     lastAssistantResponse: "Interrupted"
                 )
                 finalizeStreamingMessage()
-                messages.append(.system("Agent aborted"))
+                messages.append(.interrupted())
                 logger.info("Agent aborted successfully", category: .chat)
             } catch {
                 logger.error("Failed to abort agent: \(error.localizedDescription)", category: .chat)

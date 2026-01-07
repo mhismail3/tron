@@ -155,6 +155,9 @@ struct SessionEvent: Identifiable, Codable {
                      (payload["model"]?.value as? String)?.shortModelName ?? "?"
             return "\(from) → \(to)"
 
+        case .notificationInterrupted:
+            return "Session interrupted"
+
         case .compactBoundary:
             return "Context compacted"
 
@@ -368,6 +371,9 @@ enum SessionEventType: String, Codable {
 
     case configModelSwitch = "config.model_switch"
     case configPromptUpdate = "config.prompt_update"
+
+    // Notifications (in-chat pill notifications)
+    case notificationInterrupted = "notification.interrupted"
 
     case ledgerUpdate = "ledger.update"
     case ledgerGoal = "ledger.goal"

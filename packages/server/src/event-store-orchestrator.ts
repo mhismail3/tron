@@ -280,6 +280,8 @@ export interface EventStoreOrchestratorConfig {
   maxConcurrentSessions?: number;
   /** Worktree configuration */
   worktree?: WorktreeCoordinatorConfig;
+  /** Pre-existing EventStore instance (for testing) - if provided, eventStoreDbPath is ignored */
+  eventStore?: EventStore;
 }
 
 /**
@@ -343,6 +345,11 @@ export interface ActiveSession {
    * Turn N shows tools from Turn 1, 2, ..., N.
    */
   currentTurnToolCalls: CurrentTurnToolCall[];
+  /**
+   * Flag indicating if this session was interrupted by user.
+   * Used to inform clients that the session ended due to interruption.
+   */
+  wasInterrupted?: boolean;
 }
 
 export interface AgentRunOptions {
@@ -414,12 +421,14 @@ export class EventStoreOrchestrator extends EventEmitter {
     super();
     this.config = config;
 
-    // Default event store path
-    const eventStoreDbPath = config.eventStoreDbPath ??
-      path.join(os.homedir(), '.tron', 'events.db');
-
-    // Initialize EventStore
-    this.eventStore = new EventStore(eventStoreDbPath);
+    // Use injected EventStore (for testing) or create new one
+    if (config.eventStore) {
+      this.eventStore = config.eventStore;
+    } else {
+      const eventStoreDbPath = config.eventStoreDbPath ??
+        path.join(os.homedir(), '.tron', 'events.db');
+      this.eventStore = new EventStore(eventStoreDbPath);
+    }
 
     // Initialize WorktreeCoordinator
     this.worktreeCoordinator = createWorktreeCoordinator(this.eventStore, {
@@ -731,6 +740,30 @@ export class EventStoreOrchestrator extends EventEmitter {
     return this.activeSessions.get(sessionId);
   }
 
+  /**
+   * Check if a session was interrupted by looking at the last assistant message.
+   * Returns true if the session's last assistant message has interrupted: true in payload.
+   */
+  async wasSessionInterrupted(sessionId: string): Promise<boolean> {
+    try {
+      // Get all events for the session
+      const events = await this.eventStore.getEventsBySession(sessionId as SessionId);
+
+      // Find the last message.assistant event
+      for (let i = events.length - 1; i >= 0; i--) {
+        const event = events[i];
+        if (event && event.type === 'message.assistant') {
+          const payload = event.payload as Record<string, unknown>;
+          return payload?.interrupted === true;
+        }
+      }
+      return false;
+    } catch (error) {
+      logger.error('Failed to check session interrupted status', { sessionId, error });
+      return false;
+    }
+  }
+
   // ===========================================================================
   // Fork & Rewind
   // ===========================================================================
@@ -919,14 +952,14 @@ export class EventStoreOrchestrator extends EventEmitter {
       const runResult = await active.agent.run(options.prompt);
       active.lastActivity = new Date();
 
-      // Handle interrupted runs - don't store incomplete content
-      // Note: The agent already emits 'agent_interrupted' via abort() which gets
-      // forwarded as 'agent.complete' with interrupted=true to clients
+      // Handle interrupted runs - PERSIST partial content so it survives session resume
       if (runResult.interrupted) {
         logger.info('Agent run interrupted', {
           sessionId: options.sessionId,
           turn: runResult.turns,
           hasPartialContent: !!runResult.partialContent,
+          accumulatedTextLength: active.currentTurnAccumulatedText?.length ?? 0,
+          toolCallsCount: active.currentTurnToolCalls?.length ?? 0,
         });
 
         // Notify the RPC caller (if any) about the interruption
@@ -941,6 +974,85 @@ export class EventStoreOrchestrator extends EventEmitter {
             },
           });
         }
+
+        // CRITICAL: Persist partial content so it survives session resume
+        // Build content from accumulated streaming data
+        const interruptedContent: any[] = [];
+
+        // Add any accumulated text
+        const partialText = active.currentTurnAccumulatedText || runResult.partialContent || '';
+        if (partialText) {
+          interruptedContent.push({ type: 'text', text: partialText });
+        }
+
+        // Add any in-progress tool calls
+        if (active.currentTurnToolCalls && active.currentTurnToolCalls.length > 0) {
+          for (const tc of active.currentTurnToolCalls) {
+            interruptedContent.push({
+              type: 'tool_use',
+              id: tc.toolCallId,
+              name: tc.toolName,
+              input: tc.arguments,
+            });
+          }
+        }
+
+        // Only persist if there's actual content
+        if (interruptedContent.length > 0) {
+          // Wait for any pending stream events
+          await active.appendPromiseChain;
+
+          const normalizedContent = normalizeContentBlocks(interruptedContent);
+          const interruptedParentId = active.pendingHeadEventId;
+
+          const interruptedMsgEvent = await this.eventStore.append({
+            sessionId: active.sessionId,
+            type: 'message.assistant',
+            payload: {
+              content: normalizedContent,
+              tokenUsage: runResult.totalTokenUsage,
+              turn: runResult.turns || 1,
+              model: active.model,
+              stopReason: 'interrupted',
+              interrupted: true,  // Flag to identify interrupted messages
+            },
+            parentId: interruptedParentId,
+          });
+          active.pendingHeadEventId = interruptedMsgEvent.id;
+
+          logger.info('Persisted interrupted assistant message', {
+            sessionId: active.sessionId,
+            eventId: interruptedMsgEvent.id,
+            contentBlocks: normalizedContent.length,
+            textLength: partialText.length,
+            toolCalls: active.currentTurnToolCalls?.length ?? 0,
+          });
+        }
+
+        // Persist notification.interrupted event as first-class ledger entry
+        const interruptedNotificationParentId = active.pendingHeadEventId;
+        const interruptNotificationEvent = await this.eventStore.append({
+          sessionId: active.sessionId,
+          type: 'notification.interrupted',
+          payload: {
+            timestamp: new Date().toISOString(),
+            turn: runResult.turns || 1,
+          },
+          parentId: interruptedNotificationParentId,
+        });
+        active.pendingHeadEventId = interruptNotificationEvent.id;
+
+        logger.info('Persisted notification.interrupted event', {
+          sessionId: active.sessionId,
+          eventId: interruptNotificationEvent.id,
+        });
+
+        // Mark session as interrupted in metadata
+        active.wasInterrupted = true;
+
+        // Clear turn tracking state
+        active.currentTurnAccumulatedText = '';
+        active.currentTurnToolCalls = [];
 
         return [runResult] as unknown as TurnResult[];
       }
