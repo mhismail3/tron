@@ -38,8 +38,11 @@ class EventStoreManager: ObservableObject {
 
     // MARK: - Turn Content Cache
     // Caches full message content from agent.turn events for merging with server events
-    // Key: sessionId, Value: array of messages with full content blocks
-    private var turnContentCache: [String: [[String: Any]]] = [:]
+    // Key: sessionId, Value: tuple of (messages array, timestamp)
+    // Bounded to prevent memory growth - entries expire after 2 minutes, max 10 sessions cached
+    private var turnContentCache: [String: (messages: [[String: Any]], timestamp: Date)] = [:]
+    private let maxCachedSessions = 10
+    private let cacheExpiry: TimeInterval = 120 // 2 minutes
 
     // MARK: - Initialization
 
@@ -655,8 +658,25 @@ class EventStoreManager: ObservableObject {
     /// Cache full turn content from agent.turn event
     /// This captures tool_use and tool_result blocks that may not be in server events
     func cacheTurnContent(sessionId: String, turnNumber: Int, messages: [[String: Any]]) {
-        // Store messages for this session (replace any existing cache)
-        turnContentCache[sessionId] = messages
+        let now = Date()
+
+        // Clean expired entries first
+        let expiredCount = turnContentCache.filter { now.timeIntervalSince($0.value.timestamp) > cacheExpiry }.count
+        if expiredCount > 0 {
+            turnContentCache = turnContentCache.filter { now.timeIntervalSince($0.value.timestamp) <= cacheExpiry }
+            logger.debug("Cleaned \(expiredCount) expired cache entries")
+        }
+
+        // Enforce size limit (remove oldest if at limit and not updating existing session)
+        if turnContentCache[sessionId] == nil && turnContentCache.count >= maxCachedSessions {
+            if let oldest = turnContentCache.min(by: { $0.value.timestamp < $1.value.timestamp })?.key {
+                turnContentCache.removeValue(forKey: oldest)
+                logger.debug("Removed oldest cache entry for session \(oldest) to stay within limit")
+            }
+        }
+
+        // Store messages with timestamp
+        turnContentCache[sessionId] = (messages, now)
         logger.info("Cached turn \(turnNumber) content for session \(sessionId): \(messages.count) messages")
 
         // Log content block types for debugging
@@ -673,7 +693,14 @@ class EventStoreManager: ObservableObject {
 
     /// Get cached turn content for enriching server events
     private func getCachedTurnContent(sessionId: String) -> [[String: Any]]? {
-        return turnContentCache[sessionId]
+        guard let cached = turnContentCache[sessionId] else { return nil }
+        // Check if expired
+        if Date().timeIntervalSince(cached.timestamp) > cacheExpiry {
+            turnContentCache.removeValue(forKey: sessionId)
+            logger.debug("Cache entry for session \(sessionId) expired, removed")
+            return nil
+        }
+        return cached.messages
     }
 
     /// Clear cached turn content after successful enrichment

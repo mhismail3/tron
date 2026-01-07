@@ -66,6 +66,7 @@ final class WebSocketService: ObservableObject {
     private let requestTimeout: TimeInterval = 30.0
 
     private var pendingRequests: [String: CheckedContinuation<Data, Error>] = [:]
+    private var timeoutTasks: [String: Task<Void, Never>] = [:]
 
     @Published private(set) var connectionState: ConnectionState = .disconnected
 
@@ -136,7 +137,12 @@ final class WebSocketService: ObservableObject {
             continuation.resume(throwing: WebSocketError.notConnected)
         }
         pendingRequests.removeAll()
-        logger.debug("Cleared \(pendingCount) pending requests", category: .websocket)
+
+        // Cancel all timeout tasks
+        let timeoutCount = timeoutTasks.count
+        timeoutTasks.values.forEach { $0.cancel() }
+        timeoutTasks.removeAll()
+        logger.debug("Cleared \(pendingCount) pending requests and \(timeoutCount) timeout tasks", category: .websocket)
 
         connectionState = .disconnected
         logger.logWebSocketState("Disconnected")
@@ -181,15 +187,18 @@ final class WebSocketService: ObservableObject {
             pendingRequests[requestId] = continuation
             logger.verbose("Registered pending request id=\(requestId), total pending: \(pendingRequests.count)", category: .websocket)
 
-            Task { [weak self] in
+            // Store timeout task so it can be cancelled when response arrives
+            let timeoutTask = Task { [weak self] in
                 try? await Task.sleep(for: .seconds(self?.requestTimeout ?? 30))
                 await MainActor.run {
                     if let pending = self?.pendingRequests.removeValue(forKey: requestId) {
                         logger.error("Request timeout for \(method) id=\(requestId) after \(self?.requestTimeout ?? 30)s", category: .websocket)
                         pending.resume(throwing: WebSocketError.timeout)
                     }
+                    self?.timeoutTasks.removeValue(forKey: requestId)
                 }
             }
+            timeoutTasks[requestId] = timeoutTask
         }
 
         let duration = CFAbsoluteTimeGetCurrent() - startTime
@@ -273,7 +282,10 @@ final class WebSocketService: ObservableObject {
         }
 
         if let id = json["id"] as? String {
-            // This is an RPC response
+            // This is an RPC response - cancel timeout task and resume continuation
+            timeoutTasks[id]?.cancel()
+            timeoutTasks.removeValue(forKey: id)
+
             if let continuation = pendingRequests.removeValue(forKey: id) {
                 continuation.resume(returning: data)
                 logger.debug("Resolved RPC response for id=\(id), remaining pending: \(pendingRequests.count)", category: .websocket)
@@ -336,7 +348,12 @@ final class WebSocketService: ObservableObject {
             continuation.resume(throwing: WebSocketError.connectionFailed("Disconnected"))
         }
         pendingRequests.removeAll()
-        logger.debug("Cleared \(pendingCount) pending requests due to disconnect", category: .websocket)
+
+        // Cancel all timeout tasks
+        let timeoutCount = timeoutTasks.count
+        timeoutTasks.values.forEach { $0.cancel() }
+        timeoutTasks.removeAll()
+        logger.debug("Cleared \(pendingCount) pending requests and \(timeoutCount) timeout tasks due to disconnect", category: .websocket)
 
         if reconnectAttempts < maxReconnectAttempts {
             reconnectAttempts += 1

@@ -889,6 +889,14 @@ class ChatViewModel: ObservableObject {
 
     private func handleTurnStart(_ event: TurnStartEvent) {
         logger.info("Turn \(event.turnNumber) started", category: .events)
+
+        // Safety: clear any stale data from incomplete previous turns
+        // (e.g., if connection dropped mid-turn)
+        if !currentTurnToolCalls.isEmpty || !currentToolMessages.isEmpty {
+            logger.warning("Clearing \(currentTurnToolCalls.count) uncleaned tool calls and \(currentToolMessages.count) tool messages from previous turn", category: .events)
+            currentTurnToolCalls.removeAll()
+            currentToolMessages.removeAll()
+        }
     }
 
     private func handleTurnEnd(_ event: TurnEndEvent) {

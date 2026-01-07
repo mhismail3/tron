@@ -51,9 +51,13 @@ struct TronMobileApp: App {
                         eventStoreManager = manager
                     }
 
+                    #if DEBUG
                     print("[TronMobileApp] Event store initialized with \(manager.sessions.count) sessions")
+                    #endif
                 } catch {
+                    #if DEBUG
                     print("[TronMobileApp] Failed to initialize event store: \(error)")
+                    #endif
                 }
             }
         }
@@ -183,7 +187,9 @@ struct ContentView: View {
                             workingDirectory: workingDirectory
                         )
                     } catch {
+                        #if DEBUG
                         print("[ContentView] Failed to cache new session: \(error)")
+                        #endif
                     }
                     selectedSessionId = sessionId
                     showNewSessionSheet = false
@@ -282,7 +288,9 @@ struct ContentView: View {
             do {
                 try await eventStoreManager.deleteSession(sessionId)
             } catch {
+                #if DEBUG
                 print("[ContentView] Failed to delete session: \(error)")
+                #endif
             }
 
             if selectedSessionId == sessionId {

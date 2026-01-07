@@ -83,6 +83,10 @@ final class TronLogger: @unchecked Sendable {
     // OS Loggers by category
     private var loggers: [LogCategory: Logger] = [:]
 
+    // Cached date formatter (creating these is expensive)
+    // nonisolated(unsafe) because ISO8601DateFormatter is not Sendable, but we only read from it
+    private static nonisolated(unsafe) let isoFormatter = ISO8601DateFormatter()
+
     private init() {
         // Initialize loggers for each category
         for category in LogCategory.allCases {
@@ -121,7 +125,7 @@ final class TronLogger: @unchecked Sendable {
         guard level >= effectiveLevel else { return }
 
         let fileName = (file as NSString).lastPathComponent
-        let timestamp = ISO8601DateFormatter().string(from: Date())
+        let timestamp = Self.isoFormatter.string(from: Date())
         let formattedMessage = "[\(timestamp)] \(level.prefix) [\(category.rawValue)] \(fileName):\(line) \(function) - \(message)"
 
         // Log to OS unified logging
