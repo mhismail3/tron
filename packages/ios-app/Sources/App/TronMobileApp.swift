@@ -1155,16 +1155,23 @@ struct SessionPreviewSheet: View {
                 }
 
             case "tool.call":
-                // Tool call event
+                // Tool call event - parse arguments dict to JSON string
                 let name = event.payload["name"]?.value as? String ?? "unknown"
                 let id = event.payload["id"]?.value as? String ?? ""
-                let args = event.payload["arguments"]?.value as? String ?? "{}"
+                var argsString = "{}"
+                if let argsDict = event.payload["arguments"]?.value as? [String: Any],
+                   let jsonData = try? JSONSerialization.data(withJSONObject: argsDict),
+                   let jsonString = String(data: jsonData, encoding: .utf8) {
+                    argsString = jsonString
+                } else if let argsStr = event.payload["arguments"]?.value as? String {
+                    argsString = argsStr
+                }
                 messages.append(ChatMessage(
                     role: .assistant,
                     content: .toolUse(ToolUseData(
                         toolName: name,
                         toolCallId: id,
-                        arguments: args,
+                        arguments: argsString,
                         status: .success
                     ))
                 ))
@@ -1176,7 +1183,16 @@ struct SessionPreviewSheet: View {
                 let content = event.payload["content"]?.value as? String ?? ""
                 let isError = event.payload["isError"]?.value as? Bool ?? false
                 let durationMs = event.payload["durationMs"]?.value as? Int
-                let arguments = event.payload["arguments"]?.value as? String
+                    ?? event.payload["duration"]?.value as? Int
+                // Parse arguments - could be dict or string
+                var argsString: String? = nil
+                if let argsDict = event.payload["arguments"]?.value as? [String: Any],
+                   let jsonData = try? JSONSerialization.data(withJSONObject: argsDict),
+                   let jsonStr = String(data: jsonData, encoding: .utf8) {
+                    argsString = jsonStr
+                } else if let argsStr = event.payload["arguments"]?.value as? String {
+                    argsString = argsStr
+                }
                 messages.append(ChatMessage(
                     role: .toolResult,
                     content: .toolResult(ToolResultData(
@@ -1184,7 +1200,7 @@ struct SessionPreviewSheet: View {
                         content: content,
                         isError: isError,
                         toolName: toolName,
-                        arguments: arguments,
+                        arguments: argsString,
                         durationMs: durationMs
                     ))
                 ))
@@ -1196,8 +1212,10 @@ struct SessionPreviewSheet: View {
                 ))
 
             case "config.model_switch":
-                let from = event.payload["from"]?.value as? String ?? ""
-                let to = event.payload["to"]?.value as? String ?? ""
+                // Payload uses previousModel and newModel (or model) fields
+                let from = event.payload["previousModel"]?.value as? String ?? ""
+                let to = event.payload["newModel"]?.value as? String
+                    ?? event.payload["model"]?.value as? String ?? ""
                 messages.append(ChatMessage(
                     role: .system,
                     content: .modelChange(from: formatModelDisplayName(from), to: formatModelDisplayName(to))
@@ -1227,8 +1245,8 @@ struct SessionPreviewSheet: View {
             )
 
             await MainActor.run {
-                // Events come in reverse chronological, reverse them for display
-                events = result.events.reversed()
+                // Sort events by sequence number for correct chronological order
+                events = result.events.sorted { $0.sequence < $1.sequence }
                 isLoading = false
             }
         } catch {
