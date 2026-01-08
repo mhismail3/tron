@@ -269,6 +269,22 @@ export class EventStoreOrchestrator extends EventEmitter {
       session.latestModel
     );
 
+    // Load conversation history from event store and populate agent
+    // This follows parent_id chain for forked sessions to include parent history
+    const eventMessages = await this.eventStore.getMessagesAtHead(session.id);
+    for (const msg of eventMessages) {
+      // Convert event store messages to agent message format
+      // Event store only returns 'user' and 'assistant' roles
+      // Note: Content block types differ slightly between event store (Anthropic API format)
+      // and agent types, but they are compatible at runtime for common cases (text, tool_use)
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      agent.addMessage(msg as any);
+    }
+    logger.info('Session history loaded', {
+      sessionId,
+      messageCount: eventMessages.length,
+    });
+
     this.activeSessions.set(sessionId, {
       sessionId: session.id,
       agent,

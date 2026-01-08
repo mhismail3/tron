@@ -1,14 +1,15 @@
 import Foundation
 import SQLite3
-import os
 
 // MARK: - Event Database
+
+// NOTE: Uses global `logger` from TronLogger.swift (TronLogger.shared)
+// Do NOT define a local logger property - it would shadow the global one
 
 /// SQLite-based local event store for iOS
 /// Provides offline support and fast state reconstruction
 @MainActor
 class EventDatabase: ObservableObject {
-    private let logger = Logger(subsystem: "com.tron.mobile", category: "EventDatabase")
 
     private var db: OpaquePointer?
     private let dbPath: String
@@ -45,7 +46,7 @@ class EventDatabase: ObservableObject {
         try createTables()
 
         isInitialized = true
-        logger.info("Event database initialized at \(self.dbPath)")
+        logger.info("Event database initialized at \(self.dbPath)", category: .session)
     }
 
     func close() {
@@ -321,11 +322,11 @@ class EventDatabase: ObservableObject {
         var currentId: String? = eventId
         var depth = 0
 
-        logger.debug("[ANCESTORS] Walking chain from \(eventId)")
+        logger.info("[DB-ANCESTORS] Walking chain from \(eventId)", category: .session)
 
         while let id = currentId {
             guard let event = try getEvent(id) else {
-                logger.warning("[ANCESTORS] Event not found at depth \(depth): \(id)")
+                logger.warning("[DB-ANCESTORS] Event NOT FOUND at depth \(depth): \(id) - chain broken!", category: .session)
                 break
             }
             ancestors.insert(event, at: 0)
@@ -333,7 +334,7 @@ class EventDatabase: ObservableObject {
             currentId = event.parentId
         }
 
-        logger.debug("[ANCESTORS] Chain complete: \(ancestors.count) events, types: \(ancestors.map { $0.type }.joined(separator: "→"))")
+        logger.info("[DB-ANCESTORS] Chain complete: \(ancestors.count) events, types: \(ancestors.map { $0.type }.joined(separator: "→"))", category: .session)
         return ancestors
     }
 
@@ -389,11 +390,11 @@ class EventDatabase: ObservableObject {
         var contentToMerge: [String: [String: AnyCodable]] = [:]
 
         guard !localEvents.isEmpty else {
-            logger.debug("No local events to deduplicate for session \(sessionId)")
+            logger.debug("No local events to deduplicate for session \(sessionId)", category: .session)
             return contentToMerge
         }
 
-        logger.debug("Checking \(localEvents.count) local events against \(serverEvents.count) server events")
+        logger.debug("Checking \(localEvents.count) local events against \(serverEvents.count) server events", category: .session)
 
         // Helper to check if content has tool_use or tool_result blocks
         func hasToolBlocks(_ payload: [String: AnyCodable]) -> Bool {
@@ -450,7 +451,7 @@ class EventDatabase: ObservableObject {
                 let key = "\(event.type):\(String(contentStr.prefix(100)))"
                 let info = ServerEventInfo(id: event.id, hasToolBlocks: hasToolBlocks(event.payload))
                 serverEventMap[key] = info
-                logger.debug("Server event key: \(key), hasToolBlocks: \(info.hasToolBlocks)")
+                logger.debug("Server event key: \(key), hasToolBlocks: \(info.hasToolBlocks)", category: .session)
             }
         }
 
@@ -469,18 +470,18 @@ class EventDatabase: ObservableObject {
 
                     // If local has tool blocks but server doesn't, save content to merge
                     if localHasToolBlocks && !serverInfo.hasToolBlocks {
-                        logger.info("Will merge local tool blocks into server event: \(serverInfo.id)")
+                        logger.info("Will merge local tool blocks into server event: \(serverInfo.id)", category: .session)
                         contentToMerge[serverInfo.id] = localEvent.payload
                     }
 
-                    logger.debug("Local event key: \(key) - will delete (localTools: \(localHasToolBlocks), serverTools: \(serverInfo.hasToolBlocks), merge: \(localHasToolBlocks && !serverInfo.hasToolBlocks))")
+                    logger.debug("Local event key: \(key) - will delete (localTools: \(localHasToolBlocks), serverTools: \(serverInfo.hasToolBlocks), merge: \(localHasToolBlocks && !serverInfo.hasToolBlocks))", category: .session)
                 }
             }
         }
 
         // Delete matching local events
         if !idsToDelete.isEmpty {
-            logger.info("Deleting \(idsToDelete.count) local duplicate events for session \(sessionId)")
+            logger.info("Deleting \(idsToDelete.count) local duplicate events for session \(sessionId)", category: .session)
 
             for id in idsToDelete {
                 let sql = "DELETE FROM events WHERE id = ?"
@@ -497,9 +498,9 @@ class EventDatabase: ObservableObject {
                 }
             }
 
-            logger.info("Deleted \(idsToDelete.count) local duplicate events for session \(sessionId)")
+            logger.info("Deleted \(idsToDelete.count) local duplicate events for session \(sessionId)", category: .session)
         } else {
-            logger.debug("No duplicates found to delete")
+            logger.debug("No duplicates found to delete", category: .session)
         }
 
         return contentToMerge
@@ -799,7 +800,7 @@ class EventDatabase: ObservableObject {
         var idsToDelete: [String] = []
         for (key, group) in keyToEvents {
             if group.count > 1 {
-                logger.debug("Found \(group.count) events for key: \(key)")
+                logger.debug("Found \(group.count) events for key: \(key)", category: .session)
 
                 // Categorize events by content richness
                 let eventsWithTools = group.filter { hasToolBlocks($0.payload) }
@@ -807,7 +808,7 @@ class EventDatabase: ObservableObject {
 
                 if !eventsWithTools.isEmpty {
                     // Keep events with tool blocks, delete those without
-                    logger.debug("Keeping \(eventsWithTools.count) events with tool blocks, deleting \(eventsWithoutTools.count) without")
+                    logger.debug("Keeping \(eventsWithTools.count) events with tool blocks, deleting \(eventsWithoutTools.count) without", category: .session)
                     idsToDelete.append(contentsOf: eventsWithoutTools.map { $0.id })
 
                     // Among events with tools, prefer server events
@@ -829,10 +830,10 @@ class EventDatabase: ObservableObject {
                     let localEvents = group.filter { !$0.id.hasPrefix("evt_") }
 
                     if !serverEvents.isEmpty {
-                        logger.debug("Keeping \(serverEvents.count) server events, deleting \(localEvents.count) local events")
+                        logger.debug("Keeping \(serverEvents.count) server events, deleting \(localEvents.count) local events", category: .session)
                         idsToDelete.append(contentsOf: localEvents.map { $0.id })
                     } else {
-                        logger.debug("No server events, keeping first local, deleting \(localEvents.count - 1) others")
+                        logger.debug("No server events, keeping first local, deleting \(localEvents.count - 1) others", category: .session)
                         idsToDelete.append(contentsOf: localEvents.dropFirst().map { $0.id })
                     }
                 }
@@ -853,7 +854,7 @@ class EventDatabase: ObservableObject {
                 _ = sqlite3_step(stmt)
             }
 
-            logger.info("Deduplicated session \(sessionId): removed \(idsToDelete.count) duplicate events")
+            logger.info("Deduplicated session \(sessionId): removed \(idsToDelete.count) duplicate events", category: .session)
         }
 
         return idsToDelete.count

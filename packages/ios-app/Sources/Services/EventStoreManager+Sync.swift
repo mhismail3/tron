@@ -10,12 +10,12 @@ extension EventStoreManager {
 
         setIsSyncing(true)
         clearLastSyncError()
-        logger.info("Starting full sync...")
+        logger.info("Starting full sync...", category: .session)
 
         do {
             // First, fetch session list from server
             let serverSessions = try await rpcClient.listSessions(includeEnded: true)
-            logger.info("Fetched \(serverSessions.count) sessions from server")
+            logger.info("Fetched \(serverSessions.count) sessions from server", category: .session)
 
             // Convert and cache each session
             for serverSession in serverSessions {
@@ -28,11 +28,11 @@ extension EventStoreManager {
 
             // Reload local sessions
             loadSessions()
-            logger.info("Full sync completed: \(self.sessions.count) sessions")
+            logger.info("Full sync completed: \(self.sessions.count) sessions", category: .session)
 
         } catch {
             setLastSyncError(error.localizedDescription)
-            logger.error("Full sync failed: \(error.localizedDescription)")
+            logger.error("Full sync failed: \(error.localizedDescription)", category: .session)
         }
 
         setIsSyncing(false)
@@ -40,7 +40,7 @@ extension EventStoreManager {
 
     /// Sync events for a specific session
     func syncSessionEvents(sessionId: String) async throws {
-        logger.info("Syncing events for session \(sessionId)")
+        logger.info("[SYNC] Syncing events for session \(sessionId)", category: .session)
 
         // Get sync state to find cursor
         let syncState = try eventDB.getSyncState(sessionId)
@@ -77,7 +77,7 @@ extension EventStoreManager {
             // Update session metadata
             try await updateSessionMetadata(sessionId: sessionId)
 
-            logger.info("Synced \(result.events.count) events for session \(sessionId)")
+            logger.info("[SYNC] Synced \(result.events.count) events for session \(sessionId)", category: .session)
         }
 
         // If more events available, continue fetching
@@ -88,7 +88,7 @@ extension EventStoreManager {
 
     /// Full sync for a single session (fetch all events from scratch)
     func fullSyncSession(_ sessionId: String) async throws {
-        logger.info("Full sync for session \(sessionId)")
+        logger.info("[FULL-SYNC] Starting full sync for session \(sessionId)", category: .session)
 
         // Clear existing events
         try eventDB.deleteEventsBySession(sessionId)
@@ -105,6 +105,12 @@ extension EventStoreManager {
         // Fetch all events
         let events = try await rpcClient.getAllEvents(sessionId: sessionId)
         let sessionEvents = events.map { rawEventToSessionEvent($0) }
+
+        // Log the first event (should be fork/session.start) to verify parent_id
+        if let firstEvent = sessionEvents.first {
+            logger.info("[FULL-SYNC] First event: id=\(firstEvent.id.prefix(12)), type=\(firstEvent.type), parentId=\(firstEvent.parentId?.prefix(12) ?? "nil")", category: .session)
+        }
+
         try eventDB.insertEvents(sessionEvents)
 
         // Update session metadata
@@ -113,7 +119,7 @@ extension EventStoreManager {
         // Notify views
         sessionUpdated.send(sessionId)
 
-        logger.info("Full synced \(events.count) events for session \(sessionId)")
+        logger.info("[FULL-SYNC] Completed: \(events.count) events for session \(sessionId)", category: .session)
     }
 
     /// Update session metadata from event database

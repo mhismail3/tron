@@ -95,12 +95,24 @@ extension EventStoreManager {
                 for rawEvent in ancestorRawEvents {
                     let event = rawEventToSessionEvent(rawEvent)
                     sessionEvents.append(event)
+                    logger.debug("[FORK] Ancestor event: id=\(event.id.prefix(12)), type=\(event.type), sessionId=\(event.sessionId.prefix(12)), parentId=\(event.parentId?.prefix(12) ?? "nil")", category: .session)
                 }
 
                 // Store ancestor events (ignoring duplicates that already exist)
                 if !sessionEvents.isEmpty {
                     let inserted = try eventDB.insertEventsIgnoringDuplicates(sessionEvents)
                     logger.info("[FORK] Stored \(inserted) new ancestor events (\(sessionEvents.count - inserted) already existed)", category: .session)
+
+                    // Verify the fork event's parent is now in DB
+                    if let forkEvent = sessionEvents.last {
+                        if let parentId = forkEvent.parentId {
+                            if let parentEvent = try? eventDB.getEvent(parentId) {
+                                logger.info("[FORK] ✓ Fork event parent found in DB: \(parentEvent.id.prefix(12)), type=\(parentEvent.type)", category: .session)
+                            } else {
+                                logger.warning("[FORK] ✗ Fork event parent NOT in DB: \(parentId)", category: .session)
+                            }
+                        }
+                    }
                 }
             } catch {
                 // Log but don't fail - the fork itself succeeded

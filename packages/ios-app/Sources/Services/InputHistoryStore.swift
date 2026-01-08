@@ -1,11 +1,11 @@
 import Foundation
-import os
 
 // MARK: - Input History Store
 
+// NOTE: Uses global `logger` from TronLogger.swift (TronLogger.shared)
+
 @MainActor
 class InputHistoryStore: ObservableObject {
-    private let logger = Logger(subsystem: "com.tron.mobile", category: "InputHistoryStore")
     private let storageKey = "tron.inputHistory"
     private let maxHistorySize = 100
 
@@ -24,7 +24,7 @@ class InputHistoryStore: ObservableObject {
         if let data = UserDefaults.standard.data(forKey: storageKey),
            let decoded = try? JSONDecoder().decode([String].self, from: data) {
             history = decoded
-            logger.debug("Loaded \(decoded.count) history items")
+            logger.debug("Loaded \(decoded.count) history items", category: .general)
         }
     }
 
