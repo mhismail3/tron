@@ -16,7 +16,7 @@
  * const engine = new HookEngine();
  *
  * // Register built-in hooks
- * registerBuiltinHooks(engine, { ledgerManager, handoffManager });
+ * registerBuiltinHooks(engine, { handoffManager });
  *
  * // Discover and load user hooks
  * const discovered = await discoverHooks({ projectPath });

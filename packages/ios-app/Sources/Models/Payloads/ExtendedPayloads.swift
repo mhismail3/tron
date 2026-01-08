@@ -1,57 +1,5 @@
 import Foundation
 
-// MARK: - Ledger Payloads
-
-/// Payload for ledger.update event
-/// Server: LedgerUpdateEvent.payload
-struct LedgerUpdatePayload {
-    let field: LedgerField?
-    let previousValue: Any?
-    let newValue: Any?
-
-    init(from payload: [String: AnyCodable]) {
-        if let fieldStr = payload.string("field") {
-            self.field = LedgerField(rawValue: fieldStr)
-        } else {
-            self.field = nil
-        }
-        self.previousValue = payload["previousValue"]?.value
-        self.newValue = payload["newValue"]?.value
-    }
-}
-
-/// Payload for ledger.goal event
-/// Server: LedgerGoalEvent.payload
-struct LedgerGoalPayload {
-    let goal: String
-
-    init?(from payload: [String: AnyCodable]) {
-        guard let goal = payload.string("goal") else {
-            return nil
-        }
-        self.goal = goal
-    }
-}
-
-/// Payload for ledger.task event
-/// Server: LedgerTaskEvent.payload
-struct LedgerTaskPayload {
-    let action: String  // "add" | "complete" | "remove"
-    let task: String
-    let list: String    // "next" | "done"
-
-    init?(from payload: [String: AnyCodable]) {
-        guard let action = payload.string("action"),
-              let task = payload.string("task"),
-              let list = payload.string("list") else {
-            return nil
-        }
-        self.action = action
-        self.task = task
-        self.list = list
-    }
-}
-
 // MARK: - Metadata Payloads
 
 /// Payload for metadata.update event

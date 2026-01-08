@@ -119,7 +119,7 @@ OPTIONS:
   --ws-port <port>          WebSocket server port (default: 8080)
   --health-port <port>      Health check port (default: 8081)
   --api-key <key>           Set API key for authentication
-  -e, --ephemeral           Ephemeral mode - no persistence (no session files, handoffs, or ledger)
+  -e, --ephemeral           Ephemeral mode - no persistence (no session files or handoffs)
   -v, --verbose             Enable verbose logging
   -d, --debug               Enable debug mode (full trace logs to stderr and ~/.tron/logs/)
   --prompt <text>           Run a single prompt and exit (non-interactive)

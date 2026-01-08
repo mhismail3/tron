@@ -6,7 +6,6 @@
  *
  * Tracks:
  * - Context files loaded (AGENTS.md, CLAUDE.md hierarchy)
- * - Ledger state injected
  * - Handoffs retrieved and injected
  * - System prompt composition
  * - Tool definitions
@@ -25,7 +24,6 @@
  *
  * // Track context loading
  * audit.addContextFile({ path: '~/.tron/AGENTS.md', content: '...', charCount: 500 });
- * audit.setLedger({ goal: 'Implement OAuth', now: 'Testing' });
  * audit.addHandoff({ id: 'h1', summary: 'Previous work on auth' });
  *
  * // Get full audit
@@ -36,18 +34,6 @@
 // =============================================================================
 // Types
 // =============================================================================
-
-/**
- * Simple ledger state for audit tracking
- */
-export interface LedgerState {
-  goal?: string;
-  now?: string;
-  next?: string[];
-  done?: string[];
-  constraints?: string[];
-  workingFiles?: string[];
-}
 
 export interface ContextFileEntry {
   /** Absolute path to the file */
@@ -115,9 +101,6 @@ export interface ContextAuditData {
   /** Context files loaded */
   contextFiles: ContextFileEntry[];
 
-  /** Ledger state */
-  ledger: LedgerState | null;
-
   /** Handoffs injected */
   handoffs: HandoffEntry[];
 
@@ -168,7 +151,6 @@ export class ContextAudit {
         provider: '',
       },
       contextFiles: [],
-      ledger: null,
       handoffs: [],
       tools: [],
       hookModifications: [],
@@ -221,17 +203,6 @@ export class ContextAudit {
     // Update token estimates (rough: ~4 chars per token)
     this.data.tokenEstimates.contextTokens += Math.ceil(file.content.length / 4);
     this.updateTotalTokens();
-  }
-
-  // ===========================================================================
-  // Ledger Methods
-  // ===========================================================================
-
-  /**
-   * Set ledger state
-   */
-  setLedger(ledger: LedgerState | null): void {
-    this.data.ledger = ledger;
   }
 
   // ===========================================================================
@@ -388,25 +359,6 @@ export class ContextAudit {
         lines.push(file.preview);
         lines.push('```');
         lines.push('');
-      }
-    }
-    lines.push('');
-
-    // Ledger
-    lines.push('## Ledger State');
-    if (!this.data.ledger) {
-      lines.push('*No ledger loaded*');
-    } else {
-      if (this.data.ledger.goal) lines.push(`- **Goal**: ${this.data.ledger.goal}`);
-      if (this.data.ledger.now) lines.push(`- **Now**: ${this.data.ledger.now}`);
-      if (this.data.ledger.next?.length) {
-        lines.push(`- **Next**: ${this.data.ledger.next.slice(0, 3).join(', ')}`);
-      }
-      if (this.data.ledger.constraints?.length) {
-        lines.push(`- **Constraints**: ${this.data.ledger.constraints.join('; ')}`);
-      }
-      if (this.data.ledger.workingFiles?.length) {
-        lines.push(`- **Working Files**: ${this.data.ledger.workingFiles.join(', ')}`);
       }
     }
     lines.push('');

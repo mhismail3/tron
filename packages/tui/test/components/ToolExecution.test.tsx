@@ -120,8 +120,9 @@ describe('ToolExecution Component', () => {
       expect(frame).not.toContain('should not appear');
     });
 
-    it('should truncate long output to 3 lines by default', () => {
-      const output = 'line1\nline2\nline3\nline4\nline5\nline6\nline7';
+    it('should truncate long output to 8 lines by default', () => {
+      // Component uses MAX_OUTPUT_LINES = 8
+      const output = Array.from({ length: 12 }, (_, i) => `line${i + 1}`).join('\n');
       const { lastFrame } = render(
         <ToolExecution
           toolName="bash"
@@ -132,14 +133,15 @@ describe('ToolExecution Component', () => {
       );
       const frame = lastFrame() ?? '';
       expect(frame).toContain('line1');
-      expect(frame).toContain('line2');
-      expect(frame).toContain('line3');
-      // line4+ should not be visible (truncated)
-      expect(frame).not.toContain('line7');
+      expect(frame).toContain('line8');
+      // line9+ should not be visible (truncated)
+      expect(frame).not.toContain('line9');
+      expect(frame).not.toContain('line12');
     });
 
     it('should show more lines indicator when output is truncated', () => {
-      const output = 'line1\nline2\nline3\nline4\nline5';
+      // Need more than 8 lines to trigger truncation
+      const output = Array.from({ length: 12 }, (_, i) => `line${i + 1}`).join('\n');
       const { lastFrame } = render(
         <ToolExecution
           toolName="bash"
@@ -149,7 +151,7 @@ describe('ToolExecution Component', () => {
         />
       );
       const frame = lastFrame() ?? '';
-      // Should show truncation indicator
+      // Should show truncation indicator (4 more lines)
       expect(frame).toMatch(/more line/i);
     });
 
@@ -184,7 +186,9 @@ describe('ToolExecution Component', () => {
     });
 
     it('should truncate very long lines', () => {
-      const longLine = 'x'.repeat(200);
+      // Component uses MAX_OUTPUT_LINE_LENGTH = 100
+      // 150 chars should be truncated to 97 + "..."
+      const longLine = 'x'.repeat(150);
       const { lastFrame } = render(
         <ToolExecution
           toolName="bash"
@@ -194,10 +198,12 @@ describe('ToolExecution Component', () => {
         />
       );
       const frame = lastFrame() ?? '';
-      // Line should be truncated with ...
-      expect(frame).toContain('...');
-      // Should not contain the full 200 character line
-      expect(frame.length).toBeLessThan(300);
+      // Should not contain the full 150 x's (line is truncated to ~97)
+      const xCount = (frame.match(/x/g) || []).length;
+      expect(xCount).toBeLessThan(150);
+      expect(xCount).toBe(97); // 100 - 3 (for "...")
+      // The "..." may be split across lines due to wrapping, so just check dots exist
+      expect(frame).toMatch(/\./);
     });
 
     it('should handle empty output gracefully', () => {

@@ -16,13 +16,13 @@ interface ContextViewerProps {
   onClose: () => void;
 }
 
-type ViewTab = 'summary' | 'files' | 'ledger' | 'handoffs' | 'tokens';
+type ViewTab = 'summary' | 'files' | 'handoffs' | 'tokens';
 
 export function ContextViewer({ audit, onClose }: ContextViewerProps): React.ReactElement {
   const [activeTab, setActiveTab] = useState<ViewTab>('summary');
   const [scrollOffset, setScrollOffset] = useState(0);
 
-  const tabs: ViewTab[] = ['summary', 'files', 'ledger', 'handoffs', 'tokens'];
+  const tabs: ViewTab[] = ['summary', 'files', 'handoffs', 'tokens'];
 
   useInput((input, key) => {
     if (input === 'q' || key.escape) {
@@ -50,8 +50,6 @@ export function ContextViewer({ audit, onClose }: ContextViewerProps): React.Rea
         return renderSummary(audit);
       case 'files':
         return renderContextFiles(audit);
-      case 'ledger':
-        return renderLedger(audit);
       case 'handoffs':
         return renderHandoffs(audit);
       case 'tokens':
@@ -165,50 +163,6 @@ function renderContextFiles(audit: ContextAuditData): string[] {
     lines.push('');
   }
 
-  return lines;
-}
-
-function renderLedger(audit: ContextAuditData): string[] {
-  const lines: string[] = [];
-
-  if (!audit.ledger) {
-    lines.push('No ledger state loaded');
-    return lines;
-  }
-
-  const ledger = audit.ledger;
-
-  if (ledger.now) {
-    lines.push(`Working On: ${ledger.now}`);
-  }
-  if (ledger.next && ledger.next.length > 0) {
-    lines.push('');
-    lines.push('Next Steps:');
-    for (const step of ledger.next) {
-      lines.push(`  • ${step}`);
-    }
-  }
-  if (ledger.done && ledger.done.length > 0) {
-    lines.push('');
-    lines.push('Completed:');
-    for (const item of ledger.done.slice(-5)) {
-      lines.push(`  ✓ ${item}`);
-    }
-  }
-  if (ledger.constraints && ledger.constraints.length > 0) {
-    lines.push('');
-    lines.push('Constraints:');
-    for (const c of ledger.constraints) {
-      lines.push(`  ! ${c}`);
-    }
-  }
-  if (ledger.workingFiles && ledger.workingFiles.length > 0) {
-    lines.push('');
-    lines.push('Working Files:');
-    for (const f of ledger.workingFiles) {
-      lines.push(`  - ${f}`);
-    }
-  }
   return lines;
 }
 

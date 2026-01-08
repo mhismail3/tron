@@ -49,20 +49,6 @@ import {
 } from '@tron/core';
 
 /**
- * Ledger state for session task tracking
- * Previously from memory module, now defined locally
- */
-export interface Ledger {
-  goal?: string;
-  now?: string;
-  next: string[];
-  done: string[];
-  constraints: string[];
-  workingFiles: string[];
-  decisions: Array<{ choice: string; reason: string; timestamp?: string }>;
-}
-
-/**
  * Handoff record for session context continuity
  * Previously from memory module, now defined locally
  */
@@ -124,8 +110,6 @@ export interface EventStoreInitializeResult {
   sessionId: string;
   /** Loaded context from AGENTS.md files */
   context?: LoadedContext;
-  /** Current ledger state */
-  ledger?: Ledger;
   /** Recent handoffs/session summaries for context */
   handoffs?: Handoff[];
   /** System prompt with all context */
@@ -217,7 +201,6 @@ export class EventStoreTuiSession {
 
   // In-memory cache for ephemeral mode and performance
   private cachedMessages: Message[] = [];
-  private cachedLedger: Ledger;
   private cachedTokenUsage: TokenUsage = { inputTokens: 0, outputTokens: 0 };
 
   constructor(config: EventStoreTuiSessionConfig) {
@@ -238,9 +221,6 @@ export class EventStoreTuiSession {
       compactionThreshold: this.config.compactionThreshold,
       targetTokens: this.config.compactionTargetTokens,
     });
-
-    // Initialize empty ledger
-    this.cachedLedger = this.getEmptyLedger();
   }
 
   /**
@@ -306,9 +286,6 @@ export class EventStoreTuiSession {
     // Update state
     this.state = 'ready';
 
-    // Record ledger in audit
-    this.contextAudit.setLedger(this.cachedLedger);
-
     // Build system prompt
     const systemPrompt = this.buildSystemPrompt();
     this.recordSystemPromptInAudit(systemPrompt);
@@ -319,7 +296,6 @@ export class EventStoreTuiSession {
     return {
       sessionId: this.sessionId!,
       context: this.loadedContext ?? undefined,
-      ledger: this.cachedLedger,
       handoffs: handoffs.length > 0 ? handoffs : undefined,
       systemPrompt,
       audit: this.contextAudit.getData(),
@@ -356,7 +332,6 @@ export class EventStoreTuiSession {
         payload: {
           reason: 'completed',
           summary,
-          ledger: this.cachedLedger,
           messageCount,
           tokenUsage: this.cachedTokenUsage,
           workingDirectory: this.config.workingDirectory,
@@ -480,97 +455,6 @@ export class EventStoreTuiSession {
   }
 
   // ===========================================================================
-  // Ledger Methods
-  // ===========================================================================
-
-  /**
-   * Get current ledger state
-   */
-  async getLedger(): Promise<Ledger> {
-    this.ensureReady();
-
-    if (this.isEphemeral() || !this.sessionId) {
-      return { ...this.cachedLedger };
-    }
-
-    // Reconstruct ledger from events
-    const state = await this.eventStore.getStateAtHead(this.sessionId);
-    if (state.ledger) {
-      this.cachedLedger = { ...state.ledger };
-    }
-    return { ...this.cachedLedger };
-  }
-
-  /**
-   * Update ledger with partial changes
-   */
-  async updateLedger(updates: Partial<Ledger>): Promise<void> {
-    this.ensureReady();
-
-    // Update cache
-    this.cachedLedger = { ...this.cachedLedger, ...updates };
-
-    // Skip persistence in ephemeral mode
-    if (this.isEphemeral()) {
-      return;
-    }
-
-    await this.eventStore.append({
-      sessionId: this.sessionId!,
-      type: 'ledger.update',
-      payload: {
-        updates,
-        timestamp: new Date().toISOString(),
-      },
-    });
-  }
-
-  /**
-   * Add a working file to the ledger
-   */
-  async addWorkingFile(filePath: string): Promise<void> {
-    if (!this.cachedLedger.workingFiles.includes(filePath)) {
-      this.cachedLedger.workingFiles.push(filePath);
-      await this.updateLedger({ workingFiles: this.cachedLedger.workingFiles });
-    }
-  }
-
-  /**
-   * Add a decision to the ledger
-   */
-  async addDecision(choice: string, reason: string): Promise<void> {
-    this.cachedLedger.decisions.push({
-      choice,
-      reason,
-      timestamp: new Date().toISOString(),
-    });
-    await this.updateLedger({ decisions: this.cachedLedger.decisions });
-  }
-
-  /**
-   * Complete current task and move to next
-   */
-  async completeCurrentTask(): Promise<void> {
-    if (this.cachedLedger.now) {
-      // Move current to done
-      this.cachedLedger.done.push(this.cachedLedger.now);
-
-      // Pop from next if available
-      if (this.cachedLedger.next.length > 0) {
-        this.cachedLedger.now = this.cachedLedger.next.shift()!;
-      } else {
-        this.cachedLedger.now = '';
-      }
-
-      await this.updateLedger({
-        done: this.cachedLedger.done,
-        now: this.cachedLedger.now,
-        next: this.cachedLedger.next,
-      });
-    }
-  }
-
-  // ===========================================================================
   // State Reconstruction
   // ===========================================================================
 
@@ -580,14 +464,12 @@ export class EventStoreTuiSession {
   async getSessionState(): Promise<{
     messages: Message[];
     tokenUsage: TokenUsage;
-    ledger: Ledger;
     messageCount: number;
   }> {
     if (this.isEphemeral() || !this.sessionId) {
       return {
         messages: [...this.cachedMessages],
         tokenUsage: { ...this.cachedTokenUsage },
-        ledger: { ...this.cachedLedger },
         messageCount: this.cachedMessages.length,
       };
     }
@@ -598,7 +480,6 @@ export class EventStoreTuiSession {
     return {
       messages,
       tokenUsage: state.tokenUsage,
-      ledger: state.ledger || this.cachedLedger,
       messageCount: messages.length,
     };
   }
@@ -609,7 +490,6 @@ export class EventStoreTuiSession {
   async getStateAt(eventId: EventId): Promise<{
     messages: Message[];
     tokenUsage: TokenUsage;
-    ledger: Ledger;
   }> {
     const state = await this.eventStore.getStateAt(eventId);
     const messages = state.messages.map(em => this.eventMessageToMessage(em));
@@ -617,7 +497,6 @@ export class EventStoreTuiSession {
     return {
       messages,
       tokenUsage: state.tokenUsage,
-      ledger: state.ledger || this.getEmptyLedger(),
     };
   }
 
@@ -896,28 +775,6 @@ export class EventStoreTuiSession {
       sections.push('');
     }
 
-    // Add ledger state
-    if (this.cachedLedger && (this.cachedLedger.goal || this.cachedLedger.now)) {
-      sections.push('# Session State\n');
-
-      if (this.cachedLedger.goal) {
-        sections.push(`**Goal**: ${this.cachedLedger.goal}`);
-      }
-      if (this.cachedLedger.now) {
-        sections.push(`**Working on**: ${this.cachedLedger.now}`);
-      }
-      if (this.cachedLedger.next.length > 0) {
-        sections.push(`**Next**: ${this.cachedLedger.next.slice(0, 3).join(', ')}`);
-      }
-      if (this.cachedLedger.constraints.length > 0) {
-        sections.push(`**Constraints**: ${this.cachedLedger.constraints.join('; ')}`);
-      }
-      if (this.cachedLedger.workingFiles.length > 0) {
-        sections.push(`**Files**: ${this.cachedLedger.workingFiles.join(', ')}`);
-      }
-      sections.push('');
-    }
-
     return sections.join('\n').trim();
   }
 
@@ -1053,7 +910,6 @@ export class EventStoreTuiSession {
     // Convert event messages to regular messages
     this.cachedMessages = state.messages.map(em => this.eventMessageToMessage(em));
     this.cachedTokenUsage = state.tokenUsage;
-    this.cachedLedger = state.ledger || this.getEmptyLedger();
   }
 
   private async loadContext(): Promise<LoadedContext | null> {
@@ -1120,31 +976,9 @@ export class EventStoreTuiSession {
     }
   }
 
-  private getEmptyLedger(): Ledger {
-    return {
-      goal: '',
-      now: '',
-      next: [],
-      done: [],
-      constraints: [],
-      workingFiles: [],
-      decisions: [],
-    };
-  }
-
   private generateSummary(): string {
     const parts: string[] = [];
-
-    if (this.cachedLedger.now) {
-      parts.push(`Worked on: ${this.cachedLedger.now}`);
-    }
-
-    if (this.cachedLedger.done.length > 0) {
-      parts.push(`Completed: ${this.cachedLedger.done.slice(-3).join(', ')}`);
-    }
-
     parts.push(`${this.cachedMessages.length} messages exchanged`);
-
     return parts.join('. ') || 'Session completed';
   }
 
@@ -1161,25 +995,10 @@ export class EventStoreTuiSession {
       });
     }
 
-    if (this.cachedLedger.goal || this.cachedLedger.now) {
-      sections.push({
-        name: 'Session State',
-        content: this.buildLedgerContent(),
-        source: 'EventStore ledger events',
-      });
-    }
-
     this.contextAudit.setSystemPrompt({
       content: systemPrompt,
       sections,
     });
-  }
-
-  private buildLedgerContent(): string {
-    const parts: string[] = [];
-    if (this.cachedLedger.now) parts.push(`Now: ${this.cachedLedger.now}`);
-    if (this.cachedLedger.next.length) parts.push(`Next: ${this.cachedLedger.next.join(', ')}`);
-    return parts.join('\n');
   }
 
   private eventToTreeNode(event: TronSessionEvent, isHead: boolean, depth: number): TreeNode {
@@ -1228,8 +1047,6 @@ export class EventStoreTuiSession {
         return `Tool: ${event.payload.name}`;
       case 'tool.result':
         return `Tool result (${event.payload.isError ? 'error' : 'success'})`;
-      case 'ledger.update':
-        return 'Ledger updated';
       default:
         return event.type;
     }

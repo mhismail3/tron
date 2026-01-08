@@ -6,7 +6,7 @@
  * - Session lifecycle (init, end)
  * - Message flow (user, assistant, tool)
  * - Tool execution (start, result, timing)
- * - Memory operations (ledger, handoffs)
+ * - Handoff operations
  * - Context loading
  * - Provider API calls
  * - Errors and warnings

@@ -6,7 +6,6 @@
  * - Full session lifecycle management via TuiSession
  * - Context loading from AGENTS.md files
  * - Memory/handoff integration for cross-session learning
- * - Ledger management for continuity
  * - Streaming output from agent events
  * - Animated thinking indicator
  * - Proper session end with handoff creation
@@ -421,14 +420,6 @@ export function App({ config, auth }: AppProps): React.ReactElement {
           dispatch({ type: 'SET_ACTIVE_TOOL', payload: event.toolName });
           dispatch({ type: 'SET_ACTIVE_TOOL_INPUT', payload: toolInput });
           dispatch({ type: 'SET_STATUS', payload: `Running ${event.toolName}` });
-
-          // Track working files in ledger
-          if (tuiSessionRef.current && event.toolName.toLowerCase() !== 'bash') {
-            const filePath = toolInput;
-            if (filePath) {
-              tuiSessionRef.current.addWorkingFile(filePath).catch(() => {});
-            }
-          }
         }
         break;
 
@@ -606,7 +597,7 @@ export function App({ config, auth }: AppProps): React.ReactElement {
 
       tuiSessionRef.current = tuiSession;
 
-      // Initialize session (loads context, ledger, handoffs)
+      // Initialize session (loads context and handoffs)
       const initResult = await tuiSession.initialize();
 
       // Create tools
@@ -799,11 +790,6 @@ export function App({ config, auth }: AppProps): React.ReactElement {
 
     // Persist user message to session file
     await tuiSessionRef.current.addMessage(userMessage);
-
-    // Update ledger with current work
-    await tuiSessionRef.current.updateLedger({
-      now: `Processing: ${prompt.slice(0, 50)}${prompt.length > 50 ? '...' : ''}`,
-    });
 
     try {
       dispatch({ type: 'SET_STATUS', payload: 'Thinking' });

@@ -347,92 +347,6 @@ describe('EventStoreTuiSession', () => {
   });
 
   // ===========================================================================
-  // Ledger Tests
-  // ===========================================================================
-
-  describe('ledger management', () => {
-    it('should record ledger update as event', async () => {
-      const tuiSession = new EventStoreTuiSession(config);
-      await tuiSession.initialize();
-
-      await tuiSession.updateLedger({
-        goal: 'Implement feature X',
-        now: 'Writing tests',
-      });
-
-      const sessionId = tuiSession.getSessionId();
-      const events = await eventStore.getEventsBySession(sessionId);
-      const ledgerEvent = events.find(e => e.type === 'ledger.update');
-
-      expect(ledgerEvent).toBeDefined();
-      expect(ledgerEvent?.payload).toMatchObject({
-        updates: {
-          goal: 'Implement feature X',
-          now: 'Writing tests',
-        },
-      });
-    });
-
-    it('should reconstruct ledger from events', async () => {
-      const tuiSession = new EventStoreTuiSession(config);
-      await tuiSession.initialize();
-
-      await tuiSession.updateLedger({ goal: 'Goal 1' });
-      await tuiSession.updateLedger({ now: 'Task 1' });
-      await tuiSession.updateLedger({ next: ['Task 2', 'Task 3'] });
-
-      const ledger = await tuiSession.getLedger();
-
-      expect(ledger.goal).toBe('Goal 1');
-      expect(ledger.now).toBe('Task 1');
-      expect(ledger.next).toEqual(['Task 2', 'Task 3']);
-    });
-
-    it('should add working file via ledger event', async () => {
-      const tuiSession = new EventStoreTuiSession(config);
-      await tuiSession.initialize();
-
-      await tuiSession.addWorkingFile('/src/test.ts');
-      await tuiSession.addWorkingFile('/src/other.ts');
-
-      const ledger = await tuiSession.getLedger();
-      expect(ledger.workingFiles).toContain('/src/test.ts');
-      expect(ledger.workingFiles).toContain('/src/other.ts');
-    });
-
-    it('should record decisions via ledger events', async () => {
-      const tuiSession = new EventStoreTuiSession(config);
-      await tuiSession.initialize();
-
-      await tuiSession.addDecision('Use TypeScript', 'Better type safety');
-
-      const ledger = await tuiSession.getLedger();
-      expect(ledger.decisions).toContainEqual(expect.objectContaining({
-        choice: 'Use TypeScript',
-        reason: 'Better type safety',
-        // timestamp is added automatically
-      }));
-    });
-
-    it('should complete current task and move to next', async () => {
-      const tuiSession = new EventStoreTuiSession(config);
-      await tuiSession.initialize();
-
-      await tuiSession.updateLedger({
-        now: 'Task A',
-        next: ['Task B', 'Task C'],
-      });
-
-      await tuiSession.completeCurrentTask();
-
-      const ledger = await tuiSession.getLedger();
-      expect(ledger.done).toContain('Task A');
-      expect(ledger.now).toBe('Task B');
-      expect(ledger.next).toEqual(['Task C']);
-    });
-  });
-
-  // ===========================================================================
   // State Reconstruction Tests
   // ===========================================================================
 
@@ -463,14 +377,12 @@ describe('EventStoreTuiSession', () => {
         { role: 'assistant', content: [{ type: 'text', text: 'Response' }] },
         { inputTokens: 0, outputTokens: 20 }
       );
-      await tuiSession.updateLedger({ goal: 'Test goal' });
 
       const state = await tuiSession.getSessionState();
 
       expect(state.messages.length).toBe(2);
       expect(state.tokenUsage.inputTokens).toBe(10);
       expect(state.tokenUsage.outputTokens).toBe(20);
-      expect(state.ledger.goal).toBe('Test goal');
     });
 
     it('should get state at specific event (point-in-time)', async () => {
@@ -583,26 +495,6 @@ describe('EventStoreTuiSession', () => {
 
       expect(originalMessages[1].content).toBe('Original path');
       expect(forkedMessages[1].content).toBe('Forked path');
-    });
-
-    it('should preserve ledger state in fork', async () => {
-      const tuiSession = new EventStoreTuiSession(config);
-      await tuiSession.initialize();
-
-      await tuiSession.updateLedger({ goal: 'Original goal' });
-      await tuiSession.addWorkingFile('/src/test.ts');
-
-      const forkResult = await tuiSession.fork();
-
-      const forkedSession = new EventStoreTuiSession({
-        ...config,
-        sessionId: forkResult.newSessionId,
-      });
-      await forkedSession.initialize();
-
-      const ledger = await forkedSession.getLedger();
-      expect(ledger.goal).toBe('Original goal');
-      expect(ledger.workingFiles).toContain('/src/test.ts');
     });
   });
 
@@ -820,7 +712,6 @@ describe('EventStoreTuiSession', () => {
       });
       await tuiSession.initialize();
 
-      await tuiSession.updateLedger({ goal: 'Test task', now: 'Working on it' });
       await tuiSession.addMessage({ role: 'user', content: 'First message' });
       await tuiSession.addMessage({ role: 'assistant', content: [{ type: 'text', text: 'Response' }] });
       await tuiSession.addMessage({ role: 'user', content: 'Second message' });
@@ -907,14 +798,12 @@ describe('EventStoreTuiSession', () => {
       await tuiSession.initialize();
 
       await tuiSession.addMessage({ role: 'user', content: 'Test' });
-      await tuiSession.updateLedger({ goal: 'Goal' });
 
       const events = await tuiSession.getRecentEvents(5);
 
-      expect(events.length).toBeGreaterThanOrEqual(3); // start + message + ledger
+      expect(events.length).toBeGreaterThanOrEqual(2); // start + message
       expect(events.some(e => e.type === 'session.start')).toBe(true);
       expect(events.some(e => e.type === 'message.user')).toBe(true);
-      expect(events.some(e => e.type === 'ledger.update')).toBe(true);
     });
 
     it('should get ancestors (full history to root)', async () => {

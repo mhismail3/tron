@@ -295,17 +295,6 @@ export class EventStore {
     let turnCount = 0;
     let currentTurn = 0;
 
-    // Initialize ledger state
-    const ledger = {
-      goal: '',
-      now: '',
-      next: [] as string[],
-      done: [] as string[],
-      constraints: [] as string[],
-      workingFiles: [] as string[],
-      decisions: [] as Array<{ choice: string; reason: string; timestamp?: string }>,
-    };
-
     for (const evt of ancestors) {
       if (evt.type === 'message.user') {
         const payload = evt.payload as { content: Message['content']; tokenUsage?: TokenUsage };
@@ -336,18 +325,6 @@ export class EventStore {
           currentTurn = payload.turn;
           turnCount = payload.turn;
         }
-      } else if (evt.type === 'ledger.update') {
-        // Merge ledger updates
-        const payload = evt.payload as { updates?: Record<string, unknown> };
-        if (payload.updates) {
-          if (typeof payload.updates.goal === 'string') ledger.goal = payload.updates.goal;
-          if (typeof payload.updates.now === 'string') ledger.now = payload.updates.now;
-          if (Array.isArray(payload.updates.next)) ledger.next = payload.updates.next;
-          if (Array.isArray(payload.updates.done)) ledger.done = payload.updates.done;
-          if (Array.isArray(payload.updates.constraints)) ledger.constraints = payload.updates.constraints;
-          if (Array.isArray(payload.updates.workingFiles)) ledger.workingFiles = payload.updates.workingFiles;
-          if (Array.isArray(payload.updates.decisions)) ledger.decisions = payload.updates.decisions;
-        }
       }
     }
 
@@ -363,7 +340,6 @@ export class EventStore {
       turnCount,
       model: session?.model ?? 'unknown',
       workingDirectory: session?.workingDirectory ?? '',
-      ledger,
     };
   }
 

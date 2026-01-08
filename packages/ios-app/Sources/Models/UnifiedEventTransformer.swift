@@ -778,13 +778,12 @@ extension UnifiedEventTransformer {
     /// Reconstructed session state from event history.
     ///
     /// This structure contains all information needed to display a session,
-    /// including messages, token usage, model info, and ledger state.
+    /// including messages, token usage, and model info.
     struct ReconstructedState {
         var messages: [ChatMessage]
         var totalTokenUsage: TokenUsage
         var currentModel: String?
         var currentTurn: Int
-        var ledger: LedgerState?
         var workingDirectory: String?
 
         // Extended state (Phase 2)
@@ -796,16 +795,6 @@ extension UnifiedEventTransformer {
         var tags: [String]
 
         // MARK: - Nested Types
-
-        struct LedgerState {
-            var goal: String?
-            var now: String?
-            var next: [String]
-            var done: [String]
-            var constraints: [String]
-            var workingFiles: [String]
-            var decisions: [(choice: String, reason: String)]
-        }
 
         /// File read/write/edit activity during the session
         struct FileActivityState {
@@ -956,7 +945,6 @@ extension UnifiedEventTransformer {
             self.totalTokenUsage = TokenUsage(inputTokens: 0, outputTokens: 0, cacheReadTokens: nil, cacheCreationTokens: nil)
             self.currentModel = nil
             self.currentTurn = 0
-            self.ledger = nil
             self.workingDirectory = nil
             self.fileActivity = FileActivityState()
             self.worktree = WorktreeState()
@@ -973,7 +961,6 @@ extension UnifiedEventTransformer {
     /// - Chat messages for display
     /// - Accumulated token usage
     /// - Current model (after any switches)
-    /// - Ledger state
     /// - Working directory
     ///
     /// **Important**: Tool calls (`tool.call`) are combined with their results
@@ -1053,51 +1040,6 @@ extension UnifiedEventTransformer {
                 if eventType == .configModelSwitch,
                    let parsed = ModelSwitchPayload(from: event.payload) {
                     state.currentModel = parsed.newModel
-                }
-
-            case .ledgerUpdate:
-                let payload = LedgerUpdatePayload(from: event.payload)
-                if state.ledger == nil {
-                    state.ledger = ReconstructedState.LedgerState(
-                        goal: nil, now: nil, next: [], done: [],
-                        constraints: [], workingFiles: [], decisions: []
-                    )
-                }
-                if let field = payload.field {
-                    switch field {
-                    case .goal:
-                        state.ledger?.goal = payload.newValue as? String
-                    case .now:
-                        state.ledger?.now = payload.newValue as? String
-                    case .next:
-                        state.ledger?.next = payload.newValue as? [String] ?? []
-                    case .done:
-                        state.ledger?.done = payload.newValue as? [String] ?? []
-                    case .constraints:
-                        state.ledger?.constraints = payload.newValue as? [String] ?? []
-                    case .workingFiles:
-                        state.ledger?.workingFiles = payload.newValue as? [String] ?? []
-                    case .decisions:
-                        // Decisions format: array of {choice, reason}
-                        if let decisions = payload.newValue as? [[String: String]] {
-                            state.ledger?.decisions = decisions.compactMap { dict in
-                                guard let choice = dict["choice"],
-                                      let reason = dict["reason"] else { return nil }
-                                return (choice: choice, reason: reason)
-                            }
-                        }
-                    }
-                }
-
-            case .ledgerGoal:
-                if let parsed = LedgerGoalPayload(from: event.payload) {
-                    if state.ledger == nil {
-                        state.ledger = ReconstructedState.LedgerState(
-                            goal: nil, now: nil, next: [], done: [],
-                            constraints: [], workingFiles: [], decisions: []
-                        )
-                    }
-                    state.ledger?.goal = parsed.goal
                 }
 
             case .streamTurnEnd:
@@ -1320,50 +1262,6 @@ extension UnifiedEventTransformer {
                 if eventType == .configModelSwitch,
                    let parsed = ModelSwitchPayload(from: event.payload) {
                     state.currentModel = parsed.newModel
-                }
-
-            case .ledgerUpdate:
-                let payload = LedgerUpdatePayload(from: event.payload)
-                if state.ledger == nil {
-                    state.ledger = ReconstructedState.LedgerState(
-                        goal: nil, now: nil, next: [], done: [],
-                        constraints: [], workingFiles: [], decisions: []
-                    )
-                }
-                if let field = payload.field {
-                    switch field {
-                    case .goal:
-                        state.ledger?.goal = payload.newValue as? String
-                    case .now:
-                        state.ledger?.now = payload.newValue as? String
-                    case .next:
-                        state.ledger?.next = payload.newValue as? [String] ?? []
-                    case .done:
-                        state.ledger?.done = payload.newValue as? [String] ?? []
-                    case .constraints:
-                        state.ledger?.constraints = payload.newValue as? [String] ?? []
-                    case .workingFiles:
-                        state.ledger?.workingFiles = payload.newValue as? [String] ?? []
-                    case .decisions:
-                        if let decisions = payload.newValue as? [[String: String]] {
-                            state.ledger?.decisions = decisions.compactMap { dict in
-                                guard let choice = dict["choice"],
-                                      let reason = dict["reason"] else { return nil }
-                                return (choice: choice, reason: reason)
-                            }
-                        }
-                    }
-                }
-
-            case .ledgerGoal:
-                if let parsed = LedgerGoalPayload(from: event.payload) {
-                    if state.ledger == nil {
-                        state.ledger = ReconstructedState.LedgerState(
-                            goal: nil, now: nil, next: [], done: [],
-                            constraints: [], workingFiles: [], decisions: []
-                        )
-                    }
-                    state.ledger?.goal = parsed.goal
                 }
 
             case .streamTurnEnd:

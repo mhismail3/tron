@@ -146,9 +146,6 @@ struct SessionEvent: Identifiable, Codable {
             let toolName = payload.string("toolName") ?? "tool"
             return "\(toolName) failed"
 
-        case .ledgerUpdate:
-            return "Ledger updated"
-
         case .configModelSwitch:
             let from = payload.string("previousModel")?.shortModelName ?? "?"
             let to = payload.string("newModel")?.shortModelName ??
@@ -375,10 +372,6 @@ enum SessionEventType: String, Codable {
     // Notifications (in-chat pill notifications)
     case notificationInterrupted = "notification.interrupted"
 
-    case ledgerUpdate = "ledger.update"
-    case ledgerGoal = "ledger.goal"
-    case ledgerTask = "ledger.task"
-
     case compactBoundary = "compact.boundary"
     case compactSummary = "compact.summary"
 
@@ -557,5 +550,5 @@ struct EventTreeNode: Identifiable {
 }
 
 // MARK: - Session State
-// NOTE: Legacy types (ReconstructedSessionState, ReconstructedMessage, ReconstructedLedger)
+// NOTE: Legacy types (ReconstructedSessionState, ReconstructedMessage)
 // have been removed. Use UnifiedEventTransformer.ReconstructedState instead.

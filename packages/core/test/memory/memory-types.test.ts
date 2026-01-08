@@ -8,7 +8,6 @@ import { describe, it, expect } from 'vitest';
 import type {
   SessionMemory,
   HandoffRecord,
-  LedgerEntry,
 } from '../../src/memory/types.js';
 
 describe('Memory Types', () => {
@@ -115,41 +114,6 @@ describe('Memory Types', () => {
 
       expect(handoff.compressedMessages).toBeTruthy();
       expect(handoff.keyInsights).toHaveLength(2);
-    });
-  });
-
-  describe('LedgerEntry', () => {
-    it('should track completed work', () => {
-      const entry: LedgerEntry = {
-        id: 'ledger_123',
-        timestamp: new Date().toISOString(),
-        sessionId: 'sess_abc',
-        action: 'implement_feature',
-        description: 'Added user login flow',
-        filesModified: ['/src/auth.ts', '/src/login.tsx'],
-        success: true,
-      };
-
-      expect(entry.action).toBe('implement_feature');
-      expect(entry.filesModified).toHaveLength(2);
-      expect(entry.success).toBe(true);
-    });
-
-    it('should track failed actions', () => {
-      const entry: LedgerEntry = {
-        id: 'ledger_456',
-        timestamp: new Date().toISOString(),
-        sessionId: 'sess_def',
-        action: 'run_tests',
-        description: 'Ran test suite',
-        success: false,
-        error: '5 tests failed',
-        duration: 15000,
-      };
-
-      expect(entry.success).toBe(false);
-      expect(entry.error).toBe('5 tests failed');
-      expect(entry.duration).toBe(15000);
     });
   });
 });

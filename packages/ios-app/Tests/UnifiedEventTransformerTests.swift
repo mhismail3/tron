@@ -361,8 +361,6 @@ final class UnifiedEventTransformerTests: XCTestCase {
         let metadataTypes = [
             "session.start",
             "session.end",
-            "ledger.update",
-            "ledger.goal",
             "compact.boundary",
             "worktree.acquired",
             "stream.turn_end"
@@ -601,28 +599,6 @@ final class UnifiedEventTransformerTests: XCTestCase {
 
         XCTAssertEqual(state.currentModel, "claude-opus-4")
         XCTAssertEqual(state.messages.count, 3) // user + model_switch + assistant
-    }
-
-    func testReconstructSessionStateWithLedger() {
-        let events = [
-            rawEvent(type: "session.start", payload: ["model": AnyCodable("claude-sonnet-4")], timestamp: timestamp(0)),
-            rawEvent(type: "ledger.goal", payload: ["goal": AnyCodable("Implement authentication")], timestamp: timestamp(1)),
-            rawEvent(type: "ledger.update", payload: [
-                "field": AnyCodable("next"),
-                "newValue": AnyCodable(["Add login form", "Add password hashing"])
-            ], timestamp: timestamp(2)),
-            rawEvent(type: "ledger.update", payload: [
-                "field": AnyCodable("done"),
-                "newValue": AnyCodable(["Created user model"])
-            ], timestamp: timestamp(3))
-        ]
-
-        let state = UnifiedEventTransformer.reconstructSessionState(from: events)
-
-        XCTAssertNotNil(state.ledger)
-        XCTAssertEqual(state.ledger?.goal, "Implement authentication")
-        XCTAssertEqual(state.ledger?.next.count, 2)
-        XCTAssertEqual(state.ledger?.done.count, 1)
     }
 
     func testReconstructSessionStateWithTokenAccumulation() {

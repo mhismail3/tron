@@ -60,10 +60,6 @@ export type EventType =
   | 'config.prompt_update'
   // Notifications (in-chat pill notifications)
   | 'notification.interrupted'
-  // Ledger/state
-  | 'ledger.update'
-  | 'ledger.goal'
-  | 'ledger.task'
   // Compaction/summarization
   | 'compact.boundary'
   | 'compact.summary'
@@ -357,44 +353,6 @@ export interface ConfigPromptUpdateEvent extends BaseEvent {
 }
 
 // =============================================================================
-// Ledger Events
-// =============================================================================
-
-/**
- * Ledger update event
- */
-export interface LedgerUpdateEvent extends BaseEvent {
-  type: 'ledger.update';
-  payload: {
-    field: 'goal' | 'now' | 'next' | 'done' | 'constraints' | 'decisions' | 'workingFiles';
-    previousValue?: unknown;
-    newValue: unknown;
-  };
-}
-
-/**
- * Goal event
- */
-export interface LedgerGoalEvent extends BaseEvent {
-  type: 'ledger.goal';
-  payload: {
-    goal: string;
-  };
-}
-
-/**
- * Task event
- */
-export interface LedgerTaskEvent extends BaseEvent {
-  type: 'ledger.task';
-  payload: {
-    action: 'add' | 'complete' | 'remove';
-    task: string;
-    list: 'next' | 'done';
-  };
-}
-
-// =============================================================================
 // Compaction Events
 // =============================================================================
 
@@ -641,10 +599,6 @@ export type SessionEvent =
   // Config
   | ConfigModelSwitchEvent
   | ConfigPromptUpdateEvent
-  // Ledger
-  | LedgerUpdateEvent
-  | LedgerGoalEvent
-  | LedgerTaskEvent
   // Compaction
   | CompactBoundaryEvent
   | CompactSummaryEvent
@@ -785,16 +739,6 @@ export interface SessionState {
   };
   /** Timestamp of this state */
   timestamp?: string;
-  /** Ledger state reconstructed from ledger.update events */
-  ledger?: {
-    goal: string;
-    now: string;
-    next: string[];
-    done: string[];
-    constraints: string[];
-    workingFiles: string[];
-    decisions: Array<{ choice: string; reason: string; timestamp?: string }>;
-  };
 }
 
 export interface SessionMetadata {

@@ -51,22 +51,3 @@ export interface HandoffRecord {
   keyInsights?: string[];
 }
 
-// =============================================================================
-// Ledger System
-// =============================================================================
-
-/**
- * Ledger entry for completed work tracking
- */
-export interface LedgerEntry {
-  id: string;
-  timestamp: string;
-  sessionId: string;
-  action: string;
-  description: string;
-  filesModified?: string[];
-  success: boolean;
-  error?: string;
-  duration?: number;
-  metadata?: Record<string, unknown>;
-}

@@ -38,11 +38,6 @@ enum PersistedEventType: String, CaseIterable {
     // Notifications (in-chat pill notifications)
     case notificationInterrupted = "notification.interrupted"
 
-    // Ledger/state
-    case ledgerUpdate = "ledger.update"
-    case ledgerGoal = "ledger.goal"
-    case ledgerTask = "ledger.task"
-
     // Compaction/summarization
     case compactBoundary = "compact.boundary"
     case compactSummary = "compact.summary"
@@ -89,7 +84,6 @@ enum PersistedEventType: String, CaseIterable {
              .messageUser, .messageAssistant, .messageSystem,
              .toolCall, .toolResult,
              .configModelSwitch, .configPromptUpdate,
-             .ledgerUpdate, .ledgerGoal, .ledgerTask,
              .compactBoundary, .compactSummary,
              .worktreeAcquired, .worktreeCommit, .worktreeReleased, .worktreeMerged,
              .errorAgent:
@@ -113,7 +107,6 @@ enum PersistedEventType: String, CaseIterable {
     var isMetadataOnly: Bool {
         switch self {
         case .sessionStart, .sessionEnd, .sessionFork, .sessionBranch,
-             .ledgerUpdate, .ledgerGoal, .ledgerTask,
              .compactBoundary, .compactSummary,
              .metadataUpdate, .metadataTag,
              .worktreeAcquired, .worktreeReleased, .worktreeCommit, .worktreeMerged,
@@ -144,9 +137,6 @@ enum PersistedEventType: String, CaseIterable {
         case .configModelSwitch: return "Model switched"
         case .configPromptUpdate: return "Prompt updated"
         case .notificationInterrupted: return "Session interrupted"
-        case .ledgerUpdate: return "Ledger updated"
-        case .ledgerGoal: return "Goal set"
-        case .ledgerTask: return "Task updated"
         case .compactBoundary: return "Compact boundary"
         case .compactSummary: return "Compact summary"
         case .metadataUpdate: return "Metadata updated"
@@ -291,22 +281,6 @@ enum SystemMessageSource: String {
     case hook = "hook"
     case error = "error"
     case inject = "inject"
-}
-
-// =============================================================================
-// MARK: - Ledger Fields (from server LedgerUpdateEvent)
-// =============================================================================
-
-/// Ledger fields that can be updated.
-/// This EXACTLY mirrors the server's field union.
-enum LedgerField: String {
-    case goal = "goal"
-    case now = "now"
-    case next = "next"
-    case done = "done"
-    case constraints = "constraints"
-    case decisions = "decisions"
-    case workingFiles = "workingFiles"
 }
 
 // =============================================================================
