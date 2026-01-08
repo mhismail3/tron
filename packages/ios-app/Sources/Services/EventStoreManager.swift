@@ -1,6 +1,8 @@
 import Foundation
 import Combine
-import os
+
+// NOTE: Uses global `logger` from TronLogger.swift (TronLogger.shared)
+// Do NOT define a local logger property - it would shadow the global one
 
 // MARK: - Tool Call Record (for persistence)
 
@@ -19,7 +21,7 @@ struct ToolCallRecord {
 /// Coordinates between EventDatabase (local SQLite) and RPCClient (server sync)
 @MainActor
 class EventStoreManager: ObservableObject {
-    let logger = Logger(subsystem: "com.tron.mobile", category: "EventStoreManager")
+    // Uses global `logger` from TronLogger.swift
 
     let eventDB: EventDatabase
     let rpcClient: RPCClient
@@ -63,14 +65,14 @@ class EventStoreManager: ObservableObject {
     private func setupGlobalEventHandlers() {
         rpcClient.onGlobalProcessingStart = { [weak self] sessionId in
             Task { @MainActor in
-                self?.logger.info("Global: Session \(sessionId) started processing")
+                logger.info("Global: Session \(sessionId) started processing", category: .session)
                 self?.setSessionProcessing(sessionId, isProcessing: true)
             }
         }
 
         rpcClient.onGlobalComplete = { [weak self] sessionId in
             Task { @MainActor in
-                self?.logger.info("Global: Session \(sessionId) completed processing")
+                logger.info("Global: Session \(sessionId) completed processing", category: .session)
                 self?.setSessionProcessing(sessionId, isProcessing: false)
                 try? await self?.syncSessionEvents(sessionId: sessionId)
                 self?.extractDashboardInfoFromEvents(sessionId: sessionId)
@@ -79,7 +81,7 @@ class EventStoreManager: ObservableObject {
 
         rpcClient.onGlobalError = { [weak self] sessionId, message in
             Task { @MainActor in
-                self?.logger.info("Global: Session \(sessionId) error: \(message)")
+                logger.info("Global: Session \(sessionId) error: \(message)", category: .session)
                 self?.setSessionProcessing(sessionId, isProcessing: false)
                 self?.updateSessionDashboardInfo(
                     sessionId: sessionId,
@@ -141,7 +143,7 @@ class EventStoreManager: ObservableObject {
             }
 
             sessions = try eventDB.getAllSessions()
-            logger.info("Loaded \(self.sessions.count) sessions from EventDatabase")
+            logger.info("Loaded \(self.sessions.count) sessions from EventDatabase", category: .session)
 
             // Restore preserved transient state and extract dashboard info
             for i in sessions.indices {
@@ -158,7 +160,7 @@ class EventStoreManager: ObservableObject {
                 extractDashboardInfoFromEvents(sessionId: sessionId)
             }
         } catch {
-            logger.error("Failed to load sessions: \(error.localizedDescription)")
+            logger.error("Failed to load sessions: \(error.localizedDescription)", category: .session)
             sessions = []
         }
     }

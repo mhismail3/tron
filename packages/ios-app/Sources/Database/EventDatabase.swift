@@ -212,6 +212,65 @@ class EventDatabase: ObservableObject {
         }
     }
 
+    /// Insert events, ignoring any that already exist (by ID).
+    /// Returns the number of events actually inserted.
+    func insertEventsIgnoringDuplicates(_ events: [SessionEvent]) throws -> Int {
+        guard !events.isEmpty else { return 0 }
+
+        let sql = """
+            INSERT OR IGNORE INTO events
+            (id, parent_id, session_id, workspace_id, type, timestamp, sequence, payload)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """
+
+        var insertedCount = 0
+
+        try execute("BEGIN TRANSACTION")
+        do {
+            var stmt: OpaquePointer?
+            guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+                throw EventDatabaseError.prepareFailed(errorMessage)
+            }
+            defer { sqlite3_finalize(stmt) }
+
+            for event in events {
+                sqlite3_reset(stmt)
+                sqlite3_clear_bindings(stmt)
+
+                sqlite3_bind_text(stmt, 1, event.id, -1, SQLITE_TRANSIENT)
+                if let parentId = event.parentId {
+                    sqlite3_bind_text(stmt, 2, parentId, -1, SQLITE_TRANSIENT)
+                } else {
+                    sqlite3_bind_null(stmt, 2)
+                }
+                sqlite3_bind_text(stmt, 3, event.sessionId, -1, SQLITE_TRANSIENT)
+                sqlite3_bind_text(stmt, 4, event.workspaceId, -1, SQLITE_TRANSIENT)
+                sqlite3_bind_text(stmt, 5, event.type, -1, SQLITE_TRANSIENT)
+                sqlite3_bind_text(stmt, 6, event.timestamp, -1, SQLITE_TRANSIENT)
+                sqlite3_bind_int(stmt, 7, Int32(event.sequence))
+
+                let payloadData = try JSONEncoder().encode(event.payload)
+                let payloadString = String(data: payloadData, encoding: .utf8) ?? "{}"
+                sqlite3_bind_text(stmt, 8, payloadString, -1, SQLITE_TRANSIENT)
+
+                guard sqlite3_step(stmt) == SQLITE_DONE else {
+                    throw EventDatabaseError.insertFailed(errorMessage)
+                }
+
+                // Check if a row was actually inserted (changes > 0)
+                if sqlite3_changes(db) > 0 {
+                    insertedCount += 1
+                }
+            }
+            try execute("COMMIT")
+        } catch {
+            try execute("ROLLBACK")
+            throw error
+        }
+
+        return insertedCount
+    }
+
     func getEvent(_ id: String) throws -> SessionEvent? {
         let sql = """
             SELECT id, parent_id, session_id, workspace_id, type, timestamp, sequence, payload
