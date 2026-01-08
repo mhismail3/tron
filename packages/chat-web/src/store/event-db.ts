@@ -36,15 +36,28 @@ export interface CachedSession {
   workspaceId: string;
   rootEventId: string | null;
   headEventId: string | null;
-  status: 'active' | 'ended';
   title: string | null;
-  model: string;
-  provider: string;
+  latestModel: string;
   workingDirectory: string;
   createdAt: string;
   lastActivityAt: string;
+  endedAt: string | null;
   eventCount: number;
   messageCount: number;
+}
+
+/**
+ * Helper to check if a session has ended
+ */
+export function isSessionEnded(session: CachedSession): boolean {
+  return session.endedAt !== null;
+}
+
+/**
+ * Backward compatibility: get model from session
+ */
+export function getSessionModel(session: CachedSession): string {
+  return session.latestModel;
 }
 
 /**
@@ -143,7 +156,7 @@ export class EventDB {
       const sessionsStore = db.createObjectStore(STORES.sessions, { keyPath: 'id' });
       sessionsStore.createIndex('workspaceId', 'workspaceId', { unique: false });
       sessionsStore.createIndex('lastActivityAt', 'lastActivityAt', { unique: false });
-      sessionsStore.createIndex('status', 'status', { unique: false });
+      sessionsStore.createIndex('endedAt', 'endedAt', { unique: false });
     }
 
     // Sync state store

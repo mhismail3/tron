@@ -736,7 +736,7 @@ describe('EventStoreTuiSession', () => {
       const sessionId = tuiSession.getSessionId();
       const session = await eventStore.getSession(sessionId);
 
-      expect(session?.status).toBe('ended');
+      expect(session?.isEnded).toBe(true);
     });
 
     it('should not allow operations after end', async () => {

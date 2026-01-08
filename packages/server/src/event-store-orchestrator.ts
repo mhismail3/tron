@@ -266,7 +266,7 @@ export class EventStoreOrchestrator extends EventEmitter {
     const agent = await this.createAgentForSession(
       session.id,
       workingDir.path,
-      session.model
+      session.latestModel
     );
 
     this.activeSessions.set(sessionId, {
@@ -275,7 +275,7 @@ export class EventStoreOrchestrator extends EventEmitter {
       isProcessing: false,
       lastActivity: new Date(),
       workingDirectory: workingDir.path,
-      model: session.model,
+      model: session.latestModel,
       workingDir,
       currentTurn: session.turnCount ?? 0,
       // Initialize linearization tracking from session's current head
@@ -1138,7 +1138,7 @@ export class EventStoreOrchestrator extends EventEmitter {
       throw new Error(`Session not found: ${sessionId}`);
     }
 
-    const previousModel = session.model;
+    const previousModel = session.latestModel;
 
     // Get active session first to access pendingHeadEventId for linearization
     const active = this.activeSessions.get(sessionId);
@@ -1201,7 +1201,7 @@ export class EventStoreOrchestrator extends EventEmitter {
 
     // CRITICAL: Persist model change to session in database
     // Without this, the model reverts when session is reloaded
-    await this.eventStore.updateSessionModel(sessionId as SessionId, model);
+    await this.eventStore.updateLatestModel(sessionId as SessionId, model);
     logger.debug('[MODEL_SWITCH] Model persisted to database', { sessionId, model });
 
     // Update active session if exists
@@ -1648,7 +1648,8 @@ export class EventStoreOrchestrator extends EventEmitter {
     return {
       sessionId: row.id,
       workingDirectory: workingDir?.path ?? row.workingDirectory,
-      model: row.model,
+      // Use latestModel from DB, but expose as 'model' for backward compatibility
+      model: row.latestModel,
       messageCount: row.messageCount ?? 0,
       eventCount: row.eventCount ?? 0,
       inputTokens: row.totalInputTokens ?? 0,

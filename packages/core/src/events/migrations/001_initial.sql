@@ -1,6 +1,6 @@
 -- Event-Sourced Session Tree Schema
 -- Migration 001: Initial schema
--- Version: 1.0.0
+-- Version: 2.0.0 (updated to remove status/provider, rename model to latest_model)
 
 -- =============================================================================
 -- WORKSPACES TABLE
@@ -29,9 +29,7 @@ CREATE TABLE IF NOT EXISTS sessions (
 
   -- Denormalized for fast queries
   title TEXT,
-  status TEXT NOT NULL DEFAULT 'active',  -- 'active', 'ended', 'archived'
-  model TEXT NOT NULL,
-  provider TEXT NOT NULL,
+  latest_model TEXT NOT NULL,             -- Current/latest model being used
   working_directory TEXT NOT NULL,
 
   -- Fork tracking
@@ -41,7 +39,7 @@ CREATE TABLE IF NOT EXISTS sessions (
   -- Timestamps
   created_at TEXT NOT NULL,
   last_activity_at TEXT NOT NULL,
-  ended_at TEXT,
+  ended_at TEXT,                          -- NULL = active, set = ended
 
   -- Aggregates (updated on event insert)
   event_count INTEGER DEFAULT 0,
@@ -56,10 +54,10 @@ CREATE TABLE IF NOT EXISTS sessions (
 );
 
 CREATE INDEX IF NOT EXISTS idx_sessions_workspace ON sessions(workspace_id);
-CREATE INDEX IF NOT EXISTS idx_sessions_status ON sessions(status);
 CREATE INDEX IF NOT EXISTS idx_sessions_activity ON sessions(last_activity_at DESC);
 CREATE INDEX IF NOT EXISTS idx_sessions_parent ON sessions(parent_session_id);
 CREATE INDEX IF NOT EXISTS idx_sessions_working_dir ON sessions(working_directory);
+CREATE INDEX IF NOT EXISTS idx_sessions_ended ON sessions(ended_at);
 
 -- =============================================================================
 -- EVENTS TABLE
@@ -169,4 +167,4 @@ CREATE TABLE IF NOT EXISTS schema_version (
 );
 
 INSERT OR IGNORE INTO schema_version (version, applied_at, description)
-VALUES (1, datetime('now'), 'Initial event-sourced session tree schema');
+VALUES (2, datetime('now'), 'Initial schema (v2: no status/provider, uses latest_model)');

@@ -38,7 +38,6 @@ describe('EventStore Integration', () => {
         workspacePath: '/test/project',
         workingDirectory: '/test/project',
         model: 'claude-sonnet-4-20250514',
-        provider: 'anthropic',
         title: 'Test Session',
       });
 
@@ -53,7 +52,6 @@ describe('EventStore Integration', () => {
         workspacePath: '/test/project',
         workingDirectory: '/test/project',
         model: 'claude-sonnet-4-20250514',
-        provider: 'anthropic',
         title: 'Test Session',
         tags: ['test', 'integration'],
       });
@@ -61,7 +59,6 @@ describe('EventStore Integration', () => {
       expect(result.rootEvent.payload).toEqual({
         workingDirectory: '/test/project',
         model: 'claude-sonnet-4-20250514',
-        provider: 'anthropic',
         title: 'Test Session',
       });
     });
@@ -71,7 +68,6 @@ describe('EventStore Integration', () => {
         workspacePath: '/test/project',
         workingDirectory: '/test/project',
         model: 'claude-sonnet-4-20250514',
-        provider: 'anthropic',
       });
 
       const session = await eventStore.getSession(created.session.id);
@@ -85,14 +81,12 @@ describe('EventStore Integration', () => {
         workspacePath: '/project-a',
         workingDirectory: '/project-a',
         model: 'claude-sonnet-4-20250514',
-        provider: 'anthropic',
       });
 
       await eventStore.createSession({
         workspacePath: '/project-b',
         workingDirectory: '/project-b',
         model: 'claude-sonnet-4-20250514',
-        provider: 'anthropic',
       });
 
       const workspace = await eventStore.getWorkspaceByPath('/project-a');
@@ -107,13 +101,12 @@ describe('EventStore Integration', () => {
         workspacePath: '/test/project',
         workingDirectory: '/test/project',
         model: 'claude-sonnet-4-20250514',
-        provider: 'anthropic',
       });
 
       await eventStore.endSession(created.session.id);
 
       const session = await eventStore.getSession(created.session.id);
-      expect(session?.status).toBe('ended');
+      expect(session?.isEnded).toBe(true);
     });
   });
 
@@ -126,7 +119,6 @@ describe('EventStore Integration', () => {
         workspacePath: '/test/project',
         workingDirectory: '/test/project',
         model: 'claude-sonnet-4-20250514',
-        provider: 'anthropic',
       });
       sessionId = result.session.id;
       rootEventId = result.rootEvent.id;
@@ -246,7 +238,6 @@ describe('EventStore Integration', () => {
         workspacePath: '/test/project',
         workingDirectory: '/test/project',
         model: 'claude-sonnet-4-20250514',
-        provider: 'anthropic',
       });
       sessionId = result.session.id;
     });
@@ -335,7 +326,6 @@ describe('EventStore Integration', () => {
         workspacePath: '/test/project',
         workingDirectory: '/test/project',
         model: 'claude-sonnet-4-20250514',
-        provider: 'anthropic',
       });
       sessionId = result.session.id;
       eventIds = [result.rootEvent.id];
@@ -392,7 +382,6 @@ describe('EventStore Integration', () => {
         workspacePath: '/test/project',
         workingDirectory: '/test/project',
         model: 'claude-sonnet-4-20250514',
-        provider: 'anthropic',
       });
       sessionId = result.session.id;
 
@@ -489,7 +478,6 @@ describe('EventStore Integration', () => {
         workspacePath: '/test/project',
         workingDirectory: '/test/project',
         model: 'claude-sonnet-4-20250514',
-        provider: 'anthropic',
       });
       sessionId = result.session.id;
       eventIds = [result.rootEvent.id];
@@ -558,7 +546,6 @@ describe('EventStore Integration', () => {
         workspacePath: '/test/project',
         workingDirectory: '/test/project',
         model: 'claude-sonnet-4-20250514',
-        provider: 'anthropic',
       });
       sessionId = result.session.id;
 
@@ -607,7 +594,6 @@ describe('EventStore Integration', () => {
         workspacePath: '/test/project',
         workingDirectory: '/test/project',
         model: 'claude-sonnet-4-20250514',
-        provider: 'anthropic',
       });
       const sessionId = result.session.id;
 
@@ -637,7 +623,6 @@ describe('EventStore Integration', () => {
         workspacePath: '/test/project',
         workingDirectory: '/test/project',
         model: 'claude-sonnet-4-20250514',
-        provider: 'anthropic',
       });
       const sessionId = result.session.id;
 

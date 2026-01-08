@@ -88,13 +88,12 @@ class EventDatabase: ObservableObject {
                 workspace_id TEXT NOT NULL,
                 root_event_id TEXT,
                 head_event_id TEXT,
-                status TEXT DEFAULT 'active',
                 title TEXT,
-                model TEXT NOT NULL,
-                provider TEXT NOT NULL,
+                latest_model TEXT NOT NULL,
                 working_directory TEXT NOT NULL,
                 created_at TEXT NOT NULL,
                 last_activity_at TEXT NOT NULL,
+                ended_at TEXT,
                 event_count INTEGER DEFAULT 0,
                 message_count INTEGER DEFAULT 0,
                 input_tokens INTEGER DEFAULT 0,
@@ -103,16 +102,52 @@ class EventDatabase: ObservableObject {
             )
         """)
 
-        // Migration: Add cost column if it doesn't exist (for existing databases)
+        // Migrations for existing databases
         do {
             try execute("ALTER TABLE sessions ADD COLUMN cost REAL DEFAULT 0")
         } catch {
             // Column already exists, ignore
         }
 
+        // Migration: Remove provider, status columns; rename model to latest_model
+        // Check if we need migration by looking for provider column
+        if try columnExists(table: "sessions", column: "provider") {
+            // Table rebuild approach for SQLite
+            try execute("""
+                CREATE TABLE sessions_new (
+                    id TEXT PRIMARY KEY,
+                    workspace_id TEXT NOT NULL,
+                    root_event_id TEXT,
+                    head_event_id TEXT,
+                    title TEXT,
+                    latest_model TEXT NOT NULL,
+                    working_directory TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    last_activity_at TEXT NOT NULL,
+                    ended_at TEXT,
+                    event_count INTEGER DEFAULT 0,
+                    message_count INTEGER DEFAULT 0,
+                    input_tokens INTEGER DEFAULT 0,
+                    output_tokens INTEGER DEFAULT 0,
+                    cost REAL DEFAULT 0
+                )
+            """)
+            try execute("""
+                INSERT INTO sessions_new
+                SELECT id, workspace_id, root_event_id, head_event_id, title,
+                       model, working_directory, created_at, last_activity_at,
+                       CASE WHEN status = 'ended' THEN last_activity_at ELSE NULL END,
+                       event_count, message_count, input_tokens, output_tokens, cost
+                FROM sessions
+            """)
+            try execute("DROP TABLE sessions")
+            try execute("ALTER TABLE sessions_new RENAME TO sessions")
+        }
+
         // Sessions indexes
         try execute("CREATE INDEX IF NOT EXISTS idx_sessions_workspace ON sessions(workspace_id)")
         try execute("CREATE INDEX IF NOT EXISTS idx_sessions_activity ON sessions(last_activity_at)")
+        try execute("CREATE INDEX IF NOT EXISTS idx_sessions_ended ON sessions(ended_at)")
 
         // Sync state table
         try execute("""
@@ -431,10 +466,10 @@ class EventDatabase: ObservableObject {
     func insertSession(_ session: CachedSession) throws {
         let sql = """
             INSERT OR REPLACE INTO sessions
-            (id, workspace_id, root_event_id, head_event_id, status, title, model, provider,
-             working_directory, created_at, last_activity_at, event_count, message_count,
-             input_tokens, output_tokens, cost)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            (id, workspace_id, root_event_id, head_event_id, title, latest_model,
+             working_directory, created_at, last_activity_at, ended_at, event_count,
+             message_count, input_tokens, output_tokens, cost)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """
 
         var stmt: OpaquePointer?
@@ -447,18 +482,17 @@ class EventDatabase: ObservableObject {
         sqlite3_bind_text(stmt, 2, session.workspaceId, -1, SQLITE_TRANSIENT)
         bindOptionalText(stmt, 3, session.rootEventId)
         bindOptionalText(stmt, 4, session.headEventId)
-        sqlite3_bind_text(stmt, 5, session.status.rawValue, -1, SQLITE_TRANSIENT)
-        bindOptionalText(stmt, 6, session.title)
-        sqlite3_bind_text(stmt, 7, session.model, -1, SQLITE_TRANSIENT)
-        sqlite3_bind_text(stmt, 8, session.provider, -1, SQLITE_TRANSIENT)
-        sqlite3_bind_text(stmt, 9, session.workingDirectory, -1, SQLITE_TRANSIENT)
-        sqlite3_bind_text(stmt, 10, session.createdAt, -1, SQLITE_TRANSIENT)
-        sqlite3_bind_text(stmt, 11, session.lastActivityAt, -1, SQLITE_TRANSIENT)
-        sqlite3_bind_int(stmt, 12, Int32(session.eventCount))
-        sqlite3_bind_int(stmt, 13, Int32(session.messageCount))
-        sqlite3_bind_int(stmt, 14, Int32(session.inputTokens))
-        sqlite3_bind_int(stmt, 15, Int32(session.outputTokens))
-        sqlite3_bind_double(stmt, 16, session.cost)
+        bindOptionalText(stmt, 5, session.title)
+        sqlite3_bind_text(stmt, 6, session.latestModel, -1, SQLITE_TRANSIENT)
+        sqlite3_bind_text(stmt, 7, session.workingDirectory, -1, SQLITE_TRANSIENT)
+        sqlite3_bind_text(stmt, 8, session.createdAt, -1, SQLITE_TRANSIENT)
+        sqlite3_bind_text(stmt, 9, session.lastActivityAt, -1, SQLITE_TRANSIENT)
+        bindOptionalText(stmt, 10, session.endedAt)
+        sqlite3_bind_int(stmt, 11, Int32(session.eventCount))
+        sqlite3_bind_int(stmt, 12, Int32(session.messageCount))
+        sqlite3_bind_int(stmt, 13, Int32(session.inputTokens))
+        sqlite3_bind_int(stmt, 14, Int32(session.outputTokens))
+        sqlite3_bind_double(stmt, 15, session.cost)
 
         guard sqlite3_step(stmt) == SQLITE_DONE else {
             throw EventDatabaseError.insertFailed(errorMessage)
@@ -467,9 +501,9 @@ class EventDatabase: ObservableObject {
 
     func getSession(_ id: String) throws -> CachedSession? {
         let sql = """
-            SELECT id, workspace_id, root_event_id, head_event_id, status, title, model, provider,
-                   working_directory, created_at, last_activity_at, event_count, message_count,
-                   input_tokens, output_tokens, cost
+            SELECT id, workspace_id, root_event_id, head_event_id, title, latest_model,
+                   working_directory, created_at, last_activity_at, ended_at, event_count,
+                   message_count, input_tokens, output_tokens, cost
             FROM sessions WHERE id = ?
         """
 
@@ -490,9 +524,9 @@ class EventDatabase: ObservableObject {
 
     func getAllSessions() throws -> [CachedSession] {
         let sql = """
-            SELECT id, workspace_id, root_event_id, head_event_id, status, title, model, provider,
-                   working_directory, created_at, last_activity_at, event_count, message_count,
-                   input_tokens, output_tokens, cost
+            SELECT id, workspace_id, root_event_id, head_event_id, title, latest_model,
+                   working_directory, created_at, last_activity_at, ended_at, event_count,
+                   message_count, input_tokens, output_tokens, cost
             FROM sessions ORDER BY last_activity_at DESC
         """
 
@@ -790,6 +824,23 @@ class EventDatabase: ObservableObject {
         }
     }
 
+    private func columnExists(table: String, column: String) throws -> Bool {
+        let sql = "PRAGMA table_info(\(table))"
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+            throw EventDatabaseError.prepareFailed(errorMessage)
+        }
+        defer { sqlite3_finalize(stmt) }
+
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            let colName = String(cString: sqlite3_column_text(stmt, 1))
+            if colName == column {
+                return true
+            }
+        }
+        return false
+    }
+
     private func bindOptionalText(_ stmt: OpaquePointer?, _ index: Int32, _ value: String?) {
         if let value = value {
             sqlite3_bind_text(stmt, index, value, -1, SQLITE_TRANSIENT)
@@ -837,31 +888,29 @@ class EventDatabase: ObservableObject {
         let workspaceId = String(cString: sqlite3_column_text(stmt, 1))
         let rootEventId = getOptionalText(stmt, 2)
         let headEventId = getOptionalText(stmt, 3)
-        let statusStr = String(cString: sqlite3_column_text(stmt, 4))
-        let title = getOptionalText(stmt, 5)
-        let model = String(cString: sqlite3_column_text(stmt, 6))
-        let provider = String(cString: sqlite3_column_text(stmt, 7))
-        let workingDirectory = String(cString: sqlite3_column_text(stmt, 8))
-        let createdAt = String(cString: sqlite3_column_text(stmt, 9))
-        let lastActivityAt = String(cString: sqlite3_column_text(stmt, 10))
-        let eventCount = Int(sqlite3_column_int(stmt, 11))
-        let messageCount = Int(sqlite3_column_int(stmt, 12))
-        let inputTokens = Int(sqlite3_column_int(stmt, 13))
-        let outputTokens = Int(sqlite3_column_int(stmt, 14))
-        let cost = sqlite3_column_double(stmt, 15)
+        let title = getOptionalText(stmt, 4)
+        let latestModel = String(cString: sqlite3_column_text(stmt, 5))
+        let workingDirectory = String(cString: sqlite3_column_text(stmt, 6))
+        let createdAt = String(cString: sqlite3_column_text(stmt, 7))
+        let lastActivityAt = String(cString: sqlite3_column_text(stmt, 8))
+        let endedAt = getOptionalText(stmt, 9)
+        let eventCount = Int(sqlite3_column_int(stmt, 10))
+        let messageCount = Int(sqlite3_column_int(stmt, 11))
+        let inputTokens = Int(sqlite3_column_int(stmt, 12))
+        let outputTokens = Int(sqlite3_column_int(stmt, 13))
+        let cost = sqlite3_column_double(stmt, 14)
 
         return CachedSession(
             id: id,
             workspaceId: workspaceId,
             rootEventId: rootEventId,
             headEventId: headEventId,
-            status: SessionStatus(rawValue: statusStr) ?? .active,
             title: title,
-            model: model,
-            provider: provider,
+            latestModel: latestModel,
             workingDirectory: workingDirectory,
             createdAt: createdAt,
             lastActivityAt: lastActivityAt,
+            endedAt: endedAt,
             eventCount: eventCount,
             messageCount: messageCount,
             inputTokens: inputTokens,

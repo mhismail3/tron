@@ -58,7 +58,7 @@ describe('SQLiteBackend', () => {
 
     it('should record schema version', async () => {
       const version = backend.getSchemaVersion();
-      expect(version).toBe(1);
+      expect(version).toBe(2);  // Updated: migration 002 for schema cleanup
     });
   });
 
@@ -118,13 +118,12 @@ describe('SQLiteBackend', () => {
         workspaceId,
         workingDirectory: '/test',
         model: 'claude-sonnet-4-20250514',
-        provider: 'anthropic',
       });
 
       expect(session.id).toMatch(/^sess_/);
       expect(session.workspaceId).toBe(workspaceId);
       expect(session.model).toBe('claude-sonnet-4-20250514');
-      expect(session.status).toBe('active');
+      expect(session.isEnded).toBe(false);
     });
 
     it('should get session by id', async () => {
@@ -132,7 +131,6 @@ describe('SQLiteBackend', () => {
         workspaceId,
         workingDirectory: '/test',
         model: 'claude-sonnet-4-20250514',
-        provider: 'anthropic',
       });
 
       const session = await backend.getSession(created.id);
@@ -151,13 +149,11 @@ describe('SQLiteBackend', () => {
         workspaceId,
         workingDirectory: '/test',
         model: 'claude-sonnet-4-20250514',
-        provider: 'anthropic',
       });
       await backend.createSession({
         workspaceId,
         workingDirectory: '/test',
         model: 'claude-sonnet-4-20250514',
-        provider: 'anthropic',
       });
 
       const sessions = await backend.listSessions({ workspaceId });
@@ -170,7 +166,6 @@ describe('SQLiteBackend', () => {
         workspaceId,
         workingDirectory: '/test',
         model: 'claude-sonnet-4-20250514',
-        provider: 'anthropic',
       });
 
       const eventId = EventId('evt_test123');
@@ -180,18 +175,17 @@ describe('SQLiteBackend', () => {
       expect(updated?.headEventId).toBe(eventId);
     });
 
-    it('should update session status', async () => {
+    it('should mark session as ended', async () => {
       const session = await backend.createSession({
         workspaceId,
         workingDirectory: '/test',
         model: 'claude-sonnet-4-20250514',
-        provider: 'anthropic',
       });
 
-      await backend.updateSessionStatus(session.id, 'ended');
+      await backend.markSessionEnded(session.id);
 
       const updated = await backend.getSession(session.id);
-      expect(updated?.status).toBe('ended');
+      expect(updated?.isEnded).toBe(true);
     });
 
     it('should increment session counters', async () => {
@@ -199,7 +193,6 @@ describe('SQLiteBackend', () => {
         workspaceId,
         workingDirectory: '/test',
         model: 'claude-sonnet-4-20250514',
-        provider: 'anthropic',
       });
 
       await backend.incrementSessionCounters(session.id, {
@@ -229,7 +222,6 @@ describe('SQLiteBackend', () => {
         workspaceId,
         workingDirectory: '/test',
         model: 'claude-sonnet-4-20250514',
-        provider: 'anthropic',
       });
       sessionId = session.id;
     });
@@ -246,8 +238,7 @@ describe('SQLiteBackend', () => {
         payload: {
           workingDirectory: '/test',
           model: 'claude-sonnet-4-20250514',
-          provider: 'anthropic',
-        },
+          },
       };
 
       await backend.insertEvent(event);
@@ -269,8 +260,7 @@ describe('SQLiteBackend', () => {
         payload: {
           workingDirectory: '/test',
           model: 'claude-sonnet-4-20250514',
-          provider: 'anthropic',
-        },
+          },
       };
 
       await backend.insertEvent(event);
@@ -565,7 +555,6 @@ describe('SQLiteBackend', () => {
         workspaceId,
         workingDirectory: '/test',
         model: 'claude-sonnet-4-20250514',
-        provider: 'anthropic',
       });
       sessionId = session.id;
     });
@@ -691,7 +680,6 @@ describe('SQLiteBackend', () => {
         workspaceId,
         workingDirectory: '/test',
         model: 'claude-sonnet-4-20250514',
-        provider: 'anthropic',
       });
       sessionId = session.id;
 

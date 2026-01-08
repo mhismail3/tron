@@ -109,7 +109,6 @@ describe('EventStore - Explicit ParentId Support', () => {
         workspacePath: '/test',
         workingDirectory: '/test',
         model: 'claude-sonnet-4-20250514',
-        provider: 'anthropic',
       });
 
       // Append first event (will use session head = root)
@@ -141,7 +140,6 @@ describe('EventStore - Explicit ParentId Support', () => {
         workspacePath: '/test',
         workingDirectory: '/test',
         model: 'claude-sonnet-4-20250514',
-        provider: 'anthropic',
       });
 
       // Chain: root -> event1 -> event2 -> event3 using explicit parentIds
@@ -201,7 +199,6 @@ describe('Linearization Pattern', () => {
         workspacePath: '/test',
         workingDirectory: '/test',
         model: 'claude-sonnet-4-20250514',
-        provider: 'anthropic',
       });
 
       // Simulate in-memory head tracking with ACTUAL event IDs
@@ -240,7 +237,6 @@ describe('Linearization Pattern', () => {
         workspacePath: '/test',
         workingDirectory: '/test',
         model: 'claude-sonnet-4-20250514',
-        provider: 'anthropic',
       });
 
       // Chain events sequentially with explicit parentIds
@@ -278,7 +274,6 @@ describe('Linearization Pattern', () => {
         workspacePath: '/test',
         workingDirectory: '/test',
         model: 'claude-sonnet-4-20250514',
-        provider: 'anthropic',
       });
 
       let chain: Promise<EventId> = Promise.resolve(session.rootEvent.id);
@@ -324,20 +319,17 @@ describe('Linearization Pattern', () => {
           workspacePath: '/test/a',
           workingDirectory: '/test/a',
           model: 'claude-sonnet-4-20250514',
-          provider: 'anthropic',
-        }),
+          }),
         eventStore.createSession({
           workspacePath: '/test/b',
           workingDirectory: '/test/b',
           model: 'claude-sonnet-4-20250514',
-          provider: 'anthropic',
-        }),
+          }),
         eventStore.createSession({
           workspacePath: '/test/c',
           workingDirectory: '/test/c',
           model: 'claude-sonnet-4-20250514',
-          provider: 'anthropic',
-        }),
+          }),
       ]);
 
       // Track chains per session (each chain returns the latest event ID)
@@ -397,14 +389,12 @@ describe('Linearization Pattern', () => {
         workspacePath: '/test/a',
         workingDirectory: '/test/a',
         model: 'claude-sonnet-4-20250514',
-        provider: 'anthropic',
       });
 
       const sessionB = await eventStore.createSession({
         workspacePath: '/test/b',
         workingDirectory: '/test/b',
         model: 'claude-sonnet-4-20250514',
-        provider: 'anthropic',
       });
 
       // Chain for session A
@@ -449,7 +439,6 @@ describe('Linearization Pattern', () => {
         workspacePath: '/test',
         workingDirectory: '/test',
         model: 'claude-sonnet-4-20250514',
-        provider: 'anthropic',
       });
 
       // Chain 50 events
@@ -492,7 +481,6 @@ describe('Linearization Pattern', () => {
         workspacePath: '/test',
         workingDirectory: '/test',
         model: 'claude-sonnet-4-20250514',
-        provider: 'anthropic',
       });
 
       // Initialize pending head from root event
@@ -515,7 +503,6 @@ describe('Linearization Pattern', () => {
         workspacePath: '/test',
         workingDirectory: '/test',
         model: 'claude-sonnet-4-20250514',
-        provider: 'anthropic',
       });
 
       // Chain 20 events
@@ -546,7 +533,6 @@ describe('Linearization Pattern', () => {
         workspacePath: '/test',
         workingDirectory: '/test',
         model: 'claude-sonnet-4-20250514',
-        provider: 'anthropic',
       });
 
       // Create linear chain: root -> e1 -> e2 -> e3 -> e4 -> e5
@@ -589,7 +575,6 @@ describe('Linearization Pattern', () => {
         workspacePath: '/test',
         workingDirectory: '/test',
         model: 'claude-sonnet-4-20250514',
-        provider: 'anthropic',
       });
 
       // Create linear chain: root -> e1 -> e2 -> e3 -> e4 -> e5

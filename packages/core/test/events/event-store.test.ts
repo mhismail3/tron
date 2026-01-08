@@ -46,7 +46,6 @@ describe('EventStore', () => {
         workspacePath: '/test/project',
         workingDirectory: '/test/project',
         model: 'claude-sonnet-4-20250514',
-        provider: 'anthropic',
       });
 
       expect(session.id).toMatch(/^sess_/);
@@ -61,7 +60,6 @@ describe('EventStore', () => {
         workspacePath: '/new/project',
         workingDirectory: '/new/project',
         model: 'test',
-        provider: 'test',
       });
 
       const workspace = await store.getWorkspaceByPath('/new/project');
@@ -74,14 +72,12 @@ describe('EventStore', () => {
         workspacePath: '/shared/project',
         workingDirectory: '/shared/project',
         model: 'test',
-        provider: 'test',
       });
 
       const { session: session2 } = await store.createSession({
         workspacePath: '/shared/project',
         workingDirectory: '/shared/project',
         model: 'test',
-        provider: 'test',
       });
 
       expect(session1.workspaceId).toBe(session2.workspaceId);
@@ -92,7 +88,6 @@ describe('EventStore', () => {
         workspacePath: '/test',
         workingDirectory: '/test',
         model: 'test',
-        provider: 'test',
       });
 
       const updatedSession = await store.getSession(session.id);
@@ -111,7 +106,6 @@ describe('EventStore', () => {
         workspacePath: '/test',
         workingDirectory: '/test',
         model: 'test',
-        provider: 'test',
       });
       sessionId = result.session.id;
       workspaceId = result.session.workspaceId;
@@ -223,7 +217,6 @@ describe('EventStore', () => {
         workspacePath: '/test',
         workingDirectory: '/test',
         model: 'test',
-        provider: 'test',
       });
       sessionId = result.session.id;
     });
@@ -282,7 +275,6 @@ describe('EventStore', () => {
         workspacePath: '/test',
         workingDirectory: '/test',
         model: 'claude-sonnet-4-20250514',
-        provider: 'anthropic',
       });
       sessionId = result.session.id;
       rootEventId = result.rootEvent.id;
@@ -377,7 +369,6 @@ describe('EventStore', () => {
         workspacePath: '/test',
         workingDirectory: '/test',
         model: 'test',
-        provider: 'test',
       });
       sessionId = result.session.id;
       rootEventId = result.rootEvent.id;
@@ -443,7 +434,6 @@ describe('EventStore', () => {
         workspacePath: '/test',
         workingDirectory: '/test',
         model: 'test',
-        provider: 'test',
       });
       sessionId = result.session.id;
 
@@ -525,7 +515,6 @@ describe('EventStore', () => {
         workspacePath: '/test',
         workingDirectory: '/test',
         model: 'test',
-        provider: 'test',
       });
       sessionId = result.session.id;
 
@@ -591,7 +580,6 @@ describe('EventStore', () => {
         workspacePath: '/test',
         workingDirectory: '/test',
         model: 'test',
-        provider: 'test',
       });
       sessionId = result.session.id;
       workspaceId = result.session.workspaceId;
@@ -628,7 +616,6 @@ describe('EventStore', () => {
         workspacePath: '/other',
         workingDirectory: '/other',
         model: 'test',
-        provider: 'test',
       });
 
       await store.append({
@@ -650,14 +637,12 @@ describe('EventStore', () => {
         workspacePath: '/test',
         workingDirectory: '/test',
         model: 'test',
-        provider: 'test',
       });
 
       await store.createSession({
         workspacePath: '/test',
         workingDirectory: '/test',
         model: 'test',
-        provider: 'test',
       });
 
       const sessions = await store.listSessions({ workspaceId: session.workspaceId });
@@ -670,13 +655,12 @@ describe('EventStore', () => {
         workspacePath: '/test',
         workingDirectory: '/test',
         model: 'test',
-        provider: 'test',
       });
 
       await store.endSession(session.id);
 
       const updated = await store.getSession(session.id);
-      expect(updated?.status).toBe('ended');
+      expect(updated?.isEnded).toBe(true);
       expect(updated?.endedAt).not.toBeNull();
     });
   });

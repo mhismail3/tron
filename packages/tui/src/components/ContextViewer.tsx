@@ -116,7 +116,6 @@ function renderSummary(audit: ContextAuditData): string[] {
   lines.push(`Started: ${audit.session.startedAt.toISOString()}`);
   lines.push(`Working Dir: ${audit.session.workingDirectory}`);
   lines.push(`Model: ${audit.session.model}`);
-  lines.push(`Provider: ${audit.session.provider}`);
   lines.push('');
   lines.push('--- Quick Stats ---');
   lines.push(`Context Files: ${audit.contextFiles.length}`);

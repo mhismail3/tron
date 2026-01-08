@@ -35,7 +35,6 @@ describe('Model Switch', () => {
         workspacePath: '/test/project',
         workingDirectory: '/test/project',
         model: 'claude-haiku-4-5-20251001',
-        provider: 'anthropic',
       });
 
       // Add a user message first
@@ -68,7 +67,6 @@ describe('Model Switch', () => {
         workspacePath: '/test/project',
         workingDirectory: '/test/project',
         model: 'claude-haiku-4-5-20251001',
-        provider: 'anthropic',
       });
 
       // Add message → model switch → another message
@@ -117,7 +115,6 @@ describe('Model Switch', () => {
         workspacePath: '/test/project',
         workingDirectory: '/test/project',
         model: 'claude-haiku-4-5-20251001',
-        provider: 'anthropic',
       });
 
       // Verify initial model
@@ -125,7 +122,7 @@ describe('Model Switch', () => {
       expect(dbSession?.model).toBe('claude-haiku-4-5-20251001');
 
       // Update model in database
-      await eventStore.updateSessionModel(session.id, 'claude-sonnet-4-5-20250929');
+      await eventStore.updateLatestModel(session.id, 'claude-sonnet-4-5-20250929');
 
       // Verify model was persisted
       dbSession = await eventStore.getSession(session.id);
@@ -137,11 +134,10 @@ describe('Model Switch', () => {
         workspacePath: '/test/project',
         workingDirectory: '/test/project',
         model: 'claude-haiku-4-5-20251001',
-        provider: 'anthropic',
       });
 
       // Update model
-      await eventStore.updateSessionModel(session.id, 'claude-opus-4-5-20251101');
+      await eventStore.updateLatestModel(session.id, 'claude-opus-4-5-20251101');
 
       // Close and reopen event store (simulating app restart)
       await eventStore.close();
@@ -162,7 +158,6 @@ describe('Model Switch', () => {
         workspacePath: '/test/project',
         workingDirectory: '/test/project',
         model: 'claude-haiku-4-5-20251001',
-        provider: 'anthropic',
       });
 
       const before = await eventStore.getSession(session.id);
@@ -171,7 +166,7 @@ describe('Model Switch', () => {
       // Small delay to ensure timestamp difference
       await new Promise(resolve => setTimeout(resolve, 50));
 
-      await eventStore.updateSessionModel(session.id, 'claude-sonnet-4-5-20250929');
+      await eventStore.updateLatestModel(session.id, 'claude-sonnet-4-5-20250929');
 
       const after = await eventStore.getSession(session.id);
       const afterTime = new Date(after!.lastActivityAt).getTime();
@@ -186,7 +181,6 @@ describe('Model Switch', () => {
         workspacePath: '/test/project',
         workingDirectory: '/test/project',
         model: 'claude-haiku-4-5-20251001',
-        provider: 'anthropic',
       });
 
       // Add events including model switches

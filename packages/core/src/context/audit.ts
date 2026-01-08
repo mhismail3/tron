@@ -95,7 +95,6 @@ export interface ContextAuditData {
     startedAt: Date;
     workingDirectory: string;
     model: string;
-    provider: string;
   };
 
   /** Context files loaded */
@@ -148,7 +147,6 @@ export class ContextAudit {
         startedAt: new Date(),
         workingDirectory: '',
         model: '',
-        provider: '',
       },
       contextFiles: [],
       handoffs: [],
@@ -335,7 +333,6 @@ export class ContextAudit {
     lines.push(`- **Started**: ${this.data.session.startedAt.toISOString()}`);
     lines.push(`- **Working Dir**: ${this.data.session.workingDirectory}`);
     lines.push(`- **Model**: ${this.data.session.model}`);
-    lines.push(`- **Provider**: ${this.data.session.provider}`);
     lines.push('');
 
     // Token estimates

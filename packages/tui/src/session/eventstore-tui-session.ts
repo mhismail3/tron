@@ -280,7 +280,6 @@ export class EventStoreTuiSession {
       startedAt: new Date(),
       workingDirectory: this.config.workingDirectory,
       model: this.config.model,
-      provider: this.config.provider,
     });
 
     // Update state

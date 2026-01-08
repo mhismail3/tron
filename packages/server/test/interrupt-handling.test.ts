@@ -137,7 +137,6 @@ describe('Interrupt Handling', () => {
         workspacePath: '/test/project',
         workingDirectory: '/test/project',
         model: 'claude-sonnet-4-20250514',
-        provider: 'anthropic',
       });
       sessionId = result.session.id;
     });
@@ -244,7 +243,6 @@ describe('Interrupt Handling', () => {
         workspacePath: '/test/project',
         workingDirectory: '/test/project',
         model: 'claude-sonnet-4-20250514',
-        provider: 'anthropic',
       });
       sessionId = result.session.id;
     });
@@ -349,7 +347,6 @@ describe('Interrupt Handling', () => {
         workspacePath: '/test/project',
         workingDirectory: '/test/project',
         model: 'claude-sonnet-4-20250514',
-        provider: 'anthropic',
       });
       sessionId = result.session.id;
     });
@@ -447,7 +444,6 @@ describe('Interrupt Handling', () => {
         workspacePath: '/test/project',
         workingDirectory: '/test/project',
         model: 'claude-sonnet-4-20250514',
-        provider: 'anthropic',
       });
       sessionId = result.session.id;
     });
@@ -543,7 +539,6 @@ describe('Interrupt Handling', () => {
         workspacePath: '/test/project',
         workingDirectory: '/test/project',
         model: 'claude-sonnet-4-20250514',
-        provider: 'anthropic',
       });
       sessionId = result.session.id;
     });

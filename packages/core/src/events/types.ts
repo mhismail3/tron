@@ -130,7 +130,8 @@ export interface SessionStartEvent extends BaseEvent {
   payload: {
     workingDirectory: string;
     model: string;
-    provider: string;
+    /** Provider (optional - can be auto-detected from model name) */
+    provider?: string;
     systemPrompt?: string;
     title?: string;
     tags?: string[];
@@ -730,8 +731,8 @@ export interface SessionState {
   metadata?: SessionMetadata;
   /** Active files being worked on */
   activeFiles?: string[];
-  /** Session status */
-  status?: 'active' | 'ended';
+  /** Whether session has ended (derived from ended_at) */
+  isEnded?: boolean;
   /** Branch information */
   branch?: {
     id: BranchId;
@@ -837,7 +838,8 @@ export interface SessionSummary {
   tokenUsage: TokenUsage;
   created: string;
   lastActivity: string;
-  status: 'active' | 'ended';
+  /** Whether session has ended (derived from ended_at IS NOT NULL) */
+  isEnded: boolean;
   tags: string[];
 }
 

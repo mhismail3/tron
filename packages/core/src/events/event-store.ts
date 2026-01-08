@@ -35,7 +35,8 @@ export interface CreateSessionOptions {
   workspacePath: string;
   workingDirectory: string;
   model: string;
-  provider: string;
+  /** Provider type (for session.start event payload) */
+  provider?: string;
   title?: string;
   tags?: string[];
   /** Additional metadata to include in session.start event payload */
@@ -57,7 +58,6 @@ export interface AppendEventOptions {
 export interface ForkOptions {
   name?: string;
   model?: string;
-  provider?: string;
 }
 
 export interface ForkResult {
@@ -119,12 +119,11 @@ export class EventStore {
       workspaceId: workspace.id,
       workingDirectory: options.workingDirectory,
       model: options.model,
-      provider: options.provider,
       title: options.title,
       tags: options.tags,
     });
 
-    // Create root event
+    // Create root event (provider stored in event payload for historical record)
     const rootEvent: SessionStartEvent = {
       id: EventId(`evt_${this.generateId()}`),
       parentId: null,
@@ -136,7 +135,7 @@ export class EventStore {
       payload: {
         workingDirectory: options.workingDirectory,
         model: options.model,
-        provider: options.provider,
+        ...(options.provider && { provider: options.provider }),
         title: options.title,
         // Include any additional metadata in the payload
         ...options.metadata,
@@ -208,7 +207,7 @@ export class EventStore {
         counters.inputTokens = payload.tokenUsage.inputTokens;
         counters.outputTokens = payload.tokenUsage.outputTokens;
         // Calculate cost using the model from payload or session
-        const modelId = payload.model ?? session.model;
+        const modelId = payload.model ?? session.latestModel;
         counters.cost = calculateCost(modelId, payload.tokenUsage.inputTokens, payload.tokenUsage.outputTokens);
       }
 
@@ -338,7 +337,7 @@ export class EventStore {
       messages,
       tokenUsage: { inputTokens, outputTokens },
       turnCount,
-      model: session?.model ?? 'unknown',
+      model: session?.latestModel ?? 'unknown',
       workingDirectory: session?.workingDirectory ?? '',
     };
   }
@@ -365,8 +364,7 @@ export class EventStore {
       const forkedSession = await this.backend.createSession({
         workspaceId: sourceSession.workspaceId,
         workingDirectory: sourceSession.workingDirectory,
-        model: options?.model ?? sourceSession.model,
-        provider: sourceSession.provider,
+        model: options?.model ?? sourceSession.latestModel,
         title: options?.name,
         parentSessionId: sourceSession.id,
         forkFromEventId: fromEventId,
@@ -450,11 +448,15 @@ export class EventStore {
   }
 
   async endSession(sessionId: SessionId): Promise<void> {
-    await this.backend.updateSessionStatus(sessionId, 'ended');
+    await this.backend.markSessionEnded(sessionId);
   }
 
-  async updateSessionModel(sessionId: SessionId, model: string): Promise<void> {
-    await this.backend.updateSessionModel(sessionId, model);
+  async clearSessionEnded(sessionId: SessionId): Promise<void> {
+    await this.backend.clearSessionEnded(sessionId);
+  }
+
+  async updateLatestModel(sessionId: SessionId, model: string): Promise<void> {
+    await this.backend.updateLatestModel(sessionId, model);
   }
 
   // ===========================================================================

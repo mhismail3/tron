@@ -44,7 +44,6 @@ export interface CreateSessionOptions {
   workspaceId: WorkspaceId;
   workingDirectory: string;
   model: string;
-  provider: string;
   title?: string;
   tags?: string[];
   parentSessionId?: SessionId;
@@ -57,9 +56,7 @@ export interface SessionRow {
   headEventId: EventId | null;
   rootEventId: EventId | null;
   title: string | null;
-  status: 'active' | 'ended' | 'archived';
-  model: string;
-  provider: string;
+  latestModel: string;
   workingDirectory: string;
   parentSessionId: SessionId | null;
   forkFromEventId: EventId | null;
@@ -73,6 +70,10 @@ export interface SessionRow {
   totalOutputTokens: number;
   totalCost: number;
   tags: string[];
+  /** Backward compatible alias for latestModel */
+  model: string;
+  /** Computed: whether session has ended (endedAt !== null) */
+  isEnded: boolean;
 }
 
 export interface CreateBranchOptions {
@@ -98,7 +99,8 @@ export interface BranchRow {
 
 export interface ListSessionsOptions {
   workspaceId?: WorkspaceId;
-  status?: 'active' | 'ended' | 'archived';
+  /** Filter by ended state (derived from ended_at) */
+  ended?: boolean;
   limit?: number;
   offset?: number;
   orderBy?: 'createdAt' | 'lastActivityAt';
@@ -208,11 +210,78 @@ export class SQLiteBackend {
   }
 
   private runIncrementalMigrations(db: Database.Database): void {
-    // Migration: Add total_cost column to sessions table (if not exists)
     const sessionColumns = db.prepare("PRAGMA table_info(sessions)").all() as { name: string }[];
-    const hasTotalCost = sessionColumns.some(col => col.name === 'total_cost');
-    if (!hasTotalCost) {
+    const columnNames = sessionColumns.map(col => col.name);
+
+    // Migration: Add total_cost column to sessions table (if not exists)
+    if (!columnNames.includes('total_cost')) {
       db.exec("ALTER TABLE sessions ADD COLUMN total_cost REAL DEFAULT 0");
+    }
+
+    // Migration 002: Remove provider, status columns; rename model -> latest_model
+    // Check if we need to run this migration (provider column exists = old schema)
+    if (columnNames.includes('provider')) {
+      // Disable foreign keys during table rebuild
+      db.pragma('foreign_keys = OFF');
+
+      // Use table rebuild approach for SQLite compatibility
+      db.exec(`
+        -- Clean up any partial migration state
+        DROP TABLE IF EXISTS sessions_new;
+
+        -- Create new sessions table without provider/status, with latest_model
+        CREATE TABLE sessions_new (
+          id TEXT PRIMARY KEY,
+          workspace_id TEXT NOT NULL REFERENCES workspaces(id),
+          head_event_id TEXT,
+          root_event_id TEXT,
+          title TEXT,
+          latest_model TEXT NOT NULL,
+          working_directory TEXT NOT NULL,
+          parent_session_id TEXT REFERENCES sessions(id),
+          fork_from_event_id TEXT,
+          created_at TEXT NOT NULL,
+          last_activity_at TEXT NOT NULL,
+          ended_at TEXT,
+          event_count INTEGER DEFAULT 0,
+          message_count INTEGER DEFAULT 0,
+          turn_count INTEGER DEFAULT 0,
+          total_input_tokens INTEGER DEFAULT 0,
+          total_output_tokens INTEGER DEFAULT 0,
+          total_cost REAL DEFAULT 0,
+          tags TEXT DEFAULT '[]'
+        );
+
+        -- Copy data from old table (model -> latest_model, status -> ended_at)
+        INSERT INTO sessions_new
+        SELECT
+          id, workspace_id, head_event_id, root_event_id, title,
+          model, working_directory, parent_session_id, fork_from_event_id,
+          created_at, last_activity_at,
+          CASE WHEN status = 'ended' THEN last_activity_at ELSE NULL END,
+          event_count, message_count,
+          turn_count, total_input_tokens, total_output_tokens,
+          COALESCE(total_cost, 0), tags
+        FROM sessions;
+
+        -- Drop old table and rename new one
+        DROP TABLE sessions;
+        ALTER TABLE sessions_new RENAME TO sessions;
+
+        -- Recreate indexes (without status index)
+        CREATE INDEX idx_sessions_workspace ON sessions(workspace_id);
+        CREATE INDEX idx_sessions_activity ON sessions(last_activity_at DESC);
+        CREATE INDEX idx_sessions_parent ON sessions(parent_session_id);
+        CREATE INDEX idx_sessions_working_dir ON sessions(working_directory);
+        CREATE INDEX idx_sessions_ended ON sessions(ended_at);
+
+        -- Update schema version
+        INSERT OR REPLACE INTO schema_version (version, applied_at, description)
+        VALUES (2, datetime('now'), 'Remove provider/status columns, rename model to latest_model');
+      `);
+
+      // Re-enable foreign keys
+      db.pragma('foreign_keys = ON');
     }
   }
 
@@ -235,9 +304,7 @@ export class SQLiteBackend {
         head_event_id TEXT,
         root_event_id TEXT,
         title TEXT,
-        status TEXT NOT NULL DEFAULT 'active',
-        model TEXT NOT NULL,
-        provider TEXT NOT NULL,
+        latest_model TEXT NOT NULL,
         working_directory TEXT NOT NULL,
         parent_session_id TEXT REFERENCES sessions(id),
         fork_from_event_id TEXT,
@@ -253,7 +320,7 @@ export class SQLiteBackend {
         tags TEXT DEFAULT '[]'
       );
       CREATE INDEX IF NOT EXISTS idx_sessions_workspace ON sessions(workspace_id);
-      CREATE INDEX IF NOT EXISTS idx_sessions_status ON sessions(status);
+      CREATE INDEX IF NOT EXISTS idx_sessions_ended ON sessions(ended_at);
 
       -- Events
       CREATE TABLE IF NOT EXISTS events (
@@ -327,7 +394,7 @@ export class SQLiteBackend {
         description TEXT
       );
       INSERT OR IGNORE INTO schema_version (version, applied_at, description)
-      VALUES (1, datetime('now'), 'Initial schema');
+      VALUES (2, datetime('now'), 'Initial schema (v2: no status/provider, uses latest_model)');
     `;
   }
 
@@ -426,16 +493,15 @@ export class SQLiteBackend {
 
     db.prepare(`
       INSERT INTO sessions (
-        id, workspace_id, title, status, model, provider, working_directory,
+        id, workspace_id, title, latest_model, working_directory,
         parent_session_id, fork_from_event_id, created_at, last_activity_at, tags
       )
-      VALUES (?, ?, ?, 'active', ?, ?, ?, ?, ?, ?, ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       id,
       options.workspaceId,
       options.title ?? null,
       options.model,
-      options.provider,
       options.workingDirectory,
       options.parentSessionId ?? null,
       options.forkFromEventId ?? null,
@@ -450,9 +516,7 @@ export class SQLiteBackend {
       headEventId: null,
       rootEventId: null,
       title: options.title ?? null,
-      status: 'active',
-      model: options.model,
-      provider: options.provider,
+      latestModel: options.model,
       workingDirectory: options.workingDirectory,
       parentSessionId: options.parentSessionId ?? null,
       forkFromEventId: options.forkFromEventId ?? null,
@@ -466,6 +530,9 @@ export class SQLiteBackend {
       totalOutputTokens: 0,
       totalCost: 0,
       tags: options.tags ?? [],
+      // Backward compatibility aliases
+      model: options.model,
+      isEnded: false,
     };
   }
 
@@ -505,9 +572,12 @@ export class SQLiteBackend {
       params.push(options.workspaceId);
     }
 
-    if (options.status) {
-      sql += ' AND status = ?';
-      params.push(options.status);
+    if (options.ended !== undefined) {
+      if (options.ended) {
+        sql += ' AND ended_at IS NOT NULL';
+      } else {
+        sql += ' AND ended_at IS NULL';
+      }
     }
 
     const orderBy = options.orderBy === 'createdAt' ? 'created_at' : 'last_activity_at';
@@ -546,22 +616,32 @@ export class SQLiteBackend {
     `).run(rootEventId, sessionId);
   }
 
-  async updateSessionStatus(sessionId: SessionId, status: 'active' | 'ended' | 'archived'): Promise<void> {
+  async markSessionEnded(sessionId: SessionId): Promise<void> {
     const db = this.getDb();
     const now = new Date().toISOString();
     db.prepare(`
       UPDATE sessions
-      SET status = ?, ended_at = ?, last_activity_at = ?
+      SET ended_at = ?, last_activity_at = ?
       WHERE id = ?
-    `).run(status, status === 'ended' ? now : null, now, sessionId);
+    `).run(now, now, sessionId);
   }
 
-  async updateSessionModel(sessionId: SessionId, model: string): Promise<void> {
+  async clearSessionEnded(sessionId: SessionId): Promise<void> {
     const db = this.getDb();
     const now = new Date().toISOString();
     db.prepare(`
       UPDATE sessions
-      SET model = ?, last_activity_at = ?
+      SET ended_at = NULL, last_activity_at = ?
+      WHERE id = ?
+    `).run(now, sessionId);
+  }
+
+  async updateLatestModel(sessionId: SessionId, model: string): Promise<void> {
+    const db = this.getDb();
+    const now = new Date().toISOString();
+    db.prepare(`
+      UPDATE sessions
+      SET latest_model = ?, last_activity_at = ?
       WHERE id = ?
     `).run(model, now, sessionId);
   }
@@ -609,21 +689,21 @@ export class SQLiteBackend {
   }
 
   private rowToSession(row: any): SessionRow {
+    const latestModel = row.latest_model;
+    const endedAt = row.ended_at;
     return {
       id: SessionId(row.id),
       workspaceId: WorkspaceId(row.workspace_id),
       headEventId: row.head_event_id ? EventId(row.head_event_id) : null,
       rootEventId: row.root_event_id ? EventId(row.root_event_id) : null,
       title: row.title,
-      status: row.status,
-      model: row.model,
-      provider: row.provider,
+      latestModel,
       workingDirectory: row.working_directory,
       parentSessionId: row.parent_session_id ? SessionId(row.parent_session_id) : null,
       forkFromEventId: row.fork_from_event_id ? EventId(row.fork_from_event_id) : null,
       createdAt: row.created_at,
       lastActivityAt: row.last_activity_at,
-      endedAt: row.ended_at,
+      endedAt,
       eventCount: row.event_count,
       messageCount: row.message_count,
       turnCount: row.turn_count,
@@ -631,6 +711,9 @@ export class SQLiteBackend {
       totalOutputTokens: row.total_output_tokens,
       totalCost: row.total_cost ?? 0,
       tags: JSON.parse(row.tags || '[]'),
+      // Backward compatibility aliases
+      model: latestModel,
+      isEnded: endedAt !== null,
     };
   }
 

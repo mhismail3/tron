@@ -41,7 +41,6 @@ describe('Event Store Enhancements', () => {
         workspacePath: '/test/project',
         workingDirectory: '/test/project',
         model: 'claude-sonnet-4-20250514',
-        provider: 'anthropic',
       });
       sessionId = result.session.id;
     });
@@ -232,7 +231,6 @@ describe('Event Store Enhancements', () => {
         workspacePath: '/test/project',
         workingDirectory: '/test/project',
         model: 'claude-sonnet-4-20250514',
-        provider: 'anthropic',
       });
       sessionId = result.session.id;
     });
@@ -414,7 +412,6 @@ describe('Event Store Enhancements', () => {
         workspacePath: '/test/project',
         workingDirectory: '/test/project',
         model: 'claude-sonnet-4-20250514',
-        provider: 'anthropic',
       });
       sessionId = result.session.id;
     });
@@ -455,7 +452,7 @@ describe('Event Store Enhancements', () => {
         sessionId,
         type: 'error.provider',
         payload: {
-          provider: 'anthropic',
+          provider: 'anthropic',  // Provider now passed explicitly in event payload
           error: 'Rate limit exceeded',
           code: 'rate_limit_error',
           retryable: true,
@@ -475,8 +472,7 @@ describe('Event Store Enhancements', () => {
         sessionId,
         type: 'error.provider',
         payload: {
-          provider: 'anthropic',
-          error: 'Invalid API key',
+            error: 'Invalid API key',
           code: 'authentication_error',
           retryable: false,
         },
@@ -515,8 +511,7 @@ describe('Event Store Enhancements', () => {
         sessionId,
         type: 'error.provider',
         payload: {
-          provider: 'anthropic',
-          error: 'Rate limit',
+            error: 'Rate limit',
           code: 'rate_limit',
           retryable: true,
         },
@@ -553,7 +548,6 @@ describe('Event Store Enhancements', () => {
         workspacePath: '/test/project',
         workingDirectory: '/test/project',
         model: 'claude-sonnet-4-20250514',
-        provider: 'anthropic',
       });
       sessionId = result.session.id;
     });
@@ -695,7 +689,6 @@ describe('Event Store Enhancements', () => {
         workspacePath: '/test/project',
         workingDirectory: '/test/project',
         model: 'claude-sonnet-4-20250514',
-        provider: 'anthropic',
       });
       sessionId = result.session.id;
     });
@@ -828,7 +821,6 @@ describe('Event Store Enhancements', () => {
         workspacePath: '/test/project',
         workingDirectory: '/test/project',
         model: 'claude-sonnet-4-20250514',
-        provider: 'anthropic',
       });
       sessionId = result.session.id;
     });
@@ -976,8 +968,7 @@ describe('Event Store Enhancements', () => {
         sessionId,
         type: 'error.provider',
         payload: {
-          provider: 'anthropic',
-          error: 'Rate limit exceeded',
+            error: 'Rate limit exceeded',
           code: 'rate_limit',
           retryable: true,
           retryAfter: 1000,
