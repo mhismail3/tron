@@ -119,9 +119,16 @@ struct ChatView: View {
                 }
             }
             ToolbarItem(placement: .principal) {
-                Text(eventStoreManager.activeSession?.displayTitle ?? "Chat")
-                    .font(.system(size: 16, weight: .semibold, design: .monospaced))
-                    .foregroundStyle(.tronEmerald)
+                VStack(spacing: 2) {
+                    Text(eventStoreManager.activeSession?.displayTitle ?? "Chat")
+                        .font(.system(size: 16, weight: .semibold, design: .monospaced))
+                        .foregroundStyle(.tronEmerald)
+                    if eventStoreManager.activeSession?.isFork == true {
+                        Text("forked")
+                            .font(.system(size: 10, weight: .medium, design: .monospaced))
+                            .foregroundStyle(.tronEmerald.opacity(0.6))
+                    }
+                }
             }
             ToolbarItem(placement: .topBarTrailing) {
                 commandsMenu

@@ -115,6 +115,7 @@ function createRpcContext(orchestrator: EventStoreOrchestrator): RpcContext {
           rootEventId: result.rootEventId,
           forkedFromEventId: result.forkedFromEventId,
           forkedFromSessionId: result.forkedFromSessionId,
+          worktree: result.worktree,
         };
       },
       async rewindSession(sessionId, toEventId) {

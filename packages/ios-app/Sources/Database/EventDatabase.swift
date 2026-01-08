@@ -110,6 +110,13 @@ class EventDatabase: ObservableObject {
             // Column already exists, ignore
         }
 
+        // Migration: Add is_fork column
+        do {
+            try execute("ALTER TABLE sessions ADD COLUMN is_fork INTEGER DEFAULT 0")
+        } catch {
+            // Column already exists, ignore
+        }
+
         // Migration: Remove provider, status columns; rename model to latest_model
         // Check if we need migration by looking for provider column
         if try columnExists(table: "sessions", column: "provider") {
@@ -528,8 +535,8 @@ class EventDatabase: ObservableObject {
             INSERT OR REPLACE INTO sessions
             (id, workspace_id, root_event_id, head_event_id, title, latest_model,
              working_directory, created_at, last_activity_at, ended_at, event_count,
-             message_count, input_tokens, output_tokens, cost)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             message_count, input_tokens, output_tokens, cost, is_fork)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """
 
         var stmt: OpaquePointer?
@@ -553,6 +560,7 @@ class EventDatabase: ObservableObject {
         sqlite3_bind_int(stmt, 13, Int32(session.inputTokens))
         sqlite3_bind_int(stmt, 14, Int32(session.outputTokens))
         sqlite3_bind_double(stmt, 15, session.cost)
+        sqlite3_bind_int(stmt, 16, Int32(session.isFork == true ? 1 : 0))
 
         guard sqlite3_step(stmt) == SQLITE_DONE else {
             throw EventDatabaseError.insertFailed(errorMessage)
@@ -563,7 +571,7 @@ class EventDatabase: ObservableObject {
         let sql = """
             SELECT id, workspace_id, root_event_id, head_event_id, title, latest_model,
                    working_directory, created_at, last_activity_at, ended_at, event_count,
-                   message_count, input_tokens, output_tokens, cost
+                   message_count, input_tokens, output_tokens, cost, is_fork
             FROM sessions WHERE id = ?
         """
 
@@ -586,7 +594,7 @@ class EventDatabase: ObservableObject {
         let sql = """
             SELECT id, workspace_id, root_event_id, head_event_id, title, latest_model,
                    working_directory, created_at, last_activity_at, ended_at, event_count,
-                   message_count, input_tokens, output_tokens, cost
+                   message_count, input_tokens, output_tokens, cost, is_fork
             FROM sessions ORDER BY last_activity_at DESC
         """
 
@@ -959,6 +967,7 @@ class EventDatabase: ObservableObject {
         let inputTokens = Int(sqlite3_column_int(stmt, 12))
         let outputTokens = Int(sqlite3_column_int(stmt, 13))
         let cost = sqlite3_column_double(stmt, 14)
+        let isFork = sqlite3_column_int(stmt, 15) != 0
 
         return CachedSession(
             id: id,
@@ -975,7 +984,8 @@ class EventDatabase: ObservableObject {
             messageCount: messageCount,
             inputTokens: inputTokens,
             outputTokens: outputTokens,
-            cost: cost
+            cost: cost,
+            isFork: isFork
         )
     }
 }

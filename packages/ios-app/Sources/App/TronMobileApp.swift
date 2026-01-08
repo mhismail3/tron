@@ -536,8 +536,13 @@ struct NewSessionFlow: View {
                     rpcClient: rpcClient,
                     eventStoreManager: eventStoreManager,
                     onFork: { newSessionId in
-                        previewSession = nil
+                        // IMPORTANT: Call onSessionForked FIRST to set selectedSessionId
+                        // BEFORE dismissing sheets. This ensures navigation state is set
+                        // before SwiftUI starts sheet dismissal animations.
                         onSessionForked(newSessionId)
+                        // Dismiss preview sheet after navigation is set
+                        // (parent sheet dismissal in onSessionForked will also dismiss this)
+                        previewSession = nil
                     },
                     onDismiss: {
                         previewSession = nil

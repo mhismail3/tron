@@ -71,8 +71,12 @@ struct SessionInfo: Decodable, Identifiable, Hashable {
     let cost: Double?
     let isActive: Bool
     let workingDirectory: String?
+    let parentSessionId: String?
 
     var id: String { sessionId }
+
+    /// Whether this session is a fork (has a parent session)
+    var isFork: Bool { parentSessionId != nil }
 
     var displayName: String {
         if let dir = workingDirectory {
@@ -269,6 +273,15 @@ struct SessionForkResult: Decodable {
     let forkedFromEventId: String?  // The event that was forked from
     let forkedFromSessionId: String?  // The source session
     let rootEventId: String?  // The fork event in the new session
+    let worktree: ForkWorktreeInfo?  // Worktree info including path
+}
+
+/// Simplified worktree info for fork results
+struct ForkWorktreeInfo: Decodable {
+    let isolated: Bool
+    let branch: String?  // Can be null for non-isolated sessions
+    let baseCommit: String?  // Can be null for non-isolated sessions
+    let path: String
 }
 
 struct SessionRewindParams: Encodable {
@@ -559,4 +572,14 @@ struct WorktreeListItem: Decodable, Identifiable, Hashable {
 
 struct WorktreeListResult: Decodable {
     let worktrees: [WorktreeListItem]
+}
+
+// MARK: - Tree Methods
+
+struct TreeGetAncestorsParams: Encodable {
+    let eventId: String
+}
+
+struct TreeGetAncestorsResult: Decodable {
+    let events: [RawEvent]
 }

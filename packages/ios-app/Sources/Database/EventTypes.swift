@@ -422,6 +422,9 @@ struct CachedSession: Identifiable, Codable {
     var lastToolCount: Int?
     var isProcessing: Bool?
 
+    /// Whether this session is a fork of another session
+    var isFork: Bool?
+
     var totalTokens: Int { inputTokens + outputTokens }
 
     /// Formatted token counts (e.g., "↓1.2k ↑3.4k")

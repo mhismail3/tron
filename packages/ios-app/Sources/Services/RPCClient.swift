@@ -680,6 +680,26 @@ class RPCClient: ObservableObject {
         return result.worktrees
     }
 
+    // MARK: - Tree Methods
+
+    /// Get ancestor events for an event (traverses across session boundaries via parent_id chain)
+    func getAncestors(_ eventId: String) async throws -> [RawEvent] {
+        guard let ws = webSocket else {
+            throw RPCClientError.connectionNotEstablished
+        }
+
+        let params = TreeGetAncestorsParams(eventId: eventId)
+        logger.info("[ANCESTORS] Fetching ancestors for eventId=\(eventId)", category: .session)
+
+        let result: TreeGetAncestorsResult = try await ws.send(
+            method: "tree.getAncestors",
+            params: params
+        )
+
+        logger.info("[ANCESTORS] Received \(result.events.count) ancestor events", category: .session)
+        return result.events
+    }
+
     // MARK: - State Accessors
 
     var isConnected: Bool {

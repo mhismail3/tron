@@ -126,17 +126,20 @@ extension EventStoreManager {
         try await fullSyncSession(result.newSessionId)
 
         // Create the cached session entry
-        // Get source session info from local DB if available, otherwise use defaults
+        // Get source session info from local DB if available, otherwise use fork result
         let sourceSession = try? eventDB.getSession(sessionId)
         let now = ISO8601DateFormatter().string(from: Date())
+        // Use worktree path from fork result (preferred) or fallback to source session
+        let workingDir = result.worktree?.path ?? sourceSession?.workingDirectory ?? ""
+        let workspaceName = URL(fileURLWithPath: workingDir).lastPathComponent
         let forkedSession = CachedSession(
             id: result.newSessionId,
-            workspaceId: sourceSession?.workspaceId ?? "",
+            workspaceId: sourceSession?.workspaceId ?? workingDir,
             rootEventId: result.rootEventId,
             headEventId: result.rootEventId,
-            title: "Fork of \(sourceSession?.title ?? sessionId.prefix(12).description)",
+            title: workspaceName.isEmpty ? nil : workspaceName,
             latestModel: sourceSession?.latestModel ?? "unknown",
-            workingDirectory: sourceSession?.workingDirectory ?? "",
+            workingDirectory: workingDir,
             createdAt: now,
             lastActivityAt: now,
             endedAt: nil,
@@ -148,7 +151,8 @@ extension EventStoreManager {
             lastUserPrompt: sourceSession?.lastUserPrompt,
             lastAssistantResponse: sourceSession?.lastAssistantResponse,
             lastToolCount: nil,
-            isProcessing: false
+            isProcessing: false,
+            isFork: true
         )
         try eventDB.insertSession(forkedSession)
         logger.info("[FORK] Inserted forked session into local DB", category: .session)

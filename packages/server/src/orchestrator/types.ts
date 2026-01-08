@@ -187,6 +187,8 @@ export interface SessionInfo {
   isActive: boolean;
   /** Worktree status (if worktree coordination is enabled) */
   worktree?: WorktreeInfo;
+  /** Parent session ID if this is a forked session */
+  parentSessionId?: string;
 }
 
 // =============================================================================

@@ -101,6 +101,17 @@ struct CachedSessionSidebarRow: View {
                     .foregroundStyle(.tronEmerald)
                     .lineLimit(1)
 
+                // Forked badge
+                if session.isFork == true {
+                    Text("forked")
+                        .font(.system(size: 9, weight: .medium, design: .monospaced))
+                        .foregroundStyle(.tronEmerald.opacity(0.7))
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(Color.tronEmerald.opacity(0.15))
+                        .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
+                }
+
                 // Message count (moved to right of title)
                 HStack(spacing: 3) {
                     Image(systemName: "bubble.left")

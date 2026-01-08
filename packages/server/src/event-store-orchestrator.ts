@@ -1675,6 +1675,7 @@ export class EventStoreOrchestrator extends EventEmitter {
       lastActivity: row.lastActivityAt,
       isActive,
       worktree: workingDir ? buildWorktreeInfo(workingDir) : undefined,
+      parentSessionId: row.parentSessionId ?? undefined,
     };
   }
 
