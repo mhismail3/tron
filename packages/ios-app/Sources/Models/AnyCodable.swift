@@ -184,6 +184,11 @@ extension Dictionary where Key == String, Value == AnyCodable {
         self[key]?.arrayValue
     }
 
+    /// Get string array for key
+    func stringArray(_ key: String) -> [String]? {
+        self[key]?.arrayValue?.compactMap { $0 as? String }
+    }
+
     /// Get nested AnyCodable dictionary for key
     func anyCodableDict(_ key: String) -> [String: AnyCodable]? {
         if let dict = self[key]?.dictionaryValue {

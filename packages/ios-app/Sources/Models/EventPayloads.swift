@@ -26,14 +26,14 @@ struct SessionStartPayload {
     }
 
     init(from payload: [String: AnyCodable]) {
-        self.workingDirectory = payload["workingDirectory"]?.value as? String ?? ""
-        self.model = payload["model"]?.value as? String ?? ""
-        self.provider = payload["provider"]?.value as? String ?? ""
-        self.systemPrompt = payload["systemPrompt"]?.value as? String
-        self.title = payload["title"]?.value as? String
-        self.tags = payload["tags"]?.value as? [String]
+        self.workingDirectory = payload.string("workingDirectory") ?? ""
+        self.model = payload.string("model") ?? ""
+        self.provider = payload.string("provider") ?? ""
+        self.systemPrompt = payload.string("systemPrompt")
+        self.title = payload.string("title")
+        self.tags = payload.stringArray("tags")
 
-        if let forked = payload["forkedFrom"]?.value as? [String: Any] {
+        if let forked = payload.dict("forkedFrom") {
             self.forkedFrom = ForkedFromInfo(
                 sessionId: forked["sessionId"] as? String ?? "",
                 eventId: forked["eventId"] as? String ?? ""
@@ -53,15 +53,15 @@ struct SessionEndPayload {
     let duration: Int?  // milliseconds
 
     init(from payload: [String: AnyCodable]) {
-        if let reasonStr = payload["reason"]?.value as? String {
+        if let reasonStr = payload.string("reason") {
             self.reason = SessionEndReason(rawValue: reasonStr)
         } else {
             self.reason = nil
         }
-        self.summary = payload["summary"]?.value as? String
-        self.duration = payload["duration"]?.value as? Int
+        self.summary = payload.string("summary")
+        self.duration = payload.int("duration")
 
-        if let usage = payload["totalTokenUsage"]?.value as? [String: Any] {
+        if let usage = payload.dict("totalTokenUsage") {
             self.totalTokenUsage = TokenUsage(
                 inputTokens: usage["inputTokens"] as? Int ?? 0,
                 outputTokens: usage["outputTokens"] as? Int ?? 0,
@@ -83,14 +83,14 @@ struct SessionForkPayload {
     let reason: String?
 
     init?(from payload: [String: AnyCodable]) {
-        guard let sourceSessionId = payload["sourceSessionId"]?.value as? String,
-              let sourceEventId = payload["sourceEventId"]?.value as? String else {
+        guard let sourceSessionId = payload.string("sourceSessionId"),
+              let sourceEventId = payload.string("sourceEventId") else {
             return nil
         }
         self.sourceSessionId = sourceSessionId
         self.sourceEventId = sourceEventId
-        self.name = payload["name"]?.value as? String
-        self.reason = payload["reason"]?.value as? String
+        self.name = payload.string("name")
+        self.reason = payload.string("reason")
     }
 }
 
@@ -102,13 +102,13 @@ struct SessionBranchPayload {
     let description: String?
 
     init?(from payload: [String: AnyCodable]) {
-        guard let branchId = payload["branchId"]?.value as? String,
-              let name = payload["name"]?.value as? String else {
+        guard let branchId = payload.string("branchId"),
+              let name = payload.string("name") else {
             return nil
         }
         self.branchId = branchId
         self.name = name
-        self.description = payload["description"]?.value as? String
+        self.description = payload.string("description")
     }
 }
 
@@ -123,7 +123,7 @@ struct UserMessagePayload {
 
     init?(from payload: [String: AnyCodable]) {
         // Content can be a string or array of content blocks
-        if let content = payload["content"]?.value as? String {
+        if let content = payload.string("content") {
             self.content = content
         } else if let contentBlocks = payload["content"]?.value as? [[String: Any]] {
             // Extract text from content blocks
@@ -136,8 +136,8 @@ struct UserMessagePayload {
             return nil
         }
 
-        self.turn = payload["turn"]?.value as? Int ?? 1
-        self.imageCount = payload["imageCount"]?.value as? Int
+        self.turn = payload.int("turn") ?? 1
+        self.imageCount = payload.int("imageCount")
     }
 }
 
@@ -181,19 +181,19 @@ struct AssistantMessagePayload {
         // Content can be array of blocks or direct string (legacy)
         if let blocks = payload["content"]?.value as? [[String: Any]] {
             self.contentBlocks = blocks
-        } else if let text = payload["content"]?.value as? String {
+        } else if let text = payload.string("content") {
             // Legacy: convert string to text block
             self.contentBlocks = [["type": "text", "text": text]]
-        } else if let text = payload["text"]?.value as? String {
+        } else if let text = payload.string("text") {
             // Alternative field name
             self.contentBlocks = [["type": "text", "text": text]]
         } else {
             self.contentBlocks = nil
         }
 
-        self.turn = payload["turn"]?.value as? Int ?? 1
+        self.turn = payload.int("turn") ?? 1
 
-        if let usage = payload["tokenUsage"]?.value as? [String: Any] {
+        if let usage = payload.dict("tokenUsage") {
             self.tokenUsage = TokenUsage(
                 inputTokens: usage["inputTokens"] as? Int ?? 0,
                 outputTokens: usage["outputTokens"] as? Int ?? 0,
@@ -204,16 +204,16 @@ struct AssistantMessagePayload {
             self.tokenUsage = nil
         }
 
-        if let stopStr = payload["stopReason"]?.value as? String {
+        if let stopStr = payload.string("stopReason") {
             self.stopReason = StopReason(rawValue: stopStr)
         } else {
             self.stopReason = nil
         }
 
-        self.latencyMs = payload["latency"]?.value as? Int ?? payload["latencyMs"]?.value as? Int
-        self.model = payload["model"]?.value as? String
-        self.hasThinking = payload["hasThinking"]?.value as? Bool
-        self.interrupted = payload["interrupted"]?.value as? Bool
+        self.latencyMs = payload.int("latency") ?? payload.int("latencyMs")
+        self.model = payload.string("model")
+        self.hasThinking = payload.bool("hasThinking")
+        self.interrupted = payload.bool("interrupted")
     }
 }
 
@@ -224,12 +224,12 @@ struct SystemMessagePayload {
     let source: SystemMessageSource?
 
     init?(from payload: [String: AnyCodable]) {
-        guard let content = payload["content"]?.value as? String else {
+        guard let content = payload.string("content") else {
             return nil
         }
         self.content = content
 
-        if let sourceStr = payload["source"]?.value as? String {
+        if let sourceStr = payload.string("source") {
             self.source = SystemMessageSource(rawValue: sourceStr)
         } else {
             self.source = nil
@@ -249,21 +249,21 @@ struct ToolCallPayload {
 
     init?(from payload: [String: AnyCodable]) {
         // toolCallId can be "toolCallId" or "id"
-        guard let id = payload["toolCallId"]?.value as? String ?? payload["id"]?.value as? String,
-              let name = payload["name"]?.value as? String else {
+        guard let id = payload.string("toolCallId") ?? payload.string("id"),
+              let name = payload.string("name") else {
             return nil
         }
 
         self.toolCallId = id
         self.name = name
-        self.turn = payload["turn"]?.value as? Int ?? 1
+        self.turn = payload.int("turn") ?? 1
 
         // Arguments can be dict or string
-        if let argsDict = payload["arguments"]?.value as? [String: Any],
+        if let argsDict = payload.dict("arguments"),
            let jsonData = try? JSONSerialization.data(withJSONObject: argsDict, options: [.sortedKeys]),
            let jsonString = String(data: jsonData, encoding: .utf8) {
             self.arguments = jsonString
-        } else if let argsStr = payload["arguments"]?.value as? String {
+        } else if let argsStr = payload.string("arguments") {
             self.arguments = argsStr
         } else {
             self.arguments = "{}"
@@ -286,24 +286,24 @@ struct ToolResultPayload {
     let arguments: String?
 
     init?(from payload: [String: AnyCodable]) {
-        guard let toolCallId = payload["toolCallId"]?.value as? String else {
+        guard let toolCallId = payload.string("toolCallId") else {
             return nil
         }
 
         self.toolCallId = toolCallId
-        self.content = payload["content"]?.value as? String ?? ""
-        self.isError = payload["isError"]?.value as? Bool ?? false
-        self.durationMs = payload["duration"]?.value as? Int ?? payload["durationMs"]?.value as? Int ?? 0
-        self.affectedFiles = payload["affectedFiles"]?.value as? [String]
-        self.truncated = payload["truncated"]?.value as? Bool
+        self.content = payload.string("content") ?? ""
+        self.isError = payload.bool("isError") ?? false
+        self.durationMs = payload.int("duration") ?? payload.int("durationMs") ?? 0
+        self.affectedFiles = payload.stringArray("affectedFiles")
+        self.truncated = payload.bool("truncated")
 
         // Optional enrichment fields
-        self.name = payload["name"]?.value as? String
-        if let argsDict = payload["arguments"]?.value as? [String: Any],
+        self.name = payload.string("name")
+        if let argsDict = payload.dict("arguments"),
            let jsonData = try? JSONSerialization.data(withJSONObject: argsDict),
            let jsonString = String(data: jsonData, encoding: .utf8) {
             self.arguments = jsonString
-        } else if let argsStr = payload["arguments"]?.value as? String {
+        } else if let argsStr = payload.string("arguments") {
             self.arguments = argsStr
         } else {
             self.arguments = nil
@@ -321,14 +321,14 @@ struct ModelSwitchPayload {
     let reason: String?
 
     init?(from payload: [String: AnyCodable]) {
-        guard let previousModel = payload["previousModel"]?.value as? String else {
+        guard let previousModel = payload.string("previousModel") else {
             return nil
         }
 
         self.previousModel = previousModel
-        self.newModel = payload["newModel"]?.value as? String
-            ?? payload["model"]?.value as? String ?? ""
-        self.reason = payload["reason"]?.value as? String
+        self.newModel = payload.string("newModel")
+            ?? payload.string("model") ?? ""
+        self.reason = payload.string("reason")
     }
 }
 
@@ -340,12 +340,12 @@ struct ConfigPromptUpdatePayload {
     let contentBlobId: String?
 
     init?(from payload: [String: AnyCodable]) {
-        guard let newHash = payload["newHash"]?.value as? String else {
+        guard let newHash = payload.string("newHash") else {
             return nil
         }
-        self.previousHash = payload["previousHash"]?.value as? String
+        self.previousHash = payload.string("previousHash")
         self.newHash = newHash
-        self.contentBlobId = payload["contentBlobId"]?.value as? String
+        self.contentBlobId = payload.string("contentBlobId")
     }
 }
 
@@ -357,8 +357,8 @@ struct InterruptedPayload {
     let turn: Int?
 
     init(from payload: [String: AnyCodable]) {
-        self.timestamp = payload["timestamp"]?.value as? String
-        self.turn = payload["turn"]?.value as? Int
+        self.timestamp = payload.string("timestamp")
+        self.turn = payload.int("turn")
     }
 }
 
@@ -372,14 +372,14 @@ struct AgentErrorPayload {
     let recoverable: Bool
 
     init?(from payload: [String: AnyCodable]) {
-        guard let error = payload["error"]?.value as? String
-                ?? payload["message"]?.value as? String else {
+        guard let error = payload.string("error")
+                ?? payload.string("message") else {
             return nil
         }
 
         self.error = error
-        self.code = payload["code"]?.value as? String
-        self.recoverable = payload["recoverable"]?.value as? Bool ?? false
+        self.code = payload.string("code")
+        self.recoverable = payload.bool("recoverable") ?? false
     }
 }
 
@@ -392,16 +392,16 @@ struct ToolErrorPayload {
     let code: String?
 
     init?(from payload: [String: AnyCodable]) {
-        guard let toolName = payload["toolName"]?.value as? String,
-              let toolCallId = payload["toolCallId"]?.value as? String,
-              let error = payload["error"]?.value as? String else {
+        guard let toolName = payload.string("toolName"),
+              let toolCallId = payload.string("toolCallId"),
+              let error = payload.string("error") else {
             return nil
         }
 
         self.toolName = toolName
         self.toolCallId = toolCallId
         self.error = error
-        self.code = payload["code"]?.value as? String
+        self.code = payload.string("code")
     }
 }
 
@@ -415,16 +415,16 @@ struct ProviderErrorPayload {
     let retryAfter: Int?
 
     init?(from payload: [String: AnyCodable]) {
-        guard let provider = payload["provider"]?.value as? String,
-              let error = payload["error"]?.value as? String else {
+        guard let provider = payload.string("provider"),
+              let error = payload.string("error") else {
             return nil
         }
 
         self.provider = provider
         self.error = error
-        self.code = payload["code"]?.value as? String
-        self.retryable = payload["retryable"]?.value as? Bool ?? false
-        self.retryAfter = payload["retryAfter"]?.value as? Int
+        self.code = payload.string("code")
+        self.retryable = payload.bool("retryable") ?? false
+        self.retryAfter = payload.int("retryAfter")
     }
 }
 
@@ -438,7 +438,7 @@ struct LedgerUpdatePayload {
     let newValue: Any?
 
     init(from payload: [String: AnyCodable]) {
-        if let fieldStr = payload["field"]?.value as? String {
+        if let fieldStr = payload.string("field") {
             self.field = LedgerField(rawValue: fieldStr)
         } else {
             self.field = nil
@@ -454,7 +454,7 @@ struct LedgerGoalPayload {
     let goal: String
 
     init?(from payload: [String: AnyCodable]) {
-        guard let goal = payload["goal"]?.value as? String else {
+        guard let goal = payload.string("goal") else {
             return nil
         }
         self.goal = goal
@@ -469,9 +469,9 @@ struct LedgerTaskPayload {
     let list: String    // "next" | "done"
 
     init?(from payload: [String: AnyCodable]) {
-        guard let action = payload["action"]?.value as? String,
-              let task = payload["task"]?.value as? String,
-              let list = payload["list"]?.value as? String else {
+        guard let action = payload.string("action"),
+              let task = payload.string("task"),
+              let list = payload.string("list") else {
             return nil
         }
         self.action = action
@@ -490,7 +490,7 @@ struct MetadataUpdatePayload {
     let newValue: Any?
 
     init?(from payload: [String: AnyCodable]) {
-        guard let key = payload["key"]?.value as? String else {
+        guard let key = payload.string("key") else {
             return nil
         }
         self.key = key
@@ -506,8 +506,8 @@ struct MetadataTagPayload {
     let tag: String
 
     init?(from payload: [String: AnyCodable]) {
-        guard let action = payload["action"]?.value as? String,
-              let tag = payload["tag"]?.value as? String else {
+        guard let action = payload.string("action"),
+              let tag = payload.string("tag") else {
             return nil
         }
         self.action = action
@@ -525,12 +525,12 @@ struct FileReadPayload {
     let linesEnd: Int?
 
     init?(from payload: [String: AnyCodable]) {
-        guard let path = payload["path"]?.value as? String else {
+        guard let path = payload.string("path") else {
             return nil
         }
         self.path = path
 
-        if let lines = payload["lines"]?.value as? [String: Any] {
+        if let lines = payload.dict("lines") {
             self.linesStart = lines["start"] as? Int
             self.linesEnd = lines["end"] as? Int
         } else {
@@ -548,12 +548,12 @@ struct FileWritePayload {
     let contentHash: String
 
     init?(from payload: [String: AnyCodable]) {
-        guard let path = payload["path"]?.value as? String,
-              let contentHash = payload["contentHash"]?.value as? String else {
+        guard let path = payload.string("path"),
+              let contentHash = payload.string("contentHash") else {
             return nil
         }
         self.path = path
-        self.size = payload["size"]?.value as? Int ?? 0
+        self.size = payload.int("size") ?? 0
         self.contentHash = contentHash
     }
 }
@@ -567,15 +567,15 @@ struct FileEditPayload {
     let diff: String?
 
     init?(from payload: [String: AnyCodable]) {
-        guard let path = payload["path"]?.value as? String,
-              let oldString = payload["oldString"]?.value as? String,
-              let newString = payload["newString"]?.value as? String else {
+        guard let path = payload.string("path"),
+              let oldString = payload.string("oldString"),
+              let newString = payload.string("newString") else {
             return nil
         }
         self.path = path
         self.oldString = oldString
         self.newString = newString
-        self.diff = payload["diff"]?.value as? String
+        self.diff = payload.string("diff")
     }
 }
 
@@ -590,15 +590,15 @@ struct CompactBoundaryPayload {
     let compactedTokens: Int
 
     init?(from payload: [String: AnyCodable]) {
-        guard let range = payload["range"]?.value as? [String: Any],
+        guard let range = payload.dict("range"),
               let from = range["from"] as? String,
               let to = range["to"] as? String else {
             return nil
         }
         self.rangeFrom = from
         self.rangeTo = to
-        self.originalTokens = payload["originalTokens"]?.value as? Int ?? 0
-        self.compactedTokens = payload["compactedTokens"]?.value as? Int ?? 0
+        self.originalTokens = payload.int("originalTokens") ?? 0
+        self.compactedTokens = payload.int("compactedTokens") ?? 0
     }
 }
 
@@ -611,14 +611,14 @@ struct CompactSummaryPayload {
     let boundaryEventId: String
 
     init?(from payload: [String: AnyCodable]) {
-        guard let summary = payload["summary"]?.value as? String,
-              let boundaryEventId = payload["boundaryEventId"]?.value as? String else {
+        guard let summary = payload.string("summary"),
+              let boundaryEventId = payload.string("boundaryEventId") else {
             return nil
         }
         self.summary = summary
         self.boundaryEventId = boundaryEventId
-        self.keyDecisions = payload["keyDecisions"]?.value as? [String]
-        self.filesModified = payload["filesModified"]?.value as? [String]
+        self.keyDecisions = payload.stringArray("keyDecisions")
+        self.filesModified = payload.stringArray("filesModified")
     }
 }
 
@@ -639,17 +639,17 @@ struct WorktreeAcquiredPayload {
     }
 
     init?(from payload: [String: AnyCodable]) {
-        guard let path = payload["path"]?.value as? String,
-              let branch = payload["branch"]?.value as? String,
-              let baseCommit = payload["baseCommit"]?.value as? String else {
+        guard let path = payload.string("path"),
+              let branch = payload.string("branch"),
+              let baseCommit = payload.string("baseCommit") else {
             return nil
         }
         self.path = path
         self.branch = branch
         self.baseCommit = baseCommit
-        self.isolated = payload["isolated"]?.value as? Bool ?? false
+        self.isolated = payload.bool("isolated") ?? false
 
-        if let forked = payload["forkedFrom"]?.value as? [String: Any] {
+        if let forked = payload.dict("forkedFrom") {
             self.forkedFrom = ForkedFromInfo(
                 sessionId: forked["sessionId"] as? String ?? "",
                 commit: forked["commit"] as? String ?? ""
@@ -670,15 +670,15 @@ struct WorktreeCommitPayload {
     let deletions: Int?
 
     init?(from payload: [String: AnyCodable]) {
-        guard let commitHash = payload["commitHash"]?.value as? String,
-              let message = payload["message"]?.value as? String else {
+        guard let commitHash = payload.string("commitHash"),
+              let message = payload.string("message") else {
             return nil
         }
         self.commitHash = commitHash
         self.message = message
-        self.filesChanged = payload["filesChanged"]?.value as? [String] ?? []
-        self.insertions = payload["insertions"]?.value as? Int
-        self.deletions = payload["deletions"]?.value as? Int
+        self.filesChanged = payload.stringArray("filesChanged") ?? []
+        self.insertions = payload.int("insertions")
+        self.deletions = payload.int("deletions")
     }
 }
 
@@ -690,9 +690,9 @@ struct WorktreeReleasedPayload {
     let branchPreserved: Bool
 
     init(from payload: [String: AnyCodable]) {
-        self.finalCommit = payload["finalCommit"]?.value as? String
-        self.deleted = payload["deleted"]?.value as? Bool ?? false
-        self.branchPreserved = payload["branchPreserved"]?.value as? Bool ?? false
+        self.finalCommit = payload.string("finalCommit")
+        self.deleted = payload.bool("deleted") ?? false
+        self.branchPreserved = payload.bool("branchPreserved") ?? false
     }
 }
 
@@ -705,16 +705,16 @@ struct WorktreeMergedPayload {
     let strategy: MergeStrategy?
 
     init?(from payload: [String: AnyCodable]) {
-        guard let sourceBranch = payload["sourceBranch"]?.value as? String,
-              let targetBranch = payload["targetBranch"]?.value as? String,
-              let mergeCommit = payload["mergeCommit"]?.value as? String else {
+        guard let sourceBranch = payload.string("sourceBranch"),
+              let targetBranch = payload.string("targetBranch"),
+              let mergeCommit = payload.string("mergeCommit") else {
             return nil
         }
         self.sourceBranch = sourceBranch
         self.targetBranch = targetBranch
         self.mergeCommit = mergeCommit
 
-        if let strategyStr = payload["strategy"]?.value as? String {
+        if let strategyStr = payload.string("strategy") {
             self.strategy = MergeStrategy(rawValue: strategyStr)
         } else {
             self.strategy = nil
@@ -731,9 +731,9 @@ struct StreamTurnEndPayload {
     let tokenUsage: TokenUsage?
 
     init(from payload: [String: AnyCodable]) {
-        self.turn = payload["turn"]?.value as? Int ?? 1
+        self.turn = payload.int("turn") ?? 1
 
-        if let usage = payload["tokenUsage"]?.value as? [String: Any] {
+        if let usage = payload.dict("tokenUsage") {
             self.tokenUsage = TokenUsage(
                 inputTokens: usage["inputTokens"] as? Int ?? 0,
                 outputTokens: usage["outputTokens"] as? Int ?? 0,
