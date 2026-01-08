@@ -30,6 +30,7 @@
 		901A2D24F559EC522BF3D175 /* Date+Extensions.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB4071D0B8C943D30748238A /* Date+Extensions.swift */; };
 		A30DB8557BB5D3E5CFD61ADD /* RecentSessionsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A113B9D98B4711E36919F2A /* RecentSessionsTests.swift */; };
 		A3BCE182EB003CB62D1D96E6 /* RPCClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = B9DD45A3974192F927E1B73A /* RPCClient.swift */; };
+		A7F43CE8B687131A3F3D7011 /* AppState.swift in Sources */ = {isa = PBXBuildFile; fileRef = DB2DE70827D1CEDC99DA04E4 /* AppState.swift */; };
 		A8AD0FB128F1F5AABAA2191F /* SessionTreeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9EC65CD838F5540EC3B1AA02 /* SessionTreeView.swift */; };
 		AA0AC5B4C07C617F0612C7FA /* View+Extensions.swift in Sources */ = {isa = PBXBuildFile; fileRef = B4B65C803EB12E8C7004E843 /* View+Extensions.swift */; };
 		B4AEC8956304E794BC187E01 /* ModelSwitcher.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7F6BD19519452787421FD54D /* ModelSwitcher.swift */; };
@@ -99,6 +100,7 @@
 		CC00489C0CFF17B0531219D9 /* Events.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Events.swift; sourceTree = "<group>"; };
 		D03A2E1D488FAFF8C0088D61 /* ModelNameFormatter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelNameFormatter.swift; sourceTree = "<group>"; };
 		D8570EA3731FBC504D7AB252 /* UnifiedEventTransformer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UnifiedEventTransformer.swift; sourceTree = "<group>"; };
+		DB2DE70827D1CEDC99DA04E4 /* AppState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppState.swift; sourceTree = "<group>"; };
 		E5C3B6B3DA1A77E2A09976D5 /* InputHistoryStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InputHistoryStore.swift; sourceTree = "<group>"; };
 		F2B298578C85F2293B9568BA /* TronMobile.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = TronMobile.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
@@ -201,6 +203,7 @@
 		A330FEB69A6F3221BC858FB4 /* App */ = {
 			isa = PBXGroup;
 			children = (
+				DB2DE70827D1CEDC99DA04E4 /* AppState.swift */,
 				B018ED18CE376F88F9C442F4 /* TronMobileApp.swift */,
 			);
 			path = App;
@@ -343,6 +346,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				E36A71E3DB6FC3116C36F11B /* AnyCodable.swift in Sources */,
+				A7F43CE8B687131A3F3D7011 /* AppState.swift in Sources */,
 				2AC4711FE03EDA25CA10832D /* ChatView.swift in Sources */,
 				C5D9BF6461C33FF5131E7B42 /* ChatViewModel.swift in Sources */,
 				6014AB90BD2F803AA569152D /* ContextAuditView.swift in Sources */,
