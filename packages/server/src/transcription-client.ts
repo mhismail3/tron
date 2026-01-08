@@ -1,12 +1,50 @@
 /**
  * @fileoverview Transcription Sidecar Client
  *
- * Sends audio to the local transcription sidecar (faster-whisper) and returns the result.
+ * Sends audio to the local transcription sidecar and returns the result.
  */
 import { createLogger, getSettings } from '@tron/core';
-import type { TranscribeAudioParams, TranscribeAudioResult } from '@tron/core';
+import type {
+  TranscribeAudioParams,
+  TranscribeAudioResult,
+  TranscribeListModelsResult,
+  TranscriptionModelInfo,
+} from '@tron/core';
 
 const logger = createLogger('transcription');
+
+type TranscriptionModelProfile = TranscriptionModelInfo & {
+  backend: string;
+  modelName: string;
+  device: string;
+  computeType: string;
+  endpoint: string;
+};
+
+const TRANSCRIPTION_MODELS: TranscriptionModelProfile[] = [
+  {
+    id: 'parakeet-tdt-0.6b-v3',
+    label: 'Parakeet TDT 0.6B v3',
+    description: 'Fastest on Apple Silicon',
+    backend: 'parakeet-mlx',
+    modelName: 'mlx-community/parakeet-tdt-0.6b-v3',
+    device: 'mlx',
+    computeType: 'mlx',
+    endpoint: '/transcribe/faster',
+  },
+  {
+    id: 'whisper-large-v3',
+    label: 'Whisper Large v3',
+    description: 'Higher accuracy (CPU)',
+    backend: 'faster-whisper',
+    modelName: 'large-v3',
+    device: 'cpu',
+    computeType: 'int8',
+    endpoint: '/transcribe/better',
+  },
+];
+
+const DEFAULT_TRANSCRIPTION_MODEL_ID = TRANSCRIPTION_MODELS[0]?.id;
 
 function normalizeBase64(input: string): string {
   const trimmed = input.trim();
@@ -46,7 +84,12 @@ export async function transcribeAudio(params: TranscribeAudioParams): Promise<Tr
   const cleanupMode = normalizeCleanupMode(params.cleanupMode, settings.cleanupMode);
   const mimeType = params.mimeType ?? 'audio/m4a';
   const fileName = params.fileName ?? 'audio.m4a';
-  const endpoint = new URL('/transcribe', settings.baseUrl).toString();
+  const profile =
+    getProfileById(params.transcriptionModelId)
+    ?? getProfileByQuality(params.transcriptionQuality)
+    ?? getDefaultProfile();
+  const endpointPath = profile?.endpoint ?? '/transcribe';
+  const endpoint = new URL(endpointPath, settings.baseUrl).toString();
 
   const form = new FormData();
   form.append('audio', new Blob([audioBuffer], { type: mimeType }), fileName);
@@ -61,6 +104,12 @@ export async function transcribeAudio(params: TranscribeAudioParams): Promise<Tr
   }
   if (cleanupMode) {
     form.append('cleanup_mode', cleanupMode);
+  }
+  if (profile) {
+    form.append('backend', profile.backend);
+    form.append('model_name', profile.modelName);
+    form.append('device', profile.device);
+    form.append('compute_type', profile.computeType);
   }
 
   const controller = new AbortController();
@@ -100,4 +149,41 @@ export async function transcribeAudio(params: TranscribeAudioParams): Promise<Tr
   } finally {
     clearTimeout(timeout);
   }
+}
+
+export async function listTranscriptionModels(): Promise<TranscribeListModelsResult> {
+  return {
+    models: TRANSCRIPTION_MODELS.map(({ id, label, description }) => ({
+      id,
+      label,
+      description,
+    })),
+    defaultModelId: DEFAULT_TRANSCRIPTION_MODEL_ID,
+  };
+}
+
+function getProfileById(id?: string): TranscriptionModelProfile | null {
+  if (!id) {
+    return null;
+  }
+  return TRANSCRIPTION_MODELS.find((model) => model.id === id) ?? null;
+}
+
+function getProfileByQuality(
+  quality: TranscribeAudioParams['transcriptionQuality'],
+): TranscriptionModelProfile | null {
+  if (quality === 'faster') {
+    return getProfileById('parakeet-tdt-0.6b-v3');
+  }
+  if (quality === 'better') {
+    return getProfileById('whisper-large-v3');
+  }
+  return null;
+}
+
+function getDefaultProfile(): TranscriptionModelProfile | null {
+  if (!DEFAULT_TRANSCRIPTION_MODEL_ID) {
+    return null;
+  }
+  return getProfileById(DEFAULT_TRANSCRIPTION_MODEL_ID);
 }

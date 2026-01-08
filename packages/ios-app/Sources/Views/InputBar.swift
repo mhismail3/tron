@@ -363,49 +363,64 @@ struct InputBar: View {
     // MARK: - Mic Button
 
     private var micButtonGlass: some View {
-        ZStack {
-            if isRecording && !isTranscribing {
-                Circle()
-                    .stroke(Color.red.opacity(0.45), lineWidth: 1.5)
-                    .scaleEffect(isMicPulsing ? 1.6 : 1.0)
-                    .opacity(isMicPulsing ? 0.0 : 0.55)
-                    .animation(.easeOut(duration: 1.2).repeatForever(autoreverses: false), value: isMicPulsing)
-            }
-
-            Button {
-                onMicTap()
-            } label: {
-                Group {
-                    if isTranscribing {
-                        ProgressView()
-                            .tint(.white)
-                            .scaleEffect(0.8)
-                    } else if isRecording {
-                        Image(systemName: "stop.fill")
-                            .font(.system(size: 14, weight: .semibold))
-                            .foregroundStyle(.red)
-                    } else {
-                        Image(systemName: "mic.fill")
-                            .font(.system(size: 14, weight: .semibold))
-                            .foregroundStyle(isMicDisabled ? .white.opacity(0.3) : .white)
-                    }
+        Button {
+            onMicTap()
+        } label: {
+            Group {
+                if isTranscribing {
+                    ProgressView()
+                        .tint(.white)
+                        .scaleEffect(0.8)
+                } else if isRecording {
+                    Image(systemName: "stop.fill")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(.red)
+                } else {
+                    Image(systemName: "mic.fill")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(isMicDisabled ? .white.opacity(0.3) : .white)
                 }
-                .frame(width: 40, height: 40)
-                .contentShape(Circle())
             }
-            .glassEffect(
-                .regular.tint(isRecording ? Color.red.opacity(0.35) : Color.tronPhthaloGreen.opacity(0.3)).interactive(),
-                in: .circle
-            )
-            .disabled(isMicDisabled)
-            .animation(.easeInOut(duration: 0.2), value: isRecording)
-            .animation(.easeInOut(duration: 0.2), value: isTranscribing)
+            .frame(width: 40, height: 40)
+            .contentShape(Circle())
         }
+        .glassEffect(
+            .regular.tint(micGlassTint).interactive(),
+            in: .circle
+        )
+        .disabled(isMicDisabled)
+        .animation(.easeInOut(duration: 0.2), value: isRecording)
+        .animation(.easeInOut(duration: 0.2), value: isTranscribing)
         .onAppear {
-            isMicPulsing = isRecording
+            updateMicPulse(shouldPulse: shouldPulseMicTint)
         }
-        .onChange(of: isRecording) { _, newValue in
-            isMicPulsing = newValue
+        .onChange(of: isRecording) { _, _ in
+            updateMicPulse(shouldPulse: shouldPulseMicTint)
+        }
+        .onChange(of: isTranscribing) { _, _ in
+            updateMicPulse(shouldPulse: shouldPulseMicTint)
+        }
+    }
+
+    private var shouldPulseMicTint: Bool {
+        isRecording && !isTranscribing
+    }
+
+    private var micGlassTint: Color {
+        if shouldPulseMicTint {
+            return Color.red.opacity(isMicPulsing ? 0.45 : 0.25)
+        }
+        return Color.tronPhthaloGreen.opacity(0.3)
+    }
+
+    private func updateMicPulse(shouldPulse: Bool) {
+        guard shouldPulse else {
+            isMicPulsing = false
+            return
+        }
+        isMicPulsing = false
+        withAnimation(.easeInOut(duration: 1.2).repeatForever(autoreverses: true)) {
+            isMicPulsing = true
         }
     }
 

@@ -57,6 +57,7 @@ import type {
   WorktreeListResult,
   TranscribeAudioParams,
   TranscribeAudioResult,
+  TranscribeListModelsResult,
 } from './types.js';
 import { ANTHROPIC_MODELS } from '../providers/models.js';
 
@@ -165,6 +166,7 @@ interface MemoryStore {
 
 interface TranscriptionManager {
   transcribeAudio(params: TranscribeAudioParams): Promise<TranscribeAudioResult>;
+  listModels(): Promise<TranscribeListModelsResult>;
 }
 
 // =============================================================================
@@ -312,6 +314,8 @@ export class RpcHandler extends EventEmitter {
           return this.handleSystemGetInfo(request);
         case 'transcribe.audio':
           return this.handleTranscribeAudio(request);
+        case 'transcribe.listModels':
+          return this.handleTranscribeListModels(request);
 
         // Event methods (requires eventStore in context)
         case 'events.getHistory':
@@ -791,6 +795,20 @@ export class RpcHandler extends EventEmitter {
       return this.successResponse(request.id, result);
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Transcription failed';
+      return this.errorResponse(request.id, 'TRANSCRIPTION_FAILED', message);
+    }
+  }
+
+  private async handleTranscribeListModels(request: RpcRequest): Promise<RpcResponse> {
+    if (!this.context.transcriptionManager) {
+      return this.errorResponse(request.id, 'NOT_SUPPORTED', 'Transcription is not available');
+    }
+
+    try {
+      const result = await this.context.transcriptionManager.listModels();
+      return this.successResponse(request.id, result);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to list transcription models';
       return this.errorResponse(request.id, 'TRANSCRIPTION_FAILED', message);
     }
   }

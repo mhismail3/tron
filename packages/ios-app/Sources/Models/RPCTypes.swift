@@ -227,6 +227,7 @@ struct TranscribeAudioParams: Encodable {
     let audioBase64: String
     let mimeType: String?
     let fileName: String?
+    let transcriptionModelId: String?
     let cleanupMode: String?
     let language: String?
     let prompt: String?
@@ -243,6 +244,17 @@ struct TranscribeAudioResult: Decodable {
     let device: String
     let computeType: String
     let cleanupMode: String
+}
+
+struct TranscriptionModelInfo: Decodable, Identifiable {
+    let id: String
+    let label: String
+    let description: String?
+}
+
+struct TranscribeListModelsResult: Decodable {
+    let models: [TranscriptionModelInfo]
+    let defaultModelId: String?
 }
 
 /// Token usage specifically for agent.getState response (uses different field names)

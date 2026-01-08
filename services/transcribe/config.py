@@ -49,6 +49,7 @@ class TranscribeConfig:
     host: str
     port: int
 
+    backend: str
     model_name: str
     device: str
     compute_type: str
@@ -89,9 +90,10 @@ def load_config() -> TranscribeConfig:
     host = str(pick("host", "127.0.0.1"))
     port = _to_int(pick("port", 8787), 8787)
 
-    model_name = str(pick("model_name", "large-v3"))
-    device = str(pick("device", "cpu"))
-    compute_type = str(pick("compute_type", "int8"))
+    backend = str(pick("backend", "parakeet-mlx"))
+    model_name = str(pick("model_name", "mlx-community/parakeet-tdt-0.6b-v3"))
+    device = str(pick("device", "mlx"))
+    compute_type = str(pick("compute_type", "mlx"))
     language = str(pick("language", "en"))
     beam_size = _to_int(pick("beam_size", 5), 5)
     vad_filter = _to_bool(pick("vad_filter", True), True)
@@ -113,6 +115,7 @@ def load_config() -> TranscribeConfig:
         logs_dir=logs_dir,
         host=host,
         port=port,
+        backend=backend,
         model_name=model_name,
         device=device,
         compute_type=compute_type,

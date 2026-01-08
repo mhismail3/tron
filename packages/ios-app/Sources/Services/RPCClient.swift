@@ -350,6 +350,7 @@ class RPCClient: ObservableObject {
         audioData: Data,
         mimeType: String = "audio/m4a",
         fileName: String? = nil,
+        transcriptionModelId: String? = nil,
         cleanupMode: String? = nil,
         language: String? = nil
     ) async throws -> TranscribeAudioResult {
@@ -366,6 +367,7 @@ class RPCClient: ObservableObject {
             audioBase64: audioBase64,
             mimeType: mimeType,
             fileName: fileName,
+            transcriptionModelId: transcriptionModelId,
             cleanupMode: cleanupMode,
             language: language,
             prompt: nil,
@@ -376,6 +378,17 @@ class RPCClient: ObservableObject {
             method: "transcribe.audio",
             params: params,
             timeout: 180.0
+        )
+    }
+
+    func listTranscriptionModels() async throws -> TranscribeListModelsResult {
+        guard let ws = webSocket else {
+            throw RPCClientError.connectionNotEstablished
+        }
+
+        return try await ws.send(
+            method: "transcribe.listModels",
+            params: EmptyParams()
         )
     }
 

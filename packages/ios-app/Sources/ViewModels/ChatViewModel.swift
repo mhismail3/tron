@@ -25,6 +25,7 @@ class ChatViewModel: ObservableObject {
     @Published var totalTokenUsage: TokenUsage?
     @Published var isRecording = false
     @Published var isTranscribing = false
+    @AppStorage("transcriptionModelId") var transcriptionModelId = ""
     /// Whether more older messages are available for loading
     @Published var hasMoreMessages = false
     /// Whether currently loading more messages

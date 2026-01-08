@@ -139,7 +139,7 @@ struct ChatView: View {
         }
         .navigationBarBackButtonHidden(true)
         .sheet(isPresented: $viewModel.showSettings) {
-            SettingsView()
+            SettingsView(rpcClient: rpcClient)
         }
         .sheet(isPresented: $showContextAudit) {
             ContextAuditView(

@@ -23,6 +23,7 @@ _semaphore = asyncio.Semaphore(1)
 async def health() -> dict[str, Any]:
     return {
         "status": "ok",
+        "backend": _config.backend,
         "model": _config.model_name,
         "device": _config.device,
         "compute_type": _config.compute_type,
@@ -37,11 +38,88 @@ async def config() -> dict[str, Any]:
 @app.post("/transcribe")
 async def transcribe(
     audio: UploadFile = File(...),
+    backend: Optional[str] = Form(default=None),
+    model_name: Optional[str] = Form(default=None),
+    device: Optional[str] = Form(default=None),
+    compute_type: Optional[str] = Form(default=None),
     language: Optional[str] = Form(default=None),
     task: Optional[str] = Form(default=None),
     prompt: Optional[str] = Form(default=None),
     cleanup_mode: Optional[str] = Form(default=None),
     return_segments: bool = Form(default=False),
+) -> JSONResponse:
+    return await _handle_transcribe(
+        audio=audio,
+        backend=backend,
+        model_name=model_name,
+        device=device,
+        compute_type=compute_type,
+        language=language,
+        task=task,
+        prompt=prompt,
+        cleanup_mode=cleanup_mode,
+        return_segments=return_segments,
+    )
+
+
+@app.post("/transcribe/faster")
+async def transcribe_faster(
+    audio: UploadFile = File(...),
+    language: Optional[str] = Form(default=None),
+    task: Optional[str] = Form(default=None),
+    prompt: Optional[str] = Form(default=None),
+    cleanup_mode: Optional[str] = Form(default=None),
+    return_segments: bool = Form(default=False),
+) -> JSONResponse:
+    return await _handle_transcribe(
+        audio=audio,
+        backend="parakeet-mlx",
+        model_name="mlx-community/parakeet-tdt-0.6b-v3",
+        device="mlx",
+        compute_type="mlx",
+        language=language,
+        task=task,
+        prompt=prompt,
+        cleanup_mode=cleanup_mode,
+        return_segments=return_segments,
+    )
+
+
+@app.post("/transcribe/better")
+async def transcribe_better(
+    audio: UploadFile = File(...),
+    language: Optional[str] = Form(default=None),
+    task: Optional[str] = Form(default=None),
+    prompt: Optional[str] = Form(default=None),
+    cleanup_mode: Optional[str] = Form(default=None),
+    return_segments: bool = Form(default=False),
+) -> JSONResponse:
+    return await _handle_transcribe(
+        audio=audio,
+        backend="faster-whisper",
+        model_name="large-v3",
+        device="cpu",
+        compute_type="int8",
+        language=language,
+        task=task,
+        prompt=prompt,
+        cleanup_mode=cleanup_mode,
+        return_segments=return_segments,
+    )
+
+
+async def _handle_transcribe(
+    *,
+    audio: UploadFile,
+    backend: Optional[str] = None,
+    model_name: Optional[str] = None,
+    device: Optional[str] = None,
+    compute_type: Optional[str] = None,
+    language: Optional[str] = None,
+    task: Optional[str] = None,
+    prompt: Optional[str] = None,
+    cleanup_mode: Optional[str] = None,
+    return_segments: bool = False,
 ) -> JSONResponse:
     if audio.filename is None:
         raise HTTPException(status_code=400, detail="Missing filename")
@@ -59,6 +137,10 @@ async def transcribe(
                 result = await run_in_threadpool(
                     transcribe_file,
                     tmp_path,
+                    backend=backend,
+                    model_name=model_name,
+                    device=device,
+                    compute_type=compute_type,
                     language=language,
                     task=task,
                     prompt=prompt,

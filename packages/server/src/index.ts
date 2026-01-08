@@ -8,7 +8,7 @@ import { createLogger, getSettings, resolveTronPath, getTronDataDir, type RpcCon
 import { TronWebSocketServer, type WebSocketServerConfig } from './websocket.js';
 import { EventStoreOrchestrator, type EventStoreOrchestratorConfig } from './event-store-orchestrator.js';
 import { HealthServer, type HealthServerConfig } from './health.js';
-import { transcribeAudio } from './transcription-client.js';
+import { listTranscriptionModels, transcribeAudio } from './transcription-client.js';
 import { ensureTranscriptionSidecar, stopTranscriptionSidecar } from './transcription-sidecar.js';
 
 // Get server settings (loaded lazily on first access)
@@ -194,6 +194,9 @@ function createRpcContext(orchestrator: EventStoreOrchestrator): RpcContext {
     transcriptionManager: {
       async transcribeAudio(params) {
         return transcribeAudio(params);
+      },
+      async listModels() {
+        return listTranscriptionModels();
       },
     },
   };

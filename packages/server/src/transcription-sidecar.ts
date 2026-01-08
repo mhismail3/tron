@@ -1,7 +1,7 @@
 /**
  * @fileoverview Transcription sidecar manager.
  *
- * Starts the local faster-whisper sidecar when the Tron server boots.
+ * Starts the local transcription sidecar when the Tron server boots.
  */
 import { createLogger, getSettings } from '@tron/core';
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';

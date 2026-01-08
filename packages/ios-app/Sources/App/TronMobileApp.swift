@@ -151,7 +151,7 @@ struct ContentView: View {
             )
         }
         .sheet(isPresented: $showSettings) {
-            SettingsView()
+            SettingsView(rpcClient: appState.rpcClient)
         }
         .alert("Archive Session?", isPresented: $showArchiveConfirmation) {
             Button("Cancel", role: .cancel) {

@@ -1,7 +1,8 @@
 {
-  "model_name": "large-v3",
-  "device": "cpu",
-  "compute_type": "int8",
+  "backend": "parakeet-mlx",
+  "model_name": "mlx-community/parakeet-tdt-0.6b-v3",
+  "device": "mlx",
+  "compute_type": "mlx",
   "language": "en",
   "beam_size": 5,
   "vad_filter": true,

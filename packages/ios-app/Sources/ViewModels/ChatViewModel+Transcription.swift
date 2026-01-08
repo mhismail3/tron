@@ -48,19 +48,22 @@ extension ChatViewModel {
                 return try Data(contentsOf: url)
             }.value
 
+            let modelId = transcriptionModelId.trimmingCharacters(in: CharacterSet.whitespacesAndNewlines)
+
             let result = try await rpcClient.transcribeAudio(
                 audioData: audioData,
                 mimeType: mimeType(for: url),
-                fileName: url.lastPathComponent
+                fileName: url.lastPathComponent,
+                transcriptionModelId: modelId.isEmpty ? nil : modelId
             )
 
-            let transcript = result.text.trimmingCharacters(in: .whitespacesAndNewlines)
+            let transcript = result.text.trimmingCharacters(in: CharacterSet.whitespacesAndNewlines)
             guard !transcript.isEmpty else {
                 appendNoSpeechDetectedNotification()
                 return
             }
 
-            if inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            if inputText.trimmingCharacters(in: CharacterSet.whitespacesAndNewlines).isEmpty {
                 inputText = transcript
             } else {
                 inputText += "\n" + transcript

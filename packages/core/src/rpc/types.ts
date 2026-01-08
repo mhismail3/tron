@@ -134,7 +134,8 @@ export type RpcMethod =
   | 'system.getInfo'
   | 'system.shutdown'
   // Transcription
-  | 'transcribe.audio';
+  | 'transcribe.audio'
+  | 'transcribe.listModels';
 
 // =============================================================================
 // Session Methods
@@ -742,6 +743,10 @@ export interface TranscribeAudioParams {
   mimeType?: string;
   /** Original filename (optional) */
   fileName?: string;
+  /** Preferred transcription model ID (server-defined) */
+  transcriptionModelId?: string;
+  /** Client-selected transcription quality profile */
+  transcriptionQuality?: 'faster' | 'better';
   /** Cleanup mode override */
   cleanupMode?: 'none' | 'basic' | 'llm';
   /** Language hint (optional, e.g., "en") */
@@ -762,6 +767,19 @@ export interface TranscribeAudioResult {
   device: string;
   computeType: string;
   cleanupMode: string;
+}
+
+export interface TranscriptionModelInfo {
+  id: string;
+  label: string;
+  description?: string;
+}
+
+export interface TranscribeListModelsParams {}
+
+export interface TranscribeListModelsResult {
+  models: TranscriptionModelInfo[];
+  defaultModelId?: string;
 }
 
 // =============================================================================
