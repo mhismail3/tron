@@ -44,6 +44,11 @@ import {
   flushAllPendingEvents as flushAllPendingEventsImpl,
 } from './orchestrator/event-linearizer';
 import {
+  buildWorktreeInfo,
+  buildWorktreeInfoWithStatus,
+  commitWorkingDirectory,
+} from './orchestrator/worktree-ops';
+import {
   DEFAULT_SYSTEM_PROMPT,
   type EventStoreOrchestratorConfig,
   type ActiveSession,
@@ -221,7 +226,7 @@ export class EventStoreOrchestrator extends EventEmitter {
       sessionId,
       workingDirectory: workingDir.path,
       model,
-      worktree: this.buildWorktreeInfo(workingDir),
+      worktree: buildWorktreeInfo(workingDir),
     });
 
     logger.info('Session created', {
@@ -478,7 +483,7 @@ export class EventStoreOrchestrator extends EventEmitter {
       sourceEventId: eventIdToFork,
       newSessionId: result.session.id,
       newRootEventId: result.rootEvent.id,
-      worktree: this.buildWorktreeInfo(workingDir),
+      worktree: buildWorktreeInfo(workingDir),
     });
 
     logger.info('Session forked', {
@@ -493,7 +498,7 @@ export class EventStoreOrchestrator extends EventEmitter {
       rootEventId: result.rootEvent.id,
       forkedFromEventId: eventIdToFork,
       forkedFromSessionId: sessionId,
-      worktree: this.buildWorktreeInfo(workingDir),
+      worktree: buildWorktreeInfo(workingDir),
     };
   }
 
@@ -1257,7 +1262,7 @@ export class EventStoreOrchestrator extends EventEmitter {
       return null;
     }
 
-    return this.buildWorktreeInfoWithStatus(active.workingDir);
+    return buildWorktreeInfoWithStatus(active.workingDir);
   }
 
   /**
@@ -1274,23 +1279,7 @@ export class EventStoreOrchestrator extends EventEmitter {
       return { success: false, error: 'Session not found or no worktree' };
     }
 
-    try {
-      const result = await active.workingDir.commit(message, { addAll: true });
-      if (!result) {
-        return { success: true, filesChanged: [] }; // Nothing to commit
-      }
-
-      return {
-        success: true,
-        commitHash: result.hash,
-        filesChanged: result.filesChanged,
-      };
-    } catch (error) {
-      return {
-        success: false,
-        error: error instanceof Error ? error.message : String(error),
-      };
-    }
+    return commitWorkingDirectory(active.workingDir, message);
   }
 
   /**
@@ -1665,37 +1654,8 @@ export class EventStoreOrchestrator extends EventEmitter {
       createdAt: row.createdAt,
       lastActivity: row.lastActivityAt,
       isActive,
-      worktree: workingDir ? this.buildWorktreeInfo(workingDir) : undefined,
+      worktree: workingDir ? buildWorktreeInfo(workingDir) : undefined,
     };
-  }
-
-  /**
-   * Build WorktreeInfo from a WorkingDirectory
-   */
-  private buildWorktreeInfo(workingDir: WorkingDirectory): WorktreeInfo {
-    return {
-      isolated: workingDir.isolated,
-      branch: workingDir.branch,
-      baseCommit: workingDir.baseCommit,
-      path: workingDir.path,
-    };
-  }
-
-  /**
-   * Build WorktreeInfo with additional status (async)
-   */
-  private async buildWorktreeInfoWithStatus(workingDir: WorkingDirectory): Promise<WorktreeInfo> {
-    const info = this.buildWorktreeInfo(workingDir);
-
-    try {
-      info.hasUncommittedChanges = await workingDir.hasUncommittedChanges();
-      const commits = await workingDir.getCommitsSinceBase();
-      info.commitCount = commits.length;
-    } catch {
-      // Ignore errors getting status
-    }
-
-    return info;
   }
 
   private startCleanupTimer(): void {
