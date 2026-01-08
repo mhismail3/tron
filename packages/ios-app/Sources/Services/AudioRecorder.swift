@@ -26,6 +26,32 @@ final class AudioRecorder: NSObject, ObservableObject, AVAudioRecorderDelegate {
     private var recorder: AVAudioRecorder?
     private var currentURL: URL?
     private var autoStopTask: Task<Void, Never>?
+    /// Whether audio session has been pre-warmed
+    private var isSessionPrewarmed = false
+
+    // MARK: - Pre-warming (Performance Optimization)
+
+    /// Pre-warm the audio session for faster mic response on first tap.
+    /// Call this when ChatView appears to eliminate first-tap latency.
+    /// This configures the audio session without activating it,
+    /// so the actual recording start is nearly instant.
+    func prewarmAudioSession() {
+        guard !isSessionPrewarmed else { return }
+
+        Task.detached(priority: .utility) {
+            let session = AVAudioSession.sharedInstance()
+            do {
+                // Configure the category but don't activate yet
+                // This initializes the audio hardware in the background
+                try session.setCategory(.playAndRecord, mode: .default, options: [.defaultToSpeaker, .allowBluetoothA2DP])
+                await MainActor.run {
+                    self.isSessionPrewarmed = true
+                }
+            } catch {
+                // Silently fail - will retry on actual recording start
+            }
+        }
+    }
 
     func requestPermission() async -> Bool {
         if #available(iOS 17.0, *) {
@@ -77,7 +103,7 @@ final class AudioRecorder: NSObject, ObservableObject, AVAudioRecorderDelegate {
         let session = AVAudioSession.sharedInstance()
         do {
             do {
-                try session.setCategory(.playAndRecord, mode: .default, options: [.defaultToSpeaker, .allowBluetooth])
+                try session.setCategory(.playAndRecord, mode: .default, options: [.defaultToSpeaker, .allowBluetoothA2DP])
             } catch {
                 // Fallback for environments that reject playAndRecord (e.g. simulator)
                 try session.setCategory(.record, mode: .default, options: [])

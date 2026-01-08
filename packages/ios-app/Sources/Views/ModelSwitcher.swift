@@ -12,6 +12,17 @@ struct ModelPickerMenu: View {
     let isLoading: Bool
     let onSelect: (ModelInfo) -> Void
 
+    // PERFORMANCE: Cache filtered/sorted models to avoid recalculating on every render
+    private var latestAnthropicModels: [ModelInfo] {
+        models.filter { ($0.provider.lowercased() == "anthropic" || $0.id.lowercased().contains("claude")) && $0.is45Model }
+            .uniqueByFormattedName().sortedByTier()
+    }
+
+    private var legacyAnthropicModels: [ModelInfo] {
+        models.filter { ($0.provider.lowercased() == "anthropic" || $0.id.lowercased().contains("claude")) && !$0.is45Model }
+            .uniqueByFormattedName().sortedByTier()
+    }
+
     var body: some View {
         Menu {
             if isLoading && models.isEmpty {
@@ -19,15 +30,10 @@ struct ModelPickerMenu: View {
             } else {
                 // Anthropic section - latest models first, then legacy
                 Section("Anthropic") {
-                    let latestModels = anthropicModels.filter { $0.is45Model }
-                        .uniqueByFormattedName().sortedByTier()
-                    let legacyModels = anthropicModels.filter { !$0.is45Model }
-                        .uniqueByFormattedName().sortedByTier()
-
-                    ForEach(latestModels) { model in
+                    ForEach(latestAnthropicModels) { model in
                         modelButton(model)
                     }
-                    ForEach(legacyModels) { model in
+                    ForEach(legacyAnthropicModels) { model in
                         modelButton(model)
                     }
                 }
@@ -70,13 +76,6 @@ struct ModelPickerMenu: View {
             .contentShape(Capsule())
         }
         .glassEffect(.regular.tint(Color.tronPhthaloGreen.opacity(0.4)).interactive(), in: .capsule)
-    }
-
-    // MARK: - Computed Properties
-
-    /// All Anthropic models from the available models list
-    private var anthropicModels: [ModelInfo] {
-        models.filter { $0.provider.lowercased() == "anthropic" || $0.id.lowercased().contains("claude") }
     }
 
     // MARK: - Model Button

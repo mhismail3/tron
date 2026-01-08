@@ -113,6 +113,12 @@ class ChatViewModel: ObservableObject {
         }
     }
 
+    /// Pre-warm audio session for faster mic button response.
+    /// Call this when ChatView appears to eliminate first-tap latency.
+    func prewarmAudioSession() {
+        audioRecorder.prewarmAudioSession()
+    }
+
     private func setupEventHandlers() {
         rpcClient.onTextDelta = { [weak self] delta in
             self?.handleTextDelta(delta)

@@ -175,13 +175,18 @@ struct ChatView: View {
             //
             // Critical order:
             // 1. Set manager reference first (sync, instant)
-            // 2. Connect/resume and prefetch models run in parallel
-            // 3. Sync/load messages runs after connect/resume completes
+            // 2. Pre-warm audio session for instant mic response
+            // 3. Connect/resume and prefetch models run in parallel
+            // 4. Sync/load messages runs after connect/resume completes
             //
-            // Model prefetch is completely independent and doesn't block the UI
+            // Model prefetch and audio prewarm are independent and don't block UI
 
             let workspaceId = eventStoreManager.activeSession?.workspaceId ?? ""
             viewModel.setEventStoreManager(eventStoreManager, workspaceId: workspaceId)
+
+            // Pre-warm audio session in background for instant mic button response
+            // This eliminates the 100-300ms delay on first mic tap
+            viewModel.prewarmAudioSession()
 
             // Run model prefetch in parallel with connect/resume
             // This is a fire-and-forget operation that doesn't block session entry
