@@ -148,3 +148,47 @@ extension AnyCodable: ExpressibleByDictionaryLiteral {
         value = Dictionary(uniqueKeysWithValues: elements)
     }
 }
+
+// MARK: - Payload Dictionary Extensions
+
+/// Convenience extensions for [String: AnyCodable] payloads.
+/// Simplifies the common pattern: payload["key"]?.value as? Type
+extension Dictionary where Key == String, Value == AnyCodable {
+    /// Get string value for key
+    func string(_ key: String) -> String? {
+        self[key]?.stringValue
+    }
+
+    /// Get int value for key
+    func int(_ key: String) -> Int? {
+        self[key]?.intValue
+    }
+
+    /// Get double value for key
+    func double(_ key: String) -> Double? {
+        self[key]?.doubleValue
+    }
+
+    /// Get bool value for key
+    func bool(_ key: String) -> Bool? {
+        self[key]?.boolValue
+    }
+
+    /// Get nested dictionary for key
+    func dict(_ key: String) -> [String: Any]? {
+        self[key]?.dictionaryValue
+    }
+
+    /// Get array for key
+    func array(_ key: String) -> [Any]? {
+        self[key]?.arrayValue
+    }
+
+    /// Get nested AnyCodable dictionary for key
+    func anyCodableDict(_ key: String) -> [String: AnyCodable]? {
+        if let dict = self[key]?.dictionaryValue {
+            return dict.mapValues { AnyCodable($0) }
+        }
+        return nil
+    }
+}

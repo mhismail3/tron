@@ -594,7 +594,7 @@ struct StandaloneToolResultView: View {
             // For Read/Write/Edit: show file path
             if let path = json["file_path"] as? String ?? json["path"] as? String {
                 // Show just filename
-                return (path as NSString).lastPathComponent
+                return path.filename
             }
             // For Grep: show pattern
             if let pattern = json["pattern"] as? String {

@@ -124,7 +124,7 @@ final class TronLogger: @unchecked Sendable {
         let effectiveLevel = categoryLevels[category] ?? minimumLevel
         guard level >= effectiveLevel else { return }
 
-        let fileName = (file as NSString).lastPathComponent
+        let fileName = file.filename
         let timestamp = Self.isoFormatter.string(from: Date())
         let formattedMessage = "[\(timestamp)] \(level.prefix) [\(category.rawValue)] \(fileName):\(line) \(function) - \(message)"
 
