@@ -37,7 +37,11 @@ import {
   type EventType,
   type CurrentTurnToolCall,
 } from '@tron/core';
-import { normalizeContentBlocks } from './utils/content-normalizer';
+import {
+  normalizeContentBlocks,
+  truncateString,
+  MAX_TOOL_RESULT_SIZE,
+} from './utils/content-normalizer';
 import {
   appendEventLinearized as appendEventLinearizedImpl,
   flushPendingEvents as flushPendingEventsImpl,
