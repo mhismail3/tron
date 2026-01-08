@@ -179,6 +179,8 @@ struct ChatView: View {
         isLoadingModels = true
         if let models = try? await rpcClient.listModels() {
             cachedModels = models
+            // Update context window from server-provided model info
+            viewModel.updateContextWindow(from: models)
         }
         isLoadingModels = false
     }
@@ -189,6 +191,8 @@ struct ChatView: View {
 
         // Optimistic update - UI updates instantly
         optimisticModelName = model.id
+        // Update context window immediately with new model's value
+        viewModel.currentContextWindow = model.contextWindow
 
         // Fire the actual switch in background
         Task {
@@ -209,6 +213,10 @@ struct ChatView: View {
                 await MainActor.run {
                     // Revert optimistic update on failure
                     optimisticModelName = nil
+                    // Revert context window on failure
+                    if let originalModel = cachedModels.first(where: { $0.id == previousModel }) {
+                        viewModel.currentContextWindow = originalModel.contextWindow
+                    }
                     viewModel.showErrorAlert("Failed to switch model: \(error.localizedDescription)")
                 }
             }

@@ -27,6 +27,8 @@ class ChatViewModel: ObservableObject {
     @Published var hasMoreMessages = false
     /// Whether currently loading more messages
     @Published var isLoadingMoreMessages = false
+    /// Current model's context window size (from server's model.list)
+    @Published var currentContextWindow: Int = 200_000
 
     // MARK: - Internal State (accessible to extensions)
 
@@ -216,39 +218,20 @@ class ChatViewModel: ObservableObject {
     /// Estimated context usage percentage based on total tokens and model context window
     var contextPercentage: Int {
         guard let usage = totalTokenUsage else { return 0 }
-
-        // Get context window for current model
-        let contextWindow = modelContextWindow(for: currentModel)
-        guard contextWindow > 0 else { return 0 }
+        guard currentContextWindow > 0 else { return 0 }
 
         // Total tokens used (input + output counts toward context)
         let totalUsed = usage.inputTokens + usage.outputTokens
-        let percentage = Double(totalUsed) / Double(contextWindow) * 100
+        let percentage = Double(totalUsed) / Double(currentContextWindow) * 100
 
         return min(100, Int(percentage.rounded()))
     }
 
-    /// Returns the context window size for a given model ID
-    /// TODO: Move to server - this should come from model.list response
-    private func modelContextWindow(for modelId: String) -> Int {
-        let lowered = modelId.lowercased()
-
-        // Claude 4.5 models have 200k context
-        if lowered.contains("4-5") || lowered.contains("4.5") {
-            return 200_000
+    /// Updates the context window based on available model info
+    /// Called by ChatView when models are loaded or model is switched
+    func updateContextWindow(from models: [ModelInfo]) {
+        if let model = models.first(where: { $0.id == currentModel }) {
+            currentContextWindow = model.contextWindow
         }
-
-        // Claude 4 models have 200k context
-        if lowered.contains("-4-") || lowered.contains("sonnet-4") || lowered.contains("opus-4") {
-            return 200_000
-        }
-
-        // Claude 3.5 models have 200k context
-        if lowered.contains("3-5") || lowered.contains("3.5") {
-            return 200_000
-        }
-
-        // Default to 200k for safety
-        return 200_000
     }
 }
