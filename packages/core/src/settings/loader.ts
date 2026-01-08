@@ -373,6 +373,55 @@ export function applyEnvOverrides(settings: TronSettings): TronSettings {
       memoryDbPath: process.env.TRON_MEMORY_DB,
     };
   }
+  if (process.env.TRON_TRANSCRIBE_ENABLED) {
+    const enabled = process.env.TRON_TRANSCRIBE_ENABLED.toLowerCase();
+    result.server = {
+      ...result.server,
+      transcription: {
+        ...result.server.transcription,
+        enabled: enabled === 'true' || enabled === '1' || enabled === 'yes',
+      },
+    };
+  }
+  if (process.env.TRON_TRANSCRIBE_URL) {
+    result.server = {
+      ...result.server,
+      transcription: {
+        ...result.server.transcription,
+        baseUrl: process.env.TRON_TRANSCRIBE_URL,
+      },
+    };
+  }
+  if (process.env.TRON_TRANSCRIBE_TIMEOUT_MS) {
+    result.server = {
+      ...result.server,
+      transcription: {
+        ...result.server.transcription,
+        timeoutMs: parseInt(process.env.TRON_TRANSCRIBE_TIMEOUT_MS, 10),
+      },
+    };
+  }
+  if (process.env.TRON_TRANSCRIBE_MAX_BYTES) {
+    result.server = {
+      ...result.server,
+      transcription: {
+        ...result.server.transcription,
+        maxBytes: parseInt(process.env.TRON_TRANSCRIBE_MAX_BYTES, 10),
+      },
+    };
+  }
+  if (process.env.TRON_TRANSCRIBE_CLEANUP_MODE) {
+    const cleanupMode = process.env.TRON_TRANSCRIBE_CLEANUP_MODE;
+    if (cleanupMode === 'none' || cleanupMode === 'basic' || cleanupMode === 'llm') {
+      result.server = {
+        ...result.server,
+        transcription: {
+          ...result.server.transcription,
+          cleanupMode,
+        },
+      };
+    }
+  }
 
   return result;
 }

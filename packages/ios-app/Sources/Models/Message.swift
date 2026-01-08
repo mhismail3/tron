@@ -152,6 +152,8 @@ enum MessageContent: Equatable {
     case modelChange(from: String, to: String)
     /// In-chat notification for interrupted session
     case interrupted
+    /// In-chat notification for transcription failure
+    case transcriptionFailed
 
     var textContent: String {
         switch self {
@@ -171,6 +173,8 @@ enum MessageContent: Equatable {
             return "Switched from \(from) to \(to)"
         case .interrupted:
             return "Session interrupted"
+        case .transcriptionFailed:
+            return "Transcription failed"
         }
     }
 
@@ -185,7 +189,7 @@ enum MessageContent: Equatable {
 
     var isNotification: Bool {
         switch self {
-        case .modelChange, .interrupted:
+        case .modelChange, .interrupted, .transcriptionFailed:
             return true
         default:
             return false
@@ -323,5 +327,10 @@ extension ChatMessage {
     /// In-chat notification for session interruption
     static func interrupted() -> ChatMessage {
         ChatMessage(role: .system, content: .interrupted)
+    }
+
+    /// In-chat notification for transcription failure
+    static func transcriptionFailed() -> ChatMessage {
+        ChatMessage(role: .system, content: .transcriptionFailed)
     }
 }

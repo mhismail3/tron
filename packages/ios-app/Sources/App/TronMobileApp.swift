@@ -271,7 +271,7 @@ struct WelcomePage: View {
                         .frame(height: 80)
 
                     // Subtle tagline
-                    Text("Start talking to Tron")
+                    Text("Start talking")
                         .font(.system(size: 14, weight: .regular, design: .monospaced))
                         .foregroundStyle(.white.opacity(0.4))
                 }
@@ -554,10 +554,7 @@ struct NewSessionFlow: View {
                 await loadServerSessions()
             }
             .onAppear {
-                // Only auto-open workspace selector if no recent sessions AND no server sessions
-                if eventStoreManager.sessions.isEmpty && serverSessions.isEmpty {
-                    showWorkspaceSelector = true
-                }
+                // Don't auto-open workspace selector - let user explicitly tap to select
             }
         }
         .presentationDetents([.medium, .large])
@@ -760,13 +757,14 @@ struct NewSessionFlow: View {
                         .font(.title2)
                         .foregroundStyle(.white.opacity(0.3))
                     Text(workingDirectory.isEmpty
-                        ? "No other device sessions found"
+                        ? "No sessions found"
                         : "No sessions in this workspace")
                         .font(.caption)
                         .foregroundStyle(.white.opacity(0.4))
                 }
                 .frame(maxWidth: .infinity)
-                .padding(.vertical, 16)
+                .padding(.top, 32)
+                .padding(.bottom, 16)
             } else {
                 // Sessions list - tap to preview
                 VStack(spacing: 4) {

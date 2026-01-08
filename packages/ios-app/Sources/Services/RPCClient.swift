@@ -344,6 +344,37 @@ class RPCClient: ObservableObject {
         return try await ws.send(method: "agent.getState", params: params)
     }
 
+    // MARK: - Transcription Methods
+
+    func transcribeAudio(
+        audioData: Data,
+        mimeType: String = "audio/m4a",
+        fileName: String? = nil,
+        cleanupMode: String? = nil,
+        language: String? = nil
+    ) async throws -> TranscribeAudioResult {
+        guard let ws = webSocket else {
+            throw RPCClientError.connectionNotEstablished
+        }
+
+        let params = TranscribeAudioParams(
+            sessionId: currentSessionId,
+            audioBase64: audioData.base64EncodedString(),
+            mimeType: mimeType,
+            fileName: fileName,
+            cleanupMode: cleanupMode,
+            language: language,
+            prompt: nil,
+            task: nil
+        )
+
+        return try await ws.send(
+            method: "transcribe.audio",
+            params: params,
+            timeout: 180.0
+        )
+    }
+
     // MARK: - System Methods
 
     func ping() async throws {

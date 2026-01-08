@@ -152,9 +152,11 @@ final class WebSocketService: ObservableObject {
 
     func send<P: Encodable, R: Decodable>(
         method: String,
-        params: P
+        params: P,
+        timeout: TimeInterval? = nil
     ) async throws -> R {
         let startTime = CFAbsoluteTimeGetCurrent()
+        let timeoutInterval = timeout ?? requestTimeout
 
         guard isConnectedFlag, let task = webSocketTask else {
             logger.error("Cannot send \(method): not connected (isConnectedFlag=\(isConnectedFlag), task=\(webSocketTask != nil ? "exists" : "nil"))", category: .websocket)
@@ -189,10 +191,10 @@ final class WebSocketService: ObservableObject {
 
             // Store timeout task so it can be cancelled when response arrives
             let timeoutTask = Task { [weak self] in
-                try? await Task.sleep(for: .seconds(self?.requestTimeout ?? 30))
+                try? await Task.sleep(for: .seconds(timeoutInterval))
                 await MainActor.run {
                     if let pending = self?.pendingRequests.removeValue(forKey: requestId) {
-                        logger.error("Request timeout for \(method) id=\(requestId) after \(self?.requestTimeout ?? 30)s", category: .websocket)
+                        logger.error("Request timeout for \(method) id=\(requestId) after \(timeoutInterval)s", category: .websocket)
                         pending.resume(throwing: WebSocketError.timeout)
                     }
                     self?.timeoutTasks.removeValue(forKey: requestId)

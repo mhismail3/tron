@@ -132,7 +132,9 @@ export type RpcMethod =
   // System
   | 'system.ping'
   | 'system.getInfo'
-  | 'system.shutdown';
+  | 'system.shutdown'
+  // Transcription
+  | 'transcribe.audio';
 
 // =============================================================================
 // Session Methods
@@ -725,6 +727,41 @@ export interface SystemShutdownParams {
 
 export interface SystemShutdownResult {
   acknowledged: boolean;
+}
+
+// =============================================================================
+// Transcription Methods
+// =============================================================================
+
+export interface TranscribeAudioParams {
+  /** Optional session ID for attribution */
+  sessionId?: string;
+  /** Base64-encoded audio bytes */
+  audioBase64: string;
+  /** MIME type for the audio (e.g., audio/m4a) */
+  mimeType?: string;
+  /** Original filename (optional) */
+  fileName?: string;
+  /** Cleanup mode override */
+  cleanupMode?: 'none' | 'basic' | 'llm';
+  /** Language hint (optional, e.g., "en") */
+  language?: string;
+  /** Initial prompt for transcription (optional) */
+  prompt?: string;
+  /** Task type (transcribe/translate) */
+  task?: 'transcribe' | 'translate';
+}
+
+export interface TranscribeAudioResult {
+  text: string;
+  rawText: string;
+  language: string;
+  durationSeconds: number;
+  processingTimeMs: number;
+  model: string;
+  device: string;
+  computeType: string;
+  cleanupMode: string;
 }
 
 // =============================================================================

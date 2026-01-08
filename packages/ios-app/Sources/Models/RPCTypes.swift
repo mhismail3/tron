@@ -220,6 +220,31 @@ struct AgentStateResult: Decodable {
     let wasInterrupted: Bool?
 }
 
+// MARK: - Transcription Methods
+
+struct TranscribeAudioParams: Encodable {
+    let sessionId: String?
+    let audioBase64: String
+    let mimeType: String?
+    let fileName: String?
+    let cleanupMode: String?
+    let language: String?
+    let prompt: String?
+    let task: String?
+}
+
+struct TranscribeAudioResult: Decodable {
+    let text: String
+    let rawText: String
+    let language: String
+    let durationSeconds: Double
+    let processingTimeMs: Int
+    let model: String
+    let device: String
+    let computeType: String
+    let cleanupMode: String
+}
+
 /// Token usage specifically for agent.getState response (uses different field names)
 struct AgentStateTokenUsage: Decodable {
     let input: Int

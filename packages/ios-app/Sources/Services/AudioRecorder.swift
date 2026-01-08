@@ -1,0 +1,192 @@
+import Foundation
+import AVFoundation
+
+// MARK: - Audio Recorder
+
+@MainActor
+final class AudioRecorder: NSObject, ObservableObject, AVAudioRecorderDelegate {
+    enum RecorderError: LocalizedError {
+        case permissionDenied
+        case startFailed(String)
+
+        var errorDescription: String? {
+            switch self {
+            case .permissionDenied:
+                return "Microphone permission denied"
+            case .startFailed(let reason):
+                return reason
+            }
+        }
+    }
+
+    @Published private(set) var isRecording = false
+
+    var onFinish: ((URL?, Bool) -> Void)?
+
+    private var recorder: AVAudioRecorder?
+    private var currentURL: URL?
+    private var autoStopTask: Task<Void, Never>?
+
+    func requestPermission() async -> Bool {
+        if #available(iOS 17.0, *) {
+            switch AVAudioApplication.shared.recordPermission {
+            case .granted:
+                return true
+            case .denied:
+                return false
+            case .undetermined:
+                return await withCheckedContinuation { continuation in
+                    AVAudioApplication.requestRecordPermission { allowed in
+                        DispatchQueue.main.async {
+                            continuation.resume(returning: allowed)
+                        }
+                    }
+                }
+            @unknown default:
+                return false
+            }
+        } else {
+            switch AVAudioSession.sharedInstance().recordPermission {
+            case .granted:
+                return true
+            case .denied:
+                return false
+            case .undetermined:
+                return await withCheckedContinuation { continuation in
+                    AVAudioSession.sharedInstance().requestRecordPermission { allowed in
+                        DispatchQueue.main.async {
+                            continuation.resume(returning: allowed)
+                        }
+                    }
+                }
+            @unknown default:
+                return false
+            }
+        }
+    }
+
+    func startRecording(maxDuration: TimeInterval) async throws {
+        if isRecording {
+            return
+        }
+        let hasPermission = await requestPermission()
+        guard hasPermission else {
+            throw RecorderError.permissionDenied
+        }
+
+        let session = AVAudioSession.sharedInstance()
+        do {
+            do {
+                try session.setCategory(.playAndRecord, mode: .default, options: [.defaultToSpeaker, .allowBluetooth])
+            } catch {
+                // Fallback for environments that reject playAndRecord (e.g. simulator)
+                try session.setCategory(.record, mode: .default, options: [])
+            }
+            try session.setActive(true, options: [])
+        } catch {
+            throw RecorderError.startFailed("Failed to configure audio session: \(error.localizedDescription)")
+        }
+        if !session.isInputAvailable {
+            throw RecorderError.startFailed("No audio input available")
+        }
+        if let inputs = session.availableInputs, let builtIn = inputs.first(where: { $0.portType == .builtInMic }) {
+            try? session.setPreferredInput(builtIn)
+        }
+
+        let fileURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("tron-recording-\(UUID().uuidString)")
+            .appendingPathExtension("m4a")
+
+        let settings: [String: Any] = [
+            AVFormatIDKey: Int(kAudioFormatMPEG4AAC),
+            AVSampleRateKey: 44_100,
+            AVNumberOfChannelsKey: 1,
+            AVEncoderAudioQualityKey: AVAudioQuality.high.rawValue,
+        ]
+
+        do {
+            let recorder = try AVAudioRecorder(url: fileURL, settings: settings)
+            recorder.delegate = self
+            recorder.isMeteringEnabled = false
+            if !recorder.prepareToRecord() {
+                throw RecorderError.startFailed("Failed to prepare recorder")
+            }
+            guard recorder.record() else {
+                throw RecorderError.startFailed("Recorder refused to start")
+            }
+            self.recorder = recorder
+            self.currentURL = fileURL
+            isRecording = true
+            autoStopTask?.cancel()
+            autoStopTask = Task { [weak self] in
+                try? await Task.sleep(for: .seconds(maxDuration))
+                await MainActor.run {
+                    self?.stopRecording()
+                }
+            }
+        } catch let error as RecorderError {
+            throw error
+        } catch {
+            throw RecorderError.startFailed("Failed to start recording: \(error.localizedDescription)")
+        }
+    }
+
+    func stopRecording() {
+        autoStopTask?.cancel()
+        autoStopTask = nil
+        recorder?.stop()
+    }
+
+    func cancelRecording() {
+        autoStopTask?.cancel()
+        autoStopTask = nil
+        recorder?.stop()
+        cleanupFile()
+    }
+
+    nonisolated func audioRecorderDidFinishRecording(_ recorder: AVAudioRecorder, successfully flag: Bool) {
+        Task { @MainActor [weak self] in
+            self?.handleRecorderFinished(success: flag)
+        }
+    }
+
+    nonisolated func audioRecorderEncodeErrorDidOccur(_ recorder: AVAudioRecorder, error: Error?) {
+        Task { @MainActor [weak self] in
+            self?.handleRecorderError()
+        }
+    }
+
+    private func handleRecorderFinished(success: Bool) {
+        isRecording = false
+        defer {
+            recorder = nil
+        }
+
+        do {
+            try AVAudioSession.sharedInstance().setActive(false, options: [.notifyOthersOnDeactivation])
+        } catch {
+            // Ignore deactivation errors
+        }
+
+        if !success {
+            cleanupFile()
+        }
+
+        let finishedURL = success ? currentURL : nil
+        onFinish?(finishedURL, success)
+        currentURL = nil
+    }
+
+    private func handleRecorderError() {
+        isRecording = false
+        cleanupFile()
+        onFinish?(nil, false)
+    }
+
+    private func cleanupFile() {
+        if let url = currentURL {
+            try? FileManager.default.removeItem(at: url)
+        }
+        currentURL = nil
+    }
+}

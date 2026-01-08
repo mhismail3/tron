@@ -7,10 +7,13 @@ import PhotosUI
 struct InputBar: View {
     @Binding var text: String
     let isProcessing: Bool
+    let isRecording: Bool
+    let isTranscribing: Bool
     @Binding var attachedImages: [ImageContent]
     @Binding var selectedImages: [PhotosPickerItem]
     let onSend: () -> Void
     let onAbort: () -> Void
+    let onMicTap: () -> Void
     let onRemoveImage: (ImageContent) -> Void
     var inputHistory: InputHistoryStore?
     var onHistoryNavigate: ((String) -> Void)?
@@ -48,6 +51,9 @@ struct InputBar: View {
             HStack(alignment: .bottom, spacing: 12) {
                 // Text field with glass background
                 textFieldGlass
+
+                // Mic button - liquid glass
+                micButtonGlass
 
                 // Send/Abort button - liquid glass
                 actionButtonGlass
@@ -353,6 +359,49 @@ struct InputBar: View {
         .animation(.easeInOut(duration: 0.2), value: canSend)
     }
 
+    // MARK: - Mic Button
+
+    private var micButtonGlass: some View {
+        Button {
+            onMicTap()
+        } label: {
+            Group {
+                if isTranscribing {
+                    ProgressView()
+                        .tint(.white)
+                        .scaleEffect(0.8)
+                } else if isRecording {
+                    Image(systemName: "stop.fill")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(.red)
+                } else {
+                    Image(systemName: "mic.fill")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(isMicDisabled ? .white.opacity(0.3) : .white)
+                }
+            }
+            .frame(width: 40, height: 40)
+            .contentShape(Circle())
+        }
+        .glassEffect(
+            .regular.tint(isRecording ? Color.red.opacity(0.35) : Color.tronPhthaloGreen.opacity(0.3)).interactive(),
+            in: .circle
+        )
+        .disabled(isMicDisabled)
+        .animation(.easeInOut(duration: 0.2), value: isRecording)
+        .animation(.easeInOut(duration: 0.2), value: isTranscribing)
+    }
+
+    private var isMicDisabled: Bool {
+        if isTranscribing {
+            return true
+        }
+        if isRecording {
+            return false
+        }
+        return isProcessing
+    }
+
     private var canSend: Bool {
         !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !attachedImages.isEmpty
     }
@@ -401,10 +450,13 @@ struct AttachedImageThumbnail: View {
         InputBar(
             text: .constant("Hello world"),
             isProcessing: false,
+            isRecording: false,
+            isTranscribing: false,
             attachedImages: .constant([]),
             selectedImages: .constant([]),
             onSend: {},
             onAbort: {},
+            onMicTap: {},
             onRemoveImage: { _ in },
             inputHistory: nil,
             onHistoryNavigate: nil,

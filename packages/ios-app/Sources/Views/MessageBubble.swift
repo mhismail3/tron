@@ -68,6 +68,9 @@ struct MessageBubble: View {
 
         case .interrupted:
             InterruptedNotificationView()
+
+        case .transcriptionFailed:
+            TranscriptionFailedNotificationView()
         }
     }
 }
@@ -122,6 +125,31 @@ struct InterruptedNotificationView: View {
                 .foregroundStyle(.red)
 
             Text("Session interrupted")
+                .font(.system(size: 11, weight: .medium, design: .monospaced))
+                .foregroundStyle(.red.opacity(0.9))
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(Color.red.opacity(0.1))
+        .clipShape(Capsule())
+        .overlay(
+            Capsule()
+                .stroke(Color.red.opacity(0.3), lineWidth: 0.5)
+        )
+        .frame(maxWidth: .infinity, alignment: .center)
+    }
+}
+
+// MARK: - Transcription Failed Notification View (Red pill-style in-chat notification)
+
+struct TranscriptionFailedNotificationView: View {
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "mic.slash.fill")
+                .font(.system(size: 10, weight: .medium))
+                .foregroundStyle(.red)
+
+            Text("Transcription failed")
                 .font(.system(size: 11, weight: .medium, design: .monospaced))
                 .foregroundStyle(.red.opacity(0.9))
         }

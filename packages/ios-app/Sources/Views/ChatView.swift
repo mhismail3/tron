@@ -75,6 +75,8 @@ struct ChatView: View {
                     InputBar(
                         text: $viewModel.inputText,
                         isProcessing: viewModel.isProcessing,
+                        isRecording: viewModel.isRecording,
+                        isTranscribing: viewModel.isTranscribing,
                         attachedImages: $viewModel.attachedImages,
                         selectedImages: $viewModel.selectedImages,
                         onSend: {
@@ -87,6 +89,7 @@ struct ChatView: View {
                             viewModel.sendMessage()
                         },
                         onAbort: viewModel.abortAgent,
+                        onMicTap: viewModel.toggleRecording,
                         onRemoveImage: viewModel.removeAttachedImage,
                         inputHistory: inputHistory,
                         onHistoryNavigate: { newText in

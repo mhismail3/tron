@@ -146,6 +146,13 @@ export const DEFAULT_SETTINGS: TronSettings = {
     memoryDbPath: 'memory.db',
     defaultModel: 'claude-sonnet-4-20250514',
     defaultProvider: 'anthropic',
+    transcription: {
+      enabled: true,
+      baseUrl: 'http://127.0.0.1:8787',
+      timeoutMs: 180000,
+      cleanupMode: 'llm',
+      maxBytes: 25 * 1024 * 1024,
+    },
   },
 
   // Tmux Configuration

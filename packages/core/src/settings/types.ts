@@ -216,6 +216,24 @@ export interface ServerSettings {
   defaultModel: string;
   /** Default provider */
   defaultProvider: string;
+  /** Audio transcription settings */
+  transcription: TranscriptionSettings;
+}
+
+/**
+ * Audio transcription configuration
+ */
+export interface TranscriptionSettings {
+  /** Enable transcription support */
+  enabled: boolean;
+  /** Base URL for transcription sidecar */
+  baseUrl: string;
+  /** Request timeout in milliseconds */
+  timeoutMs: number;
+  /** Cleanup mode to apply to transcriptions */
+  cleanupMode: 'none' | 'basic' | 'llm';
+  /** Maximum audio payload size in bytes */
+  maxBytes: number;
 }
 
 // =============================================================================

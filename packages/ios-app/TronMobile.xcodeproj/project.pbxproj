@@ -10,6 +10,8 @@
 		0186B0083110F291EA235935 /* RPCTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = B082B6CE011A17ED14F3393B /* RPCTypes.swift */; };
 		029590450DF8FB55EBB86C23 /* ModelNameFormatter.swift in Sources */ = {isa = PBXBuildFile; fileRef = D03A2E1D488FAFF8C0088D61 /* ModelNameFormatter.swift */; };
 		0586FDB3434B135163CEE2D4 /* ChatViewModel+Events.swift in Sources */ = {isa = PBXBuildFile; fileRef = 85AB906ED58C2A5018AA8055 /* ChatViewModel+Events.swift */; };
+		B7C8D9E0F1A2B3C4D5E6F7A8 /* AudioRecorder.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1C2A3B4D5E6F708192A3B4C /* AudioRecorder.swift */; };
+		C1D2E3F4A5B6C7D8E9F0A1B2 /* ChatViewModel+Transcription.swift in Sources */ = {isa = PBXBuildFile; fileRef = A4B5C6D7E8F90123B4C5D6E7 /* ChatViewModel+Transcription.swift */; };
 		136A2E352353C637D95DB9B2 /* SessionAnalyticsSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = A98EEAD5A6421EB34B269C1A /* SessionAnalyticsSheet.swift */; };
 		1401327824254E4B259C40C7 /* SessionPayloads.swift in Sources */ = {isa = PBXBuildFile; fileRef = D55558B6BDA1C107C3E0BA83 /* SessionPayloads.swift */; };
 		14260190901BA8299D13DC43 /* InputBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3EF2CB735CA19344DB30086D /* InputBar.swift */; };
@@ -82,8 +84,10 @@
 		12D4005085E6F37ECCF3AC12 /* StreamingPayloads.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StreamingPayloads.swift; sourceTree = "<group>"; };
 		13A4AA26839505AD8FD5CEC5 /* TokenFormatter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TokenFormatter.swift; sourceTree = "<group>"; };
 		18C18EEFAB81D6052EB39694 /* TronLogger.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TronLogger.swift; sourceTree = "<group>"; };
+		F1C2A3B4D5E6F708192A3B4C /* AudioRecorder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioRecorder.swift; sourceTree = "<group>"; };
 		1BF58E115A8E40AD658E4346 /* ExtendedPayloads.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExtendedPayloads.swift; sourceTree = "<group>"; };
 		25C6E368AD4411B086E35A61 /* ChatViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatViewModel.swift; sourceTree = "<group>"; };
+		A4B5C6D7E8F90123B4C5D6E7 /* ChatViewModel+Transcription.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ChatViewModel+Transcription.swift"; sourceTree = "<group>"; };
 		30CFDC8D8AA4B77F61F2AF71 /* AnyCodable.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnyCodable.swift; sourceTree = "<group>"; };
 		33342D92F24E04282ECE2DBA /* WorktreeStatusView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorktreeStatusView.swift; sourceTree = "<group>"; };
 		3EF2CB735CA19344DB30086D /* InputBar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InputBar.swift; sourceTree = "<group>"; };
@@ -178,6 +182,7 @@
 				D08A7F84A65F541596DED158 /* EventStoreManager+Operations.swift */,
 				9DBD69C34C8538CD6BE89D81 /* EventStoreManager+Sync.swift */,
 				E5C3B6B3DA1A77E2A09976D5 /* InputHistoryStore.swift */,
+				F1C2A3B4D5E6F708192A3B4C /* AudioRecorder.swift */,
 				B9DD45A3974192F927E1B73A /* RPCClient.swift */,
 				18C18EEFAB81D6052EB39694 /* TronLogger.swift */,
 				79449B7B56831FA69C873699 /* WebSocketService.swift */,
@@ -243,6 +248,7 @@
 				85AB906ED58C2A5018AA8055 /* ChatViewModel+Events.swift */,
 				E6F71203A3512D5375E51BE4 /* ChatViewModel+Messaging.swift */,
 				C8F9B0354BC7BDECDCD3DEAF /* ChatViewModel+Pagination.swift */,
+				A4B5C6D7E8F90123B4C5D6E7 /* ChatViewModel+Transcription.swift */,
 			);
 			path = ViewModels;
 			sourceTree = "<group>";
@@ -397,6 +403,7 @@
 				0586FDB3434B135163CEE2D4 /* ChatViewModel+Events.swift in Sources */,
 				5A1242156B1B5AAC643EBB82 /* ChatViewModel+Messaging.swift in Sources */,
 				452AF7E62120E804DCC18384 /* ChatViewModel+Pagination.swift in Sources */,
+				C1D2E3F4A5B6C7D8E9F0A1B2 /* ChatViewModel+Transcription.swift in Sources */,
 				C5D9BF6461C33FF5131E7B42 /* ChatViewModel.swift in Sources */,
 				76B05635967578B4280C48D5 /* ConfigPayloads.swift in Sources */,
 				6014AB90BD2F803AA569152D /* ContextAuditView.swift in Sources */,
@@ -413,6 +420,7 @@
 				31FB5B88C183967844283776 /* ExtendedPayloads.swift in Sources */,
 				14260190901BA8299D13DC43 /* InputBar.swift in Sources */,
 				2701DC74D1DBFB4C90AC84AA /* InputHistoryStore.swift in Sources */,
+				B7C8D9E0F1A2B3C4D5E6F7A8 /* AudioRecorder.swift in Sources */,
 				7E5E03B3D452DA98E4B6F768 /* LogViewer.swift in Sources */,
 				35E00DB7B38895FF3C3A473E /* Message.swift in Sources */,
 				EED3EB5C8DA4800D10BC6AEA /* MessageBubble.swift in Sources */,

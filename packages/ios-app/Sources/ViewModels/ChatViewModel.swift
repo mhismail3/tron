@@ -23,6 +23,8 @@ class ChatViewModel: ObservableObject {
     @Published var thinkingText = ""
     @Published var isThinkingExpanded = false
     @Published var totalTokenUsage: TokenUsage?
+    @Published var isRecording = false
+    @Published var isTranscribing = false
     /// Whether more older messages are available for loading
     @Published var hasMoreMessages = false
     /// Whether currently loading more messages
@@ -43,6 +45,8 @@ class ChatViewModel: ObservableObject {
 
     /// Track tool calls for the current turn (for display purposes)
     var currentTurnToolCalls: [ToolCallRecord] = []
+    let audioRecorder = AudioRecorder()
+    let maxRecordingDuration: TimeInterval = 120
 
     // MARK: - Performance Optimization: Batched Updates
 
@@ -82,6 +86,7 @@ class ChatViewModel: ObservableObject {
         self.eventStoreManager = eventStoreManager
         setupBindings()
         setupEventHandlers()
+        setupAudioRecorder()
     }
 
     private func setupBindings() {
@@ -95,6 +100,16 @@ class ChatViewModel: ObservableObject {
                 Task { await self?.processSelectedImages(items) }
             }
             .store(in: &cancellables)
+
+        audioRecorder.$isRecording
+            .receive(on: DispatchQueue.main)
+            .assign(to: &$isRecording)
+    }
+
+    private func setupAudioRecorder() {
+        audioRecorder.onFinish = { [weak self] url, success in
+            Task { await self?.handleRecordingFinished(url: url, success: success) }
+        }
     }
 
     private func setupEventHandlers() {

@@ -1,0 +1,103 @@
+/**
+ * @fileoverview Transcription Sidecar Client
+ *
+ * Sends audio to the local transcription sidecar (faster-whisper) and returns the result.
+ */
+import { createLogger, getSettings } from '@tron/core';
+import type { TranscribeAudioParams, TranscribeAudioResult } from '@tron/core';
+
+const logger = createLogger('transcription');
+
+function normalizeBase64(input: string): string {
+  const trimmed = input.trim();
+  const commaIndex = trimmed.indexOf(',');
+  if (commaIndex >= 0) {
+    return trimmed.slice(commaIndex + 1);
+  }
+  return trimmed;
+}
+
+function normalizeCleanupMode(mode: TranscribeAudioParams['cleanupMode'], fallback: string): string | undefined {
+  if (mode === 'none' || mode === 'basic' || mode === 'llm') {
+    return mode;
+  }
+  if (fallback === 'none' || fallback === 'basic' || fallback === 'llm') {
+    return fallback;
+  }
+  return undefined;
+}
+
+export async function transcribeAudio(params: TranscribeAudioParams): Promise<TranscribeAudioResult> {
+  const settings = getSettings().server.transcription;
+
+  if (!settings.enabled) {
+    throw new Error('Transcription is disabled');
+  }
+
+  const base64 = normalizeBase64(params.audioBase64);
+  const audioBuffer = Buffer.from(base64, 'base64');
+  if (!audioBuffer.length) {
+    throw new Error('Audio payload is empty');
+  }
+  if (audioBuffer.length > settings.maxBytes) {
+    throw new Error(`Audio payload exceeds ${settings.maxBytes} bytes`);
+  }
+
+  const cleanupMode = normalizeCleanupMode(params.cleanupMode, settings.cleanupMode);
+  const mimeType = params.mimeType ?? 'audio/m4a';
+  const fileName = params.fileName ?? 'audio.m4a';
+  const endpoint = new URL('/transcribe', settings.baseUrl).toString();
+
+  const form = new FormData();
+  form.append('audio', new Blob([audioBuffer], { type: mimeType }), fileName);
+  if (params.language) {
+    form.append('language', params.language);
+  }
+  if (params.task) {
+    form.append('task', params.task);
+  }
+  if (params.prompt) {
+    form.append('prompt', params.prompt);
+  }
+  if (cleanupMode) {
+    form.append('cleanup_mode', cleanupMode);
+  }
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), settings.timeoutMs);
+
+  try {
+    const response = await fetch(endpoint, {
+      method: 'POST',
+      body: form,
+      signal: controller.signal,
+    });
+
+    if (!response.ok) {
+      const detail = await response.text();
+      throw new Error(`Sidecar error (${response.status}): ${detail || 'unknown error'}`);
+    }
+
+    const data = await response.json() as Record<string, unknown>;
+
+    return {
+      text: String(data.text ?? ''),
+      rawText: String(data.raw_text ?? data.rawText ?? ''),
+      language: String(data.language ?? ''),
+      durationSeconds: Number(data.duration_s ?? data.durationSeconds ?? 0),
+      processingTimeMs: Number(data.processing_time_ms ?? data.processingTimeMs ?? 0),
+      model: String(data.model ?? ''),
+      device: String(data.device ?? ''),
+      computeType: String(data.compute_type ?? data.computeType ?? ''),
+      cleanupMode: String(data.cleanup_mode ?? cleanupMode ?? ''),
+    };
+  } catch (error) {
+    if (error instanceof Error && error.name === 'AbortError') {
+      throw new Error('Transcription request timed out');
+    }
+    logger.error('Transcription failed', error instanceof Error ? error : new Error(String(error)));
+    throw error instanceof Error ? error : new Error(String(error));
+  } finally {
+    clearTimeout(timeout);
+  }
+}

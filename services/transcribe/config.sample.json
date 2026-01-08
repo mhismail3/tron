@@ -1,0 +1,14 @@
+{
+  "model_name": "large-v3",
+  "device": "cpu",
+  "compute_type": "int8",
+  "language": "en",
+  "beam_size": 5,
+  "vad_filter": true,
+  "word_timestamps": false,
+  "temperature": 0.0,
+  "max_duration_s": 120,
+  "cleanup_mode": "llm",
+  "cleanup_llm_base_url": "http://127.0.0.1:11434/v1",
+  "cleanup_llm_model": "llama3.1:8b"
+}

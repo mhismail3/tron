@@ -55,6 +55,8 @@ import type {
   WorktreeMergeParams,
   WorktreeMergeResult,
   WorktreeListResult,
+  TranscribeAudioParams,
+  TranscribeAudioResult,
 } from './types.js';
 import { ANTHROPIC_MODELS } from '../providers/models.js';
 
@@ -75,6 +77,8 @@ export interface RpcContext {
   eventStore?: EventStoreManager;
   /** Worktree manager for git worktree operations (optional) */
   worktreeManager?: WorktreeRpcManager;
+  /** Transcription manager (optional) */
+  transcriptionManager?: TranscriptionManager;
 }
 
 /**
@@ -157,6 +161,10 @@ interface MemoryStore {
   searchEntries(params: MemorySearchParams): Promise<{ entries: unknown[]; totalCount: number }>;
   addEntry(params: MemoryAddEntryParams): Promise<{ id: string }>;
   listHandoffs(workingDirectory?: string, limit?: number): Promise<unknown[]>;
+}
+
+interface TranscriptionManager {
+  transcribeAudio(params: TranscribeAudioParams): Promise<TranscribeAudioResult>;
 }
 
 // =============================================================================
@@ -302,6 +310,8 @@ export class RpcHandler extends EventEmitter {
           return this.handleSystemPing(request);
         case 'system.getInfo':
           return this.handleSystemGetInfo(request);
+        case 'transcribe.audio':
+          return this.handleTranscribeAudio(request);
 
         // Event methods (requires eventStore in context)
         case 'events.getHistory':
@@ -759,6 +769,30 @@ export class RpcHandler extends EventEmitter {
     };
 
     return this.successResponse(request.id, result);
+  }
+
+  // ===========================================================================
+  // Transcription Handlers
+  // ===========================================================================
+
+  private async handleTranscribeAudio(request: RpcRequest): Promise<RpcResponse> {
+    const params = request.params as TranscribeAudioParams | undefined;
+
+    if (!params?.audioBase64) {
+      return this.errorResponse(request.id, 'INVALID_PARAMS', 'audioBase64 is required');
+    }
+
+    if (!this.context.transcriptionManager) {
+      return this.errorResponse(request.id, 'NOT_SUPPORTED', 'Transcription is not available');
+    }
+
+    try {
+      const result = await this.context.transcriptionManager.transcribeAudio(params);
+      return this.successResponse(request.id, result);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Transcription failed';
+      return this.errorResponse(request.id, 'TRANSCRIPTION_FAILED', message);
+    }
   }
 
   // ===========================================================================
