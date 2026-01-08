@@ -279,7 +279,7 @@ struct SummaryStatsRow: View {
             StatCard(value: "\(analytics.totalTurns)", label: "turns")
             StatCard(value: formatLatency(analytics.avgLatency), label: "avg latency")
             StatCard(value: "\(analytics.totalErrors)", label: "errors")
-            StatCard(value: formatTokens(analytics.totalTokens), label: "tokens")
+            StatCard(value: TokenFormatter.format(analytics.totalTokens, style: .uppercase), label: "tokens")
         }
         .padding(.vertical, 16)
         .background(Color.tronSurface)
@@ -292,14 +292,6 @@ struct SummaryStatsRow: View {
             return "\(ms)ms"
         } else {
             return String(format: "%.1fs", Double(ms) / 1000.0)
-        }
-    }
-
-    private func formatTokens(_ tokens: Int) -> String {
-        if tokens < 1000 {
-            return "\(tokens)"
-        } else {
-            return String(format: "%.1fK", Double(tokens) / 1000.0)
         }
     }
 }
@@ -361,7 +353,7 @@ struct TurnBreakdownSection: View {
                         .background(Color.tronSurface)
                         .clipShape(RoundedRectangle(cornerRadius: 4))
 
-                        Text(formatTokens(turn.totalTokens))
+                        Text(TokenFormatter.format(turn.totalTokens, style: .uppercase))
                             .font(.system(size: 11, design: .monospaced))
                             .foregroundStyle(.tronTextMuted)
                             .frame(width: 50, alignment: .trailing)
@@ -377,14 +369,6 @@ struct TurnBreakdownSection: View {
     private func ratio(_ tokens: Int) -> CGFloat {
         guard maxTokens > 0 else { return 0 }
         return CGFloat(tokens) / CGFloat(maxTokens)
-    }
-
-    private func formatTokens(_ tokens: Int) -> String {
-        if tokens < 1000 {
-            return "\(tokens)"
-        } else {
-            return String(format: "%.1fK", Double(tokens) / 1000.0)
-        }
     }
 }
 
@@ -566,7 +550,7 @@ struct SessionInfoHeader: View {
                 Spacer()
 
                 // Token usage badge
-                Text(formatTokens(session.inputTokens + session.outputTokens))
+                Text(TokenFormatter.format(session.inputTokens + session.outputTokens, style: .withSuffix))
                     .font(.system(size: 10, weight: .medium, design: .monospaced))
                     .foregroundStyle(.tronEmerald)
                     .padding(.horizontal, 6)
@@ -619,14 +603,6 @@ struct SessionInfoHeader: View {
         return path
     }
 
-    private func formatTokens(_ tokens: Int) -> String {
-        if tokens >= 1_000_000 {
-            return String(format: "%.1fM tokens", Double(tokens) / 1_000_000)
-        } else if tokens >= 1_000 {
-            return String(format: "%.1fK tokens", Double(tokens) / 1_000)
-        }
-        return "\(tokens) tokens"
-    }
 }
 
 struct InfoColumn: View {

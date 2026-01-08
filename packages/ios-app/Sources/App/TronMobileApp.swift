@@ -51,13 +51,9 @@ struct TronMobileApp: App {
                         eventStoreManager = manager
                     }
 
-                    #if DEBUG
-                    print("[TronMobileApp] Event store initialized with \(manager.sessions.count) sessions")
-                    #endif
+                    logger.info("Event store initialized with \(manager.sessions.count) sessions", category: .session)
                 } catch {
-                    #if DEBUG
-                    print("[TronMobileApp] Failed to initialize event store: \(error)")
-                    #endif
+                    logger.error("Failed to initialize event store: \(error)", category: .session)
                 }
             }
         }
@@ -188,9 +184,7 @@ struct ContentView: View {
                             workingDirectory: workingDirectory
                         )
                     } catch {
-                        #if DEBUG
-                        print("[ContentView] Failed to cache new session: \(error)")
-                        #endif
+                        logger.error("Failed to cache new session: \(error)", category: .session)
                     }
                     selectedSessionId = sessionId
                     showNewSessionSheet = false
@@ -294,9 +288,7 @@ struct ContentView: View {
             do {
                 try await eventStoreManager.deleteSession(sessionId)
             } catch {
-                #if DEBUG
-                print("[ContentView] Failed to delete session: \(error)")
-                #endif
+                logger.error("Failed to delete session: \(error)", category: .session)
             }
 
             if selectedSessionId == sessionId {
@@ -1077,10 +1069,7 @@ struct SessionPreviewSheet: View {
                 // Store raw events - UnifiedEventTransformer handles sorting and filtering
                 events = result.events
                 isLoading = false
-
-                #if DEBUG
-                print("[SessionPreview] Loaded \(result.events.count) events for session \(session.sessionId.prefix(8))")
-                #endif
+                logger.debug("Loaded \(result.events.count) events for session \(session.sessionId.prefix(8))", category: .session)
             }
         } catch {
             await MainActor.run {

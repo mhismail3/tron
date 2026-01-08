@@ -427,9 +427,7 @@ struct CachedSession: Identifiable, Codable {
 
     /// Formatted token counts (e.g., "↓1.2k ↑3.4k")
     var formattedTokens: String {
-        let inStr = formatTokenCount(inputTokens)
-        let outStr = formatTokenCount(outputTokens)
-        return "↓\(inStr) ↑\(outStr)"
+        TokenFormatter.formatPair(input: inputTokens, output: outputTokens)
     }
 
     /// Formatted cost string (e.g., "$0.12")
@@ -438,15 +436,6 @@ struct CachedSession: Identifiable, Codable {
             return "<$0.01"
         }
         return String(format: "$%.2f", cost)
-    }
-
-    private func formatTokenCount(_ count: Int) -> String {
-        if count >= 1_000_000 {
-            return String(format: "%.1fM", Double(count) / 1_000_000)
-        } else if count >= 1_000 {
-            return String(format: "%.1fk", Double(count) / 1_000)
-        }
-        return "\(count)"
     }
 
     var displayTitle: String {

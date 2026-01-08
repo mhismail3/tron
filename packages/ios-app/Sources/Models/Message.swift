@@ -116,43 +116,7 @@ struct ChatMessage: Identifiable, Equatable {
     /// Short model name (e.g., "claude-sonnet-4-20250514" -> "sonnet-4")
     var shortModelName: String? {
         guard let model = model else { return nil }
-        return formatModelName(model)
-    }
-
-    /// Format model name to short form
-    private func formatModelName(_ model: String) -> String {
-        let lowered = model.lowercased()
-
-        // Determine tier
-        let tier: String
-        if lowered.contains("opus") {
-            tier = "opus"
-        } else if lowered.contains("sonnet") {
-            tier = "sonnet"
-        } else if lowered.contains("haiku") {
-            tier = "haiku"
-        } else {
-            // Fallback: return first two components
-            let parts = model.components(separatedBy: "-")
-            if parts.count >= 2 {
-                return parts.prefix(2).joined(separator: "-")
-            }
-            return model
-        }
-
-        // Determine version
-        if lowered.contains("4-5") || lowered.contains("4.5") {
-            return "\(tier)-4.5"
-        }
-        if lowered.contains("-4-") || lowered.contains("sonnet-4") ||
-           lowered.contains("opus-4") || lowered.contains("haiku-4") {
-            return "\(tier)-4"
-        }
-        if lowered.contains("3-5") || lowered.contains("3.5") {
-            return "\(tier)-3.5"
-        }
-
-        return tier
+        return model.compactModelName
     }
 }
 

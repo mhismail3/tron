@@ -170,9 +170,7 @@ struct UnifiedEventTransformer {
         payload: [String: AnyCodable]
     ) -> ChatMessage? {
         guard let eventType = PersistedEventType(rawValue: type) else {
-            #if DEBUG
-            print("[EventTransformer] Unknown persisted event type: \(type)")
-            #endif
+            logger.warning("Unknown persisted event type: \(type)", category: .events)
             return nil
         }
 
@@ -508,9 +506,7 @@ struct UnifiedEventTransformer {
         data: [String: Any]
     ) -> ChatMessage? {
         guard let eventType = StreamingEventType(rawValue: type) else {
-            #if DEBUG
-            print("[EventTransformer] Unknown streaming event type: \(type)")
-            #endif
+            logger.warning("Unknown streaming event type: \(type)", category: .events)
             return nil
         }
 

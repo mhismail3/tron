@@ -25,7 +25,7 @@ struct WorktreeStatusView: View {
                 // Branch indicator
                 HStack(spacing: 4) {
                     Image(systemName: "arrow.triangle.branch")
-                        .foregroundStyle(.accent)
+                        .foregroundStyle(.tronEmerald)
                         .font(.caption)
 
                     Text(worktree.shortBranch)

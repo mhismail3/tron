@@ -94,11 +94,7 @@ struct SessionInfo: Decodable, Identifiable, Hashable {
 
     /// Formatted token counts (e.g., "↓1.2k ↑3.4k")
     var formattedTokens: String {
-        let inTokens = inputTokens ?? 0
-        let outTokens = outputTokens ?? 0
-        let inStr = formatTokenCount(inTokens)
-        let outStr = formatTokenCount(outTokens)
-        return "↓\(inStr) ↑\(outStr)"
+        TokenFormatter.formatPair(input: inputTokens ?? 0, output: outputTokens ?? 0)
     }
 
     /// Formatted cost string (e.g., "$0.12")
@@ -108,15 +104,6 @@ struct SessionInfo: Decodable, Identifiable, Hashable {
             return "<$0.01"
         }
         return String(format: "$%.2f", c)
-    }
-
-    private func formatTokenCount(_ count: Int) -> String {
-        if count >= 1_000_000 {
-            return String(format: "%.1fM", Double(count) / 1_000_000)
-        } else if count >= 1_000 {
-            return String(format: "%.1fk", Double(count) / 1_000)
-        }
-        return "\(count)"
     }
 }
 
@@ -245,16 +232,9 @@ struct TokenUsage: Decodable, Equatable {
 
     var totalTokens: Int { inputTokens + outputTokens }
 
-    var formattedInput: String { formatTokenCount(inputTokens) }
-    var formattedOutput: String { formatTokenCount(outputTokens) }
-    var formattedTotal: String { formatTokenCount(totalTokens) }
-
-    private func formatTokenCount(_ count: Int) -> String {
-        if count >= 1000 {
-            return String(format: "%.1fk", Double(count) / 1000.0)
-        }
-        return "\(count)"
-    }
+    var formattedInput: String { inputTokens.formattedTokenCount }
+    var formattedOutput: String { outputTokens.formattedTokenCount }
+    var formattedTotal: String { totalTokens.formattedTokenCount }
 }
 
 // MARK: - System Methods
@@ -327,50 +307,17 @@ struct ModelInfo: Decodable, Identifiable, Hashable {
 
     /// Properly formatted display name (e.g., "Claude Opus 4.5", "Claude Sonnet 4")
     var displayName: String {
-        formattedModelName
+        id.fullModelName
     }
 
+    /// Short tier name: "Opus", "Sonnet", "Haiku"
     var shortName: String {
-        if id.contains("opus") { return "Opus" }
-        if id.contains("sonnet") { return "Sonnet" }
-        if id.contains("haiku") { return "Haiku" }
-        return name
+        ModelNameFormatter.format(id, style: .tierOnly, fallback: name)
     }
 
     /// Formats model name properly: "Claude Opus 4.5", "Claude Sonnet 4", etc.
     var formattedModelName: String {
-        let lowerId = id.lowercased()
-
-        // Detect tier
-        let tierName: String
-        if lowerId.contains("opus") {
-            tierName = "Opus"
-        } else if lowerId.contains("sonnet") {
-            tierName = "Sonnet"
-        } else if lowerId.contains("haiku") {
-            tierName = "Haiku"
-        } else {
-            return name
-        }
-
-        // Detect version - check for 4.5 first (latest)
-        if lowerId.contains("4-5") || lowerId.contains("4.5") {
-            return "Claude \(tierName) 4.5"
-        }
-        // Check for version 4
-        if lowerId.contains("-4-") || lowerId.contains("sonnet-4") || lowerId.contains("opus-4") || lowerId.contains("haiku-4") {
-            return "Claude \(tierName) 4"
-        }
-        // Check for 3.5
-        if lowerId.contains("3-5") || lowerId.contains("3.5") {
-            return "Claude \(tierName) 3.5"
-        }
-        // Check for version 3
-        if lowerId.contains("-3-") || lowerId.contains("sonnet-3") || lowerId.contains("opus-3") || lowerId.contains("haiku-3") {
-            return "Claude \(tierName) 3"
-        }
-
-        return "Claude \(tierName)"
+        id.fullModelName
     }
 
     /// Whether this is a 4.5 (latest generation) model

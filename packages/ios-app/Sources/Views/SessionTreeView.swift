@@ -657,9 +657,7 @@ struct SessionHistorySheet: View {
             // For now, fetch directly
             events = try eventStoreManager.getSessionEvents(sessionId)
         } catch {
-            #if DEBUG
-            print("Failed to load events: \(error)")
-            #endif
+            logger.error("Failed to load events: \(error)", category: .session)
         }
 
         isLoading = false
@@ -736,52 +734,40 @@ struct SessionHistorySheet: View {
     }
 
     private func performFork(_ eventId: String) async {
-        #if DEBUG
-        print("[FORK-UI] User initiated fork: sessionId=\(sessionId), fromEventId=\(eventId)")
+        logger.debug("Fork initiated: sessionId=\(sessionId), fromEventId=\(eventId)", category: .session)
         if let event = events.first(where: { $0.id == eventId }) {
-            print("[FORK-UI] Fork point: type=\(event.type), sequence=\(event.sequence)")
+            logger.debug("Fork point: type=\(event.type), sequence=\(event.sequence)", category: .session)
         }
-        #endif
 
         do {
             let newSessionId = try await eventStoreManager.forkSession(sessionId, fromEventId: eventId)
-            #if DEBUG
-            print("[FORK-UI] Fork succeeded: newSessionId=\(newSessionId)")
-            #endif
+            logger.debug("Fork succeeded: newSessionId=\(newSessionId)", category: .session)
             eventStoreManager.setActiveSession(newSessionId)
             dismiss()
         } catch {
-            #if DEBUG
-            print("[FORK-UI] Fork FAILED: \(error)")
-            #endif
+            logger.error("Fork FAILED: \(error)", category: .session)
             actionConfirm = nil
         }
     }
 
     private func performRewind(_ eventId: String) async {
-        #if DEBUG
-        print("[REWIND-UI] User initiated rewind: sessionId=\(sessionId), toEventId=\(eventId)")
+        logger.debug("Rewind initiated: sessionId=\(sessionId), toEventId=\(eventId)", category: .session)
         if let event = events.first(where: { $0.id == eventId }) {
-            print("[REWIND-UI] Rewind target: type=\(event.type), sequence=\(event.sequence)")
+            logger.debug("Rewind target: type=\(event.type), sequence=\(event.sequence)", category: .session)
         }
         let currentHeadId = eventStoreManager.activeSession?.headEventId
         if let headId = currentHeadId, let currentHead = events.first(where: { $0.id == headId }) {
-            print("[REWIND-UI] Current HEAD: type=\(currentHead.type), sequence=\(currentHead.sequence)")
+            logger.debug("Current HEAD: type=\(currentHead.type), sequence=\(currentHead.sequence)", category: .session)
         } else {
-            print("[REWIND-UI] Current HEAD: \(currentHeadId ?? "unknown")")
+            logger.debug("Current HEAD: \(currentHeadId ?? "unknown")", category: .session)
         }
-        #endif
 
         do {
             try await eventStoreManager.rewindSession(sessionId, toEventId: eventId)
-            #if DEBUG
-            print("[REWIND-UI] Rewind succeeded, dismissing sheet")
-            #endif
+            logger.debug("Rewind succeeded, dismissing sheet", category: .session)
             dismiss()
         } catch {
-            #if DEBUG
-            print("[REWIND-UI] Rewind FAILED: \(error)")
-            #endif
+            logger.error("Rewind FAILED: \(error)", category: .session)
             actionConfirm = nil
         }
     }

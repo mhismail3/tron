@@ -329,9 +329,7 @@ struct ChatView: View {
                                 // User is dragging down (scrolling up through content)
                                 // translation.height > 0 means finger moved down
                                 if value.translation.height > 40 && autoScrollEnabled {
-                                    #if DEBUG
-                                    print("👆 USER SCROLL UP detected - disabling auto-scroll")
-                                    #endif
+                                    logger.verbose("User scroll up detected - disabling auto-scroll", category: .ui)
                                     autoScrollEnabled = false
                                     if viewModel.isProcessing {
                                         hasUnreadContent = true
@@ -348,9 +346,7 @@ struct ChatView: View {
                         // 2. NOT currently processing (to prevent snap-back during streaming)
                         // During processing, only the button can re-enable
                         if !viewModel.isProcessing && distanceFromBottom > -atBottomThreshold && !autoScrollEnabled {
-                            #if DEBUG
-                            print("✅ User scrolled to bottom (not processing) - re-enabling auto-scroll")
-                            #endif
+                            logger.verbose("User scrolled to bottom - re-enabling auto-scroll", category: .ui)
                             autoScrollEnabled = true
                             hasUnreadContent = false
                         }
@@ -462,43 +458,6 @@ struct ChatView: View {
         }
         .disabled(viewModel.isLoadingMoreMessages)
         .padding(.bottom, 8)
-    }
-}
-
-// MARK: - String Extension for Short Model Name
-
-extension String {
-    var shortModelName: String {
-        let lowered = lowercased()
-
-        // Detect tier
-        let tier: String
-        if lowered.contains("opus") {
-            tier = "Opus"
-        } else if lowered.contains("sonnet") {
-            tier = "Sonnet"
-        } else if lowered.contains("haiku") {
-            tier = "Haiku"
-        } else {
-            let parts = split(separator: "-")
-            if parts.count >= 2 {
-                return String(parts[0]).capitalized + " " + String(parts[1]).capitalized
-            }
-            return self
-        }
-
-        // Detect version
-        if lowered.contains("4-5") || lowered.contains("4.5") {
-            return "\(tier) 4.5"
-        }
-        if lowered.contains("-4-") || lowered.contains("sonnet-4") || lowered.contains("opus-4") || lowered.contains("haiku-4") {
-            return "\(tier) 4"
-        }
-        if lowered.contains("3-5") || lowered.contains("3.5") {
-            return "\(tier) 3.5"
-        }
-
-        return tier
     }
 }
 
