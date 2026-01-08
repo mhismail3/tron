@@ -14,7 +14,7 @@ import {
   type EventType,
   type SessionId,
 } from '@tron/core';
-import type { ActiveSession } from './types';
+import type { ActiveSession } from './types.js';
 
 const logger = createLogger('event-linearizer');
 

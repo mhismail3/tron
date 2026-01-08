@@ -32,7 +32,6 @@ import {
   type EventId,
   type SessionId,
   type WorkingDirectory,
-  type WorktreeCoordinatorConfig,
   type ServerAuth,
   type EventType,
   type CurrentTurnToolCall,
@@ -41,17 +40,17 @@ import {
   normalizeContentBlocks,
   truncateString,
   MAX_TOOL_RESULT_SIZE,
-} from './utils/content-normalizer';
+} from './utils/content-normalizer.js';
 import {
   appendEventLinearized as appendEventLinearizedImpl,
   flushPendingEvents as flushPendingEventsImpl,
   flushAllPendingEvents as flushAllPendingEventsImpl,
-} from './orchestrator/event-linearizer';
+} from './orchestrator/event-linearizer.js';
 import {
   buildWorktreeInfo,
   buildWorktreeInfoWithStatus,
   commitWorkingDirectory,
-} from './orchestrator/worktree-ops';
+} from './orchestrator/worktree-ops.js';
 import {
   DEFAULT_SYSTEM_PROMPT,
   type EventStoreOrchestratorConfig,
@@ -63,7 +62,7 @@ import {
   type ForkResult,
   type RewindResult,
   type WorktreeInfo,
-} from './orchestrator/types';
+} from './orchestrator/types.js';
 
 // Re-export types for consumers
 export type {
@@ -955,11 +954,11 @@ export class EventStoreOrchestrator extends EventEmitter {
       logger.debug('Storing assistant content', {
         sessionId: active.sessionId,
         blockCount: normalizedAssistantContent.length,
-        blockTypes: normalizedAssistantContent.map(b => b.type),
-        toolUseCount: normalizedAssistantContent.filter(b => b.type === 'tool_use').length,
+        blockTypes: normalizedAssistantContent.map((b: Record<string, unknown>) => b.type),
+        toolUseCount: normalizedAssistantContent.filter((b: Record<string, unknown>) => b.type === 'tool_use').length,
         hasInputs: normalizedAssistantContent
-          .filter(b => b.type === 'tool_use')
-          .map(b => ({ name: b.name, hasInput: !!b.input && Object.keys(b.input as object).length > 0 })),
+          .filter((b: Record<string, unknown>) => b.type === 'tool_use')
+          .map((b: Record<string, unknown>) => ({ name: b.name, hasInput: !!b.input && Object.keys(b.input as object).length > 0 })),
         // Phase 1 enrichment logging
         turn: runResult.turns,
         model: active.model,
@@ -1027,7 +1026,7 @@ export class EventStoreOrchestrator extends EventEmitter {
         logger.debug('Storing tool results', {
           sessionId: active.sessionId,
           resultCount: normalizedToolResults.length,
-          sampleContent: normalizedToolResults.slice(0, 3).map(r => ({
+          sampleContent: normalizedToolResults.slice(0, 3).map((r: Record<string, unknown>) => ({
             type: r.type,
             toolUseId: (r.tool_use_id as string)?.slice(0, 20) + '...',
             hasContent: !!(r.content || r.text),

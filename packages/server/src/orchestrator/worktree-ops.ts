@@ -6,7 +6,7 @@
  * depend on orchestrator state.
  */
 import type { WorkingDirectory } from '@tron/core';
-import type { WorktreeInfo } from './types';
+import type { WorktreeInfo } from './types.js';
 
 /**
  * Build WorktreeInfo from a WorkingDirectory (synchronous, basic info only)
