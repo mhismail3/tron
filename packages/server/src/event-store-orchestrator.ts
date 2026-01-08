@@ -39,6 +39,11 @@ import {
 } from '@tron/core';
 import { normalizeContentBlocks } from './utils/content-normalizer';
 import {
+  appendEventLinearized as appendEventLinearizedImpl,
+  flushPendingEvents as flushPendingEventsImpl,
+  flushAllPendingEvents as flushAllPendingEventsImpl,
+} from './orchestrator/event-linearizer';
+import {
   DEFAULT_SYSTEM_PROMPT,
   type EventStoreOrchestratorConfig,
   type ActiveSession,
@@ -1386,14 +1391,7 @@ export class EventStoreOrchestrator extends EventEmitter {
 
   /**
    * Append an event with linearized ordering per session.
-   * Uses promise chaining to serialize event appends.
-   *
-   * CRITICAL: This solves the spurious branching bug where rapid events
-   * A, B, C all capture the same parentId before any updates.
-   *
-   * The key insight: parentId is captured INSIDE the .then() callback,
-   * which only runs AFTER the previous event's promise resolves.
-   * This ensures each event correctly chains to the previous one.
+   * Delegates to event-linearizer module for the core logic.
    */
   private appendEventLinearized(
     sessionId: SessionId,
@@ -1405,59 +1403,7 @@ export class EventStoreOrchestrator extends EventEmitter {
       logger.error('Cannot append event: session not active', { sessionId, type });
       return;
     }
-
-    // P0 FIX: Skip appends if prior append failed to prevent malformed event trees
-    // If turn_start fails but turn_end succeeds, the tree becomes inconsistent
-    if (active.lastAppendError) {
-      logger.warn('Skipping append due to prior error', {
-        sessionId,
-        type,
-        priorError: active.lastAppendError.message,
-      });
-      return;
-    }
-
-    if (!active.pendingHeadEventId) {
-      logger.error('Cannot append event: no pending head event ID', { sessionId, type });
-      return;
-    }
-
-    // Chain this append to the previous one
-    // CRITICAL: parentId must be captured INSIDE .then() to get updated value
-    active.appendPromiseChain = active.appendPromiseChain
-      .then(async () => {
-        // Check again inside chain - error may have occurred in previous chain link
-        if (active.lastAppendError) {
-          logger.warn('Skipping append in chain due to prior error', {
-            sessionId,
-            type,
-            priorError: active.lastAppendError.message,
-          });
-          return;
-        }
-
-        // Capture parent ID HERE - after previous event has updated pendingHeadEventId
-        const parentId = active.pendingHeadEventId;
-        if (!parentId) {
-          logger.error('Cannot append event: no pending head event ID in chain', { sessionId, type });
-          return;
-        }
-
-        try {
-          const event = await this.eventStore.append({
-            sessionId,
-            type,
-            payload,
-            parentId,
-          });
-          // Update in-memory head for the next event in the chain
-          active.pendingHeadEventId = event.id;
-        } catch (err) {
-          logger.error(`Failed to store ${type} event`, { err, sessionId });
-          // P0 FIX: Track error to prevent subsequent appends from creating orphaned events
-          active.lastAppendError = err instanceof Error ? err : new Error(String(err));
-        }
-      });
+    appendEventLinearizedImpl(this.eventStore, sessionId, active, type, payload);
   }
 
   /**
@@ -1467,7 +1413,7 @@ export class EventStoreOrchestrator extends EventEmitter {
   async flushPendingEvents(sessionId: SessionId): Promise<void> {
     const active = this.activeSessions.get(sessionId);
     if (active) {
-      await active.appendPromiseChain;
+      await flushPendingEventsImpl(active);
     }
   }
 
@@ -1475,9 +1421,7 @@ export class EventStoreOrchestrator extends EventEmitter {
    * Flush all active sessions' pending events.
    */
   async flushAllPendingEvents(): Promise<void> {
-    const flushes = Array.from(this.activeSessions.values())
-      .map(s => s.appendPromiseChain);
-    await Promise.all(flushes);
+    await flushAllPendingEventsImpl(this.activeSessions.values());
   }
 
   private forwardAgentEvent(sessionId: SessionId, event: TronEvent): void {
