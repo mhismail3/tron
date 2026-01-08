@@ -561,8 +561,11 @@ struct NewSessionFlow: View {
             .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
-                    Button("Cancel") { dismiss() }
-                        .font(.subheadline.weight(.medium))
+                    Button { dismiss() } label: {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 14, weight: .medium))
+                            .foregroundStyle(.tronEmerald)
+                    }
                 }
                 ToolbarItem(placement: .principal) {
                     Text("New Session")
@@ -577,8 +580,8 @@ struct NewSessionFlow: View {
                         Button {
                             createSession()
                         } label: {
-                            Text("Create")
-                                .font(.subheadline.weight(.medium))
+                            Image(systemName: "checkmark")
+                                .font(.system(size: 14, weight: .semibold))
                                 .foregroundStyle(canCreate ? .tronEmerald : .white.opacity(0.3))
                         }
                         .disabled(!canCreate)
@@ -883,6 +886,7 @@ struct RecentSessionRow: View {
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 10)
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .glassEffect(.regular.tint(Color.tronPhthaloGreen.opacity(0.12)).interactive(), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
@@ -945,9 +949,11 @@ struct SessionPreviewSheet: View {
             .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
-                    Button("Back") { onDismiss() }
-                        .font(.subheadline.weight(.medium))
-                        .foregroundStyle(.tronEmerald)
+                    Button { onDismiss() } label: {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 14, weight: .medium))
+                            .foregroundStyle(.tronEmerald)
+                    }
                 }
                 ToolbarItem(placement: .principal) {
                     VStack(spacing: 2) {
@@ -967,13 +973,9 @@ struct SessionPreviewSheet: View {
                         Button {
                             forkSession()
                         } label: {
-                            HStack(spacing: 4) {
-                                Image(systemName: "arrow.branch")
-                                    .font(.system(size: 12))
-                                Text("Fork")
-                                    .font(.subheadline.weight(.semibold))
-                            }
-                            .foregroundStyle(.tronEmerald)
+                            Image(systemName: "arrow.branch")
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundStyle(.tronEmerald)
                         }
                     }
                 }
@@ -1161,8 +1163,11 @@ struct WorkspaceSelector: View {
             .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
-                    Button("Cancel") { dismiss() }
-                        .foregroundStyle(.tronEmerald)
+                    Button { dismiss() } label: {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 14, weight: .medium))
+                            .foregroundStyle(.tronEmerald)
+                    }
                 }
 
                 ToolbarItem(placement: .principal) {
@@ -1176,8 +1181,8 @@ struct WorkspaceSelector: View {
                         selectedPath = currentPath
                         dismiss()
                     } label: {
-                        Text("Select")
-                            .fontWeight(.semibold)
+                        Image(systemName: "checkmark")
+                            .font(.system(size: 14, weight: .semibold))
                     }
                     .disabled(currentPath.isEmpty)
                     .foregroundStyle(currentPath.isEmpty ? .white.opacity(0.3) : .tronEmerald)

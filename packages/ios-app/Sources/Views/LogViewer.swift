@@ -28,9 +28,11 @@ struct LogViewer: View {
             .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
-                    Button("Done") { dismiss() }
-                        .font(.subheadline.weight(.medium))
-                        .foregroundStyle(.tronEmerald)
+                    Button { dismiss() } label: {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 14, weight: .medium))
+                            .foregroundStyle(.tronEmerald)
+                    }
                 }
 
                 ToolbarItem(placement: .principal) {
@@ -40,11 +42,13 @@ struct LogViewer: View {
                 }
 
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button("Copy Logs") {
+                    Button {
                         copyFilteredLogs()
+                    } label: {
+                        Image(systemName: "doc.on.doc")
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundStyle(.tronEmerald)
                     }
-                    .font(.subheadline.weight(.medium))
-                    .foregroundStyle(.tronEmerald)
                 }
             }
             .onAppear { refreshLogs() }

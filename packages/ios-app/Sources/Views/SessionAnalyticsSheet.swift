@@ -69,8 +69,11 @@ struct SessionAnalyticsSheet: View {
                         .foregroundStyle(.tronEmerald)
                 }
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button("Done") { dismiss() }
-                        .foregroundStyle(.tronEmerald)
+                    Button { dismiss() } label: {
+                        Image(systemName: "checkmark")
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundStyle(.tronEmerald)
+                    }
                 }
             }
         }
