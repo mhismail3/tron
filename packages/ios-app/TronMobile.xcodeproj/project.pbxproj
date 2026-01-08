@@ -9,23 +9,31 @@
 /* Begin PBXBuildFile section */
 		0186B0083110F291EA235935 /* RPCTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = B082B6CE011A17ED14F3393B /* RPCTypes.swift */; };
 		029590450DF8FB55EBB86C23 /* ModelNameFormatter.swift in Sources */ = {isa = PBXBuildFile; fileRef = D03A2E1D488FAFF8C0088D61 /* ModelNameFormatter.swift */; };
+		0586FDB3434B135163CEE2D4 /* ChatViewModel+Events.swift in Sources */ = {isa = PBXBuildFile; fileRef = 85AB906ED58C2A5018AA8055 /* ChatViewModel+Events.swift */; };
 		136A2E352353C637D95DB9B2 /* SessionAnalyticsSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = A98EEAD5A6421EB34B269C1A /* SessionAnalyticsSheet.swift */; };
 		14260190901BA8299D13DC43 /* InputBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3EF2CB735CA19344DB30086D /* InputBar.swift */; };
 		15D5C1CDEE971D2D3264B4A7 /* EventTypeRegistry.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4C46C2D9874A2C1C807D43A0 /* EventTypeRegistry.swift */; };
+		2261029ECB57CE70FEEF0330 /* EventStoreManager+Operations.swift in Sources */ = {isa = PBXBuildFile; fileRef = D08A7F84A65F541596DED158 /* EventStoreManager+Operations.swift */; };
 		2701DC74D1DBFB4C90AC84AA /* InputHistoryStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = E5C3B6B3DA1A77E2A09976D5 /* InputHistoryStore.swift */; };
 		2AC4711FE03EDA25CA10832D /* ChatView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5571DC3A896875D1693192D9 /* ChatView.swift */; };
+		2B946C64D7C177C1EDEBF677 /* EventStoreManager+Cache.swift in Sources */ = {isa = PBXBuildFile; fileRef = 69F056A4E371328F3B9EE047 /* EventStoreManager+Cache.swift */; };
 		329F629FAD3C73DA80ABDD4A /* TokenFormatter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13A4AA26839505AD8FD5CEC5 /* TokenFormatter.swift */; };
 		35E00DB7B38895FF3C3A473E /* Message.swift in Sources */ = {isa = PBXBuildFile; fileRef = 67E30FC4A871038322F79EB0 /* Message.swift */; };
 		3B2F3204C57C790DDCD71A45 /* TronLogger.swift in Sources */ = {isa = PBXBuildFile; fileRef = 18C18EEFAB81D6052EB39694 /* TronLogger.swift */; };
+		3F36EA78A9F26FF65D1F4DF2 /* EventStoreManager+Sync.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9DBD69C34C8538CD6BE89D81 /* EventStoreManager+Sync.swift */; };
 		4445FADC8739036DF9B95BA0 /* Events.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC00489C0CFF17B0531219D9 /* Events.swift */; };
+		452AF7E62120E804DCC18384 /* ChatViewModel+Pagination.swift in Sources */ = {isa = PBXBuildFile; fileRef = C8F9B0354BC7BDECDCD3DEAF /* ChatViewModel+Pagination.swift */; };
 		482423A54FE0C25BA4414CCA /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 42E47B6EAD030227C54F0028 /* SettingsView.swift */; };
+		4896F1E74C19CBDFCFE1F5EC /* ChatViewModel+Connection.swift in Sources */ = {isa = PBXBuildFile; fileRef = E7285B697CF31BB6986535D3 /* ChatViewModel+Connection.swift */; };
 		490E7266613F29CD1E3F69F3 /* String+Extensions.swift in Sources */ = {isa = PBXBuildFile; fileRef = 68870B0709527607F70004EB /* String+Extensions.swift */; };
+		5A1242156B1B5AAC643EBB82 /* ChatViewModel+Messaging.swift in Sources */ = {isa = PBXBuildFile; fileRef = E6F71203A3512D5375E51BE4 /* ChatViewModel+Messaging.swift */; };
 		6014AB90BD2F803AA569152D /* ContextAuditView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11A3A5FE4D68F7D714067F63 /* ContextAuditView.swift */; };
 		635F100955D3A973E63C057A /* UnifiedEventTransformer.swift in Sources */ = {isa = PBXBuildFile; fileRef = D8570EA3731FBC504D7AB252 /* UnifiedEventTransformer.swift */; };
 		7704175EFC374D5E5425BC6D /* TronIcons.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00739C1F26626C7791649198 /* TronIcons.swift */; };
 		7E5E03B3D452DA98E4B6F768 /* LogViewer.swift in Sources */ = {isa = PBXBuildFile; fileRef = AD61CD33CD78B1F23CDBABD7 /* LogViewer.swift */; };
 		814753F04077C3B98C1BF843 /* UnifiedEventTransformerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0123F7482F532CD8FBA61F0E /* UnifiedEventTransformerTests.swift */; };
 		834644A22FBBDC1872C1DE2A /* SessionSidebar.swift in Sources */ = {isa = PBXBuildFile; fileRef = 766753AA2F765B13E1B4676A /* SessionSidebar.swift */; };
+		8B8940613FB7E2B089DAFE44 /* EventStoreManager+Dashboard.swift in Sources */ = {isa = PBXBuildFile; fileRef = FD89009575AAF815668A8370 /* EventStoreManager+Dashboard.swift */; };
 		8D03520968C046CF0A0C5CC9 /* TronMobileApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = B018ED18CE376F88F9C442F4 /* TronMobileApp.swift */; };
 		901A2D24F559EC522BF3D175 /* Date+Extensions.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB4071D0B8C943D30748238A /* Date+Extensions.swift */; };
 		A30DB8557BB5D3E5CFD61ADD /* RecentSessionsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A113B9D98B4711E36919F2A /* RecentSessionsTests.swift */; };
@@ -78,12 +86,15 @@
 		67E30FC4A871038322F79EB0 /* Message.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Message.swift; sourceTree = "<group>"; };
 		68870B0709527607F70004EB /* String+Extensions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "String+Extensions.swift"; sourceTree = "<group>"; };
 		69203645DAFCA91156124C1F /* ToolResultViewers.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ToolResultViewers.swift; sourceTree = "<group>"; };
+		69F056A4E371328F3B9EE047 /* EventStoreManager+Cache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "EventStoreManager+Cache.swift"; sourceTree = "<group>"; };
 		6FF70E627268406FDA7DAC41 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		766753AA2F765B13E1B4676A /* SessionSidebar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionSidebar.swift; sourceTree = "<group>"; };
 		79449B7B56831FA69C873699 /* WebSocketService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebSocketService.swift; sourceTree = "<group>"; };
 		7A113B9D98B4711E36919F2A /* RecentSessionsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecentSessionsTests.swift; sourceTree = "<group>"; };
 		7F6BD19519452787421FD54D /* ModelSwitcher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelSwitcher.swift; sourceTree = "<group>"; };
 		8347F0B7D54B1F1EAA6C762C /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		85AB906ED58C2A5018AA8055 /* ChatViewModel+Events.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ChatViewModel+Events.swift"; sourceTree = "<group>"; };
+		9DBD69C34C8538CD6BE89D81 /* EventStoreManager+Sync.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "EventStoreManager+Sync.swift"; sourceTree = "<group>"; };
 		9EC65CD838F5540EC3B1AA02 /* SessionTreeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionTreeView.swift; sourceTree = "<group>"; };
 		A013DFE849DA84E8EA5F545C /* EventDatabaseTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EventDatabaseTests.swift; sourceTree = "<group>"; };
 		A51CB66FF27D47E989DF0839 /* EventStoreManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EventStoreManager.swift; sourceTree = "<group>"; };
@@ -96,13 +107,18 @@
 		B4B65C803EB12E8C7004E843 /* View+Extensions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "View+Extensions.swift"; sourceTree = "<group>"; };
 		B9DD45A3974192F927E1B73A /* RPCClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RPCClient.swift; sourceTree = "<group>"; };
 		C37E248C562712A416669C61 /* MessageBubble.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MessageBubble.swift; sourceTree = "<group>"; };
+		C8F9B0354BC7BDECDCD3DEAF /* ChatViewModel+Pagination.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ChatViewModel+Pagination.swift"; sourceTree = "<group>"; };
 		C9EDF4ADEF01F732B6DE8F15 /* TronMobileTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = TronMobileTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		CC00489C0CFF17B0531219D9 /* Events.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Events.swift; sourceTree = "<group>"; };
 		D03A2E1D488FAFF8C0088D61 /* ModelNameFormatter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelNameFormatter.swift; sourceTree = "<group>"; };
+		D08A7F84A65F541596DED158 /* EventStoreManager+Operations.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "EventStoreManager+Operations.swift"; sourceTree = "<group>"; };
 		D8570EA3731FBC504D7AB252 /* UnifiedEventTransformer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UnifiedEventTransformer.swift; sourceTree = "<group>"; };
 		DB2DE70827D1CEDC99DA04E4 /* AppState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppState.swift; sourceTree = "<group>"; };
 		E5C3B6B3DA1A77E2A09976D5 /* InputHistoryStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InputHistoryStore.swift; sourceTree = "<group>"; };
+		E6F71203A3512D5375E51BE4 /* ChatViewModel+Messaging.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ChatViewModel+Messaging.swift"; sourceTree = "<group>"; };
+		E7285B697CF31BB6986535D3 /* ChatViewModel+Connection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ChatViewModel+Connection.swift"; sourceTree = "<group>"; };
 		F2B298578C85F2293B9568BA /* TronMobile.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = TronMobile.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		FD89009575AAF815668A8370 /* EventStoreManager+Dashboard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "EventStoreManager+Dashboard.swift"; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXGroup section */
@@ -147,6 +163,10 @@
 			isa = PBXGroup;
 			children = (
 				A51CB66FF27D47E989DF0839 /* EventStoreManager.swift */,
+				69F056A4E371328F3B9EE047 /* EventStoreManager+Cache.swift */,
+				FD89009575AAF815668A8370 /* EventStoreManager+Dashboard.swift */,
+				D08A7F84A65F541596DED158 /* EventStoreManager+Operations.swift */,
+				9DBD69C34C8538CD6BE89D81 /* EventStoreManager+Sync.swift */,
 				E5C3B6B3DA1A77E2A09976D5 /* InputHistoryStore.swift */,
 				B9DD45A3974192F927E1B73A /* RPCClient.swift */,
 				18C18EEFAB81D6052EB39694 /* TronLogger.swift */,
@@ -196,6 +216,10 @@
 			isa = PBXGroup;
 			children = (
 				25C6E368AD4411B086E35A61 /* ChatViewModel.swift */,
+				E7285B697CF31BB6986535D3 /* ChatViewModel+Connection.swift */,
+				85AB906ED58C2A5018AA8055 /* ChatViewModel+Events.swift */,
+				E6F71203A3512D5375E51BE4 /* ChatViewModel+Messaging.swift */,
+				C8F9B0354BC7BDECDCD3DEAF /* ChatViewModel+Pagination.swift */,
 			);
 			path = ViewModels;
 			sourceTree = "<group>";
@@ -348,11 +372,19 @@
 				E36A71E3DB6FC3116C36F11B /* AnyCodable.swift in Sources */,
 				A7F43CE8B687131A3F3D7011 /* AppState.swift in Sources */,
 				2AC4711FE03EDA25CA10832D /* ChatView.swift in Sources */,
+				4896F1E74C19CBDFCFE1F5EC /* ChatViewModel+Connection.swift in Sources */,
+				0586FDB3434B135163CEE2D4 /* ChatViewModel+Events.swift in Sources */,
+				5A1242156B1B5AAC643EBB82 /* ChatViewModel+Messaging.swift in Sources */,
+				452AF7E62120E804DCC18384 /* ChatViewModel+Pagination.swift in Sources */,
 				C5D9BF6461C33FF5131E7B42 /* ChatViewModel.swift in Sources */,
 				6014AB90BD2F803AA569152D /* ContextAuditView.swift in Sources */,
 				901A2D24F559EC522BF3D175 /* Date+Extensions.swift in Sources */,
 				CA108EDBDE08C589D6EDC3D8 /* EventDatabase.swift in Sources */,
 				D1DEBB2B69F91E185CE01C73 /* EventPayloads.swift in Sources */,
+				2B946C64D7C177C1EDEBF677 /* EventStoreManager+Cache.swift in Sources */,
+				8B8940613FB7E2B089DAFE44 /* EventStoreManager+Dashboard.swift in Sources */,
+				2261029ECB57CE70FEEF0330 /* EventStoreManager+Operations.swift in Sources */,
+				3F36EA78A9F26FF65D1F4DF2 /* EventStoreManager+Sync.swift in Sources */,
 				B67D2D61A1344F963F5B1C28 /* EventStoreManager.swift in Sources */,
 				15D5C1CDEE971D2D3264B4A7 /* EventTypeRegistry.swift in Sources */,
 				C0629A9C0BD76E3873E8C114 /* EventTypes.swift in Sources */,

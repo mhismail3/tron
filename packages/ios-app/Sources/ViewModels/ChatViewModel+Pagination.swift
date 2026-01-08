@@ -1,0 +1,151 @@
+import Foundation
+
+// MARK: - Pagination & History Loading
+
+extension ChatViewModel {
+
+    /// Set the event store manager reference (used when injected via environment)
+    /// Call this BEFORE connectAndResume() so agent state check can update processing state
+    func setEventStoreManager(_ manager: EventStoreManager, workspaceId: String) {
+        self.eventStoreManager = manager
+        self.workspaceId = workspaceId
+    }
+
+    /// Sync events from server and load persisted messages
+    /// Call this AFTER connectAndResume() so isProcessing flag is already set if agent is running
+    func syncAndLoadMessagesForResume() async {
+        await syncAndLoadMessages()
+    }
+
+    /// Sync events from server, then load messages from local database
+    func syncAndLoadMessages() async {
+        guard let manager = eventStoreManager else { return }
+
+        // Skip if already loaded and we have messages (re-entering view after navigation)
+        if hasInitiallyLoaded && !messages.isEmpty && !isProcessing {
+            logger.info("Skipping redundant sync/load - already have \(messages.count) messages", category: .session)
+            return
+        }
+
+        // First sync from server to get any events that happened while we were away
+        do {
+            try await manager.syncSessionEvents(sessionId: sessionId)
+            logger.info("Synced events from server before loading messages", category: .session)
+        } catch {
+            logger.warning("Failed to sync events from server: \(error.localizedDescription)", category: .session)
+        }
+
+        // Now load from local database (which now includes synced events)
+        await loadPersistedMessagesAsync()
+        hasInitiallyLoaded = true
+    }
+
+    /// Load messages from EventDatabase using the unified transformer.
+    func loadPersistedMessagesAsync() async {
+        guard let manager = eventStoreManager else { return }
+
+        // Preserve streaming state if in progress
+        let preserveStreamingState = isProcessing || streamingMessageId != nil
+        var catchUpMessagesToRestore: [ChatMessage] = []
+
+        if preserveStreamingState {
+            catchUpMessagesToRestore = messages
+            logger.info("Preserving \(catchUpMessagesToRestore.count) catch-up messages before loading history (isProcessing=\(isProcessing))", category: .session)
+        }
+
+        await Task.yield()
+
+        do {
+            let state = try manager.getReconstructedState(sessionId: sessionId)
+            let loadedMessages = state.messages
+
+            // Store all messages for pagination
+            allReconstructedMessages = loadedMessages
+
+            // Show only the latest batch of messages
+            let batchSize = min(Self.initialMessageBatchSize, loadedMessages.count)
+            displayedMessageCount = batchSize
+            hasMoreMessages = loadedMessages.count > batchSize
+
+            if batchSize > 0 {
+                let startIndex = loadedMessages.count - batchSize
+                messages = Array(loadedMessages[startIndex...])
+            } else {
+                messages = []
+            }
+
+            // Restore catch-up messages at the end
+            if !catchUpMessagesToRestore.isEmpty {
+                messages.append(contentsOf: catchUpMessagesToRestore)
+                logger.info("Restored \(catchUpMessagesToRestore.count) catch-up messages after loading \(loadedMessages.count) historical messages", category: .session)
+            }
+
+            // Update turn counter and token usage from unified state
+            currentTurn = state.currentTurn
+            let usage = state.totalTokenUsage
+            if usage.inputTokens > 0 || usage.outputTokens > 0 {
+                accumulatedInputTokens = usage.inputTokens
+                accumulatedOutputTokens = usage.outputTokens
+                totalTokenUsage = usage
+            }
+
+            logger.info("Loaded \(loadedMessages.count) messages via UnifiedEventTransformer, displaying latest \(batchSize) for session \(sessionId)", category: .session)
+        } catch {
+            logger.error("Failed to load messages from EventDatabase: \(error.localizedDescription)", category: .session)
+        }
+    }
+
+    /// Load more older messages when user scrolls to top
+    func loadMoreMessages() {
+        guard hasMoreMessages, !isLoadingMoreMessages else { return }
+
+        isLoadingMoreMessages = true
+
+        let historicalCount = allReconstructedMessages.count
+        let shownFromHistory = displayedMessageCount
+
+        let remainingInHistory = historicalCount - shownFromHistory
+        let batchToLoad = min(Self.additionalMessageBatchSize, remainingInHistory)
+
+        if batchToLoad > 0 {
+            let endIndex = historicalCount - shownFromHistory
+            let startIndex = max(0, endIndex - batchToLoad)
+            let olderMessages = Array(allReconstructedMessages[startIndex..<endIndex])
+
+            messages.insert(contentsOf: olderMessages, at: 0)
+            displayedMessageCount += batchToLoad
+
+            logger.debug("Loaded \(batchToLoad) more messages, now showing \(displayedMessageCount) historical + new", category: .session)
+        }
+
+        hasMoreMessages = displayedMessageCount < historicalCount
+        isLoadingMoreMessages = false
+    }
+
+    /// Load messages from EventDatabase (sync version - kept for compatibility)
+    func loadPersistedMessages() {
+        guard let manager = eventStoreManager else { return }
+
+        do {
+            let state = try manager.getReconstructedState(sessionId: sessionId)
+            messages = state.messages
+
+            currentTurn = state.currentTurn
+            let usage = state.totalTokenUsage
+            if usage.inputTokens > 0 || usage.outputTokens > 0 {
+                accumulatedInputTokens = usage.inputTokens
+                accumulatedOutputTokens = usage.outputTokens
+                totalTokenUsage = usage
+            }
+
+            logger.info("Loaded \(messages.count) messages via UnifiedEventTransformer for session \(sessionId)", category: .session)
+        } catch {
+            logger.error("Failed to load messages from EventDatabase: \(error.localizedDescription)", category: .session)
+        }
+    }
+
+    /// Append a new message to the display (streaming messages during active session)
+    func appendMessage(_ message: ChatMessage) {
+        messages.append(message)
+    }
+}
