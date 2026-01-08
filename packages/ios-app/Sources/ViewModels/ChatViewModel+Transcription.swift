@@ -72,6 +72,11 @@ extension ChatViewModel {
             logger.error("Recorded audio too small (\(fileSize) bytes)", category: .chat)
             appendNoSpeechDetectedNotification()
         } catch {
+            if isNoSpeechDetectedError(error) {
+                logger.info("No speech detected in transcription: \(error.localizedDescription)", category: .chat)
+                appendNoSpeechDetectedNotification()
+                return
+            }
             logger.error("Transcription failed: \(error.localizedDescription)", category: .chat)
             appendTranscriptionFailedNotification()
         }
@@ -83,6 +88,17 @@ extension ChatViewModel {
 
     private func appendNoSpeechDetectedNotification() {
         messages.append(.transcriptionNoSpeech())
+    }
+
+    private func isNoSpeechDetectedError(_ error: Error) -> Bool {
+        let message: String
+        if let rpcError = error as? RPCError {
+            message = rpcError.message
+        } else {
+            message = error.localizedDescription
+        }
+        let normalized = message.lowercased()
+        return normalized.contains("no speech") || normalized.contains("no text")
     }
 
     private func mimeType(for url: URL) -> String {

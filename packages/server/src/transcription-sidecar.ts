@@ -6,6 +6,7 @@
 import { createLogger, getSettings } from '@tron/core';
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { existsSync } from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 
@@ -78,9 +79,16 @@ function startSidecarProcess(pythonBin: string, repoRoot: string): void {
   sidecarStarting = true;
   sidecarOwned = true;
 
+  const transcribeBaseDir =
+    process.env.TRON_TRANSCRIBE_BASE_DIR ?? path.join(os.homedir(), '.tron', 'transcribe');
+  const hfCacheDir = path.join(transcribeBaseDir, 'models', 'hf');
+
   const env = {
     ...process.env,
     PYTHONPATH: repoRoot,
+    ...(process.env.HUGGINGFACE_HUB_CACHE || process.env.HF_HOME
+      ? {}
+      : { HUGGINGFACE_HUB_CACHE: hfCacheDir }),
   };
 
   const child = spawn(pythonBin, ['-m', 'services.transcribe.app'], {

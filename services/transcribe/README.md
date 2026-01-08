@@ -92,6 +92,7 @@ To switch to faster-whisper:
 ```
 
 Notes:
-- Model downloads go to `~/.tron/transcribe/models`.
+- Model downloads go to `~/.tron/transcribe/models`. Parakeet (HF) artifacts are cached under
+  `~/.tron/transcribe/models/hf` unless `HF_HOME` or `HUGGINGFACE_HUB_CACHE` is set.
 - `cleanup_mode` supports `none`, `basic`, or `llm`.
 - Whisper-style settings like `beam_size` are ignored by parakeet-mlx.
