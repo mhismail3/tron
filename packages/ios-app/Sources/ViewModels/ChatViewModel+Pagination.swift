@@ -18,6 +18,7 @@ extension ChatViewModel {
     }
 
     /// Sync events from server, then load messages from local database
+    /// PERFORMANCE OPTIMIZATION: Load cached messages first for instant UI, then sync in background
     func syncAndLoadMessages() async {
         guard let manager = eventStoreManager else { return }
 
@@ -27,17 +28,32 @@ extension ChatViewModel {
             return
         }
 
-        // First sync from server to get any events that happened while we were away
-        do {
-            try await manager.syncSessionEvents(sessionId: sessionId)
-            logger.info("Synced events from server before loading messages", category: .session)
-        } catch {
-            logger.warning("Failed to sync events from server: \(error.localizedDescription)", category: .session)
-        }
-
-        // Now load from local database (which now includes synced events)
+        // OPTIMIZATION: Load cached messages FIRST for instant UI responsiveness
+        // This shows whatever we have locally without waiting for network
         await loadPersistedMessagesAsync()
         hasInitiallyLoaded = true
+
+        let initialMessageCount = messages.count
+        logger.info("Loaded \(initialMessageCount) cached messages - now syncing from server", category: .session)
+
+        // Then sync from server in background to get any events that happened while away
+        do {
+            try await manager.syncSessionEvents(sessionId: sessionId)
+            logger.info("Synced events from server after initial load", category: .session)
+
+            // If sync brought new events, reload to show them
+            // But only if we're not in the middle of processing (avoid disrupting streaming)
+            if !isProcessing {
+                let state = try manager.getReconstructedState(sessionId: sessionId)
+                if state.messages.count > initialMessageCount {
+                    logger.info("Server sync found \(state.messages.count - initialMessageCount) new messages, updating UI", category: .session)
+                    await loadPersistedMessagesAsync()
+                }
+            }
+        } catch {
+            logger.warning("Failed to sync events from server: \(error.localizedDescription)", category: .session)
+            // Not critical - we already showed cached messages
+        }
     }
 
     /// Load messages from EventDatabase using the unified transformer.

@@ -42,10 +42,32 @@ extension EventStoreManager {
         logger.info("Starting dashboard polling for session states")
 
         pollingTask = Task { [weak self] in
+            // Pre-warm WebSocket connection immediately for faster session entry
+            // This runs once at dashboard load, before any polling
+            await self?.preWarmConnection()
+
             while !Task.isCancelled {
                 await self?.pollAllSessionStates()
                 try? await Task.sleep(for: .seconds(2))
             }
+        }
+    }
+
+    /// Pre-warm the WebSocket connection so session entry is instant
+    /// Called once when dashboard becomes visible
+    private func preWarmConnection() async {
+        guard !rpcClient.isConnected else {
+            logger.verbose("Connection already established, skipping pre-warm", category: .rpc)
+            return
+        }
+
+        logger.info("Pre-warming WebSocket connection for faster session entry", category: .rpc)
+        await rpcClient.connect()
+
+        if rpcClient.isConnected {
+            logger.info("WebSocket pre-warm complete - connection ready", category: .rpc)
+        } else {
+            logger.warning("WebSocket pre-warm failed - will retry on session entry", category: .rpc)
         }
     }
 

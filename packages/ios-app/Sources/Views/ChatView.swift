@@ -170,17 +170,30 @@ struct ChatView: View {
             }
         }
         .task {
-            // Order is critical for handling in-progress sessions:
-            // 1. Set manager reference first (so connectAndResume can update processing state)
-            // 2. Connect and resume (checks if agent is running, sets isProcessing)
-            // 3. Load messages (respects isProcessing flag to preserve streaming state)
+            // PERFORMANCE OPTIMIZATION: Parallelize independent operations
+            // and ensure UI is responsive immediately
+            //
+            // Critical order:
+            // 1. Set manager reference first (sync, instant)
+            // 2. Connect/resume and prefetch models run in parallel
+            // 3. Sync/load messages runs after connect/resume completes
+            //
+            // Model prefetch is completely independent and doesn't block the UI
+
             let workspaceId = eventStoreManager.activeSession?.workspaceId ?? ""
             viewModel.setEventStoreManager(eventStoreManager, workspaceId: workspaceId)
-            await viewModel.connectAndResume()
-            await viewModel.syncAndLoadMessagesForResume()
 
-            // Pre-fetch models in background for faster ModelSwitcher opening
-            await prefetchModels()
+            // Run model prefetch in parallel with connect/resume
+            // This is a fire-and-forget operation that doesn't block session entry
+            Task {
+                await prefetchModels()
+            }
+
+            // Connect and resume - this is required before loading messages
+            await viewModel.connectAndResume()
+
+            // Load messages after connection is established
+            await viewModel.syncAndLoadMessagesForResume()
         }
     }
 
