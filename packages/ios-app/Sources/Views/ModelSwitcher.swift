@@ -83,22 +83,9 @@ struct ModelPickerMenu: View {
 
     @ViewBuilder
     private func modelButton(_ model: ModelInfo) -> some View {
-        let isSelected = model.id == currentModel
-
-        Button {
+        Button(model.formattedModelName) {
             onSelect(model)
-        } label: {
-            HStack {
-                Text(model.formattedModelName)
-                Spacer()
-                if isSelected {
-                    Image(systemName: "checkmark")
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(.tronEmerald)
-                }
-            }
         }
-        .disabled(isSelected)
     }
 
     // MARK: - Coming Soon Model (greyed out, disabled)

@@ -466,31 +466,19 @@ struct NewSessionFlow: View {
                             if isLoadingModels && availableModels.isEmpty {
                                 Text("Loading models...")
                             } else {
-                                // Latest models (4.5 family) - grouped by tier
-                                Section("Latest") {
-                                    ForEach(latestModels) { model in
-                                        Button {
-                                            selectedModel = model.id
-                                        } label: {
-                                            HStack {
-                                                Text(model.formattedModelName)
-                                                if selectedModel == model.id {
-                                                    Image(systemName: "checkmark")
-                                                }
-                                            }
-                                        }
+                                // All models in a flat list - Latest first, then Legacy
+                                ForEach(latestModels) { model in
+                                    Button(model.formattedModelName) {
+                                        selectedModel = model.id
                                     }
                                 }
 
-                                // Legacy models
                                 if !legacyModels.isEmpty {
-                                    Section("Legacy") {
-                                        ForEach(legacyModels) { model in
-                                            Button {
-                                                selectedModel = model.id
-                                            } label: {
-                                                Text(model.formattedModelName)
-                                            }
+                                    Divider()
+
+                                    ForEach(legacyModels) { model in
+                                        Button(model.formattedModelName) {
+                                            selectedModel = model.id
                                         }
                                     }
                                 }
@@ -506,7 +494,9 @@ struct NewSessionFlow: View {
                                         .font(.system(size: 14, weight: .regular, design: .monospaced))
                                         .foregroundStyle(.tronEmerald)
                                 }
+
                                 Spacer()
+
                                 Image(systemName: "chevron.up.chevron.down")
                                     .font(.system(size: 10))
                                     .foregroundStyle(.tronEmerald.opacity(0.5))
