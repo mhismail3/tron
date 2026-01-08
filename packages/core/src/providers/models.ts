@@ -277,3 +277,25 @@ export function getAllModels(): ModelInfo[] {
 export function isValidModelId(modelId: string): boolean {
   return ANTHROPIC_MODELS.some(m => m.id === modelId);
 }
+
+/**
+ * Calculate cost for given model and token counts.
+ * Returns cost in USD.
+ */
+export function calculateCost(
+  modelId: string,
+  inputTokens: number,
+  outputTokens: number
+): number {
+  const model = getModelById(modelId);
+  if (model) {
+    const inputCost = (model.inputCostPerMillion * inputTokens) / 1_000_000;
+    const outputCost = (model.outputCostPerMillion * outputTokens) / 1_000_000;
+    return inputCost + outputCost;
+  }
+
+  // Fallback: use sonnet pricing if model not found
+  const fallbackInputCost = (3 * inputTokens) / 1_000_000;
+  const fallbackOutputCost = (15 * outputTokens) / 1_000_000;
+  return fallbackInputCost + fallbackOutputCost;
+}

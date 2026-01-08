@@ -138,6 +138,9 @@ interface SessionInfo {
   workingDirectory: string;
   model: string;
   messageCount: number;
+  inputTokens: number;
+  outputTokens: number;
+  cost: number;
   createdAt: string;
   lastActivity: string;
   isActive: boolean;
@@ -399,6 +402,9 @@ export class RpcHandler extends EventEmitter {
         workingDirectory: s.workingDirectory,
         model: s.model,
         messageCount: s.messageCount,
+        inputTokens: s.inputTokens,
+        outputTokens: s.outputTokens,
+        cost: s.cost,
         createdAt: s.createdAt,
         lastActivity: s.lastActivity,
         isActive: s.isActive,

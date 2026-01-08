@@ -297,7 +297,8 @@ class EventStoreManager: ObservableObject {
             eventCount: 0,
             messageCount: 0,
             inputTokens: 0,
-            outputTokens: 0
+            outputTokens: 0,
+            cost: 0
         )
 
         try eventDB.insertSession(session)
@@ -917,8 +918,9 @@ class EventStoreManager: ObservableObject {
             lastActivityAt: info.createdAt,
             eventCount: 0,
             messageCount: info.messageCount,
-            inputTokens: 0,
-            outputTokens: 0
+            inputTokens: info.inputTokens ?? 0,
+            outputTokens: info.outputTokens ?? 0,
+            cost: info.cost ?? 0
         )
     }
 

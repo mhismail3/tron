@@ -388,6 +388,9 @@ export interface SessionInfo {
   model: string;
   messageCount: number;
   eventCount: number;
+  inputTokens: number;
+  outputTokens: number;
+  cost: number;
   createdAt: string;
   lastActivity: string;
   isActive: boolean;
@@ -1329,8 +1332,16 @@ export class EventStoreOrchestrator extends EventEmitter {
       // TronAgent stores these as ToolResultMessage with role: 'toolResult'
       // Only get tool results from the CURRENT turn (after the last user message)
       // Note: toolResult messages come BETWEEN assistant messages, not after them
+      let toolResultLastUserIndex = -1;
+      for (let i = runResult.messages.length - 1; i >= 0; i--) {
+        const msg = runResult.messages[i];
+        if (msg && msg.role === 'user') {
+          toolResultLastUserIndex = i;
+          break;
+        }
+      }
       const currentTurnToolResults = runResult.messages
-        .slice(lastUserIndex + 1)
+        .slice(toolResultLastUserIndex + 1)
         .filter((m: any) => m.role === 'toolResult') as any[];
 
       if (currentTurnToolResults.length > 0) {
@@ -2051,6 +2062,9 @@ export class EventStoreOrchestrator extends EventEmitter {
       model: row.model,
       messageCount: row.messageCount ?? 0,
       eventCount: row.eventCount ?? 0,
+      inputTokens: row.totalInputTokens ?? 0,
+      outputTokens: row.totalOutputTokens ?? 0,
+      cost: row.totalCost ?? 0,
       createdAt: row.createdAt,
       lastActivity: row.lastActivityAt,
       isActive,

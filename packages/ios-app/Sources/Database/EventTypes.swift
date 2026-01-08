@@ -415,6 +415,7 @@ struct CachedSession: Identifiable, Codable {
     var messageCount: Int
     var inputTokens: Int
     var outputTokens: Int
+    var cost: Double
 
     // Dashboard display fields
     var lastUserPrompt: String?
@@ -423,6 +424,30 @@ struct CachedSession: Identifiable, Codable {
     var isProcessing: Bool?
 
     var totalTokens: Int { inputTokens + outputTokens }
+
+    /// Formatted token counts (e.g., "↓1.2k ↑3.4k")
+    var formattedTokens: String {
+        let inStr = formatTokenCount(inputTokens)
+        let outStr = formatTokenCount(outputTokens)
+        return "↓\(inStr) ↑\(outStr)"
+    }
+
+    /// Formatted cost string (e.g., "$0.12")
+    var formattedCost: String {
+        if cost < 0.01 {
+            return "<$0.01"
+        }
+        return String(format: "$%.2f", cost)
+    }
+
+    private func formatTokenCount(_ count: Int) -> String {
+        if count >= 1_000_000 {
+            return String(format: "%.1fM", Double(count) / 1_000_000)
+        } else if count >= 1_000 {
+            return String(format: "%.1fk", Double(count) / 1_000)
+        }
+        return "\(count)"
+    }
 
     var displayTitle: String {
         if let title = title, !title.isEmpty {

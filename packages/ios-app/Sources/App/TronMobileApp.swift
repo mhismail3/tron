@@ -852,25 +852,22 @@ struct RecentSessionRow: View {
                             .foregroundStyle(.white.opacity(0.4))
                     }
 
-                    // Model + message count + chevron on same row
+                    // Model + tokens/cost on same row
                     HStack(spacing: 6) {
                         Text(session.model.shortModelName)
                             .font(.system(size: 10, weight: .medium, design: .monospaced))
                             .foregroundStyle(.tronEmerald.opacity(0.6))
 
-                        HStack(spacing: 2) {
-                            Image(systemName: "bubble.left")
-                                .font(.system(size: 7))
-                            Text("\(session.messageCount)")
-                                .font(.system(size: 9, design: .monospaced))
-                        }
-                        .foregroundStyle(.white.opacity(0.35))
-
                         Spacer()
 
-                        Image(systemName: "chevron.right")
-                            .font(.system(size: 9, weight: .medium))
-                            .foregroundStyle(.white.opacity(0.25))
+                        // Tokens and cost
+                        Text(session.formattedTokens)
+                            .font(.system(size: 9, design: .monospaced))
+                            .foregroundStyle(.white.opacity(0.35))
+
+                        Text(session.formattedCost)
+                            .font(.system(size: 9, weight: .medium, design: .monospaced))
+                            .foregroundStyle(.tronEmerald.opacity(0.5))
                     }
                 }
             }

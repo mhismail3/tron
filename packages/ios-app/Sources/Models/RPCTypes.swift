@@ -66,6 +66,9 @@ struct SessionInfo: Decodable, Identifiable, Hashable {
     let model: String
     let createdAt: String
     let messageCount: Int
+    let inputTokens: Int?
+    let outputTokens: Int?
+    let cost: Double?
     let isActive: Bool
     let workingDirectory: String?
 
@@ -87,6 +90,33 @@ struct SessionInfo: Decodable, Identifiable, Hashable {
             return relativeFormatter.localizedString(for: date, relativeTo: Date())
         }
         return createdAt
+    }
+
+    /// Formatted token counts (e.g., "↓1.2k ↑3.4k")
+    var formattedTokens: String {
+        let inTokens = inputTokens ?? 0
+        let outTokens = outputTokens ?? 0
+        let inStr = formatTokenCount(inTokens)
+        let outStr = formatTokenCount(outTokens)
+        return "↓\(inStr) ↑\(outStr)"
+    }
+
+    /// Formatted cost string (e.g., "$0.12")
+    var formattedCost: String {
+        let c = cost ?? 0
+        if c < 0.01 {
+            return "<$0.01"
+        }
+        return String(format: "$%.2f", c)
+    }
+
+    private func formatTokenCount(_ count: Int) -> String {
+        if count >= 1_000_000 {
+            return String(format: "%.1fM", Double(count) / 1_000_000)
+        } else if count >= 1_000 {
+            return String(format: "%.1fk", Double(count) / 1_000)
+        }
+        return "\(count)"
     }
 }
 

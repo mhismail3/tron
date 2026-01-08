@@ -98,9 +98,17 @@ class EventDatabase: ObservableObject {
                 event_count INTEGER DEFAULT 0,
                 message_count INTEGER DEFAULT 0,
                 input_tokens INTEGER DEFAULT 0,
-                output_tokens INTEGER DEFAULT 0
+                output_tokens INTEGER DEFAULT 0,
+                cost REAL DEFAULT 0
             )
         """)
+
+        // Migration: Add cost column if it doesn't exist (for existing databases)
+        do {
+            try execute("ALTER TABLE sessions ADD COLUMN cost REAL DEFAULT 0")
+        } catch {
+            // Column already exists, ignore
+        }
 
         // Sessions indexes
         try execute("CREATE INDEX IF NOT EXISTS idx_sessions_workspace ON sessions(workspace_id)")
@@ -425,8 +433,8 @@ class EventDatabase: ObservableObject {
             INSERT OR REPLACE INTO sessions
             (id, workspace_id, root_event_id, head_event_id, status, title, model, provider,
              working_directory, created_at, last_activity_at, event_count, message_count,
-             input_tokens, output_tokens)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             input_tokens, output_tokens, cost)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """
 
         var stmt: OpaquePointer?
@@ -450,6 +458,7 @@ class EventDatabase: ObservableObject {
         sqlite3_bind_int(stmt, 13, Int32(session.messageCount))
         sqlite3_bind_int(stmt, 14, Int32(session.inputTokens))
         sqlite3_bind_int(stmt, 15, Int32(session.outputTokens))
+        sqlite3_bind_double(stmt, 16, session.cost)
 
         guard sqlite3_step(stmt) == SQLITE_DONE else {
             throw EventDatabaseError.insertFailed(errorMessage)
@@ -460,7 +469,7 @@ class EventDatabase: ObservableObject {
         let sql = """
             SELECT id, workspace_id, root_event_id, head_event_id, status, title, model, provider,
                    working_directory, created_at, last_activity_at, event_count, message_count,
-                   input_tokens, output_tokens
+                   input_tokens, output_tokens, cost
             FROM sessions WHERE id = ?
         """
 
@@ -483,7 +492,7 @@ class EventDatabase: ObservableObject {
         let sql = """
             SELECT id, workspace_id, root_event_id, head_event_id, status, title, model, provider,
                    working_directory, created_at, last_activity_at, event_count, message_count,
-                   input_tokens, output_tokens
+                   input_tokens, output_tokens, cost
             FROM sessions ORDER BY last_activity_at DESC
         """
 
@@ -839,6 +848,7 @@ class EventDatabase: ObservableObject {
         let messageCount = Int(sqlite3_column_int(stmt, 12))
         let inputTokens = Int(sqlite3_column_int(stmt, 13))
         let outputTokens = Int(sqlite3_column_int(stmt, 14))
+        let cost = sqlite3_column_double(stmt, 15)
 
         return CachedSession(
             id: id,
@@ -855,7 +865,8 @@ class EventDatabase: ObservableObject {
             eventCount: eventCount,
             messageCount: messageCount,
             inputTokens: inputTokens,
-            outputTokens: outputTokens
+            outputTokens: outputTokens,
+            cost: cost
         )
     }
 }

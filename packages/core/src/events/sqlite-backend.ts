@@ -71,6 +71,7 @@ export interface SessionRow {
   turnCount: number;
   totalInputTokens: number;
   totalOutputTokens: number;
+  totalCost: number;
   tags: string[];
 }
 
@@ -118,6 +119,7 @@ export interface IncrementCountersOptions {
   turnCount?: number;
   inputTokens?: number;
   outputTokens?: number;
+  cost?: number;
 }
 
 // =============================================================================
@@ -200,6 +202,18 @@ export class SQLiteBackend {
     }
 
     db.exec(migrationSQL);
+
+    // Run incremental migrations for existing databases
+    this.runIncrementalMigrations(db);
+  }
+
+  private runIncrementalMigrations(db: Database.Database): void {
+    // Migration: Add total_cost column to sessions table (if not exists)
+    const sessionColumns = db.prepare("PRAGMA table_info(sessions)").all() as { name: string }[];
+    const hasTotalCost = sessionColumns.some(col => col.name === 'total_cost');
+    if (!hasTotalCost) {
+      db.exec("ALTER TABLE sessions ADD COLUMN total_cost REAL DEFAULT 0");
+    }
   }
 
   private getInlineMigration(): string {
@@ -235,6 +249,7 @@ export class SQLiteBackend {
         turn_count INTEGER DEFAULT 0,
         total_input_tokens INTEGER DEFAULT 0,
         total_output_tokens INTEGER DEFAULT 0,
+        total_cost REAL DEFAULT 0,
         tags TEXT DEFAULT '[]'
       );
       CREATE INDEX IF NOT EXISTS idx_sessions_workspace ON sessions(workspace_id);
@@ -449,6 +464,7 @@ export class SQLiteBackend {
       turnCount: 0,
       totalInputTokens: 0,
       totalOutputTokens: 0,
+      totalCost: 0,
       tags: options.tags ?? [],
     };
   }
@@ -575,6 +591,10 @@ export class SQLiteBackend {
       updates.push('total_output_tokens = total_output_tokens + ?');
       params.push(counters.outputTokens);
     }
+    if (counters.cost) {
+      updates.push('total_cost = total_cost + ?');
+      params.push(counters.cost);
+    }
 
     if (updates.length === 0) return;
 
@@ -609,6 +629,7 @@ export class SQLiteBackend {
       turnCount: row.turn_count,
       totalInputTokens: row.total_input_tokens,
       totalOutputTokens: row.total_output_tokens,
+      totalCost: row.total_cost ?? 0,
       tags: JSON.parse(row.tags || '[]'),
     };
   }

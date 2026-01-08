@@ -183,6 +183,9 @@ export interface SessionListResult {
     workingDirectory: string;
     model: string;
     messageCount: number;
+    inputTokens: number;
+    outputTokens: number;
+    cost: number;
     createdAt: string;
     lastActivity: string;
     isActive: boolean;

@@ -21,6 +21,7 @@ import {
   type SearchResult,
   type TokenUsage,
 } from './types.js';
+import { calculateCost } from '../providers/models.js';
 
 // =============================================================================
 // Types
@@ -192,7 +193,7 @@ export class EventStore {
       // Update session head and counters
       await this.backend.updateSessionHead(options.sessionId, event.id);
 
-      const counters: { eventCount: number; messageCount?: number; inputTokens?: number; outputTokens?: number } = {
+      const counters: { eventCount: number; messageCount?: number; inputTokens?: number; outputTokens?: number; cost?: number } = {
         eventCount: 1,
       };
 
@@ -201,11 +202,14 @@ export class EventStore {
         counters.messageCount = 1;
       }
 
-      // Track token usage
-      const payload = options.payload as { tokenUsage?: TokenUsage };
+      // Track token usage and calculate cost
+      const payload = options.payload as { tokenUsage?: TokenUsage; model?: string };
       if (payload.tokenUsage) {
         counters.inputTokens = payload.tokenUsage.inputTokens;
         counters.outputTokens = payload.tokenUsage.outputTokens;
+        // Calculate cost using the model from payload or session
+        const modelId = payload.model ?? session.model;
+        counters.cost = calculateCost(modelId, payload.tokenUsage.inputTokens, payload.tokenUsage.outputTokens);
       }
 
       await this.backend.incrementSessionCounters(options.sessionId, counters);

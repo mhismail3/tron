@@ -171,12 +171,24 @@ struct CachedSessionSidebarRow: View {
                 .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
             }
 
-            // Working directory (truncated)
-            Text(session.displayDirectory)
-                .font(.system(size: 10, weight: .regular, design: .monospaced))
-                .foregroundStyle(.white.opacity(0.4))
-                .lineLimit(1)
-                .truncationMode(.head)
+            // Bottom row: Working directory + tokens/cost
+            HStack(spacing: 6) {
+                Text(session.displayDirectory)
+                    .font(.system(size: 10, weight: .regular, design: .monospaced))
+                    .foregroundStyle(.white.opacity(0.4))
+                    .lineLimit(1)
+                    .truncationMode(.head)
+
+                Spacer()
+
+                Text(session.formattedTokens)
+                    .font(.system(size: 9, design: .monospaced))
+                    .foregroundStyle(.white.opacity(0.35))
+
+                Text(session.formattedCost)
+                    .font(.system(size: 9, weight: .medium, design: .monospaced))
+                    .foregroundStyle(.tronEmerald.opacity(0.5))
+            }
         }
         .padding(.vertical, 10)
         .padding(.horizontal, 14)

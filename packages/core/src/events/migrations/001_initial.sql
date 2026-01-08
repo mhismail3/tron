@@ -49,6 +49,7 @@ CREATE TABLE IF NOT EXISTS sessions (
   turn_count INTEGER DEFAULT 0,
   total_input_tokens INTEGER DEFAULT 0,
   total_output_tokens INTEGER DEFAULT 0,
+  total_cost REAL DEFAULT 0,
 
   -- Tags (JSON array)
   tags TEXT DEFAULT '[]'
