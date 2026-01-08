@@ -101,7 +101,7 @@ def load_config() -> TranscribeConfig:
     cpu_threads = _to_int(pick("cpu_threads", 0), 0)
     num_workers = _to_int(pick("num_workers", 1), 1)
 
-    cleanup_mode = str(pick("cleanup_mode", "llm"))
+    cleanup_mode = str(pick("cleanup_mode", "basic"))
     cleanup_llm_base_url = str(pick("cleanup_llm_base_url", "http://127.0.0.1:11434/v1"))
     cleanup_llm_model = str(pick("cleanup_llm_model", "llama3.1:8b"))
     cleanup_llm_api_key = os.environ.get("TRON_TRANSCRIBE_LLM_API_KEY") or file_data.get("cleanup_llm_api_key")

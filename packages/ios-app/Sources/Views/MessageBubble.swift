@@ -71,6 +71,9 @@ struct MessageBubble: View {
 
         case .transcriptionFailed:
             TranscriptionFailedNotificationView()
+
+        case .transcriptionNoSpeech:
+            TranscriptionNoSpeechNotificationView()
         }
     }
 }
@@ -160,6 +163,31 @@ struct TranscriptionFailedNotificationView: View {
         .overlay(
             Capsule()
                 .stroke(Color.red.opacity(0.3), lineWidth: 0.5)
+        )
+        .frame(maxWidth: .infinity, alignment: .center)
+    }
+}
+
+// MARK: - No Speech Detected Notification View (Amber pill-style in-chat notification)
+
+struct TranscriptionNoSpeechNotificationView: View {
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "waveform")
+                .font(.system(size: 10, weight: .medium))
+                .foregroundStyle(Color.orange)
+
+            Text("No speech detected")
+                .font(.system(size: 11, weight: .medium, design: .monospaced))
+                .foregroundStyle(Color.orange.opacity(0.9))
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(Color.orange.opacity(0.12))
+        .clipShape(Capsule())
+        .overlay(
+            Capsule()
+                .stroke(Color.orange.opacity(0.35), lineWidth: 0.5)
         )
         .frame(maxWidth: .infinity, alignment: .center)
     }

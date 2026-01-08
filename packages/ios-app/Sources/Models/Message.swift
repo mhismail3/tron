@@ -154,6 +154,8 @@ enum MessageContent: Equatable {
     case interrupted
     /// In-chat notification for transcription failure
     case transcriptionFailed
+    /// In-chat notification for no speech detected
+    case transcriptionNoSpeech
 
     var textContent: String {
         switch self {
@@ -175,6 +177,8 @@ enum MessageContent: Equatable {
             return "Session interrupted"
         case .transcriptionFailed:
             return "Transcription failed"
+        case .transcriptionNoSpeech:
+            return "No speech detected"
         }
     }
 
@@ -189,7 +193,7 @@ enum MessageContent: Equatable {
 
     var isNotification: Bool {
         switch self {
-        case .modelChange, .interrupted, .transcriptionFailed:
+        case .modelChange, .interrupted, .transcriptionFailed, .transcriptionNoSpeech:
             return true
         default:
             return false
@@ -332,5 +336,10 @@ extension ChatMessage {
     /// In-chat notification for transcription failure
     static func transcriptionFailed() -> ChatMessage {
         ChatMessage(role: .system, content: .transcriptionFailed)
+    }
+
+    /// In-chat notification for no speech detected
+    static func transcriptionNoSpeech() -> ChatMessage {
+        ChatMessage(role: .system, content: .transcriptionNoSpeech)
     }
 }

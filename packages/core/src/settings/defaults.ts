@@ -148,9 +148,10 @@ export const DEFAULT_SETTINGS: TronSettings = {
     defaultProvider: 'anthropic',
     transcription: {
       enabled: true,
+      manageSidecar: true,
       baseUrl: 'http://127.0.0.1:8787',
       timeoutMs: 180000,
-      cleanupMode: 'llm',
+      cleanupMode: 'basic',
       maxBytes: 25 * 1024 * 1024,
     },
   },

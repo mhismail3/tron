@@ -357,9 +357,13 @@ class RPCClient: ObservableObject {
             throw RPCClientError.connectionNotEstablished
         }
 
+        let audioBase64 = await Task.detached(priority: .utility) {
+            audioData.base64EncodedString()
+        }.value
+
         let params = TranscribeAudioParams(
             sessionId: currentSessionId,
-            audioBase64: audioData.base64EncodedString(),
+            audioBase64: audioBase64,
             mimeType: mimeType,
             fileName: fileName,
             cleanupMode: cleanupMode,

@@ -2,6 +2,10 @@ import Foundation
 
 // MARK: - Voice Transcription
 
+private enum AudioProcessingError: Error {
+    case tooSmall(Int)
+}
+
 extension ChatViewModel {
 
     func toggleRecording() {
@@ -34,17 +38,15 @@ extension ChatViewModel {
         defer { isTranscribing = false }
 
         do {
-            let fileAttributes = try FileManager.default.attributesOfItem(atPath: url.path)
-            let fileSize = (fileAttributes[.size] as? NSNumber)?.intValue ?? 0
-            if fileSize < 1024 {
-                logger.error("Recorded audio too small (\(fileSize) bytes)", category: .chat)
-                try? FileManager.default.removeItem(at: url)
-                appendTranscriptionFailedNotification()
-                return
-            }
-
-            let audioData = try Data(contentsOf: url)
-            try? FileManager.default.removeItem(at: url)
+            let audioData = try await Task.detached(priority: .utility) { () throws -> Data in
+                defer { try? FileManager.default.removeItem(at: url) }
+                let fileAttributes = try FileManager.default.attributesOfItem(atPath: url.path)
+                let fileSize = (fileAttributes[.size] as? NSNumber)?.intValue ?? 0
+                if fileSize < 1024 {
+                    throw AudioProcessingError.tooSmall(fileSize)
+                }
+                return try Data(contentsOf: url)
+            }.value
 
             let result = try await rpcClient.transcribeAudio(
                 audioData: audioData,
@@ -54,7 +56,7 @@ extension ChatViewModel {
 
             let transcript = result.text.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !transcript.isEmpty else {
-                appendTranscriptionFailedNotification()
+                appendNoSpeechDetectedNotification()
                 return
             }
 
@@ -63,6 +65,9 @@ extension ChatViewModel {
             } else {
                 inputText += "\n" + transcript
             }
+        } catch AudioProcessingError.tooSmall(let fileSize) {
+            logger.error("Recorded audio too small (\(fileSize) bytes)", category: .chat)
+            appendNoSpeechDetectedNotification()
         } catch {
             logger.error("Transcription failed: \(error.localizedDescription)", category: .chat)
             appendTranscriptionFailedNotification()
@@ -71,6 +76,10 @@ extension ChatViewModel {
 
     private func appendTranscriptionFailedNotification() {
         messages.append(.transcriptionFailed())
+    }
+
+    private func appendNoSpeechDetectedNotification() {
+        messages.append(.transcriptionNoSpeech())
     }
 
     private func mimeType(for url: URL) -> String {

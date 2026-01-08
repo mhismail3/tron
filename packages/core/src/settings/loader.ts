@@ -383,6 +383,16 @@ export function applyEnvOverrides(settings: TronSettings): TronSettings {
       },
     };
   }
+  if (process.env.TRON_TRANSCRIBE_MANAGE_SIDECAR) {
+    const manageSidecar = process.env.TRON_TRANSCRIBE_MANAGE_SIDECAR.toLowerCase();
+    result.server = {
+      ...result.server,
+      transcription: {
+        ...result.server.transcription,
+        manageSidecar: manageSidecar === 'true' || manageSidecar === '1' || manageSidecar === 'yes',
+      },
+    };
+  }
   if (process.env.TRON_TRANSCRIBE_URL) {
     result.server = {
       ...result.server,

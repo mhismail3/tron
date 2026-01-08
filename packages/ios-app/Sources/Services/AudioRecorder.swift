@@ -157,6 +157,8 @@ final class AudioRecorder: NSObject, ObservableObject, AVAudioRecorderDelegate {
     }
 
     private func handleRecorderFinished(success: Bool) {
+        autoStopTask?.cancel()
+        autoStopTask = nil
         isRecording = false
         defer {
             recorder = nil
@@ -178,7 +180,19 @@ final class AudioRecorder: NSObject, ObservableObject, AVAudioRecorderDelegate {
     }
 
     private func handleRecorderError() {
+        autoStopTask?.cancel()
+        autoStopTask = nil
         isRecording = false
+        defer {
+            recorder = nil
+        }
+
+        do {
+            try AVAudioSession.sharedInstance().setActive(false, options: [.notifyOthersOnDeactivation])
+        } catch {
+            // Ignore deactivation errors
+        }
+
         cleanupFile()
         onFinish?(nil, false)
     }

@@ -226,6 +226,8 @@ export interface ServerSettings {
 export interface TranscriptionSettings {
   /** Enable transcription support */
   enabled: boolean;
+  /** Auto-start local transcription sidecar */
+  manageSidecar: boolean;
   /** Base URL for transcription sidecar */
   baseUrl: string;
   /** Request timeout in milliseconds */
