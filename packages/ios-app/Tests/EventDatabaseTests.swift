@@ -138,6 +138,43 @@ final class EventDatabaseTests: XCTestCase {
     }
 
     @MainActor
+    func testGetAncestorsCrossSession() async throws {
+        // Create parent session events
+        let parentEvents = [
+            SessionEvent(id: "p-root", parentId: nil, sessionId: "parent-session",
+                         workspaceId: "/test", type: "session.start",
+                         timestamp: "2024-01-01T00:00:00Z", sequence: 1, payload: [:]),
+            SessionEvent(id: "p-user", parentId: "p-root", sessionId: "parent-session",
+                         workspaceId: "/test", type: "message.user",
+                         timestamp: "2024-01-01T00:01:00Z", sequence: 2,
+                         payload: ["content": AnyCodable("Hello from parent")]),
+            SessionEvent(id: "p-assistant", parentId: "p-user", sessionId: "parent-session",
+                         workspaceId: "/test", type: "message.assistant",
+                         timestamp: "2024-01-01T00:02:00Z", sequence: 3,
+                         payload: ["content": AnyCodable("Hi there!")])
+        ]
+        try database.insertEvents(parentEvents)
+
+        // Create forked session with root linking to parent session
+        let forkedEvents = [
+            SessionEvent(id: "f-root", parentId: "p-assistant", sessionId: "forked-session",
+                         workspaceId: "/test", type: "session.fork",
+                         timestamp: "2024-01-01T00:03:00Z", sequence: 1, payload: [:])
+        ]
+        try database.insertEvents(forkedEvents)
+
+        // getAncestors should traverse across session boundary
+        let ancestors = try database.getAncestors("f-root")
+
+        XCTAssertEqual(ancestors.count, 4) // p-root, p-user, p-assistant, f-root
+        XCTAssertEqual(ancestors.map { $0.id }, ["p-root", "p-user", "p-assistant", "f-root"])
+
+        // Verify messages can be transformed from cross-session ancestors
+        let messages = UnifiedEventTransformer.transformPersistedEvents(ancestors)
+        XCTAssertEqual(messages.count, 2) // user + assistant from parent
+    }
+
+    @MainActor
     func testGetChildren() async throws {
         // Create a branching structure
         let events = [
@@ -166,6 +203,40 @@ final class EventDatabaseTests: XCTestCase {
 
         events = try database.getEventsBySession("s1")
         XCTAssertEqual(events.count, 0)
+    }
+
+    @MainActor
+    func testInsertEventsIgnoringDuplicates() async throws {
+        // Insert initial events
+        let initialEvents = [
+            SessionEvent(id: "e1", parentId: nil, sessionId: "s1", workspaceId: "/test", type: "session.start", timestamp: "2024-01-01T00:00:00Z", sequence: 1, payload: [:]),
+            SessionEvent(id: "e2", parentId: "e1", sessionId: "s1", workspaceId: "/test", type: "message.user", timestamp: "2024-01-01T00:01:00Z", sequence: 2, payload: [:])
+        ]
+        try database.insertEvents(initialEvents)
+
+        // Verify initial state
+        var allEvents = try database.getEventsBySession("s1")
+        XCTAssertEqual(allEvents.count, 2)
+
+        // Try to insert mix of duplicates and new events
+        let mixedEvents = [
+            SessionEvent(id: "e1", parentId: nil, sessionId: "s1", workspaceId: "/test", type: "session.start", timestamp: "2024-01-01T00:00:00Z", sequence: 1, payload: [:]), // duplicate
+            SessionEvent(id: "e2", parentId: "e1", sessionId: "s1", workspaceId: "/test", type: "message.user", timestamp: "2024-01-01T00:01:00Z", sequence: 2, payload: [:]), // duplicate
+            SessionEvent(id: "e3", parentId: "e2", sessionId: "s1", workspaceId: "/test", type: "message.assistant", timestamp: "2024-01-01T00:02:00Z", sequence: 3, payload: [:]) // new
+        ]
+        let insertedCount = try database.insertEventsIgnoringDuplicates(mixedEvents)
+
+        // Should only insert the new event
+        XCTAssertEqual(insertedCount, 1)
+
+        // Verify total count
+        allEvents = try database.getEventsBySession("s1")
+        XCTAssertEqual(allEvents.count, 3)
+
+        // Verify the new event exists
+        let newEvent = try database.getEvent("e3")
+        XCTAssertNotNil(newEvent)
+        XCTAssertEqual(newEvent?.type, "message.assistant")
     }
 
     // MARK: - Session Operations
