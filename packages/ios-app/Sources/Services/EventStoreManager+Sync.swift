@@ -140,7 +140,7 @@ extension EventStoreManager {
         var inputTokens = 0
         var outputTokens = 0
         for event in events {
-            if let usage = event.payload["tokenUsage"]?.value as? [String: Any] {
+            if let usage = event.payload.dict("tokenUsage") {
                 inputTokens += (usage["inputTokens"] as? Int) ?? 0
                 outputTokens += (usage["outputTokens"] as? Int) ?? 0
             }

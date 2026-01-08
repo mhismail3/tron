@@ -57,18 +57,18 @@ struct SessionEvent: Identifiable, Codable {
     var summary: String {
         switch eventType {
         case .sessionStart:
-            let model = (payload["model"]?.value as? String) ?? "unknown"
+            let model = payload.string("model") ?? "unknown"
             return "Session started • \(model.shortModelName)"
 
         case .sessionEnd:
-            let reason = (payload["reason"]?.value as? String) ?? "completed"
+            let reason = payload.string("reason") ?? "completed"
             return "Session ended (\(reason))"
 
         case .sessionFork:
             return "Forked session"
 
         case .messageUser:
-            if let content = payload["content"]?.value as? String {
+            if let content = payload.string("content") {
                 return String(content.prefix(50)).trimmingCharacters(in: .whitespacesAndNewlines)
             }
             return "User message"
@@ -76,9 +76,9 @@ struct SessionEvent: Identifiable, Codable {
         case .messageAssistant:
             // Extract text content
             var content = ""
-            if let text = payload["content"]?.value as? String, !text.isEmpty {
+            if let text = payload.string("content"), !text.isEmpty {
                 content = String(text.prefix(40)).trimmingCharacters(in: .whitespacesAndNewlines)
-            } else if let text = payload["text"]?.value as? String, !text.isEmpty {
+            } else if let text = payload.string("text"), !text.isEmpty {
                 content = String(text.prefix(40)).trimmingCharacters(in: .whitespacesAndNewlines)
             } else {
                 content = "Assistant response"
@@ -86,10 +86,10 @@ struct SessionEvent: Identifiable, Codable {
 
             // Add metadata indicators
             var indicators: [String] = []
-            if let latency = payload["latency"]?.value as? Int {
+            if let latency = payload.int("latency") {
                 indicators.append(formatLatency(latency))
             }
-            if payload["hasThinking"]?.value as? Bool == true {
+            if payload.bool("hasThinking") == true {
                 indicators.append("Thinking")
             }
 
@@ -99,8 +99,8 @@ struct SessionEvent: Identifiable, Codable {
             return content
 
         case .toolCall:
-            let name = (payload["name"]?.value as? String) ?? "unknown"
-            let args = payload["arguments"]?.value as? [String: Any] ?? [:]
+            let name = payload.string("name") ?? "unknown"
+            let args = payload.dict("arguments") ?? [:]
             let keyArg = extractKeyArgument(toolName: name, from: args)
             if !keyArg.isEmpty {
                 return "\(name): \(keyArg)"
@@ -108,8 +108,8 @@ struct SessionEvent: Identifiable, Codable {
             return name
 
         case .toolResult:
-            let isError = (payload["isError"]?.value as? Bool) ?? false
-            let duration = payload["duration"]?.value as? Int
+            let isError = payload.bool("isError") ?? false
+            let duration = payload.int("duration")
             let status = isError ? "error" : "success"
             if let duration = duration {
                 return "\(duration)ms • \(status)"
@@ -117,12 +117,12 @@ struct SessionEvent: Identifiable, Codable {
             return status
 
         case .streamTurnStart:
-            let turn = (payload["turn"]?.value as? Int) ?? 0
+            let turn = payload.int("turn") ?? 0
             return "Turn \(turn) started"
 
         case .streamTurnEnd:
-            let turn = (payload["turn"]?.value as? Int) ?? 0
-            if let tokenUsage = payload["tokenUsage"]?.value as? [String: Any],
+            let turn = payload.int("turn") ?? 0
+            if let tokenUsage = payload.dict("tokenUsage"),
                let input = tokenUsage["inputTokens"] as? Int,
                let output = tokenUsage["outputTokens"] as? Int {
                 return "Turn \(turn) • \(formatTokens(input + output)) tokens"
@@ -130,29 +130,29 @@ struct SessionEvent: Identifiable, Codable {
             return "Turn \(turn) ended"
 
         case .errorAgent:
-            let code = (payload["code"]?.value as? String) ?? "ERROR"
-            let error = (payload["error"]?.value as? String) ?? "Unknown error"
+            let code = payload.string("code") ?? "ERROR"
+            let error = payload.string("error") ?? "Unknown error"
             return "\(code): \(String(error.prefix(30)))"
 
         case .errorProvider:
-            let provider = (payload["provider"]?.value as? String) ?? "provider"
-            let retryable = (payload["retryable"]?.value as? Bool) ?? false
-            if retryable, let delay = payload["retryAfter"]?.value as? Int {
+            let provider = payload.string("provider") ?? "provider"
+            let retryable = payload.bool("retryable") ?? false
+            if retryable, let delay = payload.int("retryAfter") {
                 return "\(provider) • retry in \(delay)ms"
             }
             return "\(provider) error"
 
         case .errorTool:
-            let toolName = (payload["toolName"]?.value as? String) ?? "tool"
+            let toolName = payload.string("toolName") ?? "tool"
             return "\(toolName) failed"
 
         case .ledgerUpdate:
             return "Ledger updated"
 
         case .configModelSwitch:
-            let from = (payload["previousModel"]?.value as? String)?.shortModelName ?? "?"
-            let to = (payload["newModel"]?.value as? String)?.shortModelName ??
-                     (payload["model"]?.value as? String)?.shortModelName ?? "?"
+            let from = payload.string("previousModel")?.shortModelName ?? "?"
+            let to = payload.string("newModel")?.shortModelName ??
+                     payload.string("model")?.shortModelName ?? "?"
             return "\(from) → \(to)"
 
         case .notificationInterrupted:
