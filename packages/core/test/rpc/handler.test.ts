@@ -3,9 +3,12 @@
  *
  * TDD: Tests for request handling and dispatching
  */
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { RpcHandler, type RpcContext } from '../../src/rpc/handler.js';
 import type { RpcRequest, RpcResponse, RpcEvent } from '../../src/rpc/types.js';
+import fs from 'fs/promises';
+import os from 'os';
+import path from 'path';
 
 describe('RpcHandler', () => {
   let handler: RpcHandler;
@@ -347,6 +350,198 @@ describe('RpcHandler', () => {
 
       expect(response.success).toBe(false);
       expect(response.error?.code).toBe('BLOCKED');
+    });
+  });
+
+  describe('filesystem.createDir', () => {
+    let testDir: string;
+
+    beforeEach(async () => {
+      testDir = await fs.mkdtemp(path.join(os.tmpdir(), 'tron-test-'));
+    });
+
+    afterEach(async () => {
+      try {
+        await fs.rm(testDir, { recursive: true, force: true });
+      } catch {
+        // Ignore cleanup errors
+      }
+    });
+
+    it('should return error for missing path param', async () => {
+      const request: RpcRequest = {
+        id: 'req_mkdir_1',
+        method: 'filesystem.createDir',
+        params: {},
+      };
+
+      const response = await handler.handle(request);
+
+      expect(response.success).toBe(false);
+      expect(response.error?.code).toBe('INVALID_PARAMS');
+      expect(response.error?.message).toContain('path');
+    });
+
+    it('should return error for empty path param', async () => {
+      const request: RpcRequest = {
+        id: 'req_mkdir_2',
+        method: 'filesystem.createDir',
+        params: { path: '' },
+      };
+
+      const response = await handler.handle(request);
+
+      expect(response.success).toBe(false);
+      expect(response.error?.code).toBe('INVALID_PARAMS');
+    });
+
+    it('should reject path traversal attempts', async () => {
+      const request: RpcRequest = {
+        id: 'req_mkdir_3',
+        method: 'filesystem.createDir',
+        params: { path: `${testDir}/../../../etc/malicious` },
+      };
+
+      const response = await handler.handle(request);
+
+      expect(response.success).toBe(false);
+      expect(response.error?.code).toBe('INVALID_PARAMS');
+      expect(response.error?.message).toContain('traversal');
+    });
+
+    it('should reject hidden folder names', async () => {
+      const request: RpcRequest = {
+        id: 'req_mkdir_4',
+        method: 'filesystem.createDir',
+        params: { path: `${testDir}/.hidden` },
+      };
+
+      const response = await handler.handle(request);
+
+      expect(response.success).toBe(false);
+      expect(response.error?.code).toBe('INVALID_PARAMS');
+    });
+
+    it('should reject folder names with invalid characters', async () => {
+      const invalidNames = ['folder<name', 'folder>name', 'folder:name', 'folder"name', 'folder|name', 'folder?name', 'folder*name'];
+
+      for (const name of invalidNames) {
+        const request: RpcRequest = {
+          id: `req_mkdir_invalid_${name}`,
+          method: 'filesystem.createDir',
+          params: { path: `${testDir}/${name}` },
+        };
+
+        const response = await handler.handle(request);
+
+        expect(response.success).toBe(false);
+        expect(response.error?.code).toBe('INVALID_PARAMS');
+        expect(response.error?.message).toContain('invalid characters');
+      }
+    });
+
+    it('should return ALREADY_EXISTS when directory exists', async () => {
+      const existingDir = path.join(testDir, 'existing');
+      await fs.mkdir(existingDir);
+
+      const request: RpcRequest = {
+        id: 'req_mkdir_exists',
+        method: 'filesystem.createDir',
+        params: { path: existingDir },
+      };
+
+      const response = await handler.handle(request);
+
+      expect(response.success).toBe(false);
+      expect(response.error?.code).toBe('ALREADY_EXISTS');
+    });
+
+    it('should return PARENT_NOT_FOUND when parent does not exist and recursive is false', async () => {
+      const request: RpcRequest = {
+        id: 'req_mkdir_no_parent',
+        method: 'filesystem.createDir',
+        params: {
+          path: path.join(testDir, 'nonexistent', 'child'),
+          recursive: false,
+        },
+      };
+
+      const response = await handler.handle(request);
+
+      expect(response.success).toBe(false);
+      expect(response.error?.code).toBe('PARENT_NOT_FOUND');
+    });
+
+    it('should create directory successfully', async () => {
+      const newDir = path.join(testDir, 'new-folder');
+
+      const request: RpcRequest = {
+        id: 'req_mkdir_success',
+        method: 'filesystem.createDir',
+        params: { path: newDir },
+      };
+
+      const response = await handler.handle(request);
+
+      expect(response.success).toBe(true);
+      expect(response.result).toHaveProperty('created', true);
+      expect(response.result).toHaveProperty('path', newDir);
+
+      // Verify directory was actually created
+      const stat = await fs.stat(newDir);
+      expect(stat.isDirectory()).toBe(true);
+    });
+
+    it('should create nested directories when recursive is true', async () => {
+      const nestedDir = path.join(testDir, 'parent', 'child', 'grandchild');
+
+      const request: RpcRequest = {
+        id: 'req_mkdir_recursive',
+        method: 'filesystem.createDir',
+        params: {
+          path: nestedDir,
+          recursive: true,
+        },
+      };
+
+      const response = await handler.handle(request);
+
+      expect(response.success).toBe(true);
+      expect(response.result).toHaveProperty('created', true);
+
+      // Verify directory was actually created
+      const stat = await fs.stat(nestedDir);
+      expect(stat.isDirectory()).toBe(true);
+    });
+
+    it('should allow folder names with spaces and underscores', async () => {
+      const newDir = path.join(testDir, 'my folder_name');
+
+      const request: RpcRequest = {
+        id: 'req_mkdir_spaces',
+        method: 'filesystem.createDir',
+        params: { path: newDir },
+      };
+
+      const response = await handler.handle(request);
+
+      expect(response.success).toBe(true);
+      expect(response.result).toHaveProperty('created', true);
+    });
+
+    it('should allow folder names with dashes', async () => {
+      const newDir = path.join(testDir, 'my-new-project');
+
+      const request: RpcRequest = {
+        id: 'req_mkdir_dashes',
+        method: 'filesystem.createDir',
+        params: { path: newDir },
+      };
+
+      const response = await handler.handle(request);
+
+      expect(response.success).toBe(true);
+      expect(response.result).toHaveProperty('created', true);
     });
   });
 });

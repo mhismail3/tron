@@ -126,6 +126,7 @@ export type RpcMethod =
   // Filesystem operations
   | 'filesystem.listDir'
   | 'filesystem.getHome'
+  | 'filesystem.createDir'
   // Search
   | 'search.content'
   | 'search.events'
@@ -839,6 +840,21 @@ export interface FilesystemGetHomeResult {
     path: string;
     exists: boolean;
   }>;
+}
+
+/** Create directory */
+export interface FilesystemCreateDirParams {
+  /** Path of the directory to create */
+  path: string;
+  /** Whether to create parent directories if they don't exist (default: false) */
+  recursive?: boolean;
+}
+
+export interface FilesystemCreateDirResult {
+  /** Whether the directory was created successfully */
+  created: boolean;
+  /** The absolute path of the created directory */
+  path: string;
 }
 
 // =============================================================================

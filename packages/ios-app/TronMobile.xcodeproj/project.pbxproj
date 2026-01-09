@@ -7,6 +7,8 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		FOLDER00100000001A00000001 /* FolderNameValidator.swift in Sources */ = {isa = PBXBuildFile; fileRef = FOLDER00100000002A00000001 /* FolderNameValidator.swift */; };
+		FOLDER00100000003A00000001 /* FolderCreationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FOLDER00100000004A00000001 /* FolderCreationTests.swift */; };
 		0186B0083110F291EA235935 /* RPCTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = B082B6CE011A17ED14F3393B /* RPCTypes.swift */; };
 		029590450DF8FB55EBB86C23 /* ModelNameFormatter.swift in Sources */ = {isa = PBXBuildFile; fileRef = D03A2E1D488FAFF8C0088D61 /* ModelNameFormatter.swift */; };
 		0586FDB3434B135163CEE2D4 /* ChatViewModel+Events.swift in Sources */ = {isa = PBXBuildFile; fileRef = 85AB906ED58C2A5018AA8055 /* ChatViewModel+Events.swift */; };
@@ -76,6 +78,8 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+		FOLDER00100000002A00000001 /* FolderNameValidator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FolderNameValidator.swift; sourceTree = "<group>"; };
+		FOLDER00100000004A00000001 /* FolderCreationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FolderCreationTests.swift; sourceTree = "<group>"; };
 		00621F6FD9BF0B51E5370E4B /* EventDatabase.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EventDatabase.swift; sourceTree = "<group>"; };
 		00739C1F26626C7791649198 /* TronIcons.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TronIcons.swift; sourceTree = "<group>"; };
 		0123F7482F532CD8FBA61F0E /* UnifiedEventTransformerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UnifiedEventTransformerTests.swift; sourceTree = "<group>"; };
@@ -142,6 +146,7 @@
 			isa = PBXGroup;
 			children = (
 				A013DFE849DA84E8EA5F545C /* EventDatabaseTests.swift */,
+				FOLDER00100000004A00000001 /* FolderCreationTests.swift */,
 				7A113B9D98B4711E36919F2A /* RecentSessionsTests.swift */,
 				0123F7482F532CD8FBA61F0E /* UnifiedEventTransformerTests.swift */,
 			);
@@ -151,6 +156,7 @@
 		17D2D493213C68D1AB6E2B84 /* Utilities */ = {
 			isa = PBXGroup;
 			children = (
+				FOLDER00100000002A00000001 /* FolderNameValidator.swift */,
 				D03A2E1D488FAFF8C0088D61 /* ModelNameFormatter.swift */,
 				13A4AA26839505AD8FD5CEC5 /* TokenFormatter.swift */,
 			);
@@ -440,6 +446,7 @@
 				AB572EB35C683B3E98C1CE75 /* StreamingPayloads.swift in Sources */,
 				490E7266613F29CD1E3F69F3 /* String+Extensions.swift in Sources */,
 				329F629FAD3C73DA80ABDD4A /* TokenFormatter.swift in Sources */,
+				FOLDER00100000001A00000001 /* FolderNameValidator.swift in Sources */,
 				E127B12EA0AC057011AC2A09 /* ToolPayloads.swift in Sources */,
 				F7C7E361C09D466FAEE1AAEE /* ToolResultViewers.swift in Sources */,
 				EAE9FFCC465D011583D191E0 /* TronColors.swift in Sources */,
@@ -459,6 +466,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				FACF3272EAAA614047FA83C8 /* EventDatabaseTests.swift in Sources */,
+				FOLDER00100000003A00000001 /* FolderCreationTests.swift in Sources */,
 				A30DB8557BB5D3E5CFD61ADD /* RecentSessionsTests.swift in Sources */,
 				814753F04077C3B98C1BF843 /* UnifiedEventTransformerTests.swift in Sources */,
 			);
@@ -479,6 +487,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
+				GENERATE_INFOPLIST_FILE = YES;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
@@ -581,6 +590,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
+				GENERATE_INFOPLIST_FILE = YES;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",

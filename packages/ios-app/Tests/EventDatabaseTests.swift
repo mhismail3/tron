@@ -248,17 +248,16 @@ final class EventDatabaseTests: XCTestCase {
             workspaceId: "/test/workspace",
             rootEventId: "event-1",
             headEventId: "event-3",
-            status: .active,
             title: "Test Session",
-            model: "claude-sonnet-4",
-            provider: "anthropic",
+            latestModel: "claude-sonnet-4",
             workingDirectory: "/test/workspace",
             createdAt: ISO8601DateFormatter().string(from: Date()),
             lastActivityAt: ISO8601DateFormatter().string(from: Date()),
             eventCount: 3,
             messageCount: 2,
             inputTokens: 100,
-            outputTokens: 200
+            outputTokens: 200,
+            cost: 0.0
         )
 
         try database.insertSession(session)
@@ -275,18 +274,18 @@ final class EventDatabaseTests: XCTestCase {
     func testGetAllSessions() async throws {
         try database.insertSession(CachedSession(
             id: "s1", workspaceId: "/test", rootEventId: nil, headEventId: nil,
-            status: .active, title: "Session 1", model: "claude-sonnet-4",
-            provider: "anthropic", workingDirectory: "/test",
+            title: "Session 1", latestModel: "claude-sonnet-4",
+            workingDirectory: "/test",
             createdAt: "2024-01-01T00:00:00Z", lastActivityAt: "2024-01-01T00:00:00Z",
-            eventCount: 0, messageCount: 0, inputTokens: 0, outputTokens: 0
+            eventCount: 0, messageCount: 0, inputTokens: 0, outputTokens: 0, cost: 0.0
         ))
 
         try database.insertSession(CachedSession(
             id: "s2", workspaceId: "/test", rootEventId: nil, headEventId: nil,
-            status: .active, title: "Session 2", model: "claude-opus-4",
-            provider: "anthropic", workingDirectory: "/test",
+            title: "Session 2", latestModel: "claude-opus-4",
+            workingDirectory: "/test",
             createdAt: "2024-01-02T00:00:00Z", lastActivityAt: "2024-01-02T00:00:00Z",
-            eventCount: 0, messageCount: 0, inputTokens: 0, outputTokens: 0
+            eventCount: 0, messageCount: 0, inputTokens: 0, outputTokens: 0, cost: 0.0
         ))
 
         let sessions = try database.getAllSessions()
@@ -299,10 +298,10 @@ final class EventDatabaseTests: XCTestCase {
     func testDeleteSession() async throws {
         try database.insertSession(CachedSession(
             id: "s1", workspaceId: "/test", rootEventId: nil, headEventId: nil,
-            status: .active, title: "Test", model: "claude-sonnet-4",
-            provider: "anthropic", workingDirectory: "/test",
+            title: "Test", latestModel: "claude-sonnet-4",
+            workingDirectory: "/test",
             createdAt: "2024-01-01", lastActivityAt: "2024-01-01",
-            eventCount: 0, messageCount: 0, inputTokens: 0, outputTokens: 0
+            eventCount: 0, messageCount: 0, inputTokens: 0, outputTokens: 0, cost: 0.0
         ))
 
         var session = try database.getSession("s1")
@@ -353,10 +352,10 @@ final class EventDatabaseTests: XCTestCase {
         try database.insertEvents(events)
         try database.insertSession(CachedSession(
             id: "s1", workspaceId: "/test", rootEventId: "e1", headEventId: "e3",
-            status: .active, title: "Test", model: "claude-sonnet-4",
-            provider: "anthropic", workingDirectory: "/test",
+            title: "Test", latestModel: "claude-sonnet-4",
+            workingDirectory: "/test",
             createdAt: "2024-01-01", lastActivityAt: "2024-01-01",
-            eventCount: 3, messageCount: 2, inputTokens: 0, outputTokens: 0
+            eventCount: 3, messageCount: 2, inputTokens: 0, outputTokens: 0, cost: 0.0
         ))
 
         // Use unified transformer to reconstruct state
@@ -380,10 +379,10 @@ final class EventDatabaseTests: XCTestCase {
         try database.insertEvents(events)
         try database.insertSession(CachedSession(
             id: "s1", workspaceId: "/test", rootEventId: "root", headEventId: "msg2",
-            status: .active, title: "Test", model: "claude-sonnet-4",
-            provider: "anthropic", workingDirectory: "/test",
+            title: "Test", latestModel: "claude-sonnet-4",
+            workingDirectory: "/test",
             createdAt: "2024-01-01", lastActivityAt: "2024-01-01",
-            eventCount: 3, messageCount: 2, inputTokens: 0, outputTokens: 0
+            eventCount: 3, messageCount: 2, inputTokens: 0, outputTokens: 0, cost: 0.0
         ))
 
         let tree = try database.buildTreeVisualization("s1")
@@ -415,10 +414,10 @@ final class EventDatabaseTests: XCTestCase {
         try database.insertEvents(events)
         try database.insertSession(CachedSession(
             id: "s1", workspaceId: "/test", rootEventId: "root", headEventId: "branch-a",
-            status: .active, title: "Test", model: "claude-sonnet-4",
-            provider: "anthropic", workingDirectory: "/test",
+            title: "Test", latestModel: "claude-sonnet-4",
+            workingDirectory: "/test",
             createdAt: "2024-01-01", lastActivityAt: "2024-01-01",
-            eventCount: 4, messageCount: 1, inputTokens: 0, outputTokens: 0
+            eventCount: 4, messageCount: 1, inputTokens: 0, outputTokens: 0, cost: 0.0
         ))
 
         let tree = try database.buildTreeVisualization("s1")
@@ -472,10 +471,10 @@ final class EventDatabaseTests: XCTestCase {
         try database.insertEvents(events)
         try database.insertSession(CachedSession(
             id: "s1", workspaceId: "/test", rootEventId: "e1", headEventId: "e3",
-            status: .active, title: "Test", model: "claude-sonnet-4",
-            provider: "anthropic", workingDirectory: "/test",
+            title: "Test", latestModel: "claude-sonnet-4",
+            workingDirectory: "/test",
             createdAt: "2024-01-01", lastActivityAt: "2024-01-01",
-            eventCount: 3, messageCount: 2, inputTokens: 0, outputTokens: 0
+            eventCount: 3, messageCount: 2, inputTokens: 0, outputTokens: 0, cost: 0.0
         ))
 
         // Use unified transformer to reconstruct state

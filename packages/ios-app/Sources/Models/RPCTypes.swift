@@ -459,6 +459,23 @@ struct SuggestedPath: Decodable, Identifiable, Hashable {
     var id: String { path }
 }
 
+// MARK: - Create Directory
+
+struct FilesystemCreateDirParams: Encodable {
+    let path: String
+    let recursive: Bool?
+
+    init(path: String, recursive: Bool? = nil) {
+        self.path = path
+        self.recursive = recursive
+    }
+}
+
+struct FilesystemCreateDirResult: Decodable {
+    let created: Bool
+    let path: String
+}
+
 // MARK: - Memory Methods
 
 struct MemorySearchParams: Encodable {

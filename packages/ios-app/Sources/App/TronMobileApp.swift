@@ -1090,6 +1090,13 @@ struct WorkspaceSelector: View {
     @State private var errorMessage: String?
     @State private var showHidden = false
 
+    // Folder creation state
+    @State private var isCreatingFolder = false
+    @State private var newFolderName = ""
+    @State private var isSubmittingFolder = false
+    @State private var folderCreationError: String?
+    @FocusState private var folderNameFieldFocused: Bool
+
     var body: some View {
         NavigationStack {
             ZStack {
@@ -1227,6 +1234,9 @@ struct WorkspaceSelector: View {
                             .padding(.leading, 48)
                     }
 
+                    // New folder row
+                    newFolderRow
+
                     // Directories
                     ForEach(entries.filter { $0.isDirectory }) { entry in
                         Button {
@@ -1306,6 +1316,163 @@ struct WorkspaceSelector: View {
     private func navigateUp() {
         let parent = URL(fileURLWithPath: currentPath).deletingLastPathComponent().path
         navigateTo(parent)
+    }
+
+    // MARK: - Folder Creation
+
+    @ViewBuilder
+    private var newFolderRow: some View {
+        if isCreatingFolder {
+            // Inline text field for folder name
+            VStack(spacing: 0) {
+                HStack(spacing: 12) {
+                    Image(systemName: "folder.badge.plus")
+                        .font(.system(size: 14))
+                        .foregroundStyle(.tronEmerald)
+
+                    TextField("Folder name", text: $newFolderName)
+                        .font(.system(size: 13, weight: .regular, design: .monospaced))
+                        .foregroundStyle(.tronEmerald)
+                        .textFieldStyle(.plain)
+                        .autocorrectionDisabled()
+                        .textInputAutocapitalization(.never)
+                        .focused($folderNameFieldFocused)
+                        .submitLabel(.done)
+                        .onSubmit {
+                            submitNewFolder()
+                        }
+
+                    if isSubmittingFolder {
+                        ProgressView()
+                            .scaleEffect(0.8)
+                            .tint(.tronEmerald)
+                    } else {
+                        HStack(spacing: 8) {
+                            Button {
+                                cancelFolderCreation()
+                            } label: {
+                                Image(systemName: "xmark.circle.fill")
+                                    .font(.system(size: 18))
+                                    .foregroundStyle(.white.opacity(0.4))
+                            }
+
+                            Button {
+                                submitNewFolder()
+                            } label: {
+                                Image(systemName: "checkmark.circle.fill")
+                                    .font(.system(size: 18))
+                                    .foregroundStyle(canSubmitFolder ? .tronEmerald : .white.opacity(0.2))
+                            }
+                            .disabled(!canSubmitFolder)
+                        }
+                    }
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 10)
+
+                // Error message
+                if let error = folderCreationError {
+                    HStack {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .font(.system(size: 10))
+                            .foregroundStyle(.tronError)
+                        Text(error)
+                            .font(.system(size: 11, design: .monospaced))
+                            .foregroundStyle(.tronError)
+                        Spacer()
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 8)
+                }
+            }
+            .background(Color.tronPhthaloGreen.opacity(0.1))
+            .onAppear {
+                folderNameFieldFocused = true
+            }
+        } else {
+            // "+ New Folder" button
+            Button {
+                startFolderCreation()
+            } label: {
+                HStack {
+                    Image(systemName: "folder.badge.plus")
+                        .font(.system(size: 14))
+                        .foregroundStyle(.tronEmerald.opacity(0.8))
+                    Text("New Folder")
+                        .font(.system(size: 13, weight: .medium, design: .monospaced))
+                        .foregroundStyle(.tronEmerald.opacity(0.8))
+                    Spacer()
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 12)
+            }
+        }
+
+        Divider()
+            .background(Color.tronBorder.opacity(0.5))
+            .padding(.leading, 48)
+    }
+
+    private var canSubmitFolder: Bool {
+        let trimmed = newFolderName.trimmingCharacters(in: .whitespacesAndNewlines)
+        return !trimmed.isEmpty && !isSubmittingFolder
+    }
+
+    private func startFolderCreation() {
+        withAnimation(.easeInOut(duration: 0.2)) {
+            isCreatingFolder = true
+            newFolderName = ""
+            folderCreationError = nil
+        }
+    }
+
+    private func cancelFolderCreation() {
+        withAnimation(.easeInOut(duration: 0.2)) {
+            isCreatingFolder = false
+            newFolderName = ""
+            folderCreationError = nil
+            folderNameFieldFocused = false
+        }
+    }
+
+    private func submitNewFolder() {
+        let trimmedName = newFolderName.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        // Client-side validation using FolderNameValidator
+        if let error = FolderNameValidator.validationError(for: trimmedName) {
+            folderCreationError = error
+            return
+        }
+
+        isSubmittingFolder = true
+        folderCreationError = nil
+
+        Task {
+            do {
+                let newPath = (currentPath as NSString).appendingPathComponent(trimmedName)
+                let result = try await rpcClient.createDirectory(path: newPath)
+
+                await MainActor.run {
+                    isSubmittingFolder = false
+                    isCreatingFolder = false
+                    newFolderName = ""
+
+                    // Auto-select the new folder and dismiss
+                    selectedPath = result.path
+                    dismiss()
+                }
+            } catch let error as RPCError {
+                await MainActor.run {
+                    isSubmittingFolder = false
+                    folderCreationError = error.message
+                }
+            } catch {
+                await MainActor.run {
+                    isSubmittingFolder = false
+                    folderCreationError = error.localizedDescription
+                }
+            }
+        }
     }
 }
 

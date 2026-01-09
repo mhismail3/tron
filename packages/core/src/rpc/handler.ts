@@ -48,6 +48,8 @@ import type {
   FilesystemListDirParams,
   FilesystemListDirResult,
   FilesystemGetHomeResult,
+  FilesystemCreateDirParams,
+  FilesystemCreateDirResult,
   WorktreeGetStatusParams,
   WorktreeGetStatusResult,
   WorktreeCommitParams,
@@ -306,6 +308,8 @@ export class RpcHandler extends EventEmitter {
           return this.handleFilesystemListDir(request);
         case 'filesystem.getHome':
           return this.handleFilesystemGetHome(request);
+        case 'filesystem.createDir':
+          return this.handleFilesystemCreateDir(request);
 
         // System methods
         case 'system.ping':
@@ -761,6 +765,89 @@ export class RpcHandler extends EventEmitter {
     };
 
     return this.successResponse(request.id, result);
+  }
+
+  private async handleFilesystemCreateDir(request: RpcRequest): Promise<RpcResponse> {
+    const params = request.params as FilesystemCreateDirParams | undefined;
+
+    // Validate path parameter
+    if (!params?.path) {
+      return this.errorResponse(request.id, 'INVALID_PARAMS', 'path is required');
+    }
+
+    const inputPath = params.path.trim();
+    if (!inputPath) {
+      return this.errorResponse(request.id, 'INVALID_PARAMS', 'path is required');
+    }
+
+    // Reject path traversal attempts before normalization
+    if (inputPath.includes('..')) {
+      return this.errorResponse(request.id, 'INVALID_PARAMS', 'Path traversal not allowed');
+    }
+
+    // Normalize path
+    const normalizedPath = path.normalize(inputPath);
+
+    // Validate folder name
+    const folderName = path.basename(normalizedPath);
+    if (!folderName) {
+      return this.errorResponse(request.id, 'INVALID_PARAMS', 'Invalid folder name');
+    }
+
+    // Reject hidden folder names (starting with .)
+    if (folderName.startsWith('.')) {
+      return this.errorResponse(request.id, 'INVALID_PARAMS', 'Hidden folders not allowed');
+    }
+
+    // Check for reserved/invalid characters (cross-platform safety)
+    const invalidChars = /[<>:"|?*\x00-\x1f]/;
+    if (invalidChars.test(folderName)) {
+      return this.errorResponse(request.id, 'INVALID_PARAMS', 'Folder name contains invalid characters');
+    }
+
+    try {
+      const resolvedPath = path.resolve(normalizedPath);
+
+      // Check if path already exists
+      try {
+        const stat = await fs.stat(resolvedPath);
+        if (stat.isDirectory()) {
+          return this.errorResponse(request.id, 'ALREADY_EXISTS', 'Directory already exists');
+        } else {
+          return this.errorResponse(request.id, 'INVALID_PATH', 'Path exists but is not a directory');
+        }
+      } catch {
+        // Path doesn't exist - this is expected, continue with creation
+      }
+
+      // Create the directory
+      await fs.mkdir(resolvedPath, { recursive: params.recursive ?? false });
+
+      const result: FilesystemCreateDirResult = {
+        created: true,
+        path: resolvedPath,
+      };
+
+      return this.successResponse(request.id, result);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to create directory';
+
+      // Map common error codes to user-friendly error codes
+      if (error instanceof Error && 'code' in error) {
+        const code = (error as NodeJS.ErrnoException).code;
+        if (code === 'EACCES') {
+          return this.errorResponse(request.id, 'PERMISSION_DENIED', 'Permission denied');
+        }
+        if (code === 'ENOENT') {
+          return this.errorResponse(request.id, 'PARENT_NOT_FOUND', 'Parent directory does not exist');
+        }
+        if (code === 'EEXIST') {
+          return this.errorResponse(request.id, 'ALREADY_EXISTS', 'Directory already exists');
+        }
+      }
+
+      return this.errorResponse(request.id, 'FILESYSTEM_ERROR', message);
+    }
   }
 
   // ===========================================================================

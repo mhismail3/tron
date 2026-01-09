@@ -35,17 +35,16 @@ final class RecentSessionsTests: XCTestCase {
             workspaceId: "/workspace/a",
             rootEventId: nil,
             headEventId: nil,
-            status: .active,
             title: "Oldest",
-            model: "claude-sonnet-4",
-            provider: "anthropic",
+            latestModel: "claude-sonnet-4",
             workingDirectory: "/workspace/a",
             createdAt: "2024-01-01T00:00:00Z",
             lastActivityAt: "2024-01-01T00:00:00Z",
             eventCount: 0,
             messageCount: 0,
             inputTokens: 0,
-            outputTokens: 0
+            outputTokens: 0,
+            cost: 0.0
         )
 
         let session2 = CachedSession(
@@ -53,17 +52,16 @@ final class RecentSessionsTests: XCTestCase {
             workspaceId: "/workspace/b",
             rootEventId: nil,
             headEventId: nil,
-            status: .active,
             title: "Middle",
-            model: "claude-sonnet-4",
-            provider: "anthropic",
+            latestModel: "claude-sonnet-4",
             workingDirectory: "/workspace/b",
             createdAt: "2024-01-02T00:00:00Z",
             lastActivityAt: "2024-01-02T00:00:00Z",
             eventCount: 0,
             messageCount: 0,
             inputTokens: 0,
-            outputTokens: 0
+            outputTokens: 0,
+            cost: 0.0
         )
 
         let session3 = CachedSession(
@@ -71,17 +69,16 @@ final class RecentSessionsTests: XCTestCase {
             workspaceId: "/workspace/c",
             rootEventId: nil,
             headEventId: nil,
-            status: .active,
             title: "Newest",
-            model: "claude-sonnet-4",
-            provider: "anthropic",
+            latestModel: "claude-sonnet-4",
             workingDirectory: "/workspace/c",
             createdAt: "2024-01-03T00:00:00Z",
             lastActivityAt: "2024-01-03T00:00:00Z",
             eventCount: 0,
             messageCount: 0,
             inputTokens: 0,
-            outputTokens: 0
+            outputTokens: 0,
+            cost: 0.0
         )
 
         try database.insertSession(session1)
@@ -105,17 +102,16 @@ final class RecentSessionsTests: XCTestCase {
             workspaceId: "/workspace/a",
             rootEventId: nil,
             headEventId: nil,
-            status: .active,
             title: "A1",
-            model: "claude-sonnet-4",
-            provider: "anthropic",
+            latestModel: "claude-sonnet-4",
             workingDirectory: "/workspace/a",
             createdAt: "2024-01-01T00:00:00Z",
             lastActivityAt: "2024-01-01T00:00:00Z",
             eventCount: 0,
             messageCount: 0,
             inputTokens: 0,
-            outputTokens: 0
+            outputTokens: 0,
+            cost: 0.0
         )
 
         let sessionA2 = CachedSession(
@@ -123,17 +119,16 @@ final class RecentSessionsTests: XCTestCase {
             workspaceId: "/workspace/a",
             rootEventId: nil,
             headEventId: nil,
-            status: .active,
             title: "A2",
-            model: "claude-sonnet-4",
-            provider: "anthropic",
+            latestModel: "claude-sonnet-4",
             workingDirectory: "/workspace/a",
             createdAt: "2024-01-02T00:00:00Z",
             lastActivityAt: "2024-01-02T00:00:00Z",
             eventCount: 0,
             messageCount: 0,
             inputTokens: 0,
-            outputTokens: 0
+            outputTokens: 0,
+            cost: 0.0
         )
 
         let sessionB1 = CachedSession(
@@ -141,17 +136,16 @@ final class RecentSessionsTests: XCTestCase {
             workspaceId: "/workspace/b",
             rootEventId: nil,
             headEventId: nil,
-            status: .active,
             title: "B1",
-            model: "claude-sonnet-4",
-            provider: "anthropic",
+            latestModel: "claude-sonnet-4",
             workingDirectory: "/workspace/b",
             createdAt: "2024-01-03T00:00:00Z",
             lastActivityAt: "2024-01-03T00:00:00Z",
             eventCount: 0,
             messageCount: 0,
             inputTokens: 0,
-            outputTokens: 0
+            outputTokens: 0,
+            cost: 0.0
         )
 
         try database.insertSession(sessionA1)
@@ -182,17 +176,16 @@ final class RecentSessionsTests: XCTestCase {
                 workspaceId: "/workspace",
                 rootEventId: nil,
                 headEventId: nil,
-                status: .active,
                 title: "Session \(i)",
-                model: "claude-sonnet-4",
-                provider: "anthropic",
+                latestModel: "claude-sonnet-4",
                 workingDirectory: "/workspace",
                 createdAt: "2024-01-\(String(format: "%02d", i))T00:00:00Z",
                 lastActivityAt: "2024-01-\(String(format: "%02d", i))T00:00:00Z",
                 eventCount: 0,
                 messageCount: 0,
                 inputTokens: 0,
-                outputTokens: 0
+                outputTokens: 0,
+                cost: 0.0
             )
             try database.insertSession(session)
         }
@@ -217,17 +210,17 @@ final class RecentSessionsTests: XCTestCase {
             workspaceId: "/workspace",
             rootEventId: nil,
             headEventId: nil,
-            status: .active,
             title: "Active",
-            model: "claude-sonnet-4",
-            provider: "anthropic",
+            latestModel: "claude-sonnet-4",
             workingDirectory: "/workspace",
             createdAt: "2024-01-02T00:00:00Z",
             lastActivityAt: "2024-01-02T00:00:00Z",
+            endedAt: nil,
             eventCount: 0,
             messageCount: 0,
             inputTokens: 0,
-            outputTokens: 0
+            outputTokens: 0,
+            cost: 0.0
         )
 
         let endedSession = CachedSession(
@@ -235,17 +228,17 @@ final class RecentSessionsTests: XCTestCase {
             workspaceId: "/workspace",
             rootEventId: nil,
             headEventId: nil,
-            status: .ended,
             title: "Ended",
-            model: "claude-sonnet-4",
-            provider: "anthropic",
+            latestModel: "claude-sonnet-4",
             workingDirectory: "/workspace",
             createdAt: "2024-01-01T00:00:00Z",
             lastActivityAt: "2024-01-01T00:00:00Z",
+            endedAt: "2024-01-01T00:05:00Z",
             eventCount: 0,
             messageCount: 0,
             inputTokens: 0,
-            outputTokens: 0
+            outputTokens: 0,
+            cost: 0.0
         )
 
         try database.insertSession(activeSession)
@@ -254,9 +247,10 @@ final class RecentSessionsTests: XCTestCase {
         let sessions = try database.getAllSessions()
         XCTAssertEqual(sessions.count, 2)
 
-        let statuses = sessions.map { $0.status }
-        XCTAssertTrue(statuses.contains(.active))
-        XCTAssertTrue(statuses.contains(.ended))
+        let hasActive = sessions.contains { !$0.isEnded }
+        let hasEnded = sessions.contains { $0.isEnded }
+        XCTAssertTrue(hasActive)
+        XCTAssertTrue(hasEnded)
     }
 
     // MARK: - Session Display Data Tests
@@ -268,17 +262,16 @@ final class RecentSessionsTests: XCTestCase {
             workspaceId: "/projects/myapp",
             rootEventId: nil,
             headEventId: nil,
-            status: .active,
             title: "My Custom Title",
-            model: "claude-sonnet-4",
-            provider: "anthropic",
+            latestModel: "claude-sonnet-4",
             workingDirectory: "/projects/myapp",
             createdAt: "2024-01-01T00:00:00Z",
             lastActivityAt: "2024-01-01T00:00:00Z",
             eventCount: 0,
             messageCount: 0,
             inputTokens: 0,
-            outputTokens: 0
+            outputTokens: 0,
+            cost: 0.0
         )
 
         let sessionWithoutTitle = CachedSession(
@@ -286,17 +279,16 @@ final class RecentSessionsTests: XCTestCase {
             workspaceId: "/projects/myapp",
             rootEventId: nil,
             headEventId: nil,
-            status: .active,
             title: nil,
-            model: "claude-sonnet-4",
-            provider: "anthropic",
+            latestModel: "claude-sonnet-4",
             workingDirectory: "/projects/myapp",
             createdAt: "2024-01-01T00:00:00Z",
             lastActivityAt: "2024-01-01T00:00:00Z",
             eventCount: 0,
             messageCount: 0,
             inputTokens: 0,
-            outputTokens: 0
+            outputTokens: 0,
+            cost: 0.0
         )
 
         XCTAssertEqual(sessionWithTitle.displayTitle, "My Custom Title")
@@ -306,15 +298,13 @@ final class RecentSessionsTests: XCTestCase {
     /// Test that lastUserPrompt is accessible for display
     @MainActor
     func testSessionWithLastUserPrompt() async throws {
-        var session = CachedSession(
+        let session = CachedSession(
             id: "s1",
             workspaceId: "/workspace",
             rootEventId: nil,
             headEventId: nil,
-            status: .active,
             title: "Test",
-            model: "claude-sonnet-4",
-            provider: "anthropic",
+            latestModel: "claude-sonnet-4",
             workingDirectory: "/workspace",
             createdAt: "2024-01-01T00:00:00Z",
             lastActivityAt: "2024-01-01T00:00:00Z",
@@ -322,6 +312,7 @@ final class RecentSessionsTests: XCTestCase {
             messageCount: 1,
             inputTokens: 0,
             outputTokens: 0,
+            cost: 0.0,
             lastUserPrompt: "Help me refactor this code",
             lastAssistantResponse: nil,
             lastToolCount: nil,
@@ -390,17 +381,16 @@ final class RecentSessionsTests: XCTestCase {
             workspaceId: "/workspace",
             rootEventId: "e1",
             headEventId: "e3",
-            status: .active,
             title: "Source",
-            model: "claude-sonnet-4",
-            provider: "anthropic",
+            latestModel: "claude-sonnet-4",
             workingDirectory: "/workspace",
             createdAt: "2024-01-01T00:00:00Z",
             lastActivityAt: "2024-01-01T00:02:00Z",
             eventCount: 3,
             messageCount: 2,
             inputTokens: 0,
-            outputTokens: 0
+            outputTokens: 0,
+            cost: 0.0
         ))
 
         // Verify source session exists
@@ -419,17 +409,16 @@ final class RecentSessionsTests: XCTestCase {
             workspaceId: "/workspace",
             rootEventId: "e1",
             headEventId: "e5",
-            status: .active,
             title: "Original",
-            model: "claude-sonnet-4",
-            provider: "anthropic",
+            latestModel: "claude-sonnet-4",
             workingDirectory: "/workspace",
             createdAt: "2024-01-01T00:00:00Z",
             lastActivityAt: "2024-01-01T00:05:00Z",
             eventCount: 5,
             messageCount: 3,
             inputTokens: 100,
-            outputTokens: 200
+            outputTokens: 200,
+            cost: 0.0
         ))
 
         // Simulate what happens after a fork - original should be unchanged
@@ -441,17 +430,16 @@ final class RecentSessionsTests: XCTestCase {
             workspaceId: "/workspace",
             rootEventId: "f1",
             headEventId: "f5",
-            status: .active,
             title: "Forked from Original",
-            model: "claude-sonnet-4",
-            provider: "anthropic",
+            latestModel: "claude-sonnet-4",
             workingDirectory: "/workspace",
             createdAt: "2024-01-01T00:06:00Z",
             lastActivityAt: "2024-01-01T00:06:00Z",
             eventCount: 5,
             messageCount: 3,
             inputTokens: 100,
-            outputTokens: 200
+            outputTokens: 200,
+            cost: 0.0
         ))
 
         // Verify original is unchanged
@@ -473,17 +461,16 @@ final class RecentSessionsTests: XCTestCase {
             workspaceId: "/projects/app-a",
             rootEventId: nil,
             headEventId: nil,
-            status: .active,
             title: nil,
-            model: "claude-sonnet-4",
-            provider: "anthropic",
+            latestModel: "claude-sonnet-4",
             workingDirectory: "/projects/app-a",
             createdAt: "2024-01-05T00:00:00Z",
             lastActivityAt: "2024-01-05T00:00:00Z",
             eventCount: 0,
             messageCount: 0,
             inputTokens: 0,
-            outputTokens: 0
+            outputTokens: 0,
+            cost: 0.0
         ))
 
         try database.insertSession(CachedSession(
@@ -491,17 +478,16 @@ final class RecentSessionsTests: XCTestCase {
             workspaceId: "/projects/app-a",
             rootEventId: nil,
             headEventId: nil,
-            status: .active,
             title: nil,
-            model: "claude-opus-4",
-            provider: "anthropic",
+            latestModel: "claude-opus-4",
             workingDirectory: "/projects/app-a",
             createdAt: "2024-01-04T00:00:00Z",
             lastActivityAt: "2024-01-04T00:00:00Z",
             eventCount: 0,
             messageCount: 0,
             inputTokens: 0,
-            outputTokens: 0
+            outputTokens: 0,
+            cost: 0.0
         ))
 
         try database.insertSession(CachedSession(
@@ -509,17 +495,16 @@ final class RecentSessionsTests: XCTestCase {
             workspaceId: "/projects/app-b",
             rootEventId: nil,
             headEventId: nil,
-            status: .active,
             title: nil,
-            model: "claude-sonnet-4",
-            provider: "anthropic",
+            latestModel: "claude-sonnet-4",
             workingDirectory: "/projects/app-b",
             createdAt: "2024-01-03T00:00:00Z",
             lastActivityAt: "2024-01-03T00:00:00Z",
             eventCount: 0,
             messageCount: 0,
             inputTokens: 0,
-            outputTokens: 0
+            outputTokens: 0,
+            cost: 0.0
         ))
 
         // Get all sessions sorted
@@ -591,10 +576,8 @@ final class RecentSessionsTests: XCTestCase {
             workspaceId: "/workspace",
             rootEventId: nil,
             headEventId: nil,
-            status: .active,
             title: "Processing",
-            model: "claude-sonnet-4",
-            provider: "anthropic",
+            latestModel: "claude-sonnet-4",
             workingDirectory: "/workspace",
             createdAt: "2024-01-01T00:00:00Z",
             lastActivityAt: "2024-01-01T00:00:00Z",
@@ -602,6 +585,7 @@ final class RecentSessionsTests: XCTestCase {
             messageCount: 0,
             inputTokens: 0,
             outputTokens: 0,
+            cost: 0.0,
             lastUserPrompt: nil,
             lastAssistantResponse: nil,
             lastToolCount: nil,
@@ -623,17 +607,16 @@ final class RecentSessionsTests: XCTestCase {
             workspaceId: "/workspace",
             rootEventId: nil,
             headEventId: nil,
-            status: .active,
             title: nil,
-            model: "claude-sonnet-4",
-            provider: "anthropic",
+            latestModel: "claude-sonnet-4",
             workingDirectory: "/workspace",
             createdAt: recentTimestamp,
             lastActivityAt: recentTimestamp,
             eventCount: 0,
             messageCount: 0,
             inputTokens: 0,
-            outputTokens: 0
+            outputTokens: 0,
+            cost: 0.0
         )
 
         // formattedDate should return relative time like "1 hour ago"
@@ -651,17 +634,16 @@ final class RecentSessionsTests: XCTestCase {
             workspaceId: "/workspace",
             rootEventId: nil,
             headEventId: nil,
-            status: .active,
             title: nil,
-            model: "claude-sonnet-4",
-            provider: "anthropic",
+            latestModel: "claude-sonnet-4",
             workingDirectory: "/workspace",
             createdAt: "2023-06-15T00:00:00Z",
             lastActivityAt: "2023-06-15T00:00:00Z",
             eventCount: 0,
             messageCount: 0,
             inputTokens: 0,
-            outputTokens: 0
+            outputTokens: 0,
+            cost: 0.0
         )
 
         let formatted = oldSession.formattedDate

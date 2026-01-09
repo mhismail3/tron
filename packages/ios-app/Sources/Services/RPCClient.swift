@@ -534,6 +534,19 @@ class RPCClient: ObservableObject {
         )
     }
 
+    /// Create a new directory
+    func createDirectory(path: String, recursive: Bool = false) async throws -> FilesystemCreateDirResult {
+        guard let ws = webSocket else {
+            throw RPCClientError.connectionNotEstablished
+        }
+
+        let params = FilesystemCreateDirParams(path: path, recursive: recursive)
+        return try await ws.send(
+            method: "filesystem.createDir",
+            params: params
+        )
+    }
+
     // MARK: - Memory Methods
 
     func searchMemory(
