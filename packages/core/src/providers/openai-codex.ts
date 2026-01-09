@@ -212,7 +212,20 @@ function generateToolClarificationMessage(tools: Array<{ name: string; descripti
 
 ${toolDescriptions}
 
-CRITICAL: When calling any tool, you MUST provide ALL required parameters. Do not call tools with empty or missing arguments. For file operations, always provide the complete file path.`;
+## Bash Tool Capabilities
+The Bash tool runs commands on the user's local machine with FULL capabilities:
+- **Network access**: Use curl, wget, or other tools to fetch URLs, APIs, websites
+- **File system**: Full read/write access to files and directories
+- **Git operations**: Clone, commit, push, pull, etc.
+- **Package managers**: npm, pip, brew, apt, etc.
+- **Any installed CLI tools**: rg, jq, python, node, etc.
+
+When asked to visit a website or fetch data from the internet, USE the Bash tool with curl. Example: \`curl -s https://example.com\`
+
+## Important Rules
+1. You MUST provide ALL required parameters when calling tools - never call with empty arguments
+2. For file paths, provide the complete path (e.g., "src/index.ts" or "/absolute/path/file.txt")
+3. Confidently interpret and explain results from tool calls - you have full context of what was returned`;
 }
 
 // =============================================================================
