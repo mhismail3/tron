@@ -407,7 +407,7 @@ export class OpenAICodexProvider {
         const clarificationText = generateToolClarificationMessage(context.tools);
         input.unshift({
           type: 'message',
-          role: 'developer',
+          role: 'user',
           content: [{ type: 'input_text', text: clarificationText }],
         });
         logger.debug('Prepended tool clarification message (first turn)');
