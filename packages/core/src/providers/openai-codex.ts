@@ -195,7 +195,33 @@ export type OpenAICodexModelId = keyof typeof OPENAI_CODEX_MODELS;
  */
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const CODEX_INSTRUCTIONS_PATH = join(__dirname, 'prompts', 'codex-instructions.md');
-const CODEX_DEFAULT_INSTRUCTIONS = readFileSync(CODEX_INSTRUCTIONS_PATH, 'utf-8');
+const CODEX_BASE_INSTRUCTIONS = readFileSync(CODEX_INSTRUCTIONS_PATH, 'utf-8');
+
+/**
+ * Generate instructions with tool clarification appended.
+ * This helps the model understand which tools are actually available.
+ */
+function generateInstructions(tools?: Array<{ name: string; description: string }>): string {
+  if (!tools || tools.length === 0) {
+    return CODEX_BASE_INSTRUCTIONS;
+  }
+
+  const toolList = tools.map(t => `- **${t.name}**: ${t.description}`).join('\n');
+
+  return `${CODEX_BASE_INSTRUCTIONS}
+
+## Available Tools
+
+IMPORTANT: The tools mentioned earlier in this prompt (like shell, apply_patch, etc.) are NOT available in this session. Instead, you have access to the following tools. When calling these tools, you MUST provide all required parameters as specified in each tool's schema:
+
+${toolList}
+
+When using these tools:
+1. Always provide the required parameters - do not call tools with empty or missing arguments
+2. For file paths, provide the full path (e.g., "src/index.ts" or "/absolute/path/file.txt")
+3. Read files before editing them to understand their current content
+4. Use Bash for shell commands, Read for reading files, Write for creating files, Edit for modifying files`;
+}
 
 // =============================================================================
 // Settings Helper
@@ -369,14 +395,16 @@ export class OpenAICodexProvider {
       const input = this.convertToResponsesInput(context);
       const tools = context.tools ? this.convertTools(context.tools) : undefined;
 
+      // Generate instructions with tool clarification appended
+      const instructions = generateInstructions(context.tools);
+
       // Build request body (Responses API format)
       // The instructions field is REQUIRED by the ChatGPT backend API.
-      // ChatGPT OAuth only accepts authorized system prompts - custom instructions will fail validation.
       // Note: max_output_tokens is NOT supported by the ChatGPT backend API.
       const body: Record<string, unknown> = {
         model,
         input,
-        instructions: CODEX_DEFAULT_INSTRUCTIONS,
+        instructions,
         stream: true,
         store: false,
       };
@@ -444,6 +472,18 @@ export class OpenAICodexProvider {
           try {
             const event = JSON.parse(data) as ResponsesStreamEvent;
 
+            // Log all events for debugging tool call issues
+            if (event.type?.includes('function') || event.type?.includes('output_item')) {
+              logger.debug('Codex SSE event', {
+                type: event.type,
+                hasItem: !!(event as any).item,
+                itemType: (event as any).item?.type,
+                callId: (event as any).call_id || (event as any).item?.call_id,
+                hasArguments: !!(event as any).item?.arguments || !!(event as any).delta,
+                argumentsPreview: ((event as any).item?.arguments || (event as any).delta || '').substring(0, 100),
+              });
+            }
+
             // Handle different event types
             switch (event.type) {
               case 'response.output_text.delta':
@@ -501,6 +541,19 @@ export class OpenAICodexProvider {
 
               case 'response.completed':
                 if (event.response) {
+                  // Log the full response for debugging
+                  logger.debug('Codex response.completed', {
+                    outputCount: event.response.output?.length ?? 0,
+                    outputTypes: event.response.output?.map((o: any) => o.type) ?? [],
+                    functionCalls: event.response.output?.filter((o: any) => o.type === 'function_call').map((fc: any) => ({
+                      name: fc.name,
+                      callId: fc.call_id,
+                      hasArguments: !!fc.arguments,
+                      argumentsLength: fc.arguments?.length ?? 0,
+                      argumentsPreview: fc.arguments?.substring(0, 200),
+                    })) ?? [],
+                  });
+
                   // Get usage
                   if (event.response.usage) {
                     inputTokens = event.response.usage.input_tokens;
