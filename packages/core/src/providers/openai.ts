@@ -516,7 +516,8 @@ export class OpenAIProvider {
             type: 'function' as const,
             function: {
               name: tc.name,
-              arguments: JSON.stringify(tc.arguments),
+              // Ensure arguments is always a valid JSON string (required by OpenAI)
+              arguments: JSON.stringify(tc.arguments ?? {}),
             },
           }));
 

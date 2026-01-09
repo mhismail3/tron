@@ -631,7 +631,8 @@ export class OpenAICodexProvider {
             type: 'function_call',
             call_id: tc.id,
             name: tc.name,
-            arguments: JSON.stringify(tc.arguments),
+            // Ensure arguments is always a valid JSON string (required by Responses API)
+            arguments: JSON.stringify(tc.arguments ?? {}),
           });
         }
       } else if (msg.role === 'toolResult') {
