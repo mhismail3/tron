@@ -460,10 +460,17 @@ export class OpenAICodexProvider {
               case 'response.output_item.added':
                 if (event.item?.type === 'function_call' && event.item.call_id && event.item.name) {
                   const callId = event.item.call_id;
+                  const initialArgs = event.item.arguments || '';
+                  logger.debug('Tool call added via output_item.added', {
+                    callId,
+                    name: event.item.name,
+                    hasArguments: !!event.item.arguments,
+                    argumentsLength: initialArgs.length,
+                  });
                   toolCalls.set(callId, {
                     id: callId,
                     name: event.item.name,
-                    args: event.item.arguments || '',
+                    args: initialArgs,
                   });
                   yield {
                     type: 'toolcall_start',
@@ -478,6 +485,11 @@ export class OpenAICodexProvider {
                   const tc = toolCalls.get(event.call_id);
                   if (tc) {
                     tc.args += event.delta;
+                    logger.debug('Tool call arguments delta', {
+                      callId: event.call_id,
+                      deltaLength: event.delta.length,
+                      totalArgsLength: tc.args.length,
+                    });
                     yield {
                       type: 'toolcall_delta',
                       toolCallId: event.call_id,
@@ -495,7 +507,8 @@ export class OpenAICodexProvider {
                     outputTokens = event.response.usage.output_tokens;
                   }
 
-                  // Process output items
+                  // Process output items from completed response
+                  // This is the authoritative source - update/add all tool calls from here
                   for (const item of event.response.output) {
                     if (item.type === 'message' && item.content) {
                       for (const content of item.content) {
@@ -507,7 +520,29 @@ export class OpenAICodexProvider {
                         }
                       }
                     } else if (item.type === 'function_call' && item.call_id) {
-                      if (!toolCalls.has(item.call_id)) {
+                      logger.debug('Tool call in completed response', {
+                        callId: item.call_id,
+                        name: item.name,
+                        hasArguments: !!item.arguments,
+                        argumentsLength: item.arguments?.length ?? 0,
+                        argumentsPreview: item.arguments?.substring(0, 100),
+                      });
+                      const existing = toolCalls.get(item.call_id);
+                      if (existing) {
+                        // Update with completed response data if streaming didn't capture it
+                        // Prefer completed response arguments if streaming didn't accumulate any
+                        if (item.arguments && !existing.args) {
+                          logger.debug('Updating tool call args from completed response', {
+                            callId: item.call_id,
+                            existingArgsLength: existing.args.length,
+                            newArgsLength: item.arguments.length,
+                          });
+                          existing.args = item.arguments;
+                        }
+                        if (item.name && !existing.name) {
+                          existing.name = item.name;
+                        }
+                      } else {
                         toolCalls.set(item.call_id, {
                           id: item.call_id,
                           name: item.name || '',
@@ -525,6 +560,12 @@ export class OpenAICodexProvider {
                   // Emit toolcall_end for each tool call
                   for (const [, tc] of toolCalls) {
                     if (tc.id && tc.name) {
+                      logger.debug('Final tool call before emit', {
+                        id: tc.id,
+                        name: tc.name,
+                        argsLength: tc.args.length,
+                        argsPreview: tc.args.substring(0, 200),
+                      });
                       let parsedArgs: Record<string, unknown> = {};
                       try {
                         parsedArgs = JSON.parse(tc.args || '{}');
