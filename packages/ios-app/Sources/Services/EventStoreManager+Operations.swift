@@ -58,6 +58,24 @@ extension EventStoreManager {
         logger.info("Deleted session: \(sessionId)", category: .session)
     }
 
+    /// Update session token counts (called when streaming accumulates tokens)
+    func updateSessionTokens(sessionId: String, inputTokens: Int, outputTokens: Int) throws {
+        guard var session = try eventDB.getSession(sessionId) else {
+            logger.warning("Cannot update tokens: session \(sessionId) not found", category: .session)
+            return
+        }
+
+        session.inputTokens = inputTokens
+        session.outputTokens = outputTokens
+
+        try eventDB.insertSession(session)
+
+        // Reload sessions to update in-memory array
+        loadSessions()
+
+        logger.debug("Updated session \(sessionId) tokens: in=\(inputTokens) out=\(outputTokens)", category: .session)
+    }
+
     // MARK: - Tree Operations (Fork/Rewind)
 
     /// Fork a session at a specific event (or HEAD if nil)

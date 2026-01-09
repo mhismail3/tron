@@ -142,6 +142,19 @@ extension ChatViewModel {
                 cacheCreationTokens: nil
             )
             logger.debug("Total tokens: in=\(accumulatedInputTokens) out=\(accumulatedOutputTokens)", category: .events)
+
+            // Update CachedSession with accumulated tokens so dashboard shows correct values
+            if let manager = eventStoreManager {
+                do {
+                    try manager.updateSessionTokens(
+                        sessionId: sessionId,
+                        inputTokens: accumulatedInputTokens,
+                        outputTokens: accumulatedOutputTokens
+                    )
+                } catch {
+                    logger.error("Failed to update session tokens: \(error.localizedDescription)", category: .events)
+                }
+            }
         }
     }
 

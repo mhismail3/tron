@@ -142,17 +142,10 @@ extension EventStoreManager {
             session.rootEventId = firstEvent.id
         }
 
-        // Sum up token usage
-        var inputTokens = 0
-        var outputTokens = 0
-        for event in events {
-            if let usage = event.payload.dict("tokenUsage") {
-                inputTokens += (usage["inputTokens"] as? Int) ?? 0
-                outputTokens += (usage["outputTokens"] as? Int) ?? 0
-            }
-        }
-        session.inputTokens = inputTokens
-        session.outputTokens = outputTokens
+        // NOTE: Do NOT recalculate inputTokens/outputTokens here
+        // Server is the source of truth for token counts
+        // These values are set correctly in serverSessionToCached() from session.list
+        // Recalculating here would overwrite server values and cause inconsistencies
 
         // Update last activity
         if let lastEvent = events.last {

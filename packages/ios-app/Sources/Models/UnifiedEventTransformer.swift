@@ -1043,16 +1043,10 @@ extension UnifiedEventTransformer {
                 }
 
             case .streamTurnEnd:
-                // Accumulate token usage from turn end events
+                // Only update turn counter, NOT token usage
+                // Token usage is already captured in message.assistant events
+                // Accumulating here would double-count tokens
                 let payload = StreamTurnEndPayload(from: event.payload)
-                if let usage = payload.tokenUsage {
-                    state.totalTokenUsage = TokenUsage(
-                        inputTokens: state.totalTokenUsage.inputTokens + usage.inputTokens,
-                        outputTokens: state.totalTokenUsage.outputTokens + usage.outputTokens,
-                        cacheReadTokens: (state.totalTokenUsage.cacheReadTokens ?? 0) + (usage.cacheReadTokens ?? 0),
-                        cacheCreationTokens: (state.totalTokenUsage.cacheCreationTokens ?? 0) + (usage.cacheCreationTokens ?? 0)
-                    )
-                }
                 if payload.turn > state.currentTurn {
                     state.currentTurn = payload.turn
                 }
@@ -1265,15 +1259,10 @@ extension UnifiedEventTransformer {
                 }
 
             case .streamTurnEnd:
+                // Only update turn counter, NOT token usage
+                // Token usage is already captured in message.assistant events
+                // Accumulating here would double-count tokens
                 let payload = StreamTurnEndPayload(from: event.payload)
-                if let usage = payload.tokenUsage {
-                    state.totalTokenUsage = TokenUsage(
-                        inputTokens: state.totalTokenUsage.inputTokens + usage.inputTokens,
-                        outputTokens: state.totalTokenUsage.outputTokens + usage.outputTokens,
-                        cacheReadTokens: (state.totalTokenUsage.cacheReadTokens ?? 0) + (usage.cacheReadTokens ?? 0),
-                        cacheCreationTokens: (state.totalTokenUsage.cacheCreationTokens ?? 0) + (usage.cacheCreationTokens ?? 0)
-                    )
-                }
                 if payload.turn > state.currentTurn {
                     state.currentTurn = payload.turn
                 }

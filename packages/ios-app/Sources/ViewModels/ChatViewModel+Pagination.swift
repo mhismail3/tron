@@ -96,13 +96,28 @@ extension ChatViewModel {
                 logger.info("Restored \(catchUpMessagesToRestore.count) catch-up messages after loading \(loadedMessages.count) historical messages", category: .session)
             }
 
-            // Update turn counter and token usage from unified state
+            // Update turn counter from unified state
             currentTurn = state.currentTurn
-            let usage = state.totalTokenUsage
-            if usage.inputTokens > 0 || usage.outputTokens > 0 {
-                accumulatedInputTokens = usage.inputTokens
-                accumulatedOutputTokens = usage.outputTokens
-                totalTokenUsage = usage
+
+            // Get token totals from cached session (server source of truth)
+            // instead of reconstructed state (local calculation that may double-count)
+            if let session = try? manager.eventDB.getSession(sessionId) {
+                accumulatedInputTokens = session.inputTokens
+                accumulatedOutputTokens = session.outputTokens
+                totalTokenUsage = TokenUsage(
+                    inputTokens: session.inputTokens,
+                    outputTokens: session.outputTokens,
+                    cacheReadTokens: nil,
+                    cacheCreationTokens: nil
+                )
+            } else {
+                // Fallback to reconstructed state if session not found
+                let usage = state.totalTokenUsage
+                if usage.inputTokens > 0 || usage.outputTokens > 0 {
+                    accumulatedInputTokens = usage.inputTokens
+                    accumulatedOutputTokens = usage.outputTokens
+                    totalTokenUsage = usage
+                }
             }
 
             logger.info("Loaded \(loadedMessages.count) messages via UnifiedEventTransformer, displaying latest \(batchSize) for session \(sessionId)", category: .session)
@@ -147,11 +162,25 @@ extension ChatViewModel {
             messages = state.messages
 
             currentTurn = state.currentTurn
-            let usage = state.totalTokenUsage
-            if usage.inputTokens > 0 || usage.outputTokens > 0 {
-                accumulatedInputTokens = usage.inputTokens
-                accumulatedOutputTokens = usage.outputTokens
-                totalTokenUsage = usage
+
+            // Get token totals from cached session (server source of truth)
+            if let session = try? manager.eventDB.getSession(sessionId) {
+                accumulatedInputTokens = session.inputTokens
+                accumulatedOutputTokens = session.outputTokens
+                totalTokenUsage = TokenUsage(
+                    inputTokens: session.inputTokens,
+                    outputTokens: session.outputTokens,
+                    cacheReadTokens: nil,
+                    cacheCreationTokens: nil
+                )
+            } else {
+                // Fallback to reconstructed state if session not found
+                let usage = state.totalTokenUsage
+                if usage.inputTokens > 0 || usage.outputTokens > 0 {
+                    accumulatedInputTokens = usage.inputTokens
+                    accumulatedOutputTokens = usage.outputTokens
+                    totalTokenUsage = usage
+                }
             }
 
             logger.info("Loaded \(messages.count) messages via UnifiedEventTransformer for session \(sessionId)", category: .session)

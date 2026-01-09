@@ -90,6 +90,18 @@ struct ContextAuditView: View {
                         ContextUsageGaugeView(snapshot: snapshot)
                             .padding(.horizontal)
 
+                        // Info about context vs session tokens
+                        HStack(spacing: 4) {
+                            Image(systemName: "info.circle")
+                                .font(.caption2)
+                                .foregroundStyle(.tronTextMuted)
+                            Text("Context % shows current memory usage. Total tokens in the chat pill show cumulative API usage and don't decrease after compaction.")
+                                .font(.caption2)
+                                .foregroundStyle(.tronTextMuted)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        .padding(.horizontal)
+
                         // Breakdown section
                         ContextBreakdownView(breakdown: snapshot.breakdown)
                             .padding(.horizontal)
