@@ -200,15 +200,30 @@ const CODEX_DEFAULT_INSTRUCTIONS = readFileSync(CODEX_INSTRUCTIONS_PATH, 'utf-8'
 /**
  * Generate a tool clarification message to prepend to conversation.
  * Since we can't modify the system prompt, we add this as a "developer" context message.
+ *
+ * This includes:
+ * 1. Tron identity and role
+ * 2. Available tools and their descriptions
+ * 3. Bash capabilities (since Codex's default instructions mention shell which we don't use)
  */
-function generateToolClarificationMessage(tools: Array<{ name: string; description: string; parameters?: unknown }>): string {
+function generateToolClarificationMessage(
+  tools: Array<{ name: string; description: string; parameters?: unknown }>,
+  workingDirectory?: string
+): string {
   const toolDescriptions = tools.map(t => {
     const params = t.parameters as { properties?: Record<string, { description?: string }>; required?: string[] } | undefined;
     const requiredParams = params?.required?.join(', ') || 'none';
     return `- **${t.name}**: ${t.description} (required params: ${requiredParams})`;
   }).join('\n');
 
-  return `[TOOL CONTEXT] The following tools are available for this session. The tools mentioned in the system instructions (shell, apply_patch, etc.) are NOT available. Use ONLY these tools:
+  const cwdLine = workingDirectory ? `\nCurrent working directory: ${workingDirectory}` : '';
+
+  return `[TRON CONTEXT]
+You are Tron, an AI coding assistant with full access to the user's file system.
+${cwdLine}
+
+## Available Tools
+The tools mentioned in the system instructions (shell, apply_patch, etc.) are NOT available. Use ONLY these tools:
 
 ${toolDescriptions}
 
@@ -225,7 +240,10 @@ When asked to visit a website or fetch data from the internet, USE the Bash tool
 ## Important Rules
 1. You MUST provide ALL required parameters when calling tools - never call with empty arguments
 2. For file paths, provide the complete path (e.g., "src/index.ts" or "/absolute/path/file.txt")
-3. Confidently interpret and explain results from tool calls - you have full context of what was returned`;
+3. Confidently interpret and explain results from tool calls - you have full context of what was returned
+4. Be helpful, accurate, and efficient when working with code
+5. Read existing files to understand context before making changes
+6. Make targeted, minimal edits rather than rewriting entire files`;
 }
 
 // =============================================================================
@@ -404,13 +422,18 @@ export class OpenAICodexProvider {
       // (when there are no assistant messages yet in the history)
       const hasAssistantMessages = context.messages.some(m => m.role === 'assistant');
       if (context.tools && context.tools.length > 0 && !hasAssistantMessages) {
-        const clarificationText = generateToolClarificationMessage(context.tools);
+        const clarificationText = generateToolClarificationMessage(
+          context.tools,
+          context.workingDirectory
+        );
         input.unshift({
           type: 'message',
           role: 'user',
           content: [{ type: 'input_text', text: clarificationText }],
         });
-        logger.debug('Prepended tool clarification message (first turn)');
+        logger.debug('Prepended tool clarification message (first turn)', {
+          workingDirectory: context.workingDirectory,
+        });
       }
 
       // Build request body (Responses API format)

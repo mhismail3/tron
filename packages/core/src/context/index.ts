@@ -31,3 +31,36 @@ export {
   type BeforeCompactInfo,
   type AfterCompactInfo,
 } from './compactor.js';
+
+export {
+  ContextManager,
+  createContextManager,
+  type ContextManagerConfig,
+  type ContextSnapshot,
+  type PreTurnValidation,
+  type CompactionPreview,
+  type CompactionResult,
+  type ProcessedToolResult,
+  type ExportedState,
+  type ThresholdLevel,
+} from './context-manager.js';
+
+export {
+  KeywordSummarizer,
+  type Summarizer,
+  type SummaryResult,
+  type ExtractedData,
+} from './summarizer.js';
+
+export {
+  TRON_CORE_PROMPT,
+  WORKING_DIRECTORY_SUFFIX,
+  buildSystemPrompt,
+  buildAnthropicSystemPrompt,
+  buildOpenAISystemPrompt,
+  buildCodexToolClarification,
+  buildGoogleSystemPrompt,
+  requiresToolClarificationMessage,
+  getToolClarificationMessage,
+  type SystemPromptConfig,
+} from './system-prompts.js';

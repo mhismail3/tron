@@ -272,6 +272,31 @@ export interface ContextWarningEvent extends BaseTronEvent {
 }
 
 /**
+ * Compaction events
+ */
+export interface CompactionStartEvent extends BaseTronEvent {
+  type: 'compaction_start';
+  /** Why compaction was triggered */
+  reason: 'pre_turn_guardrail' | 'threshold_exceeded' | 'manual';
+  /** Token count before compaction */
+  tokensBefore: number;
+}
+
+export interface CompactionCompleteEvent extends BaseTronEvent {
+  type: 'compaction_complete';
+  /** Whether compaction succeeded */
+  success: boolean;
+  /** Token count before compaction */
+  tokensBefore: number;
+  /** Token count after compaction */
+  tokensAfter: number;
+  /** Compression ratio achieved (0-1, lower is better) */
+  compressionRatio: number;
+  /** Why compaction was triggered */
+  reason?: 'pre_turn_guardrail' | 'threshold_exceeded' | 'manual';
+}
+
+/**
  * Error event
  */
 export interface TronErrorEvent extends BaseTronEvent {
@@ -315,6 +340,8 @@ export type TronEvent =
   | SessionSavedEvent
   | SessionLoadedEvent
   | ContextWarningEvent
+  | CompactionStartEvent
+  | CompactionCompleteEvent
   | TronErrorEvent
   | TronRetryEvent;
 

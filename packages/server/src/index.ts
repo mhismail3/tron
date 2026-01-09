@@ -4,7 +4,7 @@
  * Main entry point for the Tron WebSocket server.
  * Uses event-sourced session management via EventStoreOrchestrator.
  */
-import { createLogger, getSettings, resolveTronPath, getTronDataDir, type RpcContext, type EventStoreManager, type WorktreeRpcManager } from '@tron/core';
+import { createLogger, getSettings, resolveTronPath, getTronDataDir, type RpcContext, type EventStoreManager, type WorktreeRpcManager, type ContextRpcManager } from '@tron/core';
 import { TronWebSocketServer, type WebSocketServerConfig } from './websocket.js';
 import { EventStoreOrchestrator, type EventStoreOrchestratorConfig } from './event-store-orchestrator.js';
 import { HealthServer, type HealthServerConfig } from './health.js';
@@ -389,6 +389,29 @@ function createWorktreeManager(orchestrator: EventStoreOrchestrator): WorktreeRp
   };
 }
 
+/**
+ * Creates a ContextRpcManager adapter from EventStoreOrchestrator
+ */
+function createContextManager(orchestrator: EventStoreOrchestrator): ContextRpcManager {
+  return {
+    getContextSnapshot(sessionId) {
+      return orchestrator.getContextSnapshot(sessionId);
+    },
+    shouldCompact(sessionId) {
+      return orchestrator.shouldCompact(sessionId);
+    },
+    async previewCompaction(sessionId) {
+      return orchestrator.previewCompaction(sessionId);
+    },
+    async confirmCompaction(sessionId, opts) {
+      return orchestrator.confirmCompaction(sessionId, opts);
+    },
+    canAcceptTurn(sessionId, opts) {
+      return orchestrator.canAcceptTurn(sessionId, opts);
+    },
+  };
+}
+
 // Helper functions for tree visualization
 function getDescendantCount(eventId: string, allEvents: any[]): number {
   const children = allEvents.filter(e => e.parentId === eventId);
@@ -503,6 +526,7 @@ export class TronServer {
       ...createRpcContext(this.orchestrator),
       eventStore: createEventStoreManager(this.orchestrator),
       worktreeManager: createWorktreeManager(this.orchestrator),
+      contextManager: createContextManager(this.orchestrator),
     };
 
     // Initialize WebSocket server

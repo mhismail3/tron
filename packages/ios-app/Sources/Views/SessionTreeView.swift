@@ -8,14 +8,21 @@ struct SessionTreeView: View {
     let headEventId: String?
     let sessionId: String
     @Binding var selectedEventId: String?
+    /// Fork context for displaying parent session events differently
+    var forkContext: SessionHistorySheet.ForkContext?
     let onFork: (String) -> Void
     let onRewind: (String) -> Void
     var isLoading: Bool = false
 
     var body: some View {
         VStack(spacing: 0) {
+            // Fork context header (if this is a forked session)
+            if let context = forkContext {
+                ForkContextHeader(context: context)
+            }
+
             // Header with stats
-            TreeStatsHeader(events: events)
+            TreeStatsHeader(events: events, forkContext: forkContext)
 
             // Tree content
             if isLoading {
@@ -27,12 +34,19 @@ struct SessionTreeView: View {
                     ScrollView {
                         LazyVStack(alignment: .leading, spacing: 0) {
                             ForEach(sortedEvents, id: \.id) { event in
+                                // Show fork divider before the fork event
+                                if let context = forkContext,
+                                   event.id == context.forkPointEventId {
+                                    ForkDivider()
+                                }
+
                                 TreeNodeRow(
                                     event: event,
                                     isHead: event.id == headEventId,
                                     isSelected: event.id == selectedEventId,
                                     isOnPath: pathToHead.contains(event.id),
                                     isBranchPoint: branchPoints.contains(event.id),
+                                    isFromParentSession: forkContext?.parentEventIds.contains(event.id) ?? false,
                                     depth: nodeDepths[event.id] ?? 0,
                                     onSelect: { selectedEventId = event.id },
                                     onFork: { onFork(event.id) },
@@ -129,10 +143,95 @@ struct SessionTreeView: View {
     }
 }
 
+// MARK: - Fork Context Header
+
+struct ForkContextHeader: View {
+    let context: SessionHistorySheet.ForkContext
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "arrow.triangle.branch")
+                .font(.system(size: 12))
+                .foregroundStyle(.tronAmber)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Forked Session")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(.tronAmber)
+
+                HStack(spacing: 4) {
+                    Text("from")
+                        .font(.system(size: 10))
+                        .foregroundStyle(.tronTextMuted)
+
+                    Text(context.parentSessionTitle ?? "Unknown Session")
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundStyle(.tronTextSecondary)
+                }
+            }
+
+            Spacer()
+
+            // Parent event count badge
+            HStack(spacing: 3) {
+                Image(systemName: "clock.arrow.circlepath")
+                    .font(.system(size: 9))
+                Text("\(context.parentEventIds.count)")
+                    .font(.system(size: 10, weight: .medium, design: .monospaced))
+            }
+            .foregroundStyle(.tronTextMuted)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(Color.tronSurfaceElevated)
+            .clipShape(Capsule())
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
+        .background(Color.tronAmber.opacity(0.1))
+        .overlay(
+            Rectangle()
+                .fill(Color.tronAmber.opacity(0.3))
+                .frame(height: 1),
+            alignment: .bottom
+        )
+    }
+}
+
+// MARK: - Fork Divider
+
+struct ForkDivider: View {
+    var body: some View {
+        HStack(spacing: 8) {
+            Rectangle()
+                .fill(Color.tronAmber.opacity(0.4))
+                .frame(height: 1)
+
+            HStack(spacing: 4) {
+                Image(systemName: "arrow.triangle.branch")
+                    .font(.system(size: 9))
+                Text("FORK POINT")
+                    .font(.system(size: 8, weight: .bold, design: .monospaced))
+            }
+            .foregroundStyle(.tronAmber)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 3)
+            .background(Color.tronAmber.opacity(0.15))
+            .clipShape(Capsule())
+
+            Rectangle()
+                .fill(Color.tronAmber.opacity(0.4))
+                .frame(height: 1)
+        }
+        .padding(.vertical, 8)
+        .padding(.horizontal, 28)  // Align with event rows
+    }
+}
+
 // MARK: - Tree Stats Header
 
 struct TreeStatsHeader: View {
     let events: [SessionEvent]
+    var forkContext: SessionHistorySheet.ForkContext?
 
     private var branchCount: Int {
         var childCounts: [String: Int] = [:]
@@ -144,9 +243,22 @@ struct TreeStatsHeader: View {
         return childCounts.filter { $0.value > 1 }.count
     }
 
+    private var currentSessionEventCount: Int {
+        if let context = forkContext {
+            return events.count - context.parentEventIds.count
+        }
+        return events.count
+    }
+
     var body: some View {
         HStack(spacing: 16) {
-            StatBadge(value: events.count, label: "events")
+            if let context = forkContext {
+                // Show breakdown for forked sessions
+                StatBadge(value: currentSessionEventCount, label: "this session")
+                StatBadge(value: context.parentEventIds.count, label: "inherited", isSecondary: true)
+            } else {
+                StatBadge(value: events.count, label: "events")
+            }
             StatBadge(value: branchCount, label: "branches")
             Spacer()
         }
@@ -158,12 +270,13 @@ struct TreeStatsHeader: View {
 struct StatBadge: View {
     let value: Int
     let label: String
+    var isSecondary: Bool = false
 
     var body: some View {
         HStack(spacing: 4) {
             Text("\(value)")
                 .font(.system(size: 16, weight: .semibold, design: .monospaced))
-                .foregroundStyle(.tronEmerald)
+                .foregroundStyle(isSecondary ? .tronTextMuted : .tronEmerald)
             Text(label)
                 .font(.caption2)
                 .foregroundStyle(.tronTextMuted)
@@ -179,6 +292,8 @@ struct TreeNodeRow: View {
     let isSelected: Bool
     let isOnPath: Bool
     let isBranchPoint: Bool
+    /// Whether this event is from a parent session (for forked sessions)
+    let isFromParentSession: Bool
     let depth: Int
     let hasNextSibling: Bool  // Whether there's another event at this depth after this one
     let onSelect: () -> Void
@@ -192,10 +307,13 @@ struct TreeNodeRow: View {
         event.expandedContent != nil || !isHead
     }
 
-    /// Background color based on selection state
+    /// Background color based on selection state and parent session
     private var rowBackgroundColor: Color {
         if isSelected {
             return Color.tronEmerald.opacity(0.2)
+        } else if isFromParentSession {
+            // Parent session events have a subtle different tint
+            return Color.tronTextMuted.opacity(0.08)
         } else if isOnPath {
             return Color.tronPhthaloGreen.opacity(0.15)
         } else {
@@ -207,17 +325,25 @@ struct TreeNodeRow: View {
     private var rowBorderColor: Color {
         if isSelected {
             return Color.tronEmerald.opacity(0.4)
+        } else if isFromParentSession {
+            return Color.tronTextMuted.opacity(0.15)
         } else {
             return Color.tronBorder.opacity(0.2)
         }
     }
 
-    init(event: SessionEvent, isHead: Bool, isSelected: Bool, isOnPath: Bool, isBranchPoint: Bool, depth: Int, hasNextSibling: Bool = false, onSelect: @escaping () -> Void, onFork: @escaping () -> Void, onRewind: @escaping () -> Void) {
+    /// Text color for parent session events
+    private var textColor: Color {
+        isFromParentSession ? .tronTextMuted : .tronTextPrimary
+    }
+
+    init(event: SessionEvent, isHead: Bool, isSelected: Bool, isOnPath: Bool, isBranchPoint: Bool, isFromParentSession: Bool = false, depth: Int, hasNextSibling: Bool = false, onSelect: @escaping () -> Void, onFork: @escaping () -> Void, onRewind: @escaping () -> Void) {
         self.event = event
         self.isHead = isHead
         self.isSelected = isSelected
         self.isOnPath = isOnPath
         self.isBranchPoint = isBranchPoint
+        self.isFromParentSession = isFromParentSession
         self.depth = depth
         self.hasNextSibling = hasNextSibling
         self.onSelect = onSelect
@@ -258,8 +384,19 @@ struct TreeNodeRow: View {
                     // Content
                     Text(event.summary)
                         .font(.system(size: 12, weight: .medium, design: .monospaced))
-                        .foregroundStyle(.tronTextPrimary)
+                        .foregroundStyle(textColor)
                         .lineLimit(1)
+
+                    // Parent session badge
+                    if isFromParentSession {
+                        Text("inherited")
+                            .font(.system(size: 7, weight: .medium))
+                            .foregroundStyle(.tronTextMuted)
+                            .padding(.horizontal, 4)
+                            .padding(.vertical, 1)
+                            .background(Color.tronTextMuted.opacity(0.15))
+                            .clipShape(Capsule())
+                    }
 
                     if isHead {
                         Text("HEAD")
@@ -594,6 +731,17 @@ struct SessionHistorySheet: View {
     @State private var selectedEventId: String?
     @State private var isLoading = true
     @State private var actionConfirm: ActionConfirm?
+    @State private var forkContext: ForkContext?
+
+    /// Context about the fork relationship for UI display
+    struct ForkContext {
+        let parentSessionId: String
+        let forkEventId: String  // The event we forked from (in parent session)
+        let forkPointEventId: String  // The session.fork event in this session
+        let parentSessionTitle: String?
+        /// IDs of events that belong to the parent session (displayed differently)
+        let parentEventIds: Set<String>
+    }
 
     enum ActionConfirm {
         case fork(String)
@@ -614,6 +762,7 @@ struct SessionHistorySheet: View {
                         headEventId: eventStoreManager.activeSession?.headEventId,
                         sessionId: sessionId,
                         selectedEventId: $selectedEventId,
+                        forkContext: forkContext,
                         onFork: { eventId in
                             actionConfirm = .fork(eventId)
                         },
@@ -651,16 +800,75 @@ struct SessionHistorySheet: View {
         isLoading = true
 
         do {
-            // Get events from the EventDatabase via EventStoreManager
+            // First sync session events from server
             try await eventStoreManager.syncSessionEvents(sessionId: sessionId)
-            // Note: We need to get events from the database
-            // For now, fetch directly
-            events = try eventStoreManager.getSessionEvents(sessionId)
+
+            // Check if this is a forked session
+            let session = try? eventStoreManager.eventDB.getSession(sessionId)
+            let isFork = session?.isFork == true
+
+            if isFork, let rootEventId = session?.rootEventId {
+                // For forked sessions, load the full ancestor chain
+                // This includes parent session events linked via parent_id
+                events = try eventStoreManager.eventDB.getAncestors(rootEventId)
+
+                // Also get any events after the root (children of root in this session)
+                let sessionEvents = try eventStoreManager.getSessionEvents(sessionId)
+                let rootIds = Set(events.map { $0.id })
+                for event in sessionEvents where !rootIds.contains(event.id) {
+                    events.append(event)
+                }
+
+                // Build fork context for UI display
+                forkContext = buildForkContext(events: events, currentSessionId: sessionId)
+
+                logger.info("Loaded forked session with \(events.count) events (including parent history)", category: .session)
+            } else {
+                // Regular session - just get session events
+                events = try eventStoreManager.getSessionEvents(sessionId)
+                forkContext = nil
+            }
         } catch {
             logger.error("Failed to load events: \(error)", category: .session)
         }
 
         isLoading = false
+    }
+
+    /// Build fork context from events to identify parent session events
+    private func buildForkContext(events: [SessionEvent], currentSessionId: String) -> ForkContext? {
+        // Find the session.fork event in this session
+        let forkEvents = events.filter { event in
+            event.eventType == .sessionFork && event.sessionId == currentSessionId
+        }
+        guard let forkEvent = forkEvents.first else {
+            return nil
+        }
+
+        // Parse the fork payload to get parent info
+        let payload = SessionForkPayload(from: forkEvent.payload)
+        guard let parentSessionId = payload?.sourceSessionId,
+              let forkEventId = payload?.sourceEventId else {
+            return nil
+        }
+
+        // Get parent session title
+        let parentSession = try? eventStoreManager.eventDB.getSession(parentSessionId)
+        let parentTitle = parentSession?.displayTitle
+
+        // Identify which events belong to parent session(s)
+        let parentEvents = events.filter { event in
+            event.sessionId != currentSessionId
+        }
+        let parentEventIds = Set(parentEvents.map { $0.id })
+
+        return ForkContext(
+            parentSessionId: parentSessionId,
+            forkEventId: forkEventId,
+            forkPointEventId: forkEvent.id,
+            parentSessionTitle: parentTitle,
+            parentEventIds: parentEventIds
+        )
     }
 
     @ViewBuilder

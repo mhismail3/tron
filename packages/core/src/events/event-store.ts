@@ -255,6 +255,31 @@ export class EventStore {
     const messages: Message[] = [];
 
     for (const event of ancestors) {
+      // Handle compaction boundary - clear pre-compaction messages and inject summary
+      // Compaction events come in order: [old messages] -> compact.boundary -> compact.summary -> [new messages]
+      // When we see compact.summary, we discard messages before it and inject the summary as context
+      if (event.type === 'compact.summary') {
+        const payload = event.payload as { summary: string };
+        // Clear any messages we've collected (they were summarized)
+        messages.length = 0;
+        // Inject the compaction summary as a context message pair
+        // This mirrors how ContextManager.executeCompaction() formats the summary
+        messages.push({
+          role: 'user',
+          content: `[Context from earlier in this conversation]\n\n${payload.summary}`,
+        });
+        messages.push({
+          role: 'assistant',
+          content: [
+            {
+              type: 'text',
+              text: 'I understand the previous context. Let me continue helping you.',
+            },
+          ],
+        });
+        continue;
+      }
+
       if (event.type === 'message.user') {
         const payload = event.payload as { content: Message['content'] };
         messages.push({
@@ -295,6 +320,29 @@ export class EventStore {
     let currentTurn = 0;
 
     for (const evt of ancestors) {
+      // Handle compaction boundary - clear pre-compaction messages and inject summary
+      // This mirrors getMessagesAt behavior for consistency
+      if (evt.type === 'compact.summary') {
+        const payload = evt.payload as { summary: string };
+        // Clear messages before compaction (but preserve token accounting for session totals)
+        messages.length = 0;
+        // Inject the compaction summary as a context message pair
+        messages.push({
+          role: 'user',
+          content: `[Context from earlier in this conversation]\n\n${payload.summary}`,
+        });
+        messages.push({
+          role: 'assistant',
+          content: [
+            {
+              type: 'text',
+              text: 'I understand the previous context. Let me continue helping you.',
+            },
+          ],
+        });
+        continue;
+      }
+
       if (evt.type === 'message.user') {
         const payload = evt.payload as { content: Message['content']; tokenUsage?: TokenUsage };
         messages.push({

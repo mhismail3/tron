@@ -311,6 +311,25 @@ struct ErrorEvent: Decodable {
     var message: String { data?.message ?? data?.error ?? "Unknown error" }
 }
 
+struct CompactionEvent: Decodable {
+    let type: String
+    let sessionId: String?
+    let timestamp: String?
+    let data: CompactionData
+
+    struct CompactionData: Decodable {
+        let tokensBefore: Int
+        let tokensAfter: Int
+        let compressionRatio: Double?
+        let reason: String?
+    }
+
+    var tokensBefore: Int { data.tokensBefore }
+    var tokensAfter: Int { data.tokensAfter }
+    var compressionRatio: Double { data.compressionRatio ?? Double(data.tokensAfter) / Double(data.tokensBefore) }
+    var reason: String { data.reason ?? "auto" }
+}
+
 struct ConnectedEvent: Decodable {
     let type: String
     let timestamp: String?
@@ -338,6 +357,7 @@ enum EventType: String {
     case turnEnd = "agent.turn_end"
     case complete = "agent.complete"
     case error = "agent.error"
+    case compaction = "agent.compaction"
     case connected = "connection.established"
     case systemConnected = "system.connected"
     case sessionCreated = "session.created"
@@ -357,6 +377,7 @@ enum ParsedEvent {
     case agentTurn(AgentTurnEvent)
     case complete(CompleteEvent)
     case error(ErrorEvent)
+    case compaction(CompactionEvent)
     case connected(ConnectedEvent)
     case unknown(String)
 
@@ -402,6 +423,11 @@ enum ParsedEvent {
             case EventType.error.rawValue:
                 let event = try decoder.decode(ErrorEvent.self, from: data)
                 return .error(event)
+
+            case EventType.compaction.rawValue:
+                let event = try decoder.decode(CompactionEvent.self, from: data)
+                logger.info("Context compacted: \(event.tokensBefore) -> \(event.tokensAfter) tokens (\(event.reason))", category: .events)
+                return .compaction(event)
 
             case EventType.connected.rawValue, EventType.systemConnected.rawValue:
                 let event = try decoder.decode(ConnectedEvent.self, from: data)

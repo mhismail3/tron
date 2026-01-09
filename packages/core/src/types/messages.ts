@@ -145,6 +145,8 @@ export interface Context {
   systemPrompt?: string;
   messages: Message[];
   tools?: Tool[];
+  /** Working directory for file operations (used by some providers for context) */
+  workingDirectory?: string;
 }
 
 // Tool and ToolInputSchema are re-exported from ./tools.js

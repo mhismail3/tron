@@ -230,6 +230,23 @@ extension ChatViewModel {
         currentTurnToolCalls.removeAll()
     }
 
+    func handleCompaction(_ event: CompactionEvent) {
+        let tokensSaved = event.tokensBefore - event.tokensAfter
+        logger.info("Context compacted: \(event.tokensBefore) -> \(event.tokensAfter) tokens (saved \(tokensSaved), reason: \(event.reason))", category: .events)
+
+        // Finalize any current streaming before adding notification
+        flushPendingTextUpdates()
+        finalizeStreamingMessage()
+
+        // Add compaction notification pill to chat
+        let compactionMessage = ChatMessage.compaction(
+            tokensBefore: event.tokensBefore,
+            tokensAfter: event.tokensAfter,
+            reason: event.reason
+        )
+        messages.append(compactionMessage)
+    }
+
     func handleError(_ message: String) {
         logger.error("Agent error: \(message)", category: .events)
         isProcessing = false

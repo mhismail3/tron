@@ -136,7 +136,13 @@ export type RpcMethod =
   | 'system.shutdown'
   // Transcription
   | 'transcribe.audio'
-  | 'transcribe.listModels';
+  | 'transcribe.listModels'
+  // Context management
+  | 'context.getSnapshot'
+  | 'context.shouldCompact'
+  | 'context.previewCompaction'
+  | 'context.confirmCompaction'
+  | 'context.canAcceptTurn';
 
 // =============================================================================
 // Session Methods
@@ -1075,6 +1081,80 @@ export interface WorktreeListResult {
     branch: string;
     sessionId?: string;
   }>;
+}
+
+// =============================================================================
+// Context Methods
+// =============================================================================
+
+/** Get context snapshot for a session */
+export interface ContextGetSnapshotParams {
+  sessionId: string;
+}
+
+export interface ContextGetSnapshotResult {
+  currentTokens: number;
+  contextLimit: number;
+  usagePercent: number;
+  thresholdLevel: 'normal' | 'warning' | 'alert' | 'critical' | 'exceeded';
+  breakdown: {
+    systemPrompt: number;
+    tools: number;
+    messages: number;
+  };
+}
+
+/** Check if compaction is needed */
+export interface ContextShouldCompactParams {
+  sessionId: string;
+}
+
+export interface ContextShouldCompactResult {
+  shouldCompact: boolean;
+}
+
+/** Preview compaction without executing */
+export interface ContextPreviewCompactionParams {
+  sessionId: string;
+}
+
+export interface ContextPreviewCompactionResult {
+  tokensBefore: number;
+  tokensAfter: number;
+  compressionRatio: number;
+  preservedTurns: number;
+  summarizedTurns: number;
+  summary: string;
+}
+
+/** Confirm and execute compaction */
+export interface ContextConfirmCompactionParams {
+  sessionId: string;
+  /** Optional user-edited summary to use instead of generated one */
+  editedSummary?: string;
+}
+
+export interface ContextConfirmCompactionResult {
+  success: boolean;
+  tokensBefore: number;
+  tokensAfter: number;
+  compressionRatio: number;
+  summary: string;
+}
+
+/** Pre-turn validation to check if turn can proceed */
+export interface ContextCanAcceptTurnParams {
+  sessionId: string;
+  estimatedResponseTokens: number;
+}
+
+export interface ContextCanAcceptTurnResult {
+  canProceed: boolean;
+  needsCompaction: boolean;
+  wouldExceedLimit: boolean;
+  currentTokens: number;
+  estimatedAfterTurn: number;
+  contextLimit: number;
 }
 
 // =============================================================================

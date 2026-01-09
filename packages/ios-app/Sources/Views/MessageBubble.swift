@@ -74,6 +74,9 @@ struct MessageBubble: View {
 
         case .transcriptionNoSpeech:
             TranscriptionNoSpeechNotificationView()
+
+        case .compaction(let tokensBefore, let tokensAfter, let reason):
+            CompactionNotificationView(tokensBefore: tokensBefore, tokensAfter: tokensAfter, reason: reason)
         }
     }
 }
@@ -188,6 +191,76 @@ struct TranscriptionNoSpeechNotificationView: View {
         .overlay(
             Capsule()
                 .stroke(Color.orange.opacity(0.35), lineWidth: 0.5)
+        )
+        .frame(maxWidth: .infinity, alignment: .center)
+    }
+}
+
+// MARK: - Compaction Notification View (Cyan pill-style in-chat notification)
+
+struct CompactionNotificationView: View {
+    let tokensBefore: Int
+    let tokensAfter: Int
+    let reason: String
+
+    private var tokensSaved: Int {
+        tokensBefore - tokensAfter
+    }
+
+    private var formattedSaved: String {
+        if tokensSaved >= 1000 {
+            return String(format: "%.1fk", Double(tokensSaved) / 1000.0)
+        }
+        return "\(tokensSaved)"
+    }
+
+    private var compressionPercent: Int {
+        guard tokensBefore > 0 else { return 0 }
+        return Int(Double(tokensSaved) / Double(tokensBefore) * 100)
+    }
+
+    private var reasonDisplay: String {
+        switch reason {
+        case "pre_turn_guardrail":
+            return "auto"
+        case "threshold_exceeded":
+            return "threshold"
+        case "manual":
+            return "manual"
+        default:
+            return reason
+        }
+    }
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "arrow.triangle.2.circlepath.circle.fill")
+                .font(.system(size: 10, weight: .medium))
+                .foregroundStyle(.cyan)
+
+            Text("Context compacted")
+                .font(.system(size: 11, weight: .medium, design: .monospaced))
+                .foregroundStyle(.cyan.opacity(0.9))
+
+            Text("•")
+                .font(.system(size: 8))
+                .foregroundStyle(.cyan.opacity(0.5))
+
+            Text("\(formattedSaved) tokens saved")
+                .font(.system(size: 11, design: .monospaced))
+                .foregroundStyle(.cyan.opacity(0.7))
+
+            Text("(\(compressionPercent)%)")
+                .font(.system(size: 10, design: .monospaced))
+                .foregroundStyle(.cyan.opacity(0.5))
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(Color.cyan.opacity(0.1))
+        .clipShape(Capsule())
+        .overlay(
+            Capsule()
+                .stroke(Color.cyan.opacity(0.3), lineWidth: 0.5)
         )
         .frame(maxWidth: .infinity, alignment: .center)
     }

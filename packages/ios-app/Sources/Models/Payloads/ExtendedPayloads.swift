@@ -142,6 +142,28 @@ struct CompactSummaryPayload {
     }
 }
 
+// MARK: - Context Snapshot Payloads
+
+/// Parameters for context.getSnapshot RPC method
+struct ContextGetSnapshotParams: Codable {
+    let sessionId: String
+}
+
+/// Result from context.getSnapshot RPC method
+struct ContextSnapshotResult: Codable {
+    let currentTokens: Int
+    let contextLimit: Int
+    let usagePercent: Double
+    let thresholdLevel: String
+    let breakdown: ContextBreakdown
+
+    struct ContextBreakdown: Codable {
+        let systemPrompt: Int
+        let tools: Int
+        let messages: Int
+    }
+}
+
 // MARK: - Worktree Payloads
 
 /// Payload for worktree.acquired event

@@ -10,6 +10,8 @@
  */
 
 import { randomUUID } from 'crypto';
+import { appendFileSync, mkdirSync, existsSync } from 'fs';
+import { join } from 'path';
 import type {
   Message,
   AssistantMessage,
@@ -28,8 +30,11 @@ import {
   type ProviderType,
 } from '../providers/index.js';
 import { HookEngine } from '../hooks/engine.js';
+import { ContextManager, createContextManager } from '../context/context-manager.js';
+import type { Summarizer } from '../context/summarizer.js';
 import type { HookDefinition, PreToolHookContext, PostToolHookContext } from '../hooks/types.js';
 import { createLogger } from '../logging/logger.js';
+import { getTronDataDir } from '../settings/loader.js';
 import type {
   AgentConfig,
   AgentOptions,
@@ -49,7 +54,7 @@ export class TronAgent {
   private providerType: ProviderType;
   private tools: Map<string, TronTool>;
   private hookEngine: HookEngine;
-  private messages: Message[];
+  private contextManager: ContextManager;
   private currentTurn: number;
   private tokenUsage: { inputTokens: number; outputTokens: number };
   private isRunning: boolean;
@@ -62,6 +67,12 @@ export class TronAgent {
   private activeTool: string | null = null;
   /** Current reasoning level for OpenAI Codex models */
   private currentReasoningLevel: 'low' | 'medium' | 'high' | 'xhigh' | undefined;
+  /** Summarizer for auto-compaction */
+  private summarizer: Summarizer | null = null;
+  /** JSONL log file path for turn metadata */
+  private turnLogPath: string;
+  /** Whether auto-compaction is enabled */
+  private autoCompactionEnabled: boolean = true;
 
   constructor(config: AgentConfig, options: AgentOptions = {}) {
     this.sessionId = options.sessionId ?? `sess_${randomUUID().replace(/-/g, '').slice(0, 12)}`;
@@ -88,13 +99,34 @@ export class TronAgent {
     }
 
     this.hookEngine = new HookEngine();
-    this.messages = [];
+    this.workingDirectory = options.workingDirectory ?? process.cwd();
+
+    // Create ContextManager for all context operations
+    // Pass working directory so ContextManager can build provider-specific system prompts
+    this.contextManager = createContextManager({
+      model: config.provider.model,
+      systemPrompt: config.systemPrompt,
+      workingDirectory: this.workingDirectory,
+      tools: Array.from(this.tools.values()).map(tool => ({
+        name: tool.name,
+        description: tool.description,
+        parameters: tool.parameters,
+      })),
+    });
+
     this.currentTurn = 0;
     this.tokenUsage = { inputTokens: 0, outputTokens: 0 };
     this.isRunning = false;
     this.abortController = null;
     this.eventListeners = [];
-    this.workingDirectory = options.workingDirectory ?? process.cwd();
+
+    // Initialize turn log path for JSONL debugging
+    const tronDataDir = getTronDataDir();
+    const logsDir = join(tronDataDir, 'logs');
+    if (!existsSync(logsDir)) {
+      mkdirSync(logsDir, { recursive: true });
+    }
+    this.turnLogPath = join(logsDir, `turns-${this.sessionId}.jsonl`);
 
     logger.info('TronAgent initialized', {
       sessionId: this.sessionId,
@@ -134,6 +166,41 @@ export class TronAgent {
   }
 
   /**
+   * Set the summarizer for auto-compaction.
+   * When set, the agent will automatically compact context when thresholds are hit.
+   */
+  setSummarizer(summarizer: Summarizer): void {
+    this.summarizer = summarizer;
+    logger.info('Summarizer configured', { sessionId: this.sessionId });
+  }
+
+  /**
+   * Enable or disable auto-compaction.
+   * When enabled and a summarizer is set, context will be compacted automatically.
+   */
+  setAutoCompaction(enabled: boolean): void {
+    this.autoCompactionEnabled = enabled;
+    logger.info('Auto-compaction toggled', {
+      sessionId: this.sessionId,
+      enabled,
+    });
+  }
+
+  /**
+   * Check if auto-compaction is available (has summarizer and is enabled)
+   */
+  canAutoCompact(): boolean {
+    return this.autoCompactionEnabled && this.summarizer !== null;
+  }
+
+  /**
+   * Get the path to the turn metadata JSONL log
+   */
+  getTurnLogPath(): string {
+    return this.turnLogPath;
+  }
+
+  /**
    * Switch to a different model (preserves session context)
    */
   switchModel(model: string, providerType?: ProviderType): void {
@@ -145,7 +212,7 @@ export class TronAgent {
       sessionId: this.sessionId,
       previousModel: this.config.provider.model,
       newModel: model,
-      messageCountPreserved: this.messages.length,
+      messageCountPreserved: this.contextManager.getMessages().length,
     });
 
     const newProviderType = providerType ?? detectProviderFromModel(model);
@@ -174,6 +241,9 @@ export class TronAgent {
     // Update config
     this.config.provider.model = model;
     this.config.provider.type = newProviderType;
+
+    // Update ContextManager with new model
+    this.contextManager.switchModel(model);
   }
 
   /**
@@ -182,7 +252,7 @@ export class TronAgent {
   getState(): AgentState {
     return {
       sessionId: this.sessionId,
-      messages: [...this.messages],
+      messages: this.contextManager.getMessages(),
       currentTurn: this.currentTurn,
       tokenUsage: { ...this.tokenUsage },
       isRunning: this.isRunning,
@@ -190,10 +260,17 @@ export class TronAgent {
   }
 
   /**
+   * Get the context manager for advanced context operations
+   */
+  getContextManager(): ContextManager {
+    return this.contextManager;
+  }
+
+  /**
    * Add a message to the conversation
    */
   addMessage(message: Message): void {
-    this.messages.push(message);
+    this.contextManager.addMessage(message);
     logger.debug('Message added', { role: message.role, sessionId: this.sessionId });
   }
 
@@ -201,7 +278,7 @@ export class TronAgent {
    * Clear all messages
    */
   clearMessages(): void {
-    this.messages = [];
+    this.contextManager.setMessages([]);
     this.currentTurn = 0;
     logger.debug('Messages cleared', { sessionId: this.sessionId });
   }
@@ -306,6 +383,84 @@ export class TronAgent {
 
     const turnStartTime = Date.now();
 
+    // ==========================================================================
+    // PRE-TURN GUARDRAIL: Validate context before proceeding
+    // ==========================================================================
+    const validation = this.contextManager.canAcceptTurn({ estimatedResponseTokens: 4000 });
+
+    if (!validation.canProceed) {
+      // Context would exceed limit - try auto-compaction if available
+      if (this.canAutoCompact() && this.summarizer) {
+        logger.info('Pre-turn guardrail triggered - attempting auto-compaction', {
+          sessionId: this.sessionId,
+          turn: this.currentTurn,
+          currentTokens: this.contextManager.getCurrentTokens(),
+          contextLimit: this.contextManager.getContextLimit(),
+        });
+
+        this.emit({
+          type: 'compaction_start',
+          sessionId: this.sessionId,
+          timestamp: new Date().toISOString(),
+          reason: 'pre_turn_guardrail',
+          tokensBefore: this.contextManager.getCurrentTokens(),
+        });
+
+        try {
+          const result = await this.contextManager.executeCompaction({
+            summarizer: this.summarizer,
+          });
+
+          this.emit({
+            type: 'compaction_complete',
+            sessionId: this.sessionId,
+            timestamp: new Date().toISOString(),
+            success: result.success,
+            tokensBefore: result.tokensBefore,
+            tokensAfter: result.tokensAfter,
+            compressionRatio: result.compressionRatio,
+            reason: 'pre_turn_guardrail',
+          });
+
+          if (!result.success) {
+            this.isRunning = false;
+            return {
+              success: false,
+              error: 'Context limit exceeded and auto-compaction failed',
+            };
+          }
+
+          logger.info('Auto-compaction successful', {
+            sessionId: this.sessionId,
+            tokensBefore: result.tokensBefore,
+            tokensAfter: result.tokensAfter,
+          });
+        } catch (error) {
+          this.isRunning = false;
+          const errorMessage = error instanceof Error ? error.message : String(error);
+          logger.error('Auto-compaction failed', { error: errorMessage });
+          return {
+            success: false,
+            error: `Context limit exceeded and compaction failed: ${errorMessage}`,
+          };
+        }
+      } else {
+        // No summarizer - cannot auto-compact
+        this.isRunning = false;
+        return {
+          success: false,
+          error: 'Context limit exceeded. Enable auto-compaction or clear messages.',
+        };
+      }
+    } else if (validation.needsCompaction && this.canAutoCompact()) {
+      // Context is getting high but still ok - log warning for post-turn hook to handle
+      logger.debug('Context approaching threshold', {
+        sessionId: this.sessionId,
+        turn: this.currentTurn,
+        thresholdLevel: this.contextManager.getSnapshot().thresholdLevel,
+      });
+    }
+
     this.emit({
       type: 'turn_start',
       sessionId: this.sessionId,
@@ -314,23 +469,32 @@ export class TronAgent {
     });
 
     try {
-      // Build context
+      // Get messages from ContextManager
+      const messages = this.contextManager.getMessages();
+
+      // Build context using ContextManager's provider-aware system prompt
       const context: Context = {
-        messages: this.messages,
-        systemPrompt: this.config.systemPrompt,
+        messages,
+        systemPrompt: this.contextManager.getSystemPrompt(),
         tools: Array.from(this.tools.values()).map(tool => ({
           name: tool.name,
           description: tool.description,
           parameters: tool.parameters,
         })),
+        workingDirectory: this.workingDirectory,
       };
 
-      // Debug: Log message count being sent to provider
+      // Debug: Log context being sent to provider
       logger.debug('Building context for turn', {
         sessionId: this.sessionId,
         turn: this.currentTurn,
-        messageCount: this.messages.length,
-        messageRoles: this.messages.map(m => m.role),
+        messageCount: messages.length,
+        messageRoles: messages.map(m => m.role),
+        providerType: this.providerType,
+        systemPromptLength: context.systemPrompt?.length ?? 0,
+        systemPromptPreview: context.systemPrompt?.substring(0, 100),
+        workingDirectory: this.workingDirectory,
+        hasToolClarification: this.contextManager.requiresToolClarification(),
       });
 
       // Stream response
@@ -435,8 +599,8 @@ export class TronAgent {
         this.tokenUsage.outputTokens += assistantMessage.usage.outputTokens;
       }
 
-      // Add assistant message to history
-      this.messages.push(assistantMessage);
+      // Add assistant message to history via ContextManager
+      this.contextManager.addMessage(assistantMessage);
 
       // Execute tool calls if any
       let toolCallsExecuted = 0;
@@ -459,14 +623,14 @@ export class TronAgent {
             arguments: toolCall.arguments,
           });
 
-          // Add tool result to messages
+          // Add tool result to messages via ContextManager
           const toolResultMessage: ToolResultMessage = {
             role: 'toolResult',
             toolCallId: toolCall.id,
             content: result.result.content,
             isError: result.result.isError,
           };
-          this.messages.push(toolResultMessage);
+          this.contextManager.addMessage(toolResultMessage);
           toolCallsExecuted++;
 
           // Check for abort AFTER tool execution (tool may have been interrupted)
@@ -520,6 +684,18 @@ export class TronAgent {
         } : undefined,
       });
 
+      // ==========================================================================
+      // POST-RESPONSE HOOK: Log turn metadata to JSONL for debugging
+      // ==========================================================================
+      this.logTurnMetadata({
+        turn: this.currentTurn,
+        duration: turnDuration,
+        success: true,
+        toolCallsExecuted,
+        tokenUsage: assistantMessage.usage,
+        stopReason: assistantMessage.stopReason,
+      });
+
       this.isRunning = false;
 
       return {
@@ -544,6 +720,15 @@ export class TronAgent {
           hasPartialContent: !!this.streamingContent,
         });
 
+        // Log interrupted turn metadata
+        this.logTurnMetadata({
+          turn: this.currentTurn,
+          duration: Date.now() - turnStartTime,
+          success: false,
+          toolCallsExecuted: 0,
+          error: 'Interrupted by user',
+        });
+
         return {
           success: false,
           error: 'Interrupted by user',
@@ -554,6 +739,15 @@ export class TronAgent {
       }
 
       logger.error('Turn failed', { error: errorMessage, sessionId: this.sessionId });
+
+      // Log failed turn metadata
+      this.logTurnMetadata({
+        turn: this.currentTurn,
+        duration: Date.now() - turnStartTime,
+        success: false,
+        toolCallsExecuted: 0,
+        error: errorMessage,
+      });
 
       return {
         success: false,
@@ -588,7 +782,7 @@ export class TronAgent {
           // Don't emit agent_end here - abort() already emitted agent_interrupted
           return {
             success: false,
-            messages: this.messages,
+            messages: this.contextManager.getMessages(),
             turns: this.currentTurn,
             totalTokenUsage: this.tokenUsage,
             error: lastResult.error,
@@ -606,7 +800,7 @@ export class TronAgent {
 
         return {
           success: false,
-          messages: this.messages,
+          messages: this.contextManager.getMessages(),
           turns: this.currentTurn,
           totalTokenUsage: this.tokenUsage,
           error: lastResult.error,
@@ -628,7 +822,7 @@ export class TronAgent {
 
     return {
       success: true,
-      messages: this.messages,
+      messages: this.contextManager.getMessages(),
       turns: this.currentTurn,
       totalTokenUsage: this.tokenUsage,
       stoppedReason: lastResult?.stopReason,
@@ -801,5 +995,69 @@ export class TronAgent {
       },
       duration,
     };
+  }
+
+  /**
+   * Log turn metadata to JSONL file for debugging.
+   * This is the post-response hook - runs after EVERY response.
+   */
+  private logTurnMetadata(data: {
+    turn: number;
+    duration: number;
+    success: boolean;
+    toolCallsExecuted: number;
+    tokenUsage?: { inputTokens: number; outputTokens: number };
+    stopReason?: string;
+    error?: string;
+  }): void {
+    try {
+      const snapshot = this.contextManager.getSnapshot();
+
+      const record = {
+        _meta: {
+          sessionId: this.sessionId,
+          turn: data.turn,
+          timestamp: new Date().toISOString(),
+        },
+        turn: {
+          duration: data.duration,
+          success: data.success,
+          toolCallsExecuted: data.toolCallsExecuted,
+          tokenUsage: data.tokenUsage,
+          stopReason: data.stopReason,
+          error: data.error,
+        },
+        context: {
+          model: this.contextManager.getModel(),
+          provider: this.contextManager.getProviderType(),
+          currentTokens: snapshot.currentTokens,
+          contextLimit: snapshot.contextLimit,
+          usagePercent: snapshot.usagePercent,
+          thresholdLevel: snapshot.thresholdLevel,
+          messageCount: this.contextManager.getMessages().length,
+          breakdown: snapshot.breakdown,
+        },
+        session: {
+          cumulativeInputTokens: this.tokenUsage.inputTokens,
+          cumulativeOutputTokens: this.tokenUsage.outputTokens,
+        },
+      };
+
+      // Append to JSONL file
+      const line = JSON.stringify(record) + '\n';
+      appendFileSync(this.turnLogPath, line, 'utf-8');
+
+      logger.debug('Turn metadata logged', {
+        sessionId: this.sessionId,
+        turn: data.turn,
+        logPath: this.turnLogPath,
+      });
+    } catch (error) {
+      // Don't fail the turn if logging fails
+      logger.error('Failed to log turn metadata', {
+        error: error instanceof Error ? error.message : String(error),
+        sessionId: this.sessionId,
+      });
+    }
   }
 }

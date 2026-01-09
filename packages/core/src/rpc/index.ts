@@ -8,4 +8,5 @@ export {
   type RpcMiddleware,
   type EventStoreManager,
   type WorktreeRpcManager,
+  type ContextRpcManager,
 } from './handler.js';

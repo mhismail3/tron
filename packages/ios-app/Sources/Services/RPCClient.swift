@@ -36,6 +36,7 @@ class RPCClient: ObservableObject {
     var onTurnStart: ((TurnStartEvent) -> Void)?
     var onTurnEnd: ((TurnEndEvent) -> Void)?
     var onAgentTurn: ((AgentTurnEvent) -> Void)?
+    var onCompaction: ((CompactionEvent) -> Void)?
     var onComplete: (() -> Void)?
     var onError: ((String) -> Void)?
 
@@ -169,6 +170,10 @@ class RPCClient: ObservableObject {
             }
             guard checkSession(e.sessionId) else { return }
             onComplete?()
+
+        case .compaction(let e):
+            guard checkSession(e.sessionId) else { return }
+            onCompaction?(e)
 
         case .error(let e):
             // Always notify global listeners for dashboard updates
@@ -584,6 +589,21 @@ class RPCClient: ObservableObject {
         )
 
         return result.handoffs
+    }
+
+    // MARK: - Context Methods
+
+    /// Get context snapshot for a session
+    func getContextSnapshot(sessionId: String) async throws -> ContextSnapshotResult {
+        guard let ws = webSocket else {
+            throw RPCClientError.connectionNotEstablished
+        }
+
+        let params = ContextGetSnapshotParams(sessionId: sessionId)
+        return try await ws.send(
+            method: "context.getSnapshot",
+            params: params
+        )
     }
 
     // MARK: - Event Sync Methods

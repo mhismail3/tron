@@ -148,6 +148,10 @@ class ChatViewModel: ObservableObject {
             self?.handleAgentTurn(event)
         }
 
+        rpcClient.onCompaction = { [weak self] event in
+            self?.handleCompaction(event)
+        }
+
         rpcClient.onComplete = { [weak self] in
             self?.handleComplete()
         }

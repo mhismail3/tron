@@ -156,6 +156,8 @@ enum MessageContent: Equatable {
     case transcriptionFailed
     /// In-chat notification for no speech detected
     case transcriptionNoSpeech
+    /// In-chat notification for context compaction
+    case compaction(tokensBefore: Int, tokensAfter: Int, reason: String)
 
     var textContent: String {
         switch self {
@@ -179,7 +181,17 @@ enum MessageContent: Equatable {
             return "Transcription failed"
         case .transcriptionNoSpeech:
             return "No speech detected"
+        case .compaction(let before, let after, _):
+            let saved = before - after
+            return "Context compacted: \(formatTokens(saved)) tokens saved"
         }
+    }
+
+    private func formatTokens(_ tokens: Int) -> String {
+        if tokens >= 1000 {
+            return String(format: "%.1fk", Double(tokens) / 1000.0)
+        }
+        return "\(tokens)"
     }
 
     var isToolRelated: Bool {
@@ -193,7 +205,7 @@ enum MessageContent: Equatable {
 
     var isNotification: Bool {
         switch self {
-        case .modelChange, .interrupted, .transcriptionFailed, .transcriptionNoSpeech:
+        case .modelChange, .interrupted, .transcriptionFailed, .transcriptionNoSpeech, .compaction:
             return true
         default:
             return false
@@ -341,5 +353,10 @@ extension ChatMessage {
     /// In-chat notification for no speech detected
     static func transcriptionNoSpeech() -> ChatMessage {
         ChatMessage(role: .system, content: .transcriptionNoSpeech)
+    }
+
+    /// In-chat notification for context compaction
+    static func compaction(tokensBefore: Int, tokensAfter: Int, reason: String) -> ChatMessage {
+        ChatMessage(role: .system, content: .compaction(tokensBefore: tokensBefore, tokensAfter: tokensAfter, reason: reason))
     }
 }

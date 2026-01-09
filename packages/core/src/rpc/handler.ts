@@ -60,6 +60,16 @@ import type {
   TranscribeAudioParams,
   TranscribeAudioResult,
   TranscribeListModelsResult,
+  ContextGetSnapshotParams,
+  ContextGetSnapshotResult,
+  ContextShouldCompactParams,
+  ContextShouldCompactResult,
+  ContextPreviewCompactionParams,
+  ContextPreviewCompactionResult,
+  ContextConfirmCompactionParams,
+  ContextConfirmCompactionResult,
+  ContextCanAcceptTurnParams,
+  ContextCanAcceptTurnResult,
 } from './types.js';
 import { ANTHROPIC_MODELS, OPENAI_CODEX_MODELS } from '../providers/models.js';
 
@@ -82,6 +92,8 @@ export interface RpcContext {
   worktreeManager?: WorktreeRpcManager;
   /** Transcription manager (optional) */
   transcriptionManager?: TranscriptionManager;
+  /** Context manager for compaction operations (optional) */
+  contextManager?: ContextRpcManager;
 }
 
 /**
@@ -108,6 +120,17 @@ export interface WorktreeRpcManager {
     conflicts?: string[];
   }>;
   listWorktrees(): Promise<Array<{ path: string; branch: string; sessionId?: string }>>;
+}
+
+/**
+ * Context manager interface for RPC operations
+ */
+export interface ContextRpcManager {
+  getContextSnapshot(sessionId: string): ContextGetSnapshotResult;
+  shouldCompact(sessionId: string): boolean;
+  previewCompaction(sessionId: string): Promise<ContextPreviewCompactionResult>;
+  confirmCompaction(sessionId: string, opts?: { editedSummary?: string }): Promise<ContextConfirmCompactionResult>;
+  canAcceptTurn(sessionId: string, opts: { estimatedResponseTokens: number }): ContextCanAcceptTurnResult;
 }
 
 // EventStore manager interface (implemented by EventStoreOrchestrator)
@@ -354,6 +377,18 @@ export class RpcHandler extends EventEmitter {
           return this.handleWorktreeMerge(request);
         case 'worktree.list':
           return this.handleWorktreeList(request);
+
+        // Context methods
+        case 'context.getSnapshot':
+          return this.handleContextGetSnapshot(request);
+        case 'context.shouldCompact':
+          return this.handleContextShouldCompact(request);
+        case 'context.previewCompaction':
+          return this.handleContextPreviewCompaction(request);
+        case 'context.confirmCompaction':
+          return this.handleContextConfirmCompaction(request);
+        case 'context.canAcceptTurn':
+          return this.handleContextCanAcceptTurn(request);
 
         default:
           return this.errorResponse(request.id, 'METHOD_NOT_FOUND', `Unknown method: ${request.method}`);
@@ -1183,6 +1218,130 @@ export class RpcHandler extends EventEmitter {
     const result: WorktreeListResult = { worktrees };
 
     return this.successResponse(request.id, result);
+  }
+
+  // ===========================================================================
+  // Context Handlers
+  // ===========================================================================
+
+  private async handleContextGetSnapshot(request: RpcRequest): Promise<RpcResponse> {
+    if (!this.context.contextManager) {
+      return this.errorResponse(request.id, 'NOT_SUPPORTED', 'Context manager not available');
+    }
+
+    const params = request.params as ContextGetSnapshotParams | undefined;
+
+    if (!params?.sessionId) {
+      return this.errorResponse(request.id, 'INVALID_PARAMS', 'sessionId is required');
+    }
+
+    try {
+      const result = this.context.contextManager.getContextSnapshot(params.sessionId);
+      return this.successResponse(request.id, result);
+    } catch (error) {
+      if (error instanceof Error && error.message.includes('not active')) {
+        return this.errorResponse(request.id, 'SESSION_NOT_ACTIVE', 'Session is not active');
+      }
+      throw error;
+    }
+  }
+
+  private async handleContextShouldCompact(request: RpcRequest): Promise<RpcResponse> {
+    if (!this.context.contextManager) {
+      return this.errorResponse(request.id, 'NOT_SUPPORTED', 'Context manager not available');
+    }
+
+    const params = request.params as ContextShouldCompactParams | undefined;
+
+    if (!params?.sessionId) {
+      return this.errorResponse(request.id, 'INVALID_PARAMS', 'sessionId is required');
+    }
+
+    try {
+      const shouldCompact = this.context.contextManager.shouldCompact(params.sessionId);
+      const result: ContextShouldCompactResult = { shouldCompact };
+      return this.successResponse(request.id, result);
+    } catch (error) {
+      if (error instanceof Error && error.message.includes('not active')) {
+        return this.errorResponse(request.id, 'SESSION_NOT_ACTIVE', 'Session is not active');
+      }
+      throw error;
+    }
+  }
+
+  private async handleContextPreviewCompaction(request: RpcRequest): Promise<RpcResponse> {
+    if (!this.context.contextManager) {
+      return this.errorResponse(request.id, 'NOT_SUPPORTED', 'Context manager not available');
+    }
+
+    const params = request.params as ContextPreviewCompactionParams | undefined;
+
+    if (!params?.sessionId) {
+      return this.errorResponse(request.id, 'INVALID_PARAMS', 'sessionId is required');
+    }
+
+    try {
+      const result = await this.context.contextManager.previewCompaction(params.sessionId);
+      return this.successResponse(request.id, result);
+    } catch (error) {
+      if (error instanceof Error && error.message.includes('not active')) {
+        return this.errorResponse(request.id, 'SESSION_NOT_ACTIVE', 'Session is not active');
+      }
+      throw error;
+    }
+  }
+
+  private async handleContextConfirmCompaction(request: RpcRequest): Promise<RpcResponse> {
+    if (!this.context.contextManager) {
+      return this.errorResponse(request.id, 'NOT_SUPPORTED', 'Context manager not available');
+    }
+
+    const params = request.params as ContextConfirmCompactionParams | undefined;
+
+    if (!params?.sessionId) {
+      return this.errorResponse(request.id, 'INVALID_PARAMS', 'sessionId is required');
+    }
+
+    try {
+      const result = await this.context.contextManager.confirmCompaction(
+        params.sessionId,
+        { editedSummary: params.editedSummary }
+      );
+      return this.successResponse(request.id, result);
+    } catch (error) {
+      if (error instanceof Error && error.message.includes('not active')) {
+        return this.errorResponse(request.id, 'SESSION_NOT_ACTIVE', 'Session is not active');
+      }
+      throw error;
+    }
+  }
+
+  private async handleContextCanAcceptTurn(request: RpcRequest): Promise<RpcResponse> {
+    if (!this.context.contextManager) {
+      return this.errorResponse(request.id, 'NOT_SUPPORTED', 'Context manager not available');
+    }
+
+    const params = request.params as ContextCanAcceptTurnParams | undefined;
+
+    if (!params?.sessionId) {
+      return this.errorResponse(request.id, 'INVALID_PARAMS', 'sessionId is required');
+    }
+    if (params.estimatedResponseTokens === undefined) {
+      return this.errorResponse(request.id, 'INVALID_PARAMS', 'estimatedResponseTokens is required');
+    }
+
+    try {
+      const result = this.context.contextManager.canAcceptTurn(
+        params.sessionId,
+        { estimatedResponseTokens: params.estimatedResponseTokens }
+      );
+      return this.successResponse(request.id, result);
+    } catch (error) {
+      if (error instanceof Error && error.message.includes('not active')) {
+        return this.errorResponse(request.id, 'SESSION_NOT_ACTIVE', 'Session is not active');
+      }
+      throw error;
+    }
   }
 
   // ===========================================================================

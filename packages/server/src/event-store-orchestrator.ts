@@ -24,6 +24,7 @@ import {
   loadServerAuth,
   getTronDataDir,
   detectProviderFromModel,
+  KeywordSummarizer,
   type AgentConfig,
   type TurnResult,
   type TronEvent,
@@ -38,6 +39,11 @@ import {
   type ServerAuth,
   type EventType,
   type CurrentTurnToolCall,
+  type ContextSnapshot,
+  type PreTurnValidation,
+  type CompactionPreview,
+  type CompactionResult,
+  type Summarizer,
 } from '@tron/core';
 import {
   normalizeContentBlocks,
@@ -55,7 +61,6 @@ import {
   commitWorkingDirectory,
 } from './orchestrator/worktree-ops.js';
 import {
-  DEFAULT_SYSTEM_PROMPT,
   type EventStoreOrchestratorConfig,
   type ActiveSession,
   type AgentRunOptions,
@@ -1243,6 +1248,165 @@ export class EventStoreOrchestrator extends EventEmitter {
   }
 
   // ===========================================================================
+  // Context Management & Compaction
+  // ===========================================================================
+
+  /**
+   * Get the current context snapshot for a session.
+   * Returns token usage, limits, and threshold levels.
+   * For inactive sessions, returns a default snapshot with zero usage.
+   */
+  getContextSnapshot(sessionId: string): ContextSnapshot {
+    const active = this.activeSessions.get(sessionId);
+    if (!active) {
+      // Return default snapshot for inactive sessions
+      // Use default model's context limit (200k for Claude Sonnet 4)
+      return {
+        currentTokens: 0,
+        contextLimit: 200_000,
+        usagePercent: 0,
+        thresholdLevel: 'normal',
+        breakdown: {
+          systemPrompt: 0,
+          tools: 0,
+          messages: 0,
+        },
+      };
+    }
+    return active.agent.getContextManager().getSnapshot();
+  }
+
+  /**
+   * Check if a session needs compaction based on context threshold.
+   * Returns false for inactive sessions (nothing to compact).
+   */
+  shouldCompact(sessionId: string): boolean {
+    const active = this.activeSessions.get(sessionId);
+    if (!active) {
+      return false; // Inactive sessions don't need compaction
+    }
+    return active.agent.getContextManager().shouldCompact();
+  }
+
+  /**
+   * Preview compaction without executing it.
+   * Returns estimated token reduction and generated summary.
+   */
+  async previewCompaction(sessionId: string): Promise<CompactionPreview> {
+    const active = this.activeSessions.get(sessionId);
+    if (!active) {
+      throw new Error('Session not active');
+    }
+
+    const summarizer = this.getSummarizer();
+    return active.agent.getContextManager().previewCompaction({ summarizer });
+  }
+
+  /**
+   * Execute compaction on a session.
+   * Stores compact.boundary and compact.summary events in EventStore.
+   */
+  async confirmCompaction(
+    sessionId: string,
+    opts?: { editedSummary?: string }
+  ): Promise<CompactionResult> {
+    const active = this.activeSessions.get(sessionId);
+    if (!active) {
+      throw new Error('Session not active');
+    }
+
+    const cm = active.agent.getContextManager();
+    const tokensBefore = cm.getCurrentTokens();
+    const summarizer = this.getSummarizer();
+
+    const result = await cm.executeCompaction({
+      summarizer,
+      editedSummary: opts?.editedSummary,
+    });
+
+    // Store compaction events in EventStore (linearized)
+    await active.appendPromiseChain;
+
+    // Store compact.boundary event
+    const boundaryParentId = active.pendingHeadEventId ?? undefined;
+    const boundaryEvent = await this.eventStore.append({
+      sessionId: sessionId as SessionId,
+      type: 'compact.boundary',
+      payload: {
+        originalTokens: tokensBefore,
+        compactedTokens: result.tokensAfter,
+        compressionRatio: result.compressionRatio,
+      },
+      parentId: boundaryParentId,
+    });
+    active.pendingHeadEventId = boundaryEvent.id;
+
+    // Store compact.summary event
+    const summaryParentId = active.pendingHeadEventId;
+    const summaryEvent = await this.eventStore.append({
+      sessionId: sessionId as SessionId,
+      type: 'compact.summary',
+      payload: {
+        summary: result.summary,
+        keyDecisions: result.extractedData?.keyDecisions?.map(d => d.decision),
+        filesModified: result.extractedData?.filesModified,
+      },
+      parentId: summaryParentId,
+    });
+    active.pendingHeadEventId = summaryEvent.id;
+
+    logger.info('Compaction completed', {
+      sessionId,
+      tokensBefore,
+      tokensAfter: result.tokensAfter,
+      compressionRatio: result.compressionRatio,
+    });
+
+    // Emit compaction_completed event
+    this.emit('compaction_completed', {
+      sessionId,
+      tokensBefore,
+      tokensAfter: result.tokensAfter,
+      compressionRatio: result.compressionRatio,
+      summary: result.summary,
+    });
+
+    return result;
+  }
+
+  /**
+   * Pre-turn validation to check if a turn can proceed.
+   * Returns whether compaction is needed and estimated token usage.
+   * Inactive sessions can always accept turns (they'll be activated first).
+   */
+  canAcceptTurn(
+    sessionId: string,
+    opts: { estimatedResponseTokens: number }
+  ): PreTurnValidation {
+    const active = this.activeSessions.get(sessionId);
+    if (!active) {
+      // Inactive sessions can always accept turns - they'll be activated first
+      return {
+        canProceed: true,
+        needsCompaction: false,
+        wouldExceedLimit: false,
+        currentTokens: 0,
+        estimatedAfterTurn: opts.estimatedResponseTokens,
+        contextLimit: 200_000,
+      };
+    }
+    return active.agent.getContextManager().canAcceptTurn(opts);
+  }
+
+  /**
+   * Get a summarizer instance for compaction operations.
+   */
+  private getSummarizer(): Summarizer {
+    // Use KeywordSummarizer for now - in production this would use LLM
+    return new KeywordSummarizer();
+  }
+
+  // ===========================================================================
   // Search
   // ===========================================================================
 
@@ -1387,8 +1551,10 @@ export class EventStoreOrchestrator extends EventEmitter {
       new LsTool({ workingDirectory }),
     ];
 
-    const prompt = systemPrompt ||
-      DEFAULT_SYSTEM_PROMPT.replace('{workingDirectory}', workingDirectory);
+    // System prompt is now handled by ContextManager based on provider type
+    // Only pass custom prompt if explicitly provided - otherwise ContextManager
+    // will use TRON_CORE_PROMPT with provider-specific adaptations
+    const prompt = systemPrompt; // May be undefined - that's fine
 
     logger.info('Creating agent with tools', {
       sessionId,
@@ -1694,6 +1860,20 @@ export class EventStoreOrchestrator extends EventEmitter {
             success: false,
             interrupted: true,
             partialContent: event.partialContent,
+          },
+        });
+        break;
+
+      case 'compaction_complete':
+        this.emit('agent_event', {
+          type: 'agent.compaction',
+          sessionId,
+          timestamp,
+          data: {
+            tokensBefore: event.tokensBefore,
+            tokensAfter: event.tokensAfter,
+            compressionRatio: event.compressionRatio,
+            reason: event.reason || 'auto',
           },
         });
         break;
