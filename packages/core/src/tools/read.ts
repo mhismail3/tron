@@ -50,8 +50,27 @@ export class ReadTool implements TronTool {
   }
 
   async execute(args: Record<string, unknown>): Promise<TronToolResult> {
+    // Validate required parameters (defense against truncated tool calls)
+    if (!args.file_path || typeof args.file_path !== 'string') {
+      return {
+        content: 'Missing required parameter: file_path. Please provide the absolute or relative path to the file you want to read.',
+        isError: true,
+        details: { file_path: args.file_path },
+      };
+    }
+
+    // Validate file_path is not just "/" or empty-ish
+    const rawPath = args.file_path.trim();
+    if (rawPath === '/' || rawPath === '.' || rawPath === '') {
+      return {
+        content: `Invalid file_path: "${args.file_path}". Please provide a specific file path, not a directory. Example: "/path/to/file.txt" or "src/index.ts"`,
+        isError: true,
+        details: { file_path: args.file_path },
+      };
+    }
+
     const settings = getReadSettings();
-    const filePath = this.resolvePath(args.file_path as string);
+    const filePath = this.resolvePath(rawPath);
     const offset = (args.offset as number | undefined) ?? 0;
     const limit = (args.limit as number | undefined) ?? settings.defaultLimitLines;
 

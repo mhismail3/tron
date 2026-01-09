@@ -88,18 +88,35 @@ export class GrepTool implements TronTool {
   }
 
   async execute(args: Record<string, unknown>): Promise<TronToolResult> {
+    // Validate required parameters (defense against truncated tool calls)
+    if (!args.pattern || typeof args.pattern !== 'string') {
+      return {
+        content: 'Missing required parameter: pattern. Please provide a regex pattern to search for. Example: "function.*export" or "TODO"',
+        isError: true,
+        details: { pattern: args.pattern },
+      };
+    }
+
+    const patternStr = args.pattern.trim();
+    if (patternStr === '') {
+      return {
+        content: 'Invalid pattern: pattern cannot be empty. Please provide a regex pattern to search for.',
+        isError: true,
+        details: { pattern: args.pattern },
+      };
+    }
+
     const settings = getGrepSettings();
-    const pattern = args.pattern as string;
     const searchPath = this.resolvePath((args.path as string) || '.');
     const globPattern = args.glob as string | undefined;
     const ignoreCase = (args.ignoreCase as boolean) ?? false;
     const contextLines = (args.context as number) ?? 0;
     const maxResults = (args.maxResults as number) ?? settings.defaultMaxResults;
 
-    logger.debug('Grep search', { pattern, searchPath, globPattern, ignoreCase });
+    logger.debug('Grep search', { pattern: patternStr, searchPath, globPattern, ignoreCase });
 
     try {
-      const regex = new RegExp(pattern, ignoreCase ? 'gi' : 'g');
+      const regex = new RegExp(patternStr, ignoreCase ? 'gi' : 'g');
       const matches: GrepMatch[] = [];
       let truncated = false;
 
@@ -115,9 +132,9 @@ export class GrepTool implements TronTool {
 
       if (matches.length === 0) {
         return {
-          content: `No matches found for pattern: ${pattern}`,
+          content: `No matches found for pattern: ${patternStr}`,
           isError: false,
-          details: { pattern, searchPath, matchCount: 0 },
+          details: { pattern: patternStr, searchPath, matchCount: 0 },
         };
       }
 
@@ -129,7 +146,7 @@ export class GrepTool implements TronTool {
         content: output,
         isError: false,
         details: {
-          pattern,
+          pattern: patternStr,
           searchPath,
           matchCount: matches.length,
           truncated,

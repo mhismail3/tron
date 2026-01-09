@@ -64,7 +64,17 @@ export class LsTool implements TronTool {
   }
 
   async execute(args: Record<string, unknown>): Promise<TronToolResult> {
-    const listPath = this.resolvePath((args.path as string) || '.');
+    // Validate path if provided (defense against malformed tool calls)
+    const rawPath = args.path as string | undefined;
+    if (rawPath !== undefined && typeof rawPath !== 'string') {
+      return {
+        content: 'Invalid path parameter: path must be a string. Example: "." or "/home/user/project"',
+        isError: true,
+        details: { path: rawPath },
+      };
+    }
+
+    const listPath = this.resolvePath(rawPath || '.');
     const showAll = (args.all as boolean) ?? false;
     const longFormat = (args.long as boolean) ?? false;
     const humanReadable = (args.humanReadable as boolean) ?? false;

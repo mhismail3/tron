@@ -82,8 +82,25 @@ export class FindTool implements TronTool {
   }
 
   async execute(args: Record<string, unknown>): Promise<TronToolResult> {
+    // Validate required parameters (defense against truncated tool calls)
+    if (!args.pattern || typeof args.pattern !== 'string') {
+      return {
+        content: 'Missing required parameter: pattern. Please provide a glob pattern to match files. Example: "*.ts", "**/*.js", or "src/**/*.tsx"',
+        isError: true,
+        details: { pattern: args.pattern },
+      };
+    }
+
+    const patternStr = args.pattern.trim();
+    if (patternStr === '') {
+      return {
+        content: 'Invalid pattern: pattern cannot be empty. Please provide a glob pattern like "*.ts" or "**/*.js"',
+        isError: true,
+        details: { pattern: args.pattern },
+      };
+    }
+
     const settings = getFindSettings();
-    const pattern = args.pattern as string;
     const searchPath = this.resolvePath((args.path as string) || '.');
     const typeFilter = (args.type as 'file' | 'directory' | 'all') ?? 'all';
     const maxDepth = (args.maxDepth as number) ?? settings.defaultMaxDepth;
@@ -92,7 +109,7 @@ export class FindTool implements TronTool {
     const sortByTime = (args.sortByTime as boolean) ?? false;
     const maxResults = (args.maxResults as number) ?? settings.defaultMaxResults;
 
-    logger.debug('Find search', { pattern, searchPath, typeFilter, maxDepth });
+    logger.debug('Find search', { pattern: patternStr, searchPath, typeFilter, maxDepth });
 
     try {
       const stat = await fs.stat(searchPath);
@@ -106,7 +123,7 @@ export class FindTool implements TronTool {
       }
 
       const entries: FileEntry[] = [];
-      const globRegex = this.patternToRegex(pattern);
+      const globRegex = this.patternToRegex(patternStr);
 
       await this.searchDirectory(
         searchPath,
@@ -123,9 +140,9 @@ export class FindTool implements TronTool {
 
       if (entries.length === 0) {
         return {
-          content: `No files found matching: ${pattern}`,
+          content: `No files found matching: ${patternStr}`,
           isError: false,
-          details: { pattern, searchPath, fileCount: 0 },
+          details: { pattern: patternStr, searchPath, fileCount: 0 },
         };
       }
 
@@ -147,7 +164,7 @@ export class FindTool implements TronTool {
         content: output,
         isError: false,
         details: {
-          pattern,
+          pattern: patternStr,
           searchPath,
           fileCount: entries.length,
           truncated,
