@@ -7,13 +7,10 @@ struct ContextAuditView: View {
     let sessionId: String
 
     @Environment(\.dismiss) private var dismiss
+    @EnvironmentObject var eventStoreManager: EventStoreManager
     @State private var isLoading = true
     @State private var errorMessage: String?
-    @State private var memoryEntries: [MemoryEntry] = []
-    @State private var handoffs: [Handoff] = []
     @State private var contextSnapshot: ContextSnapshotResult?
-    @State private var searchQuery = ""
-    @State private var selectedTab = 0
 
     var body: some View {
         NavigationStack {
@@ -31,7 +28,7 @@ struct ContextAuditView: View {
             .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
             .toolbar {
                 ToolbarItem(placement: .principal) {
-                    Text("Context & Memory")
+                    Text("Context Manager")
                         .font(.system(size: 16, weight: .semibold))
                         .foregroundStyle(.tronEmerald)
                 }
@@ -55,28 +52,16 @@ struct ContextAuditView: View {
         .preferredColorScheme(.dark)
     }
 
-    private var contentView: some View {
-        VStack(spacing: 0) {
-            // Tab picker
-            Picker("Tab", selection: $selectedTab) {
-                Text("Context").tag(0)
-                Text("Memory").tag(1)
-                Text("Handoffs").tag(2)
-            }
-            .pickerStyle(.segmented)
-            .padding()
-
-            switch selectedTab {
-            case 0:
-                contextView
-            case 1:
-                memoryView
-            case 2:
-                handoffsView
-            default:
-                memoryView
-            }
+    /// Get session token usage from EventStoreManager
+    private var sessionTokenUsage: (input: Int, output: Int) {
+        guard let session = eventStoreManager.sessions.first(where: { $0.id == sessionId }) else {
+            return (0, 0)
         }
+        return (session.inputTokens, session.outputTokens)
+    }
+
+    private var contentView: some View {
+        contextView
     }
 
     // MARK: - Context View
@@ -90,12 +75,19 @@ struct ContextAuditView: View {
                         ContextUsageGaugeView(snapshot: snapshot)
                             .padding(.horizontal)
 
+                        // Accumulated session tokens
+                        SessionTokensView(
+                            inputTokens: sessionTokenUsage.input,
+                            outputTokens: sessionTokenUsage.output
+                        )
+                        .padding(.horizontal)
+
                         // Info about context vs session tokens
                         HStack(spacing: 4) {
                             Image(systemName: "info.circle")
                                 .font(.caption2)
                                 .foregroundStyle(.tronTextMuted)
-                            Text("Context % shows current memory usage. Total tokens in the chat pill show cumulative API usage and don't decrease after compaction.")
+                            Text("Context % shows current memory usage and decreases after compaction. Session tokens show cumulative API usage for this session.")
                                 .font(.caption2)
                                 .foregroundStyle(.tronTextMuted)
                                 .fixedSize(horizontal: false, vertical: true)
@@ -126,151 +118,13 @@ struct ContextAuditView: View {
         }
     }
 
-    // MARK: - Memory View
-
-    private var memoryView: some View {
-        VStack(spacing: 0) {
-            // Search bar
-            HStack {
-                Image(systemName: "magnifyingglass")
-                    .foregroundStyle(.tronTextSecondary)
-                TextField("Search memory...", text: $searchQuery)
-                    .textFieldStyle(.plain)
-                    .font(.body)
-                    .foregroundStyle(.tronTextPrimary)
-                    .onSubmit {
-                        Task { await searchMemory() }
-                    }
-
-                if !searchQuery.isEmpty {
-                    Button {
-                        searchQuery = ""
-                        Task { await loadContext() }
-                    } label: {
-                        Image(systemName: "xmark.circle.fill")
-                            .foregroundStyle(.tronTextMuted)
-                    }
-                }
-            }
-            .padding()
-            .background(Color.tronSurface)
-
-            if memoryEntries.isEmpty {
-                emptyMemoryView
-            } else {
-                memoryList
-            }
-        }
-    }
-
-    private var emptyMemoryView: some View {
-        VStack(spacing: 16) {
-            Image(systemName: "brain")
-                .font(.system(size: 48))
-                .foregroundStyle(.tronTextMuted)
-
-            Text("No Memory Entries")
-                .font(.headline)
-                .foregroundStyle(.tronTextSecondary)
-
-            Text("Memory entries will appear here as patterns and decisions are learned.")
-                .font(.caption)
-                .foregroundStyle(.tronTextMuted)
-                .multilineTextAlignment(.center)
-                .padding(.horizontal)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-    }
-
-    private var memoryList: some View {
-        List {
-            ForEach(memoryEntries) { entry in
-                MemoryEntryRow(entry: entry)
-                    .listRowBackground(Color.tronSurface)
-            }
-        }
-        .listStyle(.plain)
-        .scrollContentBackground(.hidden)
-    }
-
-    // MARK: - Handoffs View
-
-    private var handoffsView: some View {
-        Group {
-            if handoffs.isEmpty {
-                emptyHandoffsView
-            } else {
-                handoffsList
-            }
-        }
-    }
-
-    private var emptyHandoffsView: some View {
-        VStack(spacing: 16) {
-            Image(systemName: "arrow.left.arrow.right")
-                .font(.system(size: 48))
-                .foregroundStyle(.tronTextMuted)
-
-            Text("No Handoffs")
-                .font(.headline)
-                .foregroundStyle(.tronTextSecondary)
-
-            Text("Session handoffs will appear here when you save your work context.")
-                .font(.caption)
-                .foregroundStyle(.tronTextMuted)
-                .multilineTextAlignment(.center)
-                .padding(.horizontal)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-    }
-
-    private var handoffsList: some View {
-        List {
-            ForEach(handoffs) { handoff in
-                HandoffRow(handoff: handoff)
-                    .listRowBackground(Color.tronSurface)
-            }
-        }
-        .listStyle(.plain)
-        .scrollContentBackground(.hidden)
-    }
-
     // MARK: - Data Loading
 
     private func loadContext() async {
         isLoading = true
 
         do {
-            async let memoryResult = rpcClient.searchMemory(query: nil, type: nil, limit: 50)
-            async let handoffsResult = rpcClient.getHandoffs(workingDirectory: nil, limit: 20)
-            async let snapshotResult = rpcClient.getContextSnapshot(sessionId: sessionId)
-
-            let (memory, handoffList, snapshot) = try await (memoryResult, handoffsResult, snapshotResult)
-            memoryEntries = memory.entries
-            handoffs = handoffList
-            contextSnapshot = snapshot
-        } catch {
-            errorMessage = error.localizedDescription
-        }
-
-        isLoading = false
-    }
-
-    private func searchMemory() async {
-        guard !searchQuery.isEmpty else {
-            await loadContext()
-            return
-        }
-
-        isLoading = true
-
-        do {
-            let result = try await rpcClient.searchMemory(
-                query: searchQuery,
-                type: nil,
-                limit: 50
-            )
-            memoryEntries = result.entries
+            contextSnapshot = try await rpcClient.getContextSnapshot(sessionId: sessionId)
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -279,123 +133,88 @@ struct ContextAuditView: View {
     }
 }
 
-// MARK: - Memory Entry Row
+// MARK: - Session Tokens View
 
-struct MemoryEntryRow: View {
-    let entry: MemoryEntry
+struct SessionTokensView: View {
+    let inputTokens: Int
+    let outputTokens: Int
+
+    private var totalTokens: Int {
+        inputTokens + outputTokens
+    }
+
+    private func formatTokenCount(_ count: Int) -> String {
+        if count >= 1_000_000 {
+            return String(format: "%.1fM", Double(count) / 1_000_000)
+        } else if count >= 1000 {
+            return String(format: "%.1fk", Double(count) / 1000)
+        }
+        return "\(count)"
+    }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(spacing: 12) {
+            // Header
             HStack {
-                // Type badge
-                Text(entry.type.capitalized)
-                    .font(.caption2.weight(.medium))
-                    .foregroundStyle(typeColor)
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 2)
-                    .background(typeColor.opacity(0.2))
-                    .clipShape(Capsule())
-
-                // Source badge
-                Text(entry.source.capitalized)
-                    .font(.caption2.weight(.medium))
-                    .foregroundStyle(.tronTextSecondary)
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 2)
-                    .background(Color.tronSurfaceElevated)
-                    .clipShape(Capsule())
-
-                Spacer()
-
-                // Relevance indicator
-                if let relevance = entry.relevance, relevance > 0 {
-                    HStack(spacing: 2) {
-                        Image(systemName: "star.fill")
-                            .font(.caption2)
-                        Text(String(format: "%.0f%%", relevance * 100))
-                            .font(.caption2)
-                    }
-                    .foregroundStyle(.tronTextMuted)
-                }
-            }
-
-            Text(entry.content)
-                .font(.subheadline)
-                .foregroundStyle(.tronTextPrimary)
-                .lineLimit(4)
-
-            if let timestamp = entry.timestamp {
-                Text(formatTimestamp(timestamp))
-                    .font(.caption2)
-                    .foregroundStyle(.tronTextMuted)
-            }
-        }
-        .padding(.vertical, 8)
-    }
-
-    private var typeColor: Color {
-        switch entry.type {
-        case "pattern": return .tronEmerald
-        case "decision": return .tronPrimaryVivid
-        case "lesson": return .orange
-        case "error": return .tronError
-        default: return .tronTextSecondary
-        }
-    }
-
-    private func formatTimestamp(_ timestamp: String) -> String {
-        let formatter = ISO8601DateFormatter()
-        if let date = formatter.date(from: timestamp) {
-            let relative = RelativeDateTimeFormatter()
-            relative.unitsStyle = .abbreviated
-            return relative.localizedString(for: date, relativeTo: Date())
-        }
-        return timestamp
-    }
-}
-
-// MARK: - Handoff Row
-
-struct HandoffRow: View {
-    let handoff: Handoff
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Image(systemName: "arrow.right.circle.fill")
+                Image(systemName: "arrow.up.arrow.down")
+                    .font(.system(size: 14))
                     .foregroundStyle(.tronEmerald)
 
-                Text("Session Handoff")
-                    .font(.caption.weight(.medium))
-                    .foregroundStyle(.tronTextSecondary)
+                Text("Session Tokens")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.tronTextPrimary)
 
                 Spacer()
 
-                Text(formatDate(handoff.createdAt))
-                    .font(.caption2)
-                    .foregroundStyle(.tronTextMuted)
+                Text(formatTokenCount(totalTokens))
+                    .font(.system(size: 24, weight: .bold, design: .monospaced))
+                    .foregroundStyle(.tronEmerald)
             }
 
-            Text(handoff.summary)
-                .font(.subheadline)
-                .foregroundStyle(.tronTextPrimary)
-                .lineLimit(6)
+            // Token breakdown
+            HStack(spacing: 16) {
+                // Input tokens
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack(spacing: 4) {
+                        Image(systemName: "arrow.up.circle.fill")
+                            .font(.system(size: 12))
+                            .foregroundStyle(.cyan)
+                        Text("Input")
+                            .font(.caption)
+                            .foregroundStyle(.tronTextSecondary)
+                    }
+                    Text(formatTokenCount(inputTokens))
+                        .font(.caption.monospacedDigit().weight(.medium))
+                        .foregroundStyle(.tronTextPrimary)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(10)
+                .background(Color.cyan.opacity(0.1))
+                .clipShape(RoundedRectangle(cornerRadius: 8))
 
-            Text("Session: \(String(handoff.sessionId.prefix(8)))...")
-                .font(.caption2)
-                .foregroundStyle(.tronTextMuted)
+                // Output tokens
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack(spacing: 4) {
+                        Image(systemName: "arrow.down.circle.fill")
+                            .font(.system(size: 12))
+                            .foregroundStyle(.tronEmerald)
+                        Text("Output")
+                            .font(.caption)
+                            .foregroundStyle(.tronTextSecondary)
+                    }
+                    Text(formatTokenCount(outputTokens))
+                        .font(.caption.monospacedDigit().weight(.medium))
+                        .foregroundStyle(.tronTextPrimary)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(10)
+                .background(Color.tronEmerald.opacity(0.1))
+                .clipShape(RoundedRectangle(cornerRadius: 8))
+            }
         }
-        .padding(.vertical, 8)
-    }
-
-    private func formatDate(_ dateString: String) -> String {
-        let formatter = ISO8601DateFormatter()
-        if let date = formatter.date(from: dateString) {
-            let relative = RelativeDateTimeFormatter()
-            relative.unitsStyle = .abbreviated
-            return relative.localizedString(for: date, relativeTo: Date())
-        }
-        return dateString
+        .padding()
+        .background(Color.tronSurfaceElevated)
+        .clipShape(RoundedRectangle(cornerRadius: 12))
     }
 }
 

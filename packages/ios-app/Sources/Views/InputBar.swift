@@ -22,6 +22,7 @@ struct InputBar: View {
     var modelName: String = ""
     var tokenUsage: TokenUsage?
     var contextPercentage: Int = 0
+    var contextWindow: Int = 0  // From server via ChatViewModel.currentContextWindow
 
     // Model picker integration
     var cachedModels: [ModelInfo] = []
@@ -167,33 +168,45 @@ struct InputBar: View {
         } else if contextPercentage >= 80 {
             return .orange
         }
-        return .primary.opacity(0.6)
+        return .tronEmerald
+    }
+
+    private var tokensRemaining: Int {
+        let used = (tokenUsage?.inputTokens ?? 0) + (tokenUsage?.outputTokens ?? 0)
+        return max(0, contextWindow - used)
+    }
+
+    private var formattedTokensRemaining: String {
+        let remaining = tokensRemaining
+        if remaining >= 1_000_000 {
+            return String(format: "%.1fM", Double(remaining) / 1_000_000)
+        } else if remaining >= 1000 {
+            return String(format: "%.0fk", Double(remaining) / 1000)
+        }
+        return "\(remaining)"
     }
 
     private var tokenStatsPill: some View {
         HStack(spacing: 8) {
-            // Input tokens
-            HStack(spacing: 2) {
-                Image(systemName: "arrow.down")
-                    .font(.system(size: 8))
-                Text(tokenUsage?.formattedInput ?? "0")
-            }
+            // Context usage bar - use overlay + clipShape to prevent overflow
+            Capsule()
+                .fill(Color.white.opacity(0.2))
+                .frame(width: 40, height: 6)
+                .overlay(alignment: .leading) {
+                    // Fill rectangle that gets clipped by parent Capsule shape
+                    Rectangle()
+                        .fill(contextPercentageColor)
+                        .frame(width: 40 * min(CGFloat(contextPercentage) / 100.0, 1.0))
+                }
+                .clipShape(Capsule())
 
-            // Output tokens
-            HStack(spacing: 2) {
-                Image(systemName: "arrow.up")
-                    .font(.system(size: 8))
-                Text(tokenUsage?.formattedOutput ?? "0")
-            }
-
-            // Context percentage
-            Text("\(contextPercentage)%")
+            // Tokens remaining
+            Text("\(formattedTokensRemaining) left")
                 .foregroundStyle(contextPercentageColor)
         }
         .font(.system(size: 10, weight: .medium, design: .monospaced))
-        .foregroundStyle(.white.opacity(0.7))
         .padding(.horizontal, 10)
-        .padding(.vertical, 5)
+        .padding(.vertical, 6)
         .glassEffect(.regular.tint(Color.tronPhthaloGreen.opacity(0.4)), in: .capsule)
     }
 
@@ -430,7 +443,7 @@ struct InputBar: View {
         }
         .matchedGeometryEffect(id: "actionButtonMorph", in: actionButtonNamespace)
         .glassEffect(
-            .regular.tint(canSend && !isProcessing ? Color.tronEmerald : Color.tronPhthaloGreen.opacity(0.3)).interactive(),
+            .regular.tint(canSend && !isProcessing ? Color.tronEmeraldDark : Color.tronPhthaloGreen.opacity(0.3)).interactive(),
             in: .circle
         )
         .disabled(!isProcessing && !canSend)
@@ -504,7 +517,7 @@ struct InputBar: View {
                 } else {
                     Image(systemName: "mic.fill")
                         .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(isMicDisabled ? .white.opacity(0.3) : .white)
+                        .foregroundStyle(isMicDisabled ? Color.tronEmerald.opacity(0.3) : Color.tronEmerald)
                 }
             }
             .frame(width: actionButtonSize, height: actionButtonSize)
@@ -699,6 +712,9 @@ struct AttachedImageThumbnail: View {
             inputHistory: nil,
             onHistoryNavigate: nil,
             modelName: "claude-sonnet-4-5-20260105",
+            tokenUsage: TokenUsage(inputTokens: 50000, outputTokens: 10000, cacheReadTokens: nil, cacheCreationTokens: nil),
+            contextPercentage: 30,
+            contextWindow: 200_000,
             cachedModels: [],
             isLoadingModels: false,
             onModelSelect: nil,

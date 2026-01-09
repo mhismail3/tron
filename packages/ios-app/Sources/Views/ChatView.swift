@@ -105,6 +105,7 @@ struct ChatView: View {
                         modelName: displayModelName,
                         tokenUsage: viewModel.totalTokenUsage,
                         contextPercentage: viewModel.contextPercentage,
+                        contextWindow: viewModel.currentContextWindow,
                         cachedModels: cachedModels,
                         isLoadingModels: isLoadingModels,
                         onModelSelect: { model in
@@ -290,7 +291,7 @@ struct ChatView: View {
                 Button {
                     showContextAudit = true
                 } label: {
-                    Label("Memory & Context", systemImage: "brain")
+                    Label("Context Manager", systemImage: "brain")
                 }
 
                 Button {

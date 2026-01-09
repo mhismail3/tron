@@ -21,6 +21,9 @@ extension Color {
     /// Emerald - assistant accent
     static let tronEmerald = Color(hex: "#10B981")
 
+    /// Darker emerald for send button
+    static let tronEmeraldDark = Color(hex: "#059669")
+
     /// Mint - user accent
     static let tronMint = Color(hex: "#34D399")
 
@@ -199,6 +202,7 @@ extension ShapeStyle where Self == Color {
     static var tronPrimaryBright: Color { .tronPrimaryBright }
     static var tronPrimaryVivid: Color { .tronPrimaryVivid }
     static var tronEmerald: Color { .tronEmerald }
+    static var tronEmeraldDark: Color { .tronEmeraldDark }
     static var tronMint: Color { .tronMint }
     static var tronSage: Color { .tronSage }
 
