@@ -414,11 +414,17 @@ export class OpenAIProvider {
               // Emit toolcall_end for each tool call
               for (const [, tc] of toolCalls) {
                 if (tc.id && tc.name) {
+                  let parsedArgs: Record<string, unknown> = {};
+                  try {
+                    parsedArgs = JSON.parse(tc.args || '{}');
+                  } catch {
+                    logger.warn('Failed to parse tool call arguments', { args: tc.args });
+                  }
                   const toolCall: ToolCall = {
                     type: 'tool_use',
                     id: tc.id,
                     name: tc.name,
-                    arguments: JSON.parse(tc.args || '{}'),
+                    arguments: parsedArgs,
                   };
                   yield { type: 'toolcall_end', toolCall };
                 }
@@ -431,11 +437,17 @@ export class OpenAIProvider {
               }
               for (const [, tc] of toolCalls) {
                 if (tc.id && tc.name) {
+                  let parsedArgs: Record<string, unknown> = {};
+                  try {
+                    parsedArgs = JSON.parse(tc.args || '{}');
+                  } catch {
+                    // Already logged above
+                  }
                   content.push({
                     type: 'tool_use',
                     id: tc.id,
                     name: tc.name,
-                    arguments: JSON.parse(tc.args || '{}'),
+                    arguments: parsedArgs,
                   });
                 }
               }

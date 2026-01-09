@@ -351,4 +351,273 @@ describe('OpenAI Provider', () => {
       expect(OPENAI_MODELS['o1-mini'].supportsTools).toBe(false);
     });
   });
+
+  describe('Tool Calling', () => {
+    it('should stream tool call with correct stop reason', async () => {
+      const provider = new OpenAIProvider({
+        apiKey: 'sk-test',
+        model: 'gpt-4o',
+      });
+
+      const mockStreamData = [
+        'data: {"id":"chatcmpl-123","object":"chat.completion.chunk","created":1234567890,"model":"gpt-4o","choices":[{"index":0,"delta":{"role":"assistant","content":null,"tool_calls":[{"index":0,"id":"call_abc123","type":"function","function":{"name":"read","arguments":""}}]},"finish_reason":null}]}\n\n',
+        'data: {"id":"chatcmpl-123","object":"chat.completion.chunk","created":1234567890,"model":"gpt-4o","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"{\\"path\\":"}}]},"finish_reason":null}]}\n\n',
+        'data: {"id":"chatcmpl-123","object":"chat.completion.chunk","created":1234567890,"model":"gpt-4o","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"\\"/test.txt\\"}"}}]},"finish_reason":null}]}\n\n',
+        'data: {"id":"chatcmpl-123","object":"chat.completion.chunk","created":1234567890,"model":"gpt-4o","choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":50,"completion_tokens":30,"total_tokens":80}}\n\n',
+        'data: [DONE]\n\n',
+      ];
+
+      const encoder = new TextEncoder();
+      let dataIndex = 0;
+
+      const mockReadableStream = new ReadableStream({
+        pull(controller) {
+          if (dataIndex < mockStreamData.length) {
+            controller.enqueue(encoder.encode(mockStreamData[dataIndex]));
+            dataIndex++;
+          } else {
+            controller.close();
+          }
+        },
+      });
+
+      global.fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        body: mockReadableStream,
+      });
+
+      const context = {
+        messages: [{ role: 'user' as const, content: 'Read the test file' }],
+        tools: [{
+          name: 'read',
+          description: 'Read a file',
+          parameters: { type: 'object', properties: { path: { type: 'string' } }, required: ['path'] },
+        }],
+      };
+
+      let doneEvent: any = null;
+      const toolCallEndEvents: any[] = [];
+      for await (const event of provider.stream(context)) {
+        if (event.type === 'done') {
+          doneEvent = event;
+        }
+        if (event.type === 'toolcall_end') {
+          toolCallEndEvents.push(event);
+        }
+      }
+
+      expect(doneEvent).not.toBeNull();
+      expect(doneEvent.message.stopReason).toBe('tool_use');
+      expect(toolCallEndEvents).toHaveLength(1);
+      expect(toolCallEndEvents[0].toolCall.name).toBe('read');
+      expect(toolCallEndEvents[0].toolCall.arguments).toEqual({ path: '/test.txt' });
+    });
+
+    it('should handle malformed tool call arguments gracefully', async () => {
+      const provider = new OpenAIProvider({
+        apiKey: 'sk-test',
+        model: 'gpt-4o',
+      });
+
+      // Simulate malformed JSON in tool call arguments
+      const mockStreamData = [
+        'data: {"id":"chatcmpl-123","object":"chat.completion.chunk","created":1234567890,"model":"gpt-4o","choices":[{"index":0,"delta":{"role":"assistant","content":null,"tool_calls":[{"index":0,"id":"call_bad","type":"function","function":{"name":"read","arguments":""}}]},"finish_reason":null}]}\n\n',
+        'data: {"id":"chatcmpl-123","object":"chat.completion.chunk","created":1234567890,"model":"gpt-4o","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"{ malformed json"}}]},"finish_reason":null}]}\n\n',
+        'data: {"id":"chatcmpl-123","object":"chat.completion.chunk","created":1234567890,"model":"gpt-4o","choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":50,"completion_tokens":30,"total_tokens":80}}\n\n',
+        'data: [DONE]\n\n',
+      ];
+
+      const encoder = new TextEncoder();
+      let dataIndex = 0;
+
+      const mockReadableStream = new ReadableStream({
+        pull(controller) {
+          if (dataIndex < mockStreamData.length) {
+            controller.enqueue(encoder.encode(mockStreamData[dataIndex]));
+            dataIndex++;
+          } else {
+            controller.close();
+          }
+        },
+      });
+
+      global.fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        body: mockReadableStream,
+      });
+
+      const context = {
+        messages: [{ role: 'user' as const, content: 'Read something' }],
+        tools: [{
+          name: 'read',
+          description: 'Read a file',
+          parameters: { type: 'object', properties: { path: { type: 'string' } }, required: ['path'] },
+        }],
+      };
+
+      let doneEvent: any = null;
+      let errorEvent: any = null;
+      const toolCallEndEvents: any[] = [];
+
+      for await (const event of provider.stream(context)) {
+        if (event.type === 'done') doneEvent = event;
+        if (event.type === 'error') errorEvent = event;
+        if (event.type === 'toolcall_end') toolCallEndEvents.push(event);
+      }
+
+      // Should not error out - should handle gracefully with empty args
+      expect(errorEvent).toBeNull();
+      expect(doneEvent).not.toBeNull();
+      expect(toolCallEndEvents).toHaveLength(1);
+      // Malformed JSON should result in empty object
+      expect(toolCallEndEvents[0].toolCall.arguments).toEqual({});
+    });
+  });
+
+  describe('Multi-Turn Conversation', () => {
+    it('should properly convert tool result messages', async () => {
+      const provider = new OpenAIProvider({
+        apiKey: 'sk-test',
+        model: 'gpt-4o',
+      });
+
+      const mockStreamData = [
+        'data: {"id":"chatcmpl-123","object":"chat.completion.chunk","created":1234567890,"model":"gpt-4o","choices":[{"index":0,"delta":{"role":"assistant","content":"The file contains: test content"},"finish_reason":null}]}\n\n',
+        'data: {"id":"chatcmpl-123","object":"chat.completion.chunk","created":1234567890,"model":"gpt-4o","choices":[{"index":0,"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":100,"completion_tokens":10,"total_tokens":110}}\n\n',
+        'data: [DONE]\n\n',
+      ];
+
+      const encoder = new TextEncoder();
+      let dataIndex = 0;
+
+      const mockReadableStream = new ReadableStream({
+        pull(controller) {
+          if (dataIndex < mockStreamData.length) {
+            controller.enqueue(encoder.encode(mockStreamData[dataIndex]));
+            dataIndex++;
+          } else {
+            controller.close();
+          }
+        },
+      });
+
+      global.fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        body: mockReadableStream,
+      });
+
+      // Simulate a multi-turn conversation with tool results
+      const context = {
+        messages: [
+          { role: 'user' as const, content: 'Read the test file' },
+          {
+            role: 'assistant' as const,
+            content: [{
+              type: 'tool_use' as const,
+              id: 'call_abc123',
+              name: 'read',
+              arguments: { path: '/test.txt' },
+            }],
+          },
+          {
+            role: 'toolResult' as const,
+            toolCallId: 'call_abc123',
+            content: 'test content',
+          },
+        ],
+        tools: [{
+          name: 'read',
+          description: 'Read a file',
+          parameters: { type: 'object', properties: { path: { type: 'string' } }, required: ['path'] },
+        }],
+      };
+
+      let doneEvent: any = null;
+      for await (const event of provider.stream(context)) {
+        if (event.type === 'done') {
+          doneEvent = event;
+        }
+      }
+
+      expect(doneEvent).not.toBeNull();
+      expect(doneEvent.message.stopReason).toBe('end_turn');
+
+      // Verify the fetch was called with properly formatted messages
+      expect(global.fetch).toHaveBeenCalled();
+      const fetchCall = (global.fetch as any).mock.calls[0];
+      const body = JSON.parse(fetchCall[1].body);
+
+      // Check that messages were properly converted (user + assistant + tool)
+      expect(body.messages).toHaveLength(3);
+      expect(body.messages[0].role).toBe('user');
+      expect(body.messages[1].role).toBe('assistant');
+      expect(body.messages[1].tool_calls).toBeDefined();
+      expect(body.messages[1].tool_calls[0].id).toBe('call_abc123');
+      expect(body.messages[2].role).toBe('tool');
+      expect(body.messages[2].tool_call_id).toBe('call_abc123');
+      expect(body.messages[2].content).toBe('test content');
+    });
+
+    it('should handle multiple tool calls in one turn', async () => {
+      const provider = new OpenAIProvider({
+        apiKey: 'sk-test',
+        model: 'gpt-4o',
+      });
+
+      const mockStreamData = [
+        'data: {"id":"chatcmpl-123","object":"chat.completion.chunk","created":1234567890,"model":"gpt-4o","choices":[{"index":0,"delta":{"role":"assistant","content":"I\'ll read both files.","tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"read","arguments":""}},{"index":1,"id":"call_2","type":"function","function":{"name":"read","arguments":""}}]},"finish_reason":null}]}\n\n',
+        'data: {"id":"chatcmpl-123","object":"chat.completion.chunk","created":1234567890,"model":"gpt-4o","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"{\\"path\\":\\"/file1.txt\\"}"}},{"index":1,"function":{"arguments":"{\\"path\\":\\"/file2.txt\\"}"}}]},"finish_reason":null}]}\n\n',
+        'data: {"id":"chatcmpl-123","object":"chat.completion.chunk","created":1234567890,"model":"gpt-4o","choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":50,"completion_tokens":50,"total_tokens":100}}\n\n',
+        'data: [DONE]\n\n',
+      ];
+
+      const encoder = new TextEncoder();
+      let dataIndex = 0;
+
+      const mockReadableStream = new ReadableStream({
+        pull(controller) {
+          if (dataIndex < mockStreamData.length) {
+            controller.enqueue(encoder.encode(mockStreamData[dataIndex]));
+            dataIndex++;
+          } else {
+            controller.close();
+          }
+        },
+      });
+
+      global.fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        body: mockReadableStream,
+      });
+
+      const context = {
+        messages: [{ role: 'user' as const, content: 'Read both files' }],
+        tools: [{
+          name: 'read',
+          description: 'Read a file',
+          parameters: { type: 'object', properties: { path: { type: 'string' } }, required: ['path'] },
+        }],
+      };
+
+      const toolCallEndEvents: any[] = [];
+      let doneEvent: any = null;
+      for await (const event of provider.stream(context)) {
+        if (event.type === 'toolcall_end') {
+          toolCallEndEvents.push(event);
+        }
+        if (event.type === 'done') {
+          doneEvent = event;
+        }
+      }
+
+      expect(toolCallEndEvents).toHaveLength(2);
+      expect(toolCallEndEvents[0].toolCall.id).toBe('call_1');
+      expect(toolCallEndEvents[0].toolCall.arguments.path).toBe('/file1.txt');
+      expect(toolCallEndEvents[1].toolCall.id).toBe('call_2');
+      expect(toolCallEndEvents[1].toolCall.arguments.path).toBe('/file2.txt');
+
+      // Verify final message contains both tool calls
+      expect(doneEvent.message.content).toHaveLength(3); // text + 2 tool calls
+    });
+  });
 });
