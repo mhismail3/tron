@@ -55,14 +55,23 @@ describe('OAuth Authentication', () => {
       const url = getAuthorizationUrl('test');
       const decodedUrl = decodeURIComponent(url);
 
+      expect(decodedUrl).toContain('org:create_api_key');
       expect(decodedUrl).toContain('user:inference');
       expect(decodedUrl).toContain('user:profile');
     });
 
-    it('should use OOB redirect for CLI', () => {
+    it('should use Anthropic console callback redirect', () => {
       const url = getAuthorizationUrl('test');
+      const decodedUrl = decodeURIComponent(url);
 
-      expect(url).toContain('redirect_uri=urn%3Aietf%3Awg%3Aoauth%3A2.0%3Aoob');
+      expect(decodedUrl).toContain('redirect_uri=https://console.anthropic.com/oauth/code/callback');
+    });
+
+    it('should include state parameter', () => {
+      const challenge = 'test-challenge';
+      const url = getAuthorizationUrl(challenge);
+
+      expect(url).toContain(`state=${challenge}`);
     });
   });
 

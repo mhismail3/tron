@@ -64,8 +64,12 @@ export const DEFAULT_SETTINGS: TronSettings = {
     anthropic: {
       authUrl: 'https://claude.ai/oauth/authorize',
       tokenUrl: 'https://console.anthropic.com/v1/oauth/token',
+      // Use Anthropic's code callback page - displays code for user to copy/paste
+      // This avoids Cloudflare blocking issues with local callback servers
+      redirectUri: 'https://console.anthropic.com/oauth/code/callback',
       clientId: '9d1c250a-e61b-44d9-88ed-5944d1962f5e', // Claude CLI OAuth client ID
-      scopes: ['user:inference', 'user:profile'],
+      // Required scopes: org:create_api_key is needed for OAuth to work with Claude Max subscriptions
+      scopes: ['org:create_api_key', 'user:profile', 'user:inference'],
       systemPromptPrefix: "You are Claude Code, Anthropic's official CLI for Claude.",
       oauthBetaHeaders: 'oauth-2025-04-20,interleaved-thinking-2025-05-14,fine-grained-tool-streaming-2025-05-14',
       tokenExpiryBufferSeconds: 300,

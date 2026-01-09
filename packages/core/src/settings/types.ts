@@ -17,6 +17,8 @@ export interface AnthropicApiSettings {
   authUrl: string;
   /** OAuth token exchange URL */
   tokenUrl: string;
+  /** OAuth redirect URI (use Anthropic's callback page to avoid Cloudflare issues) */
+  redirectUri: string;
   /** OAuth client ID */
   clientId: string;
   /** OAuth scopes */

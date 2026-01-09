@@ -80,6 +80,11 @@ function getExpiryBuffer(): number {
   return getOAuthSettings().tokenExpiryBufferSeconds;
 }
 
+/** Get OAuth redirect URI from settings */
+function getRedirectUri(): string {
+  return getOAuthSettings().redirectUri;
+}
+
 // =============================================================================
 // PKCE Functions
 // =============================================================================
@@ -121,14 +126,17 @@ export function getAuthorizationUrl(challenge: string): string {
   const clientId = getClientId();
   const scopes = getScopes();
   const authUrl = getAuthUrl();
+  const redirectUri = getRedirectUri();
 
   const params = new URLSearchParams({
+    code: 'true',
     client_id: clientId,
-    redirect_uri: 'urn:ietf:wg:oauth:2.0:oob', // OOB for CLI apps
+    redirect_uri: redirectUri,
     response_type: 'code',
     scope: scopes.join(' '),
     code_challenge: challenge,
     code_challenge_method: 'S256',
+    state: challenge, // Use challenge as state for verification
   });
 
   const url = `${authUrl}?${params.toString()}`;
@@ -136,6 +144,7 @@ export function getAuthorizationUrl(challenge: string): string {
   logger.debug('Generated authorization URL', {
     clientId,
     scopes,
+    redirectUri,
   });
 
   return url;
@@ -150,17 +159,20 @@ export function getAuthorizationUrl(challenge: string): string {
  *
  * @param code - Authorization code from OAuth redirect
  * @param verifier - PKCE verifier (from generatePKCE)
+ * @param state - Optional state parameter (used with Anthropic's callback page)
  * @returns OAuth tokens
  * @throws OAuthError if exchange fails
  */
 export async function exchangeCodeForTokens(
   code: string,
-  verifier: string
+  verifier: string,
+  state?: string
 ): Promise<OAuthTokens> {
   logger.info('Exchanging authorization code for tokens');
 
   const clientId = getClientId();
   const tokenUrl = getTokenUrl();
+  const redirectUri = getRedirectUri();
   const expiryBuffer = getExpiryBuffer();
 
   const response = await fetch(tokenUrl, {
@@ -170,9 +182,11 @@ export async function exchangeCodeForTokens(
     },
     body: JSON.stringify({
       grant_type: 'authorization_code',
-      code,
-      code_verifier: verifier,
       client_id: clientId,
+      code,
+      state,
+      redirect_uri: redirectUri,
+      code_verifier: verifier,
     }),
   });
 
