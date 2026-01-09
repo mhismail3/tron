@@ -191,36 +191,28 @@ export type OpenAICodexModelId = keyof typeof OPENAI_CODEX_MODELS;
 /**
  * Load Codex system instructions from markdown file.
  * The ChatGPT backend API requires an instructions field - it cannot be omitted.
- * ChatGPT OAuth only accepts authorized system prompts, so we use a Codex-compatible prompt.
+ * ChatGPT OAuth validates instructions EXACTLY - we cannot modify them at all.
  */
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const CODEX_INSTRUCTIONS_PATH = join(__dirname, 'prompts', 'codex-instructions.md');
-const CODEX_BASE_INSTRUCTIONS = readFileSync(CODEX_INSTRUCTIONS_PATH, 'utf-8');
+const CODEX_DEFAULT_INSTRUCTIONS = readFileSync(CODEX_INSTRUCTIONS_PATH, 'utf-8');
 
 /**
- * Generate instructions with tool clarification appended.
- * This helps the model understand which tools are actually available.
+ * Generate a tool clarification message to prepend to conversation.
+ * Since we can't modify the system prompt, we add this as a "developer" context message.
  */
-function generateInstructions(tools?: Array<{ name: string; description: string }>): string {
-  if (!tools || tools.length === 0) {
-    return CODEX_BASE_INSTRUCTIONS;
-  }
+function generateToolClarificationMessage(tools: Array<{ name: string; description: string; parameters?: unknown }>): string {
+  const toolDescriptions = tools.map(t => {
+    const params = t.parameters as { properties?: Record<string, { description?: string }>; required?: string[] } | undefined;
+    const requiredParams = params?.required?.join(', ') || 'none';
+    return `- **${t.name}**: ${t.description} (required params: ${requiredParams})`;
+  }).join('\n');
 
-  const toolList = tools.map(t => `- **${t.name}**: ${t.description}`).join('\n');
+  return `[TOOL CONTEXT] The following tools are available for this session. The tools mentioned in the system instructions (shell, apply_patch, etc.) are NOT available. Use ONLY these tools:
 
-  return `${CODEX_BASE_INSTRUCTIONS}
+${toolDescriptions}
 
-## Available Tools
-
-IMPORTANT: The tools mentioned earlier in this prompt (like shell, apply_patch, etc.) are NOT available in this session. Instead, you have access to the following tools. When calling these tools, you MUST provide all required parameters as specified in each tool's schema:
-
-${toolList}
-
-When using these tools:
-1. Always provide the required parameters - do not call tools with empty or missing arguments
-2. For file paths, provide the full path (e.g., "src/index.ts" or "/absolute/path/file.txt")
-3. Read files before editing them to understand their current content
-4. Use Bash for shell commands, Read for reading files, Write for creating files, Edit for modifying files`;
+CRITICAL: When calling any tool, you MUST provide ALL required parameters. Do not call tools with empty or missing arguments. For file operations, always provide the complete file path.`;
 }
 
 // =============================================================================
@@ -395,16 +387,24 @@ export class OpenAICodexProvider {
       const input = this.convertToResponsesInput(context);
       const tools = context.tools ? this.convertTools(context.tools) : undefined;
 
-      // Generate instructions with tool clarification appended
-      const instructions = generateInstructions(context.tools);
+      // Prepend tool clarification message if tools are available
+      if (context.tools && context.tools.length > 0) {
+        const clarificationText = generateToolClarificationMessage(context.tools);
+        input.unshift({
+          type: 'message',
+          role: 'developer',
+          content: [{ type: 'input_text', text: clarificationText }],
+        });
+      }
 
       // Build request body (Responses API format)
       // The instructions field is REQUIRED by the ChatGPT backend API.
+      // ChatGPT OAuth validates instructions EXACTLY - we cannot modify them.
       // Note: max_output_tokens is NOT supported by the ChatGPT backend API.
       const body: Record<string, unknown> = {
         model,
         input,
-        instructions,
+        instructions: CODEX_DEFAULT_INSTRUCTIONS,
         stream: true,
         store: false,
       };
