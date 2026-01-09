@@ -37,7 +37,6 @@ struct InputBar: View {
     @State private var showMicButton = false
     @State private var showModelPill = false
     @State private var showTokenPill = false
-    @State private var hasPlayedIntro = false
     @State private var introTask: Task<Void, Never>?
     @Namespace private var actionButtonNamespace
     @Namespace private var modelPillNamespace
@@ -91,12 +90,19 @@ struct InputBar: View {
         // iOS 26: No background - elements float with glass effects only
         // Sync focus state with parent control
         .onAppear {
-            guard !hasPlayedIntro else { return }
-            hasPlayedIntro = true
-            playIntroSequence()
+            // Reset state to ensure fresh animation on each appearance
+            resetIntroState()
+            // Small delay to ensure view is fully attached before animating
+            Task { @MainActor in
+                try? await Task.sleep(nanoseconds: 50_000_000) // 50ms
+                playIntroSequence()
+            }
         }
         .onDisappear {
             introTask?.cancel()
+            introTask = nil
+            // Reset state for clean re-entry on next appearance
+            resetIntroState()
         }
         .onChange(of: shouldFocus) { _, newValue in
             if newValue && !isProcessing {
@@ -589,26 +595,30 @@ struct InputBar: View {
         .spring(response: 0.32, dampingFraction: 0.86)
     }
 
-    private func playIntroSequence() {
-        introTask?.cancel()
+    private func resetIntroState() {
         showModelPill = false
         showTokenPill = false
         showMicButton = false
+    }
+
+    private func playIntroSequence() {
+        introTask?.cancel()
+        resetIntroState()
 
         introTask = Task { @MainActor in
-            try? await Task.sleep(nanoseconds: 120_000_000)
+            try? await Task.sleep(nanoseconds: 50_000_000)
             guard !Task.isCancelled else { return }
             withAnimation(modelPillAnimation) {
                 showModelPill = true
             }
 
-            try? await Task.sleep(nanoseconds: 80_000_000)
+            try? await Task.sleep(nanoseconds: 60_000_000)
             guard !Task.isCancelled else { return }
             withAnimation(tokenPillAnimation) {
                 showTokenPill = true
             }
 
-            try? await Task.sleep(nanoseconds: 500_000_000)
+            try? await Task.sleep(nanoseconds: 200_000_000)
             guard !Task.isCancelled else { return }
             withAnimation(micButtonAnimation) {
                 showMicButton = true
