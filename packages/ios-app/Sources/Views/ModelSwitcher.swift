@@ -2,6 +2,26 @@ import SwiftUI
 
 // MARK: - Model Picker Menu (iOS 26 Liquid Glass Popup)
 
+@available(iOS 26.0, *)
+struct ModelPillLabel: View {
+    let modelName: String
+
+    var body: some View {
+        HStack(spacing: 4) {
+            Image(systemName: "cpu")
+                .font(.system(size: 9, weight: .medium))
+            Text(modelName.shortModelName)
+                .font(.system(size: 11, weight: .medium))
+            Image(systemName: "chevron.up.chevron.down")
+                .font(.system(size: 8, weight: .medium))
+        }
+        .foregroundStyle(.white.opacity(0.9))
+        .padding(.horizontal, 10)
+        .padding(.vertical, 5)
+        .contentShape(Capsule())
+    }
+}
+
 /// Popup menu for selecting models - replaces the old sheet-based picker
 /// Organized by provider: Anthropic, OpenAI, Google
 /// Used inline in InputBar for fast model switching
@@ -62,18 +82,7 @@ struct ModelPickerMenu: View {
                 }
             }
         } label: {
-            HStack(spacing: 4) {
-                Image(systemName: "cpu")
-                    .font(.system(size: 9, weight: .medium))
-                Text(currentModel.shortModelName)
-                    .font(.system(size: 11, weight: .medium))
-                Image(systemName: "chevron.up.chevron.down")
-                    .font(.system(size: 8, weight: .medium))
-            }
-            .foregroundStyle(.white.opacity(0.9))
-            .padding(.horizontal, 10)
-            .padding(.vertical, 5)
-            .contentShape(Capsule())
+            ModelPillLabel(modelName: currentModel)
         }
         .glassEffect(.regular.tint(Color.tronPhthaloGreen.opacity(0.4)).interactive(), in: .capsule)
     }

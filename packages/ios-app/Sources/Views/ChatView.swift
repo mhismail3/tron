@@ -105,6 +105,7 @@ struct ChatView: View {
                         },
                         shouldFocus: $inputFocused
                     )
+                    .id(sessionId)
                 }
             }
             .scrollContentBackground(.hidden)

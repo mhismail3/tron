@@ -34,6 +34,18 @@ struct InputBar: View {
     @FocusState private var isFocused: Bool
     @State private var showingImagePicker = false
     @State private var isMicPulsing = false
+    @State private var showMicButton = false
+    @State private var showModelPill = false
+    @State private var showTokenPill = false
+    @State private var hasPlayedIntro = false
+    @State private var introTask: Task<Void, Never>?
+    @Namespace private var actionButtonNamespace
+    @Namespace private var modelPillNamespace
+    @Namespace private var tokenPillNamespace
+    @Namespace private var micButtonNamespace
+
+    private let actionButtonSize: CGFloat = 40
+    private let micDockInset: CGFloat = 18
 
     var body: some View {
         VStack(spacing: 10) {
@@ -43,9 +55,10 @@ struct InputBar: View {
             }
 
             // Status pills row - floating liquid glass elements
-            if !modelName.isEmpty || tokenUsage != nil {
+            if shouldShowStatusPills {
                 statusPillsRow
                     .padding(.horizontal, 16)
+                    .transition(.opacity)
             }
 
             // Input row - floating liquid glass elements
@@ -53,17 +66,38 @@ struct InputBar: View {
                 // Text field with glass background
                 textFieldGlass
 
-                // Mic button - liquid glass
-                micButtonGlass
-
                 // Send/Abort button - liquid glass
-                actionButtonGlass
+                if shouldShowActionButton {
+                    actionButtonGlass
+                        .transition(.scale(scale: 0.6).combined(with: .opacity))
+                }
+
+                // Mic button - liquid glass
+                if shouldShowMicButton {
+                    micButtonGlass
+                        .transition(.scale(scale: 0.6).combined(with: .opacity))
+                }
             }
             .padding(.horizontal, 16)
             .padding(.bottom, 8)
+            .overlay(alignment: .topTrailing) {
+                if shouldShowTokenPillDock {
+                    tokenStatsPillDock
+                }
+            }
+            .animation(.tronStandard, value: shouldShowActionButton)
+            .animation(micButtonAnimation, value: shouldShowMicButton)
         }
         // iOS 26: No background - elements float with glass effects only
         // Sync focus state with parent control
+        .onAppear {
+            guard !hasPlayedIntro else { return }
+            hasPlayedIntro = true
+            playIntroSequence()
+        }
+        .onDisappear {
+            introTask?.cancel()
+        }
         .onChange(of: shouldFocus) { _, newValue in
             if newValue && !isProcessing {
                 isFocused = true
@@ -81,7 +115,7 @@ struct InputBar: View {
     private var statusPillsRow: some View {
         HStack {
             // Model picker menu - popup style (replaces old button)
-            if !modelName.isEmpty {
+            if !modelName.isEmpty && showModelPill {
                 ModelPickerMenu(
                     currentModel: modelName,
                     models: cachedModels,
@@ -90,36 +124,15 @@ struct InputBar: View {
                         onModelSelect?(model)
                     }
                 )
+                .matchedGeometryEffect(id: "modelPillMorph", in: modelPillNamespace)
             }
 
             Spacer()
 
             // Token stats pill with liquid glass
-            if tokenUsage != nil || contextPercentage > 0 {
-                HStack(spacing: 8) {
-                    // Input tokens
-                    HStack(spacing: 2) {
-                        Image(systemName: "arrow.down")
-                            .font(.system(size: 8))
-                        Text(tokenUsage?.formattedInput ?? "0")
-                    }
-
-                    // Output tokens
-                    HStack(spacing: 2) {
-                        Image(systemName: "arrow.up")
-                            .font(.system(size: 8))
-                        Text(tokenUsage?.formattedOutput ?? "0")
-                    }
-
-                    // Context percentage
-                    Text("\(contextPercentage)%")
-                        .foregroundStyle(contextPercentageColor)
-                }
-                .font(.system(size: 10, weight: .medium, design: .monospaced))
-                .foregroundStyle(.white.opacity(0.7))
-                .padding(.horizontal, 10)
-                .padding(.vertical, 5)
-                .glassEffect(.regular.tint(Color.tronPhthaloGreen.opacity(0.4)), in: .capsule)
+            if showTokenPill {
+                tokenStatsPill
+                    .matchedGeometryEffect(id: "tokenPillMorph", in: tokenPillNamespace)
             }
         }
     }
@@ -131,6 +144,33 @@ struct InputBar: View {
             return .orange
         }
         return .primary.opacity(0.6)
+    }
+
+    private var tokenStatsPill: some View {
+        HStack(spacing: 8) {
+            // Input tokens
+            HStack(spacing: 2) {
+                Image(systemName: "arrow.down")
+                    .font(.system(size: 8))
+                Text(tokenUsage?.formattedInput ?? "0")
+            }
+
+            // Output tokens
+            HStack(spacing: 2) {
+                Image(systemName: "arrow.up")
+                    .font(.system(size: 8))
+                Text(tokenUsage?.formattedOutput ?? "0")
+            }
+
+            // Context percentage
+            Text("\(contextPercentage)%")
+                .foregroundStyle(contextPercentageColor)
+        }
+        .font(.system(size: 10, weight: .medium, design: .monospaced))
+        .foregroundStyle(.white.opacity(0.7))
+        .padding(.horizontal, 10)
+        .padding(.vertical, 5)
+        .glassEffect(.regular.tint(Color.tronPhthaloGreen.opacity(0.4)), in: .capsule)
     }
 
     // MARK: - Attached Images Row
@@ -203,7 +243,8 @@ struct InputBar: View {
             .textFieldStyle(.plain)
             .font(.subheadline)
             .foregroundStyle(.white.opacity(0.9))
-            .padding(.horizontal, 14)
+            .padding(.leading, 14)
+            .padding(.trailing, textFieldTrailingPadding)
             .padding(.vertical, 10)
             .frame(minHeight: 40)
             .glassEffect(.regular.tint(Color.tronPhthaloGreen.opacity(0.3)), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
@@ -215,6 +256,18 @@ struct InputBar: View {
                     onSend()
                 }
             }
+            .overlay(alignment: .leading) {
+                if shouldShowModelPillDock {
+                    modelPillDock
+                }
+            }
+            .overlay(alignment: .trailing) {
+                if shouldShowTrailingDock {
+                    trailingDock
+                }
+            }
+            .animation(.tronStandard, value: shouldShowActionButton)
+            .animation(micButtonAnimation, value: shouldShowMicButton)
     }
 
     // MARK: - Text Field (preserved implementation with history)
@@ -351,6 +404,7 @@ struct InputBar: View {
             .frame(width: 40, height: 40)
             .contentShape(Circle())
         }
+        .matchedGeometryEffect(id: "actionButtonMorph", in: actionButtonNamespace)
         .glassEffect(
             .regular.tint(canSend && !isProcessing ? Color.tronEmerald : Color.tronPhthaloGreen.opacity(0.3)).interactive(),
             in: .circle
@@ -358,6 +412,54 @@ struct InputBar: View {
         .disabled(!isProcessing && !canSend)
         .animation(.easeInOut(duration: 0.2), value: isProcessing)
         .animation(.easeInOut(duration: 0.2), value: canSend)
+    }
+
+    private var actionButtonDock: some View {
+        Circle()
+            .fill(Color.clear)
+            .frame(width: actionButtonSize, height: actionButtonSize)
+            .matchedGeometryEffect(id: "actionButtonMorph", in: actionButtonNamespace)
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
+    }
+
+    private var modelPillDock: some View {
+        ModelPillLabel(modelName: modelName)
+            .glassEffect(.regular.tint(Color.tronPhthaloGreen.opacity(0.4)).interactive(), in: .capsule)
+            .matchedGeometryEffect(id: "modelPillMorph", in: modelPillNamespace)
+            .opacity(0)
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
+    }
+
+    private var tokenStatsPillDock: some View {
+        tokenStatsPill
+            .matchedGeometryEffect(id: "tokenPillMorph", in: tokenPillNamespace)
+            .opacity(0)
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
+    }
+
+    private var micButtonDock: some View {
+        Circle()
+            .fill(Color.clear)
+            .frame(width: actionButtonSize, height: actionButtonSize)
+            .matchedGeometryEffect(id: "micButtonMorph", in: micButtonNamespace)
+            .offset(x: -micDockInset)
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
+    }
+
+    private var trailingDock: some View {
+        HStack(spacing: 12) {
+            if !shouldShowActionButton {
+                actionButtonDock
+            }
+            if !shouldShowMicButton {
+                micButtonDock
+            }
+        }
+        .padding(.trailing, 4)
     }
 
     // MARK: - Mic Button
@@ -381,9 +483,10 @@ struct InputBar: View {
                         .foregroundStyle(isMicDisabled ? .white.opacity(0.3) : .white)
                 }
             }
-            .frame(width: 40, height: 40)
+            .frame(width: actionButtonSize, height: actionButtonSize)
             .contentShape(Circle())
         }
+        .matchedGeometryEffect(id: "micButtonMorph", in: micButtonNamespace)
         .glassEffect(
             .regular.tint(micGlassTint).interactive(),
             in: .circle
@@ -436,6 +539,81 @@ struct InputBar: View {
 
     private var canSend: Bool {
         !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !attachedImages.isEmpty
+    }
+
+    private var shouldShowStatusPills: Bool {
+        showTokenPill || (showModelPill && !modelName.isEmpty)
+    }
+
+    private var shouldShowModelPillDock: Bool {
+        !showModelPill && !modelName.isEmpty
+    }
+
+    private var shouldShowTokenPillDock: Bool {
+        !showTokenPill
+    }
+
+    private var shouldShowMicButton: Bool {
+        showMicButton
+    }
+
+    private var shouldShowTrailingDock: Bool {
+        !shouldShowActionButton || !shouldShowMicButton
+    }
+
+    private var shouldShowActionButton: Bool {
+        isProcessing || canSend
+    }
+
+    private var textFieldTrailingPadding: CGFloat {
+        let basePadding: CGFloat = 14
+        var totalPadding = basePadding
+        if !shouldShowActionButton {
+            totalPadding += actionButtonSize + 8
+        }
+        if !shouldShowMicButton {
+            totalPadding += actionButtonSize + 8
+        }
+        return totalPadding
+    }
+
+    private var modelPillAnimation: Animation {
+        .spring(response: 0.42, dampingFraction: 0.82)
+    }
+
+    private var tokenPillAnimation: Animation {
+        .spring(response: 0.3, dampingFraction: 0.9)
+    }
+
+    private var micButtonAnimation: Animation {
+        .spring(response: 0.32, dampingFraction: 0.86)
+    }
+
+    private func playIntroSequence() {
+        introTask?.cancel()
+        showModelPill = false
+        showTokenPill = false
+        showMicButton = false
+
+        introTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 120_000_000)
+            guard !Task.isCancelled else { return }
+            withAnimation(modelPillAnimation) {
+                showModelPill = true
+            }
+
+            try? await Task.sleep(nanoseconds: 80_000_000)
+            guard !Task.isCancelled else { return }
+            withAnimation(tokenPillAnimation) {
+                showTokenPill = true
+            }
+
+            try? await Task.sleep(nanoseconds: 500_000_000)
+            guard !Task.isCancelled else { return }
+            withAnimation(micButtonAnimation) {
+                showMicButton = true
+            }
+        }
     }
 }
 
