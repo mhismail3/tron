@@ -6,6 +6,7 @@
  */
 import { EventEmitter } from 'events';
 import * as path from 'path';
+import * as fs from 'fs';
 import * as os from 'os';
 import {
   createLogger,
@@ -21,6 +22,8 @@ import {
   FindTool,
   LsTool,
   loadServerAuth,
+  getTronDataDir,
+  detectProviderFromModel,
   type AgentConfig,
   type TurnResult,
   type TronEvent,
@@ -640,6 +643,11 @@ export class EventStoreOrchestrator extends EventEmitter {
 
       // Track timing for latency measurement (Phase 1)
       const runStartTime = Date.now();
+
+      // Set reasoning level if provided (for OpenAI Codex models)
+      if (options.reasoningLevel) {
+        active.agent.setReasoningLevel(options.reasoningLevel);
+      }
 
       // Run agent
       const runResult = await active.agent.run(options.prompt);
@@ -1340,14 +1348,33 @@ export class EventStoreOrchestrator extends EventEmitter {
     model: string,
     systemPrompt?: string
   ): Promise<TronAgent> {
-    // Use cached auth from ~/.tron/auth.json (supports Claude Max OAuth)
-    // Refresh cache if needed (OAuth tokens expire)
-    if (!this.cachedAuth || (this.cachedAuth.type === 'oauth' && this.cachedAuth.expiresAt < Date.now())) {
-      this.cachedAuth = await loadServerAuth();
-    }
+    // Detect provider type from model
+    const providerType = detectProviderFromModel(model);
 
-    if (!this.cachedAuth) {
-      throw new Error('No authentication configured. Run `tron login` to authenticate with Claude Max or set up API key.');
+    // For OpenAI Codex models, load Codex-specific OAuth tokens
+    let auth: ServerAuth;
+    if (providerType === 'openai-codex') {
+      const codexTokens = this.loadCodexTokens();
+      if (!codexTokens) {
+        throw new Error('OpenAI Codex not authenticated. Sign in via the iOS app or use a different model.');
+      }
+      auth = {
+        type: 'oauth',
+        accessToken: codexTokens.accessToken,
+        refreshToken: codexTokens.refreshToken,
+        expiresAt: codexTokens.expiresAt,
+      };
+    } else {
+      // Use cached auth from ~/.tron/auth.json (supports Claude Max OAuth)
+      // Refresh cache if needed (OAuth tokens expire)
+      if (!this.cachedAuth || (this.cachedAuth.type === 'oauth' && this.cachedAuth.expiresAt < Date.now())) {
+        this.cachedAuth = await loadServerAuth();
+      }
+
+      if (!this.cachedAuth) {
+        throw new Error('No authentication configured. Run `tron login` to authenticate with Claude Max or set up API key.');
+      }
+      auth = this.cachedAuth;
     }
 
     const tools: TronTool[] = [
@@ -1367,14 +1394,15 @@ export class EventStoreOrchestrator extends EventEmitter {
       sessionId,
       workingDirectory,
       toolCount: tools.length,
-      authType: this.cachedAuth.type,
-      isOAuth: this.cachedAuth.type === 'oauth',
+      authType: auth.type,
+      isOAuth: auth.type === 'oauth',
+      providerType,
     });
 
     const agentConfig: AgentConfig = {
       provider: {
         model,
-        auth: this.cachedAuth, // Use OAuth or API key from ~/.tron/auth.json
+        auth, // Use OAuth from Codex tokens or auth.json
       },
       tools,
       systemPrompt: prompt,
@@ -1391,6 +1419,22 @@ export class EventStoreOrchestrator extends EventEmitter {
     });
 
     return agent;
+  }
+
+  /**
+   * Load Codex OAuth tokens from file storage
+   */
+  private loadCodexTokens(): { accessToken: string; refreshToken: string; expiresAt: number } | null {
+    try {
+      const tokensPath = path.join(getTronDataDir(), 'codex-tokens.json');
+      if (fs.existsSync(tokensPath)) {
+        const data = fs.readFileSync(tokensPath, 'utf8');
+        return JSON.parse(data);
+      }
+    } catch (error) {
+      logger.warn('Failed to load Codex tokens', { error });
+    }
+    return null;
   }
 
   // ===========================================================================

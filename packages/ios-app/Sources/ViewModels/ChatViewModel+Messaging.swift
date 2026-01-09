@@ -5,14 +5,14 @@ import PhotosUI
 
 extension ChatViewModel {
 
-    func sendMessage() {
+    func sendMessage(reasoningLevel: String? = nil) {
         let text = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty || !attachedImages.isEmpty else {
             logger.verbose("sendMessage() called but no text or images to send", category: .chat)
             return
         }
 
-        logger.info("Sending message: \"\(text.prefix(100))...\" with \(attachedImages.count) images", category: .chat)
+        logger.info("Sending message: \"\(text.prefix(100))...\" with \(attachedImages.count) images, reasoningLevel=\(reasoningLevel ?? "nil")", category: .chat)
 
         // Create user message
         if !attachedImages.isEmpty {
@@ -56,7 +56,8 @@ extension ChatViewModel {
                 logger.debug("Calling rpcClient.sendPrompt()...", category: .chat)
                 try await rpcClient.sendPrompt(
                     text,
-                    images: imageAttachments.isEmpty ? nil : imageAttachments
+                    images: imageAttachments.isEmpty ? nil : imageAttachments,
+                    reasoningLevel: reasoningLevel
                 )
                 logger.info("Prompt sent successfully", category: .chat)
             } catch {

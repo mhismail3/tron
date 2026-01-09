@@ -28,6 +28,11 @@ struct InputBar: View {
     var isLoadingModels: Bool = false
     var onModelSelect: ((ModelInfo) -> Void)?
 
+    // Reasoning level picker (for OpenAI Codex models)
+    @Binding var reasoningLevel: String
+    var currentModelInfo: ModelInfo?
+    var onReasoningLevelChange: ((String) -> Void)?
+
     /// Binding to control focus (used to prevent keyboard after response)
     @Binding var shouldFocus: Bool
 
@@ -131,6 +136,19 @@ struct InputBar: View {
                     }
                 )
                 .matchedGeometryEffect(id: "modelPillMorph", in: modelPillNamespace)
+            }
+
+            // Reasoning level picker (for OpenAI Codex models)
+            if let model = currentModelInfo, model.supportsReasoning == true, showModelPill {
+                ReasoningLevelPicker(
+                    model: model,
+                    selectedLevel: Binding(
+                        get: { reasoningLevel },
+                        set: { newLevel in
+                            onReasoningLevelChange?(newLevel)
+                        }
+                    )
+                )
             }
 
             Spacer()
@@ -684,6 +702,9 @@ struct AttachedImageThumbnail: View {
             cachedModels: [],
             isLoadingModels: false,
             onModelSelect: nil,
+            reasoningLevel: .constant("medium"),
+            currentModelInfo: nil,
+            onReasoningLevelChange: nil,
             shouldFocus: .constant(false)
         )
     }

@@ -290,7 +290,8 @@ class RPCClient: ObservableObject {
 
     func sendPrompt(
         _ prompt: String,
-        images: [ImageAttachment]? = nil
+        images: [ImageAttachment]? = nil,
+        reasoningLevel: String? = nil
     ) async throws {
         guard let ws = webSocket,
               let sessionId = currentSessionId else {
@@ -300,7 +301,8 @@ class RPCClient: ObservableObject {
         let params = AgentPromptParams(
             sessionId: sessionId,
             prompt: prompt,
-            images: images
+            images: images,
+            reasoningLevel: reasoningLevel
         )
 
         let result: AgentPromptResult = try await ws.send(

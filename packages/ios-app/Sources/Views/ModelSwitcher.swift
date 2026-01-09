@@ -23,7 +23,7 @@ struct ModelPillLabel: View {
 }
 
 /// Popup menu for selecting models - replaces the old sheet-based picker
-/// Organized by provider: Anthropic, OpenAI, Google
+/// Organized by provider: Anthropic, OpenAI Codex, Google
 /// Used inline in InputBar for fast model switching
 @available(iOS 26.0, *)
 struct ModelPickerMenu: View {
@@ -43,6 +43,16 @@ struct ModelPickerMenu: View {
             .uniqueByFormattedName().sortedByTier()
     }
 
+    /// OpenAI Codex models (via ChatGPT subscription)
+    private var openAICodexModels: [ModelInfo] {
+        models.filter { $0.provider.lowercased() == "openai-codex" }
+    }
+
+    /// Standard OpenAI API models (gpt-4o, o1, o3, etc.)
+    private var standardOpenAIModels: [ModelInfo] {
+        models.filter { $0.provider.lowercased() == "openai" && !$0.provider.contains("codex") }
+    }
+
     var body: some View {
         Menu {
             if isLoading && models.isEmpty {
@@ -58,27 +68,37 @@ struct ModelPickerMenu: View {
                     }
                 }
 
-                // OpenAI section
-                Section("OpenAI") {
-                    // GPT-5 series (flagship)
-                    comingSoonModel("GPT-5.2")
-                    comingSoonModel("GPT-5.2 Mini")
-                    comingSoonModel("GPT-5.2-Codex")
-                    // Reasoning models
-                    comingSoonModel("o3")
-                    comingSoonModel("o3-pro")
-                    comingSoonModel("o4-mini")
+                // OpenAI Codex section (ChatGPT subscription models)
+                Section("OpenAI Codex") {
+                    // Real models from server
+                    ForEach(openAICodexModels) { model in
+                        codexModelButton(model)
+                    }
+                    // If no Codex models available, show coming soon placeholder
+                    if openAICodexModels.isEmpty {
+                        comingSoonModel("GPT-5.2 Codex")
+                    }
+                }
+
+                // Standard OpenAI API section (coming soon)
+                Section("OpenAI API") {
+                    ForEach(standardOpenAIModels) { model in
+                        modelButton(model)
+                    }
+                    // Placeholder for models not yet available
+                    if standardOpenAIModels.isEmpty {
+                        comingSoonModel("GPT-4o")
+                        comingSoonModel("o3")
+                        comingSoonModel("o3-mini")
+                    }
                 }
 
                 // Google section
                 Section("Google") {
-                    // Gemini 3 series (latest)
+                    // Gemini 3 series (latest) - coming soon
                     comingSoonModel("Gemini 3 Pro")
                     comingSoonModel("Gemini 3 Flash")
-                    comingSoonModel("Gemini 3 Deep Think")
-                    // Gemini 2.5 series (stable)
                     comingSoonModel("Gemini 2.5 Pro")
-                    comingSoonModel("Gemini 2.5 Flash")
                 }
             }
         } label: {
@@ -93,6 +113,23 @@ struct ModelPickerMenu: View {
     private func modelButton(_ model: ModelInfo) -> some View {
         Button(model.formattedModelName) {
             onSelect(model)
+        }
+    }
+
+    /// Codex model button with reasoning level indicator
+    @ViewBuilder
+    private func codexModelButton(_ model: ModelInfo) -> some View {
+        Button {
+            onSelect(model)
+        } label: {
+            HStack {
+                Text(model.formattedModelName)
+                if model.supportsReasoning == true {
+                    Text("reasoning")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+            }
         }
     }
 
@@ -248,31 +285,40 @@ struct ModelSwitcher: View {
     }
 
     private var groupedModels: [ModelGroup] {
-        // Separate 4.5 models (latest) from legacy models
-        let latestModels = models.filter { is45Model($0) }
-        let legacyModels = models.filter { !is45Model($0) }
+        // Separate models by provider
+        let anthropicModels = models.filter { $0.isAnthropic }
+        let codexModels = models.filter { $0.isCodex }
+
+        // Further separate Anthropic: 4.5 models (latest) from legacy models
+        let latestAnthropicModels = anthropicModels.filter { is45Model($0) }
+        let legacyAnthropicModels = anthropicModels.filter { !is45Model($0) }
 
         var groups: [ModelGroup] = []
 
-        // Latest 4.5 models first - ordered by tier: Opus, Sonnet, Haiku
-        let orderedLatest = latestModels.sorted { m1, m2 in
+        // Latest 4.5 Anthropic models first - ordered by tier: Opus, Sonnet, Haiku
+        let orderedLatest = latestAnthropicModels.sorted { m1, m2 in
             tierPriority(m1) < tierPriority(m2)
         }
 
         if !orderedLatest.isEmpty {
-            groups.append(ModelGroup(tier: "Latest (4.5)", models: orderedLatest))
+            groups.append(ModelGroup(tier: "Anthropic (Latest)", models: orderedLatest))
         }
 
-        // Legacy models grouped by tier
+        // Legacy Anthropic models grouped by tier
         let tiers = ["opus", "sonnet", "haiku"]
         for tier in tiers {
-            let tierModels = legacyModels.filter { model in
+            let tierModels = legacyAnthropicModels.filter { model in
                 model.id.lowercased().contains(tier)
             }.sorted { $0.id > $1.id }
 
             if !tierModels.isEmpty {
                 groups.append(ModelGroup(tier: "\(tier.capitalized) (Legacy)", models: tierModels))
             }
+        }
+
+        // OpenAI Codex models
+        if !codexModels.isEmpty {
+            groups.append(ModelGroup(tier: "OpenAI Codex", models: codexModels))
         }
 
         return groups
@@ -395,9 +441,14 @@ struct ModelRow: View {
                     // Context window
                     Label(formatContextWindow(model.contextWindow), systemImage: "doc.text")
 
-                    // Thinking support
+                    // Thinking support (Anthropic)
                     if model.supportsThinking == true {
                         Label("Thinking", systemImage: "brain")
+                    }
+
+                    // Reasoning support (OpenAI Codex)
+                    if model.supportsReasoning == true {
+                        Label("Reasoning", systemImage: "sparkles")
                     }
 
                     // Images support

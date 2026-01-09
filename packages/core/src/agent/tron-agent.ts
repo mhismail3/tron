@@ -60,6 +60,8 @@ export class TronAgent {
   private streamingContent: string = '';
   /** Tracks the currently executing tool for interrupt reporting */
   private activeTool: string | null = null;
+  /** Current reasoning level for OpenAI Codex models */
+  private currentReasoningLevel: 'low' | 'medium' | 'high' | 'xhigh' | undefined;
 
   constructor(config: AgentConfig, options: AgentOptions = {}) {
     this.sessionId = options.sessionId ?? `sess_${randomUUID().replace(/-/g, '').slice(0, 12)}`;
@@ -114,6 +116,21 @@ export class TronAgent {
    */
   getModel(): string {
     return this.provider.model;
+  }
+
+  /**
+   * Set reasoning level for OpenAI Codex models.
+   * Call this before run() to set the reasoning effort.
+   */
+  setReasoningLevel(level: 'low' | 'medium' | 'high' | 'xhigh' | undefined): void {
+    this.currentReasoningLevel = level;
+  }
+
+  /**
+   * Get current reasoning level
+   */
+  getReasoningLevel(): 'low' | 'medium' | 'high' | 'xhigh' | undefined {
+    return this.currentReasoningLevel;
   }
 
   /**
@@ -328,6 +345,7 @@ export class TronAgent {
         enableThinking: this.config.enableThinking,
         thinkingBudget: this.config.thinkingBudget,
         stopSequences: this.config.stopSequences,
+        reasoningEffort: this.currentReasoningLevel,
       })) {
         if (this.abortController?.signal.aborted) {
           throw new Error('Aborted');

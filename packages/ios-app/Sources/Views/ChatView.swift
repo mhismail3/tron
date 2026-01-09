@@ -31,6 +31,8 @@ struct ChatView: View {
     @State private var optimisticModelName: String?
     /// Controls input field focus - set to false after response to prevent keyboard
     @State private var inputFocused = false
+    /// Reasoning level for OpenAI Codex models (low/medium/high/xhigh)
+    @State private var reasoningLevel: String = "medium"
 
     // MARK: - Smart Auto-Scroll State
     /// Whether to auto-scroll to bottom on new content
@@ -55,6 +57,11 @@ struct ChatView: View {
     /// Current model name (optimistic if pending, else actual)
     private var displayModelName: String {
         optimisticModelName ?? viewModel.currentModel
+    }
+
+    /// Current model info (for reasoning level support detection)
+    private var currentModelInfo: ModelInfo? {
+        cachedModels.first { $0.id == displayModelName }
     }
 
     var body: some View {
@@ -86,7 +93,7 @@ struct ChatView: View {
                             hasUnreadContent = false
                             // Grace period to prevent gesture detection during initial scroll animation
                             autoScrollGraceUntil = Date().addingTimeInterval(0.8)
-                            viewModel.sendMessage()
+                            viewModel.sendMessage(reasoningLevel: currentModelInfo?.supportsReasoning == true ? reasoningLevel : nil)
                         },
                         onAbort: viewModel.abortAgent,
                         onMicTap: viewModel.toggleRecording,
@@ -102,6 +109,11 @@ struct ChatView: View {
                         isLoadingModels: isLoadingModels,
                         onModelSelect: { model in
                             switchModel(to: model)
+                        },
+                        reasoningLevel: $reasoningLevel,
+                        currentModelInfo: currentModelInfo,
+                        onReasoningLevelChange: { newLevel in
+                            reasoningLevel = newLevel
                         },
                         shouldFocus: $inputFocused
                     )

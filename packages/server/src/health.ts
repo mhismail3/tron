@@ -1,10 +1,12 @@
 /**
  * @fileoverview Health Check HTTP Server
  *
- * Simple HTTP server for health checks and metrics.
+ * Simple HTTP server for health checks, metrics, and API endpoints.
  */
 import * as http from 'http';
-import { createLogger } from '@tron/core';
+import * as fs from 'fs';
+import * as path from 'path';
+import { createLogger, getTronDataDir } from '@tron/core';
 import type { EventStoreOrchestrator } from './event-store-orchestrator.js';
 
 const logger = createLogger('health');
@@ -38,6 +40,12 @@ export interface HealthResponse {
   };
 }
 
+export interface CodexTokens {
+  accessToken: string;
+  refreshToken: string;
+  expiresAt: number;
+}
+
 // =============================================================================
 // Health Server
 // =============================================================================
@@ -47,9 +55,12 @@ export class HealthServer {
   private server: http.Server | null = null;
   private orchestrator: EventStoreOrchestrator | null = null;
   private wsClientCount: () => number = () => 0;
+  private codexTokensPath: string;
 
   constructor(config: HealthServerConfig) {
     this.config = config;
+    // Store Codex tokens in tron data directory
+    this.codexTokensPath = path.join(getTronDataDir(), 'codex-tokens.json');
   }
 
   /**
@@ -113,7 +124,7 @@ export class HealthServer {
   private handleRequest(req: http.IncomingMessage, res: http.ServerResponse): void {
     // CORS headers
     res.setHeader('Access-Control-Allow-Origin', '*');
-    res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
 
     if (req.method === 'OPTIONS') {
@@ -135,6 +146,9 @@ export class HealthServer {
         break;
       case '/metrics':
         this.handleMetrics(req, res);
+        break;
+      case '/api/codex/tokens':
+        this.handleCodexTokens(req, res);
         break;
       default:
         res.writeHead(404, { 'Content-Type': 'application/json' });
@@ -227,5 +241,110 @@ export class HealthServer {
         },
       },
     };
+  }
+
+  // ===========================================================================
+  // Codex Token Management
+  // ===========================================================================
+
+  private handleCodexTokens(req: http.IncomingMessage, res: http.ServerResponse): void {
+    if (req.method === 'GET') {
+      this.handleGetCodexTokens(res);
+    } else if (req.method === 'POST') {
+      this.handleSaveCodexTokens(req, res);
+    } else if (req.method === 'DELETE') {
+      this.handleDeleteCodexTokens(res);
+    } else {
+      res.writeHead(405, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Method not allowed' }));
+    }
+  }
+
+  private handleGetCodexTokens(res: http.ServerResponse): void {
+    const tokens = this.getCodexTokens();
+    if (tokens) {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({
+        authenticated: true,
+        expiresAt: tokens.expiresAt,
+      }));
+    } else {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ authenticated: false }));
+    }
+  }
+
+  private handleSaveCodexTokens(req: http.IncomingMessage, res: http.ServerResponse): void {
+    let body = '';
+    req.on('data', chunk => { body += chunk; });
+    req.on('end', () => {
+      try {
+        const tokens = JSON.parse(body) as CodexTokens;
+
+        if (!tokens.accessToken || !tokens.refreshToken || !tokens.expiresAt) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Missing required fields' }));
+          return;
+        }
+
+        this.saveCodexTokens(tokens);
+        logger.info('Codex tokens saved');
+
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: true }));
+      } catch (error) {
+        logger.error('Failed to save Codex tokens', error as Error);
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Invalid JSON' }));
+      }
+    });
+  }
+
+  private handleDeleteCodexTokens(res: http.ServerResponse): void {
+    this.deleteCodexTokens();
+    logger.info('Codex tokens deleted');
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ success: true }));
+  }
+
+  /**
+   * Get stored Codex tokens
+   */
+  getCodexTokens(): CodexTokens | null {
+    try {
+      if (fs.existsSync(this.codexTokensPath)) {
+        const data = fs.readFileSync(this.codexTokensPath, 'utf8');
+        return JSON.parse(data) as CodexTokens;
+      }
+    } catch (error) {
+      logger.warn('Failed to read Codex tokens', { error });
+    }
+    return null;
+  }
+
+  /**
+   * Save Codex tokens
+   */
+  saveCodexTokens(tokens: CodexTokens): void {
+    const dir = path.dirname(this.codexTokensPath);
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true });
+    }
+    fs.writeFileSync(this.codexTokensPath, JSON.stringify(tokens, null, 2), {
+      mode: 0o600, // Owner read/write only for security
+    });
+  }
+
+  /**
+   * Delete Codex tokens
+   */
+  deleteCodexTokens(): void {
+    try {
+      if (fs.existsSync(this.codexTokensPath)) {
+        fs.unlinkSync(this.codexTokensPath);
+      }
+    } catch (error) {
+      logger.warn('Failed to delete Codex tokens', { error });
+    }
   }
 }

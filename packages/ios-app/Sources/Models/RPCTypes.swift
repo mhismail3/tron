@@ -163,11 +163,13 @@ struct AgentPromptParams: Encodable {
     let sessionId: String
     let prompt: String
     let images: [ImageAttachment]?
+    let reasoningLevel: String?
 
-    init(sessionId: String, prompt: String, images: [ImageAttachment]? = nil) {
+    init(sessionId: String, prompt: String, images: [ImageAttachment]? = nil, reasoningLevel: String? = nil) {
         self.sessionId = sessionId
         self.prompt = prompt
         self.images = images
+        self.reasoningLevel = reasoningLevel
     }
 }
 
@@ -354,26 +356,53 @@ struct ModelInfo: Decodable, Identifiable, Hashable {
     let supportsImages: Bool?
     let tier: String?
     let isLegacy: Bool?
+    /// For models with reasoning capability (e.g., OpenAI Codex)
+    let supportsReasoning: Bool?
+    /// Available reasoning effort levels (low, medium, high, xhigh)
+    let reasoningLevels: [String]?
+    /// Default reasoning level
+    let defaultReasoningLevel: String?
 
     /// Properly formatted display name (e.g., "Claude Opus 4.5", "Claude Sonnet 4")
     var displayName: String {
-        id.fullModelName
+        // For OpenAI models, use the name directly
+        if provider == "openai-codex" || provider == "openai" {
+            return name
+        }
+        return id.fullModelName
     }
 
     /// Short tier name: "Opus", "Sonnet", "Haiku"
     var shortName: String {
-        ModelNameFormatter.format(id, style: .tierOnly, fallback: name)
+        // For OpenAI models, use the name directly
+        if provider == "openai-codex" || provider == "openai" {
+            return name
+        }
+        return ModelNameFormatter.format(id, style: .tierOnly, fallback: name)
     }
 
     /// Formats model name properly: "Claude Opus 4.5", "Claude Sonnet 4", etc.
     var formattedModelName: String {
-        id.fullModelName
+        if provider == "openai-codex" || provider == "openai" {
+            return name
+        }
+        return id.fullModelName
     }
 
     /// Whether this is a 4.5 (latest generation) model
     var is45Model: Bool {
         let lowerId = id.lowercased()
         return lowerId.contains("4-5") || lowerId.contains("4.5")
+    }
+
+    /// Whether this is an Anthropic model
+    var isAnthropic: Bool {
+        provider == "anthropic"
+    }
+
+    /// Whether this is an OpenAI Codex model
+    var isCodex: Bool {
+        provider == "openai-codex"
     }
 }
 

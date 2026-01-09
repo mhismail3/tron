@@ -280,6 +280,8 @@ export interface AgentPromptParams {
     data: string;
     mimeType: string;
   }>;
+  /** Reasoning effort level for OpenAI Codex models (low/medium/high/xhigh) */
+  reasoningLevel?: 'low' | 'medium' | 'high' | 'xhigh';
 }
 
 export interface AgentPromptResult {
@@ -345,7 +347,10 @@ export interface ModelSwitchResult {
 }
 
 /** List available models */
-export interface ModelListParams {}
+export interface ModelListParams {
+  /** Filter by provider (anthropic, openai, google, openai-codex) */
+  provider?: string;
+}
 
 export interface ModelListResult {
   models: Array<{
@@ -355,6 +360,12 @@ export interface ModelListResult {
     contextWindow: number;
     supportsThinking: boolean;
     supportsImages: boolean;
+    /** For models with reasoning capability (e.g., OpenAI Codex) */
+    supportsReasoning?: boolean;
+    /** Available reasoning effort levels (low, medium, high, xhigh) */
+    reasoningLevels?: string[];
+    /** Default reasoning level */
+    defaultReasoningLevel?: string;
   }>;
 }
 

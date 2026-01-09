@@ -62,6 +62,7 @@
 		F7C7E361C09D466FAEE1AAEE /* ToolResultViewers.swift in Sources */ = {isa = PBXBuildFile; fileRef = 69203645DAFCA91156124C1F /* ToolResultViewers.swift */; };
 		FACF3272EAAA614047FA83C8 /* EventDatabaseTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A013DFE849DA84E8EA5F545C /* EventDatabaseTests.swift */; };
 		FE3D89D152521876D2DDF464 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 8347F0B7D54B1F1EAA6C762C /* Assets.xcassets */; };
+		D4E5F6A1B2C30718293A4B5C /* ReasoningLevelPicker.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F60718293A4B5C /* ReasoningLevelPicker.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -133,6 +134,7 @@
 		E9A70CB49EB91A1C42338389 /* MessagePayloads.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MessagePayloads.swift; sourceTree = "<group>"; };
 		F2B298578C85F2293B9568BA /* TronMobile.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = TronMobile.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		FD89009575AAF815668A8370 /* EventStoreManager+Dashboard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "EventStoreManager+Dashboard.swift"; sourceTree = "<group>"; };
+		A1B2C3D4E5F60718293A4B5C /* ReasoningLevelPicker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReasoningLevelPicker.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXGroup section */
@@ -230,6 +232,7 @@
 				AD61CD33CD78B1F23CDBABD7 /* LogViewer.swift */,
 				C37E248C562712A416669C61 /* MessageBubble.swift */,
 				7F6BD19519452787421FD54D /* ModelSwitcher.swift */,
+				A1B2C3D4E5F60718293A4B5C /* ReasoningLevelPicker.swift */,
 				A98EEAD5A6421EB34B269C1A /* SessionAnalyticsSheet.swift */,
 				766753AA2F765B13E1B4676A /* SessionSidebar.swift */,
 				9EC65CD838F5540EC3B1AA02 /* SessionTreeView.swift */,
@@ -447,6 +450,7 @@
 				AA0AC5B4C07C617F0612C7FA /* View+Extensions.swift in Sources */,
 				DB84AFFF8F9ADCC50F75B33B /* WebSocketService.swift in Sources */,
 				C591192B9B46127C61E725EC /* WorktreeStatusView.swift in Sources */,
+				D4E5F6A1B2C30718293A4B5C /* ReasoningLevelPicker.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

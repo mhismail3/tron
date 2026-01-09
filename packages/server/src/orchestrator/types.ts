@@ -149,6 +149,8 @@ export interface AgentRunOptions {
   sessionId: string;
   prompt: string;
   onEvent?: (event: AgentEvent) => void;
+  /** Reasoning effort level for OpenAI Codex models (low/medium/high/xhigh) */
+  reasoningLevel?: 'low' | 'medium' | 'high' | 'xhigh';
 }
 
 export interface AgentEvent {

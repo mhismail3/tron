@@ -74,6 +74,17 @@ export const DEFAULT_SETTINGS: TronSettings = {
       oauthBetaHeaders: 'oauth-2025-04-20,interleaved-thinking-2025-05-14,fine-grained-tool-streaming-2025-05-14',
       tokenExpiryBufferSeconds: 300,
     },
+    // OpenAI Codex OAuth configuration (for ChatGPT Plus/Pro subscription access)
+    // Based on: https://github.com/badlogic/pi-mono/blob/main/packages/ai/src/utils/oauth/openai-codex.ts
+    openaiCodex: {
+      authUrl: 'https://auth.openai.com/oauth/authorize',
+      tokenUrl: 'https://auth.openai.com/oauth/token',
+      clientId: 'app_EMoamEEZ73f0CkXaXp7hrann', // pi-mono client ID
+      scopes: ['openid', 'profile', 'email', 'offline_access'],
+      baseUrl: 'https://chatgpt.com/backend-api',
+      tokenExpiryBufferSeconds: 300,
+      defaultReasoningEffort: 'medium',
+    },
   },
 
   // Model Configuration

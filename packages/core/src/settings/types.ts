@@ -32,10 +32,31 @@ export interface AnthropicApiSettings {
 }
 
 /**
+ * OpenAI Codex OAuth configuration (for ChatGPT subscription access)
+ */
+export interface OpenAICodexApiSettings {
+  /** OAuth authorization URL */
+  authUrl: string;
+  /** OAuth token exchange URL */
+  tokenUrl: string;
+  /** OAuth client ID */
+  clientId: string;
+  /** OAuth scopes */
+  scopes: string[];
+  /** Base URL for Codex API (chatgpt.com backend) */
+  baseUrl: string;
+  /** Token expiry buffer in seconds (refresh before actual expiry) */
+  tokenExpiryBufferSeconds: number;
+  /** Default reasoning effort level */
+  defaultReasoningEffort: 'low' | 'medium' | 'high' | 'xhigh';
+}
+
+/**
  * API settings container
  */
 export interface ApiSettings {
   anthropic: AnthropicApiSettings;
+  openaiCodex?: OpenAICodexApiSettings;
 }
 
 // =============================================================================

@@ -9,6 +9,13 @@ import type { Context, StreamEvent } from '../types/index.js';
 import { AnthropicProvider, type AnthropicConfig, type StreamOptions } from './anthropic.js';
 import { OpenAIProvider, type OpenAIConfig, type OpenAIStreamOptions } from './openai.js';
 import { GoogleProvider, type GoogleConfig, type GoogleStreamOptions } from './google.js';
+import {
+  OpenAICodexProvider,
+  type OpenAICodexConfig,
+  type OpenAICodexStreamOptions,
+  type ReasoningEffort,
+  OPENAI_CODEX_MODELS,
+} from './openai-codex.js';
 import { CLAUDE_MODELS, DEFAULT_MODEL } from './anthropic.js';
 import { OPENAI_MODELS } from './openai.js';
 import { GEMINI_MODELS } from './google.js';
@@ -20,7 +27,7 @@ const logger = createLogger('provider-factory');
 // Types
 // =============================================================================
 
-export type ProviderType = 'anthropic' | 'openai' | 'google';
+export type ProviderType = 'anthropic' | 'openai' | 'google' | 'openai-codex';
 
 /**
  * Unified auth configuration
@@ -43,6 +50,8 @@ export interface ProviderConfig {
   thinkingBudget?: number;
   // OpenAI-specific
   organization?: string;
+  // OpenAI Codex-specific
+  reasoningEffort?: ReasoningEffort;
 }
 
 /**
@@ -70,6 +79,8 @@ export interface ProviderStreamOptions {
   presencePenalty?: number;
   // Google-specific
   topK?: number;
+  // OpenAI Codex-specific
+  reasoningEffort?: ReasoningEffort;
 }
 
 // =============================================================================
@@ -83,6 +94,7 @@ export const PROVIDER_MODELS = {
   anthropic: CLAUDE_MODELS,
   openai: OPENAI_MODELS,
   google: GEMINI_MODELS,
+  'openai-codex': OPENAI_CODEX_MODELS,
 } as const;
 
 /**
@@ -107,7 +119,11 @@ export function detectProviderFromModel(modelId: string): ProviderType {
   if (modelId.startsWith('claude') || modelId.includes('claude')) {
     return 'anthropic';
   }
-  if (modelId.startsWith('gpt') || modelId.startsWith('o1') || modelId.startsWith('o3')) {
+  // OpenAI Codex models (via ChatGPT subscription)
+  if (modelId.includes('codex')) {
+    return 'openai-codex';
+  }
+  if (modelId.startsWith('gpt') || modelId.startsWith('o1') || modelId.startsWith('o3') || modelId.startsWith('o4')) {
     return 'openai';
   }
   if (modelId.startsWith('gemini')) {
@@ -128,6 +144,8 @@ export function getDefaultModel(provider: ProviderType): string {
       return 'gpt-4o';
     case 'google':
       return 'gemini-2.5-flash';
+    case 'openai-codex':
+      return 'gpt-5.2-codex';
     default:
       return DEFAULT_MODEL;
   }
@@ -150,6 +168,8 @@ export function createProvider(config: ProviderConfig): Provider {
       return createOpenAIProvider(config);
     case 'google':
       return createGoogleProvider(config);
+    case 'openai-codex':
+      return createOpenAICodexProvider(config);
     default:
       throw new Error(`Unknown provider type: ${config.type}`);
   }
@@ -250,6 +270,40 @@ function createGoogleProvider(config: ProviderConfig): Provider {
         temperature: options?.temperature,
         topP: options?.topP,
         topK: options?.topK,
+        stopSequences: options?.stopSequences,
+      };
+      yield* provider.stream(context, opts);
+    },
+  };
+}
+
+/**
+ * Create OpenAI Codex provider (for ChatGPT subscription OAuth)
+ */
+function createOpenAICodexProvider(config: ProviderConfig): Provider {
+  if (config.auth.type !== 'oauth') {
+    throw new Error('OpenAI Codex requires OAuth authentication');
+  }
+
+  const codexConfig: OpenAICodexConfig = {
+    model: config.model,
+    auth: config.auth,
+    maxTokens: config.maxTokens,
+    temperature: config.temperature,
+    baseURL: config.baseURL,
+    reasoningEffort: config.reasoningEffort,
+  };
+
+  const provider = new OpenAICodexProvider(codexConfig);
+
+  return {
+    id: 'openai-codex',
+    get model() { return provider.model; },
+    async *stream(context: Context, options?: ProviderStreamOptions): AsyncGenerator<StreamEvent> {
+      const opts: OpenAICodexStreamOptions = {
+        maxTokens: options?.maxTokens,
+        temperature: options?.temperature,
+        reasoningEffort: options?.reasoningEffort,
         stopSequences: options?.stopSequences,
       };
       yield* provider.stream(context, opts);

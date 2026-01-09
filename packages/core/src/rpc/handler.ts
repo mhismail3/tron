@@ -59,7 +59,7 @@ import type {
   TranscribeAudioResult,
   TranscribeListModelsResult,
 } from './types.js';
-import { ANTHROPIC_MODELS } from '../providers/models.js';
+import { ANTHROPIC_MODELS, OPENAI_CODEX_MODELS } from '../providers/models.js';
 
 const logger = createLogger('rpc');
 
@@ -531,9 +531,10 @@ export class RpcHandler extends EventEmitter {
       return this.errorResponse(request.id, 'INVALID_PARAMS', 'model is required');
     }
 
-    // Validate model exists
-    const modelInfo = ANTHROPIC_MODELS.find((m) => m.id === params.model);
-    if (!modelInfo) {
+    // Validate model exists (check all providers)
+    const anthropicModel = ANTHROPIC_MODELS.find((m) => m.id === params.model);
+    const codexModel = OPENAI_CODEX_MODELS.find((m) => m.id === params.model);
+    if (!anthropicModel && !codexModel) {
       return this.errorResponse(request.id, 'INVALID_PARAMS', `Unknown model: ${params.model}`);
     }
 
@@ -542,8 +543,10 @@ export class RpcHandler extends EventEmitter {
   }
 
   private async handleModelList(request: RpcRequest): Promise<RpcResponse> {
-    const result: ModelListResult = {
-      models: ANTHROPIC_MODELS.map((m) => ({
+    // Build model list from all providers
+    const models: ModelListResult['models'] = [
+      // Anthropic models
+      ...ANTHROPIC_MODELS.map((m) => ({
         id: m.id,
         name: m.shortName,
         provider: 'anthropic',
@@ -551,8 +554,21 @@ export class RpcHandler extends EventEmitter {
         supportsThinking: m.supportsThinking,
         supportsImages: true, // All Claude models support images
       })),
-    };
+      // OpenAI Codex models
+      ...OPENAI_CODEX_MODELS.map((m) => ({
+        id: m.id,
+        name: m.shortName,
+        provider: 'openai-codex',
+        contextWindow: m.contextWindow,
+        supportsThinking: false,
+        supportsImages: true,
+        supportsReasoning: m.supportsReasoning,
+        reasoningLevels: m.reasoningLevels,
+        defaultReasoningLevel: m.defaultReasoningLevel,
+      })),
+    ];
 
+    const result: ModelListResult = { models };
     return this.successResponse(request.id, result);
   }
 

@@ -42,6 +42,43 @@ export interface ModelInfo {
   legacy?: boolean;
 }
 
+/**
+ * OpenAI Codex model info (different structure from Anthropic)
+ * These models support reasoning effort levels instead of thinking budget
+ */
+export interface OpenAICodexModelInfo {
+  /** Model ID for API calls */
+  id: string;
+  /** Display name */
+  name: string;
+  /** Short name for compact display */
+  shortName: string;
+  /** Model family (e.g., "GPT-5.2") */
+  family: string;
+  /** Model tier/capability level */
+  tier: 'flagship' | 'mini' | 'standard';
+  /** Context window size in tokens */
+  contextWindow: number;
+  /** Maximum output tokens */
+  maxOutput: number;
+  /** Supports tool/function calling */
+  supportsTools: boolean;
+  /** Supports reasoning parameter */
+  supportsReasoning: boolean;
+  /** Available reasoning effort levels */
+  reasoningLevels?: ('low' | 'medium' | 'high' | 'xhigh')[];
+  /** Default reasoning effort level */
+  defaultReasoningLevel?: 'low' | 'medium' | 'high' | 'xhigh';
+  /** Input cost per million tokens */
+  inputCostPerMillion: number;
+  /** Output cost per million tokens */
+  outputCostPerMillion: number;
+  /** Brief description */
+  description: string;
+  /** Whether this is the recommended model */
+  recommended?: boolean;
+}
+
 export interface ModelCategory {
   name: string;
   description: string;
@@ -181,6 +218,64 @@ export const ANTHROPIC_MODELS: ModelInfo[] = [
     outputCostPerMillion: 1.25,
     description: 'Legacy fast model. Consider upgrading to Haiku 4.5.',
     legacy: true,
+  },
+];
+
+// =============================================================================
+// OpenAI Codex Models (ChatGPT subscription OAuth)
+// =============================================================================
+
+export const OPENAI_CODEX_MODELS: OpenAICodexModelInfo[] = [
+  {
+    id: 'gpt-5.2-codex',
+    name: 'GPT-5.2 Codex',
+    shortName: 'Codex 5.2',
+    family: 'GPT-5.2',
+    tier: 'flagship',
+    contextWindow: 192000,
+    maxOutput: 16384,
+    supportsTools: true,
+    supportsReasoning: true,
+    reasoningLevels: ['low', 'medium', 'high', 'xhigh'],
+    defaultReasoningLevel: 'medium',
+    inputCostPerMillion: 0,
+    outputCostPerMillion: 0,
+    description: 'Latest GPT-5.2 Codex - most advanced coding model',
+    recommended: true,
+  },
+  {
+    id: 'gpt-5.1-codex-max',
+    name: 'GPT-5.1 Codex Max',
+    shortName: 'Codex Max',
+    family: 'GPT-5.1',
+    tier: 'flagship',
+    contextWindow: 192000,
+    maxOutput: 16384,
+    supportsTools: true,
+    supportsReasoning: true,
+    reasoningLevels: ['low', 'medium', 'high', 'xhigh'],
+    defaultReasoningLevel: 'high',
+    inputCostPerMillion: 0,
+    outputCostPerMillion: 0,
+    description: 'GPT-5.1 Codex Max - deep reasoning capabilities',
+    recommended: false,
+  },
+  {
+    id: 'gpt-5.1-codex-mini',
+    name: 'GPT-5.1 Codex Mini',
+    shortName: 'Codex Mini',
+    family: 'GPT-5.1',
+    tier: 'standard',
+    contextWindow: 192000,
+    maxOutput: 16384,
+    supportsTools: true,
+    supportsReasoning: true,
+    reasoningLevels: ['low', 'medium', 'high'],
+    defaultReasoningLevel: 'low',
+    inputCostPerMillion: 0,
+    outputCostPerMillion: 0,
+    description: 'GPT-5.1 Codex Mini - faster and more efficient',
+    recommended: false,
   },
 ];
 

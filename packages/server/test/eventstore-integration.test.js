@@ -33,7 +33,6 @@ describe('EventStore Integration', () => {
                 workspacePath: '/test/project',
                 workingDirectory: '/test/project',
                 model: 'claude-sonnet-4-20250514',
-                provider: 'anthropic',
                 title: 'Test Session',
             });
             expect(result.session.id).toMatch(/^sess_/);
@@ -46,14 +45,12 @@ describe('EventStore Integration', () => {
                 workspacePath: '/test/project',
                 workingDirectory: '/test/project',
                 model: 'claude-sonnet-4-20250514',
-                provider: 'anthropic',
                 title: 'Test Session',
                 tags: ['test', 'integration'],
             });
             expect(result.rootEvent.payload).toEqual({
                 workingDirectory: '/test/project',
                 model: 'claude-sonnet-4-20250514',
-                provider: 'anthropic',
                 title: 'Test Session',
             });
         });
@@ -62,7 +59,6 @@ describe('EventStore Integration', () => {
                 workspacePath: '/test/project',
                 workingDirectory: '/test/project',
                 model: 'claude-sonnet-4-20250514',
-                provider: 'anthropic',
             });
             const session = await eventStore.getSession(created.session.id);
             expect(session).not.toBeNull();
@@ -74,13 +70,11 @@ describe('EventStore Integration', () => {
                 workspacePath: '/project-a',
                 workingDirectory: '/project-a',
                 model: 'claude-sonnet-4-20250514',
-                provider: 'anthropic',
             });
             await eventStore.createSession({
                 workspacePath: '/project-b',
                 workingDirectory: '/project-b',
                 model: 'claude-sonnet-4-20250514',
-                provider: 'anthropic',
             });
             const workspace = await eventStore.getWorkspaceByPath('/project-a');
             expect(workspace).not.toBeNull();
@@ -92,11 +86,10 @@ describe('EventStore Integration', () => {
                 workspacePath: '/test/project',
                 workingDirectory: '/test/project',
                 model: 'claude-sonnet-4-20250514',
-                provider: 'anthropic',
             });
             await eventStore.endSession(created.session.id);
             const session = await eventStore.getSession(created.session.id);
-            expect(session?.status).toBe('ended');
+            expect(session?.isEnded).toBe(true);
         });
     });
     describe('event recording', () => {
@@ -107,7 +100,6 @@ describe('EventStore Integration', () => {
                 workspacePath: '/test/project',
                 workingDirectory: '/test/project',
                 model: 'claude-sonnet-4-20250514',
-                provider: 'anthropic',
             });
             sessionId = result.session.id;
             rootEventId = result.rootEvent.id;
@@ -209,7 +201,6 @@ describe('EventStore Integration', () => {
                 workspacePath: '/test/project',
                 workingDirectory: '/test/project',
                 model: 'claude-sonnet-4-20250514',
-                provider: 'anthropic',
             });
             sessionId = result.session.id;
         });
@@ -285,7 +276,6 @@ describe('EventStore Integration', () => {
                 workspacePath: '/test/project',
                 workingDirectory: '/test/project',
                 model: 'claude-sonnet-4-20250514',
-                provider: 'anthropic',
             });
             sessionId = result.session.id;
             eventIds = [result.rootEvent.id];
@@ -332,7 +322,6 @@ describe('EventStore Integration', () => {
                 workspacePath: '/test/project',
                 workingDirectory: '/test/project',
                 model: 'claude-sonnet-4-20250514',
-                provider: 'anthropic',
             });
             sessionId = result.session.id;
             // Create conversation
@@ -404,6 +393,65 @@ describe('EventStore Integration', () => {
             ]);
         });
     });
+    describe('tree.getAncestors for forked sessions', () => {
+        it('should return ancestors across session boundaries', async () => {
+            // Create parent session with messages
+            const parentResult = await eventStore.createSession({
+                workspacePath: '/test/project',
+                workingDirectory: '/test/project',
+                model: 'claude-sonnet-4-20250514',
+            });
+            const userEvent = await eventStore.append({
+                sessionId: parentResult.session.id,
+                type: 'message.user',
+                payload: { content: 'Hello from parent' },
+            });
+            const assistantEvent = await eventStore.append({
+                sessionId: parentResult.session.id,
+                type: 'message.assistant',
+                payload: { content: 'Hi there from parent!' },
+            });
+            // Fork from assistant message
+            const forkResult = await eventStore.fork(assistantEvent.id);
+            // Get ancestors of fork root - should include parent events
+            const ancestors = await eventStore.getAncestors(forkResult.rootEvent.id);
+            // Ancestors should include: session.start, message.user, message.assistant, session.fork
+            expect(ancestors.length).toBeGreaterThanOrEqual(4);
+            expect(ancestors.map(e => e.type)).toContain('message.user');
+            expect(ancestors.map(e => e.type)).toContain('message.assistant');
+            expect(ancestors.map(e => e.type)).toContain('session.fork');
+            // Verify content is preserved in ancestors
+            const userAncestor = ancestors.find(e => e.type === 'message.user');
+            expect(userAncestor?.payload?.content).toBe('Hello from parent');
+            const assistantAncestor = ancestors.find(e => e.type === 'message.assistant');
+            expect(assistantAncestor?.payload?.content).toBe('Hi there from parent!');
+        });
+        it('should preserve correct parent chain across fork', async () => {
+            // Create parent session
+            const parentResult = await eventStore.createSession({
+                workspacePath: '/test/project',
+                workingDirectory: '/test/project',
+                model: 'claude-sonnet-4-20250514',
+            });
+            const userEvent = await eventStore.append({
+                sessionId: parentResult.session.id,
+                type: 'message.user',
+                payload: { content: 'User message' },
+            });
+            // Fork from user message
+            const forkResult = await eventStore.fork(userEvent.id);
+            // Fork root's parentId should point to the forked-from event in parent session
+            expect(forkResult.rootEvent.parentId).toBe(userEvent.id);
+            // Getting ancestors should follow the chain into the parent session
+            const ancestors = await eventStore.getAncestors(forkResult.rootEvent.id);
+            // Verify the chain is: session.start -> message.user -> session.fork
+            const rootEventIdx = ancestors.findIndex(e => e.id === parentResult.rootEvent.id);
+            const userEventIdx = ancestors.findIndex(e => e.id === userEvent.id);
+            const forkEventIdx = ancestors.findIndex(e => e.id === forkResult.rootEvent.id);
+            expect(rootEventIdx).toBeLessThan(userEventIdx);
+            expect(userEventIdx).toBeLessThan(forkEventIdx);
+        });
+    });
     describe('rewind operation', () => {
         let sessionId;
         let eventIds = [];
@@ -412,7 +460,6 @@ describe('EventStore Integration', () => {
                 workspacePath: '/test/project',
                 workingDirectory: '/test/project',
                 model: 'claude-sonnet-4-20250514',
-                provider: 'anthropic',
             });
             sessionId = result.session.id;
             eventIds = [result.rootEvent.id];
@@ -465,7 +512,6 @@ describe('EventStore Integration', () => {
                 workspacePath: '/test/project',
                 workingDirectory: '/test/project',
                 model: 'claude-sonnet-4-20250514',
-                provider: 'anthropic',
             });
             sessionId = result.session.id;
             // Create searchable content
@@ -507,7 +553,6 @@ describe('EventStore Integration', () => {
                 workspacePath: '/test/project',
                 workingDirectory: '/test/project',
                 model: 'claude-sonnet-4-20250514',
-                provider: 'anthropic',
             });
             const sessionId = result.session.id;
             // Add 100 events
@@ -533,7 +578,6 @@ describe('EventStore Integration', () => {
                 workspacePath: '/test/project',
                 workingDirectory: '/test/project',
                 model: 'claude-sonnet-4-20250514',
-                provider: 'anthropic',
             });
             const sessionId = result.session.id;
             // Create deep chain
