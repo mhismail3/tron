@@ -387,14 +387,17 @@ export class OpenAICodexProvider {
       const input = this.convertToResponsesInput(context);
       const tools = context.tools ? this.convertTools(context.tools) : undefined;
 
-      // Prepend tool clarification message if tools are available
-      if (context.tools && context.tools.length > 0) {
+      // Prepend tool clarification message ONLY on first turn of session
+      // (when there are no assistant messages yet in the history)
+      const hasAssistantMessages = context.messages.some(m => m.role === 'assistant');
+      if (context.tools && context.tools.length > 0 && !hasAssistantMessages) {
         const clarificationText = generateToolClarificationMessage(context.tools);
         input.unshift({
           type: 'message',
           role: 'developer',
           content: [{ type: 'input_text', text: clarificationText }],
         });
+        logger.debug('Prepended tool clarification message (first turn)');
       }
 
       // Build request body (Responses API format)
