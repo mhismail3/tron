@@ -333,10 +333,16 @@ final class RecentSessionsTests: XCTestCase {
 
     /// Test model shortModelName extension
     func testModelShortName() {
+        // Claude models
         XCTAssertEqual("claude-opus-4-5-20251101".shortModelName, "Opus 4.5")
         XCTAssertEqual("claude-sonnet-4-5-20251101".shortModelName, "Sonnet 4.5")
         XCTAssertEqual("claude-sonnet-4-20250514".shortModelName, "Sonnet 4")
         XCTAssertEqual("claude-haiku-3-5-20241022".shortModelName, "Haiku 3.5")
+
+        // OpenAI Codex models
+        XCTAssertEqual("gpt-5.2-codex".shortModelName, "GPT-5.2 Codex")
+        XCTAssertEqual("gpt-5.1-codex-max".shortModelName, "GPT-5.1 Codex Max")
+        XCTAssertEqual("gpt-5.1-codex-mini".shortModelName, "GPT-5.1 Codex Mini")
     }
 
     // MARK: - Fork Integration Tests

@@ -91,19 +91,19 @@ struct ModelChangeNotificationView: View {
                 .foregroundStyle(.tronEmerald)
 
             Text("Switched from")
-                .font(.system(size: 11, design: .monospaced))
+                .font(.system(size: 11))
                 .foregroundStyle(.tronTextMuted)
 
-            Text(from)
-                .font(.system(size: 11, weight: .medium, design: .monospaced))
+            Text(from.shortModelName)
+                .font(.system(size: 11, weight: .medium))
                 .foregroundStyle(.tronTextSecondary)
 
             Image(systemName: "arrow.right")
                 .font(.system(size: 9, weight: .medium))
                 .foregroundStyle(.tronTextMuted)
 
-            Text(to)
-                .font(.system(size: 11, weight: .medium, design: .monospaced))
+            Text(to.shortModelName)
+                .font(.system(size: 11, weight: .medium))
                 .foregroundStyle(.tronEmerald)
         }
         .padding(.horizontal, 12)

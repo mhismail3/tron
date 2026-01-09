@@ -381,18 +381,30 @@ struct ModelInfo: Decodable, Identifiable, Hashable {
         return ModelNameFormatter.format(id, style: .tierOnly, fallback: name)
     }
 
-    /// Formats model name properly: "Claude Opus 4.5", "Claude Sonnet 4", etc.
+    /// Formats model name properly: "Claude Opus 4.5", "GPT-5.2 Codex", etc.
+    /// Uses full format for Claude models, short format for Codex (avoids redundant "OpenAI" prefix)
     var formattedModelName: String {
-        if provider == "openai-codex" || provider == "openai" {
-            return name
+        let lowerId = id.lowercased()
+        if lowerId.contains("codex") {
+            // Codex: "GPT-5.2 Codex" (short format - no "OpenAI" prefix)
+            return id.shortModelName
         }
+        // Claude: "Claude Opus 4.5" (full format with "Claude" prefix)
         return id.fullModelName
     }
 
-    /// Whether this is a 4.5 (latest generation) model
+    /// Whether this is a latest generation model (Claude 4.5+ or GPT-5.x Codex)
     var is45Model: Bool {
         let lowerId = id.lowercased()
-        return lowerId.contains("4-5") || lowerId.contains("4.5")
+        // Claude 4.5 family
+        if lowerId.contains("4-5") || lowerId.contains("4.5") {
+            return true
+        }
+        // GPT-5.x Codex models are also "latest"
+        if lowerId.contains("codex") && (lowerId.contains("5.") || lowerId.contains("-5-")) {
+            return true
+        }
+        return false
     }
 
     /// Whether this is an Anthropic model

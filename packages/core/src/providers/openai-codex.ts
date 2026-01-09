@@ -136,8 +136,8 @@ interface ResponsesStreamEvent {
 
 export const OPENAI_CODEX_MODELS = {
   'gpt-5.2-codex': {
-    name: 'GPT-5.2 Codex',
-    shortName: 'Codex 5.2',
+    name: 'OpenAI GPT-5.2 Codex',
+    shortName: 'GPT-5.2 Codex',
     family: 'GPT-5.2',
     tier: 'flagship',
     contextWindow: 192000,
@@ -151,8 +151,8 @@ export const OPENAI_CODEX_MODELS = {
     description: 'Latest GPT-5.2 Codex - most advanced coding model',
   },
   'gpt-5.1-codex-max': {
-    name: 'GPT-5.1 Codex Max',
-    shortName: 'Codex Max',
+    name: 'OpenAI GPT-5.1 Codex Max',
+    shortName: 'GPT-5.1 Codex Max',
     family: 'GPT-5.1',
     tier: 'flagship',
     contextWindow: 192000,
@@ -166,8 +166,8 @@ export const OPENAI_CODEX_MODELS = {
     description: 'GPT-5.1 Codex Max - deep reasoning capabilities',
   },
   'gpt-5.1-codex-mini': {
-    name: 'GPT-5.1 Codex Mini',
-    shortName: 'Codex Mini',
+    name: 'OpenAI GPT-5.1 Codex Mini',
+    shortName: 'GPT-5.1 Codex Mini',
     family: 'GPT-5.1',
     tier: 'standard',
     contextWindow: 192000,

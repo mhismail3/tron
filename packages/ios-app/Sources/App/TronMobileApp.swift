@@ -565,20 +565,36 @@ struct NewSessionFlow: View {
 
     // MARK: - Computed Properties
 
-    /// Latest (4.5) models sorted by tier: Opus, Sonnet, Haiku
-    private var latestModels: [ModelInfo] {
+    /// Latest Anthropic (4.5) models sorted by tier: Opus, Sonnet, Haiku
+    private var latestAnthropicModels: [ModelInfo] {
         availableModels
-            .filter { $0.is45Model }
+            .filter { $0.isAnthropic && $0.is45Model }
             .uniqueByFormattedName()
             .sortedByTier()
     }
 
-    /// Legacy models sorted by tier
-    private var legacyModels: [ModelInfo] {
+    /// OpenAI Codex models (ChatGPT subscription)
+    private var openAICodexModels: [ModelInfo] {
         availableModels
-            .filter { !$0.is45Model }
+            .filter { $0.isCodex }
+    }
+
+    /// Legacy Anthropic models sorted by tier
+    private var legacyAnthropicModels: [ModelInfo] {
+        availableModels
+            .filter { $0.isAnthropic && !$0.is45Model }
             .uniqueByFormattedName()
             .sortedByTier()
+    }
+
+    /// All latest models (for backward compatibility)
+    private var latestModels: [ModelInfo] {
+        latestAnthropicModels + openAICodexModels
+    }
+
+    /// Legacy models sorted by tier (for backward compatibility)
+    private var legacyModels: [ModelInfo] {
+        legacyAnthropicModels
     }
 
     /// Display name for the selected model - uses ModelInfo.formattedModelName if available

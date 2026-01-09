@@ -58,47 +58,47 @@ struct ModelPickerMenu: View {
             if isLoading && models.isEmpty {
                 Text("Loading models...")
             } else {
-                // Anthropic section - latest models first, then legacy
-                Section("Anthropic") {
-                    ForEach(latestAnthropicModels) { model in
-                        modelButton(model)
-                    }
-                    ForEach(legacyAnthropicModels) { model in
-                        modelButton(model)
+                // Order (top to bottom): Legacy, Coming Soon, OpenAI Codex, Anthropic
+                // Latest models at bottom, closest to user's thumb
+
+                // Legacy Anthropic models (top)
+                if !legacyAnthropicModels.isEmpty {
+                    Section("Legacy") {
+                        ForEach(legacyAnthropicModels) { model in
+                            modelButton(model)
+                        }
                     }
                 }
 
-                // OpenAI Codex section (ChatGPT subscription models)
-                Section("OpenAI Codex") {
-                    // Real models from server
-                    ForEach(openAICodexModels) { model in
-                        codexModelButton(model)
-                    }
-                    // If no Codex models available, show coming soon placeholder
-                    if openAICodexModels.isEmpty {
-                        comingSoonModel("GPT-5.2 Codex")
-                    }
-                }
-
-                // Standard OpenAI API section (coming soon)
-                Section("OpenAI API") {
+                // Coming Soon (disabled models)
+                Section("Coming Soon") {
                     ForEach(standardOpenAIModels) { model in
                         modelButton(model)
                     }
-                    // Placeholder for models not yet available
                     if standardOpenAIModels.isEmpty {
                         comingSoonModel("GPT-4o")
                         comingSoonModel("o3")
                         comingSoonModel("o3-mini")
                     }
-                }
-
-                // Google section
-                Section("Google") {
-                    // Gemini 3 series (latest) - coming soon
                     comingSoonModel("Gemini 3 Pro")
                     comingSoonModel("Gemini 3 Flash")
-                    comingSoonModel("Gemini 2.5 Pro")
+                }
+
+                // OpenAI Codex (ChatGPT subscription models)
+                Section("OpenAI Codex") {
+                    ForEach(openAICodexModels) { model in
+                        codexModelButton(model)
+                    }
+                    if openAICodexModels.isEmpty {
+                        comingSoonModel("GPT-5.2 Codex")
+                    }
+                }
+
+                // Anthropic 4.5 family (bottom, closest to thumb)
+                Section("Anthropic") {
+                    ForEach(latestAnthropicModels) { model in
+                        modelButton(model)
+                    }
                 }
             }
         } label: {

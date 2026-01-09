@@ -27,7 +27,12 @@ enum ModelNameFormatter {
     static func format(_ modelId: String, style: Style, fallback: String? = nil) -> String {
         let lowered = modelId.lowercased()
 
-        // Detect tier
+        // Check for OpenAI Codex models first
+        if lowered.contains("codex") {
+            return formatCodexModel(modelId, style: style)
+        }
+
+        // Detect Claude tier
         let tier: Tier?
         if lowered.contains("opus") {
             tier = .opus
@@ -69,6 +74,52 @@ enum ModelNameFormatter {
         }
 
         return formatOutput(tier: tier, version: version, style: style)
+    }
+
+    /// Format OpenAI Codex model IDs
+    /// e.g., "gpt-5.2-codex" -> "GPT-5.2 Codex"
+    ///       "gpt-5.1-codex-max" -> "GPT-5.1 Codex Max"
+    ///       "gpt-5.1-codex-mini" -> "GPT-5.1 Codex Mini"
+    private static func formatCodexModel(_ modelId: String, style: Style) -> String {
+        let lowered = modelId.lowercased()
+
+        // Extract version (5.2, 5.1, etc.)
+        var version = ""
+        if lowered.contains("5.2") {
+            version = "5.2"
+        } else if lowered.contains("5.1") {
+            version = "5.1"
+        } else if lowered.contains("5.0") || lowered.contains("-5-") {
+            version = "5"
+        }
+
+        // Extract suffix (max, mini, etc.)
+        var suffix = ""
+        if lowered.contains("codex-max") {
+            suffix = " Max"
+        } else if lowered.contains("codex-mini") {
+            suffix = " Mini"
+        }
+
+        switch style {
+        case .tierOnly:
+            return "Codex\(suffix)"
+        case .short:
+            if version.isEmpty {
+                return "Codex\(suffix)"
+            }
+            return "GPT-\(version) Codex\(suffix)"
+        case .compact:
+            if version.isEmpty {
+                return "codex\(suffix.lowercased().replacingOccurrences(of: " ", with: "-"))"
+            }
+            return "gpt-\(version)-codex\(suffix.lowercased().replacingOccurrences(of: " ", with: "-"))"
+        case .full:
+            if version.isEmpty {
+                return "OpenAI Codex\(suffix)"
+            }
+            return "OpenAI GPT-\(version) Codex\(suffix)"
+        }
     }
 
     // MARK: - Private
