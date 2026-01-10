@@ -43,11 +43,14 @@ struct InputBar: View {
     @State private var showMicButton = false
     @State private var showModelPill = false
     @State private var showTokenPill = false
+    @State private var showReasoningPill = false
     @State private var introTask: Task<Void, Never>?
+    @State private var reasoningPillTask: Task<Void, Never>?
     @Namespace private var actionButtonNamespace
     @Namespace private var modelPillNamespace
     @Namespace private var tokenPillNamespace
     @Namespace private var micButtonNamespace
+    @Namespace private var reasoningPillNamespace
 
     private let actionButtonSize: CGFloat = 40
     private let micDockInset: CGFloat = 18
@@ -107,6 +110,8 @@ struct InputBar: View {
         .onDisappear {
             introTask?.cancel()
             introTask = nil
+            reasoningPillTask?.cancel()
+            reasoningPillTask = nil
             // Reset state for clean re-entry on next appearance
             resetIntroState()
         }
@@ -119,6 +124,31 @@ struct InputBar: View {
         }
         .onChange(of: isFocused) { _, newValue in
             shouldFocus = newValue
+        }
+        // Animate reasoning pill when model changes or first loads
+        .onChange(of: currentModelInfo?.id) { oldModelId, newModelId in
+            if currentModelInfo?.supportsReasoning == true {
+                // Model supports reasoning - trigger animation
+                // Works for both initial load and model switches
+                triggerReasoningPillAnimation()
+            } else if oldModelId != nil {
+                // Only hide if we're switching away from a model (not initial nil state)
+                hideReasoningPill()
+            }
+        }
+        // Also check reasoning pill when model pill appears (handles initial load timing)
+        .onChange(of: showModelPill) { _, isShowing in
+            if isShowing && currentModelInfo?.supportsReasoning == true && !showReasoningPill {
+                triggerReasoningPillAnimation()
+            }
+        }
+        // Handle case where model info arrives after model pill is already shown
+        .onChange(of: currentModelInfo?.supportsReasoning) { _, supportsReasoning in
+            if supportsReasoning == true && showModelPill && !showReasoningPill {
+                triggerReasoningPillAnimation()
+            } else if supportsReasoning != true && showReasoningPill {
+                hideReasoningPill()
+            }
         }
     }
 
@@ -140,7 +170,8 @@ struct InputBar: View {
             }
 
             // Reasoning level picker (for OpenAI Codex models)
-            if let model = currentModelInfo, model.supportsReasoning == true, showModelPill {
+            // Animates out from model pill with a delay
+            if let model = currentModelInfo, model.supportsReasoning == true, showReasoningPill {
                 ReasoningLevelPicker(
                     model: model,
                     selectedLevel: Binding(
@@ -150,6 +181,11 @@ struct InputBar: View {
                         }
                     )
                 )
+                .matchedGeometryEffect(id: "reasoningPillMorph", in: reasoningPillNamespace)
+                .transition(.asymmetric(
+                    insertion: .scale(scale: 0.6, anchor: .leading).combined(with: .opacity),
+                    removal: .scale(scale: 0.8).combined(with: .opacity)
+                ))
             }
 
             Spacer()
@@ -629,11 +665,13 @@ struct InputBar: View {
     private func resetIntroState() {
         showModelPill = false
         showTokenPill = false
+        showReasoningPill = false
         showMicButton = false
     }
 
     private func playIntroSequence() {
         introTask?.cancel()
+        reasoningPillTask?.cancel()
         resetIntroState()
 
         introTask = Task { @MainActor in
@@ -641,6 +679,15 @@ struct InputBar: View {
             guard !Task.isCancelled else { return }
             withAnimation(modelPillAnimation) {
                 showModelPill = true
+            }
+
+            // Show reasoning pill after model pill if current model supports it
+            if currentModelInfo?.supportsReasoning == true {
+                try? await Task.sleep(nanoseconds: 150_000_000) // 150ms delay
+                guard !Task.isCancelled else { return }
+                withAnimation(reasoningPillAnimation) {
+                    showReasoningPill = true
+                }
             }
 
             try? await Task.sleep(nanoseconds: 60_000_000)
@@ -654,6 +701,43 @@ struct InputBar: View {
             withAnimation(micButtonAnimation) {
                 showMicButton = true
             }
+        }
+    }
+
+    /// Animation for reasoning pill morph
+    private var reasoningPillAnimation: Animation {
+        .spring(response: 0.4, dampingFraction: 0.8)
+    }
+
+    /// Trigger reasoning pill animation when switching to a model that supports reasoning
+    func triggerReasoningPillAnimation() {
+        reasoningPillTask?.cancel()
+        reasoningPillTask = Task { @MainActor in
+            // Hide first if already showing
+            if showReasoningPill {
+                withAnimation(reasoningPillAnimation) {
+                    showReasoningPill = false
+                }
+                try? await Task.sleep(nanoseconds: 100_000_000)
+            }
+
+            // Wait a beat then show
+            try? await Task.sleep(nanoseconds: 250_000_000) // 250ms delay after model change
+            guard !Task.isCancelled else { return }
+
+            if currentModelInfo?.supportsReasoning == true {
+                withAnimation(reasoningPillAnimation) {
+                    showReasoningPill = true
+                }
+            }
+        }
+    }
+
+    /// Hide reasoning pill when switching away from a reasoning model
+    func hideReasoningPill() {
+        reasoningPillTask?.cancel()
+        withAnimation(reasoningPillAnimation) {
+            showReasoningPill = false
         }
     }
 }
