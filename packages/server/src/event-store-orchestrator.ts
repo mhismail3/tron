@@ -1716,10 +1716,13 @@ export class EventStoreOrchestrator extends EventEmitter {
 
         // Store per-turn token usage for use in message.assistant
         // This is the ACTUAL per-turn value from the LLM, not cumulative
+        // Includes cache token breakdown for accurate cost calculation
         if (active && event.tokenUsage) {
           active.lastTurnTokenUsage = {
             inputTokens: event.tokenUsage.inputTokens,
             outputTokens: event.tokenUsage.outputTokens,
+            cacheReadTokens: event.tokenUsage.cacheReadTokens,
+            cacheCreationTokens: event.tokenUsage.cacheCreationTokens,
           };
         }
 

@@ -143,8 +143,14 @@ export interface ActiveSession {
    * Token usage from the most recent turn_end event.
    * Contains PER-TURN values (not cumulative) directly from the LLM response.
    * Used to populate message.assistant.tokenUsage with accurate per-message tokens.
+   * Includes cache token breakdown for accurate cost calculation.
    */
-  lastTurnTokenUsage?: { inputTokens: number; outputTokens: number };
+  lastTurnTokenUsage?: {
+    inputTokens: number;
+    outputTokens: number;
+    cacheReadTokens?: number;
+    cacheCreationTokens?: number;
+  };
 }
 
 // =============================================================================

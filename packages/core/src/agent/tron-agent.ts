@@ -690,6 +690,9 @@ export class TronAgent {
         tokenUsage: assistantMessage.usage ? {
           inputTokens: assistantMessage.usage.inputTokens,
           outputTokens: assistantMessage.usage.outputTokens,
+          // Include cache token data for accurate cost calculation
+          cacheReadTokens: assistantMessage.usage.cacheReadTokens,
+          cacheCreationTokens: assistantMessage.usage.cacheCreationTokens,
         } : undefined,
       });
 

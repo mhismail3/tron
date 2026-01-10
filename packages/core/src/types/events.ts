@@ -183,10 +183,14 @@ export interface TurnEndEvent extends BaseTronEvent {
   turn: number;
   /** Duration in milliseconds */
   duration: number;
-  /** Token usage for this turn */
+  /** Token usage for this turn (per-turn values from LLM response) */
   tokenUsage?: {
     inputTokens: number;
     outputTokens: number;
+    /** Tokens read from prompt cache (billed at discounted rate) */
+    cacheReadTokens?: number;
+    /** Tokens written to prompt cache (billed at premium rate) */
+    cacheCreationTokens?: number;
   };
 }
 
