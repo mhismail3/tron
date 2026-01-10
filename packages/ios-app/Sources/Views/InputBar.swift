@@ -23,6 +23,7 @@ struct InputBar: View {
     var tokenUsage: TokenUsage?
     var contextPercentage: Int = 0
     var contextWindow: Int = 0  // From server via ChatViewModel.currentContextWindow
+    var lastTurnInputTokens: Int = 0  // Actual current context size for accurate "X left" display
 
     // Model picker integration
     var cachedModels: [ModelInfo] = []
@@ -208,8 +209,9 @@ struct InputBar: View {
     }
 
     private var tokensRemaining: Int {
-        let used = (tokenUsage?.inputTokens ?? 0) + (tokenUsage?.outputTokens ?? 0)
-        return max(0, contextWindow - used)
+        // Use last turn's input tokens as actual context size
+        // (input tokens already includes system prompt + history, so it's the full context)
+        return max(0, contextWindow - lastTurnInputTokens)
     }
 
     private var formattedTokensRemaining: String {
@@ -798,6 +800,7 @@ struct AttachedImageThumbnail: View {
             tokenUsage: TokenUsage(inputTokens: 50000, outputTokens: 10000, cacheReadTokens: nil, cacheCreationTokens: nil),
             contextPercentage: 30,
             contextWindow: 200_000,
+            lastTurnInputTokens: 60000,
             cachedModels: [],
             isLoadingModels: false,
             onModelSelect: nil,

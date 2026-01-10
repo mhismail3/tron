@@ -106,6 +106,7 @@ struct ChatView: View {
                         tokenUsage: viewModel.totalTokenUsage,
                         contextPercentage: viewModel.contextPercentage,
                         contextWindow: viewModel.currentContextWindow,
+                        lastTurnInputTokens: viewModel.lastTurnInputTokens,
                         cachedModels: cachedModels,
                         isLoadingModels: isLoadingModels,
                         onModelSelect: { model in

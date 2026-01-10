@@ -43,6 +43,8 @@ class ChatViewModel: ObservableObject {
     var currentToolMessages: [UUID: ChatMessage] = [:]
     var accumulatedInputTokens = 0
     var accumulatedOutputTokens = 0
+    /// Last turn's input tokens (represents actual current context size)
+    var lastTurnInputTokens = 0
 
     /// Track tool calls for the current turn (for display purposes)
     var currentTurnToolCalls: [ToolCallRecord] = []
@@ -241,14 +243,14 @@ class ChatViewModel: ObservableObject {
         rpcClient.hasActiveSession
     }
 
-    /// Estimated context usage percentage based on total tokens and model context window
+    /// Estimated context usage percentage based on last turn's input tokens
+    /// (which represents the actual current context size sent to the LLM)
     var contextPercentage: Int {
-        guard let usage = totalTokenUsage else { return 0 }
         guard currentContextWindow > 0 else { return 0 }
+        guard lastTurnInputTokens > 0 else { return 0 }
 
-        // Total tokens used (input + output counts toward context)
-        let totalUsed = usage.inputTokens + usage.outputTokens
-        let percentage = Double(totalUsed) / Double(currentContextWindow) * 100
+        // Last turn's input tokens = actual context size (system + history + message)
+        let percentage = Double(lastTurnInputTokens) / Double(currentContextWindow) * 100
 
         return min(100, Int(percentage.rounded()))
     }

@@ -25,6 +25,7 @@ struct MessageBubble: View {
             if !isUserMessage && hasMetadata {
                 MessageMetadataBadge(
                     usage: message.tokenUsage,
+                    incrementalUsage: message.incrementalTokens,
                     model: message.shortModelName,
                     latency: message.formattedLatency,
                     hasThinking: message.hasThinking
@@ -946,13 +947,20 @@ struct TokenBadge: View {
 /// Token usage, model name, latency, and thinking indicator
 struct MessageMetadataBadge: View {
     let usage: TokenUsage?
+    /// Incremental tokens (delta from previous turn) for display - preferred over raw usage
+    let incrementalUsage: TokenUsage?
     let model: String?
     let latency: String?
     let hasThinking: Bool?
 
+    /// The token usage to display - prefer incremental if available
+    private var displayUsage: TokenUsage? {
+        incrementalUsage ?? usage
+    }
+
     /// Check if we need a separator before additional metadata
     private var needsSeparator: Bool {
-        usage != nil && (model != nil || latency != nil || hasThinking == true)
+        displayUsage != nil && (model != nil || latency != nil || hasThinking == true)
     }
 
     /// Check if we need a separator between model and latency
@@ -962,8 +970,8 @@ struct MessageMetadataBadge: View {
 
     var body: some View {
         HStack(spacing: 8) {
-            // Token usage (existing format)
-            if let usage = usage {
+            // Token usage - show incremental if available, otherwise full
+            if let usage = displayUsage {
                 TokenBadge(usage: usage)
             }
 

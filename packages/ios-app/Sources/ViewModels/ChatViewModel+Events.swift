@@ -129,10 +129,27 @@ extension ChatViewModel {
             messages[index].latencyMs = event.data?.duration
             messages[index].stopReason = event.stopReason
             messages[index].turnNumber = event.turnNumber
+
+            // Compute incremental tokens (delta from previous turn) for display
+            if let usage = event.tokenUsage {
+                let previousInputTokens = findPreviousAssistantInputTokens(beforeIndex: index)
+                let incrementalInput = max(0, usage.inputTokens - previousInputTokens)
+                messages[index].incrementalTokens = TokenUsage(
+                    inputTokens: incrementalInput,
+                    outputTokens: usage.outputTokens,
+                    cacheReadTokens: usage.cacheReadTokens,
+                    cacheCreationTokens: usage.cacheCreationTokens
+                )
+                logger.debug("Incremental tokens: in=\(incrementalInput) (prev=\(previousInputTokens))", category: .events)
+            }
         }
 
-        // Accumulate token usage
+        // Accumulate token usage and update context tracking
         if let usage = event.tokenUsage {
+            // Store last turn's input tokens for context bar calculation
+            // This represents the actual current context size sent to the LLM
+            lastTurnInputTokens = usage.inputTokens
+
             accumulatedInputTokens += usage.inputTokens
             accumulatedOutputTokens += usage.outputTokens
             totalTokenUsage = TokenUsage(
@@ -141,7 +158,7 @@ extension ChatViewModel {
                 cacheReadTokens: nil,
                 cacheCreationTokens: nil
             )
-            logger.debug("Total tokens: in=\(accumulatedInputTokens) out=\(accumulatedOutputTokens)", category: .events)
+            logger.debug("Total tokens: in=\(accumulatedInputTokens) out=\(accumulatedOutputTokens), context=\(lastTurnInputTokens)", category: .events)
 
             // Update CachedSession with accumulated tokens so dashboard shows correct values
             if let manager = eventStoreManager {
@@ -156,6 +173,17 @@ extension ChatViewModel {
                 }
             }
         }
+    }
+
+    /// Find the previous assistant message's input tokens for computing incremental delta
+    private func findPreviousAssistantInputTokens(beforeIndex: Int) -> Int {
+        for i in stride(from: beforeIndex - 1, through: 0, by: -1) {
+            let msg = messages[i]
+            if msg.role == .assistant, let usage = msg.tokenUsage {
+                return usage.inputTokens
+            }
+        }
+        return 0  // First assistant message, no previous
     }
 
     func handleAgentTurn(_ event: AgentTurnEvent) {

@@ -50,6 +50,8 @@ struct ChatMessage: Identifiable, Equatable {
     let timestamp: Date
     var isStreaming: Bool
     var tokenUsage: TokenUsage?
+    /// Incremental token usage (delta from previous turn) for display purposes
+    var incrementalTokens: TokenUsage?
 
     // MARK: - Enriched Metadata (Phase 1)
     // These fields come from server-side event store enhancements
@@ -76,6 +78,7 @@ struct ChatMessage: Identifiable, Equatable {
         timestamp: Date = Date(),
         isStreaming: Bool = false,
         tokenUsage: TokenUsage? = nil,
+        incrementalTokens: TokenUsage? = nil,
         model: String? = nil,
         latencyMs: Int? = nil,
         turnNumber: Int? = nil,
@@ -88,6 +91,7 @@ struct ChatMessage: Identifiable, Equatable {
         self.timestamp = timestamp
         self.isStreaming = isStreaming
         self.tokenUsage = tokenUsage
+        self.incrementalTokens = incrementalTokens
         self.model = model
         self.latencyMs = latencyMs
         self.turnNumber = turnNumber
