@@ -619,6 +619,19 @@ class RPCClient: ObservableObject {
         )
     }
 
+    /// Clear all messages from context, preserving system prompt and tools
+    func clearContext(sessionId: String) async throws -> ContextClearResult {
+        guard let ws = webSocket else {
+            throw RPCClientError.connectionNotEstablished
+        }
+
+        let params = ContextClearParams(sessionId: sessionId)
+        return try await ws.send(
+            method: "context.clear",
+            params: params
+        )
+    }
+
     // MARK: - Event Sync Methods
 
     /// Get event history for a session

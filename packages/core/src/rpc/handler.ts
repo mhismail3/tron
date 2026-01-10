@@ -72,6 +72,8 @@ import type {
   ContextConfirmCompactionResult,
   ContextCanAcceptTurnParams,
   ContextCanAcceptTurnResult,
+  ContextClearParams,
+  ContextClearResult,
   VoiceNotesSaveParams,
   VoiceNotesSaveResult,
   VoiceNotesListParams,
@@ -142,6 +144,7 @@ export interface ContextRpcManager {
   previewCompaction(sessionId: string): Promise<ContextPreviewCompactionResult>;
   confirmCompaction(sessionId: string, opts?: { editedSummary?: string }): Promise<ContextConfirmCompactionResult>;
   canAcceptTurn(sessionId: string, opts: { estimatedResponseTokens: number }): ContextCanAcceptTurnResult;
+  clearContext(sessionId: string): Promise<ContextClearResult>;
 }
 
 // EventStore manager interface (implemented by EventStoreOrchestrator)
@@ -402,6 +405,8 @@ export class RpcHandler extends EventEmitter {
           return this.handleContextConfirmCompaction(request);
         case 'context.canAcceptTurn':
           return this.handleContextCanAcceptTurn(request);
+        case 'context.clear':
+          return this.handleContextClear(request);
 
         // Voice Notes methods
         case 'voiceNotes.save':
@@ -1382,6 +1387,28 @@ export class RpcHandler extends EventEmitter {
         params.sessionId,
         { estimatedResponseTokens: params.estimatedResponseTokens }
       );
+      return this.successResponse(request.id, result);
+    } catch (error) {
+      if (error instanceof Error && error.message.includes('not active')) {
+        return this.errorResponse(request.id, 'SESSION_NOT_ACTIVE', 'Session is not active');
+      }
+      throw error;
+    }
+  }
+
+  private async handleContextClear(request: RpcRequest): Promise<RpcResponse> {
+    if (!this.context.contextManager) {
+      return this.errorResponse(request.id, 'NOT_SUPPORTED', 'Context manager not available');
+    }
+
+    const params = request.params as ContextClearParams | undefined;
+
+    if (!params?.sessionId) {
+      return this.errorResponse(request.id, 'INVALID_PARAMS', 'sessionId is required');
+    }
+
+    try {
+      const result = await this.context.contextManager.clearContext(params.sessionId);
       return this.successResponse(request.id, result);
     } catch (error) {
       if (error instanceof Error && error.message.includes('not active')) {

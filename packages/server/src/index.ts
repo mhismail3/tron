@@ -412,6 +412,9 @@ function createContextManager(orchestrator: EventStoreOrchestrator): ContextRpcM
     canAcceptTurn(sessionId, opts) {
       return orchestrator.canAcceptTurn(sessionId, opts);
     },
+    async clearContext(sessionId) {
+      return orchestrator.clearContext(sessionId);
+    },
   };
 }
 

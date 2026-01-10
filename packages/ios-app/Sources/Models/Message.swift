@@ -162,6 +162,8 @@ enum MessageContent: Equatable {
     case transcriptionNoSpeech
     /// In-chat notification for context compaction
     case compaction(tokensBefore: Int, tokensAfter: Int, reason: String)
+    /// In-chat notification for context clearing
+    case contextCleared(tokensBefore: Int, tokensAfter: Int)
 
     var textContent: String {
         switch self {
@@ -188,6 +190,9 @@ enum MessageContent: Equatable {
         case .compaction(let before, let after, _):
             let saved = before - after
             return "Context compacted: \(formatTokens(saved)) tokens saved"
+        case .contextCleared(let before, let after):
+            let freed = before - after
+            return "Context cleared: \(formatTokens(freed)) tokens freed"
         }
     }
 
@@ -209,7 +214,7 @@ enum MessageContent: Equatable {
 
     var isNotification: Bool {
         switch self {
-        case .modelChange, .interrupted, .transcriptionFailed, .transcriptionNoSpeech, .compaction:
+        case .modelChange, .interrupted, .transcriptionFailed, .transcriptionNoSpeech, .compaction, .contextCleared:
             return true
         default:
             return false
@@ -362,5 +367,10 @@ extension ChatMessage {
     /// In-chat notification for context compaction
     static func compaction(tokensBefore: Int, tokensAfter: Int, reason: String) -> ChatMessage {
         ChatMessage(role: .system, content: .compaction(tokensBefore: tokensBefore, tokensAfter: tokensAfter, reason: reason))
+    }
+
+    /// In-chat notification for context clearing
+    static func contextCleared(tokensBefore: Int, tokensAfter: Int) -> ChatMessage {
+        ChatMessage(role: .system, content: .contextCleared(tokensBefore: tokensBefore, tokensAfter: tokensAfter))
     }
 }

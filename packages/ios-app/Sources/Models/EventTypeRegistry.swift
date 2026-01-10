@@ -42,6 +42,9 @@ enum PersistedEventType: String, CaseIterable {
     case compactBoundary = "compact.boundary"
     case compactSummary = "compact.summary"
 
+    // Context clearing
+    case contextCleared = "context.cleared"
+
     // Metadata
     case metadataUpdate = "metadata.update"
     case metadataTag = "metadata.tag"
@@ -70,6 +73,7 @@ enum PersistedEventType: String, CaseIterable {
         case .messageUser, .messageAssistant, .messageSystem,
              .toolCall, .toolResult,
              .notificationInterrupted, .configModelSwitch,
+             .contextCleared,
              .errorAgent, .errorTool, .errorProvider:
             return true
         default:
@@ -139,6 +143,7 @@ enum PersistedEventType: String, CaseIterable {
         case .notificationInterrupted: return "Session interrupted"
         case .compactBoundary: return "Compact boundary"
         case .compactSummary: return "Compact summary"
+        case .contextCleared: return "Context cleared"
         case .metadataUpdate: return "Metadata updated"
         case .metadataTag: return "Tag updated"
         case .fileRead: return "File read"

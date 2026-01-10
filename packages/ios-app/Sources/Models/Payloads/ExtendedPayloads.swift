@@ -142,6 +142,22 @@ struct CompactSummaryPayload {
     }
 }
 
+/// Payload for context.cleared event
+/// Server: ContextClearedEvent.payload
+struct ContextClearedPayload {
+    let tokensBefore: Int
+    let tokensAfter: Int
+
+    init?(from payload: [String: AnyCodable]) {
+        guard let tokensBefore = payload.int("tokensBefore"),
+              let tokensAfter = payload.int("tokensAfter") else {
+            return nil
+        }
+        self.tokensBefore = tokensBefore
+        self.tokensAfter = tokensAfter
+    }
+}
+
 // MARK: - Context Snapshot Payloads
 
 /// Parameters for context.getSnapshot RPC method
@@ -162,6 +178,18 @@ struct ContextSnapshotResult: Codable {
         let tools: Int
         let messages: Int
     }
+}
+
+/// Parameters for context.clear RPC method
+struct ContextClearParams: Codable {
+    let sessionId: String
+}
+
+/// Result from context.clear RPC method
+struct ContextClearResult: Codable {
+    let success: Bool
+    let tokensBefore: Int
+    let tokensAfter: Int
 }
 
 /// Detailed message info for context auditing

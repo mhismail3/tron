@@ -78,6 +78,9 @@ struct MessageBubble: View {
 
         case .compaction(let tokensBefore, let tokensAfter, let reason):
             CompactionNotificationView(tokensBefore: tokensBefore, tokensAfter: tokensAfter, reason: reason)
+
+        case .contextCleared(let tokensBefore, let tokensAfter):
+            ContextClearedNotificationView(tokensBefore: tokensBefore, tokensAfter: tokensAfter)
         }
     }
 }
@@ -262,6 +265,53 @@ struct CompactionNotificationView: View {
         .overlay(
             Capsule()
                 .stroke(Color.cyan.opacity(0.3), lineWidth: 0.5)
+        )
+        .frame(maxWidth: .infinity, alignment: .center)
+    }
+}
+
+// MARK: - Context Cleared Notification View (Teal pill-style in-chat notification)
+
+struct ContextClearedNotificationView: View {
+    let tokensBefore: Int
+    let tokensAfter: Int
+
+    private var tokensFreed: Int {
+        tokensBefore - tokensAfter
+    }
+
+    private var formattedFreed: String {
+        if tokensFreed >= 1000 {
+            return String(format: "%.1fk", Double(tokensFreed) / 1000.0)
+        }
+        return "\(tokensFreed)"
+    }
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "xmark.circle.fill")
+                .font(.system(size: 10, weight: .medium))
+                .foregroundStyle(.teal)
+
+            Text("Context cleared")
+                .font(.system(size: 11, weight: .medium, design: .monospaced))
+                .foregroundStyle(.teal.opacity(0.9))
+
+            Text("•")
+                .font(.system(size: 8))
+                .foregroundStyle(.teal.opacity(0.5))
+
+            Text("\(formattedFreed) tokens freed")
+                .font(.system(size: 11, design: .monospaced))
+                .foregroundStyle(.teal.opacity(0.7))
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(Color.teal.opacity(0.1))
+        .clipShape(Capsule())
+        .overlay(
+            Capsule()
+                .stroke(Color.teal.opacity(0.3), lineWidth: 0.5)
         )
         .frame(maxWidth: .infinity, alignment: .center)
     }

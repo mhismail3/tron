@@ -63,6 +63,8 @@ export type EventType =
   // Compaction/summarization
   | 'compact.boundary'
   | 'compact.summary'
+  // Context clearing
+  | 'context.cleared'
   // Metadata
   | 'metadata.update'
   | 'metadata.tag'
@@ -387,6 +389,26 @@ export interface CompactSummaryEvent extends BaseEvent {
 }
 
 // =============================================================================
+// Context Clearing Events
+// =============================================================================
+
+/**
+ * Context cleared event - marks where context was cleared
+ * Unlike compaction, no summary is preserved - all messages before this point are discarded
+ */
+export interface ContextClearedEvent extends BaseEvent {
+  type: 'context.cleared';
+  payload: {
+    /** Token count before clearing */
+    tokensBefore: number;
+    /** Token count after clearing (system prompt + tools only) */
+    tokensAfter: number;
+    /** Reason for clearing */
+    reason: 'manual';
+  };
+}
+
+// =============================================================================
 // Metadata Events
 // =============================================================================
 
@@ -603,6 +625,8 @@ export type SessionEvent =
   // Compaction
   | CompactBoundaryEvent
   | CompactSummaryEvent
+  // Context clearing
+  | ContextClearedEvent
   // Metadata
   | MetadataUpdateEvent
   | MetadataTagEvent
@@ -682,6 +706,10 @@ export function isWorktreeReleasedEvent(event: SessionEvent): event is WorktreeR
 
 export function isWorktreeMergedEvent(event: SessionEvent): event is WorktreeMergedEvent {
   return event.type === 'worktree.merged';
+}
+
+export function isContextClearedEvent(event: SessionEvent): event is ContextClearedEvent {
+  return event.type === 'context.cleared';
 }
 
 // =============================================================================

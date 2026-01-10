@@ -220,6 +220,15 @@ export class ContextManager {
   }
 
   /**
+   * Clear all messages from context.
+   * System prompt and tools are preserved.
+   */
+  clearMessages(): void {
+    this.messages = [];
+    // Token cache will be rebuilt on next add
+  }
+
+  /**
    * Get the system prompt built for the current provider.
    * For most providers, this returns the Tron system prompt.
    * For OpenAI Codex, returns empty string (Tron context is via tool clarification).

@@ -1278,6 +1278,66 @@ export class EventStoreOrchestrator extends EventEmitter {
   }
 
   /**
+   * Clear all messages from context.
+   * Unlike compaction, no summary is preserved - messages are just cleared.
+   * Stores a context.cleared event in EventStore.
+   */
+  async clearContext(sessionId: string): Promise<{
+    success: boolean;
+    tokensBefore: number;
+    tokensAfter: number;
+  }> {
+    const active = this.activeSessions.get(sessionId);
+    if (!active) {
+      throw new Error('Session not active');
+    }
+
+    const cm = active.agent.getContextManager();
+    const tokensBefore = cm.getCurrentTokens();
+
+    // Clear all messages from context manager
+    cm.clearMessages();
+
+    const tokensAfter = cm.getCurrentTokens();
+
+    // Store context.cleared event in EventStore (linearized)
+    await active.appendPromiseChain;
+
+    const parentId = active.pendingHeadEventId ?? undefined;
+    const clearedEvent = await this.eventStore.append({
+      sessionId: sessionId as SessionId,
+      type: 'context.cleared',
+      payload: {
+        tokensBefore,
+        tokensAfter,
+        reason: 'manual',
+      },
+      parentId,
+    });
+    active.pendingHeadEventId = clearedEvent.id;
+
+    logger.info('Context cleared', {
+      sessionId,
+      tokensBefore,
+      tokensAfter,
+      tokensFreed: tokensBefore - tokensAfter,
+    });
+
+    // Emit context_cleared event for WebSocket broadcast
+    this.emit('context_cleared', {
+      sessionId,
+      tokensBefore,
+      tokensAfter,
+    });
+
+    return {
+      success: true,
+      tokensBefore,
+      tokensAfter,
+    };
+  }
+
+  /**
    * Get a summarizer instance for compaction operations.
    */
   private getSummarizer(): Summarizer {

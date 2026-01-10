@@ -12,6 +12,8 @@ struct ContextAuditView: View {
     @State private var errorMessage: String?
     @State private var detailedSnapshot: DetailedContextSnapshotResult?
     @State private var sessionEvents: [SessionEvent] = []
+    @State private var isClearing = false
+    @State private var showClearConfirmation = false
 
     var body: some View {
         NavigationStack {
@@ -45,6 +47,14 @@ struct ContextAuditView: View {
                 Button("OK") { errorMessage = nil }
             } message: {
                 Text(errorMessage ?? "")
+            }
+            .alert("Clear Context", isPresented: $showClearConfirmation) {
+                Button("Cancel", role: .cancel) { }
+                Button("Clear", role: .destructive) {
+                    Task { await clearContext() }
+                }
+            } message: {
+                Text("This will remove all messages from context. System prompt and tools will be preserved. This cannot be undone.")
             }
             .task {
                 await loadContext()
@@ -121,6 +131,15 @@ struct ContextAuditView: View {
                         // Messages breakdown (granular expandable) - using server data
                         DetailedMessagesSection(messages: snapshot.messages)
                             .padding(.horizontal)
+
+                        // Clear Context button
+                        ClearContextButton(
+                            isClearing: isClearing,
+                            hasMessages: !snapshot.messages.isEmpty,
+                            action: { showClearConfirmation = true }
+                        )
+                        .padding(.horizontal)
+                        .padding(.top, 8)
                     }
                     .padding(.vertical)
                 }
@@ -155,6 +174,20 @@ struct ContextAuditView: View {
         }
 
         isLoading = false
+    }
+
+    private func clearContext() async {
+        isClearing = true
+
+        do {
+            _ = try await rpcClient.clearContext(sessionId: sessionId)
+            // Reload context to show updated state
+            await loadContext()
+        } catch {
+            errorMessage = "Failed to clear context: \(error.localizedDescription)"
+        }
+
+        isClearing = false
     }
 }
 
@@ -737,6 +770,39 @@ struct DetailedMessageRow: View {
                     .background(Color.tronBorder.opacity(0.15))
             }
         }
+    }
+}
+
+// MARK: - Clear Context Button
+
+struct ClearContextButton: View {
+    let isClearing: Bool
+    let hasMessages: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 8) {
+                if isClearing {
+                    ProgressView()
+                        .tint(.white)
+                        .scaleEffect(0.8)
+                } else {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 14, weight: .medium))
+                }
+
+                Text(isClearing ? "Clearing..." : "Clear Context")
+                    .font(.subheadline.weight(.semibold))
+            }
+            .foregroundStyle(.white)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 12)
+            .background(hasMessages ? Color.red.opacity(0.8) : Color.gray.opacity(0.3))
+            .clipShape(RoundedRectangle(cornerRadius: 10))
+        }
+        .disabled(isClearing || !hasMessages)
+        .opacity(hasMessages ? 1.0 : 0.5)
     }
 }
 

@@ -200,6 +200,8 @@ struct UnifiedEventTransformer {
             return transformToolError(payload, timestamp: ts)
         case .errorProvider:
             return transformProviderError(payload, timestamp: ts)
+        case .contextCleared:
+            return transformContextCleared(payload, timestamp: ts)
         default:
             return nil
         }
@@ -493,6 +495,22 @@ struct UnifiedEventTransformer {
         return ChatMessage(
             role: .assistant,
             content: .error(errorText),
+            timestamp: timestamp
+        )
+    }
+
+    private static func transformContextCleared(
+        _ payload: [String: AnyCodable],
+        timestamp: Date
+    ) -> ChatMessage? {
+        guard let parsed = ContextClearedPayload(from: payload) else { return nil }
+
+        return ChatMessage(
+            role: .system,
+            content: .contextCleared(
+                tokensBefore: parsed.tokensBefore,
+                tokensAfter: parsed.tokensAfter
+            ),
             timestamp: timestamp
         )
     }

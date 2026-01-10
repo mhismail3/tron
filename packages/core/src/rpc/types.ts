@@ -144,6 +144,7 @@ export type RpcMethod =
   | 'context.previewCompaction'
   | 'context.confirmCompaction'
   | 'context.canAcceptTurn'
+  | 'context.clear'
   // Voice Notes
   | 'voiceNotes.save'
   | 'voiceNotes.list'
@@ -1191,6 +1192,17 @@ export interface ContextCanAcceptTurnResult {
   currentTokens: number;
   estimatedAfterTurn: number;
   contextLimit: number;
+}
+
+/** Clear all messages from context */
+export interface ContextClearParams {
+  sessionId: string;
+}
+
+export interface ContextClearResult {
+  success: boolean;
+  tokensBefore: number;
+  tokensAfter: number;
 }
 
 // =============================================================================

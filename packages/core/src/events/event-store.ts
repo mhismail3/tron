@@ -281,6 +281,13 @@ export class EventStore {
         continue;
       }
 
+      // Handle context cleared - discard all messages before this point
+      // Unlike compaction, no summary is preserved - messages just get cleared
+      if (event.type === 'context.cleared') {
+        messages.length = 0;
+        continue;
+      }
+
       if (event.type === 'message.user') {
         const payload = event.payload as { content: Message['content'] };
         messages.push({
@@ -341,6 +348,14 @@ export class EventStore {
             },
           ],
         });
+        continue;
+      }
+
+      // Handle context cleared - discard all messages before this point
+      // Unlike compaction, no summary is preserved - messages just get cleared
+      // Token accounting is preserved for session totals
+      if (evt.type === 'context.cleared') {
+        messages.length = 0;
         continue;
       }
 
