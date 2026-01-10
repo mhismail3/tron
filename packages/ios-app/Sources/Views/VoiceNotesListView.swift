@@ -12,9 +12,6 @@ struct VoiceNotesListView: View {
     @State private var isLoading = true
     @State private var errorMessage: String?
     @State private var selectedNote: VoiceNoteMetadata?
-    @State private var noteToDelete: VoiceNoteMetadata?
-    @State private var showDeleteConfirmation = false
-    @State private var isDeleting = false
 
     var body: some View {
         ZStack(alignment: .bottomTrailing) {
@@ -71,21 +68,6 @@ struct VoiceNotesListView: View {
         .sheet(item: $selectedNote) { note in
             VoiceNoteDetailSheet(note: note)
         }
-        .confirmationDialog(
-            "Delete Voice Note",
-            isPresented: $showDeleteConfirmation,
-            titleVisibility: .visible,
-            presenting: noteToDelete
-        ) { note in
-            Button("Delete", role: .destructive) {
-                Task { await deleteNote(note) }
-            }
-            Button("Cancel", role: .cancel) {
-                noteToDelete = nil
-            }
-        } message: { note in
-            Text("⚠️ This will PERMANENTLY DELETE the note from your machine.\n\n\"\(note.preview.prefix(50))...\"")
-        }
         .task {
             await loadNotes()
         }
@@ -95,19 +77,14 @@ struct VoiceNotesListView: View {
     }
 
     private func deleteNote(_ note: VoiceNoteMetadata) async {
-        isDeleting = true
         do {
             _ = try await rpcClient.deleteVoiceNote(filename: note.filename)
             await MainActor.run {
                 notes.removeAll { $0.filename == note.filename }
-                noteToDelete = nil
-                isDeleting = false
             }
         } catch {
             await MainActor.run {
                 errorMessage = "Failed to delete: \(error.localizedDescription)"
-                noteToDelete = nil
-                isDeleting = false
             }
         }
     }
@@ -123,12 +100,22 @@ struct VoiceNotesListView: View {
                         selectedNote = note
                     }
                     .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                        Button(role: .destructive) {
-                            noteToDelete = note
-                            showDeleteConfirmation = true
+                        Menu {
+                            Section("This will permanently delete the note from your machine.") {
+                                Button(role: .destructive) {
+                                    Task { await deleteNote(note) }
+                                } label: {
+                                    Label("Delete", systemImage: "trash")
+                                }
+                            }
+                            Button(role: .cancel) {
+                            } label: {
+                                Label("Cancel", systemImage: "xmark")
+                            }
                         } label: {
-                            Label("Delete", systemImage: "trash")
+                            Image(systemName: "trash")
                         }
+                        .tint(.red)
                     }
             }
         }
@@ -238,3 +225,4 @@ struct VoiceNoteRow: View {
         )
     }
 }
+

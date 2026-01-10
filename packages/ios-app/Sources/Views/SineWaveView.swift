@@ -7,13 +7,13 @@ struct SineWaveView: View {
     let audioLevel: Float  // 0-1 normalized
     let color: Color
 
-    // Smooth the audio level changes
-    @State private var smoothedLevel: CGFloat = 0
+    // Smooth the audio level changes with spring animation
+    @State private var displayedLevel: CGFloat = 0
 
     private let waveCount = 3  // Number of overlapping waves
 
     var body: some View {
-        TimelineView(.animation(minimumInterval: 1/60)) { timeline in
+        TimelineView(.animation) { timeline in
             let time = timeline.date.timeIntervalSinceReferenceDate
 
             Canvas { context, size in
@@ -25,44 +25,69 @@ struct SineWaveView: View {
                 for waveIndex in 0..<waveCount {
                     let opacity = 1.0 - (Double(waveIndex) * 0.25)
                     let phaseOffset = Double(waveIndex) * .pi / 3
-                    let amplitudeScale = 1.0 - (Double(waveIndex) * 0.2)
+                    let amplitudeScale = 1.0 - (Double(waveIndex) * 0.15)
 
-                    // Use time directly for smooth continuous movement
-                    let phase = time * (1.5 + Double(waveIndex) * 0.3)
+                    // Faster wave speed for fluid motion (4-5x faster than before)
+                    let speed = 6.0 + Double(waveIndex) * 1.2
+                    let phase = time * speed + phaseOffset
 
                     var path = Path()
-                    // Use smoothed level for less jittery amplitude
-                    let baseAmplitude = midY * 0.6 * smoothedLevel * amplitudeScale
-                    let amplitude = max(baseAmplitude, midY * 0.05)  // Minimum visible amplitude
-                    let frequency = 2.0 + Double(waveIndex) * 0.5
+                    let baseAmplitude = midY * 0.6 * displayedLevel * amplitudeScale
+                    let amplitude = max(baseAmplitude, midY * 0.08)  // Slightly higher minimum
+                    let frequency = 2.5 + Double(waveIndex) * 0.4
 
-                    for x in stride(from: 0, through: width, by: 1) {
+                    // Use larger steps with quadratic curves for smoother rendering
+                    let step: CGFloat = 4
+                    var points: [CGPoint] = []
+
+                    for x in stride(from: 0, through: width, by: step) {
                         let normalizedX = x / width
-                        let angle = normalizedX * frequency * 2 * .pi + phase + phaseOffset
+                        let angle = normalizedX * frequency * 2 * .pi + phase
                         let y = midY + sin(angle) * amplitude
+                        points.append(CGPoint(x: x, y: y))
+                    }
 
-                        if x == 0 {
-                            path.move(to: CGPoint(x: x, y: y))
-                        } else {
-                            path.addLine(to: CGPoint(x: x, y: y))
+                    // Ensure we include the final point
+                    if points.last?.x != width {
+                        let angle = frequency * 2 * .pi + phase
+                        let y = midY + sin(angle) * amplitude
+                        points.append(CGPoint(x: width, y: y))
+                    }
+
+                    // Draw smooth curve through points
+                    if let first = points.first {
+                        path.move(to: first)
+
+                        for i in 1..<points.count {
+                            let current = points[i]
+                            let previous = points[i - 1]
+                            let midPoint = CGPoint(
+                                x: (previous.x + current.x) / 2,
+                                y: (previous.y + current.y) / 2
+                            )
+                            path.addQuadCurve(to: midPoint, control: previous)
+                        }
+
+                        if let last = points.last {
+                            path.addLine(to: last)
                         }
                     }
 
-                    // Calculate edge fade for stroke opacity
                     context.stroke(
                         path,
                         with: .color(color.opacity(opacity)),
-                        lineWidth: 2 - CGFloat(waveIndex) * 0.3
+                        style: StrokeStyle(lineWidth: 2.2 - CGFloat(waveIndex) * 0.4, lineCap: .round, lineJoin: .round)
                     )
                 }
             }
+            .drawingGroup() // Rasterize to Metal for better performance
             // Apply gradient mask for edge fade
             .mask {
                 LinearGradient(
                     stops: [
                         .init(color: .clear, location: 0),
-                        .init(color: .white, location: 0.15),
-                        .init(color: .white, location: 0.85),
+                        .init(color: .white, location: 0.12),
+                        .init(color: .white, location: 0.88),
                         .init(color: .clear, location: 1)
                     ],
                     startPoint: .leading,
@@ -71,13 +96,13 @@ struct SineWaveView: View {
             }
         }
         .onChange(of: audioLevel) { _, newValue in
-            // Smooth audio level changes with animation
-            withAnimation(.easeOut(duration: 0.1)) {
-                smoothedLevel = CGFloat(newValue)
+            // Use spring animation for natural, bouncy response
+            withAnimation(.interpolatingSpring(stiffness: 300, damping: 20)) {
+                displayedLevel = CGFloat(newValue)
             }
         }
         .onAppear {
-            smoothedLevel = CGFloat(audioLevel)
+            displayedLevel = CGFloat(audioLevel)
         }
     }
 }
