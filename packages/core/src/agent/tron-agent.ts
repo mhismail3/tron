@@ -28,6 +28,7 @@ import {
   detectProviderFromModel,
   type Provider,
   type ProviderType,
+  type UnifiedAuth,
 } from '../providers/index.js';
 import { HookEngine } from '../hooks/engine.js';
 import { ContextManager, createContextManager } from '../context/context-manager.js';
@@ -202,8 +203,11 @@ export class TronAgent {
 
   /**
    * Switch to a different model (preserves session context)
+   * @param model - The model ID to switch to
+   * @param providerType - Optional explicit provider type (auto-detected if not provided)
+   * @param auth - Optional new auth credentials (required when switching between providers)
    */
-  switchModel(model: string, providerType?: ProviderType): void {
+  switchModel(model: string, providerType?: ProviderType, auth?: UnifiedAuth): void {
     if (this.isRunning) {
       throw new Error('Cannot switch model while agent is running');
     }
@@ -213,15 +217,17 @@ export class TronAgent {
       previousModel: this.config.provider.model,
       newModel: model,
       messageCountPreserved: this.contextManager.getMessages().length,
+      authProvided: !!auth,
     });
 
     const newProviderType = providerType ?? detectProviderFromModel(model);
+    const effectiveAuth = auth ?? this.config.provider.auth;
 
-    // Create new provider
+    // Create new provider with appropriate auth
     this.provider = createProvider({
       type: newProviderType,
       model,
-      auth: this.config.provider.auth,
+      auth: effectiveAuth,
       maxTokens: this.config.maxTokens,
       temperature: this.config.temperature,
       baseURL: this.config.provider.baseURL,
@@ -238,9 +244,12 @@ export class TronAgent {
       provider: newProviderType,
     });
 
-    // Update config
+    // Update config (including auth if new auth was provided)
     this.config.provider.model = model;
     this.config.provider.type = newProviderType;
+    if (auth) {
+      this.config.provider.auth = auth;
+    }
 
     // Update ContextManager with new model
     this.contextManager.switchModel(model);

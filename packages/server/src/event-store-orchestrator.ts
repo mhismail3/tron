@@ -1235,11 +1235,40 @@ export class EventStoreOrchestrator extends EventEmitter {
 
     // Update active session if exists
     if (active) {
+      // Detect new provider type and load appropriate auth
+      const newProviderType = detectProviderFromModel(model);
+      let newAuth: ServerAuth;
+
+      if (newProviderType === 'openai-codex') {
+        // Load Codex-specific OAuth tokens
+        const codexTokens = this.loadCodexTokens();
+        if (!codexTokens) {
+          throw new Error('OpenAI Codex not authenticated. Sign in via the iOS app or use a different model.');
+        }
+        newAuth = {
+          type: 'oauth',
+          accessToken: codexTokens.accessToken,
+          refreshToken: codexTokens.refreshToken,
+          expiresAt: codexTokens.expiresAt,
+        };
+        logger.debug('[MODEL_SWITCH] Using Codex OAuth tokens', { sessionId });
+      } else {
+        // Use cached auth from ~/.tron/auth.json (supports Claude Max OAuth)
+        if (!this.cachedAuth || (this.cachedAuth.type === 'oauth' && this.cachedAuth.expiresAt < Date.now())) {
+          this.cachedAuth = await loadServerAuth();
+        }
+        if (!this.cachedAuth) {
+          throw new Error('No authentication configured. Run `tron login` to authenticate.');
+        }
+        newAuth = this.cachedAuth;
+        logger.debug('[MODEL_SWITCH] Using cached auth', { sessionId, authType: newAuth.type });
+      }
+
       active.model = model;
       // CRITICAL: Use agent's switchModel() to preserve conversation history
-      // Creating a new agent would lose all messages in this.messages
-      active.agent.switchModel(model);
-      logger.debug('[MODEL_SWITCH] Agent model switched (preserving messages)', { sessionId, model });
+      // Pass the new auth to ensure correct credentials for the new provider
+      active.agent.switchModel(model, undefined, newAuth);
+      logger.debug('[MODEL_SWITCH] Agent model switched (preserving messages)', { sessionId, model, provider: newProviderType });
     }
 
     logger.info('Model switched', { sessionId, previousModel, newModel: model });
