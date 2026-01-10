@@ -52,9 +52,21 @@ struct ModelPickerMenu: View {
             .uniqueByFormattedName().sortedByTier()
     }
 
-    /// OpenAI Codex models (via ChatGPT subscription)
+    /// OpenAI Codex models (via ChatGPT subscription), sorted by version descending
     private var openAICodexModels: [ModelInfo] {
         models.filter { $0.provider.lowercased() == "openai-codex" }
+            .sorted { m1, m2 in
+                // Sort by version descending (5.2 before 5.1)
+                codexVersionPriority(m1) > codexVersionPriority(m2)
+            }
+    }
+
+    private func codexVersionPriority(_ model: ModelInfo) -> Int {
+        let id = model.id.lowercased()
+        if id.contains("5.2") { return 52 }
+        if id.contains("5.1") { return 51 }
+        if id.contains("5.0") || id.contains("-5-") { return 50 }
+        return 0
     }
 
     /// Standard OpenAI API models (gpt-4o, o1, o3, etc.)
@@ -83,11 +95,6 @@ struct ModelPickerMenu: View {
                 Section("Coming Soon") {
                     ForEach(standardOpenAIModels) { model in
                         modelButton(model)
-                    }
-                    if standardOpenAIModels.isEmpty {
-                        comingSoonModel("GPT-4o")
-                        comingSoonModel("o3")
-                        comingSoonModel("o3-mini")
                     }
                     comingSoonModel("Gemini 3 Pro")
                     comingSoonModel("Gemini 3 Flash")
@@ -166,10 +173,17 @@ extension Array where Element == ModelInfo {
         }
     }
 
-    /// Sort by tier priority: Opus > Sonnet > Haiku
+    /// Sort by tier priority: Opus at top, then Sonnet, then Haiku
+    /// Within same tier, sort by version descending (newer versions first)
     func sortedByTier() -> [ModelInfo] {
         sorted { m1, m2 in
-            tierPriority(m1) < tierPriority(m2)
+            let tier1 = tierPriority(m1)
+            let tier2 = tierPriority(m2)
+            if tier1 != tier2 {
+                return tier1 < tier2  // Opus (0) before Sonnet (1) before Haiku (2)
+            }
+            // Same tier: sort by version descending (newer first)
+            return versionPriority(m1) > versionPriority(m2)
         }
     }
 
@@ -179,6 +193,16 @@ extension Array where Element == ModelInfo {
         if id.contains("sonnet") { return 1 }
         if id.contains("haiku") { return 2 }
         return 3
+    }
+
+    private func versionPriority(_ model: ModelInfo) -> Int {
+        let id = model.id.lowercased()
+        if id.contains("4-5") || id.contains("4.5") { return 45 }
+        if id.contains("4-1") || id.contains("4.1") { return 41 }
+        if id.contains("-4-") || id.contains("opus-4") || id.contains("sonnet-4") || id.contains("haiku-4") { return 40 }
+        if id.contains("3-5") || id.contains("3.5") { return 35 }
+        if id.contains("-3-") { return 30 }
+        return 0
     }
 }
 

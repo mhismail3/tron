@@ -44,10 +44,12 @@ enum ModelNameFormatter {
             tier = nil
         }
 
-        // Detect version
+        // Detect version (order matters: check more specific versions first)
         let version: Version?
         if lowered.contains("4-5") || lowered.contains("4.5") {
             version = .v4_5
+        } else if lowered.contains("4-1") || lowered.contains("4.1") {
+            version = .v4_1
         } else if lowered.contains("-4-") || lowered.contains("sonnet-4") ||
                   lowered.contains("opus-4") || lowered.contains("haiku-4") {
             version = .v4
@@ -145,13 +147,14 @@ enum ModelNameFormatter {
     }
 
     private enum Version {
-        case v3, v3_5, v4, v4_5
+        case v3, v3_5, v4, v4_1, v4_5
 
         var displaySuffix: String {
             switch self {
             case .v3: return "3"
             case .v3_5: return "3.5"
             case .v4: return "4"
+            case .v4_1: return "4.1"
             case .v4_5: return "4.5"
             }
         }
@@ -161,6 +164,7 @@ enum ModelNameFormatter {
             case .v3: return "-3"
             case .v3_5: return "-3.5"
             case .v4: return "-4"
+            case .v4_1: return "-4.1"
             case .v4_5: return "-4.5"
             }
         }

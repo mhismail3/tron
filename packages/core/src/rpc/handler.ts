@@ -613,6 +613,8 @@ export class RpcHandler extends EventEmitter {
         contextWindow: m.contextWindow,
         supportsThinking: m.supportsThinking,
         supportsImages: true, // All Claude models support images
+        tier: m.tier,
+        isLegacy: m.legacy ?? false,
       })),
       // OpenAI Codex models
       ...OPENAI_CODEX_MODELS.map((m) => ({
@@ -625,6 +627,8 @@ export class RpcHandler extends EventEmitter {
         supportsReasoning: m.supportsReasoning,
         reasoningLevels: m.reasoningLevels,
         defaultReasoningLevel: m.defaultReasoningLevel,
+        tier: m.tier,
+        isLegacy: false,
       })),
     ];
 

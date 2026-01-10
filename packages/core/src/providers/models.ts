@@ -185,40 +185,6 @@ export const ANTHROPIC_MODELS: ModelInfo[] = [
     description: 'Fast and capable for everyday coding tasks.',
     legacy: true,
   },
-
-  // Claude 3.7 (Legacy - February 2025)
-  {
-    id: 'claude-3-7-sonnet-20250219',
-    name: 'Claude 3.7 Sonnet',
-    shortName: '3.7 Sonnet',
-    family: 'Claude 3.7',
-    tier: 'sonnet',
-    contextWindow: 200000,
-    maxOutput: 64000,
-    supportsThinking: true,
-    releaseDate: '2025-02-19',
-    inputCostPerMillion: 3,
-    outputCostPerMillion: 15,
-    description: 'First model with extended thinking support.',
-    legacy: true,
-  },
-
-  // Claude 3 Haiku (Legacy - oldest still available)
-  {
-    id: 'claude-3-haiku-20240307',
-    name: 'Claude 3 Haiku',
-    shortName: '3 Haiku',
-    family: 'Claude 3',
-    tier: 'haiku',
-    contextWindow: 200000,
-    maxOutput: 4000,
-    supportsThinking: false,
-    releaseDate: '2024-03-07',
-    inputCostPerMillion: 0.25,
-    outputCostPerMillion: 1.25,
-    description: 'Legacy fast model. Consider upgrading to Haiku 4.5.',
-    legacy: true,
-  },
 ];
 
 // =============================================================================
@@ -258,23 +224,6 @@ export const OPENAI_CODEX_MODELS: OpenAICodexModelInfo[] = [
     inputCostPerMillion: 0,
     outputCostPerMillion: 0,
     description: 'GPT-5.1 Codex Max - deep reasoning capabilities',
-    recommended: false,
-  },
-  {
-    id: 'gpt-5.1-codex-mini',
-    name: 'OpenAI GPT-5.1 Codex Mini',
-    shortName: 'GPT-5.1 Codex Mini',
-    family: 'GPT-5.1',
-    tier: 'standard',
-    contextWindow: 192000,
-    maxOutput: 16384,
-    supportsTools: true,
-    supportsReasoning: true,
-    reasoningLevels: ['low', 'medium', 'high'],
-    defaultReasoningLevel: 'low',
-    inputCostPerMillion: 0,
-    outputCostPerMillion: 0,
-    description: 'GPT-5.1 Codex Mini - faster and more efficient',
     recommended: false,
   },
 ];

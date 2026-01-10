@@ -270,11 +270,6 @@ struct ChatView: View {
 
     private var commandsMenu: some View {
         Menu {
-            // Model info (read-only, selection is via InputBar popup)
-            Section {
-                Label(displayModelName.shortModelName, systemImage: "cpu")
-            }
-
             // Session section
             Section("Session") {
                 Button {
@@ -293,12 +288,6 @@ struct ChatView: View {
                     showContextAudit = true
                 } label: {
                     Label("Context Manager", systemImage: "brain")
-                }
-
-                Button {
-                    viewModel.clearMessages()
-                } label: {
-                    Label("Clear Messages", systemImage: "trash")
                 }
             }
 

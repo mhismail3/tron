@@ -372,6 +372,10 @@ export interface ModelListResult {
     contextWindow: number;
     supportsThinking: boolean;
     supportsImages: boolean;
+    /** Model tier: opus, sonnet, haiku, flagship, mini, standard */
+    tier?: string;
+    /** Whether this is a legacy/deprecated model */
+    isLegacy?: boolean;
     /** For models with reasoning capability (e.g., OpenAI Codex) */
     supportsReasoning?: boolean;
     /** Available reasoning effort levels (low, medium, high, xhigh) */
