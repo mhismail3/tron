@@ -43,6 +43,8 @@ class ChatViewModel: ObservableObject {
     var currentToolMessages: [UUID: ChatMessage] = [:]
     var accumulatedInputTokens = 0
     var accumulatedOutputTokens = 0
+    var accumulatedCacheReadTokens = 0
+    var accumulatedCacheCreationTokens = 0
     /// Last turn's input tokens (represents actual current context size)
     var lastTurnInputTokens = 0
 

@@ -755,19 +755,23 @@ export class SQLiteBackend {
     // Extract token usage
     let inputTokens: number | null = null;
     let outputTokens: number | null = null;
+    let cacheReadTokens: number | null = null;
+    let cacheCreationTokens: number | null = null;
     if ('payload' in event && (event.payload as any).tokenUsage) {
       const usage = (event.payload as any).tokenUsage as TokenUsage;
       inputTokens = usage.inputTokens;
       outputTokens = usage.outputTokens;
+      cacheReadTokens = usage.cacheReadTokens ?? null;
+      cacheCreationTokens = usage.cacheCreationTokens ?? null;
     }
 
     db.prepare(`
       INSERT INTO events (
         id, session_id, parent_id, sequence, depth, type, timestamp, payload,
         content_blob_id, workspace_id, role, tool_name, tool_call_id, turn,
-        input_tokens, output_tokens, checksum
+        input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens, checksum
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       event.id,
       event.sessionId,
@@ -785,6 +789,8 @@ export class SQLiteBackend {
       turn,
       inputTokens,
       outputTokens,
+      cacheReadTokens,
+      cacheCreationTokens,
       event.checksum ?? null,
     );
   }

@@ -104,14 +104,17 @@ extension ChatViewModel {
 
             // Get token totals from cached session (server source of truth)
             // instead of reconstructed state (local calculation that may double-count)
+            // Cache tokens come from reconstructed state since session doesn't store them
             if let session = try? manager.eventDB.getSession(sessionId) {
                 accumulatedInputTokens = session.inputTokens
                 accumulatedOutputTokens = session.outputTokens
+                accumulatedCacheReadTokens = state.totalTokenUsage.cacheReadTokens ?? 0
+                accumulatedCacheCreationTokens = state.totalTokenUsage.cacheCreationTokens ?? 0
                 totalTokenUsage = TokenUsage(
                     inputTokens: session.inputTokens,
                     outputTokens: session.outputTokens,
-                    cacheReadTokens: nil,
-                    cacheCreationTokens: nil
+                    cacheReadTokens: state.totalTokenUsage.cacheReadTokens,
+                    cacheCreationTokens: state.totalTokenUsage.cacheCreationTokens
                 )
             } else {
                 // Fallback to reconstructed state if session not found
@@ -119,6 +122,8 @@ extension ChatViewModel {
                 if usage.inputTokens > 0 || usage.outputTokens > 0 {
                     accumulatedInputTokens = usage.inputTokens
                     accumulatedOutputTokens = usage.outputTokens
+                    accumulatedCacheReadTokens = usage.cacheReadTokens ?? 0
+                    accumulatedCacheCreationTokens = usage.cacheCreationTokens ?? 0
                     totalTokenUsage = usage
                 }
             }
@@ -171,14 +176,17 @@ extension ChatViewModel {
             restoreTokenStateFromMessages()
 
             // Get token totals from cached session (server source of truth)
+            // Cache tokens come from reconstructed state since session doesn't store them
             if let session = try? manager.eventDB.getSession(sessionId) {
                 accumulatedInputTokens = session.inputTokens
                 accumulatedOutputTokens = session.outputTokens
+                accumulatedCacheReadTokens = state.totalTokenUsage.cacheReadTokens ?? 0
+                accumulatedCacheCreationTokens = state.totalTokenUsage.cacheCreationTokens ?? 0
                 totalTokenUsage = TokenUsage(
                     inputTokens: session.inputTokens,
                     outputTokens: session.outputTokens,
-                    cacheReadTokens: nil,
-                    cacheCreationTokens: nil
+                    cacheReadTokens: state.totalTokenUsage.cacheReadTokens,
+                    cacheCreationTokens: state.totalTokenUsage.cacheCreationTokens
                 )
             } else {
                 // Fallback to reconstructed state if session not found
@@ -186,6 +194,8 @@ extension ChatViewModel {
                 if usage.inputTokens > 0 || usage.outputTokens > 0 {
                     accumulatedInputTokens = usage.inputTokens
                     accumulatedOutputTokens = usage.outputTokens
+                    accumulatedCacheReadTokens = usage.cacheReadTokens ?? 0
+                    accumulatedCacheCreationTokens = usage.cacheCreationTokens ?? 0
                     totalTokenUsage = usage
                 }
             }

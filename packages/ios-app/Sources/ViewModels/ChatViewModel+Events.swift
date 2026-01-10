@@ -200,13 +200,15 @@ extension ChatViewModel {
 
             accumulatedInputTokens += usage.inputTokens
             accumulatedOutputTokens += usage.outputTokens
+            accumulatedCacheReadTokens += usage.cacheReadTokens ?? 0
+            accumulatedCacheCreationTokens += usage.cacheCreationTokens ?? 0
             totalTokenUsage = TokenUsage(
                 inputTokens: accumulatedInputTokens,
                 outputTokens: accumulatedOutputTokens,
-                cacheReadTokens: nil,
-                cacheCreationTokens: nil
+                cacheReadTokens: accumulatedCacheReadTokens > 0 ? accumulatedCacheReadTokens : nil,
+                cacheCreationTokens: accumulatedCacheCreationTokens > 0 ? accumulatedCacheCreationTokens : nil
             )
-            logger.debug("Total tokens: in=\(accumulatedInputTokens) out=\(accumulatedOutputTokens), context=\(lastTurnInputTokens)", category: .events)
+            logger.debug("Total tokens: in=\(accumulatedInputTokens) out=\(accumulatedOutputTokens) cacheRead=\(accumulatedCacheReadTokens), context=\(lastTurnInputTokens)", category: .events)
 
             // Update CachedSession with accumulated tokens so dashboard shows correct values
             if let manager = eventStoreManager {
