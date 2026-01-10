@@ -193,6 +193,8 @@ struct DetailedContextSnapshotResult: Codable {
     let thresholdLevel: String
     let breakdown: ContextSnapshotResult.ContextBreakdown
     let messages: [DetailedMessageInfo]
+    let systemPromptContent: String
+    let toolsContent: [String]
 }
 
 // MARK: - Worktree Payloads

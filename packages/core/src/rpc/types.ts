@@ -1132,6 +1132,8 @@ export interface ContextDetailedMessageInfo {
 
 export interface ContextGetDetailedSnapshotResult extends ContextGetSnapshotResult {
   messages: ContextDetailedMessageInfo[];
+  systemPromptContent: string;
+  toolsContent: string[];
 }
 
 /** Check if compaction is needed */

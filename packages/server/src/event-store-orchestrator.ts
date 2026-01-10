@@ -1148,6 +1148,8 @@ export class EventStoreOrchestrator extends EventEmitter {
           messages: 0,
         },
         messages: [],
+        systemPromptContent: '',
+        toolsContent: [],
       };
     }
     return active.agent.getContextManager().getDetailedSnapshot();

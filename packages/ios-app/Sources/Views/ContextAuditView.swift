@@ -112,7 +112,9 @@ struct ContextAuditView: View {
                         // System Prompt + Tools (combined expandable section)
                         SystemAndToolsSection(
                             systemPromptTokens: snapshot.breakdown.systemPrompt,
-                            toolsTokens: snapshot.breakdown.tools
+                            toolsTokens: snapshot.breakdown.tools,
+                            systemPromptContent: snapshot.systemPromptContent,
+                            toolsContent: snapshot.toolsContent
                         )
                         .padding(.horizontal)
 
@@ -383,8 +385,12 @@ struct TokenBreakdownHeader: View {
 struct SystemAndToolsSection: View {
     let systemPromptTokens: Int
     let toolsTokens: Int
+    let systemPromptContent: String
+    let toolsContent: [String]
 
     @State private var isExpanded = false
+    @State private var showingSystemPrompt = false
+    @State private var showingTools = false
 
     private var totalTokens: Int {
         systemPromptTokens + toolsTokens
@@ -435,59 +441,28 @@ struct SystemAndToolsSection: View {
                     Divider()
                         .background(Color.tronBorder.opacity(0.3))
 
-                    ScrollView {
-                        VStack(alignment: .leading, spacing: 12) {
-                            // System Prompt breakdown
-                            VStack(alignment: .leading, spacing: 6) {
-                                HStack {
-                                    Image(systemName: "doc.text.fill")
-                                        .font(.system(size: 12))
-                                        .foregroundStyle(.purple.opacity(0.8))
-                                    Text("System Prompt")
-                                        .font(.caption.weight(.medium))
-                                        .foregroundStyle(.tronTextSecondary)
-                                    Spacer()
-                                    Text(formatTokens(systemPromptTokens))
-                                        .font(.caption.monospacedDigit())
-                                        .foregroundStyle(.tronTextMuted)
-                                }
+                    VStack(alignment: .leading, spacing: 8) {
+                        // System Prompt - expandable
+                        ExpandableContentSection(
+                            icon: "doc.text.fill",
+                            iconColor: .purple,
+                            title: "System Prompt",
+                            tokens: systemPromptTokens,
+                            content: systemPromptContent,
+                            isExpanded: $showingSystemPrompt
+                        )
 
-                                Text("Contains agent instructions, working directory context, and behavioral guidelines.")
-                                    .font(.caption2)
-                                    .foregroundStyle(.tronTextMuted)
-                                    .fixedSize(horizontal: false, vertical: true)
-                            }
-                            .padding(12)
-                            .background(Color.purple.opacity(0.05))
-                            .clipShape(RoundedRectangle(cornerRadius: 8))
-
-                            // Tools breakdown
-                            VStack(alignment: .leading, spacing: 6) {
-                                HStack {
-                                    Image(systemName: "hammer.fill")
-                                        .font(.system(size: 12))
-                                        .foregroundStyle(.orange.opacity(0.8))
-                                    Text("Tools Definitions")
-                                        .font(.caption.weight(.medium))
-                                        .foregroundStyle(.tronTextSecondary)
-                                    Spacer()
-                                    Text(formatTokens(toolsTokens))
-                                        .font(.caption.monospacedDigit())
-                                        .foregroundStyle(.tronTextMuted)
-                                }
-
-                                Text("JSON schemas for all available tools including Bash, Read, Write, Edit, Glob, Grep, and WebFetch.")
-                                    .font(.caption2)
-                                    .foregroundStyle(.tronTextMuted)
-                                    .fixedSize(horizontal: false, vertical: true)
-                            }
-                            .padding(12)
-                            .background(Color.orange.opacity(0.05))
-                            .clipShape(RoundedRectangle(cornerRadius: 8))
-                        }
-                        .padding()
+                        // Tools - expandable
+                        ExpandableContentSection(
+                            icon: "hammer.fill",
+                            iconColor: .orange,
+                            title: "Tools (\(toolsContent.count))",
+                            tokens: toolsTokens,
+                            content: toolsContent.joined(separator: "\n"),
+                            isExpanded: $showingTools
+                        )
                     }
-                    .frame(maxHeight: 200)
+                    .padding(12)
                 }
                 .background(Color.tronSurface.opacity(0.3))
             }
@@ -497,6 +472,65 @@ struct SystemAndToolsSection: View {
             RoundedRectangle(cornerRadius: 12)
                 .stroke(Color.tronBorder.opacity(0.2), lineWidth: 1)
         )
+    }
+}
+
+// MARK: - Expandable Content Section
+
+struct ExpandableContentSection: View {
+    let icon: String
+    let iconColor: Color
+    let title: String
+    let tokens: Int
+    let content: String
+    @Binding var isExpanded: Bool
+
+    private func formatTokens(_ count: Int) -> String {
+        if count >= 1000 {
+            return String(format: "%.1fk", Double(count) / 1000)
+        }
+        return "\(count)"
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            // Header
+            Button(action: { withAnimation(.easeInOut(duration: 0.2)) { isExpanded.toggle() } }) {
+                HStack {
+                    Image(systemName: icon)
+                        .font(.system(size: 12))
+                        .foregroundStyle(iconColor.opacity(0.8))
+                    Text(title)
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(.tronTextSecondary)
+                    Spacer()
+                    Text(formatTokens(tokens))
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(.tronTextMuted)
+                    Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundStyle(.tronTextMuted)
+                }
+                .padding(10)
+            }
+            .buttonStyle(.plain)
+
+            // Content
+            if isExpanded {
+                ScrollView {
+                    Text(content)
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundStyle(.tronTextSecondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(10)
+                        .textSelection(.enabled)
+                }
+                .frame(maxHeight: 300)
+                .background(Color.tronBackground.opacity(0.5))
+            }
+        }
+        .background(iconColor.opacity(0.05))
+        .clipShape(RoundedRectangle(cornerRadius: 8))
     }
 }
 

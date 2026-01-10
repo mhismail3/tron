@@ -82,6 +82,8 @@ export interface DetailedMessageInfo {
  */
 export interface DetailedContextSnapshot extends ContextSnapshot {
   messages: DetailedMessageInfo[];
+  systemPromptContent: string;
+  toolsContent: string[];
 }
 
 export interface PreTurnValidation {
@@ -420,6 +422,8 @@ export class ContextManager {
     return {
       ...snapshot,
       messages: detailedMessages,
+      systemPromptContent: this.getSystemPrompt(),
+      toolsContent: this.tools.map(t => `${t.name}: ${t.description || 'No description'}`),
     };
   }
 
