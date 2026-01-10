@@ -54,6 +54,36 @@ export interface ContextSnapshot {
   };
 }
 
+/**
+ * Detailed message info for context auditing
+ */
+export interface DetailedMessageInfo {
+  index: number;
+  role: 'user' | 'assistant' | 'toolResult';
+  tokens: number;
+  /** Summary for display (truncated content or tool info) */
+  summary: string;
+  /** Full content for expansion */
+  content: string;
+  /** For tool calls within assistant messages */
+  toolCalls?: Array<{
+    id: string;
+    name: string;
+    tokens: number;
+    arguments: string;
+  }>;
+  /** For tool result messages */
+  toolCallId?: string;
+  isError?: boolean;
+}
+
+/**
+ * Detailed context snapshot with per-message token breakdown
+ */
+export interface DetailedContextSnapshot extends ContextSnapshot {
+  messages: DetailedMessageInfo[];
+}
+
 export interface PreTurnValidation {
   canProceed: boolean;
   needsCompaction: boolean;
@@ -304,6 +334,92 @@ export class ContextManager {
         tools: this.estimateToolsTokens(),
         messages: this.getMessagesTokens(),
       },
+    };
+  }
+
+  /**
+   * Get a detailed snapshot with per-message token breakdown.
+   */
+  getDetailedSnapshot(): DetailedContextSnapshot {
+    const snapshot = this.getSnapshot();
+    const detailedMessages: DetailedMessageInfo[] = [];
+
+    for (let i = 0; i < this.messages.length; i++) {
+      const msg = this.messages[i];
+      if (!msg) continue;
+
+      const tokens = this.tokenCache.get(msg) ?? this.estimateMessageTokens(msg);
+
+      switch (msg.role) {
+        case 'user': {
+          const userContent = typeof msg.content === 'string'
+            ? msg.content
+            : msg.content.map(c => c.type === 'text' ? c.text : '[image]').join('\n');
+          detailedMessages.push({
+            index: i,
+            role: 'user',
+            tokens,
+            summary: userContent.length > 100 ? userContent.slice(0, 100) + '...' : userContent,
+            content: userContent,
+          });
+          break;
+        }
+        case 'assistant': {
+          // Extract text content and tool calls
+          const textParts: string[] = [];
+          const toolCalls: NonNullable<DetailedMessageInfo['toolCalls']> = [];
+
+          for (const block of msg.content) {
+            if (block.type === 'text') {
+              textParts.push(block.text);
+            } else if (block.type === 'tool_use') {
+              const argsStr = block.arguments ? JSON.stringify(block.arguments, null, 2) : '{}';
+              const toolTokens = Math.ceil((block.name.length + argsStr.length) / 4);
+              toolCalls.push({
+                id: block.id,
+                name: block.name,
+                tokens: toolTokens,
+                arguments: argsStr,
+              });
+            }
+          }
+
+          const assistantContent = textParts.join('\n');
+          const summary = toolCalls.length > 0
+            ? `${toolCalls.map(t => t.name).join(', ')}${assistantContent ? ' + text' : ''}`
+            : (assistantContent.length > 100 ? assistantContent.slice(0, 100) + '...' : assistantContent);
+
+          detailedMessages.push({
+            index: i,
+            role: 'assistant',
+            tokens,
+            summary,
+            content: assistantContent,
+            toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
+          });
+          break;
+        }
+        case 'toolResult': {
+          const resultContent = typeof msg.content === 'string'
+            ? msg.content
+            : msg.content.map(c => c.type === 'text' ? c.text : '[image]').join('\n');
+          detailedMessages.push({
+            index: i,
+            role: 'toolResult',
+            tokens,
+            summary: resultContent.length > 100 ? resultContent.slice(0, 100) + '...' : resultContent,
+            content: resultContent,
+            toolCallId: msg.toolCallId,
+            isError: msg.isError,
+          });
+          break;
+        }
+      }
+    }
+
+    return {
+      ...snapshot,
+      messages: detailedMessages,
     };
   }
 

@@ -66,13 +66,6 @@ struct VoiceNotesRecordingSheet: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
             .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    Button { onCancel() } label: {
-                        Image(systemName: "xmark")
-                            .font(.system(size: 14, weight: .medium))
-                            .foregroundStyle(.tronEmerald)
-                    }
-                }
                 ToolbarItem(placement: .principal) {
                     Text("Voice Note")
                         .font(.system(size: 16, weight: .semibold))

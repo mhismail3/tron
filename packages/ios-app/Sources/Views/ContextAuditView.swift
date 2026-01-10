@@ -10,12 +10,13 @@ struct ContextAuditView: View {
     @EnvironmentObject var eventStoreManager: EventStoreManager
     @State private var isLoading = true
     @State private var errorMessage: String?
-    @State private var contextSnapshot: ContextSnapshotResult?
+    @State private var detailedSnapshot: DetailedContextSnapshotResult?
+    @State private var sessionEvents: [SessionEvent] = []
 
     var body: some View {
         NavigationStack {
             ZStack {
-                Color.tronBackground.ignoresSafeArea()
+                Color.tronSurface.ignoresSafeArea()
 
                 if isLoading {
                     ProgressView()
@@ -53,11 +54,27 @@ struct ContextAuditView: View {
     }
 
     /// Get session token usage from EventStoreManager
-    private var sessionTokenUsage: (input: Int, output: Int) {
+    private var sessionTokenUsage: (input: Int, output: Int, cacheRead: Int) {
         guard let session = eventStoreManager.sessions.first(where: { $0.id == sessionId }) else {
-            return (0, 0)
+            return (0, 0, 0)
         }
-        return (session.inputTokens, session.outputTokens)
+        // Calculate cache tokens from events
+        let cacheTokens = calculateCacheTokens()
+        return (session.inputTokens, session.outputTokens, cacheTokens)
+    }
+
+    /// Calculate cache read tokens from session events
+    private func calculateCacheTokens() -> Int {
+        var total = 0
+        for event in sessionEvents {
+            if event.eventType == .messageAssistant || event.eventType == .streamTurnEnd {
+                if let tokenUsage = event.payload["tokenUsage"]?.value as? [String: Any],
+                   let cacheRead = tokenUsage["cacheReadTokens"] as? Int {
+                    total += cacheRead
+                }
+            }
+        }
+        return total
     }
 
     private var contentView: some View {
@@ -68,38 +85,39 @@ struct ContextAuditView: View {
 
     private var contextView: some View {
         Group {
-            if let snapshot = contextSnapshot {
+            if let snapshot = detailedSnapshot {
                 ScrollView {
                     VStack(spacing: 16) {
                         // Usage gauge
-                        ContextUsageGaugeView(snapshot: snapshot)
-                            .padding(.horizontal)
-
-                        // Accumulated session tokens
-                        SessionTokensView(
-                            inputTokens: sessionTokenUsage.input,
-                            outputTokens: sessionTokenUsage.output
+                        ContextUsageGaugeView(
+                            currentTokens: snapshot.currentTokens,
+                            contextLimit: snapshot.contextLimit,
+                            usagePercent: snapshot.usagePercent,
+                            thresholdLevel: snapshot.thresholdLevel
                         )
                         .padding(.horizontal)
 
-                        // Info about context vs session tokens
-                        HStack(spacing: 4) {
-                            Image(systemName: "info.circle")
-                                .font(.caption2)
-                                .foregroundStyle(.tronTextMuted)
-                            Text("Context % shows current memory usage and decreases after compaction. Session tokens show cumulative API usage for this session.")
-                                .font(.caption2)
-                                .foregroundStyle(.tronTextMuted)
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
+                        // Accumulated session tokens
+                        TotalSessionTokensView(
+                            inputTokens: sessionTokenUsage.input,
+                            outputTokens: sessionTokenUsage.output,
+                            cacheReadTokens: sessionTokenUsage.cacheRead
+                        )
                         .padding(.horizontal)
 
-                        // Breakdown section
-                        ContextBreakdownView(breakdown: snapshot.breakdown)
+                        // Token Breakdown header and expandable sections
+                        TokenBreakdownHeader()
                             .padding(.horizontal)
 
-                        // Threshold info
-                        ContextThresholdView(level: snapshot.thresholdLevel, usagePercent: snapshot.usagePercent)
+                        // System Prompt + Tools (combined expandable section)
+                        SystemAndToolsSection(
+                            systemPromptTokens: snapshot.breakdown.systemPrompt,
+                            toolsTokens: snapshot.breakdown.tools
+                        )
+                        .padding(.horizontal)
+
+                        // Messages breakdown (granular expandable) - using server data
+                        DetailedMessagesSection(messages: snapshot.messages)
                             .padding(.horizontal)
                     }
                     .padding(.vertical)
@@ -124,7 +142,12 @@ struct ContextAuditView: View {
         isLoading = true
 
         do {
-            contextSnapshot = try await rpcClient.getContextSnapshot(sessionId: sessionId)
+            // Load detailed context snapshot and events in parallel
+            async let snapshotTask = rpcClient.getDetailedContextSnapshot(sessionId: sessionId)
+            let events = try eventStoreManager.getSessionEvents(sessionId)
+
+            detailedSnapshot = try await snapshotTask
+            sessionEvents = events
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -133,11 +156,12 @@ struct ContextAuditView: View {
     }
 }
 
-// MARK: - Session Tokens View
+// MARK: - Total Session Tokens View
 
-struct SessionTokensView: View {
+struct TotalSessionTokensView: View {
     let inputTokens: Int
     let outputTokens: Int
+    let cacheReadTokens: Int
 
     private var totalTokens: Int {
         inputTokens + outputTokens
@@ -160,7 +184,7 @@ struct SessionTokensView: View {
                     .font(.system(size: 14))
                     .foregroundStyle(.tronEmerald)
 
-                Text("Session Tokens")
+                Text("Total Session Tokens")
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(.tronTextPrimary)
 
@@ -171,8 +195,8 @@ struct SessionTokensView: View {
                     .foregroundStyle(.tronEmerald)
             }
 
-            // Token breakdown
-            HStack(spacing: 16) {
+            // Token breakdown row
+            HStack(spacing: 12) {
                 // Input tokens
                 VStack(alignment: .leading, spacing: 4) {
                     HStack(spacing: 4) {
@@ -210,7 +234,33 @@ struct SessionTokensView: View {
                 .padding(10)
                 .background(Color.tronEmerald.opacity(0.1))
                 .clipShape(RoundedRectangle(cornerRadius: 8))
+
+                // Cache read tokens
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack(spacing: 4) {
+                        Image(systemName: "memorychip.fill")
+                            .font(.system(size: 12))
+                            .foregroundStyle(.purple)
+                        Text("Cached")
+                            .font(.caption)
+                            .foregroundStyle(.tronTextSecondary)
+                    }
+                    Text(formatTokenCount(cacheReadTokens))
+                        .font(.caption.monospacedDigit().weight(.medium))
+                        .foregroundStyle(.tronTextPrimary)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(10)
+                .background(Color.purple.opacity(0.1))
+                .clipShape(RoundedRectangle(cornerRadius: 8))
             }
+
+            // Footer explanation inside the container
+            Text("Totals represent cumulative usage for this session")
+                .font(.caption2)
+                .foregroundStyle(.tronTextMuted)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.top, 4)
         }
         .padding()
         .background(Color.tronSurfaceElevated)
@@ -221,15 +271,18 @@ struct SessionTokensView: View {
 // MARK: - Context Usage Gauge View
 
 struct ContextUsageGaugeView: View {
-    let snapshot: ContextSnapshotResult
+    let currentTokens: Int
+    let contextLimit: Int
+    let usagePercent: Double
+    let thresholdLevel: String
 
     private var usageColor: Color {
-        switch snapshot.thresholdLevel {
-        case "critical":
+        switch thresholdLevel {
+        case "critical", "exceeded":
             return .red
-        case "high":
+        case "alert":
             return .orange
-        case "moderate":
+        case "warning":
             return .yellow
         default:
             return .cyan
@@ -237,11 +290,11 @@ struct ContextUsageGaugeView: View {
     }
 
     private var formattedTokens: String {
-        formatTokenCount(snapshot.currentTokens)
+        formatTokenCount(currentTokens)
     }
 
     private var formattedLimit: String {
-        formatTokenCount(snapshot.contextLimit)
+        formatTokenCount(contextLimit)
     }
 
     private func formatTokenCount(_ count: Int) -> String {
@@ -267,7 +320,7 @@ struct ContextUsageGaugeView: View {
 
                 Spacer()
 
-                Text("\(Int(snapshot.usagePercent * 100))%")
+                Text("\(Int(usagePercent * 100))%")
                     .font(.system(size: 24, weight: .bold, design: .monospaced))
                     .foregroundStyle(usageColor)
             }
@@ -282,7 +335,7 @@ struct ContextUsageGaugeView: View {
                     // Fill
                     RoundedRectangle(cornerRadius: 6)
                         .fill(usageColor.opacity(0.8))
-                        .frame(width: geometry.size.width * min(snapshot.usagePercent, 1.0))
+                        .frame(width: geometry.size.width * min(usagePercent, 1.0))
                 }
             }
             .frame(height: 12)
@@ -295,7 +348,7 @@ struct ContextUsageGaugeView: View {
 
                 Spacer()
 
-                Text("\(formatTokenCount(snapshot.contextLimit - snapshot.currentTokens)) remaining")
+                Text("\(formatTokenCount(contextLimit - currentTokens)) remaining")
                     .font(.caption.monospacedDigit())
                     .foregroundStyle(.tronTextMuted)
             }
@@ -306,10 +359,36 @@ struct ContextUsageGaugeView: View {
     }
 }
 
-// MARK: - Context Breakdown View
+// MARK: - Token Breakdown Header
 
-struct ContextBreakdownView: View {
-    let breakdown: ContextSnapshotResult.ContextBreakdown
+struct TokenBreakdownHeader: View {
+    var body: some View {
+        HStack {
+            Image(systemName: "chart.pie")
+                .font(.system(size: 14))
+                .foregroundStyle(.cyan)
+
+            Text("Token Breakdown")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.tronTextPrimary)
+
+            Spacer()
+        }
+        .padding(.top, 8)
+    }
+}
+
+// MARK: - System and Tools Section
+
+struct SystemAndToolsSection: View {
+    let systemPromptTokens: Int
+    let toolsTokens: Int
+
+    @State private var isExpanded = false
+
+    private var totalTokens: Int {
+        systemPromptTokens + toolsTokens
+    }
 
     private func formatTokens(_ count: Int) -> String {
         if count >= 1000 {
@@ -319,133 +398,311 @@ struct ContextBreakdownView: View {
     }
 
     var body: some View {
-        VStack(spacing: 12) {
-            HStack {
-                Image(systemName: "chart.pie")
-                    .font(.system(size: 14))
-                    .foregroundStyle(.cyan)
+        VStack(spacing: 0) {
+            // Header row (tappable)
+            Button(action: { withAnimation(.easeInOut(duration: 0.2)) { isExpanded.toggle() } }) {
+                HStack {
+                    Image(systemName: "gearshape.2.fill")
+                        .font(.system(size: 14))
+                        .foregroundStyle(.purple)
 
-                Text("Token Breakdown")
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(.tronTextPrimary)
+                    Text("System Prompt & Tools")
+                        .font(.subheadline.weight(.medium))
+                        .foregroundStyle(.tronTextPrimary)
 
-                Spacer()
+                    Spacer()
+
+                    Text(formatTokens(totalTokens))
+                        .font(.caption.monospacedDigit().weight(.medium))
+                        .foregroundStyle(.tronTextSecondary)
+
+                    Text("tokens")
+                        .font(.caption2)
+                        .foregroundStyle(.tronTextMuted)
+
+                    Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(.tronTextMuted)
+                }
+                .padding()
+                .background(Color.tronSurfaceElevated)
             }
+            .buttonStyle(.plain)
 
-            VStack(spacing: 8) {
-                BreakdownRow(
-                    icon: "gearshape.fill",
-                    label: "System Prompt",
-                    tokens: breakdown.systemPrompt,
-                    color: .purple
-                )
+            // Expandable content
+            if isExpanded {
+                VStack(spacing: 0) {
+                    Divider()
+                        .background(Color.tronBorder.opacity(0.3))
 
-                BreakdownRow(
-                    icon: "hammer.fill",
-                    label: "Tools",
-                    tokens: breakdown.tools,
-                    color: .orange
-                )
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 12) {
+                            // System Prompt breakdown
+                            VStack(alignment: .leading, spacing: 6) {
+                                HStack {
+                                    Image(systemName: "doc.text.fill")
+                                        .font(.system(size: 12))
+                                        .foregroundStyle(.purple.opacity(0.8))
+                                    Text("System Prompt")
+                                        .font(.caption.weight(.medium))
+                                        .foregroundStyle(.tronTextSecondary)
+                                    Spacer()
+                                    Text(formatTokens(systemPromptTokens))
+                                        .font(.caption.monospacedDigit())
+                                        .foregroundStyle(.tronTextMuted)
+                                }
 
-                BreakdownRow(
-                    icon: "bubble.left.and.bubble.right.fill",
-                    label: "Messages",
-                    tokens: breakdown.messages,
-                    color: .cyan
-                )
+                                Text("Contains agent instructions, working directory context, and behavioral guidelines.")
+                                    .font(.caption2)
+                                    .foregroundStyle(.tronTextMuted)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                            .padding(12)
+                            .background(Color.purple.opacity(0.05))
+                            .clipShape(RoundedRectangle(cornerRadius: 8))
+
+                            // Tools breakdown
+                            VStack(alignment: .leading, spacing: 6) {
+                                HStack {
+                                    Image(systemName: "hammer.fill")
+                                        .font(.system(size: 12))
+                                        .foregroundStyle(.orange.opacity(0.8))
+                                    Text("Tools Definitions")
+                                        .font(.caption.weight(.medium))
+                                        .foregroundStyle(.tronTextSecondary)
+                                    Spacer()
+                                    Text(formatTokens(toolsTokens))
+                                        .font(.caption.monospacedDigit())
+                                        .foregroundStyle(.tronTextMuted)
+                                }
+
+                                Text("JSON schemas for all available tools including Bash, Read, Write, Edit, Glob, Grep, and WebFetch.")
+                                    .font(.caption2)
+                                    .foregroundStyle(.tronTextMuted)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                            .padding(12)
+                            .background(Color.orange.opacity(0.05))
+                            .clipShape(RoundedRectangle(cornerRadius: 8))
+                        }
+                        .padding()
+                    }
+                    .frame(maxHeight: 200)
+                }
+                .background(Color.tronSurface.opacity(0.3))
             }
         }
-        .padding()
-        .background(Color.tronSurfaceElevated)
-        .clipShape(RoundedRectangle(cornerRadius: 12))
-    }
-}
-
-struct BreakdownRow: View {
-    let icon: String
-    let label: String
-    let tokens: Int
-    let color: Color
-
-    private var formattedTokens: String {
-        if tokens >= 1000 {
-            return String(format: "%.1fk", Double(tokens) / 1000)
-        }
-        return "\(tokens)"
-    }
-
-    var body: some View {
-        HStack {
-            Image(systemName: icon)
-                .font(.system(size: 12))
-                .foregroundStyle(color)
-                .frame(width: 24)
-
-            Text(label)
-                .font(.caption)
-                .foregroundStyle(.tronTextSecondary)
-
-            Spacer()
-
-            Text(formattedTokens)
-                .font(.caption.monospacedDigit().weight(.medium))
-                .foregroundStyle(.tronTextPrimary)
-
-            Text("tokens")
-                .font(.caption2)
-                .foregroundStyle(.tronTextMuted)
-        }
-        .padding(.horizontal, 8)
-        .padding(.vertical, 6)
-        .background(color.opacity(0.1))
-        .clipShape(RoundedRectangle(cornerRadius: 6))
-    }
-}
-
-// MARK: - Context Threshold View
-
-struct ContextThresholdView: View {
-    let level: String
-    let usagePercent: Double
-
-    private var statusInfo: (icon: String, color: Color, message: String) {
-        switch level {
-        case "critical":
-            return ("exclamationmark.triangle.fill", .red, "Context critically full. Compaction required.")
-        case "high":
-            return ("exclamationmark.circle.fill", .orange, "Context usage high. Consider compacting soon.")
-        case "moderate":
-            return ("info.circle.fill", .yellow, "Context usage moderate. Compaction available.")
-        default:
-            return ("checkmark.circle.fill", .green, "Context usage healthy.")
-        }
-    }
-
-    var body: some View {
-        HStack(spacing: 12) {
-            Image(systemName: statusInfo.icon)
-                .font(.system(size: 18))
-                .foregroundStyle(statusInfo.color)
-
-            VStack(alignment: .leading, spacing: 2) {
-                Text(level.capitalized)
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(statusInfo.color)
-
-                Text(statusInfo.message)
-                    .font(.caption2)
-                    .foregroundStyle(.tronTextMuted)
-            }
-
-            Spacer()
-        }
-        .padding()
-        .background(statusInfo.color.opacity(0.1))
         .clipShape(RoundedRectangle(cornerRadius: 12))
         .overlay(
             RoundedRectangle(cornerRadius: 12)
-                .stroke(statusInfo.color.opacity(0.3), lineWidth: 1)
+                .stroke(Color.tronBorder.opacity(0.2), lineWidth: 1)
         )
+    }
+}
+
+// MARK: - Detailed Messages Section (using server data)
+
+struct DetailedMessagesSection: View {
+    let messages: [DetailedMessageInfo]
+
+    private func formatTokens(_ count: Int) -> String {
+        if count >= 1000 {
+            return String(format: "%.1fk", Double(count) / 1000)
+        }
+        return "\(count)"
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            // Section header
+            HStack {
+                Image(systemName: "bubble.left.and.bubble.right.fill")
+                    .font(.system(size: 14))
+                    .foregroundStyle(.cyan)
+
+                Text("Messages")
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(.tronTextPrimary)
+
+                Text("(\(messages.count))")
+                    .font(.caption)
+                    .foregroundStyle(.tronTextMuted)
+
+                Spacer()
+            }
+            .padding(.bottom, 4)
+
+            if messages.isEmpty {
+                Text("No messages in context")
+                    .font(.caption)
+                    .foregroundStyle(.tronTextMuted)
+                    .padding()
+                    .frame(maxWidth: .infinity)
+                    .background(Color.tronSurfaceElevated)
+                    .clipShape(RoundedRectangle(cornerRadius: 12))
+            } else {
+                VStack(spacing: 0) {
+                    ForEach(Array(messages.enumerated()), id: \.element.index) { index, message in
+                        DetailedMessageRow(
+                            message: message,
+                            isLast: index == messages.count - 1
+                        )
+                    }
+                }
+                .clipShape(RoundedRectangle(cornerRadius: 12))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12)
+                        .stroke(Color.tronBorder.opacity(0.2), lineWidth: 1)
+                )
+            }
+        }
+    }
+}
+
+// MARK: - Detailed Message Row
+
+struct DetailedMessageRow: View {
+    let message: DetailedMessageInfo
+    let isLast: Bool
+
+    @State private var isExpanded = false
+
+    private var icon: String {
+        switch message.role {
+        case "user": return "person.fill"
+        case "assistant": return "sparkles"
+        case "toolResult": return message.isError == true ? "xmark.circle.fill" : "checkmark.circle.fill"
+        default: return "questionmark.circle"
+        }
+    }
+
+    private var iconColor: Color {
+        switch message.role {
+        case "user": return .blue
+        case "assistant": return .tronEmerald
+        case "toolResult": return message.isError == true ? .red : .cyan
+        default: return .gray
+        }
+    }
+
+    private var title: String {
+        switch message.role {
+        case "user": return "User Message"
+        case "assistant":
+            if let toolCalls = message.toolCalls, !toolCalls.isEmpty {
+                return toolCalls.map { $0.name }.joined(separator: ", ")
+            }
+            return "Assistant Response"
+        case "toolResult": return message.isError == true ? "Tool Error" : "Tool Result"
+        default: return "Message"
+        }
+    }
+
+    private func formatTokens(_ count: Int) -> String {
+        if count >= 1000 {
+            return String(format: "%.1fk", Double(count) / 1000)
+        }
+        return "\(count)"
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            // Header row (tappable)
+            Button(action: { withAnimation(.easeInOut(duration: 0.2)) { isExpanded.toggle() } }) {
+                HStack(spacing: 10) {
+                    Image(systemName: icon)
+                        .font(.system(size: 12))
+                        .foregroundStyle(iconColor)
+                        .frame(width: 20)
+
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(title)
+                            .font(.caption.weight(.medium))
+                            .foregroundStyle(.tronTextPrimary)
+
+                        if !isExpanded {
+                            Text(message.summary)
+                                .font(.caption2)
+                                .foregroundStyle(.tronTextMuted)
+                                .lineLimit(1)
+                        }
+                    }
+
+                    Spacer()
+
+                    Text(formatTokens(message.tokens))
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundStyle(.tronTextMuted)
+
+                    Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundStyle(.tronTextMuted)
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 10)
+                .background(Color.tronSurfaceElevated)
+            }
+            .buttonStyle(.plain)
+
+            // Expandable content
+            if isExpanded {
+                VStack(spacing: 0) {
+                    Divider()
+                        .background(Color.tronBorder.opacity(0.3))
+
+                    // Show tool calls if present
+                    if let toolCalls = message.toolCalls, !toolCalls.isEmpty {
+                        VStack(alignment: .leading, spacing: 8) {
+                            ForEach(toolCalls) { toolCall in
+                                VStack(alignment: .leading, spacing: 4) {
+                                    HStack {
+                                        Image(systemName: "hammer.fill")
+                                            .font(.system(size: 10))
+                                            .foregroundStyle(.orange)
+                                        Text(toolCall.name)
+                                            .font(.caption.weight(.medium))
+                                            .foregroundStyle(.tronTextPrimary)
+                                        Spacer()
+                                        Text(formatTokens(toolCall.tokens))
+                                            .font(.system(size: 9, design: .monospaced))
+                                            .foregroundStyle(.tronTextMuted)
+                                    }
+
+                                    Text(toolCall.arguments)
+                                        .font(.system(size: 10, design: .monospaced))
+                                        .foregroundStyle(.tronTextSecondary)
+                                        .lineLimit(5)
+                                }
+                                .padding(8)
+                                .background(Color.orange.opacity(0.05))
+                                .clipShape(RoundedRectangle(cornerRadius: 6))
+                            }
+                        }
+                        .padding(12)
+                    }
+
+                    // Show text content if present
+                    if !message.content.isEmpty {
+                        ScrollView {
+                            Text(message.content)
+                                .font(.system(size: 11, design: .monospaced))
+                                .foregroundStyle(.tronTextSecondary)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(12)
+                                .textSelection(.enabled)
+                        }
+                        .frame(maxHeight: 200)
+                    }
+                }
+                .background(Color.tronSurface.opacity(0.3))
+            }
+
+            // Divider between items
+            if !isLast {
+                Divider()
+                    .background(Color.tronBorder.opacity(0.15))
+            }
+        }
     }
 }
 

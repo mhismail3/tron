@@ -397,6 +397,9 @@ function createContextManager(orchestrator: EventStoreOrchestrator): ContextRpcM
     getContextSnapshot(sessionId) {
       return orchestrator.getContextSnapshot(sessionId);
     },
+    getDetailedContextSnapshot(sessionId) {
+      return orchestrator.getDetailedContextSnapshot(sessionId);
+    },
     shouldCompact(sessionId) {
       return orchestrator.shouldCompact(sessionId);
     },

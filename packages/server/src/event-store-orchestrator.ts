@@ -40,6 +40,7 @@ import {
   type EventType,
   type CurrentTurnToolCall,
   type ContextSnapshot,
+  type DetailedContextSnapshot,
   type PreTurnValidation,
   type CompactionPreview,
   type CompactionResult,
@@ -1126,6 +1127,30 @@ export class EventStoreOrchestrator extends EventEmitter {
       };
     }
     return active.agent.getContextManager().getSnapshot();
+  }
+
+  /**
+   * Get detailed context snapshot with per-message token breakdown.
+   * Returns empty messages array for inactive sessions.
+   */
+  getDetailedContextSnapshot(sessionId: string): DetailedContextSnapshot {
+    const active = this.activeSessions.get(sessionId);
+    if (!active) {
+      // Return default snapshot for inactive sessions
+      return {
+        currentTokens: 0,
+        contextLimit: 200_000,
+        usagePercent: 0,
+        thresholdLevel: 'normal',
+        breakdown: {
+          systemPrompt: 0,
+          tools: 0,
+          messages: 0,
+        },
+        messages: [],
+      };
+    }
+    return active.agent.getContextManager().getDetailedSnapshot();
   }
 
   /**

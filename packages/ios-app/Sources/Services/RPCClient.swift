@@ -606,6 +606,19 @@ class RPCClient: ObservableObject {
         )
     }
 
+    /// Get detailed context snapshot with per-message token breakdown
+    func getDetailedContextSnapshot(sessionId: String) async throws -> DetailedContextSnapshotResult {
+        guard let ws = webSocket else {
+            throw RPCClientError.connectionNotEstablished
+        }
+
+        let params = ContextGetSnapshotParams(sessionId: sessionId)
+        return try await ws.send(
+            method: "context.getDetailedSnapshot",
+            params: params
+        )
+    }
+
     // MARK: - Event Sync Methods
 
     /// Get event history for a session
@@ -823,6 +836,16 @@ class RPCClient: ObservableObject {
 
         let params = VoiceNotesListParams(limit: limit, offset: offset)
         return try await ws.send(method: "voiceNotes.list", params: params)
+    }
+
+    /// Delete a voice note
+    func deleteVoiceNote(filename: String) async throws -> VoiceNotesDeleteResult {
+        guard let ws = webSocket else {
+            throw RPCClientError.connectionNotEstablished
+        }
+
+        let params = VoiceNotesDeleteParams(filename: filename)
+        return try await ws.send(method: "voiceNotes.delete", params: params)
     }
 
     // MARK: - State Accessors

@@ -71,6 +71,7 @@
 		VOICE001000000007A0000001 /* VoiceNotesListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = VOICE001000000008A0000001 /* VoiceNotesListView.swift */; };
 		VOICE001000000009A0000001 /* VoiceNotesRecordingSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = VOICE00100000000AA0000001 /* VoiceNotesRecordingSheet.swift */; };
 		VOICE00100000000BA0000001 /* VoiceNotesRecorder.swift in Sources */ = {isa = PBXBuildFile; fileRef = VOICE00100000000CA0000001 /* VoiceNotesRecorder.swift */; };
+		AUDIO00100000000DA0000001 /* AudioAvailabilityMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = AUDIO00100000000EA0000001 /* AudioAvailabilityMonitor.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -151,6 +152,7 @@
 		VOICE001000000008A0000001 /* VoiceNotesListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceNotesListView.swift; sourceTree = "<group>"; };
 		VOICE00100000000AA0000001 /* VoiceNotesRecordingSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceNotesRecordingSheet.swift; sourceTree = "<group>"; };
 		VOICE00100000000CA0000001 /* VoiceNotesRecorder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceNotesRecorder.swift; sourceTree = "<group>"; };
+		AUDIO00100000000EA0000001 /* AudioAvailabilityMonitor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioAvailabilityMonitor.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXGroup section */
@@ -206,6 +208,7 @@
 				B9DD45A3974192F927E1B73A /* RPCClient.swift */,
 				18C18EEFAB81D6052EB39694 /* TronLogger.swift */,
 				VOICE00100000000CA0000001 /* VoiceNotesRecorder.swift */,
+				AUDIO00100000000EA0000001 /* AudioAvailabilityMonitor.swift */,
 				79449B7B56831FA69C873699 /* WebSocketService.swift */,
 			);
 			path = Services;
@@ -482,6 +485,7 @@
 				VOICE001000000007A0000001 /* VoiceNotesListView.swift in Sources */,
 				VOICE001000000009A0000001 /* VoiceNotesRecordingSheet.swift in Sources */,
 				VOICE00100000000BA0000001 /* VoiceNotesRecorder.swift in Sources */,
+				AUDIO00100000000DA0000001 /* AudioAvailabilityMonitor.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

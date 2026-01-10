@@ -164,6 +164,37 @@ struct ContextSnapshotResult: Codable {
     }
 }
 
+/// Detailed message info for context auditing
+struct DetailedMessageInfo: Codable, Identifiable {
+    let index: Int
+    let role: String  // "user" | "assistant" | "toolResult"
+    let tokens: Int
+    let summary: String
+    let content: String
+    let toolCalls: [ToolCallInfo]?
+    let toolCallId: String?
+    let isError: Bool?
+
+    var id: Int { index }
+
+    struct ToolCallInfo: Codable, Identifiable {
+        let id: String
+        let name: String
+        let tokens: Int
+        let arguments: String
+    }
+}
+
+/// Result from context.getDetailedSnapshot RPC method
+struct DetailedContextSnapshotResult: Codable {
+    let currentTokens: Int
+    let contextLimit: Int
+    let usagePercent: Double
+    let thresholdLevel: String
+    let breakdown: ContextSnapshotResult.ContextBreakdown
+    let messages: [DetailedMessageInfo]
+}
+
 // MARK: - Worktree Payloads
 
 /// Payload for worktree.acquired event

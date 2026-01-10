@@ -39,6 +39,7 @@ struct InputBar: View {
     @Binding var shouldFocus: Bool
 
     @FocusState private var isFocused: Bool
+    @ObservedObject private var audioMonitor = AudioAvailabilityMonitor.shared
     @State private var showingImagePicker = false
     @State private var isMicPulsing = false
     @State private var showMicButton = false
@@ -552,7 +553,7 @@ struct InputBar: View {
                         .font(.system(size: 14, weight: .semibold))
                         .foregroundStyle(.red)
                 } else {
-                    Image(systemName: "mic.fill")
+                    Image(systemName: audioMonitor.isRecordingAvailable ? "mic.fill" : "mic.slash.fill")
                         .font(.system(size: 14, weight: .semibold))
                         .foregroundStyle(isMicDisabled ? Color.tronEmerald.opacity(0.3) : Color.tronEmerald)
                 }
@@ -602,6 +603,10 @@ struct InputBar: View {
     }
 
     private var isMicDisabled: Bool {
+        // Disable if audio recording is unavailable (phone call, etc.)
+        if !audioMonitor.isRecordingAvailable {
+            return true
+        }
         if isTranscribing {
             return true
         }

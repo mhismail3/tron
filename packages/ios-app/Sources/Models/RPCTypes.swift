@@ -756,3 +756,12 @@ struct VoiceNotesListResult: Decodable {
     let totalCount: Int
     let hasMore: Bool
 }
+
+struct VoiceNotesDeleteParams: Encodable {
+    let filename: String
+}
+
+struct VoiceNotesDeleteResult: Decodable {
+    let success: Bool
+    let filename: String
+}

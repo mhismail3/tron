@@ -37,6 +37,8 @@ export {
   createContextManager,
   type ContextManagerConfig,
   type ContextSnapshot,
+  type DetailedContextSnapshot,
+  type DetailedMessageInfo,
   type PreTurnValidation,
   type CompactionPreview,
   type CompactionResult,

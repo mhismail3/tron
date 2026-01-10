@@ -139,13 +139,15 @@ export type RpcMethod =
   | 'transcribe.listModels'
   // Context management
   | 'context.getSnapshot'
+  | 'context.getDetailedSnapshot'
   | 'context.shouldCompact'
   | 'context.previewCompaction'
   | 'context.confirmCompaction'
   | 'context.canAcceptTurn'
   // Voice Notes
   | 'voiceNotes.save'
-  | 'voiceNotes.list';
+  | 'voiceNotes.list'
+  | 'voiceNotes.delete';
 
 // =============================================================================
 // Session Methods
@@ -1107,6 +1109,31 @@ export interface ContextGetSnapshotResult {
   };
 }
 
+/** Get detailed context snapshot with per-message token breakdown */
+export interface ContextGetDetailedSnapshotParams {
+  sessionId: string;
+}
+
+export interface ContextDetailedMessageInfo {
+  index: number;
+  role: 'user' | 'assistant' | 'toolResult';
+  tokens: number;
+  summary: string;
+  content: string;
+  toolCalls?: Array<{
+    id: string;
+    name: string;
+    tokens: number;
+    arguments: string;
+  }>;
+  toolCallId?: string;
+  isError?: boolean;
+}
+
+export interface ContextGetDetailedSnapshotResult extends ContextGetSnapshotResult {
+  messages: ContextDetailedMessageInfo[];
+}
+
 /** Check if compaction is needed */
 export interface ContextShouldCompactParams {
   sessionId: string;
@@ -1217,6 +1244,19 @@ export interface VoiceNotesListResult {
   notes: VoiceNoteMetadata[];
   totalCount: number;
   hasMore: boolean;
+}
+
+/** Delete a voice note file */
+export interface VoiceNotesDeleteParams {
+  /** Filename of the note to delete (e.g., "voice-note-2024-01-15-143022.md") */
+  filename: string;
+}
+
+export interface VoiceNotesDeleteResult {
+  /** Whether the deletion was successful */
+  success: boolean;
+  /** The filename that was deleted */
+  filename: string;
 }
 
 // =============================================================================

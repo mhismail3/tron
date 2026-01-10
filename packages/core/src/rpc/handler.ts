@@ -62,6 +62,8 @@ import type {
   TranscribeListModelsResult,
   ContextGetSnapshotParams,
   ContextGetSnapshotResult,
+  ContextGetDetailedSnapshotParams,
+  ContextGetDetailedSnapshotResult,
   ContextShouldCompactParams,
   ContextShouldCompactResult,
   ContextPreviewCompactionParams,
@@ -75,6 +77,8 @@ import type {
   VoiceNotesListParams,
   VoiceNotesListResult,
   VoiceNoteMetadata,
+  VoiceNotesDeleteParams,
+  VoiceNotesDeleteResult,
 } from './types.js';
 import { getNotesDir } from '../settings/loader.js';
 import { ANTHROPIC_MODELS, OPENAI_CODEX_MODELS } from '../providers/models.js';
@@ -133,6 +137,7 @@ export interface WorktreeRpcManager {
  */
 export interface ContextRpcManager {
   getContextSnapshot(sessionId: string): ContextGetSnapshotResult;
+  getDetailedContextSnapshot(sessionId: string): ContextGetDetailedSnapshotResult;
   shouldCompact(sessionId: string): boolean;
   previewCompaction(sessionId: string): Promise<ContextPreviewCompactionResult>;
   confirmCompaction(sessionId: string, opts?: { editedSummary?: string }): Promise<ContextConfirmCompactionResult>;
@@ -387,6 +392,8 @@ export class RpcHandler extends EventEmitter {
         // Context methods
         case 'context.getSnapshot':
           return this.handleContextGetSnapshot(request);
+        case 'context.getDetailedSnapshot':
+          return this.handleContextGetDetailedSnapshot(request);
         case 'context.shouldCompact':
           return this.handleContextShouldCompact(request);
         case 'context.previewCompaction':
@@ -401,6 +408,8 @@ export class RpcHandler extends EventEmitter {
           return this.handleVoiceNotesSave(request);
         case 'voiceNotes.list':
           return this.handleVoiceNotesList(request);
+        case 'voiceNotes.delete':
+          return this.handleVoiceNotesDelete(request);
 
         default:
           return this.errorResponse(request.id, 'METHOD_NOT_FOUND', `Unknown method: ${request.method}`);
@@ -1258,6 +1267,28 @@ export class RpcHandler extends EventEmitter {
     }
   }
 
+  private async handleContextGetDetailedSnapshot(request: RpcRequest): Promise<RpcResponse> {
+    if (!this.context.contextManager) {
+      return this.errorResponse(request.id, 'NOT_SUPPORTED', 'Context manager not available');
+    }
+
+    const params = request.params as ContextGetDetailedSnapshotParams | undefined;
+
+    if (!params?.sessionId) {
+      return this.errorResponse(request.id, 'INVALID_PARAMS', 'sessionId is required');
+    }
+
+    try {
+      const result = this.context.contextManager.getDetailedContextSnapshot(params.sessionId);
+      return this.successResponse(request.id, result);
+    } catch (error) {
+      if (error instanceof Error && error.message.includes('not active')) {
+        return this.errorResponse(request.id, 'SESSION_NOT_ACTIVE', 'Session is not active');
+      }
+      throw error;
+    }
+  }
+
   private async handleContextShouldCompact(request: RpcRequest): Promise<RpcResponse> {
     if (!this.context.contextManager) {
       return this.errorResponse(request.id, 'NOT_SUPPORTED', 'Context manager not available');
@@ -1521,6 +1552,46 @@ ${transcribeResult.text}
       language,
       preview,
     };
+  }
+
+  private async handleVoiceNotesDelete(request: RpcRequest): Promise<RpcResponse> {
+    const params = request.params as VoiceNotesDeleteParams | undefined;
+
+    if (!params?.filename) {
+      return this.errorResponse(request.id, 'INVALID_PARAMS', 'filename is required');
+    }
+
+    try {
+      const notesDir = getNotesDir();
+      const filepath = path.join(notesDir, params.filename);
+
+      // Security: Ensure the file is within the notes directory
+      const resolvedPath = path.resolve(filepath);
+      const resolvedNotesDir = path.resolve(notesDir);
+      if (!resolvedPath.startsWith(resolvedNotesDir)) {
+        return this.errorResponse(request.id, 'INVALID_PARAMS', 'Invalid filename');
+      }
+
+      // Check if file exists
+      try {
+        await fs.access(filepath);
+      } catch {
+        return this.errorResponse(request.id, 'NOT_FOUND', `Voice note not found: ${params.filename}`);
+      }
+
+      // Delete the file
+      await fs.unlink(filepath);
+
+      const result: VoiceNotesDeleteResult = {
+        success: true,
+        filename: params.filename,
+      };
+
+      return this.successResponse(request.id, result);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to delete voice note';
+      return this.errorResponse(request.id, 'VOICE_NOTE_DELETE_FAILED', message);
+    }
   }
 
   // ===========================================================================

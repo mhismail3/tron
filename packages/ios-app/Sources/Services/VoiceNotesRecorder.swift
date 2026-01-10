@@ -125,6 +125,9 @@ final class VoiceNotesRecorder: NSObject, ObservableObject, AVAudioRecorderDeleg
             self.state = .recording
             self.recordingDuration = 0
 
+            // Tell the availability monitor we're recording so it doesn't interfere
+            AudioAvailabilityMonitor.shared.isRecordingInProgress = true
+
             startTimers()
             scheduleAutoStop()
         } catch let error as RecorderError {
@@ -150,6 +153,7 @@ final class VoiceNotesRecorder: NSObject, ObservableObject, AVAudioRecorderDeleg
         state = .idle
         audioLevel = 0
         recordingDuration = 0
+        AudioAvailabilityMonitor.shared.isRecordingInProgress = false
     }
 
     func reset() {
@@ -180,6 +184,7 @@ final class VoiceNotesRecorder: NSObject, ObservableObject, AVAudioRecorderDeleg
                 self?.updateMeters()
             }
         }
+        RunLoop.main.add(levelTimer!, forMode: .common)
 
         // Duration update at 1Hz
         durationTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
@@ -187,6 +192,7 @@ final class VoiceNotesRecorder: NSObject, ObservableObject, AVAudioRecorderDeleg
                 self?.recordingDuration += 1
             }
         }
+        RunLoop.main.add(durationTimer!, forMode: .common)
     }
 
     private func stopTimers() {
@@ -231,6 +237,7 @@ final class VoiceNotesRecorder: NSObject, ObservableObject, AVAudioRecorderDeleg
     private func handleRecorderFinished(success: Bool) {
         stopTimers()
         audioLevel = 0
+        AudioAvailabilityMonitor.shared.isRecordingInProgress = false
 
         try? AVAudioSession.sharedInstance().setActive(false, options: [.notifyOthersOnDeactivation])
 
@@ -247,6 +254,7 @@ final class VoiceNotesRecorder: NSObject, ObservableObject, AVAudioRecorderDeleg
     private func handleRecorderError() {
         stopTimers()
         audioLevel = 0
+        AudioAvailabilityMonitor.shared.isRecordingInProgress = false
         cleanupFile()
         state = .idle
         recorder = nil
