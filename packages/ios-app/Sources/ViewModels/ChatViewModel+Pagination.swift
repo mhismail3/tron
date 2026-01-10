@@ -99,6 +99,9 @@ extension ChatViewModel {
             // Update turn counter from unified state
             currentTurn = state.currentTurn
 
+            // Restore lastTurnInputTokens and compute incrementalTokens for loaded messages
+            restoreTokenStateFromMessages()
+
             // Get token totals from cached session (server source of truth)
             // instead of reconstructed state (local calculation that may double-count)
             if let session = try? manager.eventDB.getSession(sessionId) {
@@ -192,5 +195,40 @@ extension ChatViewModel {
     /// Append a new message to the display (streaming messages during active session)
     func appendMessage(_ message: ChatMessage) {
         messages.append(message)
+    }
+
+    /// Restore token state from loaded messages (called on session resume)
+    /// This ensures lastTurnInputTokens and incrementalTokens are properly set
+    /// when returning to a session from the dashboard
+    func restoreTokenStateFromMessages() {
+        // 1. Find last assistant message to restore lastTurnInputTokens
+        for message in messages.reversed() {
+            if message.role == .assistant, let usage = message.tokenUsage {
+                lastTurnInputTokens = usage.inputTokens
+                logger.debug("Restored lastTurnInputTokens=\(usage.inputTokens) from last assistant message", category: .session)
+                break
+            }
+        }
+
+        // 2. Compute incrementalTokens for all assistant messages that don't have it
+        var previousInputTokens = 0
+        for i in 0..<messages.count {
+            if messages[i].role == .assistant, let usage = messages[i].tokenUsage {
+                // Only compute if not already set
+                if messages[i].incrementalTokens == nil {
+                    let incrementalInput = max(0, usage.inputTokens - previousInputTokens)
+                    messages[i].incrementalTokens = TokenUsage(
+                        inputTokens: incrementalInput,
+                        outputTokens: usage.outputTokens,
+                        cacheReadTokens: usage.cacheReadTokens,
+                        cacheCreationTokens: usage.cacheCreationTokens
+                    )
+                }
+                // Update previousInputTokens for next iteration
+                previousInputTokens = usage.inputTokens
+            }
+        }
+
+        logger.debug("Restored token state for \(messages.filter { $0.role == .assistant }.count) assistant messages", category: .session)
     }
 }
