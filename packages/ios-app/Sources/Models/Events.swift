@@ -330,6 +330,21 @@ struct CompactionEvent: Decodable {
     var reason: String { data.reason ?? "auto" }
 }
 
+struct ContextClearedEvent: Decodable {
+    let type: String
+    let sessionId: String?
+    let timestamp: String?
+    let data: ContextClearedData
+
+    struct ContextClearedData: Decodable {
+        let tokensBefore: Int
+        let tokensAfter: Int
+    }
+
+    var tokensBefore: Int { data.tokensBefore }
+    var tokensAfter: Int { data.tokensAfter }
+}
+
 struct ConnectedEvent: Decodable {
     let type: String
     let timestamp: String?
@@ -358,6 +373,7 @@ enum EventType: String {
     case complete = "agent.complete"
     case error = "agent.error"
     case compaction = "agent.compaction"
+    case contextCleared = "agent.context_cleared"
     case connected = "connection.established"
     case systemConnected = "system.connected"
     case sessionCreated = "session.created"
@@ -378,6 +394,7 @@ enum ParsedEvent {
     case complete(CompleteEvent)
     case error(ErrorEvent)
     case compaction(CompactionEvent)
+    case contextCleared(ContextClearedEvent)
     case connected(ConnectedEvent)
     case unknown(String)
 
@@ -428,6 +445,11 @@ enum ParsedEvent {
                 let event = try decoder.decode(CompactionEvent.self, from: data)
                 logger.info("Context compacted: \(event.tokensBefore) -> \(event.tokensAfter) tokens (\(event.reason))", category: .events)
                 return .compaction(event)
+
+            case EventType.contextCleared.rawValue:
+                let event = try decoder.decode(ContextClearedEvent.self, from: data)
+                logger.info("Context cleared: \(event.tokensBefore) -> \(event.tokensAfter) tokens", category: .events)
+                return .contextCleared(event)
 
             case EventType.connected.rawValue, EventType.systemConnected.rawValue:
                 let event = try decoder.decode(ConnectedEvent.self, from: data)

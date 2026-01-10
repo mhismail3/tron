@@ -338,6 +338,26 @@ extension ChatViewModel {
         messages.append(compactionMessage)
     }
 
+    func handleContextCleared(_ event: ContextClearedEvent) {
+        let tokensFreed = event.tokensBefore - event.tokensAfter
+        logger.info("Context cleared: \(event.tokensBefore) -> \(event.tokensAfter) tokens (freed \(tokensFreed))", category: .events)
+
+        // Finalize any current streaming before adding notification
+        flushPendingTextUpdates()
+        finalizeStreamingMessage()
+
+        // Update context tracking - the new context size is tokensAfter
+        lastTurnInputTokens = event.tokensAfter
+        logger.debug("Updated lastTurnInputTokens to \(event.tokensAfter) after context clear", category: .events)
+
+        // Add context cleared notification pill to chat
+        let clearedMessage = ChatMessage.contextCleared(
+            tokensBefore: event.tokensBefore,
+            tokensAfter: event.tokensAfter
+        )
+        messages.append(clearedMessage)
+    }
+
     func handleError(_ message: String) {
         logger.error("Agent error: \(message)", category: .events)
         isProcessing = false

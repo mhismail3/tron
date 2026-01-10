@@ -37,6 +37,7 @@ class RPCClient: ObservableObject {
     var onTurnEnd: ((TurnEndEvent) -> Void)?
     var onAgentTurn: ((AgentTurnEvent) -> Void)?
     var onCompaction: ((CompactionEvent) -> Void)?
+    var onContextCleared: ((ContextClearedEvent) -> Void)?
     var onComplete: (() -> Void)?
     var onError: ((String) -> Void)?
 
@@ -174,6 +175,10 @@ class RPCClient: ObservableObject {
         case .compaction(let e):
             guard checkSession(e.sessionId) else { return }
             onCompaction?(e)
+
+        case .contextCleared(let e):
+            guard checkSession(e.sessionId) else { return }
+            onContextCleared?(e)
 
         case .error(let e):
             // Always notify global listeners for dashboard updates

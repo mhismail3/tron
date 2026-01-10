@@ -164,6 +164,10 @@ class ChatViewModel: ObservableObject {
             self?.handleCompaction(event)
         }
 
+        rpcClient.onContextCleared = { [weak self] event in
+            self?.handleContextCleared(event)
+        }
+
         rpcClient.onComplete = { [weak self] in
             self?.handleComplete()
         }

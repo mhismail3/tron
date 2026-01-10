@@ -616,6 +616,18 @@ export class TronServer {
       });
     });
 
+    this.orchestrator.on('context_cleared', (data) => {
+      this.wsServer?.broadcastEvent({
+        type: 'agent.context_cleared',
+        sessionId: data.sessionId,
+        timestamp: new Date().toISOString(),
+        data: {
+          tokensBefore: data.tokensBefore,
+          tokensAfter: data.tokensAfter,
+        },
+      });
+    });
+
     this.isRunning = true;
 
     logger.info('Tron server started', {
