@@ -1218,6 +1218,7 @@ struct WorkspaceSelector: View {
             }
         }
         .presentationDetents([.medium, .large])
+        .presentationDragIndicator(.hidden)
         .preferredColorScheme(.dark)
     }
 
