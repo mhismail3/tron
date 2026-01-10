@@ -2,6 +2,12 @@ import SwiftUI
 
 // MARK: - Session Sidebar
 
+/// Navigation mode for the main view
+enum NavigationMode: String, CaseIterable {
+    case agents = "Agents"
+    case voiceNotes = "Voice Notes"
+}
+
 @available(iOS 26.0, *)
 struct SessionSidebar: View {
     @EnvironmentObject var eventStoreManager: EventStoreManager
@@ -10,6 +16,8 @@ struct SessionSidebar: View {
     let onNewSession: () -> Void
     let onDeleteSession: (String) -> Void
     let onSettings: () -> Void
+    let onVoiceNote: () -> Void
+    var onNavigationModeChange: ((NavigationMode) -> Void)?
 
     var body: some View {
         ZStack(alignment: .bottomTrailing) {
@@ -36,19 +44,32 @@ struct SessionSidebar: View {
             .listStyle(.plain)
             .scrollContentBackground(.hidden)
 
-            // Floating circular plus button - iOS 26 liquid glass style
-            FloatingNewSessionButton(action: onNewSession)
-                .padding(.trailing, 20)
-                .padding(.bottom, 24)
+            // Floating buttons - mic (smaller) and plus
+            HStack(spacing: 12) {
+                FloatingVoiceNotesButton(action: onVoiceNote)
+                FloatingNewSessionButton(action: onNewSession)
+            }
+            .padding(.trailing, 20)
+            .padding(.bottom, 24)
         }
         .navigationBarTitleDisplayMode(.inline)
         .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
         .toolbar {
             ToolbarItem(placement: .topBarLeading) {
-                Image("TronLogo")
-                    .resizable()
-                    .aspectRatio(contentMode: .fit)
-                    .frame(height: 28)
+                Menu {
+                    ForEach(NavigationMode.allCases, id: \.self) { mode in
+                        Button {
+                            onNavigationModeChange?(mode)
+                        } label: {
+                            Label(mode.rawValue, systemImage: mode == .agents ? "cpu" : "waveform")
+                        }
+                    }
+                } label: {
+                    Image("TronLogo")
+                        .resizable()
+                        .aspectRatio(contentMode: .fit)
+                        .frame(height: 28)
+                }
             }
             ToolbarItem(placement: .principal) {
                 Text("TRON")

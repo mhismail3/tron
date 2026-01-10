@@ -70,7 +70,13 @@ import type {
   ContextConfirmCompactionResult,
   ContextCanAcceptTurnParams,
   ContextCanAcceptTurnResult,
+  VoiceNotesSaveParams,
+  VoiceNotesSaveResult,
+  VoiceNotesListParams,
+  VoiceNotesListResult,
+  VoiceNoteMetadata,
 } from './types.js';
+import { getNotesDir } from '../settings/loader.js';
 import { ANTHROPIC_MODELS, OPENAI_CODEX_MODELS } from '../providers/models.js';
 
 const logger = createLogger('rpc');
@@ -389,6 +395,12 @@ export class RpcHandler extends EventEmitter {
           return this.handleContextConfirmCompaction(request);
         case 'context.canAcceptTurn':
           return this.handleContextCanAcceptTurn(request);
+
+        // Voice Notes methods
+        case 'voiceNotes.save':
+          return this.handleVoiceNotesSave(request);
+        case 'voiceNotes.list':
+          return this.handleVoiceNotesList(request);
 
         default:
           return this.errorResponse(request.id, 'METHOD_NOT_FOUND', `Unknown method: ${request.method}`);
@@ -1342,6 +1354,173 @@ export class RpcHandler extends EventEmitter {
       }
       throw error;
     }
+  }
+
+  // ===========================================================================
+  // Voice Notes Handlers
+  // ===========================================================================
+
+  private async handleVoiceNotesSave(request: RpcRequest): Promise<RpcResponse> {
+    const params = request.params as VoiceNotesSaveParams | undefined;
+
+    if (!params?.audioBase64) {
+      return this.errorResponse(request.id, 'INVALID_PARAMS', 'audioBase64 is required');
+    }
+
+    if (!this.context.transcriptionManager) {
+      return this.errorResponse(request.id, 'NOT_SUPPORTED', 'Transcription not available');
+    }
+
+    try {
+      // 1. Transcribe the audio using existing pipeline
+      const transcribeResult = await this.context.transcriptionManager.transcribeAudio({
+        audioBase64: params.audioBase64,
+        mimeType: params.mimeType,
+        fileName: params.fileName,
+        transcriptionModelId: params.transcriptionModelId,
+      });
+
+      // 2. Generate filename and create notes directory
+      const now = new Date();
+      const dateStr = now.toISOString().slice(0, 10);
+      const timeStr = now.toTimeString().slice(0, 8).replace(/:/g, '');
+      const filename = `${dateStr}-${timeStr}-voice-note.md`;
+      const notesDir = getNotesDir();
+      await fs.mkdir(notesDir, { recursive: true });
+      const filepath = path.join(notesDir, filename);
+
+      // 3. Create markdown content with frontmatter
+      const content = `---
+type: voice-note
+created: ${now.toISOString()}
+duration: ${transcribeResult.durationSeconds}
+language: ${transcribeResult.language}
+model: ${transcribeResult.model}
+---
+
+# Voice Note - ${now.toLocaleDateString('en-US', { dateStyle: 'long' })} at ${now.toLocaleTimeString('en-US', { timeStyle: 'short' })}
+
+${transcribeResult.text}
+`;
+
+      // 4. Save the file
+      await fs.writeFile(filepath, content, 'utf-8');
+
+      const result: VoiceNotesSaveResult = {
+        success: true,
+        filename,
+        filepath,
+        transcription: {
+          text: transcribeResult.text,
+          language: transcribeResult.language,
+          durationSeconds: transcribeResult.durationSeconds,
+        },
+      };
+
+      return this.successResponse(request.id, result);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to save voice note';
+      return this.errorResponse(request.id, 'VOICE_NOTE_FAILED', message);
+    }
+  }
+
+  private async handleVoiceNotesList(request: RpcRequest): Promise<RpcResponse> {
+    const params = (request.params || {}) as VoiceNotesListParams;
+    const limit = params.limit ?? 50;
+    const offset = params.offset ?? 0;
+
+    try {
+      const notesDir = getNotesDir();
+
+      // Check if directory exists
+      try {
+        await fs.access(notesDir);
+      } catch {
+        // Directory doesn't exist yet - return empty list
+        return this.successResponse(request.id, {
+          notes: [],
+          totalCount: 0,
+          hasMore: false,
+        });
+      }
+
+      // Read directory and filter for markdown files
+      const files = await fs.readdir(notesDir);
+      const mdFiles = files.filter(f => f.endsWith('.md')).sort().reverse();
+      const totalCount = mdFiles.length;
+
+      // Apply pagination
+      const pageFiles = mdFiles.slice(offset, offset + limit);
+      const hasMore = offset + limit < totalCount;
+
+      // Parse each file for metadata
+      const notes: VoiceNoteMetadata[] = [];
+      for (const filename of pageFiles) {
+        const filepath = path.join(notesDir, filename);
+        try {
+          const content = await fs.readFile(filepath, 'utf-8');
+          const metadata = this.parseVoiceNoteMetadata(filename, filepath, content);
+          notes.push(metadata);
+        } catch {
+          // Skip files that can't be read
+        }
+      }
+
+      const result: VoiceNotesListResult = { notes, totalCount, hasMore };
+      return this.successResponse(request.id, result);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to list voice notes';
+      return this.errorResponse(request.id, 'VOICE_NOTES_LIST_FAILED', message);
+    }
+  }
+
+  private parseVoiceNoteMetadata(
+    filename: string,
+    filepath: string,
+    content: string
+  ): VoiceNoteMetadata {
+    // Parse frontmatter
+    const frontmatterMatch = content.match(/^---\n([\s\S]*?)\n---/);
+    let createdAt = '';
+    let durationSeconds: number | undefined;
+    let language: string | undefined;
+
+    if (frontmatterMatch && frontmatterMatch[1]) {
+      const fm = frontmatterMatch[1];
+      const createdMatch = fm.match(/created:\s*(.+)/);
+      const durationMatch = fm.match(/duration:\s*(\d+(?:\.\d+)?)/);
+      const languageMatch = fm.match(/language:\s*(\w+)/);
+
+      if (createdMatch?.[1]) createdAt = createdMatch[1].trim();
+      if (durationMatch?.[1]) durationSeconds = parseFloat(durationMatch[1]);
+      if (languageMatch?.[1]) language = languageMatch[1];
+    }
+
+    // Get preview (first non-frontmatter, non-header line)
+    const lines = content.split('\n');
+    let preview = '';
+    let inFrontmatter = false;
+    for (const line of lines) {
+      if (line === '---') {
+        inFrontmatter = !inFrontmatter;
+        continue;
+      }
+      if (inFrontmatter) continue;
+      if (line.startsWith('#')) continue;
+      if (line.trim()) {
+        preview = line.trim().slice(0, 100);
+        break;
+      }
+    }
+
+    return {
+      filename,
+      filepath,
+      createdAt,
+      durationSeconds,
+      language,
+      preview,
+    };
   }
 
   // ===========================================================================

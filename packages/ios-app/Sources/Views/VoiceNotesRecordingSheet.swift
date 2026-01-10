@@ -1,0 +1,228 @@
+import SwiftUI
+
+/// Recording sheet for voice notes with sine wave visualization and post-recording confirmation.
+/// Styled to match NewSessionFlow sheet.
+@available(iOS 26.0, *)
+struct VoiceNotesRecordingSheet: View {
+    @StateObject private var recorder = VoiceNotesRecorder()
+    @State private var isSaving = false
+    @State private var errorMessage: String?
+
+    let rpcClient: RPCClient
+    let onComplete: (String) -> Void  // Receives filename
+    let onCancel: () -> Void
+
+    var body: some View {
+        NavigationStack {
+            VStack(spacing: 24) {
+                Spacer()
+
+                // Duration display
+                Text(formattedDuration)
+                    .font(.system(size: 56, weight: .ultraLight, design: .monospaced))
+                    .foregroundStyle(.white)
+
+                // Sine wave visualization
+                SineWaveView(audioLevel: recorder.audioLevel, color: .tronEmerald)
+                    .frame(height: 80)
+                    .padding(.horizontal, 20)
+
+                // Status text
+                Group {
+                    if isSaving {
+                        HStack(spacing: 8) {
+                            ProgressView().tint(.tronEmerald)
+                            Text("Transcribing...")
+                        }
+                        .foregroundStyle(.white.opacity(0.7))
+                    } else if recorder.isRecording {
+                        Text("Recording...")
+                            .foregroundStyle(.tronEmerald)
+                    } else if recorder.hasStopped {
+                        Text("Ready to save")
+                            .foregroundStyle(.white.opacity(0.7))
+                    } else {
+                        Text("Tap mic to start")
+                            .foregroundStyle(.white.opacity(0.5))
+                    }
+                }
+                .font(.system(size: 14, design: .monospaced))
+
+                // Max duration indicator
+                if recorder.isRecording {
+                    Text("Max: 5 minutes")
+                        .font(.system(size: 12, design: .monospaced))
+                        .foregroundStyle(.white.opacity(0.3))
+                }
+
+                Spacer()
+
+                // Control buttons
+                controlButtons
+                    .padding(.bottom, 40)
+            }
+            .padding(.horizontal, 24)
+            .background(Color.tronSurface)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button { onCancel() } label: {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 14, weight: .medium))
+                            .foregroundStyle(.tronEmerald)
+                    }
+                }
+                ToolbarItem(placement: .principal) {
+                    Text("Voice Note")
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(.tronEmerald)
+                }
+            }
+        }
+        .presentationDetents([.medium, .large])
+        .presentationDragIndicator(.hidden)
+        .tint(.tronEmerald)
+        .preferredColorScheme(.dark)
+        .onAppear {
+            // Auto-start recording when sheet appears
+            Task {
+                try? await recorder.startRecording()
+            }
+        }
+        .onDisappear {
+            recorder.cancelRecording()
+        }
+        .alert("Error", isPresented: .constant(errorMessage != nil)) {
+            Button("OK") { errorMessage = nil }
+        } message: {
+            Text(errorMessage ?? "")
+        }
+    }
+
+    private var formattedDuration: String {
+        let minutes = Int(recorder.recordingDuration) / 60
+        let seconds = Int(recorder.recordingDuration) % 60
+        return String(format: "%02d:%02d", minutes, seconds)
+    }
+
+    @ViewBuilder
+    private var controlButtons: some View {
+        if recorder.hasStopped {
+            // Post-recording: Cancel, Save, Re-record - icons only, vertically aligned
+            HStack(alignment: .center, spacing: 32) {
+                // Cancel - smaller button
+                Button(action: onCancel) {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 18, weight: .semibold))
+                        .foregroundStyle(.white.opacity(0.7))
+                        .frame(width: 52, height: 52)
+                }
+                .glassEffect(.regular.tint(Color.white.opacity(0.1)).interactive(), in: .circle)
+                .disabled(isSaving)
+
+                // Save - larger primary button, vertically centered with others
+                Button(action: handleSave) {
+                    if isSaving {
+                        ProgressView().tint(.white)
+                            .frame(width: 64, height: 64)
+                    } else {
+                        Image(systemName: "checkmark")
+                            .font(.system(size: 24, weight: .semibold))
+                            .foregroundStyle(.white)
+                            .frame(width: 64, height: 64)
+                    }
+                }
+                .glassEffect(.regular.tint(Color.tronEmerald.opacity(0.6)).interactive(), in: .circle)
+                .disabled(isSaving)
+
+                // Re-record - smaller button
+                Button(action: handleReRecord) {
+                    Image(systemName: "arrow.counterclockwise")
+                        .font(.system(size: 18, weight: .semibold))
+                        .foregroundStyle(.white.opacity(0.7))
+                        .frame(width: 52, height: 52)
+                }
+                .glassEffect(.regular.tint(Color.white.opacity(0.1)).interactive(), in: .circle)
+                .disabled(isSaving)
+            }
+        } else {
+            // Recording state: Cancel and Stop/Start
+            HStack(spacing: 48) {
+                // Cancel
+                Button(action: onCancel) {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 18, weight: .semibold))
+                        .foregroundStyle(.white.opacity(0.7))
+                        .frame(width: 52, height: 52)
+                }
+                .glassEffect(.regular.tint(Color.white.opacity(0.1)).interactive(), in: .circle)
+
+                // Record/Stop
+                Button(action: handleRecordTap) {
+                    Image(systemName: recorder.isRecording ? "stop.fill" : "mic.fill")
+                        .font(.system(size: 24, weight: .semibold))
+                        .foregroundStyle(recorder.isRecording ? .white : .tronEmerald)
+                        .frame(width: 72, height: 72)
+                }
+                .glassEffect(
+                    .regular.tint(recorder.isRecording ? Color.red.opacity(0.5) : Color.tronEmerald.opacity(0.5)).interactive(),
+                    in: .circle
+                )
+            }
+        }
+    }
+
+    // MARK: - Actions
+
+    private func handleRecordTap() {
+        if recorder.isRecording {
+            recorder.stopRecording()
+        } else {
+            Task {
+                do {
+                    try await recorder.startRecording()
+                } catch {
+                    errorMessage = error.localizedDescription
+                }
+            }
+        }
+    }
+
+    private func handleReRecord() {
+        recorder.reset()
+        Task {
+            try? await recorder.startRecording()
+        }
+    }
+
+    private func handleSave() {
+        guard let url = recorder.getRecordingURL() else { return }
+
+        isSaving = true
+        recorder.markSaving()
+
+        Task {
+            do {
+                let data = try Data(contentsOf: url)
+
+                // Fire-and-forget: dismiss immediately, save in background
+                let result = try await rpcClient.saveVoiceNote(
+                    audioData: data
+                )
+
+                // Clean up temp file
+                try? FileManager.default.removeItem(at: url)
+
+                await MainActor.run {
+                    onComplete(result.filename)
+                }
+            } catch {
+                await MainActor.run {
+                    isSaving = false
+                    errorMessage = error.localizedDescription
+                }
+            }
+        }
+    }
+}

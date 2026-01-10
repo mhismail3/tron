@@ -77,6 +77,12 @@ struct ContentView: View {
     @State private var sessionToArchive: String?
     @AppStorage("confirmArchive") private var confirmArchive = true
 
+    // Voice notes recording
+    @State private var showVoiceNotesRecording = false
+
+    // Navigation mode (Agents vs Voice Notes)
+    @State private var navigationMode: NavigationMode = .agents
+
     var body: some View {
         Group {
             // On iPhone with no sessions, show WelcomePage directly
@@ -87,20 +93,35 @@ struct ContentView: View {
                 )
             } else {
                 NavigationSplitView(columnVisibility: $columnVisibility) {
-                    // Sidebar
-                    SessionSidebar(
-                        selectedSessionId: $selectedSessionId,
-                        onNewSession: { showNewSessionSheet = true },
-                        onDeleteSession: { sessionId in
-                            if confirmArchive {
-                                sessionToArchive = sessionId
-                                showArchiveConfirmation = true
-                            } else {
-                                deleteSession(sessionId)
+                    // Sidebar - conditionally show Agents or Voice Notes
+                    if navigationMode == .agents {
+                        SessionSidebar(
+                            selectedSessionId: $selectedSessionId,
+                            onNewSession: { showNewSessionSheet = true },
+                            onDeleteSession: { sessionId in
+                                if confirmArchive {
+                                    sessionToArchive = sessionId
+                                    showArchiveConfirmation = true
+                                } else {
+                                    deleteSession(sessionId)
+                                }
+                            },
+                            onSettings: { showSettings = true },
+                            onVoiceNote: { showVoiceNotesRecording = true },
+                            onNavigationModeChange: { mode in
+                                navigationMode = mode
                             }
-                        },
-                        onSettings: { showSettings = true }
-                    )
+                        )
+                    } else {
+                        VoiceNotesListView(
+                            rpcClient: appState.rpcClient,
+                            onVoiceNote: { showVoiceNotesRecording = true },
+                            onSettings: { showSettings = true },
+                            onNavigationModeChange: { mode in
+                                navigationMode = mode
+                            }
+                        )
+                    }
                 } detail: {
                     // Main content
                     if let sessionId = selectedSessionId,
@@ -152,6 +173,18 @@ struct ContentView: View {
         }
         .sheet(isPresented: $showSettings) {
             SettingsView(rpcClient: appState.rpcClient)
+        }
+        .sheet(isPresented: $showVoiceNotesRecording) {
+            VoiceNotesRecordingSheet(
+                rpcClient: appState.rpcClient,
+                onComplete: { _ in
+                    showVoiceNotesRecording = false
+                    // If we're in voice notes mode, the list will auto-refresh
+                },
+                onCancel: {
+                    showVoiceNotesRecording = false
+                }
+            )
         }
         .alert("Archive Session?", isPresented: $showArchiveConfirmation) {
             Button("Cancel", role: .cancel) {

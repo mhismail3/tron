@@ -65,6 +65,12 @@
 		FACF3272EAAA614047FA83C8 /* EventDatabaseTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A013DFE849DA84E8EA5F545C /* EventDatabaseTests.swift */; };
 		FE3D89D152521876D2DDF464 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 8347F0B7D54B1F1EAA6C762C /* Assets.xcassets */; };
 		D4E5F6A1B2C30718293A4B5C /* ReasoningLevelPicker.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F60718293A4B5C /* ReasoningLevelPicker.swift */; };
+		VOICE001000000001A0000001 /* FloatingVoiceNotesButton.swift in Sources */ = {isa = PBXBuildFile; fileRef = VOICE001000000002A0000001 /* FloatingVoiceNotesButton.swift */; };
+		VOICE001000000003A0000001 /* SineWaveView.swift in Sources */ = {isa = PBXBuildFile; fileRef = VOICE001000000004A0000001 /* SineWaveView.swift */; };
+		VOICE001000000005A0000001 /* VoiceNoteDetailSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = VOICE001000000006A0000001 /* VoiceNoteDetailSheet.swift */; };
+		VOICE001000000007A0000001 /* VoiceNotesListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = VOICE001000000008A0000001 /* VoiceNotesListView.swift */; };
+		VOICE001000000009A0000001 /* VoiceNotesRecordingSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = VOICE00100000000AA0000001 /* VoiceNotesRecordingSheet.swift */; };
+		VOICE00100000000BA0000001 /* VoiceNotesRecorder.swift in Sources */ = {isa = PBXBuildFile; fileRef = VOICE00100000000CA0000001 /* VoiceNotesRecorder.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -139,6 +145,12 @@
 		F2B298578C85F2293B9568BA /* TronMobile.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = TronMobile.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		FD89009575AAF815668A8370 /* EventStoreManager+Dashboard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "EventStoreManager+Dashboard.swift"; sourceTree = "<group>"; };
 		A1B2C3D4E5F60718293A4B5C /* ReasoningLevelPicker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReasoningLevelPicker.swift; sourceTree = "<group>"; };
+		VOICE001000000002A0000001 /* FloatingVoiceNotesButton.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FloatingVoiceNotesButton.swift; sourceTree = "<group>"; };
+		VOICE001000000004A0000001 /* SineWaveView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SineWaveView.swift; sourceTree = "<group>"; };
+		VOICE001000000006A0000001 /* VoiceNoteDetailSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceNoteDetailSheet.swift; sourceTree = "<group>"; };
+		VOICE001000000008A0000001 /* VoiceNotesListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceNotesListView.swift; sourceTree = "<group>"; };
+		VOICE00100000000AA0000001 /* VoiceNotesRecordingSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceNotesRecordingSheet.swift; sourceTree = "<group>"; };
+		VOICE00100000000CA0000001 /* VoiceNotesRecorder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceNotesRecorder.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXGroup section */
@@ -193,6 +205,7 @@
 				F1C2A3B4D5E6F708192A3B4C /* AudioRecorder.swift */,
 				B9DD45A3974192F927E1B73A /* RPCClient.swift */,
 				18C18EEFAB81D6052EB39694 /* TronLogger.swift */,
+				VOICE00100000000CA0000001 /* VoiceNotesRecorder.swift */,
 				79449B7B56831FA69C873699 /* WebSocketService.swift */,
 			);
 			path = Services;
@@ -234,6 +247,7 @@
 			children = (
 				5571DC3A896875D1693192D9 /* ChatView.swift */,
 				11A3A5FE4D68F7D714067F63 /* ContextAuditView.swift */,
+				VOICE001000000002A0000001 /* FloatingVoiceNotesButton.swift */,
 				3EF2CB735CA19344DB30086D /* InputBar.swift */,
 				AD61CD33CD78B1F23CDBABD7 /* LogViewer.swift */,
 				C37E248C562712A416669C61 /* MessageBubble.swift */,
@@ -243,7 +257,11 @@
 				766753AA2F765B13E1B4676A /* SessionSidebar.swift */,
 				9EC65CD838F5540EC3B1AA02 /* SessionTreeView.swift */,
 				42E47B6EAD030227C54F0028 /* SettingsView.swift */,
+				VOICE001000000004A0000001 /* SineWaveView.swift */,
 				69203645DAFCA91156124C1F /* ToolResultViewers.swift */,
+				VOICE001000000006A0000001 /* VoiceNoteDetailSheet.swift */,
+				VOICE001000000008A0000001 /* VoiceNotesListView.swift */,
+				VOICE00100000000AA0000001 /* VoiceNotesRecordingSheet.swift */,
 				33342D92F24E04282ECE2DBA /* WorktreeStatusView.swift */,
 			);
 			path = Views;
@@ -458,6 +476,12 @@
 				DB84AFFF8F9ADCC50F75B33B /* WebSocketService.swift in Sources */,
 				C591192B9B46127C61E725EC /* WorktreeStatusView.swift in Sources */,
 				D4E5F6A1B2C30718293A4B5C /* ReasoningLevelPicker.swift in Sources */,
+				VOICE001000000001A0000001 /* FloatingVoiceNotesButton.swift in Sources */,
+				VOICE001000000003A0000001 /* SineWaveView.swift in Sources */,
+				VOICE001000000005A0000001 /* VoiceNoteDetailSheet.swift in Sources */,
+				VOICE001000000007A0000001 /* VoiceNotesListView.swift in Sources */,
+				VOICE001000000009A0000001 /* VoiceNotesRecordingSheet.swift in Sources */,
+				VOICE00100000000BA0000001 /* VoiceNotesRecorder.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

@@ -476,3 +476,10 @@ export function resolveTronPath(relativePath: string, tronDir?: string): string 
 export function getTronDataDir(homeDir?: string): string {
   return getSettingsDir(homeDir);
 }
+
+/**
+ * Get the path to the voice notes directory (~/.tron/notes)
+ */
+export function getNotesDir(homeDir?: string): string {
+  return path.join(getSettingsDir(homeDir), 'notes');
+}

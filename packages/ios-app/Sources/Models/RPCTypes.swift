@@ -678,3 +678,81 @@ struct TreeGetAncestorsParams: Encodable {
 struct TreeGetAncestorsResult: Decodable {
     let events: [RawEvent]
 }
+
+// MARK: - Voice Notes Methods
+
+struct VoiceNotesSaveParams: Encodable {
+    let audioBase64: String
+    let mimeType: String?
+    let fileName: String?
+    let transcriptionModelId: String?
+}
+
+struct VoiceNotesSaveResult: Decodable {
+    let success: Bool
+    let filename: String
+    let filepath: String
+    let transcription: VoiceNoteTranscription
+}
+
+struct VoiceNoteTranscription: Decodable {
+    let text: String
+    let language: String
+    let durationSeconds: Double
+}
+
+struct VoiceNotesListParams: Encodable {
+    let limit: Int?
+    let offset: Int?
+
+    init(limit: Int? = nil, offset: Int? = nil) {
+        self.limit = limit
+        self.offset = offset
+    }
+}
+
+struct VoiceNoteMetadata: Decodable, Identifiable {
+    let filename: String
+    let filepath: String
+    let createdAt: String
+    let durationSeconds: Double?
+    let language: String?
+    let preview: String
+
+    var id: String { filename }
+
+    /// Formatted date for display
+    var formattedDate: String {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let date = formatter.date(from: createdAt) {
+            let displayFormatter = DateFormatter()
+            displayFormatter.dateStyle = .medium
+            displayFormatter.timeStyle = .short
+            return displayFormatter.string(from: date)
+        }
+        // Fallback: try without fractional seconds
+        formatter.formatOptions = [.withInternetDateTime]
+        if let date = formatter.date(from: createdAt) {
+            let displayFormatter = DateFormatter()
+            displayFormatter.dateStyle = .medium
+            displayFormatter.timeStyle = .short
+            return displayFormatter.string(from: date)
+        }
+        return createdAt
+    }
+
+    /// Formatted duration (e.g., "2:34")
+    var formattedDuration: String {
+        guard let duration = durationSeconds else { return "--:--" }
+        let minutes = Int(duration) / 60
+        let seconds = Int(duration) % 60
+        return String(format: "%d:%02d", minutes, seconds)
+    }
+}
+
+struct VoiceNotesListResult: Decodable {
+    let notes: [VoiceNoteMetadata]
+    let totalCount: Int
+    let hasMore: Bool
+}

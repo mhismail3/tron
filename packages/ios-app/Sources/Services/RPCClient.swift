@@ -783,6 +783,48 @@ class RPCClient: ObservableObject {
         return result.events
     }
 
+    // MARK: - Voice Notes Methods
+
+    /// Save a voice note with transcription
+    func saveVoiceNote(
+        audioData: Data,
+        mimeType: String = "audio/m4a",
+        fileName: String? = nil,
+        transcriptionModelId: String? = nil
+    ) async throws -> VoiceNotesSaveResult {
+        guard let ws = webSocket else {
+            throw RPCClientError.connectionNotEstablished
+        }
+
+        // Encode audio to base64 off main thread
+        let audioBase64 = await Task.detached(priority: .utility) {
+            audioData.base64EncodedString()
+        }.value
+
+        let params = VoiceNotesSaveParams(
+            audioBase64: audioBase64,
+            mimeType: mimeType,
+            fileName: fileName,
+            transcriptionModelId: transcriptionModelId
+        )
+
+        return try await ws.send(
+            method: "voiceNotes.save",
+            params: params,
+            timeout: 180.0  // 3 minutes for transcription
+        )
+    }
+
+    /// List saved voice notes
+    func listVoiceNotes(limit: Int = 50, offset: Int = 0) async throws -> VoiceNotesListResult {
+        guard let ws = webSocket else {
+            throw RPCClientError.connectionNotEstablished
+        }
+
+        let params = VoiceNotesListParams(limit: limit, offset: offset)
+        return try await ws.send(method: "voiceNotes.list", params: params)
+    }
+
     // MARK: - State Accessors
 
     var isConnected: Bool {
