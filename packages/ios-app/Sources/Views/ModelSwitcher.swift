@@ -5,19 +5,28 @@ import SwiftUI
 @available(iOS 26.0, *)
 struct ModelPillLabel: View {
     let modelName: String
+    /// When true, applies glassEffect directly to the label (for use inside Menu labels)
+    var includeGlassEffect: Bool = false
 
     var body: some View {
         HStack(spacing: 4) {
             Image(systemName: "cpu")
                 .font(.system(size: 9, weight: .medium))
             Text(modelName.shortModelName)
-                .font(.system(size: 11, weight: .medium))
+                .font(.system(size: 10, weight: .medium, design: .monospaced))
             Image(systemName: "chevron.up.chevron.down")
                 .font(.system(size: 8, weight: .medium))
         }
         .foregroundStyle(.tronEmerald)
         .padding(.horizontal, 10)
         .padding(.vertical, 5)
+        .background {
+            if includeGlassEffect {
+                Capsule()
+                    .fill(.clear)
+                    .glassEffect(.regular.tint(Color.tronPhthaloGreen.opacity(0.4)), in: .capsule)
+            }
+        }
         .contentShape(Capsule())
     }
 }
@@ -102,9 +111,8 @@ struct ModelPickerMenu: View {
                 }
             }
         } label: {
-            ModelPillLabel(modelName: currentModel)
+            ModelPillLabel(modelName: currentModel, includeGlassEffect: true)
         }
-        .glassEffect(.regular.tint(Color.tronPhthaloGreen.opacity(0.4)).interactive(), in: .capsule)
     }
 
     // MARK: - Model Button

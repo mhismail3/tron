@@ -101,13 +101,10 @@ struct ReasoningLevelPicker: View {
                 ReasoningLevelPillLabel(
                     level: selectedLevel,
                     labelFunc: levelLabel,
-                    levels: levels
+                    levels: levels,
+                    includeGlassEffect: true
                 )
             }
-            .glassEffect(
-                .regular.tint(Self.levelColor(selectedLevel, levels: levels).opacity(0.4)).interactive(),
-                in: .capsule
-            )
         }
     }
 }
@@ -118,19 +115,32 @@ struct ReasoningLevelPillLabel: View {
     let level: String
     let labelFunc: (String) -> String
     var levels: [String] = ["low", "medium", "high", "xhigh"]
+    /// When true, applies glassEffect directly to the label (for use inside Menu labels)
+    var includeGlassEffect: Bool = false
+
+    private var levelColor: Color {
+        ReasoningLevelPicker.levelColor(level, levels: levels)
+    }
 
     var body: some View {
         HStack(spacing: 4) {
             Image(systemName: ReasoningLevelPicker.levelIcon(level))
                 .font(.system(size: 9, weight: .medium))
             Text(labelFunc(level))
-                .font(.system(size: 11, weight: .medium))
+                .font(.system(size: 10, weight: .medium, design: .monospaced))
             Image(systemName: "chevron.up.chevron.down")
                 .font(.system(size: 8, weight: .medium))
         }
-        .foregroundStyle(ReasoningLevelPicker.levelColor(level, levels: levels))
+        .foregroundStyle(levelColor)
         .padding(.horizontal, 10)
         .padding(.vertical, 5)
+        .background {
+            if includeGlassEffect {
+                Capsule()
+                    .fill(.clear)
+                    .glassEffect(.regular.tint(levelColor.opacity(0.4)), in: .capsule)
+            }
+        }
         .contentShape(Capsule())
     }
 }

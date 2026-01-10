@@ -497,8 +497,7 @@ struct InputBar: View {
     }
 
     private var modelPillDock: some View {
-        ModelPillLabel(modelName: modelName)
-            .glassEffect(.regular.tint(Color.tronPhthaloGreen.opacity(0.4)).interactive(), in: .capsule)
+        ModelPillLabel(modelName: modelName, includeGlassEffect: true)
             .matchedGeometryEffect(id: "modelPillMorph", in: modelPillNamespace)
             .opacity(0)
             .allowsHitTesting(false)
