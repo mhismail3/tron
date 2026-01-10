@@ -513,8 +513,13 @@ struct NewSessionFlow: View {
                             }
                             .padding(.horizontal, 16)
                             .padding(.vertical, 14)
+                            .background {
+                                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                    .fill(.clear)
+                                    .glassEffect(.regular.tint(Color.tronPhthaloGreen.opacity(0.15)), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                            }
+                            .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                         }
-                        .glassEffect(.regular.tint(Color.tronPhthaloGreen.opacity(0.15)).interactive(), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
 
                         Text(modelDescription)
                             .font(.system(size: 11, design: .monospaced))
@@ -1212,6 +1217,7 @@ struct WorkspaceSelector: View {
                 await loadHome()
             }
         }
+        .presentationDetents([.medium, .large])
         .preferredColorScheme(.dark)
     }
 
