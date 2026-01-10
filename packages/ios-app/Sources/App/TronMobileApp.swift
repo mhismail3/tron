@@ -85,12 +85,27 @@ struct ContentView: View {
 
     var body: some View {
         Group {
-            // On iPhone with no sessions, show WelcomePage directly
-            if horizontalSizeClass == .compact && eventStoreManager.sessions.isEmpty {
+            // On iPhone with no sessions, show WelcomePage or VoiceNotesListView
+            if horizontalSizeClass == .compact && eventStoreManager.sessions.isEmpty && navigationMode == .agents {
                 WelcomePage(
                     onNewSession: { showNewSessionSheet = true },
-                    onSettings: { showSettings = true }
+                    onSettings: { showSettings = true },
+                    onVoiceNote: { showVoiceNotesRecording = true },
+                    onNavigationModeChange: { mode in
+                        navigationMode = mode
+                    }
                 )
+            } else if horizontalSizeClass == .compact && navigationMode == .voiceNotes {
+                NavigationStack {
+                    VoiceNotesListView(
+                        rpcClient: appState.rpcClient,
+                        onVoiceNote: { showVoiceNotesRecording = true },
+                        onSettings: { showSettings = true },
+                        onNavigationModeChange: { mode in
+                            navigationMode = mode
+                        }
+                    )
+                }
             } else {
                 NavigationSplitView(columnVisibility: $columnVisibility) {
                     // Sidebar - conditionally show Agents or Voice Notes
@@ -133,7 +148,8 @@ struct ContentView: View {
                     } else if eventStoreManager.sessions.isEmpty {
                         WelcomePage(
                             onNewSession: { showNewSessionSheet = true },
-                            onSettings: { showSettings = true }
+                            onSettings: { showSettings = true },
+                            onVoiceNote: { showVoiceNotesRecording = true }
                         )
                     } else {
                         selectSessionPrompt
@@ -291,6 +307,8 @@ struct ContentView: View {
 struct WelcomePage: View {
     let onNewSession: () -> Void
     let onSettings: () -> Void
+    let onVoiceNote: () -> Void
+    var onNavigationModeChange: ((NavigationMode) -> Void)?
 
     var body: some View {
         NavigationStack {
@@ -311,19 +329,32 @@ struct WelcomePage: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .offset(y: -60)
 
-                // Floating + button (same as SessionSidebar)
-                FloatingNewSessionButton(action: onNewSession)
-                    .padding(.trailing, 20)
-                    .padding(.bottom, 24)
+                // Floating buttons - mic and plus (same as SessionSidebar)
+                HStack(spacing: 12) {
+                    FloatingVoiceNotesButton(action: onVoiceNote)
+                    FloatingNewSessionButton(action: onNewSession)
+                }
+                .padding(.trailing, 20)
+                .padding(.bottom, 24)
             }
             .navigationBarTitleDisplayMode(.inline)
             .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
-                    Image("TronLogo")
-                        .resizable()
-                        .aspectRatio(contentMode: .fit)
-                        .frame(height: 28)
+                    Menu {
+                        ForEach(NavigationMode.allCases, id: \.self) { mode in
+                            Button {
+                                onNavigationModeChange?(mode)
+                            } label: {
+                                Label(mode.rawValue, systemImage: mode == .agents ? "cpu" : "waveform")
+                            }
+                        }
+                    } label: {
+                        Image("TronLogo")
+                            .resizable()
+                            .aspectRatio(contentMode: .fit)
+                            .frame(height: 28)
+                    }
                 }
                 ToolbarItem(placement: .principal) {
                     Text("TRON")
