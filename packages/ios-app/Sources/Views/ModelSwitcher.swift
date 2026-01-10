@@ -15,7 +15,7 @@ struct ModelPillLabel: View {
             Image(systemName: "chevron.up.chevron.down")
                 .font(.system(size: 8, weight: .medium))
         }
-        .foregroundStyle(.white.opacity(0.9))
+        .foregroundStyle(.tronEmerald)
         .padding(.horizontal, 10)
         .padding(.vertical, 5)
         .contentShape(Capsule())
