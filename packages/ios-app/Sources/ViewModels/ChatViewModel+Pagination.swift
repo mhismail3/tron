@@ -162,9 +162,13 @@ extension ChatViewModel {
 
         do {
             let state = try manager.getReconstructedState(sessionId: sessionId)
+            allReconstructedMessages = state.messages
             messages = state.messages
 
             currentTurn = state.currentTurn
+
+            // Restore lastTurnInputTokens and compute incrementalTokens for loaded messages
+            restoreTokenStateFromMessages()
 
             // Get token totals from cached session (server source of truth)
             if let session = try? manager.eventDB.getSession(sessionId) {
@@ -200,6 +204,14 @@ extension ChatViewModel {
     /// Restore token state from loaded messages (called on session resume)
     /// This ensures lastTurnInputTokens and incrementalTokens are properly set
     /// when returning to a session from the dashboard
+    ///
+    /// IMPORTANT: The persisted `message.assistant` events store CUMULATIVE token usage,
+    /// not per-turn values. This means:
+    /// - inputTokens = cumulative context window size at that point
+    /// - outputTokens = cumulative output tokens across ALL turns up to that point
+    ///
+    /// During streaming, `turn_end` sends per-turn values, but persisted events accumulate.
+    /// We must compute deltas for BOTH input AND output tokens when restoring.
     func restoreTokenStateFromMessages() {
         // 1. Find last assistant message from ALL messages to restore lastTurnInputTokens
         // (not just displayed messages, in case of pagination)
@@ -213,18 +225,22 @@ extension ChatViewModel {
 
         // 2. Build a map of message ID -> incrementalTokens by iterating ALL messages in order
         // This ensures we compute correct deltas even when messages are paginated
+        // CRITICAL: Compute delta for BOTH inputTokens AND outputTokens since DB stores cumulative
         var incrementalTokensMap: [UUID: TokenUsage] = [:]
         var previousInputTokens = 0
+        var previousOutputTokens = 0
         for message in allReconstructedMessages {
             if message.role == .assistant, let usage = message.tokenUsage {
                 let incrementalInput = max(0, usage.inputTokens - previousInputTokens)
+                let incrementalOutput = max(0, usage.outputTokens - previousOutputTokens)
                 incrementalTokensMap[message.id] = TokenUsage(
                     inputTokens: incrementalInput,
-                    outputTokens: usage.outputTokens,
+                    outputTokens: incrementalOutput,
                     cacheReadTokens: usage.cacheReadTokens,
                     cacheCreationTokens: usage.cacheCreationTokens
                 )
                 previousInputTokens = usage.inputTokens
+                previousOutputTokens = usage.outputTokens
             }
         }
 
