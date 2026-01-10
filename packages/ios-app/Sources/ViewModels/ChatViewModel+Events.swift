@@ -12,6 +12,12 @@ extension ChatViewModel {
             streamingMessageId = newStreamingMessage.id
             streamingText = ""
             logger.verbose("Created new streaming message after tool calls id=\(newStreamingMessage.id)", category: .events)
+
+            // Track as first text message of this turn if not already set
+            if firstTextMessageIdForTurn == nil {
+                firstTextMessageIdForTurn = newStreamingMessage.id
+                logger.debug("Tracked first text message for turn: \(newStreamingMessage.id)", category: .events)
+            }
         }
 
         // Batch text deltas for better performance
@@ -116,14 +122,43 @@ extension ChatViewModel {
             logger.debug("Clearing \(currentToolMessages.count) tool message references from previous turn", category: .events)
             currentToolMessages.removeAll()
         }
+
+        // Track turn boundary for multi-turn metadata assignment
+        turnStartMessageIndex = messages.count
+        firstTextMessageIdForTurn = nil
+        logger.debug("Turn \(event.turnNumber) boundary set at message index \(turnStartMessageIndex ?? -1)", category: .events)
     }
 
     func handleTurnEnd(_ event: TurnEndEvent) {
         logger.info("Turn ended, tokens: in=\(event.tokenUsage?.inputTokens ?? 0) out=\(event.tokenUsage?.outputTokens ?? 0)", category: .events)
 
-        // Update token usage, model, and latency on the streaming message
+        // Find the message to update with metadata
+        // Priority: streaming message > first text message of turn > fallback search
+        var targetIndex: Int?
+
         if let id = streamingMessageId,
            let index = messages.firstIndex(where: { $0.id == id }) {
+            targetIndex = index
+            logger.debug("Using streaming message for turn metadata at index \(index)", category: .events)
+        } else if let firstTextId = firstTextMessageIdForTurn,
+                  let index = messages.firstIndex(where: { $0.id == firstTextId }) {
+            // Streaming message was finalized (e.g., before tool call) but we tracked the first text
+            targetIndex = index
+            logger.debug("Using tracked first text message for turn metadata at index \(index)", category: .events)
+        } else if let startIndex = turnStartMessageIndex {
+            // Fallback: find first assistant text message from turn start
+            for i in startIndex..<messages.count {
+                if messages[i].role == .assistant,
+                   case .text = messages[i].content {
+                    targetIndex = i
+                    logger.debug("Found first assistant text message at index \(i) for turn metadata", category: .events)
+                    break
+                }
+            }
+        }
+
+        // Update the target message with metadata
+        if let index = targetIndex {
             messages[index].tokenUsage = event.tokenUsage
             messages[index].model = currentModel
             messages[index].latencyMs = event.data?.duration
@@ -142,7 +177,20 @@ extension ChatViewModel {
                 )
                 logger.debug("Incremental tokens: in=\(incrementalInput) (prev=\(previousInputTokens))", category: .events)
             }
+        } else {
+            logger.warning("Could not find message to update with turn metadata (turn=\(event.turnNumber))", category: .events)
         }
+
+        // Update all assistant messages from this turn with turn number
+        if let startIndex = turnStartMessageIndex {
+            for i in startIndex..<messages.count where messages[i].role == .assistant {
+                messages[i].turnNumber = event.turnNumber
+            }
+        }
+
+        // Clear turn tracking
+        turnStartMessageIndex = nil
+        firstTextMessageIdForTurn = nil
 
         // Accumulate token usage and update context tracking
         if let usage = event.tokenUsage {

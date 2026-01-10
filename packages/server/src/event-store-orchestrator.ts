@@ -227,10 +227,13 @@ export class EventStoreOrchestrator extends EventEmitter {
       // Initialize linearization tracking with root event as head
       pendingHeadEventId: result.rootEvent.id,
       appendPromiseChain: Promise.resolve(),
-      // Initialize current turn tracking for resume support
+      // Initialize current turn tracking for resume support (accumulated across all turns)
       currentTurnAccumulatedText: '',
       currentTurnToolCalls: [],
       currentTurnContentSequence: [],
+      // Initialize per-turn tracking (cleared after each message.assistant)
+      thisTurnContent: [],
+      thisTurnToolCalls: new Map(),
     });
 
     this.emit('session_created', {
@@ -305,10 +308,13 @@ export class EventStoreOrchestrator extends EventEmitter {
       // Initialize linearization tracking from session's current head
       pendingHeadEventId: session.headEventId ?? null,
       appendPromiseChain: Promise.resolve(),
-      // Initialize current turn tracking for resume support
+      // Initialize current turn tracking for resume support (accumulated across all turns)
       currentTurnAccumulatedText: '',
       currentTurnToolCalls: [],
       currentTurnContentSequence: [],
+      // Initialize per-turn tracking (cleared after each message.assistant)
+      thisTurnContent: [],
+      thisTurnToolCalls: new Map(),
     });
 
     logger.info('Session resumed', {
@@ -646,9 +652,6 @@ export class EventStoreOrchestrator extends EventEmitter {
         parentId: userMsgParentId,
       });
 
-      // Track timing for latency measurement (Phase 1)
-      const runStartTime = Date.now();
-
       // Set reasoning level if provided (for OpenAI Codex models)
       if (options.reasoningLevel) {
         active.agent.setReasoningLevel(options.reasoningLevel);
@@ -891,199 +894,15 @@ export class EventStoreOrchestrator extends EventEmitter {
         return [runResult] as unknown as TurnResult[];
       }
 
-      // Calculate latency (Phase 1)
-      const runLatency = Date.now() - runStartTime;
-
-      // Record assistant response event
-      // Use currentTurnContentSequence if available - it preserves exact streaming order
-      // This ensures text and tool_use blocks appear in the same order as they streamed
-      let currentTurnContent: any[] = [];
-
-      if (active.currentTurnContentSequence && active.currentTurnContentSequence.length > 0) {
-        // Build content from the streaming sequence (preserves interleaving order)
-        const toolCallMap = new Map<string, CurrentTurnToolCall>();
-        if (active.currentTurnToolCalls) {
-          for (const tc of active.currentTurnToolCalls) {
-            toolCallMap.set(tc.toolCallId, tc);
-          }
-        }
-
-        for (const item of active.currentTurnContentSequence) {
-          if (item.type === 'text') {
-            if (item.text) {
-              currentTurnContent.push({ type: 'text', text: item.text });
-            }
-          } else if (item.type === 'tool_ref') {
-            const tc = toolCallMap.get(item.toolCallId);
-            if (tc) {
-              currentTurnContent.push({
-                type: 'tool_use',
-                id: tc.toolCallId,
-                name: tc.toolName,
-                input: tc.arguments,
-              });
-            }
-          }
-        }
-
-        logger.debug('Using currentTurnContentSequence for assistant content', {
-          sessionId: active.sessionId,
-          sequenceLength: active.currentTurnContentSequence.length,
-          resultBlocks: currentTurnContent.length,
-        });
-      } else {
-        // Fallback: use runResult.messages (may not preserve exact interleaving)
-        let lastUserIndex = -1;
-        for (let i = runResult.messages.length - 1; i >= 0; i--) {
-          const msg = runResult.messages[i];
-          if (msg && msg.role === 'user') {
-            lastUserIndex = i;
-            break;
-          }
-        }
-
-        const currentTurnAssistantMessages = runResult.messages
-          .slice(lastUserIndex + 1)
-          .filter((m: any) => m.role === 'assistant');
-
-        currentTurnContent = currentTurnAssistantMessages.flatMap((m: any) =>
-          Array.isArray(m.content) ? m.content : [{ type: 'text' as const, text: String(m.content) }]
-        );
-
-        logger.debug('Using runResult.messages fallback for assistant content', {
-          sessionId: active.sessionId,
-          assistantMessages: currentTurnAssistantMessages.length,
-          resultBlocks: currentTurnContent.length,
-        });
-      }
-
-      // DEBUG: Log RAW content blocks BEFORE normalization
-      const toolUseBlocks = currentTurnContent.filter((b: any) => b.type === 'tool_use');
-      logger.debug('RAW assistant content before normalization', {
-        sessionId: active.sessionId,
-        totalBlocks: currentTurnContent.length,
-        toolUseBlocks: toolUseBlocks.length,
-        toolUseDetails: toolUseBlocks.map((b: any) => ({
-          name: b.name,
-          id: typeof b.id === 'string' ? b.id.slice(0, 20) + '...' : 'N/A',
-          hasInputKey: 'input' in b,
-          inputType: typeof b.input,
-          inputIsObject: b.input !== null && typeof b.input === 'object',
-          inputKeys: b.input && typeof b.input === 'object' ? Object.keys(b.input) : [],
-          inputPreview: b.input ? JSON.stringify(b.input).slice(0, 150) : 'undefined/null',
-        })),
-      });
-
-      // Normalize content blocks to ensure consistent structure and apply truncation
-      const normalizedAssistantContent = normalizeContentBlocks(currentTurnContent);
-
-      // Detect if content has thinking blocks (Phase 1)
-      const hasThinking = currentTurnContent.some((b: any) => b.type === 'thinking');
-
-      logger.debug('Storing assistant content', {
-        sessionId: active.sessionId,
-        blockCount: normalizedAssistantContent.length,
-        blockTypes: normalizedAssistantContent.map((b: Record<string, unknown>) => b.type),
-        toolUseCount: normalizedAssistantContent.filter((b: Record<string, unknown>) => b.type === 'tool_use').length,
-        hasInputs: normalizedAssistantContent
-          .filter((b: Record<string, unknown>) => b.type === 'tool_use')
-          .map((b: Record<string, unknown>) => ({ name: b.name, hasInput: !!b.input && Object.keys(b.input as object).length > 0 })),
-        // Phase 1 enrichment logging
-        turn: runResult.turns,
-        model: active.model,
-        stopReason: runResult.stoppedReason,
-        latency: runLatency,
-        hasThinking,
-      });
-
-      // Phase 1: Store enriched assistant message with all metadata (linearized)
-      // CRITICAL: Wait for stream events (turn_start, tool events, turn_end) to complete
+      // Wait for all linearized events (turn_end creates message.assistant and tool_results per-turn)
+      // to complete before returning
       await active.appendPromiseChain;
-      // CRITICAL: Pass parentId from in-memory state, then update it after append
-      const assistantMsgParentId = active.pendingHeadEventId;
-      // tokenUsage contains PER-TURN values from the LLM response:
-      // - inputTokens: context window size sent to LLM for this turn
-      // - outputTokens: tokens generated by LLM in this turn
-      // Captured from turn_end event which fires before this point.
-      const assistantMsgEvent = await this.eventStore.append({
+
+      logger.debug('Agent run completed', {
         sessionId: active.sessionId,
-        type: 'message.assistant',
-        payload: {
-          content: normalizedAssistantContent,
-          tokenUsage: active.lastTurnTokenUsage,
-          // Phase 1: Enriched fields
-          turn: runResult.turns,
-          model: active.model,
-          stopReason: runResult.stoppedReason ?? 'end_turn',
-          latency: runLatency,
-          hasThinking,
-        },
-        parentId: assistantMsgParentId,
+        turns: runResult.turns,
+        stoppedReason: runResult.stoppedReason,
       });
-      active.pendingHeadEventId = assistantMsgEvent.id;
-      logger.debug('[LINEARIZE] message.assistant appended', {
-        sessionId: active.sessionId,
-        eventId: assistantMsgEvent.id,
-        parentId: assistantMsgParentId,
-      });
-
-      // Also record tool_result blocks from tool result messages
-      // TronAgent stores these as ToolResultMessage with role: 'toolResult'
-      // Only get tool results from the CURRENT turn (after the last user message)
-      // Note: toolResult messages come BETWEEN assistant messages, not after them
-      let toolResultLastUserIndex = -1;
-      for (let i = runResult.messages.length - 1; i >= 0; i--) {
-        const msg = runResult.messages[i];
-        if (msg && msg.role === 'user') {
-          toolResultLastUserIndex = i;
-          break;
-        }
-      }
-      const currentTurnToolResults = runResult.messages
-        .slice(toolResultLastUserIndex + 1)
-        .filter((m: any) => m.role === 'toolResult') as any[];
-
-      if (currentTurnToolResults.length > 0) {
-        // Convert ToolResultMessage format to tool_result content blocks
-        const toolResultBlocks = currentTurnToolResults.map(m => ({
-          type: 'tool_result' as const,
-          tool_use_id: m.toolCallId,
-          content: typeof m.content === 'string' ? m.content :
-                   Array.isArray(m.content) ? m.content.map((c: any) => c.text).join('\n') : '',
-          is_error: m.isError === true,
-        }));
-
-        // Normalize with truncation for large content
-        const normalizedToolResults = normalizeContentBlocks(toolResultBlocks);
-
-        logger.debug('Storing tool results', {
-          sessionId: active.sessionId,
-          resultCount: normalizedToolResults.length,
-          sampleContent: normalizedToolResults.slice(0, 3).map((r: Record<string, unknown>) => ({
-            type: r.type,
-            toolUseId: (r.tool_use_id as string)?.slice(0, 20) + '...',
-            hasContent: !!(r.content || r.text),
-            contentLength: typeof r.content === 'string' ? r.content.length : 0,
-          })),
-        });
-
-        // Store tool results as user message (linearized)
-        // CRITICAL: Wait for any pending events before appending
-        await active.appendPromiseChain;
-        const toolResultParentId = active.pendingHeadEventId;
-        const toolResultEvent = await this.eventStore.append({
-          sessionId: active.sessionId,
-          type: 'message.user',
-          payload: { content: normalizedToolResults },
-          parentId: toolResultParentId,
-        });
-        active.pendingHeadEventId = toolResultEvent.id;
-        logger.debug('[LINEARIZE] message.user (tool results) appended', {
-          sessionId: active.sessionId,
-          eventId: toolResultEvent.id,
-          parentId: toolResultParentId,
-        });
-      }
 
       // Emit completion event
       this.emit('agent_turn', {
@@ -1684,7 +1503,15 @@ export class EventStoreOrchestrator extends EventEmitter {
         // Update current turn for tool event tracking
         if (active) {
           active.currentTurn = event.turn;
-          // NOTE: We do NOT reset accumulation here anymore!
+          // Record turn start time for latency calculation
+          active.currentTurnStartTime = Date.now();
+
+          // Clear THIS TURN's content tracking (for per-turn message.assistant creation)
+          // This is separate from accumulated content which persists across turns for catch-up
+          active.thisTurnContent = [];
+          active.thisTurnToolCalls = new Map();
+
+          // NOTE: We do NOT reset accumulated content here anymore!
           // We accumulate content across ALL turns within an agent run so that
           // when a client resumes into a running session, they get ALL content
           // from the current runAgent call (Turn 1, Turn 2, etc.), not just
@@ -1709,12 +1536,12 @@ export class EventStoreOrchestrator extends EventEmitter {
         break;
 
       case 'turn_end':
-        // NOTE: We do NOT clear accumulation here anymore!
-        // Content is kept so that if user resumes during a later turn,
+        // NOTE: We do NOT clear accumulated content here anymore!
+        // Accumulated content is kept so that if user resumes during a later turn,
         // they get ALL content from Turn 1, Turn 2, etc.
         // Accumulation is cleared at agent_start/agent_end instead.
 
-        // Store per-turn token usage for use in message.assistant
+        // Store per-turn token usage
         // This is the ACTUAL per-turn value from the LLM, not cumulative
         // Includes cache token breakdown for accurate cost calculation
         if (active && event.tokenUsage) {
@@ -1724,6 +1551,92 @@ export class EventStoreOrchestrator extends EventEmitter {
             cacheReadTokens: event.tokenUsage.cacheReadTokens,
             cacheCreationTokens: event.tokenUsage.cacheCreationTokens,
           };
+        }
+
+        // CREATE MESSAGE.ASSISTANT FOR THIS TURN
+        // Each turn gets its own message.assistant event with per-turn token data
+        if (active && active.thisTurnContent.length > 0) {
+          // Build content blocks from this turn's content
+          const contentBlocks: any[] = [];
+          for (const item of active.thisTurnContent) {
+            if (item.type === 'text' && item.text) {
+              contentBlocks.push({ type: 'text', text: item.text });
+            } else if (item.type === 'tool_ref') {
+              const tc = active.thisTurnToolCalls.get(item.toolCallId);
+              if (tc) {
+                contentBlocks.push({
+                  type: 'tool_use',
+                  id: tc.toolCallId,
+                  name: tc.toolName,
+                  input: tc.arguments,
+                });
+              }
+            }
+          }
+
+          // Calculate latency for this turn
+          const turnLatency = active.currentTurnStartTime
+            ? Date.now() - active.currentTurnStartTime
+            : event.duration ?? 0;
+
+          // Detect if content has thinking blocks
+          const hasThinking = contentBlocks.some((b: any) => b.type === 'thinking');
+
+          // Normalize content blocks
+          const normalizedContent = normalizeContentBlocks(contentBlocks);
+
+          // Create message.assistant event for this turn
+          if (normalizedContent.length > 0) {
+            this.appendEventLinearized(sessionId, 'message.assistant', {
+              content: normalizedContent,
+              tokenUsage: active.lastTurnTokenUsage,
+              turn: event.turn,
+              model: active.model,
+              stopReason: 'end_turn',
+              latency: turnLatency,
+              hasThinking,
+            });
+
+            logger.debug('Created message.assistant for turn', {
+              sessionId,
+              turn: event.turn,
+              contentBlocks: normalizedContent.length,
+              tokenUsage: active.lastTurnTokenUsage,
+              latency: turnLatency,
+            });
+          }
+
+          // Store tool results as message.user AFTER message.assistant, BEFORE next turn
+          // This ensures proper sequencing: user → assistant(tool_use) → user(tool_result) → assistant(response)
+          const completedToolCalls = Array.from(active.thisTurnToolCalls.values())
+            .filter(tc => tc.status === 'completed' || tc.status === 'error');
+
+          if (completedToolCalls.length > 0) {
+            const toolResultBlocks = completedToolCalls.map(tc => ({
+              type: 'tool_result' as const,
+              tool_use_id: tc.toolCallId,
+              content: tc.result ?? (tc.isError ? 'Error' : '(no output)'),
+              is_error: tc.isError ?? false,
+            }));
+
+            // Normalize with truncation for large content
+            const normalizedToolResults = normalizeContentBlocks(toolResultBlocks);
+
+            logger.debug('Storing tool results for turn', {
+              sessionId,
+              turn: event.turn,
+              resultCount: normalizedToolResults.length,
+            });
+
+            // Store tool results as message.user (linearized)
+            this.appendEventLinearized(sessionId, 'message.user', {
+              content: normalizedToolResults,
+            });
+          }
+
+          // Clear THIS TURN's content (but keep accumulated content for catch-up)
+          active.thisTurnContent = [];
+          active.thisTurnToolCalls = new Map();
         }
 
         this.emit('agent_event', {
@@ -1745,17 +1658,25 @@ export class EventStoreOrchestrator extends EventEmitter {
         break;
 
       case 'message_update':
-        // Accumulate text for resume support
+        // Accumulate text for resume support (across ALL turns)
         if (active && typeof event.content === 'string') {
           active.currentTurnAccumulatedText += event.content;
 
-          // Track in content sequence for proper interleaving on interrupt
+          // Track in content sequence for proper interleaving on interrupt (across ALL turns)
           // If the last item is a text item, append to it; otherwise add new text item
           const lastItem = active.currentTurnContentSequence[active.currentTurnContentSequence.length - 1];
           if (lastItem && lastItem.type === 'text') {
             lastItem.text += event.content;
           } else {
             active.currentTurnContentSequence.push({ type: 'text', text: event.content });
+          }
+
+          // Also track in THIS TURN's content (for per-turn message.assistant creation)
+          const lastThisTurnItem = active.thisTurnContent[active.thisTurnContent.length - 1];
+          if (lastThisTurnItem && lastThisTurnItem.type === 'text') {
+            lastThisTurnItem.text += event.content;
+          } else {
+            active.thisTurnContent.push({ type: 'text', text: event.content });
           }
         }
 
@@ -1768,18 +1689,26 @@ export class EventStoreOrchestrator extends EventEmitter {
         break;
 
       case 'tool_execution_start':
-        // Track tool call for resume support
+        // Track tool call for resume support (across ALL turns)
         if (active) {
-          active.currentTurnToolCalls.push({
+          const toolCallData = {
             toolCallId: event.toolCallId,
             toolName: event.toolName,
             arguments: event.arguments ?? {},
-            status: 'running',
+            status: 'running' as const,
             startedAt: timestamp,
+          };
+          active.currentTurnToolCalls.push(toolCallData);
+
+          // Track in content sequence for proper interleaving on interrupt (across ALL turns)
+          active.currentTurnContentSequence.push({
+            type: 'tool_ref',
+            toolCallId: event.toolCallId,
           });
 
-          // Track in content sequence for proper interleaving on interrupt
-          active.currentTurnContentSequence.push({
+          // Also track in THIS TURN (for per-turn message.assistant creation)
+          active.thisTurnToolCalls.set(event.toolCallId, { ...toolCallData });
+          active.thisTurnContent.push({
             type: 'tool_ref',
             toolCallId: event.toolCallId,
           });
@@ -1810,7 +1739,7 @@ export class EventStoreOrchestrator extends EventEmitter {
           ? (event.result as { content?: string }).content ?? JSON.stringify(event.result)
           : String(event.result ?? '');
 
-        // Update tool call tracking for resume support
+        // Update tool call tracking for resume support (across ALL turns)
         if (active) {
           const toolCall = active.currentTurnToolCalls.find(
             tc => tc.toolCallId === event.toolCallId
@@ -1820,6 +1749,15 @@ export class EventStoreOrchestrator extends EventEmitter {
             toolCall.result = resultContent;
             toolCall.isError = event.isError ?? false;
             toolCall.completedAt = timestamp;
+          }
+
+          // Also update THIS TURN's tool call tracking
+          const thisTurnToolCall = active.thisTurnToolCalls.get(event.toolCallId);
+          if (thisTurnToolCall) {
+            thisTurnToolCall.status = event.isError ? 'error' : 'completed';
+            thisTurnToolCall.result = resultContent;
+            thisTurnToolCall.isError = event.isError ?? false;
+            thisTurnToolCall.completedAt = timestamp;
           }
         }
 

@@ -4,22 +4,42 @@ import Foundation
 
 /// Payload for message.user event
 /// Server: UserMessageEvent.payload
+///
+/// NOTE: message.user events can contain:
+/// 1. User text prompts (displayable)
+/// 2. Tool result content blocks (LLM context, not for display - handled by tool.result events)
 struct UserMessagePayload {
     let content: String
     let turn: Int
     let imageCount: Int?
+    /// True if this message contains ONLY tool_result blocks (no text)
+    /// These are LLM conversation context, not displayable user messages
+    let isToolResultContext: Bool
 
     init?(from payload: [String: AnyCodable]) {
         // Content can be a string or array of content blocks
         if let content = payload.string("content") {
             self.content = content
+            self.isToolResultContext = false
         } else if let contentBlocks = payload["content"]?.value as? [[String: Any]] {
-            // Extract text from content blocks
-            let texts = contentBlocks.compactMap { block -> String? in
-                guard block["type"] as? String == "text" else { return nil }
-                return block["text"] as? String
+            // Check if this is a tool_result context message (no text, only tool_results)
+            let textBlocks = contentBlocks.filter { ($0["type"] as? String) == "text" }
+            let toolResultBlocks = contentBlocks.filter { ($0["type"] as? String) == "tool_result" }
+
+            if textBlocks.isEmpty && !toolResultBlocks.isEmpty {
+                // This is a tool_result context message - not for display
+                // Tool results are displayed via tool.result events
+                self.content = ""
+                self.isToolResultContext = true
+            } else {
+                // Extract text from content blocks
+                let texts = contentBlocks.compactMap { block -> String? in
+                    guard block["type"] as? String == "text" else { return nil }
+                    return block["text"] as? String
+                }
+                self.content = texts.joined(separator: "\n")
+                self.isToolResultContext = false
             }
-            self.content = texts.joined(separator: "\n")
         } else {
             return nil
         }

@@ -226,6 +226,15 @@ struct UnifiedEventTransformer {
     ) -> ChatMessage? {
         guard let parsed = UserMessagePayload(from: payload) else { return nil }
 
+        // Skip tool_result context messages - they're LLM conversation context,
+        // not displayable user messages. Tool results are displayed via tool.result events.
+        if parsed.isToolResultContext {
+            return nil
+        }
+
+        // Skip empty user messages
+        guard !parsed.content.isEmpty else { return nil }
+
         return ChatMessage(
             role: .user,
             content: .text(parsed.content),

@@ -151,6 +151,21 @@ export interface ActiveSession {
     cacheReadTokens?: number;
     cacheCreationTokens?: number;
   };
+  /**
+   * Start time of the current turn (set at turn_start).
+   * Used to calculate latency for this turn's message.assistant event.
+   */
+  currentTurnStartTime?: number;
+  /**
+   * Content for THIS TURN ONLY (cleared after each message.assistant is created).
+   * Separate from currentTurnAccumulatedText which accumulates across ALL turns for catch-up.
+   */
+  thisTurnContent: Array<{type: 'text', text: string} | {type: 'tool_ref', toolCallId: string}>;
+  /**
+   * Tool calls for THIS TURN ONLY (cleared after each message.assistant is created).
+   * Maps toolCallId to full tool call data for this turn.
+   */
+  thisTurnToolCalls: Map<string, CurrentTurnToolCall>;
 }
 
 // =============================================================================

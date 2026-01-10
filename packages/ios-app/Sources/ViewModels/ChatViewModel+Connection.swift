@@ -71,9 +71,14 @@ extension ChatViewModel {
 
     /// Process accumulated content when resuming into an in-progress session
     private func processCatchUpContent(accumulatedText: String, toolCalls: [CurrentTurnToolCall]) async {
+        // Initialize turn tracking for catch-up content
+        // This ensures turn_end can find the correct messages to update
+        turnStartMessageIndex = messages.count
+        firstTextMessageIdForTurn = nil
+
         // Split accumulated text by turn boundaries
         let textSegments = accumulatedText.components(separatedBy: "\n")
-        logger.debug("Resume catch-up: split into \(textSegments.count) text segments", category: .session)
+        logger.debug("Resume catch-up: split into \(textSegments.count) text segments, turn starts at index \(turnStartMessageIndex ?? -1)", category: .session)
 
         // Process tool calls with interleaved text
         for (index, toolCall) in toolCalls.enumerated() {
@@ -84,6 +89,10 @@ extension ChatViewModel {
                 if toolCall.status == "completed" || toolCall.status == "error" {
                     let textMessage = ChatMessage(role: .assistant, content: .text(segmentText))
                     messages.append(textMessage)
+                    // Track first text message for turn metadata assignment
+                    if firstTextMessageIdForTurn == nil {
+                        firstTextMessageIdForTurn = textMessage.id
+                    }
                     logger.debug("Resume catch-up: created finalized text message for turn \(index + 1)", category: .session)
                 } else {
                     let streamingMessage = ChatMessage.streaming()
@@ -91,6 +100,10 @@ extension ChatViewModel {
                     streamingMessageId = streamingMessage.id
                     streamingText = segmentText
                     updateStreamingMessage(with: .streaming(segmentText))
+                    // Track first text message for turn metadata assignment
+                    if firstTextMessageIdForTurn == nil {
+                        firstTextMessageIdForTurn = streamingMessage.id
+                    }
                     logger.debug("Resume catch-up: created streaming message for current turn", category: .session)
                 }
             }
@@ -110,6 +123,10 @@ extension ChatViewModel {
                 streamingMessageId = streamingMessage.id
                 streamingText = remainingText
                 updateStreamingMessage(with: .streaming(remainingText))
+                // Track first text message for turn metadata assignment
+                if firstTextMessageIdForTurn == nil {
+                    firstTextMessageIdForTurn = streamingMessage.id
+                }
                 logger.debug("Resume catch-up: created streaming message for remaining text", category: .session)
             }
         }
@@ -121,6 +138,10 @@ extension ChatViewModel {
             streamingMessageId = streamingMessage.id
             streamingText = accumulatedText
             updateStreamingMessage(with: .streaming(accumulatedText))
+            // Track first text message for turn metadata assignment
+            if firstTextMessageIdForTurn == nil {
+                firstTextMessageIdForTurn = streamingMessage.id
+            }
             logger.debug("Resume catch-up: created streaming message for text-only catch-up", category: .session)
         }
     }

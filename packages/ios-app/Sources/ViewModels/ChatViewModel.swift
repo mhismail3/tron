@@ -49,6 +49,14 @@ class ChatViewModel: ObservableObject {
     /// Track tool calls for the current turn (for display purposes)
     var currentTurnToolCalls: [ToolCallRecord] = []
     let audioRecorder = AudioRecorder()
+
+    /// Track the message index where the current turn started
+    /// Used to find which messages to update with metadata at turn_end
+    var turnStartMessageIndex: Int?
+
+    /// Track the first text message ID of the current turn
+    /// This message gets the token/model/latency metadata at turn_end
+    var firstTextMessageIdForTurn: UUID?
     let maxRecordingDuration: TimeInterval = 120
 
     // MARK: - Performance Optimization: Batched Updates
