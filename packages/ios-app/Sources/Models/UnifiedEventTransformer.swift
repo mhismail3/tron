@@ -1057,6 +1057,7 @@ extension UnifiedEventTransformer {
 
             case .messageUser, .messageSystem,
                  .notificationInterrupted, .configModelSwitch,
+                 .contextCleared,
                  .errorAgent, .errorTool, .errorProvider:
                 // Add chat message
                 if let message = transformPersistedEvent(event) {
@@ -1273,6 +1274,7 @@ extension UnifiedEventTransformer {
 
             case .messageUser, .messageSystem,
                  .notificationInterrupted, .configModelSwitch,
+                 .contextCleared,
                  .errorAgent, .errorTool, .errorProvider:
                 // Add chat message using the SessionEvent overload
                 if let message = transformPersistedEvent(event) {
