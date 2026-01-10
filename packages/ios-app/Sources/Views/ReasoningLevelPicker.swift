@@ -37,7 +37,7 @@ struct ReasoningLevelPicker: View {
     }
 
     /// Icon for each level
-    private func levelIcon(_ level: String) -> String {
+    static func levelIcon(_ level: String) -> String {
         switch level.lowercased() {
         case "low": return "hare"
         case "medium": return "brain"
@@ -45,6 +45,25 @@ struct ReasoningLevelPicker: View {
         case "xhigh": return "sparkles"
         default: return "brain"
         }
+    }
+
+    /// Color for each level - gradient from dark green (low) to teal (high)
+    /// Lowest: #1F5E3F, Highest: #00A69B, with even interpolation for intermediate levels
+    static func levelColor(_ level: String, levels: [String] = ["low", "medium", "high", "xhigh"]) -> Color {
+        let index = levels.firstIndex(of: level.lowercased()) ?? 0
+        let progress = Double(index) / Double(max(levels.count - 1, 1))
+
+        // Interpolate RGB from #1F5E3F to #00A69B
+        // #1F5E3F: RGB(31, 94, 63) → normalized (0.122, 0.369, 0.247)
+        // #00A69B: RGB(0, 166, 155) → normalized (0.0, 0.651, 0.608)
+        let lowR = 31.0 / 255.0, lowG = 94.0 / 255.0, lowB = 63.0 / 255.0
+        let highR = 0.0 / 255.0, highG = 166.0 / 255.0, highB = 155.0 / 255.0
+
+        let r = lowR + (progress * (highR - lowR))
+        let g = lowG + (progress * (highG - lowG))
+        let b = lowB + (progress * (highB - lowB))
+
+        return Color(red: r, green: g, blue: b)
     }
 
     var body: some View {
@@ -65,7 +84,8 @@ struct ReasoningLevelPicker: View {
                                     }
                                 }
                             } icon: {
-                                Image(systemName: levelIcon(level))
+                                Image(systemName: Self.levelIcon(level))
+                                    .foregroundStyle(Self.levelColor(level, levels: levels))
                             }
 
                             Spacer()
@@ -78,9 +98,16 @@ struct ReasoningLevelPicker: View {
                     }
                 }
             } label: {
-                ReasoningLevelPillLabel(level: selectedLevel, labelFunc: levelLabel)
+                ReasoningLevelPillLabel(
+                    level: selectedLevel,
+                    labelFunc: levelLabel,
+                    levels: levels
+                )
             }
-            .glassEffect(.regular.tint(Color.tronAmber.opacity(0.3)).interactive(), in: .capsule)
+            .glassEffect(
+                .regular.tint(Self.levelColor(selectedLevel, levels: levels).opacity(0.4)).interactive(),
+                in: .capsule
+            )
         }
     }
 }
@@ -90,17 +117,18 @@ struct ReasoningLevelPicker: View {
 struct ReasoningLevelPillLabel: View {
     let level: String
     let labelFunc: (String) -> String
+    var levels: [String] = ["low", "medium", "high", "xhigh"]
 
     var body: some View {
         HStack(spacing: 4) {
-            Image(systemName: "sparkles")
+            Image(systemName: ReasoningLevelPicker.levelIcon(level))
                 .font(.system(size: 9, weight: .medium))
             Text(labelFunc(level))
                 .font(.system(size: 11, weight: .medium))
             Image(systemName: "chevron.up.chevron.down")
                 .font(.system(size: 8, weight: .medium))
         }
-        .foregroundStyle(.white.opacity(0.9))
+        .foregroundStyle(ReasoningLevelPicker.levelColor(level, levels: levels))
         .padding(.horizontal, 10)
         .padding(.vertical, 5)
         .contentShape(Capsule())
@@ -134,12 +162,13 @@ struct InlineReasoningControl: View {
 
             // Current level indicator
             HStack(spacing: 4) {
-                Image(systemName: "sparkles")
+                Image(systemName: ReasoningLevelPicker.levelIcon(level))
                     .font(.system(size: 10))
                 Text(level.prefix(1).uppercased())
                     .font(.system(size: 12, weight: .semibold, design: .monospaced))
             }
             .frame(minWidth: 32)
+            .foregroundStyle(ReasoningLevelPicker.levelColor(level, levels: levels))
 
             // Increase button
             Button {
@@ -190,6 +219,19 @@ struct InlineReasoningControl: View {
         .padding()
         .background(Color.black.opacity(0.3))
         .clipShape(Capsule())
+
+        // Show all level colors
+        HStack(spacing: 12) {
+            ForEach(["low", "medium", "high", "xhigh"], id: \.self) { level in
+                VStack {
+                    Circle()
+                        .fill(ReasoningLevelPicker.levelColor(level))
+                        .frame(width: 24, height: 24)
+                    Text(level)
+                        .font(.caption2)
+                }
+            }
+        }
     }
     .padding()
     .preferredColorScheme(.dark)
