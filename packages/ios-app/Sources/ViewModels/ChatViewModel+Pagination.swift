@@ -201,8 +201,9 @@ extension ChatViewModel {
     /// This ensures lastTurnInputTokens and incrementalTokens are properly set
     /// when returning to a session from the dashboard
     func restoreTokenStateFromMessages() {
-        // 1. Find last assistant message to restore lastTurnInputTokens
-        for message in messages.reversed() {
+        // 1. Find last assistant message from ALL messages to restore lastTurnInputTokens
+        // (not just displayed messages, in case of pagination)
+        for message in allReconstructedMessages.reversed() {
             if message.role == .assistant, let usage = message.tokenUsage {
                 lastTurnInputTokens = usage.inputTokens
                 logger.debug("Restored lastTurnInputTokens=\(usage.inputTokens) from last assistant message", category: .session)
@@ -210,22 +211,28 @@ extension ChatViewModel {
             }
         }
 
-        // 2. Compute incrementalTokens for all assistant messages that don't have it
+        // 2. Build a map of message ID -> incrementalTokens by iterating ALL messages in order
+        // This ensures we compute correct deltas even when messages are paginated
+        var incrementalTokensMap: [UUID: TokenUsage] = [:]
         var previousInputTokens = 0
-        for i in 0..<messages.count {
-            if messages[i].role == .assistant, let usage = messages[i].tokenUsage {
-                // Only compute if not already set
-                if messages[i].incrementalTokens == nil {
-                    let incrementalInput = max(0, usage.inputTokens - previousInputTokens)
-                    messages[i].incrementalTokens = TokenUsage(
-                        inputTokens: incrementalInput,
-                        outputTokens: usage.outputTokens,
-                        cacheReadTokens: usage.cacheReadTokens,
-                        cacheCreationTokens: usage.cacheCreationTokens
-                    )
-                }
-                // Update previousInputTokens for next iteration
+        for message in allReconstructedMessages {
+            if message.role == .assistant, let usage = message.tokenUsage {
+                let incrementalInput = max(0, usage.inputTokens - previousInputTokens)
+                incrementalTokensMap[message.id] = TokenUsage(
+                    inputTokens: incrementalInput,
+                    outputTokens: usage.outputTokens,
+                    cacheReadTokens: usage.cacheReadTokens,
+                    cacheCreationTokens: usage.cacheCreationTokens
+                )
                 previousInputTokens = usage.inputTokens
+            }
+        }
+
+        // 3. Apply computed incremental tokens to displayed messages
+        for i in 0..<messages.count {
+            if messages[i].incrementalTokens == nil,
+               let computed = incrementalTokensMap[messages[i].id] {
+                messages[i].incrementalTokens = computed
             }
         }
 
