@@ -21,7 +21,7 @@ import {
   type SearchResult,
   type TokenUsage,
 } from './types.js';
-import { calculateCost } from '../providers/models.js';
+import { calculateCost } from '../usage/index.js';
 
 // =============================================================================
 // Types
@@ -207,8 +207,9 @@ export class EventStore {
         counters.inputTokens = payload.tokenUsage.inputTokens;
         counters.outputTokens = payload.tokenUsage.outputTokens;
         // Calculate cost using the model from payload or session
+        // Uses the comprehensive calculateCost that accounts for cache token pricing
         const modelId = payload.model ?? session.latestModel;
-        counters.cost = calculateCost(modelId, payload.tokenUsage.inputTokens, payload.tokenUsage.outputTokens);
+        counters.cost = calculateCost(modelId, payload.tokenUsage).total;
       }
 
       await this.backend.incrementSessionCounters(options.sessionId, counters);

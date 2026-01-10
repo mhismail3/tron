@@ -139,6 +139,12 @@ export interface ActiveSession {
    * Used to inform clients that the session ended due to interruption.
    */
   wasInterrupted?: boolean;
+  /**
+   * Token usage from the most recent turn_end event.
+   * Contains PER-TURN values (not cumulative) directly from the LLM response.
+   * Used to populate message.assistant.tokenUsage with accurate per-message tokens.
+   */
+  lastTurnTokenUsage?: { inputTokens: number; outputTokens: number };
 }
 
 // =============================================================================
