@@ -16,11 +16,14 @@ class AudioAvailabilityMonitor: ObservableObject {
 
     private var cancellables = Set<AnyCancellable>()
     private var pollingTask: Task<Void, Never>?
+    private var isInForeground = true
 
     private init() {
         setupNotifications()
         startPolling()
+        // Do initial check after a short delay to not block init
         Task {
+            try? await Task.sleep(for: .milliseconds(100))
             await checkAvailabilityAsync()
         }
     }
@@ -37,6 +40,7 @@ class AudioAvailabilityMonitor: ObservableObject {
         // Listen for route changes (headphones connected/disconnected, etc.)
         NotificationCenter.default.publisher(for: AVAudioSession.routeChangeNotification)
             .receive(on: DispatchQueue.main)
+            .debounce(for: .milliseconds(300), scheduler: DispatchQueue.main)
             .sink { [weak self] _ in
                 Task { await self?.checkAvailabilityAsync() }
             }
@@ -54,7 +58,16 @@ class AudioAvailabilityMonitor: ObservableObject {
         NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)
             .receive(on: DispatchQueue.main)
             .sink { [weak self] _ in
+                self?.isInForeground = true
                 Task { await self?.checkAvailabilityAsync() }
+            }
+            .store(in: &cancellables)
+
+        // Stop polling when app goes to background
+        NotificationCenter.default.publisher(for: UIApplication.didEnterBackgroundNotification)
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                self?.isInForeground = false
             }
             .store(in: &cancellables)
     }
@@ -63,8 +76,11 @@ class AudioAvailabilityMonitor: ObservableObject {
     private func startPolling() {
         pollingTask = Task { [weak self] in
             while !Task.isCancelled {
-                try? await Task.sleep(for: .seconds(2))
-                await self?.checkAvailabilityAsync()
+                try? await Task.sleep(for: .seconds(3))
+                // Only poll when in foreground
+                if self?.isInForeground == true {
+                    await self?.checkAvailabilityAsync()
+                }
             }
         }
     }
@@ -78,8 +94,7 @@ class AudioAvailabilityMonitor: ObservableObject {
 
         switch type {
         case .began:
-            isRecordingAvailable = false
-            unavailabilityReason = "Audio interrupted"
+            updateAvailability(available: false, reason: "Audio interrupted")
         case .ended:
             // Re-check availability after interruption ends
             Task {
@@ -88,6 +103,16 @@ class AudioAvailabilityMonitor: ObservableObject {
             }
         @unknown default:
             Task { await checkAvailabilityAsync() }
+        }
+    }
+
+    /// Only update @Published properties if values actually changed
+    private func updateAvailability(available: Bool, reason: String?) {
+        if isRecordingAvailable != available {
+            isRecordingAvailable = available
+        }
+        if unavailabilityReason != reason {
+            unavailabilityReason = reason
         }
     }
 
@@ -100,20 +125,14 @@ class AudioAvailabilityMonitor: ObservableObject {
 
         let session = AVAudioSession.sharedInstance()
 
-        // Check record permission first
+        // Check record permission first (this is fast, OK on main thread)
         switch session.recordPermission {
         case .denied:
-            await MainActor.run {
-                isRecordingAvailable = false
-                unavailabilityReason = "Microphone access denied"
-            }
+            updateAvailability(available: false, reason: "Microphone access denied")
             return
         case .undetermined:
             // Permission not yet requested - allow button but it will request on tap
-            await MainActor.run {
-                isRecordingAvailable = true
-                unavailabilityReason = nil
-            }
+            updateAvailability(available: true, reason: nil)
             return
         case .granted:
             break
@@ -121,26 +140,23 @@ class AudioAvailabilityMonitor: ObservableObject {
             break
         }
 
-        // Try to configure the audio session to see if it's actually available
-        do {
-            // Use a category that allows recording
-            try session.setCategory(.playAndRecord, mode: .default, options: [.defaultToSpeaker, .allowBluetooth])
-            try session.setActive(true, options: .notifyOthersOnDeactivation)
-
-            // If we got here, recording is available
-            await MainActor.run {
-                isRecordingAvailable = true
-                unavailabilityReason = nil
+        // Move audio session manipulation off main thread
+        let isAvailable = await Task.detached {
+            let session = AVAudioSession.sharedInstance()
+            do {
+                try session.setCategory(.playAndRecord, mode: .default, options: [.defaultToSpeaker, .allowBluetooth])
+                try session.setActive(true, options: .notifyOthersOnDeactivation)
+                try? session.setActive(false, options: .notifyOthersOnDeactivation)
+                return true
+            } catch {
+                return false
             }
+        }.value
 
-            // Deactivate to be a good citizen
-            try? session.setActive(false, options: .notifyOthersOnDeactivation)
-        } catch {
-            // Failed to configure - likely phone call or other exclusive use
-            await MainActor.run {
-                isRecordingAvailable = false
-                unavailabilityReason = "Audio unavailable"
-            }
+        if isAvailable {
+            updateAvailability(available: true, reason: nil)
+        } else {
+            updateAvailability(available: false, reason: "Audio unavailable")
         }
     }
 

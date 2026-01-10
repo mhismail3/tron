@@ -179,16 +179,19 @@ final class VoiceNotesRecorder: NSObject, ObservableObject, AVAudioRecorderDeleg
 
     private func startTimers() {
         // Level meter update at 10Hz for smooth visualization
-        levelTimer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in
-            Task { @MainActor in
+        // Use Timer.publish to avoid Task spawning overhead
+        levelTimer = Timer(timeInterval: 0.1, repeats: true) { [weak self] _ in
+            // Direct call - timer fires on main thread, class is @MainActor
+            // Use assumeIsolated since we know we're on main thread
+            MainActor.assumeIsolated {
                 self?.updateMeters()
             }
         }
         RunLoop.main.add(levelTimer!, forMode: .common)
 
         // Duration update at 1Hz
-        durationTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
-            Task { @MainActor in
+        durationTimer = Timer(timeInterval: 1.0, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated {
                 self?.recordingDuration += 1
             }
         }
