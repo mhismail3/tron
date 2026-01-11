@@ -45,6 +45,7 @@ class ChatViewModel: ObservableObject {
     var accumulatedOutputTokens = 0
     var accumulatedCacheReadTokens = 0
     var accumulatedCacheCreationTokens = 0
+    var accumulatedCost: Double = 0
     /// Last turn's input tokens (represents actual current context size)
     var lastTurnInputTokens = 0
     /// Previous turn's final input tokens (for computing incremental delta)

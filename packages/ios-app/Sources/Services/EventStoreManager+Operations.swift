@@ -59,13 +59,14 @@ extension EventStoreManager {
         logger.info("Deleted session: \(sessionId)", category: .session)
     }
 
-    /// Update session token counts (called when streaming accumulates tokens)
+    /// Update session token counts and cost (called when streaming accumulates tokens)
     /// - Parameters:
     ///   - sessionId: The session to update
     ///   - inputTokens: Total accumulated input tokens (for billing)
     ///   - outputTokens: Total accumulated output tokens
     ///   - lastTurnInputTokens: Current context size (from last turn's input_tokens)
-    func updateSessionTokens(sessionId: String, inputTokens: Int, outputTokens: Int, lastTurnInputTokens: Int) throws {
+    ///   - cost: Total accumulated cost from all turns
+    func updateSessionTokens(sessionId: String, inputTokens: Int, outputTokens: Int, lastTurnInputTokens: Int, cost: Double) throws {
         guard var session = try eventDB.getSession(sessionId) else {
             logger.warning("Cannot update tokens: session \(sessionId) not found", category: .session)
             return
@@ -74,13 +75,14 @@ extension EventStoreManager {
         session.inputTokens = inputTokens
         session.outputTokens = outputTokens
         session.lastTurnInputTokens = lastTurnInputTokens
+        session.cost = cost
 
         try eventDB.insertSession(session)
 
         // Reload sessions to update in-memory array
         loadSessions()
 
-        logger.debug("Updated session \(sessionId) tokens: in=\(inputTokens) out=\(outputTokens) lastTurnIn=\(lastTurnInputTokens)", category: .session)
+        logger.debug("Updated session \(sessionId) tokens: in=\(inputTokens) out=\(outputTokens) lastTurnIn=\(lastTurnInputTokens) cost=\(cost)", category: .session)
     }
 
     // MARK: - Tree Operations (Fork/Rewind)

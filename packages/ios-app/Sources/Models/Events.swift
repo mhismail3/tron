@@ -131,6 +131,29 @@ struct TurnEndEvent: Decodable {
         let tokenUsage: TokenUsage?
         let stopReason: String?
         let cost: Double?
+
+        enum CodingKeys: String, CodingKey {
+            case turn, turnNumber, duration, tokenUsage, stopReason, cost
+        }
+
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            turn = try container.decodeIfPresent(Int.self, forKey: .turn)
+            turnNumber = try container.decodeIfPresent(Int.self, forKey: .turnNumber)
+            duration = try container.decodeIfPresent(Int.self, forKey: .duration)
+            tokenUsage = try container.decodeIfPresent(TokenUsage.self, forKey: .tokenUsage)
+            stopReason = try container.decodeIfPresent(String.self, forKey: .stopReason)
+
+            // Handle cost as either Double or String
+            if let costDouble = try? container.decodeIfPresent(Double.self, forKey: .cost) {
+                cost = costDouble
+            } else if let costString = try? container.decodeIfPresent(String.self, forKey: .cost),
+                      let costValue = Double(costString) {
+                cost = costValue
+            } else {
+                cost = nil
+            }
+        }
     }
 
     var turnNumber: Int { data?.turn ?? data?.turnNumber ?? 1 }

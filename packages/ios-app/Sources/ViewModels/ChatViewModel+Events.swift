@@ -207,6 +207,7 @@ extension ChatViewModel {
             accumulatedOutputTokens += usage.outputTokens
             accumulatedCacheReadTokens += usage.cacheReadTokens ?? 0
             accumulatedCacheCreationTokens += usage.cacheCreationTokens ?? 0
+            accumulatedCost += event.cost ?? 0
 
             // Total usage shows current context input + accumulated output
             // The context bar uses lastTurnInputTokens via contextPercentage
@@ -222,13 +223,15 @@ extension ChatViewModel {
             // - inputTokens: accumulated for billing
             // - outputTokens: accumulated
             // - lastTurnInputTokens: current context size for context bar
+            // - cost: accumulated cost from all turns
             if let manager = eventStoreManager {
                 do {
                     try manager.updateSessionTokens(
                         sessionId: sessionId,
                         inputTokens: accumulatedInputTokens,
                         outputTokens: accumulatedOutputTokens,
-                        lastTurnInputTokens: lastTurnInputTokens
+                        lastTurnInputTokens: lastTurnInputTokens,
+                        cost: accumulatedCost
                     )
                 } catch {
                     logger.error("Failed to update session tokens: \(error.localizedDescription)", category: .events)

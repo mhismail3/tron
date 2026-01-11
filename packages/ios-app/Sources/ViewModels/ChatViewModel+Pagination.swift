@@ -111,6 +111,7 @@ extension ChatViewModel {
                 accumulatedOutputTokens = session.outputTokens
                 accumulatedCacheReadTokens = state.totalTokenUsage.cacheReadTokens ?? 0
                 accumulatedCacheCreationTokens = state.totalTokenUsage.cacheCreationTokens ?? 0
+                accumulatedCost = session.cost
 
                 // Current context size for context bar (lastTurnInputTokens from server)
                 lastTurnInputTokens = session.lastTurnInputTokens
@@ -191,6 +192,7 @@ extension ChatViewModel {
                 accumulatedOutputTokens = session.outputTokens
                 accumulatedCacheReadTokens = state.totalTokenUsage.cacheReadTokens ?? 0
                 accumulatedCacheCreationTokens = state.totalTokenUsage.cacheCreationTokens ?? 0
+                accumulatedCost = session.cost
 
                 // Current context size for context bar
                 lastTurnInputTokens = session.lastTurnInputTokens
