@@ -401,7 +401,8 @@ describe('ContextManager', () => {
 
     it('truncates large tool results', () => {
       const cm = createContextManager({ model: 'claude-sonnet-4-20250514' });
-      const largeResult = 'x'.repeat(100_000);
+      // Use 150k chars to exceed the 100k char cap
+      const largeResult = 'x'.repeat(150_000);
 
       const processed = cm.processToolResult({
         toolCallId: 'test',
@@ -415,7 +416,8 @@ describe('ContextManager', () => {
 
     it('adds truncation marker when truncating', () => {
       const cm = createContextManager({ model: 'claude-sonnet-4-20250514' });
-      const largeResult = 'x'.repeat(100_000);
+      // Use 150k chars to exceed the 100k char cap
+      const largeResult = 'x'.repeat(150_000);
 
       const processed = cm.processToolResult({
         toolCallId: 'test',
@@ -427,14 +429,15 @@ describe('ContextManager', () => {
 
     it('adapts truncation based on remaining budget', () => {
       const simulator = createContextSimulator({ targetTokens: 1000 });
-      const session = simulator.generateAtUtilization(85, 200_000);
+      // At 95% utilization, budget should be very tight
+      const session = simulator.generateAtUtilization(95, 200_000);
 
       const cm = createContextManager({ model: 'claude-sonnet-4-20250514' });
       cm.setMessages(session.messages);
 
-      // With tight budget, max tool result size should be smaller
+      // With very tight budget, max tool result size should be smaller than the cap
       const maxSize = cm.getMaxToolResultSize();
-      expect(maxSize).toBeLessThan(50_000);
+      expect(maxSize).toBeLessThan(100_000);
     });
 
     it('returns minimum result size even when very tight', () => {

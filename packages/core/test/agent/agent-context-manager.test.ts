@@ -283,7 +283,8 @@ describe('TronAgent + ContextManager Integration', () => {
       const agent = new TronAgent(createTestConfig());
       const cm = agent.getContextManager();
 
-      const largeContent = 'x'.repeat(100_000);
+      // Use 150k chars to exceed the 100k char cap
+      const largeContent = 'x'.repeat(150_000);
       const processed = cm.processToolResult({
         toolCallId: 'test',
         content: largeContent,

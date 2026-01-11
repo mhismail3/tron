@@ -9,8 +9,15 @@ import * as fs from 'fs/promises';
 import * as path from 'path';
 import type { TronTool, TronToolResult } from '../types/index.js';
 import { createLogger } from '../logging/logger.js';
+import { getSettings } from '../settings/index.js';
+import { truncateOutput } from './utils.js';
 
 const logger = createLogger('tool:ls');
+
+// Get ls tool settings (loaded lazily on first access)
+function getLsSettings() {
+  return getSettings().tools.ls ?? { maxEntries: 1000, maxOutputTokens: 10000 };
+}
 
 export interface LsToolConfig {
   workingDirectory: string;
@@ -112,13 +119,27 @@ export class LsTool implements TronTool {
         };
       }
 
+      const settings = getLsSettings();
+      const maxEntries = settings.maxEntries ?? 1000;
+      const maxOutputTokens = settings.maxOutputTokens ?? 10000;
+
       const dirEntries = await fs.readdir(listPath, { withFileTypes: true });
       const entries: LsEntry[] = [];
+      let entriesTruncated = false;
+      let totalEntryCount = 0;
 
       for (const dirent of dirEntries) {
         // Skip hidden files unless showAll
         if (!showAll && dirent.name.startsWith('.')) {
           continue;
+        }
+
+        totalEntryCount++;
+
+        // Stop collecting if we hit the entry limit
+        if (entries.length >= maxEntries) {
+          entriesTruncated = true;
+          continue; // Continue counting total entries
         }
 
         const fullPath = path.join(listPath, dirent.name);
@@ -143,23 +164,47 @@ export class LsTool implements TronTool {
       this.sortEntries(entries, groupDirsFirst);
 
       // Format output
-      const output = longFormat
+      let output = longFormat
         ? this.formatLong(entries, humanReadable)
         : this.formatSimple(entries);
+
+      // Add entry truncation message if needed
+      if (entriesTruncated) {
+        output += `\n\n... [Showing ${entries.length} of ${totalEntryCount} entries]`;
+      }
+
+      // Apply token-based truncation
+      const truncateResult = truncateOutput(output, maxOutputTokens, {
+        preserveStartLines: 20,
+        truncationMessage: entriesTruncated
+          ? `\n\n... [Showing ${entries.length} of ${totalEntryCount} entries, output also truncated for token limit]`
+          : `\n\n... [Output truncated: exceeded ${maxOutputTokens.toLocaleString()} token limit]`,
+      });
 
       const fileCount = entries.filter(e => e.isFile).length;
       const dirCount = entries.filter(e => e.isDirectory).length;
 
-      logger.debug('Ls completed', { path: listPath, entryCount: entries.length });
+      logger.debug('Ls completed', {
+        path: listPath,
+        entryCount: entries.length,
+        totalEntryCount,
+        truncated: entriesTruncated || truncateResult.truncated,
+      });
 
       return {
-        content: output,
+        content: truncateResult.content,
         isError: false,
         details: {
           path: listPath,
           entryCount: entries.length,
+          totalEntryCount,
           fileCount,
           dirCount,
+          truncated: entriesTruncated || truncateResult.truncated,
+          ...(truncateResult.truncated && {
+            originalTokens: truncateResult.originalTokens,
+            finalTokens: truncateResult.finalTokens,
+          }),
         },
       };
     } catch (error) {

@@ -956,9 +956,24 @@ export class TronAgent {
     const duration = Date.now() - startTime;
 
     // Convert content to string for compatibility
-    const contentString = typeof result.content === 'string'
+    let contentString = typeof result.content === 'string'
       ? result.content
       : result.content.map(c => c.type === 'text' ? c.text : '[image]').join('\n');
+
+    // Apply context manager safety net truncation
+    const processed = this.contextManager.processToolResult({
+      toolCallId: request.toolCallId,
+      content: contentString,
+    });
+    if (processed.truncated) {
+      contentString = processed.content;
+      logger.info('Tool result truncated by context manager safety net', {
+        toolName: request.toolName,
+        toolCallId: request.toolCallId,
+        originalSize: processed.originalSize,
+        finalSize: contentString.length,
+      });
+    }
 
     this.emit({
       type: 'tool_execution_end',

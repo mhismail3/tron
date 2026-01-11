@@ -119,6 +119,8 @@ export interface ReadToolSettings {
   defaultLimitLines: number;
   /** Maximum line length before truncation */
   maxLineLength: number;
+  /** Maximum output size in tokens (default: 20,000) */
+  maxOutputTokens: number;
 }
 
 /**
@@ -143,6 +145,18 @@ export interface GrepToolSettings {
   binaryExtensions: string[];
   /** Directories to skip during search */
   skipDirectories: string[];
+  /** Maximum output size in tokens (default: 15,000) */
+  maxOutputTokens: number;
+}
+
+/**
+ * Ls tool configuration
+ */
+export interface LsToolSettings {
+  /** Maximum directory entries to return (default: 1,000) */
+  maxEntries: number;
+  /** Maximum output size in tokens (default: 10,000) */
+  maxOutputTokens: number;
 }
 
 /**
@@ -153,6 +167,7 @@ export interface ToolSettings {
   read: ReadToolSettings;
   find: FindToolSettings;
   grep: GrepToolSettings;
+  ls: LsToolSettings;
 }
 
 // =============================================================================

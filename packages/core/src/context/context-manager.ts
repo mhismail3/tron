@@ -653,13 +653,25 @@ export class ContextManager {
 
   /**
    * Get maximum tool result size based on remaining context budget.
+   * This provides a dynamic ceiling that adapts to current context usage.
    */
   getMaxToolResultSize(): number {
-    const remainingBudget = this.contextLimit - this.getCurrentTokens();
-    // Reserve 20k tokens for response, rest available for tool results
-    const availableTokens = Math.max(remainingBudget - 20_000, 2_500);
-    // Convert to chars (4 chars ~ 1 token), cap at 50k chars default
-    return Math.min(availableTokens * 4, 50_000);
+    const currentTokens = this.getCurrentTokens();
+    const remainingBudget = this.contextLimit - currentTokens;
+
+    // Reserve tokens for:
+    // - Model response: 8,000 tokens (typical response size)
+    // - Safety margin: 10% of remaining budget
+    const responseReserve = 8_000;
+    const safetyMargin = Math.floor(remainingBudget * 0.1);
+
+    const availableTokens = Math.max(
+      remainingBudget - responseReserve - safetyMargin,
+      2_500  // Minimum 2,500 tokens for tool results
+    );
+
+    // Convert to chars (4 chars ~ 1 token), cap at 100k chars (~25k tokens)
+    return Math.min(availableTokens * 4, 100_000);
   }
 
   // ===========================================================================

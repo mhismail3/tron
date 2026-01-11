@@ -174,9 +174,13 @@ export class BashTool implements TronTool {
 
       // Truncate if too long
       let truncated = false;
+      let originalLength: number | undefined;
       const maxOutput = settings.maxOutputLength;
       if (output.length > maxOutput) {
-        output = output.substring(0, maxOutput) + '\n... [output truncated]';
+        originalLength = output.length;
+        const estimatedTokens = Math.ceil(originalLength / 4);
+        const maxTokens = Math.ceil(maxOutput / 4);
+        output = output.substring(0, maxOutput) + `\n\n... [Output truncated: ${estimatedTokens.toLocaleString()} tokens exceeded ${maxTokens.toLocaleString()} token limit]`;
         truncated = true;
       }
 
@@ -192,6 +196,11 @@ export class BashTool implements TronTool {
           exitCode: result.exitCode,
           durationMs,
           truncated,
+          ...(truncated && originalLength && {
+            originalChars: originalLength,
+            originalTokens: Math.ceil(originalLength / 4),
+            finalTokens: Math.ceil(maxOutput / 4),
+          }),
         },
       };
     } catch (error) {

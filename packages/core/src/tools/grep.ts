@@ -10,6 +10,7 @@ import * as path from 'path';
 import type { TronTool, TronToolResult } from '../types/index.js';
 import { createLogger } from '../logging/logger.js';
 import { getSettings } from '../settings/index.js';
+import { truncateOutput } from './utils.js';
 
 const logger = createLogger('tool:grep');
 
@@ -140,16 +141,33 @@ export class GrepTool implements TronTool {
 
       const output = this.formatMatches(matches, contextLines > 0);
 
-      logger.debug('Grep completed', { matchCount: matches.length, truncated });
+      // Apply token-based truncation
+      const maxOutputTokens = settings.maxOutputTokens ?? 15000;
+      const truncateResult = truncateOutput(output, maxOutputTokens, {
+        preserveStartLines: 5,
+        truncationMessage: `\n\n... [Results truncated: ${matches.length} matches found. Output exceeded ${maxOutputTokens.toLocaleString()} token limit. Use maxResults parameter or narrow your search.]`,
+      });
+
+      const resultsTruncated = truncated || truncateResult.truncated;
+
+      logger.debug('Grep completed', {
+        matchCount: matches.length,
+        truncated: resultsTruncated,
+        tokensTruncated: truncateResult.truncated,
+      });
 
       return {
-        content: output,
+        content: truncateResult.content,
         isError: false,
         details: {
           pattern: patternStr,
           searchPath,
           matchCount: matches.length,
-          truncated,
+          truncated: resultsTruncated,
+          ...(truncateResult.truncated && {
+            originalTokens: truncateResult.originalTokens,
+            finalTokens: truncateResult.finalTokens,
+          }),
         },
       };
     } catch (error) {

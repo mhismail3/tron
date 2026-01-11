@@ -107,12 +107,13 @@ export const DEFAULT_SETTINGS: TronSettings = {
     bash: {
       defaultTimeoutMs: 120000,  // 2 minutes
       maxTimeoutMs: 600000,      // 10 minutes
-      maxOutputLength: 30000,
+      maxOutputLength: 40000,    // ~10k tokens
       dangerousPatterns: DEFAULT_DANGEROUS_PATTERNS,
     },
     read: {
       defaultLimitLines: 2000,
       maxLineLength: 2000,
+      maxOutputTokens: 20000,    // 20k tokens (~80k chars)
     },
     find: {
       defaultMaxResults: 100,
@@ -123,6 +124,11 @@ export const DEFAULT_SETTINGS: TronSettings = {
       maxFileSizeBytes: 10 * 1024 * 1024,  // 10MB
       binaryExtensions: DEFAULT_BINARY_EXTENSIONS,
       skipDirectories: DEFAULT_SKIP_DIRECTORIES,
+      maxOutputTokens: 15000,    // 15k tokens (~60k chars)
+    },
+    ls: {
+      maxEntries: 1000,          // Max 1k directory entries
+      maxOutputTokens: 10000,    // 10k tokens (~40k chars)
     },
   },
 

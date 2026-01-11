@@ -9,6 +9,7 @@ import * as path from 'path';
 import type { TronTool, TronToolResult } from '../types/index.js';
 import { createLogger } from '../logging/logger.js';
 import { getSettings } from '../settings/index.js';
+import { truncateOutput } from './utils.js';
 
 const logger = createLogger('tool:read');
 
@@ -96,14 +97,22 @@ export class ReadTool implements TronTool {
         return `${String(lineNum).padStart(6)}→${truncatedLine}`;
       }).join('\n');
 
+      // Apply token-based truncation
+      const maxOutputTokens = settings.maxOutputTokens ?? 20000;
+      const truncateResult = truncateOutput(formatted, maxOutputTokens, {
+        preserveStartLines: 10,
+        truncationMessage: `\n\n... [Output truncated: ${totalLines} total lines, showing ${selectedLines.length} lines. Output exceeded ${maxOutputTokens.toLocaleString()} token limit. Use offset/limit parameters to read specific sections.]`,
+      });
+
       logger.debug('File read successfully', {
         filePath,
         totalLines,
         linesReturned: selectedLines.length,
+        truncated: truncateResult.truncated,
       });
 
       return {
-        content: formatted,
+        content: truncateResult.content,
         isError: false,
         details: {
           filePath,
@@ -111,6 +120,11 @@ export class ReadTool implements TronTool {
           linesReturned: selectedLines.length,
           startLine: startLine + 1,
           endLine,
+          truncated: truncateResult.truncated,
+          ...(truncateResult.truncated && {
+            originalTokens: truncateResult.originalTokens,
+            finalTokens: truncateResult.finalTokens,
+          }),
         },
       };
     } catch (error) {
