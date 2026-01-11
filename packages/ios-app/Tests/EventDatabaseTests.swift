@@ -257,6 +257,7 @@ final class EventDatabaseTests: XCTestCase {
             messageCount: 2,
             inputTokens: 100,
             outputTokens: 200,
+            lastTurnInputTokens: 0,
             cost: 0.0
         )
 
@@ -277,7 +278,7 @@ final class EventDatabaseTests: XCTestCase {
             title: "Session 1", latestModel: "claude-sonnet-4",
             workingDirectory: "/test",
             createdAt: "2024-01-01T00:00:00Z", lastActivityAt: "2024-01-01T00:00:00Z",
-            eventCount: 0, messageCount: 0, inputTokens: 0, outputTokens: 0, cost: 0.0
+            eventCount: 0, messageCount: 0, inputTokens: 0, outputTokens: 0, lastTurnInputTokens: 0, cost: 0.0
         ))
 
         try database.insertSession(CachedSession(
@@ -285,7 +286,7 @@ final class EventDatabaseTests: XCTestCase {
             title: "Session 2", latestModel: "claude-opus-4",
             workingDirectory: "/test",
             createdAt: "2024-01-02T00:00:00Z", lastActivityAt: "2024-01-02T00:00:00Z",
-            eventCount: 0, messageCount: 0, inputTokens: 0, outputTokens: 0, cost: 0.0
+            eventCount: 0, messageCount: 0, inputTokens: 0, outputTokens: 0, lastTurnInputTokens: 0, cost: 0.0
         ))
 
         let sessions = try database.getAllSessions()
@@ -301,7 +302,7 @@ final class EventDatabaseTests: XCTestCase {
             title: "Test", latestModel: "claude-sonnet-4",
             workingDirectory: "/test",
             createdAt: "2024-01-01", lastActivityAt: "2024-01-01",
-            eventCount: 0, messageCount: 0, inputTokens: 0, outputTokens: 0, cost: 0.0
+            eventCount: 0, messageCount: 0, inputTokens: 0, outputTokens: 0, lastTurnInputTokens: 0, cost: 0.0
         ))
 
         var session = try database.getSession("s1")
@@ -355,7 +356,7 @@ final class EventDatabaseTests: XCTestCase {
             title: "Test", latestModel: "claude-sonnet-4",
             workingDirectory: "/test",
             createdAt: "2024-01-01", lastActivityAt: "2024-01-01",
-            eventCount: 3, messageCount: 2, inputTokens: 0, outputTokens: 0, cost: 0.0
+            eventCount: 3, messageCount: 2, inputTokens: 0, outputTokens: 0, lastTurnInputTokens: 0, cost: 0.0
         ))
 
         // Use unified transformer to reconstruct state
@@ -382,7 +383,7 @@ final class EventDatabaseTests: XCTestCase {
             title: "Test", latestModel: "claude-sonnet-4",
             workingDirectory: "/test",
             createdAt: "2024-01-01", lastActivityAt: "2024-01-01",
-            eventCount: 3, messageCount: 2, inputTokens: 0, outputTokens: 0, cost: 0.0
+            eventCount: 3, messageCount: 2, inputTokens: 0, outputTokens: 0, lastTurnInputTokens: 0, cost: 0.0
         ))
 
         let tree = try database.buildTreeVisualization("s1")
@@ -417,7 +418,7 @@ final class EventDatabaseTests: XCTestCase {
             title: "Test", latestModel: "claude-sonnet-4",
             workingDirectory: "/test",
             createdAt: "2024-01-01", lastActivityAt: "2024-01-01",
-            eventCount: 4, messageCount: 1, inputTokens: 0, outputTokens: 0, cost: 0.0
+            eventCount: 4, messageCount: 1, inputTokens: 0, outputTokens: 0, lastTurnInputTokens: 0, cost: 0.0
         ))
 
         let tree = try database.buildTreeVisualization("s1")
@@ -474,7 +475,7 @@ final class EventDatabaseTests: XCTestCase {
             title: "Test", latestModel: "claude-sonnet-4",
             workingDirectory: "/test",
             createdAt: "2024-01-01", lastActivityAt: "2024-01-01",
-            eventCount: 3, messageCount: 2, inputTokens: 0, outputTokens: 0, cost: 0.0
+            eventCount: 3, messageCount: 2, inputTokens: 0, outputTokens: 0, lastTurnInputTokens: 0, cost: 0.0
         ))
 
         // Use unified transformer to reconstruct state

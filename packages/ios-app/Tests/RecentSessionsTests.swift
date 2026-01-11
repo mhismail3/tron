@@ -44,6 +44,7 @@ final class RecentSessionsTests: XCTestCase {
             messageCount: 0,
             inputTokens: 0,
             outputTokens: 0,
+            lastTurnInputTokens: 0,
             cost: 0.0
         )
 
@@ -61,6 +62,7 @@ final class RecentSessionsTests: XCTestCase {
             messageCount: 0,
             inputTokens: 0,
             outputTokens: 0,
+            lastTurnInputTokens: 0,
             cost: 0.0
         )
 
@@ -78,6 +80,7 @@ final class RecentSessionsTests: XCTestCase {
             messageCount: 0,
             inputTokens: 0,
             outputTokens: 0,
+            lastTurnInputTokens: 0,
             cost: 0.0
         )
 
@@ -111,6 +114,7 @@ final class RecentSessionsTests: XCTestCase {
             messageCount: 0,
             inputTokens: 0,
             outputTokens: 0,
+            lastTurnInputTokens: 0,
             cost: 0.0
         )
 
@@ -128,6 +132,7 @@ final class RecentSessionsTests: XCTestCase {
             messageCount: 0,
             inputTokens: 0,
             outputTokens: 0,
+            lastTurnInputTokens: 0,
             cost: 0.0
         )
 
@@ -145,6 +150,7 @@ final class RecentSessionsTests: XCTestCase {
             messageCount: 0,
             inputTokens: 0,
             outputTokens: 0,
+            lastTurnInputTokens: 0,
             cost: 0.0
         )
 
@@ -185,6 +191,7 @@ final class RecentSessionsTests: XCTestCase {
                 messageCount: 0,
                 inputTokens: 0,
                 outputTokens: 0,
+                lastTurnInputTokens: 0,
                 cost: 0.0
             )
             try database.insertSession(session)
@@ -220,6 +227,7 @@ final class RecentSessionsTests: XCTestCase {
             messageCount: 0,
             inputTokens: 0,
             outputTokens: 0,
+            lastTurnInputTokens: 0,
             cost: 0.0
         )
 
@@ -238,6 +246,7 @@ final class RecentSessionsTests: XCTestCase {
             messageCount: 0,
             inputTokens: 0,
             outputTokens: 0,
+            lastTurnInputTokens: 0,
             cost: 0.0
         )
 
@@ -271,6 +280,7 @@ final class RecentSessionsTests: XCTestCase {
             messageCount: 0,
             inputTokens: 0,
             outputTokens: 0,
+            lastTurnInputTokens: 0,
             cost: 0.0
         )
 
@@ -288,6 +298,7 @@ final class RecentSessionsTests: XCTestCase {
             messageCount: 0,
             inputTokens: 0,
             outputTokens: 0,
+            lastTurnInputTokens: 0,
             cost: 0.0
         )
 
@@ -312,6 +323,7 @@ final class RecentSessionsTests: XCTestCase {
             messageCount: 1,
             inputTokens: 0,
             outputTokens: 0,
+            lastTurnInputTokens: 0,
             cost: 0.0,
             lastUserPrompt: "Help me refactor this code",
             lastAssistantResponse: nil,
@@ -390,6 +402,7 @@ final class RecentSessionsTests: XCTestCase {
             messageCount: 2,
             inputTokens: 0,
             outputTokens: 0,
+            lastTurnInputTokens: 0,
             cost: 0.0
         ))
 
@@ -418,6 +431,7 @@ final class RecentSessionsTests: XCTestCase {
             messageCount: 3,
             inputTokens: 100,
             outputTokens: 200,
+            lastTurnInputTokens: 0,
             cost: 0.0
         ))
 
@@ -439,6 +453,7 @@ final class RecentSessionsTests: XCTestCase {
             messageCount: 3,
             inputTokens: 100,
             outputTokens: 200,
+            lastTurnInputTokens: 0,
             cost: 0.0
         ))
 
@@ -470,6 +485,7 @@ final class RecentSessionsTests: XCTestCase {
             messageCount: 0,
             inputTokens: 0,
             outputTokens: 0,
+            lastTurnInputTokens: 0,
             cost: 0.0
         ))
 
@@ -487,6 +503,7 @@ final class RecentSessionsTests: XCTestCase {
             messageCount: 0,
             inputTokens: 0,
             outputTokens: 0,
+            lastTurnInputTokens: 0,
             cost: 0.0
         ))
 
@@ -504,6 +521,7 @@ final class RecentSessionsTests: XCTestCase {
             messageCount: 0,
             inputTokens: 0,
             outputTokens: 0,
+            lastTurnInputTokens: 0,
             cost: 0.0
         ))
 
@@ -585,6 +603,7 @@ final class RecentSessionsTests: XCTestCase {
             messageCount: 0,
             inputTokens: 0,
             outputTokens: 0,
+            lastTurnInputTokens: 0,
             cost: 0.0,
             lastUserPrompt: nil,
             lastAssistantResponse: nil,
@@ -616,6 +635,7 @@ final class RecentSessionsTests: XCTestCase {
             messageCount: 0,
             inputTokens: 0,
             outputTokens: 0,
+            lastTurnInputTokens: 0,
             cost: 0.0
         )
 
@@ -643,6 +663,7 @@ final class RecentSessionsTests: XCTestCase {
             messageCount: 0,
             inputTokens: 0,
             outputTokens: 0,
+            lastTurnInputTokens: 0,
             cost: 0.0
         )
 

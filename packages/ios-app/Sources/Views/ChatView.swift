@@ -98,6 +98,9 @@ struct ChatView: View {
                         onAbort: viewModel.abortAgent,
                         onMicTap: viewModel.toggleRecording,
                         onRemoveImage: viewModel.removeAttachedImage,
+                        attachments: $viewModel.attachments,
+                        onAddAttachment: viewModel.addAttachment,
+                        onRemoveAttachment: viewModel.removeAttachment,
                         inputHistory: inputHistory,
                         onHistoryNavigate: { newText in
                             viewModel.inputText = newText

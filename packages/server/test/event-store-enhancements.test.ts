@@ -771,11 +771,13 @@ describe('Event Store Enhancements', () => {
         payload: { turn: 1, tokenUsage: { inputTokens: 100, outputTokens: 50 } },
       });
 
-      // Reconstruct messages - should only include user/assistant messages
+      // Reconstruct messages - should include user, toolResult, and assistant messages
+      // Tool results are now reconstructed for cross-provider compatibility
       const messages = await eventStore.getMessagesAtHead(sessionId);
-      expect(messages.length).toBe(2);
+      expect(messages.length).toBe(3);
       expect(messages[0].role).toBe('user');
-      expect(messages[1].role).toBe('assistant');
+      expect(messages[1].role).toBe('toolResult');
+      expect(messages[2].role).toBe('assistant');
     });
 
     it('should not affect existing session queries with new event types', async () => {
@@ -941,8 +943,9 @@ describe('Event Store Enhancements', () => {
       expect(eventCounts['tool.result']).toBe(1);
 
       // Verify messages reconstruction
+      // Tool results are now reconstructed for cross-provider compatibility
       const messages = await eventStore.getMessagesAtHead(sessionId);
-      expect(messages.length).toBe(3); // 1 user + 2 assistant
+      expect(messages.length).toBe(4); // 1 user + 1 toolResult + 2 assistant
 
       // Verify state includes correct token totals
       const state = await eventStore.getStateAtHead(sessionId);

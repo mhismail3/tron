@@ -45,6 +45,7 @@ import {
   type CompactionPreview,
   type CompactionResult,
   type Summarizer,
+  type UserContent,
 } from '@tron/core';
 import {
   normalizeContentBlocks,
@@ -637,13 +638,66 @@ export class EventStoreOrchestrator extends EventEmitter {
       // This prevents race conditions where stream events (turn_start, etc.) capture wrong parentId
       await active.appendPromiseChain;
 
+      // Build user content from prompt and any attachments
+      const userContent: UserContent[] = [];
+
+      // Add text prompt
+      if (options.prompt) {
+        userContent.push({ type: 'text', text: options.prompt });
+      }
+
+      // Add images from legacy images array
+      if (options.images && options.images.length > 0) {
+        for (const img of options.images) {
+          if (img.mimeType.startsWith('image/')) {
+            userContent.push({
+              type: 'image',
+              data: img.data,
+              mimeType: img.mimeType,
+            });
+          }
+        }
+      }
+
+      // Add images/documents from attachments array
+      if (options.attachments && options.attachments.length > 0) {
+        for (const att of options.attachments) {
+          if (att.mimeType.startsWith('image/')) {
+            userContent.push({
+              type: 'image',
+              data: att.data,
+              mimeType: att.mimeType,
+            });
+          } else if (att.mimeType === 'application/pdf') {
+            userContent.push({
+              type: 'document',
+              data: att.data,
+              mimeType: att.mimeType,
+              fileName: att.fileName,
+            });
+          }
+        }
+      }
+
+      logger.debug('Built user content', {
+        sessionId: active.sessionId,
+        contentBlocks: userContent.length,
+        hasImages: userContent.some(c => c.type === 'image'),
+        hasDocuments: userContent.some(c => c.type === 'document'),
+      });
+
+      // Determine if we can use simple string format (backward compat) or need full content array
+      const firstContent = userContent[0];
+      const isSimpleTextOnly = userContent.length === 1 && firstContent?.type === 'text';
+      const messageContent = isSimpleTextOnly ? options.prompt : userContent;
+
       // Record user message event (linearized to prevent spurious branches)
       // CRITICAL: Pass parentId from in-memory state, then update it after append
       const userMsgParentId = active.pendingHeadEventId ?? undefined;
       const userMsgEvent = await this.eventStore.append({
         sessionId: active.sessionId,
         type: 'message.user',
-        payload: { content: options.prompt },
+        payload: { content: messageContent },
         parentId: userMsgParentId,
       });
       active.pendingHeadEventId = userMsgEvent.id;
@@ -658,8 +712,8 @@ export class EventStoreOrchestrator extends EventEmitter {
         active.agent.setReasoningLevel(options.reasoningLevel);
       }
 
-      // Run agent
-      const runResult = await active.agent.run(options.prompt);
+      // Run agent with full user content (text + images/documents)
+      const runResult = await active.agent.run(messageContent);
       active.lastActivity = new Date();
 
       // Handle interrupted runs - PERSIST partial content so it survives session resume

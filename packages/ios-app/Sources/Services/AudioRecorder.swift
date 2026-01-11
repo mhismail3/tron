@@ -100,6 +100,9 @@ final class AudioRecorder: NSObject, ObservableObject, AVAudioRecorderDelegate {
             throw RecorderError.permissionDenied
         }
 
+        // Prevent AudioAvailabilityMonitor from interfering with our recording
+        AudioAvailabilityMonitor.shared.isRecordingInProgress = true
+
         let session = AVAudioSession.sharedInstance()
         do {
             do {
@@ -110,9 +113,11 @@ final class AudioRecorder: NSObject, ObservableObject, AVAudioRecorderDelegate {
             }
             try session.setActive(true, options: [])
         } catch {
+            AudioAvailabilityMonitor.shared.isRecordingInProgress = false
             throw RecorderError.startFailed("Failed to configure audio session: \(error.localizedDescription)")
         }
         if !session.isInputAvailable {
+            AudioAvailabilityMonitor.shared.isRecordingInProgress = false
             throw RecorderError.startFailed("No audio input available")
         }
         if let inputs = session.availableInputs, let builtIn = inputs.first(where: { $0.portType == .builtInMic }) {
@@ -135,9 +140,11 @@ final class AudioRecorder: NSObject, ObservableObject, AVAudioRecorderDelegate {
             recorder.delegate = self
             recorder.isMeteringEnabled = false
             if !recorder.prepareToRecord() {
+                AudioAvailabilityMonitor.shared.isRecordingInProgress = false
                 throw RecorderError.startFailed("Failed to prepare recorder")
             }
             guard recorder.record() else {
+                AudioAvailabilityMonitor.shared.isRecordingInProgress = false
                 throw RecorderError.startFailed("Recorder refused to start")
             }
             self.recorder = recorder
@@ -151,8 +158,10 @@ final class AudioRecorder: NSObject, ObservableObject, AVAudioRecorderDelegate {
                 }
             }
         } catch let error as RecorderError {
+            AudioAvailabilityMonitor.shared.isRecordingInProgress = false
             throw error
         } catch {
+            AudioAvailabilityMonitor.shared.isRecordingInProgress = false
             throw RecorderError.startFailed("Failed to start recording: \(error.localizedDescription)")
         }
     }
@@ -166,6 +175,7 @@ final class AudioRecorder: NSObject, ObservableObject, AVAudioRecorderDelegate {
     func cancelRecording() {
         autoStopTask?.cancel()
         autoStopTask = nil
+        AudioAvailabilityMonitor.shared.isRecordingInProgress = false
         recorder?.stop()
         cleanupFile()
     }
@@ -186,6 +196,7 @@ final class AudioRecorder: NSObject, ObservableObject, AVAudioRecorderDelegate {
         autoStopTask?.cancel()
         autoStopTask = nil
         isRecording = false
+        AudioAvailabilityMonitor.shared.isRecordingInProgress = false
         defer {
             recorder = nil
         }
@@ -209,6 +220,7 @@ final class AudioRecorder: NSObject, ObservableObject, AVAudioRecorderDelegate {
         autoStopTask?.cancel()
         autoStopTask = nil
         isRecording = false
+        AudioAvailabilityMonitor.shared.isRecordingInProgress = false
         defer {
             recorder = nil
         }

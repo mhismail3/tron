@@ -15,6 +15,9 @@ struct InputBar: View {
     let onAbort: () -> Void
     let onMicTap: () -> Void
     let onRemoveImage: (ImageContent) -> Void
+    @Binding var attachments: [Attachment]
+    let onAddAttachment: (Attachment) -> Void
+    let onRemoveAttachment: (Attachment) -> Void
     var inputHistory: InputHistoryStore?
     var onHistoryNavigate: ((String) -> Void)?
 
@@ -41,6 +44,8 @@ struct InputBar: View {
     @FocusState private var isFocused: Bool
     @ObservedObject private var audioMonitor = AudioAvailabilityMonitor.shared
     @State private var showingImagePicker = false
+    @State private var showCamera = false
+    @State private var showFilePicker = false
     @State private var isMicPulsing = false
     @State private var showMicButton = false
     @State private var showModelPill = false
@@ -53,13 +58,19 @@ struct InputBar: View {
     @Namespace private var tokenPillNamespace
     @Namespace private var micButtonNamespace
     @Namespace private var reasoningPillNamespace
+    @Namespace private var attachmentButtonNamespace
 
     private let actionButtonSize: CGFloat = 40
     private let micDockInset: CGFloat = 18
 
     var body: some View {
         VStack(spacing: 10) {
-            // Attached images preview
+            // Unified attachments preview (new model)
+            if !attachments.isEmpty {
+                attachmentsRow
+            }
+
+            // Attached images preview (legacy)
             if !attachedImages.isEmpty {
                 attachedImagesRow
             }
@@ -73,6 +84,9 @@ struct InputBar: View {
 
             // Input row - floating liquid glass elements
             HStack(alignment: .bottom, spacing: 12) {
+                // Attachment button - liquid glass
+                attachmentButtonGlass
+
                 // Text field with glass background
                 textFieldGlass
 
@@ -150,6 +164,43 @@ struct InputBar: View {
                 triggerReasoningPillAnimation()
             } else if supportsReasoning != true && showReasoningPill {
                 hideReasoningPill()
+            }
+        }
+        // Camera picker sheet
+        .sheet(isPresented: $showCamera) {
+            CameraCaptureSheet { capturedImage in
+                Task {
+                    if let result = await ImageCompressor.compress(capturedImage) {
+                        let attachment = Attachment(
+                            type: .image,
+                            data: result.data,
+                            mimeType: result.mimeType,
+                            fileName: nil,
+                            originalSize: Int(capturedImage.jpegData(compressionQuality: 1.0)?.count ?? 0)
+                        )
+                        await MainActor.run {
+                            onAddAttachment(attachment)
+                        }
+                    }
+                }
+            }
+        }
+        // Document picker sheet
+        .sheet(isPresented: $showFilePicker) {
+            DocumentPicker { url, mimeType, fileName in
+                do {
+                    let data = try Data(contentsOf: url)
+                    let type = AttachmentType.from(mimeType: mimeType)
+                    let attachment = Attachment(
+                        type: type,
+                        data: data,
+                        mimeType: mimeType,
+                        fileName: fileName
+                    )
+                    onAddAttachment(attachment)
+                } catch {
+                    print("Failed to read document: \(error)")
+                }
             }
         }
     }
@@ -249,7 +300,61 @@ struct InputBar: View {
         .glassEffect(.regular.tint(Color.tronPhthaloGreen.opacity(0.4)), in: .capsule)
     }
 
-    // MARK: - Attached Images Row
+    // MARK: - Unified Attachments Row
+
+    private var attachmentsRow: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                ForEach(attachments) { attachment in
+                    AttachmentBubble(attachment: attachment) {
+                        onRemoveAttachment(attachment)
+                    }
+                }
+            }
+            .padding(.horizontal, 16)
+        }
+        .frame(height: 60)
+    }
+
+    // MARK: - Attachment Button (iOS 26 Liquid Glass)
+
+    private var attachmentButtonGlass: some View {
+        Menu {
+            // Photo Library option
+            PhotosPicker(
+                selection: $selectedImages,
+                maxSelectionCount: 5,
+                matching: .images
+            ) {
+                Label("Photo Library", systemImage: "photo.on.rectangle")
+            }
+
+            // Camera option
+            Button {
+                showCamera = true
+            } label: {
+                Label("Take Photo", systemImage: "camera")
+            }
+
+            // Files option
+            Button {
+                showFilePicker = true
+            } label: {
+                Label("Choose File", systemImage: "folder")
+            }
+        } label: {
+            Image(systemName: "plus")
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(isProcessing ? Color.tronEmerald.opacity(0.3) : Color.tronEmerald)
+                .frame(width: actionButtonSize, height: actionButtonSize)
+                .contentShape(Circle())
+        }
+        .matchedGeometryEffect(id: "attachmentButtonMorph", in: attachmentButtonNamespace)
+        .glassEffect(.regular.tint(Color.tronPhthaloGreen.opacity(0.3)).interactive(), in: .circle)
+        .disabled(isProcessing)
+    }
+
+    // MARK: - Attached Images Row (Legacy)
 
     private var attachedImagesRow: some View {
         ScrollView(.horizontal, showsIndicators: false) {
@@ -617,7 +722,7 @@ struct InputBar: View {
     }
 
     private var canSend: Bool {
-        !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !attachedImages.isEmpty
+        !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !attachedImages.isEmpty || !attachments.isEmpty
     }
 
     private var shouldShowStatusPills: Bool {
@@ -799,6 +904,9 @@ struct AttachedImageThumbnail: View {
             onAbort: {},
             onMicTap: {},
             onRemoveImage: { _ in },
+            attachments: .constant([]),
+            onAddAttachment: { _ in },
+            onRemoveAttachment: { _ in },
             inputHistory: nil,
             onHistoryNavigate: nil,
             modelName: "claude-sonnet-4-5-20260105",

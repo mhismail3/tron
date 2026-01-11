@@ -32,6 +32,16 @@ export interface ImageContent {
 }
 
 /**
+ * Document content block (PDFs, base64 encoded)
+ */
+export interface DocumentContent {
+  type: 'document';
+  data: string; // base64 encoded
+  mimeType: string; // e.g., 'application/pdf'
+  fileName?: string;
+}
+
+/**
  * Thinking content block (Claude extended thinking)
  */
 export interface ThinkingContent {
@@ -53,7 +63,7 @@ export interface ToolCall {
 /**
  * Content types that can appear in user messages
  */
-export type UserContent = TextContent | ImageContent;
+export type UserContent = TextContent | ImageContent | DocumentContent;
 
 /**
  * Content types that can appear in assistant messages

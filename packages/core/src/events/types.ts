@@ -726,8 +726,12 @@ export type CreateEventInput<T extends SessionEvent> = Omit<T, 'id' | 'timestamp
 
 /** Message format for API calls */
 export interface Message {
-  role: 'user' | 'assistant' | 'system';
+  role: 'user' | 'assistant' | 'system' | 'toolResult';
   content: string | ContentBlock[];
+  /** For toolResult messages: the ID of the tool call this result corresponds to */
+  toolCallId?: string;
+  /** For toolResult messages: whether the result is an error */
+  isError?: boolean;
 }
 
 // =============================================================================

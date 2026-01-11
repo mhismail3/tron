@@ -20,6 +20,7 @@ class ChatViewModel: ObservableObject {
     @Published var showError = false
     @Published var selectedImages: [PhotosPickerItem] = []
     @Published var attachedImages: [ImageContent] = []
+    @Published var attachments: [Attachment] = []
     @Published var thinkingText = ""
     @Published var isThinkingExpanded = false
     @Published var totalTokenUsage: TokenUsage?

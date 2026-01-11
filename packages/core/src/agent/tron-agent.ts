@@ -22,6 +22,7 @@ import type {
   Context,
   ToolCall,
   TextContent,
+  UserContent,
 } from '../types/index.js';
 import {
   createProvider,
@@ -782,8 +783,9 @@ export class TronAgent {
 
   /**
    * Run agent until completion or max turns
+   * @param userContent - User message as string or array of content blocks (text, images, documents)
    */
-  async run(userMessage: string): Promise<RunResult> {
+  async run(userContent: string | UserContent[]): Promise<RunResult> {
     this.emit({
       type: 'agent_start',
       sessionId: this.sessionId,
@@ -791,7 +793,7 @@ export class TronAgent {
     });
 
     // Add user message
-    this.addMessage({ role: 'user', content: userMessage });
+    this.addMessage({ role: 'user', content: userContent });
 
     const maxTurns = this.config.maxTurns ?? 100;
     let lastResult: TurnResult | undefined;

@@ -142,6 +142,8 @@ function createRpcContext(orchestrator: EventStoreOrchestrator): RpcContext {
           sessionId: params.sessionId,
           prompt: params.prompt,
           reasoningLevel: params.reasoningLevel,
+          images: params.images,
+          attachments: params.attachments,
         }).catch(err => {
           console.error('Agent run error:', err);
         });

@@ -7,6 +7,14 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		ATTACH0010000000300000001 /* Attachment.swift in Sources */ = {isa = PBXBuildFile; fileRef = ATTACH0010000000100000001 /* Attachment.swift */; };
+		ATTACH0010000000400000001 /* AttachmentTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = ATTACH0010000000200000001 /* AttachmentTests.swift */; };
+		IMGCMP0010000000200000001 /* ImageCompressorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = IMGCMP0010000000100000001 /* ImageCompressorTests.swift */; };
+		IMGCMP0010000000400000001 /* ImageCompressor.swift in Sources */ = {isa = PBXBuildFile; fileRef = IMGCMP0010000000300000001 /* ImageCompressor.swift */; };
+		CAMERAPICK00000000200001 /* CameraPicker.swift in Sources */ = {isa = PBXBuildFile; fileRef = CAMERAPICK00000000100001 /* CameraPicker.swift */; };
+		CAMCAPSHEET000000200001 /* CameraCaptureSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = CAMCAPSHEET000000100001 /* CameraCaptureSheet.swift */; };
+		DOCPICKER000000000200001 /* DocumentPicker.swift in Sources */ = {isa = PBXBuildFile; fileRef = DOCPICKER000000000100001 /* DocumentPicker.swift */; };
+		ATTACHBUB0000000000200001 /* AttachmentBubble.swift in Sources */ = {isa = PBXBuildFile; fileRef = ATTACHBUB0000000000100001 /* AttachmentBubble.swift */; };
 		FOLDER00100000001A00000001 /* FolderNameValidator.swift in Sources */ = {isa = PBXBuildFile; fileRef = FOLDER00100000002A00000001 /* FolderNameValidator.swift */; };
 		FOLDER00100000003A00000001 /* FolderCreationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FOLDER00100000004A00000001 /* FolderCreationTests.swift */; };
 		0186B0083110F291EA235935 /* RPCTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = B082B6CE011A17ED14F3393B /* RPCTypes.swift */; };
@@ -85,6 +93,14 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+		ATTACH0010000000100000001 /* Attachment.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Attachment.swift; sourceTree = "<group>"; };
+		ATTACH0010000000200000001 /* AttachmentTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AttachmentTests.swift; sourceTree = "<group>"; };
+		IMGCMP0010000000100000001 /* ImageCompressorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImageCompressorTests.swift; sourceTree = "<group>"; };
+		IMGCMP0010000000300000001 /* ImageCompressor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImageCompressor.swift; sourceTree = "<group>"; };
+		CAMERAPICK00000000100001 /* CameraPicker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraPicker.swift; sourceTree = "<group>"; };
+		CAMCAPSHEET000000100001 /* CameraCaptureSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraCaptureSheet.swift; sourceTree = "<group>"; };
+		DOCPICKER000000000100001 /* DocumentPicker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DocumentPicker.swift; sourceTree = "<group>"; };
+		ATTACHBUB0000000000100001 /* AttachmentBubble.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AttachmentBubble.swift; sourceTree = "<group>"; };
 		FOLDER00100000002A00000001 /* FolderNameValidator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FolderNameValidator.swift; sourceTree = "<group>"; };
 		FOLDER00100000004A00000001 /* FolderCreationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FolderCreationTests.swift; sourceTree = "<group>"; };
 		00621F6FD9BF0B51E5370E4B /* EventDatabase.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EventDatabase.swift; sourceTree = "<group>"; };
@@ -159,8 +175,10 @@
 		161F8AEF8FBE5C9C772B5263 /* Tests */ = {
 			isa = PBXGroup;
 			children = (
+				ATTACH0010000000200000001 /* AttachmentTests.swift */,
 				A013DFE849DA84E8EA5F545C /* EventDatabaseTests.swift */,
 				FOLDER00100000004A00000001 /* FolderCreationTests.swift */,
+				IMGCMP0010000000100000001 /* ImageCompressorTests.swift */,
 				7A113B9D98B4711E36919F2A /* RecentSessionsTests.swift */,
 				0123F7482F532CD8FBA61F0E /* UnifiedEventTransformerTests.swift */,
 			);
@@ -171,6 +189,7 @@
 			isa = PBXGroup;
 			children = (
 				FOLDER00100000002A00000001 /* FolderNameValidator.swift */,
+				IMGCMP0010000000300000001 /* ImageCompressor.swift */,
 				D03A2E1D488FAFF8C0088D61 /* ModelNameFormatter.swift */,
 				13A4AA26839505AD8FD5CEC5 /* TokenFormatter.swift */,
 			);
@@ -248,7 +267,11 @@
 		8019A5A03208D1ACB7D52BA9 /* Views */ = {
 			isa = PBXGroup;
 			children = (
+				ATTACHBUB0000000000100001 /* AttachmentBubble.swift */,
+				CAMERAPICK00000000100001 /* CameraPicker.swift */,
+				CAMCAPSHEET000000100001 /* CameraCaptureSheet.swift */,
 				5571DC3A896875D1693192D9 /* ChatView.swift */,
+				DOCPICKER000000000100001 /* DocumentPicker.swift */,
 				11A3A5FE4D68F7D714067F63 /* ContextAuditView.swift */,
 				VOICE001000000002A0000001 /* FloatingVoiceNotesButton.swift */,
 				3EF2CB735CA19344DB30086D /* InputBar.swift */,
@@ -315,6 +338,7 @@
 			isa = PBXGroup;
 			children = (
 				30CFDC8D8AA4B77F61F2AF71 /* AnyCodable.swift */,
+				ATTACH0010000000100000001 /* Attachment.swift */,
 				CC00489C0CFF17B0531219D9 /* Events.swift */,
 				4C46C2D9874A2C1C807D43A0 /* EventTypeRegistry.swift */,
 				67E30FC4A871038322F79EB0 /* Message.swift */,
@@ -428,6 +452,7 @@
 			files = (
 				E36A71E3DB6FC3116C36F11B /* AnyCodable.swift in Sources */,
 				A7F43CE8B687131A3F3D7011 /* AppState.swift in Sources */,
+				ATTACH0010000000300000001 /* Attachment.swift in Sources */,
 				2AC4711FE03EDA25CA10832D /* ChatView.swift in Sources */,
 				4896F1E74C19CBDFCFE1F5EC /* ChatViewModel+Connection.swift in Sources */,
 				0586FDB3434B135163CEE2D4 /* ChatViewModel+Events.swift in Sources */,
@@ -449,6 +474,10 @@
 				4445FADC8739036DF9B95BA0 /* Events.swift in Sources */,
 				31FB5B88C183967844283776 /* ExtendedPayloads.swift in Sources */,
 				14260190901BA8299D13DC43 /* InputBar.swift in Sources */,
+				CAMERAPICK00000000200001 /* CameraPicker.swift in Sources */,
+				CAMCAPSHEET000000200001 /* CameraCaptureSheet.swift in Sources */,
+				DOCPICKER000000000200001 /* DocumentPicker.swift in Sources */,
+				ATTACHBUB0000000000200001 /* AttachmentBubble.swift in Sources */,
 				2701DC74D1DBFB4C90AC84AA /* InputHistoryStore.swift in Sources */,
 				B7C8D9E0F1A2B3C4D5E6F7A8 /* AudioRecorder.swift in Sources */,
 				7E5E03B3D452DA98E4B6F768 /* LogViewer.swift in Sources */,
@@ -468,6 +497,7 @@
 				490E7266613F29CD1E3F69F3 /* String+Extensions.swift in Sources */,
 				329F629FAD3C73DA80ABDD4A /* TokenFormatter.swift in Sources */,
 				FOLDER00100000001A00000001 /* FolderNameValidator.swift in Sources */,
+				IMGCMP0010000000400000001 /* ImageCompressor.swift in Sources */,
 				E127B12EA0AC057011AC2A09 /* ToolPayloads.swift in Sources */,
 				F7C7E361C09D466FAEE1AAEE /* ToolResultViewers.swift in Sources */,
 				EAE9FFCC465D011583D191E0 /* TronColors.swift in Sources */,
@@ -493,8 +523,10 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				ATTACH0010000000400000001 /* AttachmentTests.swift in Sources */,
 				FACF3272EAAA614047FA83C8 /* EventDatabaseTests.swift in Sources */,
 				FOLDER00100000003A00000001 /* FolderCreationTests.swift in Sources */,
+				IMGCMP0010000000200000001 /* ImageCompressorTests.swift in Sources */,
 				A30DB8557BB5D3E5CFD61ADD /* RecentSessionsTests.swift in Sources */,
 				814753F04077C3B98C1BF843 /* UnifiedEventTransformerTests.swift in Sources */,
 			);

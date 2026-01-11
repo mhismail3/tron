@@ -172,12 +172,26 @@ export interface ActiveSession {
 // Agent Run Types
 // =============================================================================
 
+/** File attachment from client (iOS app or web) */
+export interface FileAttachment {
+  /** Base64 encoded file data */
+  data: string;
+  /** MIME type (e.g., "image/jpeg", "application/pdf") */
+  mimeType: string;
+  /** Optional original filename */
+  fileName?: string;
+}
+
 export interface AgentRunOptions {
   sessionId: string;
   prompt: string;
   onEvent?: (event: AgentEvent) => void;
   /** Reasoning effort level for OpenAI Codex models (low/medium/high/xhigh) */
   reasoningLevel?: 'low' | 'medium' | 'high' | 'xhigh';
+  /** Optional image attachments (base64) - legacy, use attachments instead */
+  images?: FileAttachment[];
+  /** Optional file attachments (images and PDFs) */
+  attachments?: FileAttachment[];
 }
 
 export interface AgentEvent {

@@ -301,6 +301,7 @@ class RPCClient: ObservableObject {
     func sendPrompt(
         _ prompt: String,
         images: [ImageAttachment]? = nil,
+        attachments: [FileAttachment]? = nil,
         reasoningLevel: String? = nil
     ) async throws {
         guard let ws = webSocket,
@@ -312,6 +313,7 @@ class RPCClient: ObservableObject {
             sessionId: sessionId,
             prompt: prompt,
             images: images,
+            attachments: attachments,
             reasoningLevel: reasoningLevel
         )
 

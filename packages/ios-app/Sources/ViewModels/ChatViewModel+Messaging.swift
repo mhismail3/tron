@@ -7,12 +7,12 @@ extension ChatViewModel {
 
     func sendMessage(reasoningLevel: String? = nil) {
         let text = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty || !attachedImages.isEmpty else {
-            logger.verbose("sendMessage() called but no text or images to send", category: .chat)
+        guard !text.isEmpty || !attachedImages.isEmpty || !attachments.isEmpty else {
+            logger.verbose("sendMessage() called but no text, images, or attachments to send", category: .chat)
             return
         }
 
-        logger.info("Sending message: \"\(text.prefix(100))...\" with \(attachedImages.count) images, reasoningLevel=\(reasoningLevel ?? "nil")", category: .chat)
+        logger.info("Sending message: \"\(text.prefix(100))...\" with \(attachedImages.count) images, \(attachments.count) attachments, reasoningLevel=\(reasoningLevel ?? "nil")", category: .chat)
 
         // Create user message
         if !attachedImages.isEmpty {
@@ -43,20 +43,25 @@ extension ChatViewModel {
         streamingText = ""
         logger.verbose("Created streaming placeholder message id=\(streamingMessage.id)", category: .chat)
 
-        // Prepare image attachments
+        // Prepare legacy image attachments
         let imageAttachments = attachedImages.map {
             ImageAttachment(data: $0.data, mimeType: $0.mimeType)
         }
         attachedImages = []
         selectedImages = []
 
+        // Prepare unified file attachments
+        let fileAttachments = attachments.map { FileAttachment(attachment: $0) }
+        attachments = []
+
         // Send to server
         Task {
             do {
-                logger.debug("Calling rpcClient.sendPrompt()...", category: .chat)
+                logger.debug("Calling rpcClient.sendPrompt() with \(imageAttachments.count) images and \(fileAttachments.count) attachments...", category: .chat)
                 try await rpcClient.sendPrompt(
                     text,
                     images: imageAttachments.isEmpty ? nil : imageAttachments,
+                    attachments: fileAttachments.isEmpty ? nil : fileAttachments,
                     reasoningLevel: reasoningLevel
                 )
                 logger.info("Prompt sent successfully", category: .chat)
@@ -107,5 +112,15 @@ extension ChatViewModel {
 
     func removeAttachedImage(_ image: ImageContent) {
         attachedImages.removeAll { $0.id == image.id }
+    }
+
+    // MARK: - Unified Attachment Handling
+
+    func addAttachment(_ attachment: Attachment) {
+        attachments.append(attachment)
+    }
+
+    func removeAttachment(_ attachment: Attachment) {
+        attachments.removeAll { $0.id == attachment.id }
     }
 }

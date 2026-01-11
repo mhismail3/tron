@@ -282,17 +282,29 @@ export interface SessionGetStateResult {
 // Agent Methods
 // =============================================================================
 
+/**
+ * File attachment from client (iOS app or web)
+ * Supports images (JPEG, PNG, GIF, WebP) and documents (PDF)
+ */
+export interface FileAttachment {
+  /** Base64 encoded file data */
+  data: string;
+  /** MIME type (e.g., "image/jpeg", "application/pdf") */
+  mimeType: string;
+  /** Optional original filename */
+  fileName?: string;
+}
+
 /** Send prompt to agent */
 export interface AgentPromptParams {
   /** Session to send to */
   sessionId: string;
   /** User message */
   prompt: string;
-  /** Optional image attachments (base64) */
-  images?: Array<{
-    data: string;
-    mimeType: string;
-  }>;
+  /** Optional image attachments (base64) - legacy, use attachments instead */
+  images?: FileAttachment[];
+  /** Optional file attachments (images and PDFs) */
+  attachments?: FileAttachment[];
   /** Reasoning effort level for OpenAI Codex models (low/medium/high/xhigh) */
   reasoningLevel?: 'low' | 'medium' | 'high' | 'xhigh';
 }

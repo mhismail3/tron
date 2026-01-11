@@ -306,6 +306,16 @@ export class EventStore {
           role: 'assistant',
           content: payload.content,
         });
+      } else if (event.type === 'tool.result') {
+        // Reconstruct tool result messages for cross-provider compatibility
+        // This is critical for mid-session model switching (e.g., Anthropic -> OpenAI Codex)
+        const payload = event.payload as { toolCallId: string; content: string; isError?: boolean };
+        messages.push({
+          role: 'toolResult',
+          toolCallId: payload.toolCallId,
+          content: payload.content,
+          isError: payload.isError,
+        });
       }
     }
 
@@ -394,6 +404,15 @@ export class EventStore {
           currentTurn = payload.turn;
           turnCount = payload.turn;
         }
+      } else if (evt.type === 'tool.result') {
+        // Reconstruct tool result messages for cross-provider compatibility
+        const payload = evt.payload as { toolCallId: string; content: string; isError?: boolean };
+        messages.push({
+          role: 'toolResult',
+          toolCallId: payload.toolCallId,
+          content: payload.content,
+          isError: payload.isError,
+        });
       }
     }
 

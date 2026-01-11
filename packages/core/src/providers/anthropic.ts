@@ -689,6 +689,16 @@ export class AnthropicProvider {
                     },
                   };
                 }
+                if (c.type === 'document') {
+                  return {
+                    type: 'document' as const,
+                    source: {
+                      type: 'base64' as const,
+                      media_type: c.mimeType as 'application/pdf',
+                      data: c.data,
+                    },
+                  };
+                }
                 return { type: 'text' as const, text: '' };
               });
           return { role: 'user' as const, content };
