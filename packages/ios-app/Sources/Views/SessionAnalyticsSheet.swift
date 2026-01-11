@@ -106,6 +106,7 @@ struct SessionAnalytics {
         let turn: Int
         let inputTokens: Int
         let outputTokens: Int
+        let cost: Double
         var totalTokens: Int { inputTokens + outputTokens }
     }
 
@@ -143,7 +144,7 @@ struct SessionAnalytics {
     var avgLatency: Int
 
     init(from events: [SessionEvent]) {
-        var turnData: [Int: (input: Int, output: Int)] = [:]
+        var turnData: [Int: (input: Int, output: Int, cost: Double)] = [:]
         var toolData: [String: (count: Int, duration: Int, errors: Int)] = [:]
         var modelData: [String: Int] = [:]
         var errorList: [ErrorData] = []
@@ -156,13 +157,13 @@ struct SessionAnalytics {
         for event in events {
             switch event.eventType {
             case .messageAssistant:
-                // Track turn token usage
+                // Track turn token usage (tokens only, cost comes from streamTurnEnd)
                 if let turn = event.payload["turn"]?.value as? Int,
                    let tokenUsage = event.payload["tokenUsage"]?.value as? [String: Any],
                    let input = tokenUsage["inputTokens"] as? Int,
                    let output = tokenUsage["outputTokens"] as? Int {
-                    let existing = turnData[turn] ?? (input: 0, output: 0)
-                    turnData[turn] = (input: existing.input + input, output: existing.output + output)
+                    let existing = turnData[turn] ?? (input: 0, output: 0, cost: 0)
+                    turnData[turn] = (input: existing.input + input, output: existing.output + output, cost: existing.cost)
                 }
 
                 // Track model usage
@@ -182,16 +183,26 @@ struct SessionAnalytics {
                 }
 
             case .streamTurnEnd:
-                // Alternative way to get turn data
-                if let turn = event.payload["turn"]?.value as? Int,
-                   let tokenUsage = event.payload["tokenUsage"]?.value as? [String: Any],
-                   let input = tokenUsage["inputTokens"] as? Int,
-                   let output = tokenUsage["outputTokens"] as? Int {
-                    let existing = turnData[turn] ?? (input: 0, output: 0)
-                    // Only add if not already present from message.assistant
-                    if existing.input == 0 && existing.output == 0 {
-                        turnData[turn] = (input: input, output: output)
+                // Primary source for turn data with cost
+                if let turn = event.payload["turn"]?.value as? Int {
+                    let existing = turnData[turn] ?? (input: 0, output: 0, cost: 0)
+                    var input = existing.input
+                    var output = existing.output
+
+                    // Get token usage if available
+                    if let tokenUsage = event.payload["tokenUsage"]?.value as? [String: Any] {
+                        if let i = tokenUsage["inputTokens"] as? Int, existing.input == 0 {
+                            input = i
+                        }
+                        if let o = tokenUsage["outputTokens"] as? Int, existing.output == 0 {
+                            output = o
+                        }
                     }
+
+                    // Get cost from server
+                    let cost = event.payload["cost"]?.value as? Double ?? existing.cost
+
+                    turnData[turn] = (input: input, output: output, cost: cost)
                 }
 
             case .toolCall:
@@ -240,7 +251,7 @@ struct SessionAnalytics {
 
         // Convert to arrays
         self.turns = turnData.sorted { $0.key < $1.key }.map {
-            TurnData(turn: $0.key, inputTokens: $0.value.input, outputTokens: $0.value.output)
+            TurnData(turn: $0.key, inputTokens: $0.value.input, outputTokens: $0.value.output, cost: $0.value.cost)
         }
 
         self.toolUsage = toolData.map {
@@ -357,6 +368,11 @@ struct TurnBreakdownSection: View {
                             .font(.system(size: 11, design: .monospaced))
                             .foregroundStyle(.tronTextMuted)
                             .frame(width: 50, alignment: .trailing)
+
+                        Text(formatCost(turn.cost))
+                            .font(.system(size: 11, design: .monospaced))
+                            .foregroundStyle(.tronAmber)
+                            .frame(width: 50, alignment: .trailing)
                     }
                 }
             }
@@ -369,6 +385,12 @@ struct TurnBreakdownSection: View {
     private func ratio(_ tokens: Int) -> CGFloat {
         guard maxTokens > 0 else { return 0 }
         return CGFloat(tokens) / CGFloat(maxTokens)
+    }
+
+    private func formatCost(_ cost: Double) -> String {
+        if cost < 0.001 { return "$0.00" }
+        if cost < 0.01 { return String(format: "$%.3f", cost) }
+        return String(format: "$%.2f", cost)
     }
 }
 

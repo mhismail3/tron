@@ -201,17 +201,21 @@ export class EventStore {
         counters.messageCount = 1;
       }
 
-      // Track token usage and calculate cost
-      const payload = options.payload as { tokenUsage?: TokenUsage; model?: string };
+      // Track token usage and cost
+      const payload = options.payload as { tokenUsage?: TokenUsage; model?: string; cost?: number };
       if (payload.tokenUsage) {
         counters.inputTokens = payload.tokenUsage.inputTokens;
         counters.outputTokens = payload.tokenUsage.outputTokens;
         // Set current context size (not accumulated - represents context window utilization)
         counters.lastTurnInputTokens = payload.tokenUsage.inputTokens;
-        // Calculate cost using the model from payload or session
-        // Uses the comprehensive calculateCost that accounts for cache token pricing
-        const modelId = payload.model ?? session.latestModel;
-        counters.cost = calculateCost(modelId, payload.tokenUsage).total;
+        // Use pre-calculated cost if provided (from agent with full cache token pricing),
+        // otherwise calculate from tokenUsage
+        if (payload.cost !== undefined) {
+          counters.cost = payload.cost;
+        } else {
+          const modelId = payload.model ?? session.latestModel;
+          counters.cost = calculateCost(modelId, payload.tokenUsage).total;
+        }
       }
 
       await this.backend.incrementSessionCounters(options.sessionId, counters);

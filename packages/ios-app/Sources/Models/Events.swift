@@ -130,11 +130,13 @@ struct TurnEndEvent: Decodable {
         let duration: Int?
         let tokenUsage: TokenUsage?
         let stopReason: String?
+        let cost: Double?
     }
 
     var turnNumber: Int { data?.turn ?? data?.turnNumber ?? 1 }
     var tokenUsage: TokenUsage? { data?.tokenUsage }
     var stopReason: String? { data?.stopReason }
+    var cost: Double? { data?.cost }
 }
 
 struct CompleteEvent: Decodable {

@@ -192,6 +192,8 @@ export interface TurnEndEvent extends BaseTronEvent {
     /** Tokens written to prompt cache (billed at premium rate) */
     cacheCreationTokens?: number;
   };
+  /** Cost for this turn in USD */
+  cost?: number;
 }
 
 /**
@@ -326,6 +328,109 @@ export interface TronRetryEvent extends BaseTronEvent {
   errorMessage: string;
 }
 
+// =============================================================================
+// Instagram Agent Events
+// =============================================================================
+
+/**
+ * Instagram agent started event
+ */
+export interface InstagramAgentStartedEvent extends BaseTronEvent {
+  type: 'instagram.agent.started';
+  accountId: string;
+  accountName: string;
+}
+
+/**
+ * Instagram agent stopped event
+ */
+export interface InstagramAgentStoppedEvent extends BaseTronEvent {
+  type: 'instagram.agent.stopped';
+  accountId: string;
+  reason?: string;
+}
+
+/**
+ * Instagram agent error event
+ */
+export interface InstagramAgentErrorEvent extends BaseTronEvent {
+  type: 'instagram.agent.error';
+  accountId: string;
+  error: string;
+  errorType?: string;
+}
+
+/**
+ * Instagram post generating event
+ */
+export interface InstagramPostGeneratingEvent extends BaseTronEvent {
+  type: 'instagram.post.generating';
+  accountId: string;
+  productId: string;
+  productName: string;
+  stage: 'discovering' | 'generating_image' | 'generating_caption' | 'uploading';
+}
+
+/**
+ * Instagram post published event
+ */
+export interface InstagramPostPublishedEvent extends BaseTronEvent {
+  type: 'instagram.post.published';
+  accountId: string;
+  postId: string;
+  permalink: string;
+  productName: string;
+  mediaType: string;
+}
+
+/**
+ * Instagram post failed event
+ */
+export interface InstagramPostFailedEvent extends BaseTronEvent {
+  type: 'instagram.post.failed';
+  accountId: string;
+  productId?: string;
+  error: string;
+  stage?: string;
+}
+
+/**
+ * Instagram product discovered event
+ */
+export interface InstagramProductDiscoveredEvent extends BaseTronEvent {
+  type: 'instagram.product.discovered';
+  accountId: string;
+  productId: string;
+  productName: string;
+  brand: string;
+  commission: number;
+  niche: string;
+}
+
+/**
+ * Instagram analytics update event
+ */
+export interface InstagramAnalyticsUpdateEvent extends BaseTronEvent {
+  type: 'instagram.analytics.update';
+  accountId: string;
+  totalPosts: number;
+  totalEngagement: number;
+  totalCommission: number;
+}
+
+/**
+ * Union of all Instagram events
+ */
+export type InstagramEvent =
+  | InstagramAgentStartedEvent
+  | InstagramAgentStoppedEvent
+  | InstagramAgentErrorEvent
+  | InstagramPostGeneratingEvent
+  | InstagramPostPublishedEvent
+  | InstagramPostFailedEvent
+  | InstagramProductDiscoveredEvent
+  | InstagramAnalyticsUpdateEvent;
+
 /**
  * Union of all Tron agent events
  */
@@ -347,7 +452,8 @@ export type TronEvent =
   | CompactionStartEvent
   | CompactionCompleteEvent
   | TronErrorEvent
-  | TronRetryEvent;
+  | TronRetryEvent
+  | InstagramEvent;
 
 /**
  * All Tron event types as a union
@@ -375,6 +481,10 @@ export function isToolExecutionEvent(
   event: TronEvent
 ): event is ToolExecutionStartEvent | ToolExecutionUpdateEvent | ToolExecutionEndEvent {
   return event.type.startsWith('tool_execution');
+}
+
+export function isInstagramEvent(event: TronEvent): event is InstagramEvent {
+  return event.type.startsWith('instagram.');
 }
 
 // =============================================================================

@@ -1758,13 +1758,15 @@ export class EventStoreOrchestrator extends EventEmitter {
             turn: event.turn,
             duration: event.duration,
             tokenUsage: event.tokenUsage,
+            cost: event.cost,
           },
         });
 
-        // Phase 4: Store turn end event with token usage (linearized)
+        // Phase 4: Store turn end event with token usage and cost (linearized)
         this.appendEventLinearized(sessionId, 'stream.turn_end', {
           turn: event.turn,
           tokenUsage: event.tokenUsage ?? { inputTokens: 0, outputTokens: 0 },
+          cost: event.cost,
         });
         break;
 

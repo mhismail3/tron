@@ -299,6 +299,8 @@ export interface StreamTurnEndEvent extends BaseEvent {
   payload: {
     turn: number;
     tokenUsage: TokenUsage;
+    /** Cost for this turn in USD */
+    cost?: number;
   };
 }
 

@@ -36,6 +36,7 @@ import type { Summarizer } from '../context/summarizer.js';
 import type { HookDefinition, PreToolHookContext, PostToolHookContext } from '../hooks/types.js';
 import { createLogger } from '../logging/logger.js';
 import { getTronDataDir } from '../settings/loader.js';
+import { calculateCost } from '../usage/index.js';
 import type {
   AgentConfig,
   AgentOptions,
@@ -681,6 +682,16 @@ export class TronAgent {
 
       const turnDuration = Date.now() - turnStartTime;
 
+      // Calculate cost for this turn
+      const turnCost = assistantMessage.usage
+        ? calculateCost(this.provider.model, {
+            inputTokens: assistantMessage.usage.inputTokens,
+            outputTokens: assistantMessage.usage.outputTokens,
+            cacheReadTokens: assistantMessage.usage.cacheReadTokens,
+            cacheCreationTokens: assistantMessage.usage.cacheCreationTokens,
+          })
+        : undefined;
+
       this.emit({
         type: 'turn_end',
         sessionId: this.sessionId,
@@ -690,10 +701,10 @@ export class TronAgent {
         tokenUsage: assistantMessage.usage ? {
           inputTokens: assistantMessage.usage.inputTokens,
           outputTokens: assistantMessage.usage.outputTokens,
-          // Include cache token data for accurate cost calculation
           cacheReadTokens: assistantMessage.usage.cacheReadTokens,
           cacheCreationTokens: assistantMessage.usage.cacheCreationTokens,
         } : undefined,
+        cost: turnCost?.total,
       });
 
       // ==========================================================================
