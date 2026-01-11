@@ -47,6 +47,8 @@ class ChatViewModel: ObservableObject {
     var accumulatedCacheCreationTokens = 0
     /// Last turn's input tokens (represents actual current context size)
     var lastTurnInputTokens = 0
+    /// Previous turn's final input tokens (for computing incremental delta)
+    var previousTurnFinalInputTokens = 0
 
     /// Track tool calls for the current turn (for display purposes)
     var currentTurnToolCalls: [ToolCallRecord] = []

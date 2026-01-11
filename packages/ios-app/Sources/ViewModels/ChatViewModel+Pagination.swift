@@ -250,6 +250,9 @@ extension ChatViewModel {
             }
         }
 
+        // Track the last turn's input tokens for future incremental calculations
+        previousTurnFinalInputTokens = previousInputTokens
+
         // 3. Apply computed incremental tokens to displayed messages
         for i in 0..<messages.count {
             if messages[i].incrementalTokens == nil,

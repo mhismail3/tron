@@ -770,8 +770,24 @@ export class ContextManager {
     }
 
     if (b.type === 'image') {
-      // Images are typically large but we just estimate metadata
-      return 500;
+      // Anthropic image tokenization: tokens = (width × height) / 750
+      // We estimate in characters (will be divided by 4 later in estimateMessageTokens)
+      const source = b.source as Record<string, unknown> | undefined;
+
+      if (source?.type === 'base64' && typeof source.data === 'string') {
+        // Base64: estimate dimensions from data size
+        // Base64 overhead is ~33%, so actual bytes = length * 0.75
+        // JPEG compression ratio ~10:1 for photos, PNG less compressed
+        // Use conservative multiplier of 5 for mixed content
+        const dataLength = (source.data as string).length;
+        const estimatedBytes = dataLength * 0.75;
+        const estimatedPixels = estimatedBytes * 5;
+        const estimatedTokens = Math.max(85, Math.ceil(estimatedPixels / 750));
+        return estimatedTokens * 4; // Convert tokens back to chars
+      }
+
+      // URL or unknown: conservative estimate for typical 1024x1024 image (~1400 tokens)
+      return 1500 * 4;
     }
 
     // Unknown type - estimate based on JSON size
