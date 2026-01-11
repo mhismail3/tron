@@ -676,17 +676,14 @@ export class EventStoreOrchestrator extends EventEmitter {
               fileName: att.fileName,
             });
           } else if (att.mimeType.startsWith('text/') || att.mimeType === 'application/json') {
-            // Text files: decode base64 and include as text content with file header
-            try {
-              const textContent = Buffer.from(att.data, 'base64').toString('utf-8');
-              const fileName = att.fileName || 'file';
-              userContent.push({
-                type: 'text',
-                text: `--- File: ${fileName} ---\n${textContent}\n--- End of file ---`,
-              });
-            } catch (e) {
-              logger.warn('Failed to decode text attachment', { fileName: att.fileName, error: e });
-            }
+            // Text files: preserve as document blocks for display as attachments
+            // The LLM will still be able to read them, but they'll render as thumbnails in the app
+            userContent.push({
+              type: 'document',
+              data: att.data,
+              mimeType: att.mimeType,
+              fileName: att.fileName,
+            });
           }
         }
       }
@@ -725,8 +722,12 @@ export class EventStoreOrchestrator extends EventEmitter {
         active.agent.setReasoningLevel(options.reasoningLevel);
       }
 
-      // Run agent with full user content (text + images/documents)
-      const runResult = await active.agent.run(messageContent);
+      // Transform content for LLM: convert text file documents to inline text
+      // (Claude's document type only supports PDFs, not text files)
+      const llmContent = this.transformContentForLLM(messageContent);
+
+      // Run agent with transformed content
+      const runResult = await active.agent.run(llmContent);
       active.lastActivity = new Date();
 
       // Handle interrupted runs - PERSIST partial content so it survives session resume
@@ -1535,6 +1536,44 @@ export class EventStoreOrchestrator extends EventEmitter {
   // ===========================================================================
   // Private Methods
   // ===========================================================================
+
+  /**
+   * Transform message content for LLM consumption.
+   * Converts text file documents (text/*, application/json) to inline text content,
+   * since Claude's document type only supports PDFs.
+   * The original document blocks are preserved in the event store for iOS display.
+   */
+  private transformContentForLLM(content: string | UserContent[]): string | UserContent[] {
+    // Simple string content - no transformation needed
+    if (typeof content === 'string') {
+      return content;
+    }
+
+    // Transform content blocks
+    return content.map((block) => {
+      // Only transform document blocks that are text files
+      if (
+        block.type === 'document' &&
+        'mimeType' in block &&
+        (block.mimeType?.startsWith('text/') || block.mimeType === 'application/json')
+      ) {
+        // Convert text file document to inline text content
+        try {
+          const textContent = Buffer.from(block.data as string, 'base64').toString('utf-8');
+          const fileName = 'fileName' in block ? block.fileName : 'file';
+          return {
+            type: 'text' as const,
+            text: `--- File: ${fileName} ---\n${textContent}\n--- End of file ---`,
+          };
+        } catch {
+          // If decoding fails, return original block
+          return block;
+        }
+      }
+      // Keep other blocks as-is (images, PDFs, text)
+      return block;
+    });
+  }
 
   private async createAgentForSession(
     sessionId: SessionId,

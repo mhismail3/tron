@@ -77,13 +77,22 @@ struct UserMessagePayload {
                         ))
                     }
                 } else if blockType == "document" {
-                    // PDF: Server format { type: 'document', data: <base64>, mimeType, fileName }
+                    // Document: Server format { type: 'document', data: <base64>, mimeType, fileName }
+                    // Includes PDFs, text files (text/*), and JSON files
                     if let base64Data = block["data"] as? String,
                        let mimeType = block["mimeType"] as? String,
                        let data = Data(base64Encoded: base64Data) {
                         let fileName = block["fileName"] as? String
+                        let attachmentType: AttachmentType
+                        if mimeType == "application/pdf" {
+                            attachmentType = .pdf
+                        } else if mimeType.hasPrefix("text/") || mimeType == "application/json" {
+                            attachmentType = .document
+                        } else {
+                            attachmentType = .document
+                        }
                         extractedAttachments.append(Attachment(
-                            type: mimeType == "application/pdf" ? .pdf : .document,
+                            type: attachmentType,
                             data: data,
                             mimeType: mimeType,
                             fileName: fileName
