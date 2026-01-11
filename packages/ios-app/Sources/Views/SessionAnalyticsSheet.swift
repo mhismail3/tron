@@ -554,22 +554,28 @@ struct ErrorLogSection: View {
 struct SessionInfoHeader: View {
     let session: CachedSession
 
+    @State private var showCopied = false
+
     var body: some View {
         VStack(spacing: 12) {
-            // Session ID row (compact, copyable)
+            // Session ID row (compact, tap to copy)
             HStack {
                 Image(systemName: "number.circle")
                     .font(.system(size: 12))
                     .foregroundStyle(.tronTextMuted)
 
-                Text(session.id)
+                Text(showCopied ? "Copied!" : session.id)
                     .font(.system(size: 11, design: .monospaced))
-                    .foregroundStyle(.tronTextSecondary)
+                    .foregroundStyle(showCopied ? .tronEmerald : .tronTextSecondary)
                     .lineLimit(1)
                     .truncationMode(.middle)
-                    .textSelection(.enabled)
+                    .animation(.easeInOut(duration: 0.15), value: showCopied)
 
                 Spacer()
+
+                Image(systemName: "doc.on.doc")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.tronTextMuted)
 
                 // Token usage badge
                 Text(TokenFormatter.format(session.inputTokens + session.outputTokens, style: .withSuffix))
@@ -579,6 +585,14 @@ struct SessionInfoHeader: View {
                     .padding(.vertical, 2)
                     .background(Color.tronEmerald.opacity(0.15))
                     .clipShape(Capsule())
+            }
+            .contentShape(Rectangle())
+            .onTapGesture {
+                UIPasteboard.general.string = session.id
+                showCopied = true
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                    showCopied = false
+                }
             }
 
             Divider()
