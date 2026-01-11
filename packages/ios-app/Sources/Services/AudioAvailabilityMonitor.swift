@@ -140,13 +140,14 @@ class AudioAvailabilityMonitor: ObservableObject {
             break
         }
 
-        // Move audio session manipulation off main thread
+        // Check if we can configure the audio session category (without activating it)
+        // This verifies recording capability without interrupting other audio playback
         let isAvailable = await Task.detached {
             let session = AVAudioSession.sharedInstance()
             do {
+                // Only set the category - do NOT activate the session
+                // Activating would interrupt other apps' audio playback
                 try session.setCategory(.playAndRecord, mode: .default, options: [.defaultToSpeaker, .allowBluetooth])
-                try session.setActive(true, options: .notifyOthersOnDeactivation)
-                try? session.setActive(false, options: .notifyOthersOnDeactivation)
                 return true
             } catch {
                 return false
