@@ -14,9 +14,15 @@ struct CameraCaptureSheet: View {
 
     var body: some View {
         GeometryReader { geometry in
-            let viewportSize = min(geometry.size.width - 32, geometry.size.height - 100)
+            let viewportSize = min(geometry.size.width - 48, geometry.size.height - 140)
 
-            VStack(spacing: 12) {
+            VStack(spacing: 16) {
+                // Header
+                Text("Take Photo")
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(.tronEmerald)
+                    .padding(.top, 8)
+
                 // Camera viewport - square with rounded corners
                 ZStack {
                     if let image = capturedImage, showingPreview {
@@ -66,15 +72,14 @@ struct CameraCaptureSheet: View {
 
                 // Control buttons
                 controlButtons
-                    .padding(.bottom, 16)
+                    .padding(.bottom, 20)
             }
             .frame(maxWidth: .infinity)
-            .padding(.top, 8)
         }
-        .padding(.horizontal, 16)
+        .padding(.horizontal, 24)
         .background(Color.tronSurface)
         .presentationDetents([.medium])
-        .presentationDragIndicator(.visible)
+        .presentationDragIndicator(.hidden)
         .preferredColorScheme(.dark)
         .task {
             await cameraModel.requestPermissionAndSetup()
