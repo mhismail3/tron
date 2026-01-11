@@ -14,14 +14,14 @@ struct CameraCaptureSheet: View {
 
     var body: some View {
         GeometryReader { geometry in
-            let viewportSize = min(geometry.size.width - 48, geometry.size.height - 140)
+            let viewportSize = min(geometry.size.width - 56, geometry.size.height - 150)
 
             VStack(spacing: 16) {
                 // Header
                 Text("Take Photo")
                     .font(.system(size: 16, weight: .semibold))
                     .foregroundStyle(.tronEmerald)
-                    .padding(.top, 8)
+                    .padding(.top, 16)
 
                 // Camera viewport - square with rounded corners
                 ZStack {

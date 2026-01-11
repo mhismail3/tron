@@ -9,12 +9,10 @@ struct InputBar: View {
     let isProcessing: Bool
     let isRecording: Bool
     let isTranscribing: Bool
-    @Binding var attachedImages: [ImageContent]
     @Binding var selectedImages: [PhotosPickerItem]
     let onSend: () -> Void
     let onAbort: () -> Void
     let onMicTap: () -> Void
-    let onRemoveImage: (ImageContent) -> Void
     @Binding var attachments: [Attachment]
     let onAddAttachment: (Attachment) -> Void
     let onRemoveAttachment: (Attachment) -> Void
@@ -70,10 +68,6 @@ struct InputBar: View {
                 attachmentsRow
             }
 
-            // Attached images preview (legacy)
-            if !attachedImages.isEmpty {
-                attachedImagesRow
-            }
 
             // Status pills row - floating liquid glass elements
             if shouldShowStatusPills {
@@ -203,6 +197,13 @@ struct InputBar: View {
                 }
             }
         }
+        // Photo library picker (triggered by menu button)
+        .photosPicker(
+            isPresented: $showingImagePicker,
+            selection: $selectedImages,
+            maxSelectionCount: 5,
+            matching: .images
+        )
     }
 
     // MARK: - Status Pills Row (iOS 26 Liquid Glass)
@@ -320,20 +321,18 @@ struct InputBar: View {
 
     private var attachmentButtonGlass: some View {
         Menu {
-            // Photo Library option
-            PhotosPicker(
-                selection: $selectedImages,
-                maxSelectionCount: 5,
-                matching: .images
-            ) {
-                Label("Photo Library", systemImage: "photo.on.rectangle")
-            }
-
             // Camera option
             Button {
                 showCamera = true
             } label: {
                 Label("Take Photo", systemImage: "camera")
+            }
+
+            // Photo Library option - use Button + .photosPicker modifier (Menu-embedded PhotosPicker doesn't work reliably)
+            Button {
+                showingImagePicker = true
+            } label: {
+                Label("Photo Library", systemImage: "photo.on.rectangle")
             }
 
             // Files option
@@ -351,48 +350,6 @@ struct InputBar: View {
         }
         .matchedGeometryEffect(id: "attachmentButtonMorph", in: attachmentButtonNamespace)
         .glassEffect(.regular.tint(Color.tronPhthaloGreen.opacity(0.3)).interactive(), in: .circle)
-        .disabled(isProcessing)
-    }
-
-    // MARK: - Attached Images Row (Legacy)
-
-    private var attachedImagesRow: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 8) {
-                ForEach(attachedImages) { image in
-                    AttachedImageThumbnail(
-                        image: image,
-                        onRemove: { onRemoveImage(image) }
-                    )
-                }
-            }
-            .padding(.horizontal)
-        }
-        .frame(height: 70)
-    }
-
-    // MARK: - Attachment Menu
-
-    private var attachmentMenu: some View {
-        Menu {
-            PhotosPicker(
-                selection: $selectedImages,
-                maxSelectionCount: 5,
-                matching: .images
-            ) {
-                Label("Photo Library", systemImage: TronIcon.photo.systemName)
-            }
-
-            Button {
-                // Camera would go here - requires additional permissions
-            } label: {
-                Label("Camera", systemImage: TronIcon.camera.systemName)
-            }
-            .disabled(true) // Camera not implemented yet
-        } label: {
-            TronIconView(icon: .attach, size: 22, color: .tronTextSecondary)
-                .frame(width: 36, height: 36)
-        }
         .disabled(isProcessing)
     }
 
@@ -722,7 +679,7 @@ struct InputBar: View {
     }
 
     private var canSend: Bool {
-        !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !attachedImages.isEmpty || !attachments.isEmpty
+        !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !attachments.isEmpty
     }
 
     private var shouldShowStatusPills: Bool {
@@ -853,40 +810,6 @@ struct InputBar: View {
     }
 }
 
-// MARK: - Attached Image Thumbnail
-
-struct AttachedImageThumbnail: View {
-    let image: ImageContent
-    let onRemove: () -> Void
-
-    var body: some View {
-        ZStack(alignment: .topTrailing) {
-            if let uiImage = UIImage(data: image.data) {
-                Image(uiImage: uiImage)
-                    .resizable()
-                    .aspectRatio(contentMode: .fill)
-                    .frame(width: 56, height: 56)
-                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-            } else {
-                RoundedRectangle(cornerRadius: 10)
-                    .fill(Color.tronSurfaceElevated)
-                    .frame(width: 56, height: 56)
-                    .overlay {
-                        TronIconView(icon: .photo, size: 20, color: .tronTextMuted)
-                    }
-            }
-
-            // Remove button
-            Button(action: onRemove) {
-                Image(systemName: "xmark.circle.fill")
-                    .font(.system(size: 16))
-                    .foregroundStyle(.white, .black.opacity(0.6))
-            }
-            .offset(x: 4, y: -4)
-        }
-    }
-}
-
 // MARK: - Preview
 
 @available(iOS 26.0, *)
@@ -898,12 +821,10 @@ struct AttachedImageThumbnail: View {
             isProcessing: false,
             isRecording: false,
             isTranscribing: false,
-            attachedImages: .constant([]),
             selectedImages: .constant([]),
             onSend: {},
             onAbort: {},
             onMicTap: {},
-            onRemoveImage: { _ in },
             attachments: .constant([]),
             onAddAttachment: { _ in },
             onRemoveAttachment: { _ in },

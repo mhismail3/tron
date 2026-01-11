@@ -19,9 +19,9 @@ struct MessageBubble: View {
 
     var body: some View {
         VStack(alignment: isUserMessage ? .trailing : .leading, spacing: 4) {
-            // Show attached images above text for user messages
-            if let images = message.attachedImages, !images.isEmpty {
-                AttachedImageThumbnails(images: images)
+            // Show attachments above text for user messages
+            if let attachments = message.attachments, !attachments.isEmpty {
+                AttachedFileThumbnails(attachments: attachments)
             }
 
             contentView
@@ -86,6 +86,10 @@ struct MessageBubble: View {
 
         case .contextCleared(let tokensBefore, let tokensAfter):
             ContextClearedNotificationView(tokensBefore: tokensBefore, tokensAfter: tokensAfter)
+
+        case .attachments(let attachments):
+            // Attachments-only message (no text) - show thumbnails
+            AttachedFileThumbnails(attachments: attachments)
         }
     }
 }
@@ -972,25 +976,63 @@ struct ImagesContentView: View {
     }
 }
 
-// MARK: - Attached Image Thumbnails (displayed above user message text)
+// MARK: - Attached File Thumbnails (displayed above user message text)
 
-struct AttachedImageThumbnails: View {
-    let images: [ImageContent]
+struct AttachedFileThumbnails: View {
+    let attachments: [Attachment]
 
     var body: some View {
         HStack(spacing: 6) {
-            ForEach(images) { image in
-                if let uiImage = UIImage(data: image.data) {
-                    Image(uiImage: uiImage)
-                        .resizable()
-                        .aspectRatio(contentMode: .fill)
-                        .frame(width: 56, height: 56)
-                        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                                .stroke(Color.tronEmerald.opacity(0.3), lineWidth: 1)
-                        )
+            ForEach(attachments) { attachment in
+                AttachmentThumbnail(attachment: attachment)
+            }
+        }
+    }
+}
+
+/// Individual attachment thumbnail for display in chat messages
+private struct AttachmentThumbnail: View {
+    let attachment: Attachment
+
+    var body: some View {
+        Group {
+            if attachment.isImage, let uiImage = UIImage(data: attachment.data) {
+                // Image thumbnail
+                Image(uiImage: uiImage)
+                    .resizable()
+                    .aspectRatio(contentMode: .fill)
+                    .frame(width: 56, height: 56)
+                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .stroke(Color.tronEmerald.opacity(0.3), lineWidth: 1)
+                    )
+            } else {
+                // Document/PDF thumbnail with icon
+                VStack(spacing: 2) {
+                    Image(systemName: attachment.isPDF ? "doc.fill" : "doc.text.fill")
+                        .font(.system(size: 20))
+                        .foregroundStyle(.tronEmerald)
+
+                    if let fileName = attachment.fileName {
+                        Text(fileName)
+                            .font(.system(size: 8))
+                            .foregroundStyle(.white.opacity(0.7))
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                    }
+
+                    Text(attachment.formattedSize)
+                        .font(.system(size: 7))
+                        .foregroundStyle(.white.opacity(0.5))
                 }
+                .frame(width: 56, height: 56)
+                .background(Color.tronSurfaceElevated)
+                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .stroke(Color.tronEmerald.opacity(0.3), lineWidth: 1)
+                )
             }
         }
     }

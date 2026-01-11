@@ -8,7 +8,7 @@ import Foundation
 /// NOTE: message.user events can contain:
 /// 1. User text prompts (displayable)
 /// 2. Tool result content blocks (LLM context, not for display - handled by tool.result events)
-/// 3. Image content blocks (displayable as thumbnails above text)
+/// 3. Image/document content blocks (displayable as thumbnails above text)
 struct UserMessagePayload {
     let content: String
     let turn: Int
@@ -16,11 +16,11 @@ struct UserMessagePayload {
     /// True if this message contains ONLY tool_result blocks (no text)
     /// These are LLM conversation context, not displayable user messages
     let isToolResultContext: Bool
-    /// Images attached to this message (extracted from image content blocks)
-    let images: [ImageContent]?
+    /// Attachments to this message (images, PDFs, documents)
+    let attachments: [Attachment]?
 
     init?(from payload: [String: AnyCodable]) {
-        var extractedImages: [ImageContent] = []
+        var extractedAttachments: [Attachment] = []
 
         // Content can be a string or array of content blocks
         if let content = payload.string("content") {
@@ -46,26 +46,49 @@ struct UserMessagePayload {
                 self.isToolResultContext = false
             }
 
-            // Extract images from content blocks
-            // Server format: { type: 'image', data: <base64>, mimeType: <mime> }
-            // Anthropic API format: { type: 'image', source: { type: 'base64', data: <base64>, media_type: <mime> } }
+            // Extract attachments from content blocks (images, documents, PDFs)
             for block in contentBlocks {
-                guard block["type"] as? String == "image" else { continue }
+                let blockType = block["type"] as? String
 
-                // Try server format first (direct data/mimeType)
-                if let base64Data = block["data"] as? String,
-                   let mimeType = block["mimeType"] as? String,
-                   let imageData = Data(base64Encoded: base64Data) {
-                    extractedImages.append(ImageContent(data: imageData, mimeType: mimeType))
-                    continue
-                }
+                if blockType == "image" {
+                    // Image: Server format { type: 'image', data: <base64>, mimeType: <mime> }
+                    if let base64Data = block["data"] as? String,
+                       let mimeType = block["mimeType"] as? String,
+                       let data = Data(base64Encoded: base64Data) {
+                        extractedAttachments.append(Attachment(
+                            type: .image,
+                            data: data,
+                            mimeType: mimeType,
+                            fileName: nil
+                        ))
+                        continue
+                    }
 
-                // Fallback to Anthropic API format (nested source object)
-                if let source = block["source"] as? [String: Any],
-                   let base64Data = source["data"] as? String,
-                   let mediaType = source["media_type"] as? String,
-                   let imageData = Data(base64Encoded: base64Data) {
-                    extractedImages.append(ImageContent(data: imageData, mimeType: mediaType))
+                    // Fallback: Anthropic format { source: { data, media_type } }
+                    if let source = block["source"] as? [String: Any],
+                       let base64Data = source["data"] as? String,
+                       let mediaType = source["media_type"] as? String,
+                       let data = Data(base64Encoded: base64Data) {
+                        extractedAttachments.append(Attachment(
+                            type: .image,
+                            data: data,
+                            mimeType: mediaType,
+                            fileName: nil
+                        ))
+                    }
+                } else if blockType == "document" {
+                    // PDF: Server format { type: 'document', data: <base64>, mimeType, fileName }
+                    if let base64Data = block["data"] as? String,
+                       let mimeType = block["mimeType"] as? String,
+                       let data = Data(base64Encoded: base64Data) {
+                        let fileName = block["fileName"] as? String
+                        extractedAttachments.append(Attachment(
+                            type: mimeType == "application/pdf" ? .pdf : .document,
+                            data: data,
+                            mimeType: mimeType,
+                            fileName: fileName
+                        ))
+                    }
                 }
             }
         } else {
@@ -74,7 +97,7 @@ struct UserMessagePayload {
 
         self.turn = payload.int("turn") ?? 1
         self.imageCount = payload.int("imageCount")
-        self.images = extractedImages.isEmpty ? nil : extractedImages
+        self.attachments = extractedAttachments.isEmpty ? nil : extractedAttachments
     }
 }
 

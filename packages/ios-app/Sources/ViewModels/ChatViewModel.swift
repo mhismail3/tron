@@ -19,7 +19,6 @@ class ChatViewModel: ObservableObject {
     @Published var errorMessage: String?
     @Published var showError = false
     @Published var selectedImages: [PhotosPickerItem] = []
-    @Published var attachedImages: [ImageContent] = []
     @Published var attachments: [Attachment] = []
     @Published var thinkingText = ""
     @Published var isThinkingExpanded = false
@@ -250,7 +249,7 @@ class ChatViewModel: ObservableObject {
     // MARK: - Computed Properties
 
     var canSend: Bool {
-        !inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !attachedImages.isEmpty
+        !inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !attachments.isEmpty
     }
 
     var currentModel: String {

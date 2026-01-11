@@ -52,8 +52,8 @@ struct ChatMessage: Identifiable, Equatable {
     var tokenUsage: TokenUsage?
     /// Incremental token usage (delta from previous turn) for display purposes
     var incrementalTokens: TokenUsage?
-    /// Images attached to this message (displayed as thumbnails above text)
-    var attachedImages: [ImageContent]?
+    /// Files attached to this message (unified model - images, PDFs, documents)
+    var attachments: [Attachment]?
 
     // MARK: - Enriched Metadata (Phase 1)
     // These fields come from server-side event store enhancements
@@ -81,7 +81,7 @@ struct ChatMessage: Identifiable, Equatable {
         isStreaming: Bool = false,
         tokenUsage: TokenUsage? = nil,
         incrementalTokens: TokenUsage? = nil,
-        attachedImages: [ImageContent]? = nil,
+        attachments: [Attachment]? = nil,
         model: String? = nil,
         latencyMs: Int? = nil,
         turnNumber: Int? = nil,
@@ -95,7 +95,7 @@ struct ChatMessage: Identifiable, Equatable {
         self.isStreaming = isStreaming
         self.tokenUsage = tokenUsage
         self.incrementalTokens = incrementalTokens
-        self.attachedImages = attachedImages
+        self.attachments = attachments
         self.model = model
         self.latencyMs = latencyMs
         self.turnNumber = turnNumber
@@ -156,6 +156,8 @@ enum MessageContent: Equatable {
     case toolResult(ToolResultData)
     case error(String)
     case images([ImageContent])
+    /// Unified attachments (images, PDFs, documents)
+    case attachments([Attachment])
     /// In-chat notification for model change
     case modelChange(from: String, to: String)
     /// In-chat notification for interrupted session
@@ -183,6 +185,9 @@ enum MessageContent: Equatable {
             return message
         case .images:
             return "[Images]"
+        case .attachments(let files):
+            let count = files.count
+            return "[\(count) \(count == 1 ? "attachment" : "attachments")]"
         case .modelChange(let from, let to):
             return "Switched from \(from) to \(to)"
         case .interrupted:
@@ -328,8 +333,9 @@ struct ImageContent: Equatable, Identifiable {
 // MARK: - Message Extensions
 
 extension ChatMessage {
-    static func user(_ text: String, images: [ImageContent]? = nil) -> ChatMessage {
-        ChatMessage(role: .user, content: .text(text), attachedImages: images)
+    /// Create a user message with optional attachments
+    static func user(_ text: String, attachments: [Attachment]? = nil) -> ChatMessage {
+        ChatMessage(role: .user, content: .text(text), attachments: attachments)
     }
 
     static func assistant(_ text: String) -> ChatMessage {

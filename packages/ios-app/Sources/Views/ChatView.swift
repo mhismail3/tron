@@ -45,6 +45,11 @@ struct ChatView: View {
     /// Track the last known bottom distance to detect when user scrolls back to bottom
     @State private var lastBottomDistance: CGFloat = 0
 
+    // MARK: - Entry Morph Animation (from left)
+    @State private var showEntryContent = false
+    /// Delay for entry morph: 180ms (90% of mic button's 200ms delay)
+    private let entryMorphDelay: UInt64 = 180_000_000
+
     private let sessionId: String
     private let rpcClient: RPCClient
 
@@ -65,8 +70,11 @@ struct ChatView: View {
     }
 
     var body: some View {
-        // Main content with floating input bar using safeAreaInset
+        // Main content with entry morph animation from left
         messagesScrollView
+            .opacity(showEntryContent ? 1 : 0)
+            .offset(x: showEntryContent ? 0 : -80)
+            .scaleEffect(showEntryContent ? 1 : 0.92, anchor: .leading)
             .safeAreaInset(edge: .bottom, spacing: 0) {
                 // Floating input area - iOS 26 liquid glass, no backgrounds
                 VStack(spacing: 8) {
@@ -84,7 +92,6 @@ struct ChatView: View {
                         isProcessing: viewModel.isProcessing,
                         isRecording: viewModel.isRecording,
                         isTranscribing: viewModel.isTranscribing,
-                        attachedImages: $viewModel.attachedImages,
                         selectedImages: $viewModel.selectedImages,
                         onSend: {
                             inputHistory.addToHistory(viewModel.inputText)
@@ -97,7 +104,6 @@ struct ChatView: View {
                         },
                         onAbort: viewModel.abortAgent,
                         onMicTap: viewModel.toggleRecording,
-                        onRemoveImage: viewModel.removeAttachedImage,
                         attachments: $viewModel.attachments,
                         onAddAttachment: viewModel.addAttachment,
                         onRemoveAttachment: viewModel.removeAttachment,
@@ -186,6 +192,19 @@ struct ChatView: View {
                 // Response just finished - dismiss keyboard
                 inputFocused = false
             }
+        }
+        .onAppear {
+            // Entry morph animation from left with 180ms delay (90% of mic button's 200ms)
+            Task { @MainActor in
+                try? await Task.sleep(nanoseconds: entryMorphDelay)
+                withAnimation(.spring(response: 0.32, dampingFraction: 0.86)) {
+                    showEntryContent = true
+                }
+            }
+        }
+        .onDisappear {
+            // Reset for next entry
+            showEntryContent = false
         }
         .task {
             // PERFORMANCE OPTIMIZATION: Parallelize independent operations

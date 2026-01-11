@@ -675,6 +675,18 @@ export class EventStoreOrchestrator extends EventEmitter {
               mimeType: att.mimeType,
               fileName: att.fileName,
             });
+          } else if (att.mimeType.startsWith('text/') || att.mimeType === 'application/json') {
+            // Text files: decode base64 and include as text content with file header
+            try {
+              const textContent = Buffer.from(att.data, 'base64').toString('utf-8');
+              const fileName = att.fileName || 'file';
+              userContent.push({
+                type: 'text',
+                text: `--- File: ${fileName} ---\n${textContent}\n--- End of file ---`,
+              });
+            } catch (e) {
+              logger.warn('Failed to decode text attachment', { fileName: att.fileName, error: e });
+            }
           }
         }
       }
@@ -684,6 +696,7 @@ export class EventStoreOrchestrator extends EventEmitter {
         contentBlocks: userContent.length,
         hasImages: userContent.some(c => c.type === 'image'),
         hasDocuments: userContent.some(c => c.type === 'document'),
+        hasTextFiles: userContent.filter(c => c.type === 'text').length > 1,  // More than just the prompt
       });
 
       // Determine if we can use simple string format (backward compat) or need full content array

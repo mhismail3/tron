@@ -7,31 +7,25 @@ extension ChatViewModel {
 
     func sendMessage(reasoningLevel: String? = nil) {
         let text = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty || !attachedImages.isEmpty || !attachments.isEmpty else {
-            logger.verbose("sendMessage() called but no text, images, or attachments to send", category: .chat)
+        guard !text.isEmpty || !attachments.isEmpty else {
+            logger.verbose("sendMessage() called but no text or attachments to send", category: .chat)
             return
         }
 
-        logger.info("Sending message: \"\(text.prefix(100))...\" with \(attachedImages.count) images, \(attachments.count) attachments, reasoningLevel=\(reasoningLevel ?? "nil")", category: .chat)
+        logger.info("Sending message: \"\(text.prefix(100))...\" with \(attachments.count) attachments, reasoningLevel=\(reasoningLevel ?? "nil")", category: .chat)
 
-        // Combine images from both legacy attachedImages and new attachments model
-        var allImages: [ImageContent] = attachedImages
-        for attachment in attachments where attachment.type == .image {
-            allImages.append(ImageContent(data: attachment.data, mimeType: attachment.mimeType))
-        }
-
-        // Create user message with attached images displayed as thumbnails above text
-        let imagesToAttach = allImages.isEmpty ? nil : allImages
+        // Create user message with attachments displayed as thumbnails above text
+        let attachmentsToShow = attachments.isEmpty ? nil : attachments
         if !text.isEmpty {
-            let userMessage = ChatMessage.user(text, images: imagesToAttach)
+            let userMessage = ChatMessage.user(text, attachments: attachmentsToShow)
             appendMessage(userMessage)
-            logger.debug("Added user text message with \(allImages.count) attached images", category: .chat)
+            logger.debug("Added user text message with \(attachments.count) attachments", category: .chat)
             currentTurn += 1
-        } else if !allImages.isEmpty {
-            // If only images (no text), still show them in chat
-            let imageMessage = ChatMessage(role: .user, content: .images(allImages))
-            appendMessage(imageMessage)
-            logger.debug("Added image-only message with \(allImages.count) images", category: .chat)
+        } else if !attachments.isEmpty {
+            // If only attachments (no text), still show them in chat
+            let attachmentMessage = ChatMessage(role: .user, content: .attachments(attachments), attachments: attachments)
+            appendMessage(attachmentMessage)
+            logger.debug("Added attachment-only message with \(attachments.count) attachments", category: .chat)
         }
 
         inputText = ""
@@ -49,24 +43,18 @@ extension ChatViewModel {
         streamingText = ""
         logger.verbose("Created streaming placeholder message id=\(streamingMessage.id)", category: .chat)
 
-        // Prepare legacy image attachments
-        let imageAttachments = attachedImages.map {
-            ImageAttachment(data: $0.data, mimeType: $0.mimeType)
-        }
-        attachedImages = []
-        selectedImages = []
-
-        // Prepare unified file attachments
+        // Prepare file attachments for sending
         let fileAttachments = attachments.map { FileAttachment(attachment: $0) }
         attachments = []
+        selectedImages = []
 
         // Send to server
         Task {
             do {
-                logger.debug("Calling rpcClient.sendPrompt() with \(imageAttachments.count) images and \(fileAttachments.count) attachments...", category: .chat)
+                logger.debug("Calling rpcClient.sendPrompt() with \(fileAttachments.count) attachments...", category: .chat)
                 try await rpcClient.sendPrompt(
                     text,
-                    images: imageAttachments.isEmpty ? nil : imageAttachments,
+                    images: nil,  // Legacy - no longer used
                     attachments: fileAttachments.isEmpty ? nil : fileAttachments,
                     reasoningLevel: reasoningLevel
                 )
@@ -102,22 +90,37 @@ extension ChatViewModel {
     // MARK: - Image Handling
 
     func processSelectedImages(_ items: [PhotosPickerItem]) async {
-        var newImages: [ImageContent] = []
-
         for item in items {
-            if let data = try? await item.loadTransferable(type: Data.self) {
-                let mimeType = "image/jpeg"
-                newImages.append(ImageContent(data: data, mimeType: mimeType))
+            // Load the image data
+            guard let data = try? await item.loadTransferable(type: Data.self),
+                  let uiImage = UIImage(data: data) else {
+                continue
+            }
+
+            // Compress the image (same as camera photos)
+            guard let result = await ImageCompressor.compress(uiImage) else {
+                logger.warning("Failed to compress library image", category: .chat)
+                continue
+            }
+
+            // Create unified Attachment (same model as camera photos)
+            let attachment = Attachment(
+                type: .image,
+                data: result.data,
+                mimeType: result.mimeType,
+                fileName: nil,
+                originalSize: data.count
+            )
+
+            await MainActor.run {
+                self.attachments.append(attachment)
             }
         }
 
+        // Clear the picker selection
         await MainActor.run {
-            self.attachedImages.append(contentsOf: newImages)
+            self.selectedImages = []
         }
-    }
-
-    func removeAttachedImage(_ image: ImageContent) {
-        attachedImages.removeAll { $0.id == image.id }
     }
 
     // MARK: - Unified Attachment Handling
