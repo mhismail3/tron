@@ -234,13 +234,14 @@ struct UnifiedEventTransformer {
             return nil
         }
 
-        // Skip empty user messages
-        guard !parsed.content.isEmpty else { return nil }
+        // Skip empty user messages (unless they have images)
+        guard !parsed.content.isEmpty || parsed.images != nil else { return nil }
 
         return ChatMessage(
             role: .user,
             content: .text(parsed.content),
-            timestamp: timestamp
+            timestamp: timestamp,
+            attachedImages: parsed.images
         )
     }
 

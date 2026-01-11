@@ -18,7 +18,12 @@ struct MessageBubble: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: isUserMessage ? .trailing : .leading, spacing: 4) {
+            // Show attached images above text for user messages
+            if let images = message.attachedImages, !images.isEmpty {
+                AttachedImageThumbnails(images: images)
+            }
+
             contentView
 
             // Show enriched metadata badge for assistant messages with metadata
@@ -964,6 +969,30 @@ struct ImagesContentView: View {
             }
         }
         .padding(4)
+    }
+}
+
+// MARK: - Attached Image Thumbnails (displayed above user message text)
+
+struct AttachedImageThumbnails: View {
+    let images: [ImageContent]
+
+    var body: some View {
+        HStack(spacing: 6) {
+            ForEach(images) { image in
+                if let uiImage = UIImage(data: image.data) {
+                    Image(uiImage: uiImage)
+                        .resizable()
+                        .aspectRatio(contentMode: .fill)
+                        .frame(width: 56, height: 56)
+                        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                .stroke(Color.tronEmerald.opacity(0.3), lineWidth: 1)
+                        )
+                }
+            }
+        }
     }
 }
 

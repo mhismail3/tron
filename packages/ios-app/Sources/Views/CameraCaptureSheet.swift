@@ -13,81 +13,68 @@ struct CameraCaptureSheet: View {
     @State private var showingPreview = false
 
     var body: some View {
-        NavigationStack {
-            GeometryReader { geometry in
-                // Calculate viewport to fit nicely in medium sheet
-                let availableHeight = geometry.size.height - 140 // Leave room for controls
-                let viewportSize = min(geometry.size.width - 48, availableHeight)
+        GeometryReader { geometry in
+            let viewportSize = min(geometry.size.width - 32, geometry.size.height - 100)
 
-                VStack(spacing: 16) {
-                    // Camera viewport - square with rounded corners
-                    ZStack {
-                        if let image = capturedImage, showingPreview {
-                            // Preview captured image
-                            Image(uiImage: image)
-                                .resizable()
-                                .scaledToFill()
-                                .frame(width: viewportSize, height: viewportSize)
-                                .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
-                        } else if cameraModel.isAuthorized {
-                            // Live camera preview
-                            CameraPreviewView(session: cameraModel.session)
-                                .frame(width: viewportSize, height: viewportSize)
-                                .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
-                        } else {
-                            // Permission denied or loading
-                            RoundedRectangle(cornerRadius: 24, style: .continuous)
-                                .fill(Color.tronSurfaceElevated)
-                                .frame(width: viewportSize, height: viewportSize)
-                                .overlay {
-                                    if cameraModel.permissionDenied {
-                                        VStack(spacing: 12) {
-                                            Image(systemName: "camera.fill")
-                                                .font(.system(size: 32))
-                                                .foregroundStyle(.white.opacity(0.4))
-                                            Text("Camera Access Required")
-                                                .font(.subheadline.weight(.medium))
-                                                .foregroundStyle(.white.opacity(0.7))
-                                            Text("Enable in Settings")
-                                                .font(.caption)
-                                                .foregroundStyle(.white.opacity(0.4))
-                                        }
-                                    } else {
-                                        ProgressView()
-                                            .tint(.tronEmerald)
-                                    }
-                                }
-                        }
-                    }
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 24, style: .continuous)
-                            .strokeBorder(.white.opacity(0.1), lineWidth: 1)
+            VStack(spacing: 12) {
+                // Camera viewport - square with rounded corners
+                ZStack {
+                    if let image = capturedImage, showingPreview {
+                        // Preview captured image
+                        Image(uiImage: image)
+                            .resizable()
+                            .scaledToFill()
                             .frame(width: viewportSize, height: viewportSize)
-                    )
-
-                    Spacer(minLength: 0)
-
-                    // Control buttons
-                    controlButtons
-                        .padding(.bottom, 20)
+                            .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+                    } else if cameraModel.isAuthorized {
+                        // Live camera preview
+                        CameraPreviewView(session: cameraModel.session)
+                            .frame(width: viewportSize, height: viewportSize)
+                            .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+                    } else {
+                        // Permission denied or loading
+                        RoundedRectangle(cornerRadius: 24, style: .continuous)
+                            .fill(Color.tronSurfaceElevated)
+                            .frame(width: viewportSize, height: viewportSize)
+                            .overlay {
+                                if cameraModel.permissionDenied {
+                                    VStack(spacing: 12) {
+                                        Image(systemName: "camera.fill")
+                                            .font(.system(size: 32))
+                                            .foregroundStyle(.white.opacity(0.4))
+                                        Text("Camera Access Required")
+                                            .font(.subheadline.weight(.medium))
+                                            .foregroundStyle(.white.opacity(0.7))
+                                        Text("Enable in Settings")
+                                            .font(.caption)
+                                            .foregroundStyle(.white.opacity(0.4))
+                                    }
+                                } else {
+                                    ProgressView()
+                                        .tint(.tronEmerald)
+                                }
+                            }
+                    }
                 }
-                .frame(maxWidth: .infinity)
-                .padding(.top, 8)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 24, style: .continuous)
+                        .strokeBorder(.white.opacity(0.1), lineWidth: 1)
+                        .frame(width: viewportSize, height: viewportSize)
+                )
+
+                Spacer(minLength: 0)
+
+                // Control buttons
+                controlButtons
+                    .padding(.bottom, 16)
             }
-            .padding(.horizontal, 24)
-            .background(Color.tronSurface)
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
-            .toolbar {
-                ToolbarItem(placement: .principal) {
-                    Text("Take Photo")
-                        .font(.system(size: 16, weight: .semibold))
-                        .foregroundStyle(.tronEmerald)
-                }
-            }
+            .frame(maxWidth: .infinity)
+            .padding(.top, 8)
         }
+        .padding(.horizontal, 16)
+        .background(Color.tronSurface)
         .presentationDetents([.medium])
-        .presentationDragIndicator(.hidden)
+        .presentationDragIndicator(.visible)
         .preferredColorScheme(.dark)
         .task {
             await cameraModel.requestPermissionAndSetup()
@@ -100,11 +87,11 @@ struct CameraCaptureSheet: View {
     @ViewBuilder
     private var controlButtons: some View {
         if showingPreview {
-            // Preview mode: Cancel, Use Photo, Retake
+            // Preview mode: Retake, Use Photo
             HStack(alignment: .center, spacing: 32) {
-                // Cancel
-                Button(action: { dismiss() }) {
-                    Image(systemName: "xmark")
+                // Retake
+                Button(action: retake) {
+                    Image(systemName: "arrow.counterclockwise")
                         .font(.system(size: 18, weight: .semibold))
                         .foregroundStyle(.white.opacity(0.7))
                         .frame(width: 52, height: 52)
@@ -120,26 +107,26 @@ struct CameraCaptureSheet: View {
                 }
                 .glassEffect(.regular.tint(Color.tronEmerald.opacity(0.6)).interactive(), in: .circle)
 
-                // Retake
-                Button(action: retake) {
-                    Image(systemName: "arrow.counterclockwise")
-                        .font(.system(size: 18, weight: .semibold))
-                        .foregroundStyle(.white.opacity(0.7))
-                        .frame(width: 52, height: 52)
-                }
-                .glassEffect(.regular.tint(Color.white.opacity(0.1)).interactive(), in: .circle)
+                // Placeholder for symmetry
+                Color.clear
+                    .frame(width: 52, height: 52)
             }
         } else {
-            // Capture mode: Cancel, Capture, Flip
+            // Capture mode: Night mode, Capture, Flip
             HStack(spacing: 32) {
-                // Cancel
-                Button(action: { dismiss() }) {
-                    Image(systemName: "xmark")
+                // Night mode (torch)
+                Button(action: { cameraModel.toggleTorch() }) {
+                    Image(systemName: cameraModel.isTorchOn ? "moon.fill" : "moon")
                         .font(.system(size: 18, weight: .semibold))
-                        .foregroundStyle(.white.opacity(0.7))
+                        .foregroundStyle(cameraModel.isTorchOn ? .tronEmerald : .white.opacity(0.7))
                         .frame(width: 52, height: 52)
                 }
-                .glassEffect(.regular.tint(Color.white.opacity(0.1)).interactive(), in: .circle)
+                .glassEffect(
+                    .regular.tint(cameraModel.isTorchOn ? Color.tronEmerald.opacity(0.3) : Color.white.opacity(0.1)).interactive(),
+                    in: .circle
+                )
+                .disabled(!cameraModel.isAuthorized || !cameraModel.hasTorch)
+                .opacity(cameraModel.isAuthorized && cameraModel.hasTorch ? 1 : 0.3)
 
                 // Capture
                 Button(action: capturePhoto) {
@@ -200,11 +187,14 @@ struct CameraCaptureSheet: View {
 class CameraModel: NSObject, ObservableObject {
     @Published var isAuthorized = false
     @Published var permissionDenied = false
+    @Published var isTorchOn = false
+    @Published var hasTorch = false
 
     let session = AVCaptureSession()
     private var photoOutput = AVCapturePhotoOutput()
     private var currentCameraPosition: AVCaptureDevice.Position = .back
     private var photoCaptureCompletion: ((UIImage?) -> Void)?
+    private var currentDevice: AVCaptureDevice?
 
     func requestPermissionAndSetup() async {
         let status = AVCaptureDevice.authorizationStatus(for: .video)
@@ -245,6 +235,10 @@ class CameraModel: NSObject, ObservableObject {
         session.inputs.forEach { session.removeInput($0) }
         session.addInput(input)
 
+        // Track current device for torch
+        currentDevice = camera
+        hasTorch = camera.hasTorch
+
         // Add photo output
         if session.canAddOutput(photoOutput) {
             session.addOutput(photoOutput)
@@ -269,6 +263,11 @@ class CameraModel: NSObject, ObservableObject {
     }
 
     func flipCamera() {
+        // Turn off torch before flipping
+        if isTorchOn {
+            toggleTorch()
+        }
+
         currentCameraPosition = currentCameraPosition == .back ? .front : .back
 
         session.beginConfiguration()
@@ -285,7 +284,29 @@ class CameraModel: NSObject, ObservableObject {
         }
 
         session.addInput(input)
+
+        // Track current device for torch
+        currentDevice = camera
+        hasTorch = camera.hasTorch
+
         session.commitConfiguration()
+    }
+
+    func toggleTorch() {
+        guard let device = currentDevice, device.hasTorch else { return }
+
+        do {
+            try device.lockForConfiguration()
+            if isTorchOn {
+                device.torchMode = .off
+            } else {
+                try device.setTorchModeOn(level: 1.0)
+            }
+            device.unlockForConfiguration()
+            isTorchOn.toggle()
+        } catch {
+            // Torch toggle failed silently
+        }
     }
 
     func capturePhoto(completion: @escaping (UIImage?) -> Void) {

@@ -52,6 +52,8 @@ struct ChatMessage: Identifiable, Equatable {
     var tokenUsage: TokenUsage?
     /// Incremental token usage (delta from previous turn) for display purposes
     var incrementalTokens: TokenUsage?
+    /// Images attached to this message (displayed as thumbnails above text)
+    var attachedImages: [ImageContent]?
 
     // MARK: - Enriched Metadata (Phase 1)
     // These fields come from server-side event store enhancements
@@ -79,6 +81,7 @@ struct ChatMessage: Identifiable, Equatable {
         isStreaming: Bool = false,
         tokenUsage: TokenUsage? = nil,
         incrementalTokens: TokenUsage? = nil,
+        attachedImages: [ImageContent]? = nil,
         model: String? = nil,
         latencyMs: Int? = nil,
         turnNumber: Int? = nil,
@@ -92,6 +95,7 @@ struct ChatMessage: Identifiable, Equatable {
         self.isStreaming = isStreaming
         self.tokenUsage = tokenUsage
         self.incrementalTokens = incrementalTokens
+        self.attachedImages = attachedImages
         self.model = model
         self.latencyMs = latencyMs
         self.turnNumber = turnNumber
@@ -324,8 +328,8 @@ struct ImageContent: Equatable, Identifiable {
 // MARK: - Message Extensions
 
 extension ChatMessage {
-    static func user(_ text: String) -> ChatMessage {
-        ChatMessage(role: .user, content: .text(text))
+    static func user(_ text: String, images: [ImageContent]? = nil) -> ChatMessage {
+        ChatMessage(role: .user, content: .text(text), attachedImages: images)
     }
 
     static func assistant(_ text: String) -> ChatMessage {

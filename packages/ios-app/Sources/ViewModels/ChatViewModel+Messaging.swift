@@ -14,18 +14,24 @@ extension ChatViewModel {
 
         logger.info("Sending message: \"\(text.prefix(100))...\" with \(attachedImages.count) images, \(attachments.count) attachments, reasoningLevel=\(reasoningLevel ?? "nil")", category: .chat)
 
-        // Create user message
-        if !attachedImages.isEmpty {
-            let imageMessage = ChatMessage(role: .user, content: .images(attachedImages))
-            appendMessage(imageMessage)
-            logger.debug("Added image message with \(attachedImages.count) images", category: .chat)
+        // Combine images from both legacy attachedImages and new attachments model
+        var allImages: [ImageContent] = attachedImages
+        for attachment in attachments where attachment.type == .image {
+            allImages.append(ImageContent(data: attachment.data, mimeType: attachment.mimeType))
         }
 
+        // Create user message with attached images displayed as thumbnails above text
+        let imagesToAttach = allImages.isEmpty ? nil : allImages
         if !text.isEmpty {
-            let userMessage = ChatMessage.user(text)
+            let userMessage = ChatMessage.user(text, images: imagesToAttach)
             appendMessage(userMessage)
-            logger.debug("Added user text message", category: .chat)
+            logger.debug("Added user text message with \(allImages.count) attached images", category: .chat)
             currentTurn += 1
+        } else if !allImages.isEmpty {
+            // If only images (no text), still show them in chat
+            let imageMessage = ChatMessage(role: .user, content: .images(allImages))
+            appendMessage(imageMessage)
+            logger.debug("Added image-only message with \(allImages.count) images", category: .chat)
         }
 
         inputText = ""

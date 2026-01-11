@@ -8,6 +8,7 @@ import Foundation
 /// NOTE: message.user events can contain:
 /// 1. User text prompts (displayable)
 /// 2. Tool result content blocks (LLM context, not for display - handled by tool.result events)
+/// 3. Image content blocks (displayable as thumbnails above text)
 struct UserMessagePayload {
     let content: String
     let turn: Int
@@ -15,8 +16,12 @@ struct UserMessagePayload {
     /// True if this message contains ONLY tool_result blocks (no text)
     /// These are LLM conversation context, not displayable user messages
     let isToolResultContext: Bool
+    /// Images attached to this message (extracted from image content blocks)
+    let images: [ImageContent]?
 
     init?(from payload: [String: AnyCodable]) {
+        var extractedImages: [ImageContent] = []
+
         // Content can be a string or array of content blocks
         if let content = payload.string("content") {
             self.content = content
@@ -40,12 +45,36 @@ struct UserMessagePayload {
                 self.content = texts.joined(separator: "\n")
                 self.isToolResultContext = false
             }
+
+            // Extract images from content blocks
+            // Server format: { type: 'image', data: <base64>, mimeType: <mime> }
+            // Anthropic API format: { type: 'image', source: { type: 'base64', data: <base64>, media_type: <mime> } }
+            for block in contentBlocks {
+                guard block["type"] as? String == "image" else { continue }
+
+                // Try server format first (direct data/mimeType)
+                if let base64Data = block["data"] as? String,
+                   let mimeType = block["mimeType"] as? String,
+                   let imageData = Data(base64Encoded: base64Data) {
+                    extractedImages.append(ImageContent(data: imageData, mimeType: mimeType))
+                    continue
+                }
+
+                // Fallback to Anthropic API format (nested source object)
+                if let source = block["source"] as? [String: Any],
+                   let base64Data = source["data"] as? String,
+                   let mediaType = source["media_type"] as? String,
+                   let imageData = Data(base64Encoded: base64Data) {
+                    extractedImages.append(ImageContent(data: imageData, mimeType: mediaType))
+                }
+            }
         } else {
             return nil
         }
 
         self.turn = payload.int("turn") ?? 1
         self.imageCount = payload.int("imageCount")
+        self.images = extractedImages.isEmpty ? nil : extractedImages
     }
 }
 
