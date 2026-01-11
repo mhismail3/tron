@@ -173,6 +173,7 @@ extension EventStoreManager {
             messageCount: info.messageCount,
             inputTokens: info.inputTokens ?? 0,
             outputTokens: info.outputTokens ?? 0,
+            lastTurnInputTokens: info.lastTurnInputTokens ?? 0,
             cost: info.cost ?? 0,
             isFork: info.isFork
         )

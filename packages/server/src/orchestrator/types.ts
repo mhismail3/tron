@@ -210,6 +210,8 @@ export interface SessionInfo {
   eventCount: number;
   inputTokens: number;
   outputTokens: number;
+  /** Current context size (input_tokens from last API call) */
+  lastTurnInputTokens: number;
   cost: number;
   createdAt: string;
   lastActivity: string;

@@ -106,12 +106,18 @@ extension ChatViewModel {
             // instead of reconstructed state (local calculation that may double-count)
             // Cache tokens come from reconstructed state since session doesn't store them
             if let session = try? manager.eventDB.getSession(sessionId) {
+                // Accumulated totals for billing
                 accumulatedInputTokens = session.inputTokens
                 accumulatedOutputTokens = session.outputTokens
                 accumulatedCacheReadTokens = state.totalTokenUsage.cacheReadTokens ?? 0
                 accumulatedCacheCreationTokens = state.totalTokenUsage.cacheCreationTokens ?? 0
+
+                // Current context size for context bar (lastTurnInputTokens from server)
+                lastTurnInputTokens = session.lastTurnInputTokens
+
+                // totalTokenUsage: input = current context size for display, output = accumulated
                 totalTokenUsage = TokenUsage(
-                    inputTokens: session.inputTokens,
+                    inputTokens: session.lastTurnInputTokens,  // Current context size for context bar
                     outputTokens: session.outputTokens,
                     cacheReadTokens: state.totalTokenUsage.cacheReadTokens,
                     cacheCreationTokens: state.totalTokenUsage.cacheCreationTokens
@@ -124,6 +130,8 @@ extension ChatViewModel {
                     accumulatedOutputTokens = usage.outputTokens
                     accumulatedCacheReadTokens = usage.cacheReadTokens ?? 0
                     accumulatedCacheCreationTokens = usage.cacheCreationTokens ?? 0
+                    // Use inputTokens as lastTurnInputTokens in fallback (best available)
+                    lastTurnInputTokens = usage.inputTokens
                     totalTokenUsage = usage
                 }
             }
@@ -178,12 +186,17 @@ extension ChatViewModel {
             // Get token totals from cached session (server source of truth)
             // Cache tokens come from reconstructed state since session doesn't store them
             if let session = try? manager.eventDB.getSession(sessionId) {
+                // Accumulated totals for billing
                 accumulatedInputTokens = session.inputTokens
                 accumulatedOutputTokens = session.outputTokens
                 accumulatedCacheReadTokens = state.totalTokenUsage.cacheReadTokens ?? 0
                 accumulatedCacheCreationTokens = state.totalTokenUsage.cacheCreationTokens ?? 0
+
+                // Current context size for context bar
+                lastTurnInputTokens = session.lastTurnInputTokens
+
                 totalTokenUsage = TokenUsage(
-                    inputTokens: session.inputTokens,
+                    inputTokens: session.lastTurnInputTokens,  // Current context size for context bar
                     outputTokens: session.outputTokens,
                     cacheReadTokens: state.totalTokenUsage.cacheReadTokens,
                     cacheCreationTokens: state.totalTokenUsage.cacheCreationTokens
@@ -196,6 +209,7 @@ extension ChatViewModel {
                     accumulatedOutputTokens = usage.outputTokens
                     accumulatedCacheReadTokens = usage.cacheReadTokens ?? 0
                     accumulatedCacheCreationTokens = usage.cacheCreationTokens ?? 0
+                    lastTurnInputTokens = usage.inputTokens
                     totalTokenUsage = usage
                 }
             }

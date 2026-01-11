@@ -905,7 +905,7 @@ export class EventStoreOrchestrator extends EventEmitter {
         stoppedReason: runResult.stoppedReason,
       });
 
-      // Emit completion event
+      // Emit turn completion event
       this.emit('agent_turn', {
         type: 'turn_complete',
         sessionId: options.sessionId,
@@ -921,6 +921,19 @@ export class EventStoreOrchestrator extends EventEmitter {
           data: runResult,
         });
       }
+
+      // Emit agent.complete AFTER appendPromiseChain completes
+      // This ensures all linearized events (message.assistant, tool.call, tool.result)
+      // are persisted to the database before iOS receives this and syncs
+      this.emit('agent_event', {
+        type: 'agent.complete',
+        sessionId: options.sessionId,
+        timestamp: new Date().toISOString(),
+        data: {
+          success: !runResult.error,
+          error: runResult.error,
+        },
+      });
 
       return [runResult] as unknown as TurnResult[];
     } catch (error) {
@@ -959,6 +972,17 @@ export class EventStoreOrchestrator extends EventEmitter {
           data: { message: error instanceof Error ? error.message : 'Unknown error' },
         });
       }
+
+      // Emit agent.complete for error case (after appendPromiseChain has been awaited above)
+      this.emit('agent_event', {
+        type: 'agent.complete',
+        sessionId: options.sessionId,
+        timestamp: new Date().toISOString(),
+        data: {
+          success: false,
+          error: error instanceof Error ? error.message : String(error),
+        },
+      });
 
       throw error;
     } finally {
@@ -1911,15 +1935,10 @@ export class EventStoreOrchestrator extends EventEmitter {
           active.currentTurnContentSequence = [];
         }
 
-        this.emit('agent_event', {
-          type: 'agent.complete',
-          sessionId,
-          timestamp,
-          data: {
-            success: !event.error,
-            error: event.error,
-          },
-        });
+        // NOTE: agent.complete is now emitted in runAgent() AFTER appendPromiseChain completes
+        // This ensures all linearized events (message.assistant, tool.call, tool.result)
+        // are persisted before iOS syncs on receiving agent.complete
+        // See runAgent() line ~908 for the emit
         break;
 
       case 'agent_interrupted':
@@ -1965,6 +1984,7 @@ export class EventStoreOrchestrator extends EventEmitter {
       eventCount: row.eventCount ?? 0,
       inputTokens: row.totalInputTokens ?? 0,
       outputTokens: row.totalOutputTokens ?? 0,
+      lastTurnInputTokens: row.lastTurnInputTokens ?? 0,
       cost: row.totalCost ?? 0,
       createdAt: row.createdAt,
       lastActivity: row.lastActivityAt,

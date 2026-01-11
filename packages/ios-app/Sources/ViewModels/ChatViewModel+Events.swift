@@ -201,29 +201,34 @@ extension ChatViewModel {
             // Track this turn's input for next turn's incremental calculation
             previousTurnFinalInputTokens = usage.inputTokens
 
-            // Only accumulate output tokens (meaningful total of generated content)
-            // Input tokens represent context size per-turn, not additive
+            // Accumulate ALL tokens for billing tracking
+            // Input tokens: each API call charges for full context window
+            accumulatedInputTokens += usage.inputTokens
             accumulatedOutputTokens += usage.outputTokens
             accumulatedCacheReadTokens += usage.cacheReadTokens ?? 0
             accumulatedCacheCreationTokens += usage.cacheCreationTokens ?? 0
 
             // Total usage shows current context input + accumulated output
+            // The context bar uses lastTurnInputTokens via contextPercentage
             totalTokenUsage = TokenUsage(
-                inputTokens: usage.inputTokens,  // Current context size, not accumulated
+                inputTokens: lastTurnInputTokens,  // Current context size for display
                 outputTokens: accumulatedOutputTokens,
                 cacheReadTokens: accumulatedCacheReadTokens > 0 ? accumulatedCacheReadTokens : nil,
                 cacheCreationTokens: accumulatedCacheCreationTokens > 0 ? accumulatedCacheCreationTokens : nil
             )
-            logger.debug("Total tokens: context=\(usage.inputTokens) out=\(accumulatedOutputTokens) cacheRead=\(accumulatedCacheReadTokens)", category: .events)
+            logger.debug("Total tokens: context=\(lastTurnInputTokens) out=\(accumulatedOutputTokens) accumulatedIn=\(accumulatedInputTokens)", category: .events)
 
             // Update CachedSession with token info for dashboard
-            // Input = current context size, Output = accumulated generated content
+            // - inputTokens: accumulated for billing
+            // - outputTokens: accumulated
+            // - lastTurnInputTokens: current context size for context bar
             if let manager = eventStoreManager {
                 do {
                     try manager.updateSessionTokens(
                         sessionId: sessionId,
-                        inputTokens: usage.inputTokens,  // Current context size
-                        outputTokens: accumulatedOutputTokens
+                        inputTokens: accumulatedInputTokens,
+                        outputTokens: accumulatedOutputTokens,
+                        lastTurnInputTokens: lastTurnInputTokens
                     )
                 } catch {
                     logger.error("Failed to update session tokens: \(error.localizedDescription)", category: .events)

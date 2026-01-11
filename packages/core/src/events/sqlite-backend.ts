@@ -68,6 +68,8 @@ export interface SessionRow {
   turnCount: number;
   totalInputTokens: number;
   totalOutputTokens: number;
+  /** Current context size (input_tokens from last API call) */
+  lastTurnInputTokens: number;
   totalCost: number;
   tags: string[];
   /** Backward compatible alias for latestModel */
@@ -121,6 +123,8 @@ export interface IncrementCountersOptions {
   turnCount?: number;
   inputTokens?: number;
   outputTokens?: number;
+  /** Current context size (SET, not incremented) */
+  lastTurnInputTokens?: number;
   cost?: number;
 }
 
@@ -216,6 +220,11 @@ export class SQLiteBackend {
     // Migration: Add total_cost column to sessions table (if not exists)
     if (!columnNames.includes('total_cost')) {
       db.exec("ALTER TABLE sessions ADD COLUMN total_cost REAL DEFAULT 0");
+    }
+
+    // Migration 003: Add last_turn_input_tokens column for current context size tracking
+    if (!columnNames.includes('last_turn_input_tokens')) {
+      db.exec("ALTER TABLE sessions ADD COLUMN last_turn_input_tokens INTEGER DEFAULT 0");
     }
 
     // Migration 002: Remove provider, status columns; rename model -> latest_model
@@ -316,6 +325,7 @@ export class SQLiteBackend {
         turn_count INTEGER DEFAULT 0,
         total_input_tokens INTEGER DEFAULT 0,
         total_output_tokens INTEGER DEFAULT 0,
+        last_turn_input_tokens INTEGER DEFAULT 0,
         total_cost REAL DEFAULT 0,
         tags TEXT DEFAULT '[]'
       );
@@ -528,6 +538,7 @@ export class SQLiteBackend {
       turnCount: 0,
       totalInputTokens: 0,
       totalOutputTokens: 0,
+      lastTurnInputTokens: 0,
       totalCost: 0,
       tags: options.tags ?? [],
       // Backward compatibility aliases
@@ -671,6 +682,11 @@ export class SQLiteBackend {
       updates.push('total_output_tokens = total_output_tokens + ?');
       params.push(counters.outputTokens);
     }
+    // SET (not increment) last_turn_input_tokens - this is current context size
+    if (counters.lastTurnInputTokens !== undefined) {
+      updates.push('last_turn_input_tokens = ?');
+      params.push(counters.lastTurnInputTokens);
+    }
     if (counters.cost) {
       updates.push('total_cost = total_cost + ?');
       params.push(counters.cost);
@@ -709,6 +725,7 @@ export class SQLiteBackend {
       turnCount: row.turn_count,
       totalInputTokens: row.total_input_tokens,
       totalOutputTokens: row.total_output_tokens,
+      lastTurnInputTokens: row.last_turn_input_tokens ?? 0,
       totalCost: row.total_cost ?? 0,
       tags: JSON.parse(row.tags || '[]'),
       // Backward compatibility aliases

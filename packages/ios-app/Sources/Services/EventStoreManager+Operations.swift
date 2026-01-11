@@ -28,6 +28,7 @@ extension EventStoreManager {
             messageCount: 0,
             inputTokens: 0,
             outputTokens: 0,
+            lastTurnInputTokens: 0,
             cost: 0
         )
 
@@ -59,7 +60,12 @@ extension EventStoreManager {
     }
 
     /// Update session token counts (called when streaming accumulates tokens)
-    func updateSessionTokens(sessionId: String, inputTokens: Int, outputTokens: Int) throws {
+    /// - Parameters:
+    ///   - sessionId: The session to update
+    ///   - inputTokens: Total accumulated input tokens (for billing)
+    ///   - outputTokens: Total accumulated output tokens
+    ///   - lastTurnInputTokens: Current context size (from last turn's input_tokens)
+    func updateSessionTokens(sessionId: String, inputTokens: Int, outputTokens: Int, lastTurnInputTokens: Int) throws {
         guard var session = try eventDB.getSession(sessionId) else {
             logger.warning("Cannot update tokens: session \(sessionId) not found", category: .session)
             return
@@ -67,13 +73,14 @@ extension EventStoreManager {
 
         session.inputTokens = inputTokens
         session.outputTokens = outputTokens
+        session.lastTurnInputTokens = lastTurnInputTokens
 
         try eventDB.insertSession(session)
 
         // Reload sessions to update in-memory array
         loadSessions()
 
-        logger.debug("Updated session \(sessionId) tokens: in=\(inputTokens) out=\(outputTokens)", category: .session)
+        logger.debug("Updated session \(sessionId) tokens: in=\(inputTokens) out=\(outputTokens) lastTurnIn=\(lastTurnInputTokens)", category: .session)
     }
 
     // MARK: - Tree Operations (Fork/Rewind)
@@ -165,6 +172,7 @@ extension EventStoreManager {
             messageCount: 0,
             inputTokens: 0,
             outputTokens: 0,
+            lastTurnInputTokens: 0,
             cost: 0.0,
             lastUserPrompt: sourceSession?.lastUserPrompt,
             lastAssistantResponse: sourceSession?.lastAssistantResponse,

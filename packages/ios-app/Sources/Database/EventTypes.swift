@@ -408,6 +408,8 @@ struct CachedSession: Identifiable, Codable {
     var messageCount: Int
     var inputTokens: Int
     var outputTokens: Int
+    /// Current context size (input_tokens from last API call)
+    var lastTurnInputTokens: Int
     var cost: Double
 
     /// Backward compatibility: expose latestModel as model

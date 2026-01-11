@@ -99,6 +99,7 @@ class EventDatabase: ObservableObject {
                 message_count INTEGER DEFAULT 0,
                 input_tokens INTEGER DEFAULT 0,
                 output_tokens INTEGER DEFAULT 0,
+                last_turn_input_tokens INTEGER DEFAULT 0,
                 cost REAL DEFAULT 0
             )
         """)
@@ -113,6 +114,13 @@ class EventDatabase: ObservableObject {
         // Migration: Add is_fork column
         do {
             try execute("ALTER TABLE sessions ADD COLUMN is_fork INTEGER DEFAULT 0")
+        } catch {
+            // Column already exists, ignore
+        }
+
+        // Migration: Add last_turn_input_tokens column for current context size tracking
+        do {
+            try execute("ALTER TABLE sessions ADD COLUMN last_turn_input_tokens INTEGER DEFAULT 0")
         } catch {
             // Column already exists, ignore
         }
@@ -137,6 +145,7 @@ class EventDatabase: ObservableObject {
                     message_count INTEGER DEFAULT 0,
                     input_tokens INTEGER DEFAULT 0,
                     output_tokens INTEGER DEFAULT 0,
+                    last_turn_input_tokens INTEGER DEFAULT 0,
                     cost REAL DEFAULT 0
                 )
             """)
@@ -145,7 +154,7 @@ class EventDatabase: ObservableObject {
                 SELECT id, workspace_id, root_event_id, head_event_id, title,
                        model, working_directory, created_at, last_activity_at,
                        CASE WHEN status = 'ended' THEN last_activity_at ELSE NULL END,
-                       event_count, message_count, input_tokens, output_tokens, cost
+                       event_count, message_count, input_tokens, output_tokens, 0, cost
                 FROM sessions
             """)
             try execute("DROP TABLE sessions")
@@ -535,8 +544,8 @@ class EventDatabase: ObservableObject {
             INSERT OR REPLACE INTO sessions
             (id, workspace_id, root_event_id, head_event_id, title, latest_model,
              working_directory, created_at, last_activity_at, ended_at, event_count,
-             message_count, input_tokens, output_tokens, cost, is_fork)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             message_count, input_tokens, output_tokens, last_turn_input_tokens, cost, is_fork)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """
 
         var stmt: OpaquePointer?
@@ -559,8 +568,9 @@ class EventDatabase: ObservableObject {
         sqlite3_bind_int(stmt, 12, Int32(session.messageCount))
         sqlite3_bind_int(stmt, 13, Int32(session.inputTokens))
         sqlite3_bind_int(stmt, 14, Int32(session.outputTokens))
-        sqlite3_bind_double(stmt, 15, session.cost)
-        sqlite3_bind_int(stmt, 16, Int32(session.isFork == true ? 1 : 0))
+        sqlite3_bind_int(stmt, 15, Int32(session.lastTurnInputTokens))
+        sqlite3_bind_double(stmt, 16, session.cost)
+        sqlite3_bind_int(stmt, 17, Int32(session.isFork == true ? 1 : 0))
 
         guard sqlite3_step(stmt) == SQLITE_DONE else {
             throw EventDatabaseError.insertFailed(errorMessage)
@@ -571,7 +581,7 @@ class EventDatabase: ObservableObject {
         let sql = """
             SELECT id, workspace_id, root_event_id, head_event_id, title, latest_model,
                    working_directory, created_at, last_activity_at, ended_at, event_count,
-                   message_count, input_tokens, output_tokens, cost, is_fork
+                   message_count, input_tokens, output_tokens, last_turn_input_tokens, cost, is_fork
             FROM sessions WHERE id = ?
         """
 
@@ -594,7 +604,7 @@ class EventDatabase: ObservableObject {
         let sql = """
             SELECT id, workspace_id, root_event_id, head_event_id, title, latest_model,
                    working_directory, created_at, last_activity_at, ended_at, event_count,
-                   message_count, input_tokens, output_tokens, cost, is_fork
+                   message_count, input_tokens, output_tokens, last_turn_input_tokens, cost, is_fork
             FROM sessions ORDER BY last_activity_at DESC
         """
 
@@ -966,8 +976,9 @@ class EventDatabase: ObservableObject {
         let messageCount = Int(sqlite3_column_int(stmt, 11))
         let inputTokens = Int(sqlite3_column_int(stmt, 12))
         let outputTokens = Int(sqlite3_column_int(stmt, 13))
-        let cost = sqlite3_column_double(stmt, 14)
-        let isFork = sqlite3_column_int(stmt, 15) != 0
+        let lastTurnInputTokens = Int(sqlite3_column_int(stmt, 14))
+        let cost = sqlite3_column_double(stmt, 15)
+        let isFork = sqlite3_column_int(stmt, 16) != 0
 
         return CachedSession(
             id: id,
@@ -984,6 +995,7 @@ class EventDatabase: ObservableObject {
             messageCount: messageCount,
             inputTokens: inputTokens,
             outputTokens: outputTokens,
+            lastTurnInputTokens: lastTurnInputTokens,
             cost: cost,
             isFork: isFork
         )

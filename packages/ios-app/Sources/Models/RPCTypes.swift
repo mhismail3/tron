@@ -68,6 +68,8 @@ struct SessionInfo: Decodable, Identifiable, Hashable {
     let messageCount: Int
     let inputTokens: Int?
     let outputTokens: Int?
+    /// Current context size (input_tokens from last API call)
+    let lastTurnInputTokens: Int?
     let cost: Double?
     let isActive: Bool
     let workingDirectory: String?

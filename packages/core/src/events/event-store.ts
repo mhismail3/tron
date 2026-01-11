@@ -192,7 +192,7 @@ export class EventStore {
       // Update session head and counters
       await this.backend.updateSessionHead(options.sessionId, event.id);
 
-      const counters: { eventCount: number; messageCount?: number; inputTokens?: number; outputTokens?: number; cost?: number } = {
+      const counters: { eventCount: number; messageCount?: number; inputTokens?: number; outputTokens?: number; lastTurnInputTokens?: number; cost?: number } = {
         eventCount: 1,
       };
 
@@ -206,6 +206,8 @@ export class EventStore {
       if (payload.tokenUsage) {
         counters.inputTokens = payload.tokenUsage.inputTokens;
         counters.outputTokens = payload.tokenUsage.outputTokens;
+        // Set current context size (not accumulated - represents context window utilization)
+        counters.lastTurnInputTokens = payload.tokenUsage.inputTokens;
         // Calculate cost using the model from payload or session
         // Uses the comprehensive calculateCost that accounts for cache token pricing
         const modelId = payload.model ?? session.latestModel;
