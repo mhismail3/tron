@@ -46,6 +46,7 @@ struct InputBar: View {
     @State private var showFilePicker = false
     @State private var isMicPulsing = false
     @State private var showMicButton = false
+    @State private var showAttachmentButton = false
     @State private var showModelPill = false
     @State private var showTokenPill = false
     @State private var showReasoningPill = false
@@ -60,6 +61,7 @@ struct InputBar: View {
 
     private let actionButtonSize: CGFloat = 40
     private let micDockInset: CGFloat = 18
+    private let attachmentDockInset: CGFloat = 18
 
     var body: some View {
         VStack(spacing: 10) {
@@ -78,8 +80,11 @@ struct InputBar: View {
 
             // Input row - floating liquid glass elements
             HStack(alignment: .bottom, spacing: 12) {
-                // Attachment button - liquid glass
-                attachmentButtonGlass
+                // Attachment button - liquid glass (morphs in from left)
+                if showAttachmentButton {
+                    attachmentButtonGlass
+                        .transition(.scale(scale: 0.6).combined(with: .opacity))
+                }
 
                 // Text field with glass background
                 textFieldGlass
@@ -98,11 +103,18 @@ struct InputBar: View {
             }
             .padding(.horizontal, 16)
             .padding(.bottom, 8)
+            .overlay(alignment: .topLeading) {
+                // Attachment button dock (left side)
+                if !showAttachmentButton {
+                    attachmentButtonDock
+                }
+            }
             .overlay(alignment: .topTrailing) {
                 if shouldShowTokenPillDock {
                     tokenStatsPillDock
                 }
             }
+            .animation(attachmentButtonAnimation, value: showAttachmentButton)
             .animation(.tronStandard, value: shouldShowActionButton)
             .animation(micButtonAnimation, value: shouldShowMicButton)
         }
@@ -587,6 +599,16 @@ struct InputBar: View {
             .accessibilityHidden(true)
     }
 
+    private var attachmentButtonDock: some View {
+        Circle()
+            .fill(Color.clear)
+            .frame(width: actionButtonSize, height: actionButtonSize)
+            .matchedGeometryEffect(id: "attachmentButtonMorph", in: attachmentButtonNamespace)
+            .offset(x: attachmentDockInset)
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
+    }
+
     private var trailingDock: some View {
         HStack(spacing: 12) {
             if !shouldShowActionButton {
@@ -730,7 +752,13 @@ struct InputBar: View {
         .spring(response: 0.32, dampingFraction: 0.86)
     }
 
+    /// Animation for attachment button morph from left (same spring as mic button)
+    private var attachmentButtonAnimation: Animation {
+        .spring(response: 0.32, dampingFraction: 0.86)
+    }
+
     private func resetIntroState() {
+        showAttachmentButton = false
         showModelPill = false
         showTokenPill = false
         showReasoningPill = false
@@ -743,6 +771,13 @@ struct InputBar: View {
         resetIntroState()
 
         introTask = Task { @MainActor in
+            // Attachment button morphs in from left with 350ms delay
+            try? await Task.sleep(nanoseconds: 350_000_000)
+            guard !Task.isCancelled else { return }
+            withAnimation(attachmentButtonAnimation) {
+                showAttachmentButton = true
+            }
+
             try? await Task.sleep(nanoseconds: 50_000_000)
             guard !Task.isCancelled else { return }
             withAnimation(modelPillAnimation) {
@@ -764,7 +799,7 @@ struct InputBar: View {
                 showTokenPill = true
             }
 
-            try? await Task.sleep(nanoseconds: 200_000_000)
+            try? await Task.sleep(nanoseconds: 300_000_000)
             guard !Task.isCancelled else { return }
             withAnimation(micButtonAnimation) {
                 showMicButton = true
