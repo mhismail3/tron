@@ -12,26 +12,20 @@ struct VoiceNoteDetailSheet: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
                     // Metadata header
-                    VStack(alignment: .leading, spacing: 8) {
-                        HStack {
-                            Image(systemName: "waveform")
-                                .foregroundStyle(.tronEmerald)
-                            Text(note.formattedDate)
-                                .font(.headline)
-                                .foregroundStyle(.tronEmerald)
-                        }
+                    HStack {
+                        Image(systemName: "waveform")
+                            .foregroundStyle(.tronEmerald)
+                        Text(note.formattedDate)
+                            .font(.headline)
+                            .foregroundStyle(.tronEmerald)
 
-                        HStack(spacing: 16) {
-                            Label(note.formattedDuration, systemImage: "clock")
-                            if let language = note.language {
-                                Label(language.uppercased(), systemImage: "globe")
-                            }
-                        }
-                        .font(.caption)
-                        .foregroundStyle(.white.opacity(0.6))
+                        Spacer()
+
+                        Text(note.formattedDuration)
+                            .font(.caption)
+                            .foregroundStyle(.white.opacity(0.6))
                     }
                     .padding()
-                    .frame(maxWidth: .infinity, alignment: .leading)
                     .glassEffect(
                         .regular.tint(Color.tronPhthaloGreen.opacity(0.1)),
                         in: RoundedRectangle(cornerRadius: 12, style: .continuous)

@@ -210,12 +210,6 @@ struct VoiceNoteRow: View {
                     .foregroundStyle(.white.opacity(0.7))
                     .lineLimit(2)
             }
-
-            if let language = note.language {
-                Text(language.uppercased())
-                    .font(.system(size: 9, weight: .medium, design: .monospaced))
-                    .foregroundStyle(.tronEmerald.opacity(0.6))
-            }
         }
         .padding(.vertical, 10)
         .padding(.horizontal, 14)
