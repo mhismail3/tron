@@ -391,6 +391,9 @@ extension ChatViewModel {
 
         currentToolMessages.removeAll()
         currentTurnToolCalls.removeAll()
+
+        // Close browser session when agent completes
+        closeBrowserSession()
     }
 
     func handleCompaction(_ event: CompactionEvent) {
@@ -455,6 +458,9 @@ extension ChatViewModel {
         finalizeStreamingMessage()
         messages.append(.error(message))
         thinkingText = ""
+
+        // Close browser session on error
+        closeBrowserSession()
     }
 
     /// Sync session events from server after turn completes

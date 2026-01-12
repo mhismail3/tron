@@ -198,22 +198,19 @@ struct ChatView: View {
             }
         }
         .navigationBarBackButtonHidden(true)
-        // Floating browser window overlay
-        .overlay(alignment: .bottomTrailing) {
-            if viewModel.showBrowserWindow {
-                FloatingBrowserView(
+        // Browser sheet (replaces floating window)
+        .sheet(isPresented: $viewModel.showBrowserWindow) {
+            if #available(iOS 26.0, *) {
+                BrowserSheetView(
                     frameImage: viewModel.browserFrame,
                     currentUrl: viewModel.browserStatus?.currentUrl,
-                    onClose: {
-                        viewModel.showBrowserWindow = false
+                    isStreaming: viewModel.browserStatus?.isStreaming ?? false,
+                    onCloseBrowser: {
+                        viewModel.closeBrowserSession()
                     }
                 )
-                .padding(.trailing, 16)
-                .padding(.bottom, 160) // Above input bar
-                .transition(.scale.combined(with: .opacity))
             }
         }
-        .animation(.spring(response: 0.3, dampingFraction: 0.8), value: viewModel.showBrowserWindow)
         .sheet(isPresented: $viewModel.showSettings) {
             SettingsView(rpcClient: rpcClient)
         }

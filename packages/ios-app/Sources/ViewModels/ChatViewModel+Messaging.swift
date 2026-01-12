@@ -80,6 +80,9 @@ extension ChatViewModel {
                 finalizeStreamingMessage()
                 messages.append(.interrupted())
                 logger.info("Agent aborted successfully", category: .chat)
+
+                // Close browser session when agent is interrupted
+                closeBrowserSession()
             } catch {
                 logger.error("Failed to abort agent: \(error.localizedDescription)", category: .chat)
                 showErrorAlert(error.localizedDescription)

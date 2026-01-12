@@ -452,6 +452,21 @@ class ChatViewModel: ObservableObject {
         }
     }
 
+    /// Close the browser session entirely (stops streaming and clears state)
+    func closeBrowserSession() {
+        logger.info("Closing browser session", category: .session)
+        Task {
+            // Stop streaming first
+            await stopBrowserStream()
+            // Clear all browser state
+            await MainActor.run {
+                browserFrame = nil
+                browserStatus = nil
+                showBrowserWindow = false
+            }
+        }
+    }
+
     /// Toggle browser window visibility
     func toggleBrowserWindow() {
         if showBrowserWindow {
