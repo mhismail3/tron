@@ -58,15 +58,17 @@ struct BrowserSheetView: View {
 
             Spacer()
 
-            // Close button (icon only)
+            // Close button - liquid glass style
             Button {
                 onCloseBrowser()
                 dismiss()
             } label: {
-                Image(systemName: "xmark.circle.fill")
-                    .font(.system(size: 24))
-                    .foregroundStyle(.tronTextMuted)
+                Image(systemName: "xmark")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.7))
+                    .frame(width: 32, height: 32)
             }
+            .glassEffect(.regular.tint(Color.white.opacity(0.1)).interactive(), in: .circle)
         }
     }
 
