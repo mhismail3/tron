@@ -146,6 +146,18 @@ export interface ActiveSession {
    * Maps toolCallId to full tool call data for this turn.
    */
   thisTurnToolCalls: Map<string, CurrentTurnToolCall>;
+  /**
+   * Current reasoning level for extended thinking models.
+   * Tracked in-memory to detect changes and persist events.
+   */
+  reasoningLevel?: 'low' | 'medium' | 'high' | 'xhigh';
+  /**
+   * Parallel array tracking eventIds for messages in the context manager.
+   * Used by ContextAuditView to enable message deletion.
+   * Index corresponds to context manager message index.
+   * May be undefined for messages created during current session (not yet persisted).
+   */
+  messageEventIds: (string | undefined)[];
 }
 
 // =============================================================================

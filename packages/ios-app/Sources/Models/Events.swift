@@ -370,6 +370,25 @@ struct ContextClearedEvent: Decodable {
     var tokensAfter: Int { data.tokensAfter }
 }
 
+struct MessageDeletedEvent: Decodable {
+    let type: String
+    let sessionId: String?
+    let timestamp: String?
+    let data: MessageDeletedData
+
+    struct MessageDeletedData: Decodable {
+        let targetEventId: String
+        let targetType: String
+        let targetTurn: Int?
+        let reason: String?
+    }
+
+    var targetEventId: String { data.targetEventId }
+    var targetType: String { data.targetType }
+    var targetTurn: Int? { data.targetTurn }
+    var reason: String? { data.reason }
+}
+
 struct ConnectedEvent: Decodable {
     let type: String
     let timestamp: String?
@@ -399,6 +418,7 @@ enum EventType: String {
     case error = "agent.error"
     case compaction = "agent.compaction"
     case contextCleared = "agent.context_cleared"
+    case messageDeleted = "agent.message_deleted"
     case connected = "connection.established"
     case systemConnected = "system.connected"
     case sessionCreated = "session.created"
@@ -420,6 +440,7 @@ enum ParsedEvent {
     case error(ErrorEvent)
     case compaction(CompactionEvent)
     case contextCleared(ContextClearedEvent)
+    case messageDeleted(MessageDeletedEvent)
     case connected(ConnectedEvent)
     case unknown(String)
 
@@ -475,6 +496,11 @@ enum ParsedEvent {
                 let event = try decoder.decode(ContextClearedEvent.self, from: data)
                 logger.info("Context cleared: \(event.tokensBefore) -> \(event.tokensAfter) tokens", category: .events)
                 return .contextCleared(event)
+
+            case EventType.messageDeleted.rawValue:
+                let event = try decoder.decode(MessageDeletedEvent.self, from: data)
+                logger.info("Message deleted: targetType=\(event.targetType), eventId=\(event.targetEventId)", category: .events)
+                return .messageDeleted(event)
 
             case EventType.connected.rawValue, EventType.systemConnected.rawValue:
                 let event = try decoder.decode(ConnectedEvent.self, from: data)

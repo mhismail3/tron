@@ -90,6 +90,9 @@ struct MessageBubble: View {
         case .contextCleared(let tokensBefore, let tokensAfter):
             ContextClearedNotificationView(tokensBefore: tokensBefore, tokensAfter: tokensAfter)
 
+        case .messageDeleted(let targetType):
+            MessageDeletedNotificationView(targetType: targetType)
+
         case .attachments(let attachments):
             // Attachments-only message (no text) - show thumbnails
             AttachedFileThumbnails(attachments: attachments)
@@ -364,6 +367,59 @@ struct ContextClearedNotificationView: View {
         .overlay(
             Capsule()
                 .stroke(Color.teal.opacity(0.3), lineWidth: 0.5)
+        )
+        .frame(maxWidth: .infinity, alignment: .center)
+    }
+}
+
+// MARK: - Message Deleted Notification View (Orange pill-style in-chat notification)
+
+struct MessageDeletedNotificationView: View {
+    let targetType: String
+
+    private var typeLabel: String {
+        switch targetType {
+        case "message.user":
+            return "user message"
+        case "message.assistant":
+            return "assistant message"
+        case "tool.result":
+            return "tool result"
+        default:
+            return "message"
+        }
+    }
+
+    private var icon: String {
+        switch targetType {
+        case "message.user":
+            return "person.fill.xmark"
+        case "message.assistant":
+            return "sparkles"
+        case "tool.result":
+            return "hammer.fill"
+        default:
+            return "trash.fill"
+        }
+    }
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: icon)
+                .font(.system(size: 10, weight: .medium))
+                .foregroundStyle(.tronAmber)
+
+            Text("Deleted \(typeLabel) from context")
+                .font(.system(size: 11, weight: .medium, design: .monospaced))
+                .foregroundStyle(.tronAmber.opacity(0.9))
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(Color.tronAmber.opacity(0.1))
+        .clipShape(Capsule())
+        .overlay(
+            Capsule()
+                .stroke(Color.tronAmber.opacity(0.3), lineWidth: 0.5)
         )
         .frame(maxWidth: .infinity, alignment: .center)
     }

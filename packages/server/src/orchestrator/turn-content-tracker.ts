@@ -6,6 +6,21 @@
  * 2. Per-turn (cleared after each message.assistant) - for building discrete message events
  *
  * This consolidates the duplicated tracking logic previously spread across forwardAgentEvent().
+ *
+ * ## Role in Streaming Architecture
+ *
+ * This class is the in-memory buffer for streaming content that is NOT persisted individually.
+ * The lifecycle is:
+ *
+ * 1. Agent emits text_delta events during model response
+ * 2. TurnContentTracker.addTextDelta() accumulates the text
+ * 3. WebSocket broadcasts `agent.text_delta` for real-time UI
+ * 4. At turn_end, accumulated content is consolidated into `message.assistant`
+ * 5. Only the consolidated message.assistant is persisted to EventStore
+ * 6. TurnContentTracker is cleared for the next turn
+ *
+ * This design keeps the EventStore efficient (no high-frequency delta spam) while
+ * supporting both real-time streaming UI and session reconstruction.
  */
 import { createLogger, type CurrentTurnToolCall } from '@tron/core';
 

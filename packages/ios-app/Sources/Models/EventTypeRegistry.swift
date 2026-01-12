@@ -34,6 +34,10 @@ enum PersistedEventType: String, CaseIterable {
     // Model/config changes
     case configModelSwitch = "config.model_switch"
     case configPromptUpdate = "config.prompt_update"
+    case configReasoningLevel = "config.reasoning_level"
+
+    // Message operations
+    case messageDeleted = "message.deleted"
 
     // Notifications (in-chat pill notifications)
     case notificationInterrupted = "notification.interrupted"
@@ -72,7 +76,7 @@ enum PersistedEventType: String, CaseIterable {
         switch self {
         case .messageUser, .messageAssistant, .messageSystem,
              .toolCall, .toolResult,
-             .notificationInterrupted, .configModelSwitch,
+             .notificationInterrupted, .configModelSwitch, .configReasoningLevel,
              .contextCleared,
              .errorAgent, .errorTool, .errorProvider:
             return true
@@ -86,8 +90,9 @@ enum PersistedEventType: String, CaseIterable {
         switch self {
         case .sessionStart, .sessionEnd, .sessionFork,
              .messageUser, .messageAssistant, .messageSystem,
+             .messageDeleted,
              .toolCall, .toolResult,
-             .configModelSwitch, .configPromptUpdate,
+             .configModelSwitch, .configPromptUpdate, .configReasoningLevel,
              .compactBoundary, .compactSummary,
              .worktreeAcquired, .worktreeCommit, .worktreeReleased, .worktreeMerged,
              .errorAgent:
@@ -115,7 +120,9 @@ enum PersistedEventType: String, CaseIterable {
              .metadataUpdate, .metadataTag,
              .worktreeAcquired, .worktreeReleased, .worktreeCommit, .worktreeMerged,
              .streamTextDelta, .streamThinkingDelta, .streamTurnStart, .streamTurnEnd,
-             .configPromptUpdate, .fileRead, .fileWrite, .fileEdit:
+             .configPromptUpdate,
+             .messageDeleted,
+             .fileRead, .fileWrite, .fileEdit:
             return true
         default:
             return false
@@ -140,6 +147,8 @@ enum PersistedEventType: String, CaseIterable {
         case .streamTurnEnd: return "Turn ended"
         case .configModelSwitch: return "Model switched"
         case .configPromptUpdate: return "Prompt updated"
+        case .configReasoningLevel: return "Reasoning level changed"
+        case .messageDeleted: return "Message deleted"
         case .notificationInterrupted: return "Session interrupted"
         case .compactBoundary: return "Compact boundary"
         case .compactSummary: return "Compact summary"

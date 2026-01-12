@@ -38,6 +38,38 @@ struct ConfigPromptUpdatePayload {
     }
 }
 
+/// Payload for config.reasoning_level event
+/// Server: ConfigReasoningLevelEvent.payload
+struct ReasoningLevelPayload {
+    let previousLevel: String?
+    let newLevel: String?
+
+    init(from payload: [String: AnyCodable]) {
+        self.previousLevel = payload.string("previousLevel")
+        self.newLevel = payload.string("newLevel")
+    }
+}
+
+/// Payload for message.deleted event
+/// Server: MessageDeletedEvent.payload
+struct MessageDeletedPayload {
+    let targetEventId: String
+    let targetType: String
+    let targetTurn: Int?
+    let reason: String?
+
+    init?(from payload: [String: AnyCodable]) {
+        guard let targetEventId = payload.string("targetEventId"),
+              let targetType = payload.string("targetType") else {
+            return nil
+        }
+        self.targetEventId = targetEventId
+        self.targetType = targetType
+        self.targetTurn = payload.int("targetTurn")
+        self.reason = payload.string("reason")
+    }
+}
+
 // MARK: - Notification Payloads
 
 /// Payload for notification.interrupted event

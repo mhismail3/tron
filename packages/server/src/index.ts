@@ -378,6 +378,10 @@ function createEventStoreManager(orchestrator: EventStoreOrchestrator): EventSto
         totalCount: results.length,
       };
     },
+
+    async deleteMessage(sessionId, targetEventId, reason) {
+      return orchestrator.deleteMessage(sessionId, targetEventId, reason);
+    },
   };
 }
 
@@ -626,6 +630,22 @@ export class TronServer {
         timestamp: new Date().toISOString(),
         data: { event: data.event },
       });
+
+      // Also broadcast message.deleted events with specific type for iOS
+      if (data.event.type === 'message.deleted') {
+        const payload = data.event.payload as { targetEventId: string; targetType: string; targetTurn?: number; reason?: string };
+        this.wsServer?.broadcastEvent({
+          type: 'agent.message_deleted',
+          sessionId: data.sessionId,
+          timestamp: new Date().toISOString(),
+          data: {
+            targetEventId: payload.targetEventId,
+            targetType: payload.targetType,
+            targetTurn: payload.targetTurn,
+            reason: payload.reason,
+          },
+        });
+      }
     });
 
     this.orchestrator.on('context_cleared', (data) => {

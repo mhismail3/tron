@@ -30,13 +30,15 @@ const logger = createLogger('event-linearizer');
  * @param active - Active session containing the promise chain state
  * @param type - Event type to append
  * @param payload - Event payload data
+ * @param onCreated - Optional callback invoked with the created event (for tracking eventIds)
  */
 export function appendEventLinearized(
   eventStore: EventStore,
   sessionId: SessionId,
   active: ActiveSession,
   type: EventType,
-  payload: Record<string, unknown>
+  payload: Record<string, unknown>,
+  onCreated?: (event: TronSessionEvent) => void
 ): void {
   // P0 FIX: Skip appends if prior append failed to prevent malformed event trees
   // If turn_start fails but turn_end succeeds, the tree becomes inconsistent
@@ -84,6 +86,10 @@ export function appendEventLinearized(
         });
         // Update in-memory head for the next event in the chain
         active.pendingHeadEventId = event.id;
+        // Invoke callback if provided (for tracking eventIds)
+        if (onCreated) {
+          onCreated(event);
+        }
       } catch (err) {
         logger.error(`Failed to store ${type} event`, { err, sessionId });
         // P0 FIX: Track error to prevent subsequent appends from creating orphaned events

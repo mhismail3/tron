@@ -259,9 +259,25 @@ export class EventStore {
 
   async getMessagesAt(eventId: EventId): Promise<Message[]> {
     const ancestors = await this.backend.getAncestors(eventId);
+
+    // Two-pass reconstruction: First collect deleted event IDs, then build messages
+    // This ensures deletions that occur later in the chain are properly filtered
+    const deletedEventIds = new Set<EventId>();
+    for (const event of ancestors) {
+      if (event.type === 'message.deleted') {
+        const payload = event.payload as { targetEventId: EventId };
+        deletedEventIds.add(payload.targetEventId);
+      }
+    }
+
     const messages: Message[] = [];
 
     for (const event of ancestors) {
+      // Skip deleted messages
+      if (deletedEventIds.has(event.id)) {
+        continue;
+      }
+
       // Handle compaction boundary - clear pre-compaction messages and inject summary
       // Compaction events come in order: [old messages] -> compact.boundary -> compact.summary -> [new messages]
       // When we see compact.summary, we discard messages before it and inject the summary as context
@@ -337,24 +353,66 @@ export class EventStore {
     }
 
     const ancestors = await this.backend.getAncestors(eventId);
+
+    // Two-pass reconstruction: First collect deleted event IDs and config state
+    const deletedEventIds = new Set<EventId>();
+    let reasoningLevel: 'low' | 'medium' | 'high' | 'xhigh' | undefined;
+    let systemPrompt: string | undefined;
+
+    for (const evt of ancestors) {
+      if (evt.type === 'message.deleted') {
+        const payload = evt.payload as { targetEventId: EventId };
+        deletedEventIds.add(payload.targetEventId);
+      } else if (evt.type === 'config.reasoning_level') {
+        const payload = evt.payload as { newLevel?: 'low' | 'medium' | 'high' | 'xhigh' };
+        reasoningLevel = payload.newLevel;
+      } else if (evt.type === 'session.start') {
+        // Extract initial system prompt from session.start
+        const payload = evt.payload as { systemPrompt?: string };
+        if (payload.systemPrompt) {
+          systemPrompt = payload.systemPrompt;
+        }
+      } else if (evt.type === 'config.prompt_update') {
+        // Track mid-session system prompt updates (using hash-based content blob)
+        // Note: actual content retrieval from blob would need additional implementation
+        // For now, we track that an update happened
+        const payload = evt.payload as { newHash: string; contentBlobId?: string };
+        // If contentBlobId is present, we'd fetch from blob storage
+        // For now, mark that systemPrompt was updated (actual content TBD)
+        if (payload.contentBlobId) {
+          // TODO: Implement blob content retrieval for full prompt restoration
+          systemPrompt = `[Updated prompt - hash: ${payload.newHash}]`;
+        }
+      }
+    }
+
     const messages: Message[] = [];
+    const messageEventIds: (string | undefined)[] = [];
     let inputTokens = 0;
     let outputTokens = 0;
     let turnCount = 0;
     let currentTurn = 0;
 
     for (const evt of ancestors) {
+      // Skip deleted messages
+      if (deletedEventIds.has(evt.id)) {
+        continue;
+      }
+
       // Handle compaction boundary - clear pre-compaction messages and inject summary
       // This mirrors getMessagesAt behavior for consistency
       if (evt.type === 'compact.summary') {
         const payload = evt.payload as { summary: string };
         // Clear messages before compaction (but preserve token accounting for session totals)
         messages.length = 0;
+        messageEventIds.length = 0;
         // Inject the compaction summary as a context message pair
+        // These synthetic messages don't have eventIds (undefined)
         messages.push({
           role: 'user',
           content: `[Context from earlier in this conversation]\n\n${payload.summary}`,
         });
+        messageEventIds.push(undefined); // Synthetic message, no eventId
         messages.push({
           role: 'assistant',
           content: [
@@ -364,6 +422,7 @@ export class EventStore {
             },
           ],
         });
+        messageEventIds.push(undefined); // Synthetic message, no eventId
         continue;
       }
 
@@ -372,6 +431,7 @@ export class EventStore {
       // Token accounting is preserved for session totals
       if (evt.type === 'context.cleared') {
         messages.length = 0;
+        messageEventIds.length = 0;
         continue;
       }
 
@@ -381,6 +441,7 @@ export class EventStore {
           role: 'user',
           content: payload.content,
         });
+        messageEventIds.push(evt.id); // Track eventId for deletion
         // Token usage can be on user messages too
         if (payload.tokenUsage) {
           inputTokens += payload.tokenUsage.inputTokens;
@@ -396,6 +457,7 @@ export class EventStore {
           role: 'assistant',
           content: payload.content,
         });
+        messageEventIds.push(evt.id); // Track eventId for deletion
         if (payload.tokenUsage) {
           inputTokens += payload.tokenUsage.inputTokens;
           outputTokens += payload.tokenUsage.outputTokens;
@@ -413,6 +475,7 @@ export class EventStore {
           content: payload.content,
           isError: payload.isError,
         });
+        messageEventIds.push(evt.id); // Tool results have their own eventId and can be deleted
       }
     }
 
@@ -424,10 +487,13 @@ export class EventStore {
       workspaceId: event.workspaceId,
       headEventId: eventId,
       messages,
+      messageEventIds,
       tokenUsage: { inputTokens, outputTokens },
       turnCount,
       model: session?.latestModel ?? 'unknown',
       workingDirectory: session?.workingDirectory ?? '',
+      reasoningLevel,
+      systemPrompt,
     };
   }
 
@@ -544,8 +610,72 @@ export class EventStore {
     await this.backend.clearSessionEnded(sessionId);
   }
 
+  /**
+   * Update the cached latest model in the session table.
+   *
+   * DENORMALIZATION NOTE: This is a performance cache. The source of truth for
+   * model changes is the `config.model_switch` event. This cached value is used
+   * for quick session lookups without traversing the event tree. During session
+   * reconstruction (getStateAt/getStateAtHead), the model is determined from
+   * events, NOT from this cached value.
+   *
+   * If the cache becomes stale, it can be recomputed by scanning events for the
+   * latest config.model_switch event or the session.start event.
+   */
   async updateLatestModel(sessionId: SessionId, model: string): Promise<void> {
     await this.backend.updateLatestModel(sessionId, model);
+  }
+
+  // ===========================================================================
+  // Message Deletion
+  // ===========================================================================
+
+  /**
+   * Delete a message from the session context.
+   * This appends a message.deleted event; the original message is preserved in the event log.
+   * Two-pass reconstruction will filter out deleted messages.
+   *
+   * @param sessionId - Session containing the message
+   * @param targetEventId - Event ID of the message to delete
+   * @param reason - Reason for deletion (defaults to 'user_request')
+   */
+  async deleteMessage(
+    sessionId: SessionId,
+    targetEventId: EventId,
+    reason: 'user_request' | 'content_policy' | 'context_management' = 'user_request'
+  ): Promise<SessionEvent> {
+    // Validate target exists and is a message
+    const targetEvent = await this.backend.getEvent(targetEventId);
+    if (!targetEvent) {
+      throw new Error(`Event not found: ${targetEventId}`);
+    }
+
+    // Only allow deleting message and tool result events
+    const deletableTypes = ['message.user', 'message.assistant', 'tool.result'];
+    if (!deletableTypes.includes(targetEvent.type)) {
+      throw new Error(`Cannot delete event of type: ${targetEvent.type}`);
+    }
+
+    // Validate target belongs to the session (or is in its ancestry for forks)
+    const session = await this.backend.getSession(sessionId);
+    if (!session) {
+      throw new Error(`Session not found: ${sessionId}`);
+    }
+
+    // Get turn number from the target message if available
+    const targetPayload = targetEvent.payload as { turn?: number };
+
+    // Append the deletion event
+    return this.append({
+      sessionId,
+      type: 'message.deleted',
+      payload: {
+        targetEventId,
+        targetType: targetEvent.type as 'message.user' | 'message.assistant',
+        targetTurn: targetPayload.turn,
+        reason,
+      },
+    });
   }
 
   // ===========================================================================

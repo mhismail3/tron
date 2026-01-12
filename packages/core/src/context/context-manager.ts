@@ -65,6 +65,8 @@ export interface DetailedMessageInfo {
   summary: string;
   /** Full content for expansion */
   content: string;
+  /** Event ID for this message (for deletion support) - undefined for synthetic messages */
+  eventId?: string;
   /** For tool calls within assistant messages */
   toolCalls?: Array<{
     id: string;

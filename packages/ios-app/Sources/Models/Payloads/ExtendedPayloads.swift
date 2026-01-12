@@ -214,6 +214,8 @@ struct DetailedMessageInfo: Codable, Identifiable {
     let toolCalls: [ToolCallInfo]?
     let toolCallId: String?
     let isError: Bool?
+    /// Event ID for this message (for deletion support) - nil for synthetic messages
+    let eventId: String?
 
     var id: Int { index }
 

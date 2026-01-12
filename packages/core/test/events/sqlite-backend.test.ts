@@ -9,12 +9,9 @@ import {
   EventId,
   SessionId,
   WorkspaceId,
-  type SessionEvent,
   type SessionStartEvent,
   type UserMessageEvent,
   type AssistantMessageEvent,
-  type ToolCallEvent,
-  type ToolResultEvent,
 } from '../../src/events/types.js';
 
 describe('SQLiteBackend', () => {

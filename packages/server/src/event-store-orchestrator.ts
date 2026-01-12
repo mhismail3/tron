@@ -3,6 +3,32 @@
  *
  * Manages multiple agent sessions using the EventStore for persistence.
  * This is the unified event-sourced architecture for session management.
+ *
+ * ## Streaming vs Persistence Model
+ *
+ * STREAMING EVENTS (ephemeral, WebSocket-only):
+ * - `agent.text_delta` - Real-time text chunks for UI display
+ * - `agent.tool_start/end` - Tool execution progress updates
+ * - `agent.turn_start/end` - Turn lifecycle for UI spinners
+ *
+ * These events are emitted via WebSocket for real-time UI updates but are
+ * NOT individually persisted to the EventStore. They accumulate in-memory
+ * in TurnContentTracker for client catch-up (when resuming into running session).
+ *
+ * PERSISTED EVENTS (durable, EventStore):
+ * - `message.assistant` - Consolidated assistant response at turn end
+ * - `message.user` - User prompts and tool results
+ * - `tool.call` / `tool.result` - Discrete tool events
+ * - `stream.turn_start/end` - Turn boundaries for reconstruction
+ * - `config.*` - Configuration changes (model, reasoning level, etc.)
+ *
+ * This design is intentional:
+ * 1. Streaming deltas are high-frequency, low-value for reconstruction
+ * 2. The consolidated message.assistant is the source of truth
+ * 3. Persisting deltas would bloat the event log without benefit
+ * 4. Session state can be fully reconstructed from persisted events
+ *
+ * See TurnContentTracker for the in-memory accumulation logic.
  */
 import { EventEmitter } from 'events';
 import * as path from 'path';
@@ -238,6 +264,8 @@ export class EventStoreOrchestrator extends EventEmitter {
       // Initialize per-turn tracking (cleared after each message.assistant)
       thisTurnContent: [],
       thisTurnToolCalls: new Map(),
+      // Initialize parallel event ID tracking for context manager messages
+      messageEventIds: [],
     });
 
     this.emit('session_created', {
@@ -277,17 +305,18 @@ export class EventStoreOrchestrator extends EventEmitter {
       session.workingDirectory
     );
 
-    // Create agent (use resolved working directory path)
+    // Load full session state from event store first to get systemPrompt and reasoningLevel
+    // This follows parent_id chain for forked sessions to include parent history
+    const sessionState = await this.eventStore.getStateAtHead(session.id);
+
+    // Create agent with restored system prompt (use resolved working directory path)
     const agent = await this.createAgentForSession(
       session.id,
       workingDir.path,
-      session.latestModel
+      session.latestModel,
+      sessionState.systemPrompt // Restore system prompt from events
     );
-
-    // Load conversation history from event store and populate agent
-    // This follows parent_id chain for forked sessions to include parent history
-    const eventMessages = await this.eventStore.getMessagesAtHead(session.id);
-    for (const msg of eventMessages) {
+    for (const msg of sessionState.messages) {
       // Convert event store messages to agent message format
       // Event store only returns 'user' and 'assistant' roles
       // Note: Content block types differ slightly between event store (Anthropic API format)
@@ -295,9 +324,20 @@ export class EventStoreOrchestrator extends EventEmitter {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       agent.addMessage(msg as any);
     }
+
+    // Restore reasoning level if persisted (for extended thinking models)
+    const reasoningLevel = sessionState.reasoningLevel;
+    if (reasoningLevel) {
+      agent.setReasoningLevel(reasoningLevel);
+      logger.info('Reasoning level restored from events', {
+        sessionId,
+        reasoningLevel,
+      });
+    }
+
     logger.info('Session history loaded', {
       sessionId,
-      messageCount: eventMessages.length,
+      messageCount: sessionState.messages.length,
     });
 
     this.activeSessions.set(sessionId, {
@@ -321,6 +361,10 @@ export class EventStoreOrchestrator extends EventEmitter {
       // Initialize per-turn tracking (cleared after each message.assistant)
       thisTurnContent: [],
       thisTurnToolCalls: new Map(),
+      // Restore reasoning level from events
+      reasoningLevel,
+      // Restore parallel event ID tracking from persisted state
+      messageEventIds: sessionState.messageEventIds,
     });
 
     logger.info('Session resumed', {
@@ -620,6 +664,64 @@ export class EventStoreOrchestrator extends EventEmitter {
     return event;
   }
 
+  /**
+   * Delete a message from a session.
+   *
+   * This appends a message.deleted event to the event log. The original message
+   * is preserved but will be filtered out during reconstruction (two-pass).
+   *
+   * CRITICAL: Uses linearized append via appendPromiseChain for active sessions
+   * to prevent race conditions with concurrent agent events.
+   */
+  async deleteMessage(
+    sessionId: string,
+    targetEventId: string,
+    reason?: 'user_request' | 'content_policy' | 'context_management'
+  ): Promise<{ id: string; payload: unknown }> {
+    const active = this.activeSessions.get(sessionId as SessionId);
+
+    let deletionEvent: TronSessionEvent;
+
+    if (active) {
+      // CRITICAL: For active sessions, use linearized append to prevent race conditions
+      // where concurrent events could capture stale parentId
+      const appendPromise = active.appendPromiseChain.then(async () => {
+        // Wait for any pending events, then validate and append deletion
+        // Note: We use EventStore.deleteMessage which handles validation
+        const event = await this.eventStore.deleteMessage(
+          sessionId as SessionId,
+          targetEventId as EventId,
+          reason
+        );
+        // Update pending head INSIDE the chain callback
+        active.pendingHeadEventId = event.id;
+        return event;
+      });
+
+      // Update the chain and wait for this specific event
+      active.appendPromiseChain = appendPromise.then(() => {});
+      deletionEvent = await appendPromise;
+    } else {
+      // Session not active - direct append is safe (no concurrent events)
+      deletionEvent = await this.eventStore.deleteMessage(
+        sessionId as SessionId,
+        targetEventId as EventId,
+        reason
+      );
+    }
+
+    // Broadcast the deletion event to subscribers
+    this.emit('event_new', {
+      event: deletionEvent,
+      sessionId,
+    });
+
+    return {
+      id: deletionEvent.id,
+      payload: deletionEvent.payload,
+    };
+  }
+
   // ===========================================================================
   // Agent Operations
   // ===========================================================================
@@ -715,6 +817,8 @@ export class EventStoreOrchestrator extends EventEmitter {
         parentId: userMsgParentId,
       });
       active.pendingHeadEventId = userMsgEvent.id;
+      // Track eventId for context manager message (user message will be added to context by agent.run)
+      active.messageEventIds.push(userMsgEvent.id);
       logger.debug('[LINEARIZE] message.user appended', {
         sessionId: active.sessionId,
         eventId: userMsgEvent.id,
@@ -722,8 +826,31 @@ export class EventStoreOrchestrator extends EventEmitter {
       });
 
       // Set reasoning level if provided (for OpenAI Codex models)
-      if (options.reasoningLevel) {
+      // Persist event only when level actually changes
+      if (options.reasoningLevel && options.reasoningLevel !== active.reasoningLevel) {
+        const previousLevel = active.reasoningLevel;
         active.agent.setReasoningLevel(options.reasoningLevel);
+        active.reasoningLevel = options.reasoningLevel;
+
+        // Persist reasoning level change as linearized event
+        const reasoningParentId = active.pendingHeadEventId ?? undefined;
+        const reasoningEvent = await this.eventStore.append({
+          sessionId: active.sessionId,
+          type: 'config.reasoning_level',
+          payload: {
+            previousLevel,
+            newLevel: options.reasoningLevel,
+          },
+          parentId: reasoningParentId,
+        });
+        active.pendingHeadEventId = reasoningEvent.id;
+        logger.debug('[LINEARIZE] config.reasoning_level appended', {
+          sessionId: active.sessionId,
+          eventId: reasoningEvent.id,
+          parentId: reasoningParentId,
+          previousLevel,
+          newLevel: options.reasoningLevel,
+        });
       }
 
       // Transform content for LLM: convert text file documents to inline text
@@ -1104,7 +1231,19 @@ export class EventStoreOrchestrator extends EventEmitter {
         toolsContent: [],
       };
     }
-    return active.agent.getContextManager().getDetailedSnapshot();
+    const snapshot = active.agent.getContextManager().getDetailedSnapshot();
+
+    // Augment messages with eventIds from session tracking
+    // The messageEventIds array parallels the context manager's messages array
+    for (let i = 0; i < snapshot.messages.length; i++) {
+      const eventId = active.messageEventIds[i];
+      const message = snapshot.messages[i];
+      if (eventId && message) {
+        message.eventId = eventId;
+      }
+    }
+
+    return snapshot;
   }
 
   /**
@@ -1553,14 +1692,15 @@ export class EventStoreOrchestrator extends EventEmitter {
   private appendEventLinearized(
     sessionId: SessionId,
     type: EventType,
-    payload: Record<string, unknown>
+    payload: Record<string, unknown>,
+    onCreated?: (event: TronSessionEvent) => void
   ): void {
     const active = this.activeSessions.get(sessionId);
     if (!active) {
       logger.error('Cannot append event: session not active', { sessionId, type });
       return;
     }
-    appendEventLinearizedImpl(this.eventStore, sessionId, active, type, payload);
+    appendEventLinearizedImpl(this.eventStore, sessionId, active, type, payload, onCreated);
   }
 
   /**
@@ -1633,8 +1773,10 @@ export class EventStoreOrchestrator extends EventEmitter {
           };
         }
 
-        // CREATE MESSAGE.ASSISTANT FOR THIS TURN
-        // Each turn gets its own message.assistant event with per-turn token data
+        // CREATE MESSAGE.ASSISTANT FOR THIS TURN - THIS IS WHAT GETS PERSISTED
+        // Consolidates all streaming deltas (text_delta) into a single durable event.
+        // This is the source of truth for session reconstruction.
+        // Each turn gets its own message.assistant event with per-turn token data.
         if (active && active.thisTurnContent.length > 0) {
           // Build content blocks from this turn's content
           const contentBlocks: any[] = [];
@@ -1675,6 +1817,13 @@ export class EventStoreOrchestrator extends EventEmitter {
               stopReason: 'end_turn',
               latency: turnLatency,
               hasThinking,
+            }, (evt) => {
+              // Track eventId for context manager message
+              // Re-fetch active session since callback is async
+              const currentActive = this.activeSessions.get(sessionId);
+              if (currentActive) {
+                currentActive.messageEventIds.push(evt.id);
+              }
             });
 
             logger.debug('Created message.assistant for turn', {
@@ -1740,7 +1889,14 @@ export class EventStoreOrchestrator extends EventEmitter {
         break;
 
       case 'message_update':
-        // Accumulate text for resume support (across ALL turns)
+        // STREAMING ONLY - NOT PERSISTED TO EVENT STORE
+        // Text deltas are accumulated in TurnContentTracker for:
+        // 1. Real-time WebSocket emission (agent.text_delta below)
+        // 2. Client catch-up when resuming into running session
+        // 3. Building consolidated message.assistant at turn_end (which IS persisted)
+        //
+        // Individual deltas are ephemeral by design - high frequency, low reconstruction value.
+        // The source of truth is the message.assistant event created at turn_end.
         if (active && typeof event.content === 'string') {
           // Use TurnContentTracker for text delta (updates both accumulated and per-turn)
           active.turnTracker.addTextDelta(event.content);
@@ -1875,6 +2031,13 @@ export class EventStoreOrchestrator extends EventEmitter {
           isError: event.isError ?? false,
           duration: event.duration,
           truncated: resultContent.length > MAX_TOOL_RESULT_SIZE,
+        }, (evt) => {
+          // Track eventId for context manager message (tool result)
+          // Re-fetch active session since callback is async
+          const currentActive = this.activeSessions.get(sessionId);
+          if (currentActive) {
+            currentActive.messageEventIds.push(evt.id);
+          }
         });
         break;
       }

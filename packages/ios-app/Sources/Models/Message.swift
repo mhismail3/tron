@@ -73,6 +73,9 @@ struct ChatMessage: Identifiable, Equatable {
     /// Why the turn ended (end_turn, tool_use, max_tokens)
     var stopReason: String?
 
+    /// Event ID from the server's event store (for deletion, forking, etc.)
+    var eventId: String?
+
     init(
         id: UUID = UUID(),
         role: MessageRole,
@@ -86,7 +89,8 @@ struct ChatMessage: Identifiable, Equatable {
         latencyMs: Int? = nil,
         turnNumber: Int? = nil,
         hasThinking: Bool? = nil,
-        stopReason: String? = nil
+        stopReason: String? = nil,
+        eventId: String? = nil
     ) {
         self.id = id
         self.role = role
@@ -101,6 +105,7 @@ struct ChatMessage: Identifiable, Equatable {
         self.turnNumber = turnNumber
         self.hasThinking = hasThinking
         self.stopReason = stopReason
+        self.eventId = eventId
     }
 
     var formattedTimestamp: String {
@@ -125,6 +130,21 @@ struct ChatMessage: Identifiable, Equatable {
     var shortModelName: String? {
         guard let model = model else { return nil }
         return model.compactModelName
+    }
+
+    /// Whether this message can be deleted.
+    /// Only user and assistant messages with event IDs can be deleted.
+    var canBeDeleted: Bool {
+        // Must have an eventId (from server)
+        guard eventId != nil else { return false }
+
+        // Must be a user or assistant message (not system, toolResult, etc.)
+        guard role == .user || role == .assistant else { return false }
+
+        // Don't allow deleting streaming messages
+        guard !isStreaming else { return false }
+
+        return true
     }
 }
 
@@ -172,6 +192,8 @@ enum MessageContent: Equatable {
     case compaction(tokensBefore: Int, tokensAfter: Int, reason: String)
     /// In-chat notification for context clearing
     case contextCleared(tokensBefore: Int, tokensAfter: Int)
+    /// In-chat notification for message deletion from context
+    case messageDeleted(targetType: String)
 
     var textContent: String {
         switch self {
@@ -206,6 +228,11 @@ enum MessageContent: Equatable {
         case .contextCleared(let before, let after):
             let freed = before - after
             return "Context cleared: \(formatTokens(freed)) tokens freed"
+        case .messageDeleted(let targetType):
+            let typeLabel = targetType == "message.user" ? "user message" :
+                           targetType == "message.assistant" ? "assistant message" :
+                           targetType == "tool.result" ? "tool result" : "message"
+            return "Deleted \(typeLabel) from context"
         }
     }
 
@@ -227,7 +254,7 @@ enum MessageContent: Equatable {
 
     var isNotification: Bool {
         switch self {
-        case .modelChange, .interrupted, .transcriptionFailed, .transcriptionNoSpeech, .compaction, .contextCleared:
+        case .modelChange, .interrupted, .transcriptionFailed, .transcriptionNoSpeech, .compaction, .contextCleared, .messageDeleted:
             return true
         default:
             return false
@@ -391,5 +418,10 @@ extension ChatMessage {
     /// In-chat notification for context clearing
     static func contextCleared(tokensBefore: Int, tokensAfter: Int) -> ChatMessage {
         ChatMessage(role: .system, content: .contextCleared(tokensBefore: tokensBefore, tokensAfter: tokensAfter))
+    }
+
+    /// In-chat notification for message deletion from context
+    static func messageDeleted(targetType: String) -> ChatMessage {
+        ChatMessage(role: .system, content: .messageDeleted(targetType: targetType))
     }
 }

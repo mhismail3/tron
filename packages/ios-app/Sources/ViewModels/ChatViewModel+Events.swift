@@ -368,6 +368,14 @@ extension ChatViewModel {
         messages.append(clearedMessage)
     }
 
+    func handleMessageDeleted(_ event: MessageDeletedEvent) {
+        logger.info("Message deleted: targetType=\(event.targetType), eventId=\(event.targetEventId)", category: .events)
+
+        // Add message deleted notification pill to chat
+        let deletedMessage = ChatMessage.messageDeleted(targetType: event.targetType)
+        messages.append(deletedMessage)
+    }
+
     func handleError(_ message: String) {
         logger.error("Agent error: \(message)", category: .events)
         isProcessing = false

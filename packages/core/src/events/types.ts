@@ -9,6 +9,20 @@
  * 2. Events form a tree via parentId chains
  * 3. Sessions are pointers to head events
  * 4. State is reconstructed by replaying events
+ *
+ * ## Persisted vs Streaming Events
+ *
+ * All EventType values defined here ARE persisted to the EventStore.
+ * However, there are also WebSocket-only streaming events that are NOT defined
+ * here because they are ephemeral:
+ *
+ * WEBSOCKET-ONLY (NOT persisted, defined in rpc/types.ts):
+ * - `agent.text_delta` - Real-time text chunks, accumulated into message.assistant
+ * - `agent.tool_start/end` - Tool progress, consolidated into tool.call/result
+ * - `agent.turn_start/end` - UI lifecycle, stream.turn_* is the persisted form
+ *
+ * The `stream.*` event types below ARE persisted for reconstruction but contain
+ * boundary/metadata info, not the high-frequency delta content itself.
  */
 
 // =============================================================================
@@ -58,6 +72,9 @@ export type EventType =
   // Model/config changes
   | 'config.model_switch'
   | 'config.prompt_update'
+  | 'config.reasoning_level'
+  // Message operations
+  | 'message.deleted'
   // Notifications (in-chat pill notifications)
   | 'notification.interrupted'
   // Compaction/summarization
@@ -357,6 +374,41 @@ export interface ConfigPromptUpdateEvent extends BaseEvent {
   };
 }
 
+/**
+ * Reasoning level change event
+ * Persists reasoning level changes for session reconstruction
+ */
+export interface ConfigReasoningLevelEvent extends BaseEvent {
+  type: 'config.reasoning_level';
+  payload: {
+    previousLevel?: 'low' | 'medium' | 'high' | 'xhigh';
+    newLevel?: 'low' | 'medium' | 'high' | 'xhigh';
+  };
+}
+
+// =============================================================================
+// Message Operations Events
+// =============================================================================
+
+/**
+ * Message deleted event - soft-deletes a message from context reconstruction
+ * The original message event is preserved; this event marks it as deleted.
+ * Two-pass reconstruction filters out deleted messages.
+ */
+export interface MessageDeletedEvent extends BaseEvent {
+  type: 'message.deleted';
+  payload: {
+    /** Event ID of the message being deleted */
+    targetEventId: EventId;
+    /** Original event type (for validation) */
+    targetType: 'message.user' | 'message.assistant' | 'tool.result';
+    /** Turn number of deleted message */
+    targetTurn?: number;
+    /** Reason for deletion */
+    reason?: 'user_request' | 'content_policy' | 'context_management';
+  };
+}
+
 // =============================================================================
 // Compaction Events
 // =============================================================================
@@ -624,6 +676,9 @@ export type SessionEvent =
   // Config
   | ConfigModelSwitchEvent
   | ConfigPromptUpdateEvent
+  | ConfigReasoningLevelEvent
+  // Message operations
+  | MessageDeletedEvent
   // Compaction
   | CompactBoundaryEvent
   | CompactSummaryEvent
@@ -714,6 +769,18 @@ export function isContextClearedEvent(event: SessionEvent): event is ContextClea
   return event.type === 'context.cleared';
 }
 
+export function isConfigReasoningLevelEvent(event: SessionEvent): event is ConfigReasoningLevelEvent {
+  return event.type === 'config.reasoning_level';
+}
+
+export function isMessageDeletedEvent(event: SessionEvent): event is MessageDeletedEvent {
+  return event.type === 'message.deleted';
+}
+
+export function isConfigEvent(event: SessionEvent): event is ConfigModelSwitchEvent | ConfigPromptUpdateEvent | ConfigReasoningLevelEvent {
+  return event.type.startsWith('config.');
+}
+
 // =============================================================================
 // Event Creation Helpers
 // =============================================================================
@@ -751,6 +818,8 @@ export interface SessionState {
   workingDirectory: string;
   /** All messages up to this point (for API calls) */
   messages: Message[];
+  /** Event IDs corresponding to each message (parallel array, for deletion tracking) */
+  messageEventIds: (string | undefined)[];
   /** Total token usage */
   tokenUsage: TokenUsage;
   /** Turn count */
@@ -759,6 +828,8 @@ export interface SessionState {
   provider?: string;
   /** System prompt */
   systemPrompt?: string;
+  /** Current reasoning level (for extended thinking models) */
+  reasoningLevel?: 'low' | 'medium' | 'high' | 'xhigh';
   /** Current turn number (deprecated, use turnCount) */
   currentTurn?: number;
   /** Session metadata */

@@ -171,6 +171,10 @@ class ChatViewModel: ObservableObject {
             self?.handleContextCleared(event)
         }
 
+        rpcClient.onMessageDeleted = { [weak self] event in
+            self?.handleMessageDeleted(event)
+        }
+
         rpcClient.onComplete = { [weak self] in
             self?.handleComplete()
         }
@@ -254,6 +258,50 @@ class ChatViewModel: ObservableObject {
         )
         messages.append(notification)
         logger.info("Reasoning level changed from \(previousLevel) to \(newLevel)", category: .session)
+    }
+
+    // MARK: - Message Operations
+
+    /// Delete a message from the session.
+    /// This sends an RPC request to append a message.deleted event.
+    /// The message will be filtered out during two-pass reconstruction.
+    func deleteMessage(_ message: ChatMessage) async {
+        guard let sessionId = rpcClient.currentSessionId else {
+            logger.error("Cannot delete message - no active session", category: .session)
+            showErrorAlert("No active session")
+            return
+        }
+
+        guard let eventId = message.eventId else {
+            logger.error("Cannot delete message - no event ID", category: .session)
+            showErrorAlert("Cannot delete this message")
+            return
+        }
+
+        // Only allow deleting user and assistant messages
+        guard message.role == .user || message.role == .assistant else {
+            logger.error("Cannot delete message - invalid role: \(message.role)", category: .session)
+            showErrorAlert("Cannot delete this type of message")
+            return
+        }
+
+        logger.info("Deleting message: eventId=\(eventId)", category: .session)
+
+        do {
+            let result = try await rpcClient.deleteMessage(sessionId, targetEventId: eventId)
+            logger.info("Message deleted successfully: deletionEventId=\(result.deletionEventId)", category: .session)
+
+            // Remove the message from local state immediately for responsive UI
+            // The server will also send an event.new notification which we handle in Events extension
+            await MainActor.run {
+                if let index = messages.firstIndex(where: { $0.eventId == eventId }) {
+                    messages.remove(at: index)
+                }
+            }
+        } catch {
+            logger.error("Failed to delete message: \(error)", category: .session)
+            showErrorAlert("Failed to delete message: \(error.localizedDescription)")
+        }
     }
 
     // MARK: - Computed Properties

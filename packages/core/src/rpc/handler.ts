@@ -81,6 +81,8 @@ import type {
   VoiceNoteMetadata,
   VoiceNotesDeleteParams,
   VoiceNotesDeleteResult,
+  MessageDeleteParams,
+  MessageDeleteResult,
 } from './types.js';
 import { getNotesDir } from '../settings/loader.js';
 import { ANTHROPIC_MODELS, OPENAI_CODEX_MODELS } from '../providers/models.js';
@@ -162,6 +164,9 @@ export interface EventStoreManager {
 
   // Search
   searchContent(query: string, options?: { sessionId?: string; workspaceId?: string; types?: string[]; limit?: number }): Promise<{ results: unknown[]; totalCount: number }>;
+
+  // Message operations
+  deleteMessage(sessionId: string, targetEventId: string, reason?: 'user_request' | 'content_policy' | 'context_management'): Promise<{ id: string; payload: unknown }>;
 }
 
 // Manager interfaces (implemented elsewhere)
@@ -415,6 +420,10 @@ export class RpcHandler extends EventEmitter {
           return this.handleVoiceNotesList(request);
         case 'voiceNotes.delete':
           return this.handleVoiceNotesDelete(request);
+
+        // Message methods
+        case 'message.delete':
+          return this.handleMessageDelete(request);
 
         default:
           return this.errorResponse(request.id, 'METHOD_NOT_FOUND', `Unknown method: ${request.method}`);
@@ -1622,6 +1631,55 @@ ${transcribeResult.text}
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Failed to delete voice note';
       return this.errorResponse(request.id, 'VOICE_NOTE_DELETE_FAILED', message);
+    }
+  }
+
+  // ===========================================================================
+  // Message Handlers
+  // ===========================================================================
+
+  private async handleMessageDelete(request: RpcRequest): Promise<RpcResponse> {
+    const params = request.params as MessageDeleteParams | undefined;
+
+    if (!params?.sessionId) {
+      return this.errorResponse(request.id, 'INVALID_PARAMS', 'sessionId is required');
+    }
+
+    if (!params?.targetEventId) {
+      return this.errorResponse(request.id, 'INVALID_PARAMS', 'targetEventId is required');
+    }
+
+    // Requires eventStore in context
+    if (!this.context.eventStore) {
+      return this.errorResponse(request.id, 'NOT_SUPPORTED', 'Event store not available');
+    }
+
+    try {
+      // Call the EventStore's deleteMessage method
+      const deletionEvent = await this.context.eventStore.deleteMessage(
+        params.sessionId,
+        params.targetEventId,
+        params.reason
+      );
+
+      const result: MessageDeleteResult = {
+        success: true,
+        deletionEventId: deletionEvent.id,
+        targetType: (deletionEvent.payload as { targetType: 'message.user' | 'message.assistant' | 'tool.result' }).targetType,
+      };
+
+      return this.successResponse(request.id, result);
+    } catch (error) {
+      if (error instanceof Error) {
+        if (error.message.includes('not found')) {
+          return this.errorResponse(request.id, 'NOT_FOUND', error.message);
+        }
+        if (error.message.includes('Cannot delete')) {
+          return this.errorResponse(request.id, 'INVALID_OPERATION', error.message);
+        }
+      }
+      const message = error instanceof Error ? error.message : 'Failed to delete message';
+      return this.errorResponse(request.id, 'MESSAGE_DELETE_FAILED', message);
     }
   }
 

@@ -657,6 +657,23 @@ export class SQLiteBackend {
     `).run(model, now, sessionId);
   }
 
+  /**
+   * Increment cached counters in the session table.
+   *
+   * DENORMALIZATION NOTE: These counters are a performance cache. The source of
+   * truth for token usage is in message.assistant events (tokenUsage field).
+   * Turn counts can be derived from counting message.assistant events.
+   *
+   * These cached values enable quick session list queries without event traversal.
+   * During full session reconstruction (getStateAt/getStateAtHead), token totals
+   * are computed from events, NOT from these cached values.
+   *
+   * If counters become stale (e.g., after message deletion), they can be
+   * recomputed by:
+   *   1. Counting events of each type
+   *   2. Summing tokenUsage from message.assistant events
+   *   3. Finding max turn number from message.assistant events
+   */
   async incrementSessionCounters(sessionId: SessionId, counters: IncrementCountersOptions): Promise<void> {
     const db = this.getDb();
     const updates: string[] = [];

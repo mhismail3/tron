@@ -368,6 +368,10 @@ enum SessionEventType: String, Codable {
 
     case configModelSwitch = "config.model_switch"
     case configPromptUpdate = "config.prompt_update"
+    case configReasoningLevel = "config.reasoning_level"
+
+    // Message operations
+    case messageDeleted = "message.deleted"
 
     // Notifications (in-chat pill notifications)
     case notificationInterrupted = "notification.interrupted"

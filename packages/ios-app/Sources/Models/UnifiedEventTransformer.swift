@@ -194,6 +194,8 @@ struct UnifiedEventTransformer {
             return transformInterrupted(payload, timestamp: ts)
         case .configModelSwitch:
             return transformModelSwitch(payload, timestamp: ts)
+        case .configReasoningLevel:
+            return transformReasoningLevelChange(payload, timestamp: ts)
         case .errorAgent:
             return transformAgentError(payload, timestamp: ts)
         case .errorTool:
@@ -445,6 +447,26 @@ struct UnifiedEventTransformer {
             content: .modelChange(
                 from: formatModelDisplayName(parsed.previousModel),
                 to: formatModelDisplayName(parsed.newModel)
+            ),
+            timestamp: timestamp
+        )
+    }
+
+    private static func transformReasoningLevelChange(
+        _ payload: [String: AnyCodable],
+        timestamp: Date
+    ) -> ChatMessage? {
+        let parsed = ReasoningLevelPayload(from: payload)
+
+        // Need both previous and new levels to show a meaningful notification
+        guard let previousLevel = parsed.previousLevel,
+              let newLevel = parsed.newLevel else { return nil }
+
+        return ChatMessage(
+            role: .system,
+            content: .reasoningLevelChange(
+                from: previousLevel.capitalized,
+                to: newLevel.capitalized
             ),
             timestamp: timestamp
         )
@@ -819,6 +841,8 @@ extension UnifiedEventTransformer {
         var currentModel: String?
         var currentTurn: Int
         var workingDirectory: String?
+        /// Current reasoning level for extended thinking models
+        var reasoningLevel: String?
 
         // Extended state (Phase 2)
         var fileActivity: FileActivityState
@@ -980,6 +1004,7 @@ extension UnifiedEventTransformer {
             self.currentModel = nil
             self.currentTurn = 0
             self.workingDirectory = nil
+            self.reasoningLevel = nil
             self.fileActivity = FileActivityState()
             self.worktree = WorktreeState()
             self.compaction = CompactionState()
@@ -1009,9 +1034,12 @@ extension UnifiedEventTransformer {
         // Sort by turn number, then timestamp, then sequence
         let sorted = sortEventsByTurn(events)
 
-        // Build maps for tool calls and results
+        // PASS 1: Collect deleted event IDs, config state, and build tool maps
+        // Two-pass reconstruction ensures deletions that occur later are properly filtered
+        var deletedEventIds = Set<String>()
         var toolCalls: [String: ToolCallPayload] = [:]
         var toolResults: [String: ToolResultPayload] = [:]
+
         for event in sorted {
             if event.type == PersistedEventType.toolCall.rawValue,
                let payload = ToolCallPayload(from: event.payload) {
@@ -1021,9 +1049,24 @@ extension UnifiedEventTransformer {
                let payload = ToolResultPayload(from: event.payload) {
                 toolResults[payload.toolCallId] = payload
             }
+            // Collect deleted event IDs
+            if event.type == PersistedEventType.messageDeleted.rawValue,
+               let payload = MessageDeletedPayload(from: event.payload) {
+                deletedEventIds.insert(payload.targetEventId)
+            }
+            // Track latest reasoning level
+            if event.type == PersistedEventType.configReasoningLevel.rawValue {
+                let payload = ReasoningLevelPayload(from: event.payload)
+                state.reasoningLevel = payload.newLevel
+            }
         }
 
+        // PASS 2: Build messages, skipping deleted ones
         for event in sorted {
+            // Skip deleted events
+            if deletedEventIds.contains(event.id) {
+                continue
+            }
             guard let eventType = PersistedEventType(rawValue: event.type) else { continue }
 
             switch eventType {
@@ -1040,12 +1083,17 @@ extension UnifiedEventTransformer {
 
             case .messageAssistant:
                 // Process content blocks in order (preserves interleaving)
-                let interleaved = transformAssistantMessageInterleaved(
+                var interleaved = transformAssistantMessageInterleaved(
                     event.payload,
                     timestamp: parseTimestamp(event.timestamp),
                     toolCalls: toolCalls,
                     toolResults: toolResults
                 )
+                // Set eventId on the first message for deletion tracking
+                // (interleaved may produce multiple messages from one event)
+                if !interleaved.isEmpty {
+                    interleaved[0].eventId = event.id
+                }
                 state.messages.append(contentsOf: interleaved)
 
                 // Track token usage from assistant messages
@@ -1065,11 +1113,15 @@ extension UnifiedEventTransformer {
                 }
 
             case .messageUser, .messageSystem,
-                 .notificationInterrupted, .configModelSwitch,
+                 .notificationInterrupted, .configModelSwitch, .configReasoningLevel,
                  .contextCleared,
                  .errorAgent, .errorTool, .errorProvider:
                 // Add chat message
-                if let message = transformPersistedEvent(event) {
+                if var message = transformPersistedEvent(event) {
+                    // Set eventId for message deletion tracking (user messages only)
+                    if eventType == .messageUser {
+                        message.eventId = event.id
+                    }
                     state.messages.append(message)
                 }
 
@@ -1078,6 +1130,9 @@ extension UnifiedEventTransformer {
                    let parsed = ModelSwitchPayload(from: event.payload) {
                     state.currentModel = parsed.newModel
                 }
+
+                // Track reasoning level changes (state already updated in pass 1)
+                // The chat message is created above via transformPersistedEvent
 
             case .streamTurnEnd:
                 // Only update turn counter, NOT token usage
@@ -1202,6 +1257,14 @@ extension UnifiedEventTransformer {
                         state.tags.removeAll { $0 == parsed.tag }
                     }
                 }
+
+            // Config events already processed in pass 1
+            case .configReasoningLevel:
+                break
+
+            // Deletion events already processed in pass 1
+            case .messageDeleted:
+                break
 
             default:
                 // Skip other event types for state reconstruction
@@ -1228,9 +1291,12 @@ extension UnifiedEventTransformer {
         // Sort by turn number, then timestamp, then sequence
         let sorted = sortEventsByTurn(events)
 
-        // Build maps for tool calls and results
+        // PASS 1: Collect deleted event IDs, config state, and build tool maps
+        // Two-pass reconstruction ensures deletions that occur later are properly filtered
+        var deletedEventIds = Set<String>()
         var toolCalls: [String: ToolCallPayload] = [:]
         var toolResults: [String: ToolResultPayload] = [:]
+
         for event in sorted {
             if event.type == PersistedEventType.toolCall.rawValue,
                let payload = ToolCallPayload(from: event.payload) {
@@ -1240,9 +1306,24 @@ extension UnifiedEventTransformer {
                let payload = ToolResultPayload(from: event.payload) {
                 toolResults[payload.toolCallId] = payload
             }
+            // Collect deleted event IDs
+            if event.type == PersistedEventType.messageDeleted.rawValue,
+               let payload = MessageDeletedPayload(from: event.payload) {
+                deletedEventIds.insert(payload.targetEventId)
+            }
+            // Track latest reasoning level
+            if event.type == PersistedEventType.configReasoningLevel.rawValue {
+                let payload = ReasoningLevelPayload(from: event.payload)
+                state.reasoningLevel = payload.newLevel
+            }
         }
 
+        // PASS 2: Build messages, skipping deleted ones
         for event in sorted {
+            // Skip deleted events
+            if deletedEventIds.contains(event.id) {
+                continue
+            }
             guard let eventType = PersistedEventType(rawValue: event.type) else { continue }
 
             switch eventType {
@@ -1259,12 +1340,17 @@ extension UnifiedEventTransformer {
 
             case .messageAssistant:
                 // Process content blocks in order (preserves interleaving)
-                let interleaved = transformAssistantMessageInterleaved(
+                var interleaved = transformAssistantMessageInterleaved(
                     event.payload,
                     timestamp: parseTimestamp(event.timestamp),
                     toolCalls: toolCalls,
                     toolResults: toolResults
                 )
+                // Set eventId on the first message for deletion tracking
+                // (interleaved may produce multiple messages from one event)
+                if !interleaved.isEmpty {
+                    interleaved[0].eventId = event.id
+                }
                 state.messages.append(contentsOf: interleaved)
 
                 // Track token usage from assistant messages
@@ -1284,11 +1370,15 @@ extension UnifiedEventTransformer {
                 }
 
             case .messageUser, .messageSystem,
-                 .notificationInterrupted, .configModelSwitch,
+                 .notificationInterrupted, .configModelSwitch, .configReasoningLevel,
                  .contextCleared,
                  .errorAgent, .errorTool, .errorProvider:
                 // Add chat message using the SessionEvent overload
-                if let message = transformPersistedEvent(event) {
+                if var message = transformPersistedEvent(event) {
+                    // Set eventId for message deletion tracking (user messages only)
+                    if eventType == .messageUser {
+                        message.eventId = event.id
+                    }
                     state.messages.append(message)
                 }
 
@@ -1297,6 +1387,9 @@ extension UnifiedEventTransformer {
                    let parsed = ModelSwitchPayload(from: event.payload) {
                     state.currentModel = parsed.newModel
                 }
+
+                // Track reasoning level changes (state already updated in pass 1)
+                // The chat message is created above via transformPersistedEvent
 
             case .streamTurnEnd:
                 // Only update turn counter, NOT token usage
@@ -1421,6 +1514,14 @@ extension UnifiedEventTransformer {
                         state.tags.removeAll { $0 == parsed.tag }
                     }
                 }
+
+            // Config events already processed in pass 1
+            case .configReasoningLevel:
+                break
+
+            // Deletion events already processed in pass 1
+            case .messageDeleted:
+                break
 
             default:
                 break

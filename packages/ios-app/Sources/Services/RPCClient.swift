@@ -38,6 +38,7 @@ class RPCClient: ObservableObject {
     var onAgentTurn: ((AgentTurnEvent) -> Void)?
     var onCompaction: ((CompactionEvent) -> Void)?
     var onContextCleared: ((ContextClearedEvent) -> Void)?
+    var onMessageDeleted: ((MessageDeletedEvent) -> Void)?
     var onComplete: (() -> Void)?
     var onError: ((String) -> Void)?
 
@@ -179,6 +180,10 @@ class RPCClient: ObservableObject {
         case .contextCleared(let e):
             guard checkSession(e.sessionId) else { return }
             onContextCleared?(e)
+
+        case .messageDeleted(let e):
+            guard checkSession(e.sessionId) else { return }
+            onMessageDeleted?(e)
 
         case .error(let e):
             // Always notify global listeners for dashboard updates
@@ -484,6 +489,29 @@ class RPCClient: ObservableObject {
         )
 
         logger.info("[REWIND] Rewind succeeded: newHeadEventId=\(result.newHeadEventId), previousHeadEventId=\(result.previousHeadEventId ?? "unknown")", category: .session)
+        return result
+    }
+
+    // MARK: - Message Methods
+
+    /// Delete a message from a session.
+    /// This appends a message.deleted event to the event log.
+    /// The message will be filtered out during reconstruction (two-pass).
+    func deleteMessage(_ sessionId: String, targetEventId: String, reason: String? = "user_request") async throws -> MessageDeleteResult {
+        guard let ws = webSocket else {
+            logger.error("[DELETE] Cannot delete message - WebSocket not connected", category: .session)
+            throw RPCClientError.connectionNotEstablished
+        }
+
+        let params = MessageDeleteParams(sessionId: sessionId, targetEventId: targetEventId, reason: reason)
+        logger.info("[DELETE] Sending delete request: sessionId=\(sessionId), targetEventId=\(targetEventId)", category: .session)
+
+        let result: MessageDeleteResult = try await ws.send(
+            method: "message.delete",
+            params: params
+        )
+
+        logger.info("[DELETE] Delete succeeded: deletionEventId=\(result.deletionEventId), targetType=\(result.targetType)", category: .session)
         return result
     }
 

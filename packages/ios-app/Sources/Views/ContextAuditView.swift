@@ -176,7 +176,12 @@ struct ContextAuditView: View {
                         .padding(.horizontal)
 
                         // Messages breakdown (granular expandable) - using server data
-                        DetailedMessagesSection(messages: snapshot.messages)
+                        DetailedMessagesSection(
+                            messages: snapshot.messages,
+                            onDelete: { eventId in
+                                Task { await deleteMessage(eventId: eventId) }
+                            }
+                        )
                             .padding(.horizontal)
                     }
                     .padding(.vertical)
@@ -240,6 +245,16 @@ struct ContextAuditView: View {
         }
 
         isCompacting = false
+    }
+
+    private func deleteMessage(eventId: String) async {
+        do {
+            _ = try await rpcClient.deleteMessage(sessionId, targetEventId: eventId)
+            // Reload context to show updated state
+            await loadContext()
+        } catch {
+            errorMessage = "Failed to delete message: \(error.localizedDescription)"
+        }
     }
 }
 
@@ -670,6 +685,7 @@ struct ExpandableContentSection: View {
 @available(iOS 26.0, *)
 struct DetailedMessagesSection: View {
     let messages: [DetailedMessageInfo]
+    var onDelete: ((String) -> Void)?
 
     private func formatTokens(_ count: Int) -> String {
         if count >= 1000 {
@@ -704,7 +720,8 @@ struct DetailedMessagesSection: View {
                     ForEach(Array(messages.enumerated()), id: \.element.index) { index, message in
                         DetailedMessageRow(
                             message: message,
-                            isLast: index == messages.count - 1
+                            isLast: index == messages.count - 1,
+                            onDelete: message.eventId != nil ? { onDelete?(message.eventId!) } : nil
                         )
                     }
                 }
@@ -719,6 +736,7 @@ struct DetailedMessagesSection: View {
 struct DetailedMessageRow: View {
     let message: DetailedMessageInfo
     let isLast: Bool
+    var onDelete: (() -> Void)?
 
     @State private var isExpanded = false
 
@@ -871,6 +889,16 @@ struct DetailedMessageRow: View {
                 .glassEffect(.regular.tint(iconColor.opacity(0.1)), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
         }
         .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .contextMenu {
+            // Only show delete option if eventId is available (deletable)
+            if onDelete != nil {
+                Button(role: .destructive) {
+                    onDelete?()
+                } label: {
+                    Label("Delete from Context", systemImage: "trash")
+                }
+            }
+        }
         .animation(.easeInOut(duration: 0.2), value: isExpanded)
     }
 }
