@@ -205,6 +205,12 @@ export class EventStoreOrchestrator extends EventEmitter {
     }
     this.activeSessions.clear();
 
+    // Clean up all browser sessions
+    if (this.browserService) {
+      logger.debug('Cleaning up browser service');
+      await this.browserService.cleanup();
+    }
+
     await this.eventStore.close();
     this.initialized = false;
     logger.info('EventStore orchestrator shutdown complete');
@@ -451,6 +457,12 @@ export class EventStoreOrchestrator extends EventEmitter {
       mergeStrategy: options?.mergeStrategy,
       commitMessage: options?.commitMessage,
     });
+
+    // Clean up browser session if it exists
+    if (this.browserService && this.browserService.hasSession(sessionId)) {
+      logger.debug('Closing browser session during session end', { sessionId });
+      await this.browserService.closeSession(sessionId);
+    }
 
     await this.eventStore.endSession(sessionId as SessionId);
     this.activeSessions.delete(sessionId);
