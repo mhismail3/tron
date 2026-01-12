@@ -14,6 +14,9 @@ extension ChatViewModel {
 
         logger.info("Sending message: \"\(text.prefix(100))...\" with \(attachments.count) attachments, reasoningLevel=\(reasoningLevel ?? "nil")", category: .chat)
 
+        // Reset browser dismiss flag for new prompt - browser can auto-open again
+        userDismissedBrowserThisTurn = false
+
         // Create user message with attachments displayed as thumbnails above text
         let attachmentsToShow = attachments.isEmpty ? nil : attachments
         if !text.isEmpty {

@@ -206,7 +206,7 @@ struct ChatView: View {
                     currentUrl: viewModel.browserStatus?.currentUrl,
                     isStreaming: viewModel.browserStatus?.isStreaming ?? false,
                     onCloseBrowser: {
-                        viewModel.closeBrowserSession()
+                        viewModel.userDismissedBrowser()
                     }
                 )
             }

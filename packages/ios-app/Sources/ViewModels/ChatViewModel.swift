@@ -38,10 +38,12 @@ class ChatViewModel: ObservableObject {
 
     /// Current browser frame image
     @Published var browserFrame: UIImage?
-    /// Whether to show the floating browser window
+    /// Whether to show the browser sheet
     @Published var showBrowserWindow = false
     /// Current browser status
     @Published var browserStatus: BrowserGetStatusResult?
+    /// Whether user manually dismissed browser sheet this turn (prevents auto-reopen)
+    var userDismissedBrowserThisTurn = false
 
     // MARK: - Internal State (accessible to extensions)
 
@@ -380,12 +382,19 @@ class ChatViewModel: ObservableObject {
             )
         }
 
-        // Auto-show browser window only on the FIRST frame (not subsequent frames)
-        // This allows user to close the window and have it stay closed
-        if wasFirstFrame && !showBrowserWindow {
+        // Auto-show browser window only on the FIRST frame, and only if user hasn't
+        // manually dismissed it during this prompt/response cycle
+        if wasFirstFrame && !showBrowserWindow && !userDismissedBrowserThisTurn {
             showBrowserWindow = true
             logger.info("Browser window auto-shown on first frame", category: .session)
         }
+    }
+
+    /// Mark browser as dismissed by user (prevents auto-reopen this turn)
+    func userDismissedBrowser() {
+        userDismissedBrowserThisTurn = true
+        showBrowserWindow = false
+        logger.info("User dismissed browser sheet - won't auto-reopen this turn", category: .session)
     }
 
     /// Handle browser session closed
