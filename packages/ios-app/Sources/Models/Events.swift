@@ -441,6 +441,8 @@ enum ParsedEvent {
     case compaction(CompactionEvent)
     case contextCleared(ContextClearedEvent)
     case messageDeleted(MessageDeletedEvent)
+    case browserFrame(BrowserFrameEvent)
+    case browserClosed(String)
     case connected(ConnectedEvent)
     case unknown(String)
 
@@ -501,6 +503,16 @@ enum ParsedEvent {
                 let event = try decoder.decode(MessageDeletedEvent.self, from: data)
                 logger.info("Message deleted: targetType=\(event.targetType), eventId=\(event.targetEventId)", category: .events)
                 return .messageDeleted(event)
+
+            case "browser.frame":
+                let event = try decoder.decode(BrowserFrameEvent.self, from: data)
+                return .browserFrame(event)
+
+            case "browser.closed":
+                if let sessionId = json["sessionId"] as? String {
+                    return .browserClosed(sessionId)
+                }
+                return nil
 
             case EventType.connected.rawValue, EventType.systemConnected.rawValue:
                 let event = try decoder.decode(ConnectedEvent.self, from: data)
