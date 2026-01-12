@@ -2,6 +2,7 @@ import SwiftUI
 
 // MARK: - Context Audit View
 
+@available(iOS 26.0, *)
 struct ContextAuditView: View {
     let rpcClient: RPCClient
     let sessionId: String
@@ -30,6 +31,13 @@ struct ContextAuditView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
             .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button { dismiss() } label: {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 14, weight: .medium))
+                            .foregroundStyle(.tronEmerald)
+                    }
+                }
                 ToolbarItem(placement: .principal) {
                     Text("Context Manager")
                         .font(.system(size: 16, weight: .semibold))
@@ -60,6 +68,9 @@ struct ContextAuditView: View {
                 await loadContext()
             }
         }
+        .presentationDetents([.medium, .large])
+        .presentationDragIndicator(.hidden)
+        .tint(.tronEmerald)
         .preferredColorScheme(.dark)
     }
 
@@ -193,6 +204,7 @@ struct ContextAuditView: View {
 
 // MARK: - Total Session Tokens View
 
+@available(iOS 26.0, *)
 struct TotalSessionTokensView: View {
     let inputTokens: Int
     let outputTokens: Int
@@ -212,99 +224,119 @@ struct TotalSessionTokensView: View {
     }
 
     var body: some View {
-        VStack(spacing: 12) {
-            // Header
-            HStack {
-                Image(systemName: "arrow.up.arrow.down")
-                    .font(.system(size: 14))
-                    .foregroundStyle(.tronEmerald)
+        VStack(alignment: .leading, spacing: 12) {
+            // Section header
+            Text("Session Tokens")
+                .font(.system(size: 12, weight: .medium, design: .monospaced))
+                .foregroundStyle(.white.opacity(0.6))
 
-                Text("Total Session Tokens")
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(.tronTextPrimary)
+            // Main content card
+            VStack(spacing: 12) {
+                // Header with total
+                HStack {
+                    Image(systemName: "arrow.up.arrow.down")
+                        .font(.system(size: 14))
+                        .foregroundStyle(.tronEmerald)
 
-                Spacer()
+                    Text("Total")
+                        .font(.system(size: 14, weight: .medium, design: .monospaced))
+                        .foregroundStyle(.tronEmerald)
 
-                Text(formatTokenCount(totalTokens))
-                    .font(.system(size: 24, weight: .bold, design: .monospaced))
-                    .foregroundStyle(.tronEmerald)
-            }
+                    Spacer()
 
-            // Token breakdown row
-            HStack(spacing: 12) {
-                // Input tokens
-                VStack(alignment: .leading, spacing: 4) {
-                    HStack(spacing: 4) {
-                        Image(systemName: "arrow.up.circle.fill")
-                            .font(.system(size: 12))
-                            .foregroundStyle(.cyan)
-                        Text("Input")
-                            .font(.caption)
-                            .foregroundStyle(.tronTextSecondary)
-                    }
-                    Text(formatTokenCount(inputTokens))
-                        .font(.caption.monospacedDigit().weight(.medium))
-                        .foregroundStyle(.tronTextPrimary)
+                    Text(formatTokenCount(totalTokens))
+                        .font(.system(size: 20, weight: .bold, design: .monospaced))
+                        .foregroundStyle(.tronEmerald)
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(10)
-                .background(Color.cyan.opacity(0.1))
-                .clipShape(RoundedRectangle(cornerRadius: 8))
 
-                // Output tokens
-                VStack(alignment: .leading, spacing: 4) {
-                    HStack(spacing: 4) {
-                        Image(systemName: "arrow.down.circle.fill")
-                            .font(.system(size: 12))
+                // Token breakdown row
+                HStack(spacing: 8) {
+                    // Input tokens
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack(spacing: 4) {
+                            Image(systemName: "arrow.up.circle.fill")
+                                .font(.system(size: 10))
+                                .foregroundStyle(.tronCyan)
+                            Text("Input")
+                                .font(.system(size: 10, design: .monospaced))
+                                .foregroundStyle(.white.opacity(0.5))
+                        }
+                        Text(formatTokenCount(inputTokens))
+                            .font(.system(size: 12, weight: .medium, design: .monospaced))
+                            .foregroundStyle(.tronCyan)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(10)
+                    .background {
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .fill(.clear)
+                            .glassEffect(.regular.tint(Color.tronCyan.opacity(0.15)), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    }
+
+                    // Output tokens
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack(spacing: 4) {
+                            Image(systemName: "arrow.down.circle.fill")
+                                .font(.system(size: 10))
+                                .foregroundStyle(.tronEmerald)
+                            Text("Output")
+                                .font(.system(size: 10, design: .monospaced))
+                                .foregroundStyle(.white.opacity(0.5))
+                        }
+                        Text(formatTokenCount(outputTokens))
+                            .font(.system(size: 12, weight: .medium, design: .monospaced))
                             .foregroundStyle(.tronEmerald)
-                        Text("Output")
-                            .font(.caption)
-                            .foregroundStyle(.tronTextSecondary)
                     }
-                    Text(formatTokenCount(outputTokens))
-                        .font(.caption.monospacedDigit().weight(.medium))
-                        .foregroundStyle(.tronTextPrimary)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(10)
-                .background(Color.tronEmerald.opacity(0.1))
-                .clipShape(RoundedRectangle(cornerRadius: 8))
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(10)
+                    .background {
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .fill(.clear)
+                            .glassEffect(.regular.tint(Color.tronEmerald.opacity(0.15)), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    }
 
-                // Cache read tokens
-                VStack(alignment: .leading, spacing: 4) {
-                    HStack(spacing: 4) {
-                        Image(systemName: "memorychip.fill")
-                            .font(.system(size: 12))
-                            .foregroundStyle(.purple)
-                        Text("Cached")
-                            .font(.caption)
-                            .foregroundStyle(.tronTextSecondary)
+                    // Cache read tokens
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack(spacing: 4) {
+                            Image(systemName: "memorychip.fill")
+                                .font(.system(size: 10))
+                                .foregroundStyle(.tronPurple)
+                            Text("Cached")
+                                .font(.system(size: 10, design: .monospaced))
+                                .foregroundStyle(.white.opacity(0.5))
+                        }
+                        Text(formatTokenCount(cacheReadTokens))
+                            .font(.system(size: 12, weight: .medium, design: .monospaced))
+                            .foregroundStyle(.tronPurple)
                     }
-                    Text(formatTokenCount(cacheReadTokens))
-                        .font(.caption.monospacedDigit().weight(.medium))
-                        .foregroundStyle(.tronTextPrimary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(10)
+                    .background {
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .fill(.clear)
+                            .glassEffect(.regular.tint(Color.tronPurple.opacity(0.15)), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    }
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(10)
-                .background(Color.purple.opacity(0.1))
-                .clipShape(RoundedRectangle(cornerRadius: 8))
+
+                // Footer explanation
+                Text("Cumulative usage for this session")
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundStyle(.white.opacity(0.4))
+                    .frame(maxWidth: .infinity, alignment: .leading)
             }
-
-            // Footer explanation inside the container
-            Text("Totals represent cumulative usage for this session")
-                .font(.caption2)
-                .foregroundStyle(.tronTextMuted)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.top, 4)
+            .padding(14)
+            .background {
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(.clear)
+                    .glassEffect(.regular.tint(Color.tronPhthaloGreen.opacity(0.15)), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            }
         }
-        .padding()
-        .background(Color.tronSurfaceElevated)
-        .clipShape(RoundedRectangle(cornerRadius: 12))
     }
 }
 
 // MARK: - Context Usage Gauge View
 
+@available(iOS 26.0, *)
 struct ContextUsageGaugeView: View {
     let currentTokens: Int
     let contextLimit: Int
@@ -314,13 +346,13 @@ struct ContextUsageGaugeView: View {
     private var usageColor: Color {
         switch thresholdLevel {
         case "critical", "exceeded":
-            return .red
+            return .tronError
         case "alert":
-            return .orange
+            return .tronAmber
         case "warning":
-            return .yellow
+            return .tronWarning
         default:
-            return .cyan
+            return .tronCyan
         }
     }
 
@@ -342,79 +374,85 @@ struct ContextUsageGaugeView: View {
     }
 
     var body: some View {
-        VStack(spacing: 12) {
-            // Header
-            HStack {
-                Image(systemName: "brain.head.profile")
-                    .font(.system(size: 14))
-                    .foregroundStyle(usageColor)
+        VStack(alignment: .leading, spacing: 12) {
+            // Section header
+            Text("Context Usage")
+                .font(.system(size: 12, weight: .medium, design: .monospaced))
+                .foregroundStyle(.white.opacity(0.6))
 
-                Text("Context Usage")
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(.tronTextPrimary)
+            // Main content card
+            VStack(spacing: 12) {
+                // Header
+                HStack {
+                    Image(systemName: "brain.head.profile")
+                        .font(.system(size: 14))
+                        .foregroundStyle(usageColor)
 
-                Spacer()
+                    Text("Current Window")
+                        .font(.system(size: 14, weight: .medium, design: .monospaced))
+                        .foregroundStyle(.tronEmerald)
 
-                Text("\(Int(usagePercent * 100))%")
-                    .font(.system(size: 24, weight: .bold, design: .monospaced))
-                    .foregroundStyle(usageColor)
-            }
+                    Spacer()
 
-            // Progress bar
-            GeometryReader { geometry in
-                ZStack(alignment: .leading) {
-                    // Background
-                    RoundedRectangle(cornerRadius: 6)
-                        .fill(Color.tronSurface)
+                    Text("\(Int(usagePercent * 100))%")
+                        .font(.system(size: 20, weight: .bold, design: .monospaced))
+                        .foregroundStyle(usageColor)
+                }
 
-                    // Fill
-                    RoundedRectangle(cornerRadius: 6)
-                        .fill(usageColor.opacity(0.8))
-                        .frame(width: geometry.size.width * min(usagePercent, 1.0))
+                // Progress bar
+                GeometryReader { geometry in
+                    ZStack(alignment: .leading) {
+                        // Background
+                        RoundedRectangle(cornerRadius: 6, style: .continuous)
+                            .fill(Color.white.opacity(0.1))
+
+                        // Fill
+                        RoundedRectangle(cornerRadius: 6, style: .continuous)
+                            .fill(usageColor.opacity(0.8))
+                            .frame(width: geometry.size.width * min(usagePercent, 1.0))
+                    }
+                }
+                .frame(height: 10)
+
+                // Token counts
+                HStack {
+                    Text("\(formattedTokens) / \(formattedLimit)")
+                        .font(.system(size: 11, weight: .medium, design: .monospaced))
+                        .foregroundStyle(.white.opacity(0.6))
+
+                    Spacer()
+
+                    Text("\(formatTokenCount(contextLimit - currentTokens)) remaining")
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundStyle(.white.opacity(0.4))
                 }
             }
-            .frame(height: 12)
-
-            // Token counts
-            HStack {
-                Text("\(formattedTokens) / \(formattedLimit) tokens")
-                    .font(.caption.weight(.medium).monospacedDigit())
-                    .foregroundStyle(.tronTextSecondary)
-
-                Spacer()
-
-                Text("\(formatTokenCount(contextLimit - currentTokens)) remaining")
-                    .font(.caption.monospacedDigit())
-                    .foregroundStyle(.tronTextMuted)
+            .padding(14)
+            .background {
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(.clear)
+                    .glassEffect(.regular.tint(usageColor.opacity(0.12)), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
             }
         }
-        .padding()
-        .background(Color.tronSurfaceElevated)
-        .clipShape(RoundedRectangle(cornerRadius: 12))
     }
 }
 
 // MARK: - Token Breakdown Header
 
+@available(iOS 26.0, *)
 struct TokenBreakdownHeader: View {
     var body: some View {
-        HStack {
-            Image(systemName: "chart.pie")
-                .font(.system(size: 14))
-                .foregroundStyle(.cyan)
-
-            Text("Token Breakdown")
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(.tronTextPrimary)
-
-            Spacer()
-        }
-        .padding(.top, 8)
+        Text("Token Breakdown")
+            .font(.system(size: 12, weight: .medium, design: .monospaced))
+            .foregroundStyle(.white.opacity(0.6))
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.top, 8)
     }
 }
 
 // MARK: - System and Tools Section
 
+@available(iOS 26.0, *)
 struct SystemAndToolsSection: View {
     let systemPromptTokens: Int
     let toolsTokens: Int
@@ -443,73 +481,73 @@ struct SystemAndToolsSection: View {
                 HStack {
                     Image(systemName: "gearshape.2.fill")
                         .font(.system(size: 14))
-                        .foregroundStyle(.purple)
+                        .foregroundStyle(.tronPurple)
 
-                    Text("System Prompt & Tools")
-                        .font(.subheadline.weight(.medium))
-                        .foregroundStyle(.tronTextPrimary)
+                    Text("System & Tools")
+                        .font(.system(size: 14, weight: .medium, design: .monospaced))
+                        .foregroundStyle(.tronPurple)
 
                     Spacer()
 
                     Text(formatTokens(totalTokens))
-                        .font(.caption.monospacedDigit().weight(.medium))
-                        .foregroundStyle(.tronTextSecondary)
-
-                    Text("tokens")
-                        .font(.caption2)
-                        .foregroundStyle(.tronTextMuted)
+                        .font(.system(size: 12, weight: .medium, design: .monospaced))
+                        .foregroundStyle(.white.opacity(0.6))
 
                     Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundStyle(.tronTextMuted)
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundStyle(.white.opacity(0.4))
                 }
-                .padding()
-                .background(Color.tronSurfaceElevated)
+                .padding(14)
+                .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
             }
             .buttonStyle(.plain)
+            .background {
+                if !isExpanded {
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .fill(.clear)
+                        .glassEffect(.regular.tint(Color.tronPurple.opacity(0.12)), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                }
+            }
 
             // Expandable content
             if isExpanded {
-                VStack(spacing: 0) {
-                    Divider()
-                        .background(Color.tronBorder.opacity(0.3))
+                VStack(alignment: .leading, spacing: 8) {
+                    // System Prompt - expandable
+                    ExpandableContentSection(
+                        icon: "doc.text.fill",
+                        iconColor: .tronPurple,
+                        title: "System Prompt",
+                        tokens: systemPromptTokens,
+                        content: systemPromptContent,
+                        isExpanded: $showingSystemPrompt
+                    )
 
-                    VStack(alignment: .leading, spacing: 8) {
-                        // System Prompt - expandable
-                        ExpandableContentSection(
-                            icon: "doc.text.fill",
-                            iconColor: .purple,
-                            title: "System Prompt",
-                            tokens: systemPromptTokens,
-                            content: systemPromptContent,
-                            isExpanded: $showingSystemPrompt
-                        )
-
-                        // Tools - expandable
-                        ExpandableContentSection(
-                            icon: "hammer.fill",
-                            iconColor: .orange,
-                            title: "Tools (\(toolsContent.count))",
-                            tokens: toolsTokens,
-                            content: toolsContent.joined(separator: "\n"),
-                            isExpanded: $showingTools
-                        )
-                    }
-                    .padding(12)
+                    // Tools - expandable
+                    ExpandableContentSection(
+                        icon: "hammer.fill",
+                        iconColor: .tronAmber,
+                        title: "Tools (\(toolsContent.count))",
+                        tokens: toolsTokens,
+                        content: toolsContent.joined(separator: "\n"),
+                        isExpanded: $showingTools
+                    )
                 }
-                .background(Color.tronSurface.opacity(0.3))
+                .padding(12)
             }
         }
-        .clipShape(RoundedRectangle(cornerRadius: 12))
-        .overlay(
-            RoundedRectangle(cornerRadius: 12)
-                .stroke(Color.tronBorder.opacity(0.2), lineWidth: 1)
-        )
+        .background {
+            if isExpanded {
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(.clear)
+                    .glassEffect(.regular.tint(Color.tronPurple.opacity(0.12)), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            }
+        }
     }
 }
 
 // MARK: - Expandable Content Section
 
+@available(iOS 26.0, *)
 struct ExpandableContentSection: View {
     let icon: String
     let iconColor: Color
@@ -534,17 +572,18 @@ struct ExpandableContentSection: View {
                         .font(.system(size: 12))
                         .foregroundStyle(iconColor.opacity(0.8))
                     Text(title)
-                        .font(.caption.weight(.medium))
-                        .foregroundStyle(.tronTextSecondary)
+                        .font(.system(size: 12, weight: .medium, design: .monospaced))
+                        .foregroundStyle(.white.opacity(0.7))
                     Spacer()
                     Text(formatTokens(tokens))
-                        .font(.caption.monospacedDigit())
-                        .foregroundStyle(.tronTextMuted)
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundStyle(.white.opacity(0.5))
                     Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
                         .font(.system(size: 10, weight: .medium))
-                        .foregroundStyle(.tronTextMuted)
+                        .foregroundStyle(.white.opacity(0.4))
                 }
                 .padding(10)
+                .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
             }
             .buttonStyle(.plain)
 
@@ -553,22 +592,27 @@ struct ExpandableContentSection: View {
                 ScrollView {
                     Text(content)
                         .font(.system(size: 10, design: .monospaced))
-                        .foregroundStyle(.tronTextSecondary)
+                        .foregroundStyle(.white.opacity(0.6))
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(10)
                         .textSelection(.enabled)
                 }
                 .frame(maxHeight: 300)
-                .background(Color.tronBackground.opacity(0.5))
+                .background(Color.black.opacity(0.2))
+                .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
             }
         }
-        .background(iconColor.opacity(0.05))
-        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .background {
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(.clear)
+                .glassEffect(.regular.tint(iconColor.opacity(0.08)), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        }
     }
 }
 
 // MARK: - Detailed Messages Section (using server data)
 
+@available(iOS 26.0, *)
 struct DetailedMessagesSection: View {
     let messages: [DetailedMessageInfo]
 
@@ -580,35 +624,28 @@ struct DetailedMessagesSection: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 12) {
             // Section header
-            HStack {
-                Image(systemName: "bubble.left.and.bubble.right.fill")
-                    .font(.system(size: 14))
-                    .foregroundStyle(.cyan)
-
-                Text("Messages")
-                    .font(.subheadline.weight(.medium))
-                    .foregroundStyle(.tronTextPrimary)
-
-                Text("(\(messages.count))")
-                    .font(.caption)
-                    .foregroundStyle(.tronTextMuted)
-
-                Spacer()
-            }
-            .padding(.bottom, 4)
+            Text("Messages (\(messages.count))")
+                .font(.system(size: 12, weight: .medium, design: .monospaced))
+                .foregroundStyle(.white.opacity(0.6))
 
             if messages.isEmpty {
-                Text("No messages in context")
-                    .font(.caption)
-                    .foregroundStyle(.tronTextMuted)
-                    .padding()
-                    .frame(maxWidth: .infinity)
-                    .background(Color.tronSurfaceElevated)
-                    .clipShape(RoundedRectangle(cornerRadius: 12))
+                HStack {
+                    Spacer()
+                    Text("No messages in context")
+                        .font(.system(size: 12, design: .monospaced))
+                        .foregroundStyle(.white.opacity(0.4))
+                    Spacer()
+                }
+                .padding(14)
+                .background {
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .fill(.clear)
+                        .glassEffect(.regular.tint(Color.tronPhthaloGreen.opacity(0.12)), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                }
             } else {
-                VStack(spacing: 0) {
+                VStack(spacing: 4) {
                     ForEach(Array(messages.enumerated()), id: \.element.index) { index, message in
                         DetailedMessageRow(
                             message: message,
@@ -616,11 +653,6 @@ struct DetailedMessagesSection: View {
                         )
                     }
                 }
-                .clipShape(RoundedRectangle(cornerRadius: 12))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 12)
-                        .stroke(Color.tronBorder.opacity(0.2), lineWidth: 1)
-                )
             }
         }
     }
@@ -628,6 +660,7 @@ struct DetailedMessagesSection: View {
 
 // MARK: - Detailed Message Row
 
+@available(iOS 26.0, *)
 struct DetailedMessageRow: View {
     let message: DetailedMessageInfo
     let isLast: Bool
@@ -645,22 +678,24 @@ struct DetailedMessageRow: View {
 
     private var iconColor: Color {
         switch message.role {
-        case "user": return .blue
+        case "user": return .tronBlue
         case "assistant": return .tronEmerald
-        case "toolResult": return message.isError == true ? .red : .cyan
+        case "toolResult": return message.isError == true ? .tronError : .tronCyan
         default: return .gray
         }
     }
 
     private var title: String {
         switch message.role {
-        case "user": return "User Message"
+        case "user": return "User"
         case "assistant":
             if let toolCalls = message.toolCalls, !toolCalls.isEmpty {
-                return toolCalls.map { $0.name }.joined(separator: ", ")
+                let names = toolCalls.prefix(2).map { $0.name }
+                let suffix = toolCalls.count > 2 ? " +\(toolCalls.count - 2)" : ""
+                return names.joined(separator: ", ") + suffix
             }
-            return "Assistant Response"
-        case "toolResult": return message.isError == true ? "Tool Error" : "Tool Result"
+            return "Assistant"
+        case "toolResult": return message.isError == true ? "Error" : "Result"
         default: return "Message"
         }
     }
@@ -680,17 +715,17 @@ struct DetailedMessageRow: View {
                     Image(systemName: icon)
                         .font(.system(size: 12))
                         .foregroundStyle(iconColor)
-                        .frame(width: 20)
+                        .frame(width: 18)
 
                     VStack(alignment: .leading, spacing: 2) {
                         Text(title)
-                            .font(.caption.weight(.medium))
-                            .foregroundStyle(.tronTextPrimary)
+                            .font(.system(size: 12, weight: .medium, design: .monospaced))
+                            .foregroundStyle(iconColor)
 
                         if !isExpanded {
                             Text(message.summary)
-                                .font(.caption2)
-                                .foregroundStyle(.tronTextMuted)
+                                .font(.system(size: 10, design: .monospaced))
+                                .foregroundStyle(.white.opacity(0.5))
                                 .lineLimit(1)
                         }
                     }
@@ -699,82 +734,81 @@ struct DetailedMessageRow: View {
 
                     Text(formatTokens(message.tokens))
                         .font(.system(size: 10, design: .monospaced))
-                        .foregroundStyle(.tronTextMuted)
+                        .foregroundStyle(.white.opacity(0.5))
 
                     Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
                         .font(.system(size: 10, weight: .medium))
-                        .foregroundStyle(.tronTextMuted)
+                        .foregroundStyle(.white.opacity(0.4))
                 }
                 .padding(.horizontal, 12)
                 .padding(.vertical, 10)
-                .background(Color.tronSurfaceElevated)
+                .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
             }
             .buttonStyle(.plain)
 
             // Expandable content
             if isExpanded {
-                VStack(spacing: 0) {
-                    Divider()
-                        .background(Color.tronBorder.opacity(0.3))
-
+                VStack(alignment: .leading, spacing: 8) {
                     // Show tool calls if present
                     if let toolCalls = message.toolCalls, !toolCalls.isEmpty {
-                        VStack(alignment: .leading, spacing: 8) {
-                            ForEach(toolCalls) { toolCall in
-                                VStack(alignment: .leading, spacing: 4) {
-                                    HStack {
-                                        Image(systemName: "hammer.fill")
-                                            .font(.system(size: 10))
-                                            .foregroundStyle(.orange)
-                                        Text(toolCall.name)
-                                            .font(.caption.weight(.medium))
-                                            .foregroundStyle(.tronTextPrimary)
-                                        Spacer()
-                                        Text(formatTokens(toolCall.tokens))
-                                            .font(.system(size: 9, design: .monospaced))
-                                            .foregroundStyle(.tronTextMuted)
-                                    }
-
-                                    Text(toolCall.arguments)
-                                        .font(.system(size: 10, design: .monospaced))
-                                        .foregroundStyle(.tronTextSecondary)
-                                        .lineLimit(5)
+                        ForEach(toolCalls) { toolCall in
+                            VStack(alignment: .leading, spacing: 4) {
+                                HStack {
+                                    Image(systemName: "hammer.fill")
+                                        .font(.system(size: 10))
+                                        .foregroundStyle(.tronAmber)
+                                    Text(toolCall.name)
+                                        .font(.system(size: 11, weight: .medium, design: .monospaced))
+                                        .foregroundStyle(.tronAmber)
+                                    Spacer()
+                                    Text(formatTokens(toolCall.tokens))
+                                        .font(.system(size: 9, design: .monospaced))
+                                        .foregroundStyle(.white.opacity(0.4))
                                 }
-                                .padding(8)
-                                .background(Color.orange.opacity(0.05))
-                                .clipShape(RoundedRectangle(cornerRadius: 6))
+
+                                Text(toolCall.arguments)
+                                    .font(.system(size: 10, design: .monospaced))
+                                    .foregroundStyle(.white.opacity(0.6))
+                                    .lineLimit(5)
+                            }
+                            .padding(8)
+                            .background {
+                                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                    .fill(.clear)
+                                    .glassEffect(.regular.tint(Color.tronAmber.opacity(0.08)), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
                             }
                         }
-                        .padding(12)
                     }
 
                     // Show text content if present
                     if !message.content.isEmpty {
                         ScrollView {
                             Text(message.content)
-                                .font(.system(size: 11, design: .monospaced))
-                                .foregroundStyle(.tronTextSecondary)
+                                .font(.system(size: 10, design: .monospaced))
+                                .foregroundStyle(.white.opacity(0.6))
                                 .frame(maxWidth: .infinity, alignment: .leading)
-                                .padding(12)
+                                .padding(10)
                                 .textSelection(.enabled)
                         }
                         .frame(maxHeight: 200)
+                        .background(Color.black.opacity(0.2))
+                        .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
                     }
                 }
-                .background(Color.tronSurface.opacity(0.3))
+                .padding(12)
             }
-
-            // Divider between items
-            if !isLast {
-                Divider()
-                    .background(Color.tronBorder.opacity(0.15))
-            }
+        }
+        .background {
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(.clear)
+                .glassEffect(.regular.tint(iconColor.opacity(0.1)), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
         }
     }
 }
 
 // MARK: - Clear Context Button
 
+@available(iOS 26.0, *)
 struct ClearContextButton: View {
     let isClearing: Bool
     let hasMessages: Bool
@@ -793,14 +827,19 @@ struct ClearContextButton: View {
                 }
 
                 Text(isClearing ? "Clearing..." : "Clear Context")
-                    .font(.subheadline.weight(.semibold))
+                    .font(.system(size: 14, weight: .semibold, design: .monospaced))
             }
-            .foregroundStyle(.white)
+            .foregroundStyle(hasMessages ? .white : .white.opacity(0.4))
             .frame(maxWidth: .infinity)
             .padding(.vertical, 12)
-            .background(hasMessages ? Color.red.opacity(0.8) : Color.gray.opacity(0.3))
-            .clipShape(RoundedRectangle(cornerRadius: 10))
+            .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
         }
+        .glassEffect(
+            hasMessages
+                ? .regular.tint(Color.tronError.opacity(0.6)).interactive()
+                : .regular.tint(Color.white.opacity(0.1)),
+            in: RoundedRectangle(cornerRadius: 10, style: .continuous)
+        )
         .disabled(isClearing || !hasMessages)
         .opacity(hasMessages ? 1.0 : 0.5)
     }
@@ -808,6 +847,7 @@ struct ClearContextButton: View {
 
 // MARK: - Preview
 
+@available(iOS 26.0, *)
 #Preview {
     ContextAuditView(
         rpcClient: RPCClient(serverURL: URL(string: "ws://localhost:8080/ws")!),
