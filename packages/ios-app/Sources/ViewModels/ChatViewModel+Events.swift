@@ -73,6 +73,15 @@ extension ChatViewModel {
             arguments: event.formattedArguments
         )
         currentTurnToolCalls.append(record)
+
+        // Track that a browser tool is active (for showing browser window)
+        if event.toolName.lowercased().contains("browser") {
+            logger.info("Browser tool detected", category: .events)
+            // Mark that we have an active browser session
+            if browserStatus == nil {
+                browserStatus = BrowserGetStatusResult(hasBrowser: true, isStreaming: false, currentUrl: nil)
+            }
+        }
     }
 
     func handleToolEnd(_ event: ToolEndEvent) {
@@ -91,6 +100,11 @@ extension ChatViewModel {
                 tool.result = event.displayResult
                 tool.durationMs = event.durationMs
                 messages[index].content = .toolUse(tool)
+
+                // Check if this is a browser screenshot result
+                if tool.toolName.lowercased().contains("browser") {
+                    extractAndDisplayBrowserScreenshot(from: event.displayResult)
+                }
             }
         } else {
             logger.warning("Could not find tool message for toolCallId=\(event.toolCallId)", category: .events)
@@ -100,6 +114,44 @@ extension ChatViewModel {
         if let idx = currentTurnToolCalls.firstIndex(where: { $0.toolCallId == event.toolCallId }) {
             currentTurnToolCalls[idx].result = event.displayResult
             currentTurnToolCalls[idx].isError = !event.success
+        }
+    }
+
+    /// Extract base64 screenshot from browser tool result and display it
+    private func extractAndDisplayBrowserScreenshot(from result: String) {
+        // Look for base64 image data in the result
+        // Format: "Screenshot captured (base64): iVBORw0KGgo..." or just raw base64
+        let patterns = [
+            "Screenshot captured \\(base64\\): ([A-Za-z0-9+/=]+)",
+            "base64\\): ([A-Za-z0-9+/=]+)",
+            "data:image/[^;]+;base64,([A-Za-z0-9+/=]+)"
+        ]
+
+        for pattern in patterns {
+            if let regex = try? NSRegularExpression(pattern: pattern, options: []),
+               let match = regex.firstMatch(in: result, options: [], range: NSRange(result.startIndex..., in: result)),
+               let range = Range(match.range(at: 1), in: result) {
+                let base64String = String(result[range])
+
+                // Decode base64 to image
+                if let imageData = Data(base64Encoded: base64String),
+                   let image = UIImage(data: imageData) {
+                    logger.info("Browser screenshot extracted and decoded (\(image.size.width)x\(image.size.height))", category: .events)
+                    browserFrame = image
+                    showBrowserWindow = true
+                    return
+                }
+            }
+        }
+
+        // Also check if the result itself looks like base64 image data (PNG/JPEG magic bytes when decoded)
+        if result.hasPrefix("iVBOR") || result.hasPrefix("/9j/") {
+            if let imageData = Data(base64Encoded: result),
+               let image = UIImage(data: imageData) {
+                logger.info("Browser screenshot decoded from raw base64 (\(image.size.width)x\(image.size.height))", category: .events)
+                browserFrame = image
+                showBrowserWindow = true
+            }
         }
     }
 
