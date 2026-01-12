@@ -196,7 +196,20 @@ The browser runs headless by default and streams frames to the iOS app.`;
       }
 
       // Format the response
-      return { content: this.formatResult(action, result.data ?? {}) };
+      // Include full data in details for clients (e.g., iOS) that need raw binary data
+      // The text content is kept concise for Claude's context window
+      const formattedContent = this.formatResult(action, result.data ?? {});
+      const toolResult: TronToolResult = { content: formattedContent };
+
+      // For screenshot action, include full base64 in details for client access
+      if (action === 'screenshot' && result.data?.screenshot) {
+        toolResult.details = {
+          screenshot: result.data.screenshot,
+          format: result.data.format ?? 'png',
+        };
+      }
+
+      return toolResult;
     } catch (error) {
       return {
         content: [

@@ -2060,6 +2060,11 @@ export class EventStoreOrchestrator extends EventEmitter {
           }
         }
 
+        // Extract details from tool result (e.g., full screenshot data for iOS)
+        const resultDetails = typeof event.result === 'object' && event.result !== null
+          ? (event.result as { details?: unknown }).details
+          : undefined;
+
         this.emit('agent_event', {
           type: 'agent.tool_end',
           sessionId,
@@ -2071,6 +2076,9 @@ export class EventStoreOrchestrator extends EventEmitter {
             output: event.isError ? undefined : resultContent,
             error: event.isError ? resultContent : undefined,
             duration: event.duration,
+            // Include details for clients that need full binary data (e.g., iOS screenshots)
+            // This is NOT persisted to event store to avoid bloating storage
+            details: resultDetails,
           },
         });
 

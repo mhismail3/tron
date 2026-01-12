@@ -102,9 +102,9 @@ extension ChatViewModel {
                 tool.durationMs = event.durationMs
                 messages[index].content = .toolUse(tool)
 
-                // Check if this is a browser screenshot result
+                // Check if this is a browser tool result with screenshot data
                 if tool.toolName.lowercased().contains("browser") {
-                    extractAndDisplayBrowserScreenshot(from: event.displayResult)
+                    extractAndDisplayBrowserScreenshot(from: event)
                 }
             }
         } else {
@@ -118,8 +118,23 @@ extension ChatViewModel {
         }
     }
 
-    /// Extract base64 screenshot from browser tool result and display it
-    private func extractAndDisplayBrowserScreenshot(from result: String) {
+    /// Extract screenshot from browser tool result and display it
+    /// Prefers the full screenshot from event.details, falls back to parsing text output
+    private func extractAndDisplayBrowserScreenshot(from event: ToolEndEvent) {
+        // First, try to get the full screenshot from details (preferred - untruncated)
+        if let details = event.details,
+           let screenshotBase64 = details.screenshot,
+           let imageData = Data(base64Encoded: screenshotBase64),
+           let image = UIImage(data: imageData) {
+            logger.info("Browser screenshot from details (\(image.size.width)x\(image.size.height))", category: .events)
+            browserFrame = image
+            showBrowserWindow = true
+            return
+        }
+
+        // Fallback: try to extract from text result (may be truncated)
+        let result = event.displayResult
+
         // Look for base64 image data in the result
         // Format: "Screenshot captured (base64): iVBORw0KGgo..." or just raw base64
         let patterns = [
@@ -137,7 +152,7 @@ extension ChatViewModel {
                 // Decode base64 to image
                 if let imageData = Data(base64Encoded: base64String),
                    let image = UIImage(data: imageData) {
-                    logger.info("Browser screenshot extracted and decoded (\(image.size.width)x\(image.size.height))", category: .events)
+                    logger.info("Browser screenshot from text (\(image.size.width)x\(image.size.height))", category: .events)
                     browserFrame = image
                     showBrowserWindow = true
                     return
@@ -149,7 +164,7 @@ extension ChatViewModel {
         if result.hasPrefix("iVBOR") || result.hasPrefix("/9j/") {
             if let imageData = Data(base64Encoded: result),
                let image = UIImage(data: imageData) {
-                logger.info("Browser screenshot decoded from raw base64 (\(image.size.width)x\(image.size.height))", category: .events)
+                logger.info("Browser screenshot from raw base64 (\(image.size.width)x\(image.size.height))", category: .events)
                 browserFrame = image
                 showBrowserWindow = true
             }

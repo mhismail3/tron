@@ -82,9 +82,10 @@ struct ToolEndEvent: Decodable {
         let error: String?
         let durationMs: Int?
         let duration: Int?
+        let details: ToolDetails?  // Additional details like full screenshot data
 
         enum CodingKeys: String, CodingKey {
-            case toolCallId, toolName, success, result, output, error, durationMs, duration
+            case toolCallId, toolName, success, result, output, error, durationMs, duration, details
         }
 
         init(from decoder: Decoder) throws {
@@ -96,6 +97,7 @@ struct ToolEndEvent: Decodable {
             error = try container.decodeIfPresent(String.self, forKey: .error)
             durationMs = try container.decodeIfPresent(Int.self, forKey: .durationMs)
             duration = try container.decodeIfPresent(Int.self, forKey: .duration)
+            details = try container.decodeIfPresent(ToolDetails.self, forKey: .details)
 
             // Handle output as either String or [ContentBlock] array
             if let outputString = try? container.decodeIfPresent(String.self, forKey: .output) {
@@ -109,12 +111,19 @@ struct ToolEndEvent: Decodable {
         }
     }
 
+    /// Details structure for tool results (e.g., screenshot data)
+    struct ToolDetails: Decodable {
+        let screenshot: String?  // Full base64 screenshot data
+        let format: String?      // Image format (png, jpeg)
+    }
+
     var toolCallId: String { data.toolCallId }
     var toolName: String? { data.toolName }
     var success: Bool { data.success }
     var result: String? { data.result ?? data.output }  // Prefer result, fallback to output
     var error: String? { data.error }
     var durationMs: Int? { data.durationMs ?? data.duration }  // Handle both field names
+    var details: ToolDetails? { data.details }  // Access to full binary data (e.g., screenshots)
 
     var displayResult: String {
         if data.success {
