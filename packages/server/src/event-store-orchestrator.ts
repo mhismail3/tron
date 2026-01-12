@@ -2027,9 +2027,27 @@ export class EventStoreOrchestrator extends EventEmitter {
         break;
 
       case 'tool_execution_end': {
-        const resultContent = typeof event.result === 'object' && event.result !== null
-          ? (event.result as { content?: string }).content ?? JSON.stringify(event.result)
-          : String(event.result ?? '');
+        // Extract text content from TronToolResult
+        // content can be string OR array of { type: 'text', text } | { type: 'image', ... }
+        const resultContent = (() => {
+          if (typeof event.result !== 'object' || event.result === null) {
+            return String(event.result ?? '');
+          }
+          const result = event.result as { content?: string | Array<{ type: string; text?: string }> };
+          if (typeof result.content === 'string') {
+            return result.content;
+          }
+          if (Array.isArray(result.content)) {
+            // Extract text from content blocks, join with newlines
+            return result.content
+              .filter((block): block is { type: 'text'; text: string } =>
+                block.type === 'text' && typeof block.text === 'string')
+              .map(block => block.text)
+              .join('\n');
+          }
+          // Fallback: stringify the whole result
+          return JSON.stringify(event.result);
+        })();
 
         // Update tool call tracking for resume support (across ALL turns)
         if (active) {
