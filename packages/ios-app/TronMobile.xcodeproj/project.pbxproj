@@ -30,6 +30,7 @@
 		2701DC74D1DBFB4C90AC84AA /* InputHistoryStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = E5C3B6B3DA1A77E2A09976D5 /* InputHistoryStore.swift */; };
 		2AC4711FE03EDA25CA10832D /* ChatView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5571DC3A896875D1693192D9 /* ChatView.swift */; };
 		FLOATBROW0000000000200001 /* FloatingBrowserView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FLOATBROW0000000000100001 /* FloatingBrowserView.swift */; };
+		BROWSHEET0000000000200001 /* BrowserSheetView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BROWSHEET0000000000100001 /* BrowserSheetView.swift */; };
 		2B946C64D7C177C1EDEBF677 /* EventStoreManager+Cache.swift in Sources */ = {isa = PBXBuildFile; fileRef = 69F056A4E371328F3B9EE047 /* EventStoreManager+Cache.swift */; };
 		31FB5B88C183967844283776 /* ExtendedPayloads.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1BF58E115A8E40AD658E4346 /* ExtendedPayloads.swift */; };
 		329F629FAD3C73DA80ABDD4A /* TokenFormatter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13A4AA26839505AD8FD5CEC5 /* TokenFormatter.swift */; };
@@ -124,6 +125,7 @@
 		4C46C2D9874A2C1C807D43A0 /* EventTypeRegistry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EventTypeRegistry.swift; sourceTree = "<group>"; };
 		5571DC3A896875D1693192D9 /* ChatView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatView.swift; sourceTree = "<group>"; };
 		FLOATBROW0000000000100001 /* FloatingBrowserView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FloatingBrowserView.swift; sourceTree = "<group>"; };
+		BROWSHEET0000000000100001 /* BrowserSheetView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrowserSheetView.swift; sourceTree = "<group>"; };
 		67E30FC4A871038322F79EB0 /* Message.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Message.swift; sourceTree = "<group>"; };
 		68870B0709527607F70004EB /* String+Extensions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "String+Extensions.swift"; sourceTree = "<group>"; };
 		69203645DAFCA91156124C1F /* ToolResultViewers.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ToolResultViewers.swift; sourceTree = "<group>"; };
@@ -275,6 +277,7 @@
 				5571DC3A896875D1693192D9 /* ChatView.swift */,
 				DOCPICKER000000000100001 /* DocumentPicker.swift */,
 				FLOATBROW0000000000100001 /* FloatingBrowserView.swift */,
+				BROWSHEET0000000000100001 /* BrowserSheetView.swift */,
 				11A3A5FE4D68F7D714067F63 /* ContextAuditView.swift */,
 				VOICE001000000002A0000001 /* FloatingVoiceNotesButton.swift */,
 				3EF2CB735CA19344DB30086D /* InputBar.swift */,
@@ -458,6 +461,7 @@
 				ATTACH0010000000300000001 /* Attachment.swift in Sources */,
 				2AC4711FE03EDA25CA10832D /* ChatView.swift in Sources */,
 				FLOATBROW0000000000200001 /* FloatingBrowserView.swift in Sources */,
+				BROWSHEET0000000000200001 /* BrowserSheetView.swift in Sources */,
 				4896F1E74C19CBDFCFE1F5EC /* ChatViewModel+Connection.swift in Sources */,
 				0586FDB3434B135163CEE2D4 /* ChatViewModel+Events.swift in Sources */,
 				5A1242156B1B5AAC643EBB82 /* ChatViewModel+Messaging.swift in Sources */,
