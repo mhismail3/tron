@@ -432,7 +432,10 @@ class ChatViewModel: ObservableObject {
                         isStreaming: true,
                         currentUrl: nil
                     )
-                    self.showBrowserWindow = true
+                    // Only auto-show if user hasn't manually dismissed this turn
+                    if !self.userDismissedBrowserThisTurn {
+                        self.showBrowserWindow = true
+                    }
                 }
                 logger.info("Browser stream started", category: .session)
             }

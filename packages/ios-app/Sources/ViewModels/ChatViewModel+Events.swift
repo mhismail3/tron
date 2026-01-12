@@ -128,7 +128,10 @@ extension ChatViewModel {
            let image = UIImage(data: imageData) {
             logger.info("Browser screenshot from details (\(image.size.width)x\(image.size.height))", category: .events)
             browserFrame = image
-            showBrowserWindow = true
+            // Only auto-show if user hasn't manually dismissed this turn
+            if !userDismissedBrowserThisTurn && !showBrowserWindow {
+                showBrowserWindow = true
+            }
             return
         }
 
@@ -154,7 +157,10 @@ extension ChatViewModel {
                    let image = UIImage(data: imageData) {
                     logger.info("Browser screenshot from text (\(image.size.width)x\(image.size.height))", category: .events)
                     browserFrame = image
-                    showBrowserWindow = true
+                    // Only auto-show if user hasn't manually dismissed this turn
+                    if !userDismissedBrowserThisTurn && !showBrowserWindow {
+                        showBrowserWindow = true
+                    }
                     return
                 }
             }
@@ -166,7 +172,10 @@ extension ChatViewModel {
                let image = UIImage(data: imageData) {
                 logger.info("Browser screenshot from raw base64 (\(image.size.width)x\(image.size.height))", category: .events)
                 browserFrame = image
-                showBrowserWindow = true
+                // Only auto-show if user hasn't manually dismissed this turn
+                if !userDismissedBrowserThisTurn && !showBrowserWindow {
+                    showBrowserWindow = true
+                }
             }
         }
     }

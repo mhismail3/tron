@@ -40,7 +40,6 @@ struct BrowserSheetView: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
             }
-            .background(Color.tronSurface)
             .navigationBarTitleDisplayMode(.inline)
             .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
             .toolbar {
@@ -69,7 +68,7 @@ struct BrowserSheetView: View {
             }
         }
         .presentationDetents([.medium, .large])
-        .presentationDragIndicator(.visible)
+        .presentationDragIndicator(.hidden)
     }
 }
 
