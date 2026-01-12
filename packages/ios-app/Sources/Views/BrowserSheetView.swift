@@ -2,7 +2,7 @@ import SwiftUI
 import UIKit
 
 /// Browser preview sheet that displays live browser screenshots.
-/// Presented as a medium-height sheet, dismissible by swipe.
+/// Presented as a fixed-height sheet sized to the browser viewport.
 @available(iOS 26.0, *)
 struct BrowserSheetView: View {
     /// The latest browser frame image (decoded from base64)
@@ -17,78 +17,69 @@ struct BrowserSheetView: View {
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
-        NavigationStack {
-            ZStack {
-                Color.tronSurface.ignoresSafeArea()
+        VStack(spacing: 0) {
+            // Header bar
+            headerBar
+                .padding(.horizontal, 16)
+                .padding(.top, 12)
+                .padding(.bottom, 8)
 
-                if let image = frameImage {
-                    // Browser frame display
-                    browserFrameView(image: image)
-                } else {
-                    // Loading/connecting state
-                    loadingView
-                }
-            }
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
-            .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    Button {
-                        dismiss()
-                    } label: {
-                        Text("Done")
-                            .font(.system(size: 14, weight: .medium, design: .monospaced))
-                            .foregroundStyle(.tronEmerald)
-                    }
-                }
-                ToolbarItem(placement: .principal) {
-                    HStack(spacing: 8) {
-                        // Live indicator
-                        if isStreaming {
-                            Circle()
-                                .fill(.tronError)
-                                .frame(width: 8, height: 8)
-                        }
-                        Text(urlDisplayText)
-                            .font(.system(size: 14, weight: .semibold, design: .monospaced))
-                            .foregroundStyle(.tronEmerald)
-                            .lineLimit(1)
-                    }
-                }
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button {
-                        onCloseBrowser()
-                        dismiss()
-                    } label: {
-                        HStack(spacing: 4) {
-                            Image(systemName: "xmark.circle.fill")
-                                .font(.system(size: 12, weight: .medium))
-                            Text("Close")
-                                .font(.system(size: 13, weight: .medium, design: .monospaced))
-                        }
-                        .foregroundStyle(.tronError)
-                    }
-                }
+            // Browser content
+            if let image = frameImage {
+                browserFrameView(image: image)
+            } else {
+                loadingView
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
-        .presentationDetents([.medium, .large])
-        .presentationDragIndicator(.visible)
-        .tint(.tronEmerald)
+        .background(Color.tronSurface)
+        .presentationDetents([.browserSheet])
+        .presentationDragIndicator(.hidden)
+        .interactiveDismissDisabled(false)
         .preferredColorScheme(.dark)
     }
 
     // MARK: - Subviews
 
-    private func browserFrameView(image: UIImage) -> some View {
-        GeometryReader { geometry in
-            Image(uiImage: image)
-                .resizable()
-                .aspectRatio(contentMode: .fit)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .background(Color.black)
-                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                .padding(16)
+    private var headerBar: some View {
+        HStack {
+            // URL/title in center-left
+            HStack(spacing: 8) {
+                if isStreaming {
+                    Circle()
+                        .fill(.tronError)
+                        .frame(width: 8, height: 8)
+                }
+                Text(urlDisplayText)
+                    .font(.system(size: 14, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(.tronEmerald)
+                    .lineLimit(1)
+            }
+
+            Spacer()
+
+            // Close button (icon only)
+            Button {
+                onCloseBrowser()
+                dismiss()
+            } label: {
+                Image(systemName: "xmark.circle.fill")
+                    .font(.system(size: 24))
+                    .foregroundStyle(.tronTextMuted)
+            }
         }
+    }
+
+    private func browserFrameView(image: UIImage) -> some View {
+        // Calculate aspect ratio to fit image properly
+        let aspectRatio = image.size.width / image.size.height
+
+        return Image(uiImage: image)
+            .resizable()
+            .aspectRatio(aspectRatio, contentMode: .fit)
+            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .padding(.horizontal, 12)
+            .padding(.bottom, 12)
     }
 
     private var loadingView: some View {
@@ -111,7 +102,6 @@ struct BrowserSheetView: View {
 
     private var urlDisplayText: String {
         if let url = currentUrl, !url.isEmpty {
-            // Extract domain from URL
             if let urlObj = URL(string: url) {
                 return urlObj.host ?? "Browser"
             }
@@ -119,6 +109,14 @@ struct BrowserSheetView: View {
         }
         return "Browser"
     }
+}
+
+// MARK: - Custom Detent for Browser Sheet
+
+@available(iOS 26.0, *)
+extension PresentationDetent {
+    /// Custom detent sized for browser viewport (roughly 60% of screen)
+    static let browserSheet = Self.fraction(0.55)
 }
 
 // MARK: - Preview

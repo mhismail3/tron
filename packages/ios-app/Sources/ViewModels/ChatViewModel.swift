@@ -482,8 +482,9 @@ class ChatViewModel: ObservableObject {
         }
     }
 
-    /// Whether browser toolbar button should be enabled
+    /// Whether browser toolbar button should be visible
+    /// Shows if we have an active browser status OR a browser frame to display
     var hasBrowserSession: Bool {
-        browserStatus?.hasBrowser ?? false
+        (browserStatus?.hasBrowser ?? false) || browserFrame != nil
     }
 }
