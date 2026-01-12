@@ -192,6 +192,18 @@ struct ContextClearResult: Codable {
     let tokensAfter: Int
 }
 
+/// Parameters for context.compact RPC method
+struct ContextCompactParams: Codable {
+    let sessionId: String
+}
+
+/// Result from context.compact RPC method
+struct ContextCompactResult: Codable {
+    let success: Bool
+    let tokensBefore: Int
+    let tokensAfter: Int
+}
+
 /// Detailed message info for context auditing
 struct DetailedMessageInfo: Codable, Identifiable {
     let index: Int

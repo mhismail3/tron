@@ -639,6 +639,20 @@ class RPCClient: ObservableObject {
         )
     }
 
+    /// Compact context by summarizing older messages
+    func compactContext(sessionId: String) async throws -> ContextCompactResult {
+        guard let ws = webSocket else {
+            throw RPCClientError.connectionNotEstablished
+        }
+
+        let params = ContextCompactParams(sessionId: sessionId)
+        return try await ws.send(
+            method: "context.compact",
+            params: params,
+            timeout: 60.0  // Compaction can take a while
+        )
+    }
+
     // MARK: - Event Sync Methods
 
     /// Get event history for a session

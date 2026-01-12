@@ -14,7 +14,13 @@ struct ContextAuditView: View {
     @State private var detailedSnapshot: DetailedContextSnapshotResult?
     @State private var sessionEvents: [SessionEvent] = []
     @State private var isClearing = false
-    @State private var showClearConfirmation = false
+    @State private var isCompacting = false
+
+    /// Whether there are messages in context that can be cleared/compacted
+    private var hasMessages: Bool {
+        guard let snapshot = detailedSnapshot else { return false }
+        return !snapshot.messages.isEmpty
+    }
 
     var body: some View {
         NavigationStack {
@@ -32,37 +38,67 @@ struct ContextAuditView: View {
             .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
-                    Button { dismiss() } label: {
-                        Image(systemName: "xmark")
-                            .font(.system(size: 14, weight: .medium))
-                            .foregroundStyle(.tronEmerald)
+                    // Clear button with confirmation menu
+                    Menu {
+                        Text("Remove all messages from context.\nSystem prompt and tools preserved.")
+                            .font(.caption)
+                        Button("Clear Context", role: .destructive) {
+                            Task { await clearContext() }
+                        }
+                        Button("Cancel", role: .cancel) { }
+                    } label: {
+                        HStack(spacing: 4) {
+                            if isClearing {
+                                ProgressView()
+                                    .scaleEffect(0.7)
+                                    .tint(.tronError)
+                            } else {
+                                Image(systemName: "trash")
+                                    .font(.system(size: 12, weight: .medium))
+                            }
+                            Text("Clear")
+                                .font(.system(size: 13, weight: .medium, design: .monospaced))
+                        }
+                        .foregroundStyle(hasMessages ? .tronError : .tronTextMuted)
                     }
+                    .disabled(isClearing || !hasMessages)
                 }
                 ToolbarItem(placement: .principal) {
-                    Text("Context Manager")
-                        .font(.system(size: 16, weight: .semibold))
+                    Text("Context")
+                        .font(.system(size: 16, weight: .semibold, design: .monospaced))
                         .foregroundStyle(.tronEmerald)
                 }
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button { dismiss() } label: {
-                        Image(systemName: "checkmark")
-                            .font(.system(size: 14, weight: .semibold))
-                            .foregroundStyle(.tronEmerald)
+                    // Compact button with confirmation menu
+                    Menu {
+                        Text("Summarize older messages\nto free up context space.")
+                            .font(.caption)
+                        Button("Compact Context") {
+                            Task { await compactContext() }
+                        }
+                        Button("Cancel", role: .cancel) { }
+                    } label: {
+                        HStack(spacing: 4) {
+                            if isCompacting {
+                                ProgressView()
+                                    .scaleEffect(0.7)
+                                    .tint(.tronCyan)
+                            } else {
+                                Image(systemName: "arrow.down.right.and.arrow.up.left")
+                                    .font(.system(size: 12, weight: .medium))
+                            }
+                            Text("Compact")
+                                .font(.system(size: 13, weight: .medium, design: .monospaced))
+                        }
+                        .foregroundStyle(hasMessages ? .tronCyan : .tronTextMuted)
                     }
+                    .disabled(isCompacting || !hasMessages)
                 }
             }
             .alert("Error", isPresented: .constant(errorMessage != nil)) {
                 Button("OK") { errorMessage = nil }
             } message: {
                 Text(errorMessage ?? "")
-            }
-            .alert("Clear Context", isPresented: $showClearConfirmation) {
-                Button("Cancel", role: .cancel) { }
-                Button("Clear", role: .destructive) {
-                    Task { await clearContext() }
-                }
-            } message: {
-                Text("This will remove all messages from context. System prompt and tools will be preserved. This cannot be undone.")
             }
             .task {
                 await loadContext()
@@ -142,15 +178,6 @@ struct ContextAuditView: View {
                         // Messages breakdown (granular expandable) - using server data
                         DetailedMessagesSection(messages: snapshot.messages)
                             .padding(.horizontal)
-
-                        // Clear Context button
-                        ClearContextButton(
-                            isClearing: isClearing,
-                            hasMessages: !snapshot.messages.isEmpty,
-                            action: { showClearConfirmation = true }
-                        )
-                        .padding(.horizontal)
-                        .padding(.top, 8)
                     }
                     .padding(.vertical)
                 }
@@ -199,6 +226,20 @@ struct ContextAuditView: View {
         }
 
         isClearing = false
+    }
+
+    private func compactContext() async {
+        isCompacting = true
+
+        do {
+            _ = try await rpcClient.compactContext(sessionId: sessionId)
+            // Reload context to show updated state
+            await loadContext()
+        } catch {
+            errorMessage = "Failed to compact context: \(error.localizedDescription)"
+        }
+
+        isCompacting = false
     }
 }
 
@@ -803,45 +844,6 @@ struct DetailedMessageRow: View {
                 .fill(.clear)
                 .glassEffect(.regular.tint(iconColor.opacity(0.1)), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
         }
-    }
-}
-
-// MARK: - Clear Context Button
-
-@available(iOS 26.0, *)
-struct ClearContextButton: View {
-    let isClearing: Bool
-    let hasMessages: Bool
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            HStack(spacing: 8) {
-                if isClearing {
-                    ProgressView()
-                        .tint(.white)
-                        .scaleEffect(0.8)
-                } else {
-                    Image(systemName: "xmark.circle.fill")
-                        .font(.system(size: 14, weight: .medium))
-                }
-
-                Text(isClearing ? "Clearing..." : "Clear Context")
-                    .font(.system(size: 14, weight: .semibold, design: .monospaced))
-            }
-            .foregroundStyle(hasMessages ? .white : .white.opacity(0.4))
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 12)
-            .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-        }
-        .glassEffect(
-            hasMessages
-                ? .regular.tint(Color.tronError.opacity(0.6)).interactive()
-                : .regular.tint(Color.white.opacity(0.1)),
-            in: RoundedRectangle(cornerRadius: 10, style: .continuous)
-        )
-        .disabled(isClearing || !hasMessages)
-        .opacity(hasMessages ? 1.0 : 0.5)
     }
 }
 

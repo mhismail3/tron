@@ -127,6 +127,9 @@ struct ChatView: View {
                         onReasoningLevelChange: { newLevel in
                             reasoningLevel = newLevel
                         },
+                        onContextTap: {
+                            showContextAudit = true
+                        },
                         shouldFocus: $inputFocused
                     )
                     .id(sessionId)

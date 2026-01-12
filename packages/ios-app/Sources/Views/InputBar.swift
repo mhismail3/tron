@@ -36,6 +36,9 @@ struct InputBar: View {
     var currentModelInfo: ModelInfo?
     var onReasoningLevelChange: ((String) -> Void)?
 
+    // Context manager action
+    var onContextTap: (() -> Void)?
+
     /// Binding to control focus (used to prevent keyboard after response)
     @Binding var shouldFocus: Bool
 
@@ -441,27 +444,33 @@ struct InputBar: View {
     }
 
     private var tokenStatsPill: some View {
-        HStack(spacing: 8) {
-            // Context usage bar - use overlay + clipShape to prevent overflow
-            Capsule()
-                .fill(Color.white.opacity(0.2))
-                .frame(width: 40, height: 6)
-                .overlay(alignment: .leading) {
-                    // Fill rectangle that gets clipped by parent Capsule shape
-                    Rectangle()
-                        .fill(contextPercentageColor)
-                        .frame(width: 40 * min(CGFloat(contextPercentage) / 100.0, 1.0))
-                }
-                .clipShape(Capsule())
+        Button {
+            onContextTap?()
+        } label: {
+            HStack(spacing: 8) {
+                // Context usage bar - use overlay + clipShape to prevent overflow
+                Capsule()
+                    .fill(Color.white.opacity(0.2))
+                    .frame(width: 40, height: 6)
+                    .overlay(alignment: .leading) {
+                        // Fill rectangle that gets clipped by parent Capsule shape
+                        Rectangle()
+                            .fill(contextPercentageColor)
+                            .frame(width: 40 * min(CGFloat(contextPercentage) / 100.0, 1.0))
+                    }
+                    .clipShape(Capsule())
 
-            // Tokens remaining
-            Text("\(formattedTokensRemaining) left")
-                .foregroundStyle(contextPercentageColor)
+                // Tokens remaining
+                Text("\(formattedTokensRemaining) left")
+                    .foregroundStyle(contextPercentageColor)
+            }
+            .font(.system(size: 10, weight: .medium, design: .monospaced))
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .contentShape(Capsule())
         }
-        .font(.system(size: 10, weight: .medium, design: .monospaced))
-        .padding(.horizontal, 10)
-        .padding(.vertical, 6)
-        .glassEffect(.regular.tint(Color.tronPhthaloGreen.opacity(0.4)), in: .capsule)
+        .buttonStyle(.plain)
+        .glassEffect(.regular.tint(Color.tronPhthaloGreen.opacity(0.4)).interactive(), in: .capsule)
     }
 
     // MARK: - Unified Attachments Row
