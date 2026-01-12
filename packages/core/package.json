@@ -41,7 +41,7 @@
     "dist"
   ],
   "scripts": {
-    "build": "tsc -p tsconfig.build.json && cp -r src/providers/prompts dist/providers/",
+    "build": "tsc -p tsconfig.build.json && mkdir -p dist/providers && cp -r src/providers/prompts dist/providers/",
     "dev": "tsc -p tsconfig.build.json --watch",
     "test": "vitest run",
     "test:watch": "vitest",

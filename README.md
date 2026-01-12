@@ -32,22 +32,44 @@ tron/
 
 ## Quick Start
 
+**One-command setup:**
+
 ```bash
-# Install dependencies
-npm install
+./scripts/setup.sh
+```
 
-# Build all packages
-npm run build
+This will:
+- Check prerequisites (Node.js 20+)
+- Install Bun if needed
+- Install all dependencies
+- Build all packages
+- Create default configuration
 
-# Run tests
-npm test
+**Manual setup:**
+
+```bash
+# Install Bun (if not already installed)
+curl -fsSL https://bun.sh/install | bash
+
+# Install dependencies and build
+bun install
+bun run build
 
 # Start the TUI
-npm run dev:tui
+bun run dev:tui
 
 # Start the server (for chat interfaces)
-npm run dev:server
+bun run dev:server
 ```
+
+**Why Bun?**
+- ⚡ **3-6x faster** package installation than npm/pnpm/yarn
+- 🗄️ **Built-in SQLite** (bun:sqlite) 3-6x faster than better-sqlite3
+- 🚀 **Native TypeScript** support without transpilation
+- 📦 **Workspace support** with automatic dependency resolution
+- ✅ **Zero configuration** - works out of the box with monorepos
+
+**Note:** This project uses Bun exclusively. The `preinstall` hook prevents accidental use of npm or yarn.
 
 ## Memory Architecture
 
@@ -62,18 +84,44 @@ The key insight: **Clear, don't compact**. Save state to a ledger, wipe context,
 
 ## Development
 
-This project follows strict Test-Driven Development:
+This project uses **Bun** and follows strict Test-Driven Development:
 
 ```bash
 # Run tests in watch mode
-npm run test:watch
+bun run test:watch
 
 # Check types
-npm run typecheck
+bun run typecheck
 
 # Check coverage
-npm run test:coverage
+bun run test:coverage
+
+# Lint code
+bun run lint
+
+# Clean build artifacts
+bun run clean
 ```
+
+### Working with workspace packages
+
+```bash
+# Build a specific package
+cd packages/core && bun run build
+
+# Run dev for a specific package
+cd packages/tui && bun run dev
+
+# Install a dependency to a specific package
+bun add some-package --cwd packages/server
+```
+
+### Bun Performance Benefits
+
+- **Installation**: 70% faster than pnpm, 3x faster than npm
+- **Script execution**: Native binary execution without Node.js overhead
+- **SQLite operations**: Use `bun:sqlite` for 3-6x faster database queries
+- **TypeScript**: Direct execution without transpilation step
 
 ## Configuration
 

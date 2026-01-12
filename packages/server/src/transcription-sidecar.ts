@@ -151,9 +151,10 @@ async function ensureVenvPython(sidecarDir: string): Promise<string | null> {
 
   const systemPython = await resolveSystemPython();
   if (!systemPython) {
-    logger.error('Python interpreter not found. Install python3 or set TRON_PYTHON.');
+    logger.error('Python interpreter not found. Install python3.11 or python3.12, or set TRON_PYTHON.');
     return null;
   }
+  logger.info('Using Python interpreter for transcription venv', { python: systemPython });
 
   logger.info('Creating transcription venv', { venvDir });
   try {
@@ -175,7 +176,16 @@ async function ensureVenvPython(sidecarDir: string): Promise<string | null> {
 }
 
 async function resolveSystemPython(): Promise<string | null> {
-  const candidates = [process.env.TRON_PYTHON, 'python3', 'python'].filter(Boolean) as string[];
+  // Prefer Python 3.11/3.12 for ML package compatibility (onnxruntime, etc.)
+  // Python 3.13+ often lacks wheels for ML dependencies
+  const candidates = [
+    process.env.TRON_PYTHON,
+    'python3.11',
+    'python3.12',
+    'python3.10',
+    'python3',
+    'python',
+  ].filter(Boolean) as string[];
   for (const candidate of candidates) {
     if (await canExecute(candidate)) {
       return candidate;

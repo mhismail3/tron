@@ -73,20 +73,24 @@ check_prerequisites() {
 
     # Check Node.js
     if ! command -v node &> /dev/null; then
-        error "Node.js is not installed. Please install Node.js 18+ first."
+        error "Node.js is not installed. Please install Node.js 20+ first."
     fi
 
     NODE_VERSION=$(node -v | cut -d'v' -f2 | cut -d'.' -f1)
-    if [ "$NODE_VERSION" -lt 18 ]; then
-        error "Node.js version 18+ is required. Current version: $(node -v)"
+    if [ "$NODE_VERSION" -lt 20 ]; then
+        error "Node.js version 20+ is required. Current version: $(node -v)"
     fi
     success "Node.js $(node -v) found"
 
-    # Check npm
-    if ! command -v npm &> /dev/null; then
-        error "npm is not installed."
+    # Check or install Bun
+    if ! command -v bun &> /dev/null; then
+        log "Installing Bun..."
+        curl -fsSL https://bun.sh/install | bash
+        export PATH="$HOME/.bun/bin:$PATH"
+        success "Bun installed"
+    else
+        success "Bun $(bun --version) found"
     fi
-    success "npm $(npm -v) found"
 
     # Check git (optional but recommended)
     if command -v git &> /dev/null; then
@@ -221,7 +225,12 @@ install_dependencies() {
     log "Installing dependencies..."
 
     cd "$PROJECT_DIR"
-    npm install
+
+    # Install with bun
+    bun install
+
+    # Note: Bun has built-in SQLite support via bun:sqlite
+    # Native dependencies like better-sqlite3 and esbuild work automatically with Bun
 
     success "Dependencies installed"
 }
@@ -231,7 +240,9 @@ build_project() {
     log "Building project..."
 
     cd "$PROJECT_DIR"
-    npm run build
+
+    # Build all packages in order using the workspace build script
+    ./scripts/build-workspace.sh
 
     success "Project built successfully"
 }
@@ -242,7 +253,7 @@ run_tests() {
         log "Running tests..."
 
         cd "$PROJECT_DIR"
-        if npm test; then
+        if bun test; then
             success "All tests passed"
         else
             warn "Some tests failed (continuing anyway)"
@@ -365,10 +376,13 @@ print_summary() {
     echo "       - Run 'tron login' for Claude Max OAuth"
     echo ""
     echo "    2. Start the server:"
-    echo "       npm run start:server"
+    echo "       bun run server:start"
     echo ""
     echo "    3. Launch the TUI:"
-    echo "       npm run start:tui"
+    echo "       bun run dev:tui"
+    echo ""
+    echo "  Note: Bun has built-in SQLite (bun:sqlite) which is 3-6x faster"
+    echo "        than better-sqlite3 for database operations."
     echo ""
     echo "    4. (Optional) Install as a service:"
     echo "       ./scripts/install-service.sh"

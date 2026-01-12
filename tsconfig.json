@@ -21,15 +21,7 @@
     "exactOptionalPropertyTypes": false,
     "composite": true,
     "incremental": true,
-    "baseUrl": ".",
-    "paths": {
-      "@tron/core": ["packages/core/src"],
-      "@tron/core/*": ["packages/core/src/*"],
-      "@tron/server": ["packages/server/src"],
-      "@tron/server/*": ["packages/server/src/*"],
-      "@tron/tui": ["packages/tui/src"],
-      "@tron/tui/*": ["packages/tui/src/*"]
-    }
+    "baseUrl": "."
   },
   "references": [
     { "path": "packages/core" },
