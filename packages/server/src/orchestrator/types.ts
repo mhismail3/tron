@@ -13,6 +13,7 @@ import {
   type WorktreeCoordinatorConfig,
   type CurrentTurnToolCall,
 } from '@tron/core';
+import type { TurnContentTracker } from './turn-content-tracker.js';
 
 // =============================================================================
 // Configuration
@@ -32,32 +33,6 @@ export interface EventStoreOrchestratorConfig {
   /** Pre-existing EventStore instance (for testing) - if provided, eventStoreDbPath is ignored */
   eventStore?: EventStore;
 }
-
-// =============================================================================
-// Default System Prompt
-// =============================================================================
-
-export const DEFAULT_SYSTEM_PROMPT = `You are Tron, an AI coding assistant with full access to the user's file system.
-
-You have access to the following tools:
-- read: Read files from the file system
-- write: Write content to files
-- edit: Make targeted edits to existing files
-- bash: Execute shell commands
-- grep: Search for patterns in files
-- find: Find files by name or pattern
-- ls: List directory contents
-
-When the user asks you to work with files or code, you can directly read, write, and edit files using these tools. You are operating on the server machine with full file system access.
-
-Be helpful, accurate, and efficient. When working with code:
-1. Read existing files to understand context before making changes
-2. Make targeted, minimal edits rather than rewriting entire files
-3. Test changes by running appropriate commands when asked
-4. Explain what you're doing and why
-
-Current working directory: {workingDirectory}
-`;
 
 // =============================================================================
 // Worktree Types
@@ -96,6 +71,11 @@ export interface ActiveSession {
   workingDir?: WorkingDirectory;
   /** Current turn number (tracked for discrete event storage) */
   currentTurn: number;
+  /**
+   * Encapsulated content tracker for both accumulated and per-turn tracking.
+   * Replaces the individual tracking fields below.
+   */
+  turnTracker: TurnContentTracker;
   /**
    * In-memory head event ID for linearizing event appends.
    * Updated synchronously BEFORE async DB writes to prevent race conditions

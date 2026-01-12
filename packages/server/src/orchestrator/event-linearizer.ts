@@ -13,6 +13,7 @@ import {
   EventStore,
   type EventType,
   type SessionId,
+  type TronSessionEvent,
 } from '@tron/core';
 import type { ActiveSession } from './types.js';
 
@@ -89,6 +90,68 @@ export function appendEventLinearized(
         active.lastAppendError = err instanceof Error ? err : new Error(String(err));
       }
     });
+}
+
+/**
+ * Append an event and return the result, properly chained to the promise queue.
+ *
+ * Unlike `appendEventLinearized`, this function:
+ * 1. Returns a Promise that resolves when the event is appended
+ * 2. Returns the created event (or null if skipped/failed)
+ * 3. Updates pendingHeadEventId after successful append
+ *
+ * Use this for synchronous-style code where you need to wait for the event
+ * before continuing (e.g., endSession, switchModel, confirmCompaction).
+ *
+ * @param eventStore - EventStore instance for persistence
+ * @param sessionId - Session ID for the event
+ * @param active - Active session containing the promise chain state
+ * @param type - Event type to append
+ * @param payload - Event payload data
+ * @returns The created event, or null if skipped due to prior error
+ */
+export async function appendEventLinearizedAsync(
+  eventStore: EventStore,
+  sessionId: SessionId,
+  active: ActiveSession,
+  type: EventType,
+  payload: Record<string, unknown>
+): Promise<TronSessionEvent | null> {
+  // Wait for any pending appends to complete first
+  await active.appendPromiseChain;
+
+  // Check for prior errors
+  if (active.lastAppendError) {
+    logger.warn('Skipping async append due to prior error', {
+      sessionId,
+      type,
+      priorError: active.lastAppendError.message,
+    });
+    return null;
+  }
+
+  const parentId = active.pendingHeadEventId;
+  if (!parentId) {
+    logger.error('Cannot append event: no pending head event ID', { sessionId, type });
+    return null;
+  }
+
+  try {
+    const event = await eventStore.append({
+      sessionId,
+      type,
+      payload,
+      parentId,
+    });
+    // Update in-memory head for subsequent events
+    active.pendingHeadEventId = event.id;
+    return event;
+  } catch (err) {
+    logger.error(`Failed to store ${type} event`, { err, sessionId });
+    // Track error to prevent subsequent appends from creating orphaned events
+    active.lastAppendError = err instanceof Error ? err : new Error(String(err));
+    return null;
+  }
 }
 
 /**

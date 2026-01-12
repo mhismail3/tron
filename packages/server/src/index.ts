@@ -185,14 +185,21 @@ function createRpcContext(orchestrator: EventStoreOrchestrator): RpcContext {
         };
       },
     },
-    // Memory operations are deprecated - use event store search instead
+    /**
+     * @deprecated Memory operations have been moved to event store search.
+     * These methods are kept for backward compatibility but return empty results.
+     * Use `eventStore.searchContent()` instead.
+     */
     memoryStore: {
+      /** @deprecated Use eventStore.searchContent() instead */
       async searchEntries(_params) {
         return { entries: [], totalCount: 0 };
       },
+      /** @deprecated No longer supported */
       async addEntry(_params) {
         return { id: '' };
       },
+      /** @deprecated Use eventStore.getEventHistory() instead */
       async listHandoffs(_workingDirectory, _limit) {
         return [];
       },

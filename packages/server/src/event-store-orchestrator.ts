@@ -38,7 +38,6 @@ import {
   type WorkingDirectory,
   type ServerAuth,
   type EventType,
-  type CurrentTurnToolCall,
   type ContextSnapshot,
   type DetailedContextSnapshot,
   type PreTurnValidation,
@@ -62,6 +61,7 @@ import {
   buildWorktreeInfoWithStatus,
   commitWorkingDirectory,
 } from './orchestrator/worktree-ops.js';
+import { TurnContentTracker } from './orchestrator/turn-content-tracker.js';
 import {
   type EventStoreOrchestratorConfig,
   type ActiveSession,
@@ -226,6 +226,8 @@ export class EventStoreOrchestrator extends EventEmitter {
       model,
       workingDir,
       currentTurn: 0,
+      // Encapsulated content tracker for accumulated and per-turn tracking
+      turnTracker: new TurnContentTracker(),
       // Initialize linearization tracking with root event as head
       pendingHeadEventId: result.rootEvent.id,
       appendPromiseChain: Promise.resolve(),
@@ -307,6 +309,8 @@ export class EventStoreOrchestrator extends EventEmitter {
       model: session.latestModel,
       workingDir,
       currentTurn: session.turnCount ?? 0,
+      // Encapsulated content tracker for accumulated and per-turn tracking
+      turnTracker: new TurnContentTracker(),
       // Initialize linearization tracking from session's current head
       pendingHeadEventId: session.headEventId ?? null,
       appendPromiseChain: Promise.resolve(),
@@ -754,129 +758,9 @@ export class EventStoreOrchestrator extends EventEmitter {
         }
 
         // CRITICAL: Persist partial content so it survives session resume
-        // Build content from the content sequence to preserve exact interleaving order
-        // The sequence tracks text and tool_refs in the order they were received
-        const assistantContent: any[] = [];
-        const toolResultContent: any[] = [];
-
-        // Build a lookup map for tool calls by ID for efficient access
-        const toolCallMap = new Map<string, CurrentTurnToolCall>();
-        if (active.currentTurnToolCalls) {
-          for (const tc of active.currentTurnToolCalls) {
-            toolCallMap.set(tc.toolCallId, tc);
-          }
-        }
-
-        // Iterate through the content sequence to preserve exact order
-        // This ensures text and tools appear in the same order as they were displayed
-        if (active.currentTurnContentSequence && active.currentTurnContentSequence.length > 0) {
-          for (const item of active.currentTurnContentSequence) {
-            if (item.type === 'text') {
-              // Add text block directly
-              if (item.text) {
-                assistantContent.push({ type: 'text', text: item.text });
-              }
-            } else if (item.type === 'tool_ref') {
-              // Look up the tool call and add tool_use block
-              const tc = toolCallMap.get(item.toolCallId);
-              if (tc) {
-                // Calculate duration if we have timing info
-                const durationMs = tc.completedAt && tc.startedAt
-                  ? new Date(tc.completedAt).getTime() - new Date(tc.startedAt).getTime()
-                  : undefined;
-
-                // Add tool_use block with status metadata
-                // Mark interrupted tools so iOS can show red X
-                const isInterrupted = tc.status === 'running' || tc.status === 'pending';
-                assistantContent.push({
-                  type: 'tool_use',
-                  id: tc.toolCallId,
-                  name: tc.toolName,
-                  input: tc.arguments,
-                  // Extended metadata for comprehensive ledger
-                  _meta: {
-                    status: tc.status,
-                    interrupted: isInterrupted,
-                    durationMs,
-                  },
-                });
-
-                // Add tool_result for completed/error tools
-                // This ensures results are visible when session is restored
-                if (tc.status === 'completed' || tc.status === 'error') {
-                  toolResultContent.push({
-                    type: 'tool_result',
-                    tool_use_id: tc.toolCallId,
-                    content: tc.result ?? (tc.isError ? 'Error' : '(no output)'),
-                    is_error: tc.isError ?? false,
-                    // Extended metadata
-                    _meta: {
-                      durationMs,
-                      toolName: tc.toolName,
-                    },
-                  });
-                } else if (isInterrupted) {
-                  // Add interrupted tool_result so the UI shows "interrupted" message
-                  toolResultContent.push({
-                    type: 'tool_result',
-                    tool_use_id: tc.toolCallId,
-                    content: 'Command interrupted (no output captured)',
-                    is_error: false,
-                    _meta: {
-                      interrupted: true,
-                      durationMs,
-                      toolName: tc.toolName,
-                    },
-                  });
-                }
-              }
-            }
-          }
-        } else {
-          // Fallback: If no sequence tracking, use old method (text first, then tools)
-          // This handles edge cases where sequence wasn't populated
-          const partialText = active.currentTurnAccumulatedText || runResult.partialContent || '';
-          if (partialText) {
-            assistantContent.push({ type: 'text', text: partialText });
-          }
-
-          for (const tc of toolCallMap.values()) {
-            const durationMs = tc.completedAt && tc.startedAt
-              ? new Date(tc.completedAt).getTime() - new Date(tc.startedAt).getTime()
-              : undefined;
-
-            const isInterrupted = tc.status === 'running' || tc.status === 'pending';
-            assistantContent.push({
-              type: 'tool_use',
-              id: tc.toolCallId,
-              name: tc.toolName,
-              input: tc.arguments,
-              _meta: {
-                status: tc.status,
-                interrupted: isInterrupted,
-                durationMs,
-              },
-            });
-
-            if (tc.status === 'completed' || tc.status === 'error') {
-              toolResultContent.push({
-                type: 'tool_result',
-                tool_use_id: tc.toolCallId,
-                content: tc.result ?? (tc.isError ? 'Error' : '(no output)'),
-                is_error: tc.isError ?? false,
-                _meta: { durationMs, toolName: tc.toolName },
-              });
-            } else if (isInterrupted) {
-              toolResultContent.push({
-                type: 'tool_result',
-                tool_use_id: tc.toolCallId,
-                content: 'Command interrupted (no output captured)',
-                is_error: false,
-                _meta: { interrupted: true, durationMs, toolName: tc.toolName },
-              });
-            }
-          }
-        }
+        // Use TurnContentTracker to build content blocks from accumulated state
+        // This preserves exact interleaving order of text and tool calls
+        const { assistantContent, toolResultContent } = active.turnTracker.buildInterruptedContent();
 
         // Only persist if there's actual content
         if (assistantContent.length > 0 || toolResultContent.length > 0) {
@@ -907,8 +791,7 @@ export class EventStoreOrchestrator extends EventEmitter {
               sessionId: active.sessionId,
               eventId: assistantMsgEvent.id,
               contentBlocks: normalizedAssistantContent.length,
-              sequenceItems: active.currentTurnContentSequence?.length ?? 0,
-              toolCalls: active.currentTurnToolCalls?.length ?? 0,
+              hasAccumulatedContent: active.turnTracker.hasAccumulatedContent(),
             });
           }
 
@@ -955,7 +838,8 @@ export class EventStoreOrchestrator extends EventEmitter {
         // Mark session as interrupted in metadata
         active.wasInterrupted = true;
 
-        // Clear turn tracking state
+        // Clear turn tracking state (both tracker and legacy fields for backward compatibility)
+        active.turnTracker.onAgentEnd();
         active.currentTurnAccumulatedText = '';
         active.currentTurnToolCalls = [];
         active.currentTurnContentSequence = [];
@@ -1151,34 +1035,10 @@ export class EventStoreOrchestrator extends EventEmitter {
 
     // Update active session if exists
     if (active) {
-      // Detect new provider type and load appropriate auth
+      // Get auth for the new model (handles Codex OAuth vs standard auth)
+      const newAuth = await this.getAuthForProvider(model);
       const newProviderType = detectProviderFromModel(model);
-      let newAuth: ServerAuth;
-
-      if (newProviderType === 'openai-codex') {
-        // Load Codex-specific OAuth tokens
-        const codexTokens = this.loadCodexTokens();
-        if (!codexTokens) {
-          throw new Error('OpenAI Codex not authenticated. Sign in via the iOS app or use a different model.');
-        }
-        newAuth = {
-          type: 'oauth',
-          accessToken: codexTokens.accessToken,
-          refreshToken: codexTokens.refreshToken,
-          expiresAt: codexTokens.expiresAt,
-        };
-        logger.debug('[MODEL_SWITCH] Using Codex OAuth tokens', { sessionId });
-      } else {
-        // Use cached auth from ~/.tron/auth.json (supports Claude Max OAuth)
-        if (!this.cachedAuth || (this.cachedAuth.type === 'oauth' && this.cachedAuth.expiresAt < Date.now())) {
-          this.cachedAuth = await loadServerAuth();
-        }
-        if (!this.cachedAuth) {
-          throw new Error('No authentication configured. Run `tron login` to authenticate.');
-        }
-        newAuth = this.cachedAuth;
-        logger.debug('[MODEL_SWITCH] Using cached auth', { sessionId, authType: newAuth.type });
-      }
+      logger.debug('[MODEL_SWITCH] Auth loaded', { sessionId, authType: newAuth.type, providerType: newProviderType });
 
       active.model = model;
       // CRITICAL: Use agent's switchModel() to preserve conversation history
@@ -1581,34 +1441,9 @@ export class EventStoreOrchestrator extends EventEmitter {
     model: string,
     systemPrompt?: string
   ): Promise<TronAgent> {
-    // Detect provider type from model
+    // Get auth for the model (handles Codex OAuth vs standard auth)
+    const auth = await this.getAuthForProvider(model);
     const providerType = detectProviderFromModel(model);
-
-    // For OpenAI Codex models, load Codex-specific OAuth tokens
-    let auth: ServerAuth;
-    if (providerType === 'openai-codex') {
-      const codexTokens = this.loadCodexTokens();
-      if (!codexTokens) {
-        throw new Error('OpenAI Codex not authenticated. Sign in via the iOS app or use a different model.');
-      }
-      auth = {
-        type: 'oauth',
-        accessToken: codexTokens.accessToken,
-        refreshToken: codexTokens.refreshToken,
-        expiresAt: codexTokens.expiresAt,
-      };
-    } else {
-      // Use cached auth from ~/.tron/auth.json (supports Claude Max OAuth)
-      // Refresh cache if needed (OAuth tokens expire)
-      if (!this.cachedAuth || (this.cachedAuth.type === 'oauth' && this.cachedAuth.expiresAt < Date.now())) {
-        this.cachedAuth = await loadServerAuth();
-      }
-
-      if (!this.cachedAuth) {
-        throw new Error('No authentication configured. Run `tron login` to authenticate with Claude Max or set up API key.');
-      }
-      auth = this.cachedAuth;
-    }
 
     const tools: TronTool[] = [
       new ReadTool({ workingDirectory }),
@@ -1672,6 +1507,41 @@ export class EventStoreOrchestrator extends EventEmitter {
     return null;
   }
 
+  /**
+   * Get authentication credentials for a given model.
+   * Handles Codex OAuth tokens separately from standard auth.
+   * Refreshes cached auth if OAuth tokens are expired.
+   */
+  private async getAuthForProvider(model: string): Promise<ServerAuth> {
+    const providerType = detectProviderFromModel(model);
+
+    if (providerType === 'openai-codex') {
+      // Load Codex-specific OAuth tokens
+      const codexTokens = this.loadCodexTokens();
+      if (!codexTokens) {
+        throw new Error('OpenAI Codex not authenticated. Sign in via the iOS app or use a different model.');
+      }
+      return {
+        type: 'oauth',
+        accessToken: codexTokens.accessToken,
+        refreshToken: codexTokens.refreshToken,
+        expiresAt: codexTokens.expiresAt,
+      };
+    }
+
+    // Use cached auth from ~/.tron/auth.json (supports Claude Max OAuth)
+    // Refresh cache if needed (OAuth tokens expire)
+    if (!this.cachedAuth || (this.cachedAuth.type === 'oauth' && this.cachedAuth.expiresAt < Date.now())) {
+      this.cachedAuth = await loadServerAuth();
+    }
+
+    if (!this.cachedAuth) {
+      throw new Error('No authentication configured. Run `tron login` to authenticate.');
+    }
+
+    return this.cachedAuth;
+  }
+
   // ===========================================================================
   // Linearized Event Appending
   // ===========================================================================
@@ -1723,19 +1593,12 @@ export class EventStoreOrchestrator extends EventEmitter {
           // Record turn start time for latency calculation
           active.currentTurnStartTime = Date.now();
 
-          // Clear THIS TURN's content tracking (for per-turn message.assistant creation)
-          // This is separate from accumulated content which persists across turns for catch-up
+          // Use TurnContentTracker for turn lifecycle
+          active.turnTracker.onTurnStart(event.turn);
+
+          // LEGACY: Keep old fields synchronized for backward compatibility during transition
           active.thisTurnContent = [];
           active.thisTurnToolCalls = new Map();
-
-          // NOTE: We do NOT reset accumulated content here anymore!
-          // We accumulate content across ALL turns within an agent run so that
-          // when a client resumes into a running session, they get ALL content
-          // from the current runAgent call (Turn 1, Turn 2, etc.), not just
-          // the current turn. Accumulation is cleared at agent_start/agent_end.
-
-          // Add a newline separator between turns (if there's existing content)
-          // This ensures text from different turns doesn't run together
           if (event.turn > 1 && active.currentTurnAccumulatedText.length > 0) {
             active.currentTurnAccumulatedText += '\n';
           }
@@ -1879,18 +1742,17 @@ export class EventStoreOrchestrator extends EventEmitter {
       case 'message_update':
         // Accumulate text for resume support (across ALL turns)
         if (active && typeof event.content === 'string') {
-          active.currentTurnAccumulatedText += event.content;
+          // Use TurnContentTracker for text delta (updates both accumulated and per-turn)
+          active.turnTracker.addTextDelta(event.content);
 
-          // Track in content sequence for proper interleaving on interrupt (across ALL turns)
-          // If the last item is a text item, append to it; otherwise add new text item
+          // LEGACY: Keep old fields synchronized for backward compatibility during transition
+          active.currentTurnAccumulatedText += event.content;
           const lastItem = active.currentTurnContentSequence[active.currentTurnContentSequence.length - 1];
           if (lastItem && lastItem.type === 'text') {
             lastItem.text += event.content;
           } else {
             active.currentTurnContentSequence.push({ type: 'text', text: event.content });
           }
-
-          // Also track in THIS TURN's content (for per-turn message.assistant creation)
           const lastThisTurnItem = active.thisTurnContent[active.thisTurnContent.length - 1];
           if (lastThisTurnItem && lastThisTurnItem.type === 'text') {
             lastThisTurnItem.text += event.content;
@@ -1910,6 +1772,15 @@ export class EventStoreOrchestrator extends EventEmitter {
       case 'tool_execution_start':
         // Track tool call for resume support (across ALL turns)
         if (active) {
+          // Use TurnContentTracker for tool start (updates both accumulated and per-turn)
+          active.turnTracker.startToolCall(
+            event.toolCallId,
+            event.toolName,
+            event.arguments ?? {},
+            timestamp
+          );
+
+          // LEGACY: Keep old fields synchronized for backward compatibility during transition
           const toolCallData = {
             toolCallId: event.toolCallId,
             toolName: event.toolName,
@@ -1918,14 +1789,10 @@ export class EventStoreOrchestrator extends EventEmitter {
             startedAt: timestamp,
           };
           active.currentTurnToolCalls.push(toolCallData);
-
-          // Track in content sequence for proper interleaving on interrupt (across ALL turns)
           active.currentTurnContentSequence.push({
             type: 'tool_ref',
             toolCallId: event.toolCallId,
           });
-
-          // Also track in THIS TURN (for per-turn message.assistant creation)
           active.thisTurnToolCalls.set(event.toolCallId, { ...toolCallData });
           active.thisTurnContent.push({
             type: 'tool_ref',
@@ -1960,6 +1827,15 @@ export class EventStoreOrchestrator extends EventEmitter {
 
         // Update tool call tracking for resume support (across ALL turns)
         if (active) {
+          // Use TurnContentTracker for tool end (updates both accumulated and per-turn)
+          active.turnTracker.endToolCall(
+            event.toolCallId,
+            resultContent,
+            event.isError ?? false,
+            timestamp
+          );
+
+          // LEGACY: Keep old fields synchronized for backward compatibility during transition
           const toolCall = active.currentTurnToolCalls.find(
             tc => tc.toolCallId === event.toolCallId
           );
@@ -1969,8 +1845,6 @@ export class EventStoreOrchestrator extends EventEmitter {
             toolCall.isError = event.isError ?? false;
             toolCall.completedAt = timestamp;
           }
-
-          // Also update THIS TURN's tool call tracking
           const thisTurnToolCall = active.thisTurnToolCalls.get(event.toolCallId);
           if (thisTurnToolCall) {
             thisTurnToolCall.status = event.isError ? 'error' : 'completed';
@@ -2020,6 +1894,10 @@ export class EventStoreOrchestrator extends EventEmitter {
         // Clear accumulation at the start of a new agent run
         // This ensures fresh tracking for the new runAgent call
         if (active) {
+          // Use TurnContentTracker for agent lifecycle
+          active.turnTracker.onAgentStart();
+
+          // LEGACY: Keep old fields synchronized for backward compatibility during transition
           active.currentTurnAccumulatedText = '';
           active.currentTurnToolCalls = [];
           active.currentTurnContentSequence = [];
@@ -2038,6 +1916,10 @@ export class EventStoreOrchestrator extends EventEmitter {
         // Clear accumulation when agent run completes
         // Content is now persisted in EventStore, no need for catch-up tracking
         if (active) {
+          // Use TurnContentTracker for agent lifecycle
+          active.turnTracker.onAgentEnd();
+
+          // LEGACY: Keep old fields synchronized for backward compatibility during transition
           active.currentTurnAccumulatedText = '';
           active.currentTurnToolCalls = [];
           active.currentTurnContentSequence = [];
