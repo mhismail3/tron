@@ -317,6 +317,7 @@ struct InputBar: View {
             if !modelName.isEmpty && showModelPill {
                 Menu {
                     // Anthropic 4.5 models at top (closest to thumb when menu opens upward)
+                    Text("Anthropic").font(.caption2).foregroundStyle(.secondary)
                     ForEach(latestAnthropicModels) { model in
                         Button { NotificationCenter.default.post(name: .modelPickerAction, object: model) } label: {
                             Label(model.formattedModelName, systemImage: "sparkles")
@@ -326,6 +327,7 @@ struct InputBar: View {
 
                     // OpenAI Codex models in middle
                     if !codexModels.isEmpty {
+                        Text("OpenAI Codex").font(.caption2).foregroundStyle(.secondary)
                         ForEach(codexModels) { model in
                             Button { NotificationCenter.default.post(name: .modelPickerAction, object: model) } label: {
                                 Label(model.formattedModelName, systemImage: "bolt")
@@ -336,6 +338,7 @@ struct InputBar: View {
 
                     // Legacy models at bottom (furthest from thumb)
                     if !legacyModels.isEmpty {
+                        Text("Legacy").font(.caption2).foregroundStyle(.secondary)
                         ForEach(legacyModels) { model in
                             Button { NotificationCenter.default.post(name: .modelPickerAction, object: model) } label: {
                                 Label(model.formattedModelName, systemImage: "clock")
