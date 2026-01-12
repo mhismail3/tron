@@ -31,6 +31,108 @@ struct ModelPillLabel: View {
     }
 }
 
+/// Popup menu for selecting models - replaces the old sheet-based picker
+/// Organized by provider: Anthropic, OpenAI Codex, Google
+/// Used inline in InputBar for fast model switching
+@available(iOS 26.0, *)
+struct ModelPickerMenu: View {
+    let currentModel: String
+    let models: [ModelInfo]
+    let isLoading: Bool
+    let onSelect: (ModelInfo) -> Void
+
+    // PERFORMANCE: Cache filtered/sorted models to avoid recalculating on every render
+    private var latestAnthropicModels: [ModelInfo] {
+        models.filter { ($0.provider.lowercased() == "anthropic" || $0.id.lowercased().contains("claude")) && $0.is45Model }
+            .uniqueByFormattedName().sortedByTier()
+    }
+
+    private var legacyAnthropicModels: [ModelInfo] {
+        models.filter { ($0.provider.lowercased() == "anthropic" || $0.id.lowercased().contains("claude")) && !$0.is45Model }
+            .uniqueByFormattedName().sortedByTier()
+    }
+
+    /// OpenAI Codex models (via ChatGPT subscription), sorted by version descending
+    private var openAICodexModels: [ModelInfo] {
+        models.filter { $0.provider.lowercased() == "openai-codex" }
+            .sorted { m1, m2 in
+                // Sort by version descending (5.2 before 5.1)
+                codexVersionPriority(m1) > codexVersionPriority(m2)
+            }
+    }
+
+    private func codexVersionPriority(_ model: ModelInfo) -> Int {
+        let id = model.id.lowercased()
+        if id.contains("5.2") { return 52 }
+        if id.contains("5.1") { return 51 }
+        if id.contains("5.0") || id.contains("-5-") { return 50 }
+        return 0
+    }
+
+    /// Standard OpenAI API models (gpt-4o, o1, o3, etc.)
+    private var standardOpenAIModels: [ModelInfo] {
+        models.filter { $0.provider.lowercased() == "openai" && !$0.provider.contains("codex") }
+    }
+
+    var body: some View {
+        // DEBUG: Simplified Menu - just ForEach without computed properties
+        Menu {
+            Section("All Models") {
+                ForEach(models) { model in
+                    Button(model.formattedModelName) {
+                        onSelect(model)
+                    }
+                }
+            }
+        } label: {
+            HStack(spacing: 4) {
+                Image(systemName: "cpu")
+                    .font(.system(size: 9, weight: .medium))
+                Text(currentModel.shortModelName)
+                    .font(.system(size: 10, weight: .medium, design: .monospaced))
+                Image(systemName: "chevron.up.chevron.down")
+                    .font(.system(size: 8, weight: .medium))
+            }
+            .foregroundStyle(.tronEmerald)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 5)
+            .background {
+                Capsule()
+                    .fill(.clear)
+                    .glassEffect(.regular.tint(Color.tronPhthaloGreen.opacity(0.4)), in: .capsule)
+            }
+            .contentShape(Capsule())
+        }
+    }
+
+    // MARK: - Model Button
+
+    @ViewBuilder
+    private func modelButton(_ model: ModelInfo) -> some View {
+        Button(model.formattedModelName) {
+            onSelect(model)
+        }
+    }
+
+    /// Codex model button with reasoning level indicator
+    @ViewBuilder
+    private func codexModelButton(_ model: ModelInfo) -> some View {
+        Button {
+            onSelect(model)
+        } label: {
+            HStack {
+                Text(model.formattedModelName)
+                if model.supportsReasoning == true {
+                    Text("reasoning")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+    }
+
+}
+
 // MARK: - Array Extensions for Model Filtering
 
 extension Array where Element == ModelInfo {
