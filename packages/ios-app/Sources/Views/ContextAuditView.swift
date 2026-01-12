@@ -770,11 +770,12 @@ struct DetailedMessageRow: View {
                     isExpanded.toggle()
                 }
             }) {
-                HStack(spacing: 10) {
+                HStack(alignment: .top, spacing: 10) {
                     Image(systemName: icon)
                         .font(.system(size: 12))
                         .foregroundStyle(iconColor)
                         .frame(width: 18)
+                        .padding(.top, 2)
 
                     VStack(alignment: .leading, spacing: 2) {
                         Text(title)
@@ -796,11 +797,13 @@ struct DetailedMessageRow: View {
                     Text(formatTokens(message.tokens))
                         .font(.system(size: 10, design: .monospaced))
                         .foregroundStyle(.white.opacity(0.5))
+                        .padding(.top, 2)
 
                     Image(systemName: "chevron.down")
                         .font(.system(size: 10, weight: .medium))
                         .foregroundStyle(.white.opacity(0.4))
                         .rotationEffect(.degrees(isExpanded ? -180 : 0))
+                        .padding(.top, 4)
                 }
                 .padding(.horizontal, 12)
                 .padding(.vertical, 10)
@@ -857,7 +860,8 @@ struct DetailedMessageRow: View {
                         .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
                     }
                 }
-                .padding(12)
+                .padding(.horizontal, 12)
+                .padding(.bottom, 12)
                 .transition(.opacity.combined(with: .scale(scale: 0.95, anchor: .top)))
             }
         }
@@ -867,6 +871,7 @@ struct DetailedMessageRow: View {
                 .glassEffect(.regular.tint(iconColor.opacity(0.1)), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
         }
         .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .animation(.easeInOut(duration: 0.2), value: isExpanded)
     }
 }
 
