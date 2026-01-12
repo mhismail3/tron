@@ -665,36 +665,6 @@ extension Date {
     }
 }
 
-// MARK: - DEBUG Test Menu Wrapper
-
-@available(iOS 26.0, *)
-struct TestMenuWrapper: View {
-    var body: some View {
-        Menu {
-            Section("Group A") {
-                Button("Wrapper 1") { print("w1") }
-                Button("Wrapper 2") { print("w2") }
-                Button("Wrapper 3") { print("w3") }
-            }
-            Section("Group B") {
-                Button("Wrapper 4") { print("w4") }
-                Button("Wrapper 5") { print("w5") }
-                Button("Wrapper 6") { print("w6") }
-            }
-        } label: {
-            Text("CHILD COMPONENT MENU")
-                .padding(8)
-                .foregroundColor(.tronEmerald)
-                .background {
-                    Capsule()
-                        .fill(.clear)
-                        .glassEffect(.regular.tint(Color.tronPhthaloGreen.opacity(0.4)), in: .capsule)
-                }
-                .contentShape(Capsule())
-        }
-    }
-}
-
 // MARK: - Preview
 
 // Note: Preview requires EventStoreManager which needs RPCClient and EventDatabase

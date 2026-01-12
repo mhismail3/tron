@@ -106,35 +106,6 @@ struct ContentView: View {
                         }
                     )
                 }
-            } else if horizontalSizeClass == .compact {
-                // DEBUG: Use NavigationStack on iPhone to test if NavigationSplitView causes Menu gesture issues
-                NavigationStack {
-                    SessionSidebar(
-                        selectedSessionId: $selectedSessionId,
-                        onNewSession: { showNewSessionSheet = true },
-                        onDeleteSession: { sessionId in
-                            if confirmArchive {
-                                sessionToArchive = sessionId
-                                showArchiveConfirmation = true
-                            } else {
-                                deleteSession(sessionId)
-                            }
-                        },
-                        onSettings: { showSettings = true },
-                        onVoiceNote: { showVoiceNotesRecording = true },
-                        onNavigationModeChange: { mode in
-                            navigationMode = mode
-                        }
-                    )
-                    .navigationDestination(item: $selectedSessionId) { sessionId in
-                        if eventStoreManager.sessionExists(sessionId) {
-                            ChatView(
-                                rpcClient: appState.rpcClient,
-                                sessionId: sessionId
-                            )
-                        }
-                    }
-                }
             } else {
                 NavigationSplitView(columnVisibility: $columnVisibility) {
                     // Sidebar - conditionally show Agents or Voice Notes
@@ -184,8 +155,7 @@ struct ContentView: View {
                         selectSessionPrompt
                     }
                 }
-                // DEBUG: Try .prominentDetail to test if gesture handling differs
-                .navigationSplitViewStyle(.prominentDetail)
+                .navigationSplitViewStyle(.balanced)
                 .scrollContentBackground(.hidden)
             }
         }

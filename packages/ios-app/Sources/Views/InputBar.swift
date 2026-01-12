@@ -72,10 +72,10 @@ struct InputBar: View {
 
 
             // Status pills row - floating liquid glass elements
-            // NOTE: Removed .transition(.opacity) - it was interfering with Menu gesture handling
             if shouldShowStatusPills {
                 statusPillsRow
                     .padding(.horizontal, 16)
+                    .transition(.opacity)
             }
 
             // Input row - floating liquid glass elements
@@ -398,7 +398,11 @@ struct InputBar: View {
                     }
                     .contentShape(Capsule())
                 }
-                // NOTE: Removed .matchedGeometryEffect and .transition - they interfere with Menu gesture handling
+                .matchedGeometryEffect(id: "reasoningPillMorph", in: reasoningPillNamespace)
+                .transition(.asymmetric(
+                    insertion: .scale(scale: 0.6, anchor: .leading).combined(with: .opacity),
+                    removal: .scale(scale: 0.8).combined(with: .opacity)
+                ))
             }
 
             Spacer()
