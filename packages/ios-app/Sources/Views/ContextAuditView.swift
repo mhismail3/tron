@@ -518,7 +518,11 @@ struct SystemAndToolsSection: View {
     var body: some View {
         VStack(spacing: 0) {
             // Header row (tappable)
-            Button(action: { withAnimation(.easeInOut(duration: 0.2)) { isExpanded.toggle() } }) {
+            Button(action: {
+                withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
+                    isExpanded.toggle()
+                }
+            }) {
                 HStack {
                     Image(systemName: "gearshape.2.fill")
                         .font(.system(size: 14))
@@ -534,9 +538,10 @@ struct SystemAndToolsSection: View {
                         .font(.system(size: 12, weight: .medium, design: .monospaced))
                         .foregroundStyle(.white.opacity(0.6))
 
-                    Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
+                    Image(systemName: "chevron.down")
                         .font(.system(size: 10, weight: .medium))
                         .foregroundStyle(.white.opacity(0.4))
+                        .rotationEffect(.degrees(isExpanded ? -180 : 0))
                 }
                 .padding(14)
                 .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
@@ -574,6 +579,7 @@ struct SystemAndToolsSection: View {
                     )
                 }
                 .padding(12)
+                .transition(.opacity.combined(with: .scale(scale: 0.95, anchor: .top)))
             }
         }
         .background {
@@ -583,6 +589,7 @@ struct SystemAndToolsSection: View {
                     .glassEffect(.regular.tint(Color.tronPurple.opacity(0.12)), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
             }
         }
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 }
 
@@ -607,7 +614,11 @@ struct ExpandableContentSection: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             // Header
-            Button(action: { withAnimation(.easeInOut(duration: 0.2)) { isExpanded.toggle() } }) {
+            Button(action: {
+                withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
+                    isExpanded.toggle()
+                }
+            }) {
                 HStack {
                     Image(systemName: icon)
                         .font(.system(size: 12))
@@ -619,9 +630,10 @@ struct ExpandableContentSection: View {
                     Text(formatTokens(tokens))
                         .font(.system(size: 11, design: .monospaced))
                         .foregroundStyle(.white.opacity(0.5))
-                    Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
+                    Image(systemName: "chevron.down")
                         .font(.system(size: 10, weight: .medium))
                         .foregroundStyle(.white.opacity(0.4))
+                        .rotationEffect(.degrees(isExpanded ? -180 : 0))
                 }
                 .padding(10)
                 .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
@@ -641,6 +653,7 @@ struct ExpandableContentSection: View {
                 .frame(maxHeight: 300)
                 .background(Color.black.opacity(0.2))
                 .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+                .transition(.opacity.combined(with: .scale(scale: 0.95, anchor: .top)))
             }
         }
         .background {
@@ -648,6 +661,7 @@ struct ExpandableContentSection: View {
                 .fill(.clear)
                 .glassEffect(.regular.tint(iconColor.opacity(0.08)), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
         }
+        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
     }
 }
 
@@ -751,7 +765,11 @@ struct DetailedMessageRow: View {
     var body: some View {
         VStack(spacing: 0) {
             // Header row (tappable)
-            Button(action: { withAnimation(.easeInOut(duration: 0.2)) { isExpanded.toggle() } }) {
+            Button(action: {
+                withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
+                    isExpanded.toggle()
+                }
+            }) {
                 HStack(spacing: 10) {
                     Image(systemName: icon)
                         .font(.system(size: 12))
@@ -763,12 +781,14 @@ struct DetailedMessageRow: View {
                             .font(.system(size: 12, weight: .medium, design: .monospaced))
                             .foregroundStyle(iconColor)
 
-                        if !isExpanded {
-                            Text(message.summary)
-                                .font(.system(size: 10, design: .monospaced))
-                                .foregroundStyle(.white.opacity(0.5))
-                                .lineLimit(1)
-                        }
+                        // Summary fades out when expanded
+                        Text(message.summary)
+                            .font(.system(size: 10, design: .monospaced))
+                            .foregroundStyle(.white.opacity(0.5))
+                            .lineLimit(1)
+                            .opacity(isExpanded ? 0 : 1)
+                            .frame(height: isExpanded ? 0 : nil, alignment: .top)
+                            .clipped()
                     }
 
                     Spacer()
@@ -777,9 +797,10 @@ struct DetailedMessageRow: View {
                         .font(.system(size: 10, design: .monospaced))
                         .foregroundStyle(.white.opacity(0.5))
 
-                    Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
+                    Image(systemName: "chevron.down")
                         .font(.system(size: 10, weight: .medium))
                         .foregroundStyle(.white.opacity(0.4))
+                        .rotationEffect(.degrees(isExpanded ? -180 : 0))
                 }
                 .padding(.horizontal, 12)
                 .padding(.vertical, 10)
@@ -837,6 +858,7 @@ struct DetailedMessageRow: View {
                     }
                 }
                 .padding(12)
+                .transition(.opacity.combined(with: .scale(scale: 0.95, anchor: .top)))
             }
         }
         .background {
@@ -844,6 +866,7 @@ struct DetailedMessageRow: View {
                 .fill(.clear)
                 .glassEffect(.regular.tint(iconColor.opacity(0.1)), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
         }
+        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
     }
 }
 
