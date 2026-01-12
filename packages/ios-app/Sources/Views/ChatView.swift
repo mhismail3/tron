@@ -70,11 +70,8 @@ struct ChatView: View {
     }
 
     var body: some View {
-        // Main content with entry morph animation from left
+        // Main content
         messagesScrollView
-            .opacity(showEntryContent ? 1 : 0)
-            .offset(x: showEntryContent ? 0 : -80)
-            .scaleEffect(showEntryContent ? 1 : 0.92, anchor: .leading)
             .safeAreaInset(edge: .bottom, spacing: 0) {
                 // Floating input area - iOS 26 liquid glass, no backgrounds
                 VStack(spacing: 8) {
@@ -158,7 +155,26 @@ struct ChatView: View {
                 }
             }
             ToolbarItem(placement: .topBarTrailing) {
-                commandsMenu
+                // iOS 26 fix: Use NotificationCenter to decouple button action from state mutation
+                Menu {
+                    Button { NotificationCenter.default.post(name: .chatMenuAction, object: "analytics") } label: {
+                        Label("Analytics", systemImage: "chart.bar.xaxis")
+                    }
+                    Button { NotificationCenter.default.post(name: .chatMenuAction, object: "history") } label: {
+                        Label("Session History", systemImage: "clock.arrow.circlepath")
+                    }
+                    Button { NotificationCenter.default.post(name: .chatMenuAction, object: "context") } label: {
+                        Label("Context Manager", systemImage: "brain")
+                    }
+                    Divider()
+                    Button { NotificationCenter.default.post(name: .chatMenuAction, object: "settings") } label: {
+                        Label("Settings", systemImage: "gearshape")
+                    }
+                } label: {
+                    Image(systemName: "gearshape")
+                        .font(.system(size: 16, weight: .medium))
+                        .foregroundStyle(.tronEmerald)
+                }
             }
         }
         .navigationBarBackButtonHidden(true)
@@ -185,6 +201,21 @@ struct ChatView: View {
             Button("OK") { viewModel.clearError() }
         } message: {
             Text(viewModel.errorMessage ?? "Unknown error")
+        }
+        // iOS 26 Menu workaround: Handle menu actions via NotificationCenter
+        .onReceive(NotificationCenter.default.publisher(for: .chatMenuAction)) { notification in
+            guard let action = notification.object as? String else { return }
+            switch action {
+            case "analytics": showSessionAnalytics = true
+            case "history": showSessionHistory = true
+            case "context": showContextAudit = true
+            case "settings": viewModel.showSettings = true
+            default: break
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .modelPickerAction)) { notification in
+            guard let model = notification.object as? ModelInfo else { return }
+            switchModel(to: model)
         }
         // Prevent keyboard from auto-opening after response completes
         .onChange(of: viewModel.isProcessing) { wasProcessing, isNowProcessing in
@@ -291,42 +322,18 @@ struct ChatView: View {
     // MARK: - Commands Menu
 
     private var commandsMenu: some View {
+        // NOTE: iOS 26 Menu requires simple Button("text") { } syntax
+        // Label views and Divider break gesture handling
         Menu {
-            // Session section
-            Section("Session") {
-                Button {
-                    showSessionAnalytics = true
-                } label: {
-                    Label("Analytics", systemImage: "chart.bar.xaxis")
-                }
-
-                Button {
-                    showSessionHistory = true
-                } label: {
-                    Label("Session History", systemImage: "arrow.triangle.branch")
-                }
-
-                Button {
-                    showContextAudit = true
-                } label: {
-                    Label("Context Manager", systemImage: "brain")
-                }
-            }
-
-            // Settings section
-            Section {
-                Button {
-                    viewModel.showSettings = true
-                } label: {
-                    Label("Settings", systemImage: TronIcon.settings.systemName)
-                }
-            }
+            Button("Analytics") { showSessionAnalytics = true }
+            Button("Session History") { showSessionHistory = true }
+            Button("Context Manager") { showContextAudit = true }
+            Button("Settings") { viewModel.showSettings = true }
         } label: {
             Image(systemName: "gearshape")
                 .font(.system(size: 16, weight: .medium))
                 .foregroundStyle(.tronEmerald)
         }
-        .menuIndicator(.hidden)
     }
 
     // Note: Status bar (model pill, token stats) is now integrated into InputBar
@@ -379,26 +386,28 @@ struct ChatView: View {
                         .padding()
                     }
                     .coordinateSpace(name: "scrollContainer")
-                    .scrollDismissesKeyboard(.interactively)
+                    // DEBUG: Removed .scrollDismissesKeyboard(.interactively) to test Menu gesture handling
+                    // .scrollDismissesKeyboard(.interactively)
+                    // DEBUG: Removed simultaneousGesture to test Menu gesture handling
                     // GESTURE-BASED DETECTION: Detect user scrolling up via drag gesture
                     // When user drags finger down on screen, they're scrolling up through content
-                    .simultaneousGesture(
-                        DragGesture(minimumDistance: 30)
-                            .onChanged { value in
-                                // Skip during grace period (after button tap or send message)
-                                guard Date() > autoScrollGraceUntil else { return }
-
-                                // User is dragging down (scrolling up through content)
-                                // translation.height > 0 means finger moved down
-                                if value.translation.height > 40 && autoScrollEnabled {
-                                    logger.verbose("User scroll up detected - disabling auto-scroll", category: .ui)
-                                    autoScrollEnabled = false
-                                    if viewModel.isProcessing {
-                                        hasUnreadContent = true
-                                    }
-                                }
-                            }
-                    )
+                    // .simultaneousGesture(
+                    //     DragGesture(minimumDistance: 30)
+                    //         .onChanged { value in
+                    //             // Skip during grace period (after button tap or send message)
+                    //             guard Date() > autoScrollGraceUntil else { return }
+                    //
+                    //             // User is dragging down (scrolling up through content)
+                    //             // translation.height > 0 means finger moved down
+                    //             if value.translation.height > 40 && autoScrollEnabled {
+                    //                 logger.verbose("User scroll up detected - disabling auto-scroll", category: .ui)
+                    //                 autoScrollEnabled = false
+                    //                 if viewModel.isProcessing {
+                    //                     hasUnreadContent = true
+                    //                 }
+                    //             }
+                    //         }
+                    // )
                     // Track distance from bottom to re-enable auto-scroll when user scrolls back
                     .onPreferenceChange(ScrollOffsetPreferenceKey.self) { distanceFromBottom in
                         lastBottomDistance = distanceFromBottom
@@ -656,6 +665,36 @@ extension Date {
     }
 }
 
+// MARK: - DEBUG Test Menu Wrapper
+
+@available(iOS 26.0, *)
+struct TestMenuWrapper: View {
+    var body: some View {
+        Menu {
+            Section("Group A") {
+                Button("Wrapper 1") { print("w1") }
+                Button("Wrapper 2") { print("w2") }
+                Button("Wrapper 3") { print("w3") }
+            }
+            Section("Group B") {
+                Button("Wrapper 4") { print("w4") }
+                Button("Wrapper 5") { print("w5") }
+                Button("Wrapper 6") { print("w6") }
+            }
+        } label: {
+            Text("CHILD COMPONENT MENU")
+                .padding(8)
+                .foregroundColor(.tronEmerald)
+                .background {
+                    Capsule()
+                        .fill(.clear)
+                        .glassEffect(.regular.tint(Color.tronPhthaloGreen.opacity(0.4)), in: .capsule)
+                }
+                .contentShape(Capsule())
+        }
+    }
+}
+
 // MARK: - Preview
 
 // Note: Preview requires EventStoreManager which needs RPCClient and EventDatabase
@@ -671,3 +710,12 @@ extension Date {
     }
 }
 */
+
+// MARK: - iOS 26 Menu Workaround
+// Menu button actions that mutate @State break gesture handling in iOS 26
+// Workaround: Post notification, handle via onReceive
+
+extension Notification.Name {
+    static let chatMenuAction = Notification.Name("chatMenuAction")
+    // modelPickerAction is defined in InputBar.swift
+}

@@ -72,10 +72,10 @@ struct InputBar: View {
 
 
             // Status pills row - floating liquid glass elements
+            // NOTE: Removed .transition(.opacity) - it was interfering with Menu gesture handling
             if shouldShowStatusPills {
                 statusPillsRow
                     .padding(.horizontal, 16)
-                    .transition(.opacity)
             }
 
             // Input row - floating liquid glass elements
@@ -218,21 +218,98 @@ struct InputBar: View {
         )
     }
 
+    // MARK: - Model Categorization
+
+    /// Anthropic 4.5 models (latest) - sorted: Haiku (top) → Sonnet → Opus (bottom, closest to thumb)
+    private var latestAnthropicModels: [ModelInfo] {
+        cachedModels.filter { $0.isAnthropic && $0.is45Model }
+            .sorted { tierPriority($0) > tierPriority($1) }
+    }
+
+    /// OpenAI Codex models - sorted: 5.1 (top) → 5.2 (bottom, closest to thumb)
+    private var codexModels: [ModelInfo] {
+        cachedModels.filter { $0.provider.lowercased() == "openai-codex" }
+            .sorted { codexVersionPriority($0) < codexVersionPriority($1) }
+    }
+
+    /// Legacy Anthropic models (non-4.5) - sorted: Sonnet (top) → Opus (bottom)
+    private var legacyModels: [ModelInfo] {
+        cachedModels.filter { $0.isAnthropic && !$0.is45Model }
+            .sorted { tierPriority($0) > tierPriority($1) }
+    }
+
+    private func tierPriority(_ model: ModelInfo) -> Int {
+        let id = model.id.lowercased()
+        if id.contains("opus") { return 0 }
+        if id.contains("sonnet") { return 1 }
+        if id.contains("haiku") { return 2 }
+        return 3
+    }
+
+    private func codexVersionPriority(_ model: ModelInfo) -> Int {
+        let id = model.id.lowercased()
+        if id.contains("5.2") { return 52 }
+        if id.contains("5.1") { return 51 }
+        if id.contains("5.0") || id.contains("-5-") { return 50 }
+        return 0
+    }
+
     // MARK: - Status Pills Row (iOS 26 Liquid Glass)
 
     private var statusPillsRow: some View {
         HStack {
-            // Model picker menu - popup style (replaces old button)
+            // Model picker - iOS 26 fix: Use NotificationCenter to decouple from state
+            // Order: Legacy (top) → Codex → Anthropic 4.5 (bottom, closest to thumb)
             if !modelName.isEmpty && showModelPill {
-                ModelPickerMenu(
-                    currentModel: modelName,
-                    models: cachedModels,
-                    isLoading: isLoadingModels,
-                    onSelect: { model in
-                        onModelSelect?(model)
+                Menu {
+                    // Anthropic 4.5 models at top (closest to thumb when menu opens upward)
+                    Text("Anthropic").font(.caption2).foregroundStyle(.secondary)
+                    ForEach(latestAnthropicModels) { model in
+                        Button { NotificationCenter.default.post(name: .modelPickerAction, object: model) } label: {
+                            Label(model.formattedModelName, systemImage: "sparkles")
+                        }
                     }
-                )
-                .matchedGeometryEffect(id: "modelPillMorph", in: modelPillNamespace)
+                    Divider()
+
+                    // OpenAI Codex models in middle
+                    if !codexModels.isEmpty {
+                        Text("OpenAI Codex").font(.caption2).foregroundStyle(.secondary)
+                        ForEach(codexModels) { model in
+                            Button { NotificationCenter.default.post(name: .modelPickerAction, object: model) } label: {
+                                Label(model.formattedModelName, systemImage: "bolt")
+                            }
+                        }
+                        Divider()
+                    }
+
+                    // Legacy models at bottom (furthest from thumb)
+                    if !legacyModels.isEmpty {
+                        Text("Legacy").font(.caption2).foregroundStyle(.secondary)
+                        ForEach(legacyModels) { model in
+                            Button { NotificationCenter.default.post(name: .modelPickerAction, object: model) } label: {
+                                Label(model.formattedModelName, systemImage: "clock")
+                            }
+                        }
+                    }
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: "cpu")
+                            .font(.system(size: 9, weight: .medium))
+                        Text(modelName.shortModelName)
+                            .font(.system(size: 10, weight: .medium, design: .monospaced))
+                        Image(systemName: "chevron.up.chevron.down")
+                            .font(.system(size: 8, weight: .medium))
+                    }
+                    .foregroundStyle(.tronEmerald)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 5)
+                    .background {
+                        Capsule()
+                            .fill(.clear)
+                            .glassEffect(.regular.tint(Color.tronPhthaloGreen.opacity(0.4)), in: .capsule)
+                    }
+                    .contentShape(Capsule())
+                }
             }
 
             // Reasoning level picker (for OpenAI Codex models)
@@ -333,24 +410,16 @@ struct InputBar: View {
 
     private var attachmentButtonGlass: some View {
         Menu {
-            // Camera option
-            Button {
-                showCamera = true
-            } label: {
+            // iOS 26 fix: Use NotificationCenter to decouple button action from state mutation
+            Button { NotificationCenter.default.post(name: .attachmentMenuAction, object: "camera") } label: {
                 Label("Take Photo", systemImage: "camera")
             }
 
-            // Photo Library option - use Button + .photosPicker modifier (Menu-embedded PhotosPicker doesn't work reliably)
-            Button {
-                showingImagePicker = true
-            } label: {
+            Button { NotificationCenter.default.post(name: .attachmentMenuAction, object: "photos") } label: {
                 Label("Photo Library", systemImage: "photo.on.rectangle")
             }
 
-            // Files option
-            Button {
-                showFilePicker = true
-            } label: {
+            Button { NotificationCenter.default.post(name: .attachmentMenuAction, object: "files") } label: {
                 Label("Choose File", systemImage: "folder")
             }
         } label: {
@@ -358,11 +427,25 @@ struct InputBar: View {
                 .font(.system(size: 14, weight: .semibold))
                 .foregroundStyle(isProcessing ? Color.tronEmerald.opacity(0.3) : Color.tronEmerald)
                 .frame(width: actionButtonSize, height: actionButtonSize)
+                .background {
+                    Circle()
+                        .fill(.clear)
+                        .glassEffect(.regular.tint(Color.tronPhthaloGreen.opacity(0.3)).interactive(), in: .circle)
+                }
                 .contentShape(Circle())
         }
         .matchedGeometryEffect(id: "attachmentButtonMorph", in: attachmentButtonNamespace)
-        .glassEffect(.regular.tint(Color.tronPhthaloGreen.opacity(0.3)).interactive(), in: .circle)
         .disabled(isProcessing)
+        // iOS 26 Menu workaround: Handle attachment actions via NotificationCenter
+        .onReceive(NotificationCenter.default.publisher(for: .attachmentMenuAction)) { notification in
+            guard let action = notification.object as? String else { return }
+            switch action {
+            case "camera": showCamera = true
+            case "photos": showingImagePicker = true
+            case "files": showFilePicker = true
+            default: break
+            }
+        }
     }
 
     // MARK: - Simplified Text Field (without history navigation)
@@ -880,4 +963,13 @@ struct InputBar: View {
         )
     }
     .preferredColorScheme(.dark)
+}
+
+// MARK: - iOS 26 Menu Workaround Notifications
+
+extension Notification.Name {
+    /// iOS 26 Menu bug: State mutations in button actions break gesture handling
+    /// Workaround: Post notification, handle via onReceive in parent view
+    static let modelPickerAction = Notification.Name("modelPickerAction")
+    static let attachmentMenuAction = Notification.Name("attachmentMenuAction")
 }

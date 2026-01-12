@@ -75,50 +75,33 @@ struct ModelPickerMenu: View {
     }
 
     var body: some View {
+        // DEBUG: Simplified Menu - just ForEach without computed properties
         Menu {
-            if isLoading && models.isEmpty {
-                Text("Loading models...")
-            } else {
-                // Order (top to bottom): Legacy, Coming Soon, OpenAI Codex, Anthropic
-                // Latest models at bottom, closest to user's thumb
-
-                // Legacy Anthropic models (top)
-                if !legacyAnthropicModels.isEmpty {
-                    Section("Legacy") {
-                        ForEach(legacyAnthropicModels) { model in
-                            modelButton(model)
-                        }
-                    }
-                }
-
-                // Coming Soon (disabled models)
-                Section("Coming Soon") {
-                    ForEach(standardOpenAIModels) { model in
-                        modelButton(model)
-                    }
-                    comingSoonModel("Gemini 3 Pro")
-                    comingSoonModel("Gemini 3 Flash")
-                }
-
-                // OpenAI Codex (ChatGPT subscription models)
-                Section("OpenAI Codex") {
-                    ForEach(openAICodexModels) { model in
-                        codexModelButton(model)
-                    }
-                    if openAICodexModels.isEmpty {
-                        comingSoonModel("GPT-5.2 Codex")
-                    }
-                }
-
-                // Anthropic 4.5 family (bottom, closest to thumb)
-                Section("Anthropic") {
-                    ForEach(latestAnthropicModels) { model in
-                        modelButton(model)
+            Section("All Models") {
+                ForEach(models) { model in
+                    Button(model.formattedModelName) {
+                        onSelect(model)
                     }
                 }
             }
         } label: {
-            ModelPillLabel(modelName: currentModel, includeGlassEffect: true)
+            HStack(spacing: 4) {
+                Image(systemName: "cpu")
+                    .font(.system(size: 9, weight: .medium))
+                Text(currentModel.shortModelName)
+                    .font(.system(size: 10, weight: .medium, design: .monospaced))
+                Image(systemName: "chevron.up.chevron.down")
+                    .font(.system(size: 8, weight: .medium))
+            }
+            .foregroundStyle(.tronEmerald)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 5)
+            .background {
+                Capsule()
+                    .fill(.clear)
+                    .glassEffect(.regular.tint(Color.tronPhthaloGreen.opacity(0.4)), in: .capsule)
+            }
+            .contentShape(Capsule())
         }
     }
 
@@ -148,13 +131,6 @@ struct ModelPickerMenu: View {
         }
     }
 
-    // MARK: - Coming Soon Model (greyed out, disabled)
-
-    @ViewBuilder
-    private func comingSoonModel(_ name: String) -> some View {
-        Text(name)
-            .foregroundStyle(.tertiary)
-    }
 }
 
 // MARK: - Array Extensions for Model Filtering
