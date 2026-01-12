@@ -160,6 +160,8 @@ enum MessageContent: Equatable {
     case attachments([Attachment])
     /// In-chat notification for model change
     case modelChange(from: String, to: String)
+    /// In-chat notification for reasoning level change
+    case reasoningLevelChange(from: String, to: String)
     /// In-chat notification for interrupted session
     case interrupted
     /// In-chat notification for transcription failure
@@ -190,6 +192,8 @@ enum MessageContent: Equatable {
             return "[\(count) \(count == 1 ? "attachment" : "attachments")]"
         case .modelChange(let from, let to):
             return "Switched from \(from) to \(to)"
+        case .reasoningLevelChange(let from, let to):
+            return "Reasoning: \(from) → \(to)"
         case .interrupted:
             return "Session interrupted"
         case .transcriptionFailed:
@@ -357,6 +361,11 @@ extension ChatMessage {
     /// In-chat notification for model changes
     static func modelChange(from: String, to: String) -> ChatMessage {
         ChatMessage(role: .system, content: .modelChange(from: from, to: to))
+    }
+
+    /// In-chat notification for reasoning level changes
+    static func reasoningLevelChange(from: String, to: String) -> ChatMessage {
+        ChatMessage(role: .system, content: .reasoningLevelChange(from: from, to: to))
     }
 
     /// In-chat notification for session interruption

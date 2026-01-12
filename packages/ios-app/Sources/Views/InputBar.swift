@@ -254,6 +254,47 @@ struct InputBar: View {
         return 0
     }
 
+    // MARK: - Reasoning Level Helpers
+
+    private func reasoningLevelLabel(_ level: String) -> String {
+        switch level.lowercased() {
+        case "low": return "Low"
+        case "medium": return "Medium"
+        case "high": return "High"
+        case "xhigh": return "Max"
+        default: return level.capitalized
+        }
+    }
+
+    private func reasoningLevelIcon(_ level: String) -> String {
+        switch level.lowercased() {
+        case "low": return "hare"
+        case "medium": return "brain"
+        case "high": return "brain.head.profile"
+        case "xhigh": return "sparkles"
+        default: return "brain"
+        }
+    }
+
+    private func reasoningLevelColor(_ level: String) -> Color {
+        let levels = ["low", "medium", "high", "xhigh"]
+        let index = levels.firstIndex(of: level.lowercased()) ?? 0
+        let progress = Double(index) / Double(max(levels.count - 1, 1))
+        // Interpolate from #1F5E3F to #00A69B
+        let lowR = 31.0 / 255.0, lowG = 94.0 / 255.0, lowB = 63.0 / 255.0
+        let highR = 0.0 / 255.0, highG = 166.0 / 255.0, highB = 155.0 / 255.0
+        return Color(
+            red: lowR + (progress * (highR - lowR)),
+            green: lowG + (progress * (highG - lowG)),
+            blue: lowB + (progress * (highB - lowB))
+        )
+    }
+
+    /// Available reasoning levels for current model (computed property like model picker)
+    private var availableReasoningLevels: [String] {
+        currentModelInfo?.reasoningLevels ?? ["low", "medium", "high", "xhigh"]
+    }
+
     // MARK: - Status Pills Row (iOS 26 Liquid Glass)
 
     private var statusPillsRow: some View {
@@ -263,7 +304,6 @@ struct InputBar: View {
             if !modelName.isEmpty && showModelPill {
                 Menu {
                     // Anthropic 4.5 models at top (closest to thumb when menu opens upward)
-                    Text("Anthropic").font(.caption2).foregroundStyle(.secondary)
                     ForEach(latestAnthropicModels) { model in
                         Button { NotificationCenter.default.post(name: .modelPickerAction, object: model) } label: {
                             Label(model.formattedModelName, systemImage: "sparkles")
@@ -273,7 +313,6 @@ struct InputBar: View {
 
                     // OpenAI Codex models in middle
                     if !codexModels.isEmpty {
-                        Text("OpenAI Codex").font(.caption2).foregroundStyle(.secondary)
                         ForEach(codexModels) { model in
                             Button { NotificationCenter.default.post(name: .modelPickerAction, object: model) } label: {
                                 Label(model.formattedModelName, systemImage: "bolt")
@@ -284,7 +323,6 @@ struct InputBar: View {
 
                     // Legacy models at bottom (furthest from thumb)
                     if !legacyModels.isEmpty {
-                        Text("Legacy").font(.caption2).foregroundStyle(.secondary)
                         ForEach(legacyModels) { model in
                             Button { NotificationCenter.default.post(name: .modelPickerAction, object: model) } label: {
                                 Label(model.formattedModelName, systemImage: "clock")
@@ -313,22 +351,41 @@ struct InputBar: View {
             }
 
             // Reasoning level picker (for OpenAI Codex models)
-            // Animates out from model pill with a delay
-            if let model = currentModelInfo, model.supportsReasoning == true, showReasoningPill {
-                ReasoningLevelPicker(
-                    model: model,
-                    selectedLevel: Binding(
-                        get: { reasoningLevel },
-                        set: { newLevel in
-                            onReasoningLevelChange?(newLevel)
-                        }
-                    )
-                )
-                .matchedGeometryEffect(id: "reasoningPillMorph", in: reasoningPillNamespace)
-                .transition(.asymmetric(
-                    insertion: .scale(scale: 0.6, anchor: .leading).combined(with: .opacity),
-                    removal: .scale(scale: 0.8).combined(with: .opacity)
-                ))
+            // iOS 26 fix: Inline Menu with NotificationCenter (same pattern as model picker)
+            if currentModelInfo?.supportsReasoning == true, showReasoningPill {
+                Menu {
+                    Button { NotificationCenter.default.post(name: .reasoningLevelAction, object: "low") } label: {
+                        Label("Low", systemImage: "hare")
+                    }
+                    Button { NotificationCenter.default.post(name: .reasoningLevelAction, object: "medium") } label: {
+                        Label("Medium", systemImage: "brain")
+                    }
+                    Button { NotificationCenter.default.post(name: .reasoningLevelAction, object: "high") } label: {
+                        Label("High", systemImage: "brain.head.profile")
+                    }
+                    Button { NotificationCenter.default.post(name: .reasoningLevelAction, object: "xhigh") } label: {
+                        Label("Max", systemImage: "sparkles")
+                    }
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: reasoningLevelIcon(reasoningLevel))
+                            .font(.system(size: 9, weight: .medium))
+                        Text(reasoningLevelLabel(reasoningLevel))
+                            .font(.system(size: 10, weight: .medium, design: .monospaced))
+                        Image(systemName: "chevron.up.chevron.down")
+                            .font(.system(size: 8, weight: .medium))
+                    }
+                    .foregroundStyle(reasoningLevelColor(reasoningLevel))
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 5)
+                    .background {
+                        Capsule()
+                            .fill(.clear)
+                            .glassEffect(.regular.tint(reasoningLevelColor(reasoningLevel).opacity(0.4)), in: .capsule)
+                    }
+                    .contentShape(Capsule())
+                }
+                // NOTE: Removed .matchedGeometryEffect and .transition - they interfere with Menu gesture handling
             }
 
             Spacer()
@@ -972,4 +1029,5 @@ extension Notification.Name {
     /// Workaround: Post notification, handle via onReceive in parent view
     static let modelPickerAction = Notification.Name("modelPickerAction")
     static let attachmentMenuAction = Notification.Name("attachmentMenuAction")
+    static let reasoningLevelAction = Notification.Name("reasoningLevelAction")
 }

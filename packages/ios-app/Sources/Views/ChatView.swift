@@ -32,7 +32,11 @@ struct ChatView: View {
     /// Controls input field focus - set to false after response to prevent keyboard
     @State private var inputFocused = false
     /// Reasoning level for OpenAI Codex models (low/medium/high/xhigh)
+    /// Persisted per-session via UserDefaults
     @State private var reasoningLevel: String = "medium"
+
+    /// UserDefaults key for storing reasoning level per session
+    private var reasoningLevelKey: String { "tron.reasoningLevel.\(sessionId)" }
 
     // MARK: - Smart Auto-Scroll State
     /// Whether to auto-scroll to bottom on new content
@@ -217,6 +221,18 @@ struct ChatView: View {
             guard let model = notification.object as? ModelInfo else { return }
             switchModel(to: model)
         }
+        // iOS 26 Menu workaround: Handle reasoning level actions via NotificationCenter
+        .onReceive(NotificationCenter.default.publisher(for: .reasoningLevelAction)) { notification in
+            guard let level = notification.object as? String else { return }
+            let previousLevel = reasoningLevel
+            reasoningLevel = level
+            // Persist reasoning level for this session
+            UserDefaults.standard.set(level, forKey: reasoningLevelKey)
+            // Add in-chat notification for reasoning level change
+            if previousLevel != level {
+                viewModel.addReasoningLevelChangeNotification(from: previousLevel, to: level)
+            }
+        }
         // Prevent keyboard from auto-opening after response completes
         .onChange(of: viewModel.isProcessing) { wasProcessing, isNowProcessing in
             if wasProcessing && !isNowProcessing {
@@ -225,6 +241,11 @@ struct ChatView: View {
             }
         }
         .onAppear {
+            // Load persisted reasoning level for this session
+            if let savedLevel = UserDefaults.standard.string(forKey: reasoningLevelKey) {
+                reasoningLevel = savedLevel
+            }
+
             // Entry morph animation from left with 180ms delay (90% of mic button's 200ms)
             Task { @MainActor in
                 try? await Task.sleep(nanoseconds: entryMorphDelay)

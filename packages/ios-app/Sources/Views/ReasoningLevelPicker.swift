@@ -71,7 +71,8 @@ struct ReasoningLevelPicker: View {
             Menu {
                 ForEach(levels, id: \.self) { level in
                     Button {
-                        selectedLevel = level
+                        // iOS 26 Menu workaround: Post notification instead of direct state mutation
+                        NotificationCenter.default.post(name: .reasoningLevelAction, object: level)
                     } label: {
                         HStack {
                             Label {

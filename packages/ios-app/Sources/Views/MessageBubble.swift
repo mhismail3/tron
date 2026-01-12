@@ -72,6 +72,9 @@ struct MessageBubble: View {
         case .modelChange(let from, let to):
             ModelChangeNotificationView(from: from, to: to)
 
+        case .reasoningLevelChange(let from, let to):
+            ReasoningLevelChangeNotificationView(from: from, to: to)
+
         case .interrupted:
             InterruptedNotificationView()
 
@@ -119,6 +122,46 @@ struct ModelChangeNotificationView: View {
                 .foregroundStyle(.tronTextMuted)
 
             Text(to.shortModelName)
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(.tronEmerald)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(Color.tronSurface.opacity(0.6))
+        .clipShape(Capsule())
+        .overlay(
+            Capsule()
+                .stroke(Color.tronEmerald.opacity(0.3), lineWidth: 0.5)
+        )
+        .frame(maxWidth: .infinity, alignment: .center)
+    }
+}
+
+// MARK: - Reasoning Level Change Notification View (Pill-style in-chat notification)
+
+struct ReasoningLevelChangeNotificationView: View {
+    let from: String
+    let to: String
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "brain")
+                .font(.system(size: 10, weight: .medium))
+                .foregroundStyle(.tronEmerald)
+
+            Text("Reasoning")
+                .font(.system(size: 11))
+                .foregroundStyle(.tronTextMuted)
+
+            Text(from)
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(.tronTextSecondary)
+
+            Image(systemName: "arrow.right")
+                .font(.system(size: 9, weight: .medium))
+                .foregroundStyle(.tronTextMuted)
+
+            Text(to)
                 .font(.system(size: 11, weight: .medium))
                 .foregroundStyle(.tronEmerald)
         }

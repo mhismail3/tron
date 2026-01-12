@@ -246,6 +246,16 @@ class ChatViewModel: ObservableObject {
         logger.info("Model switched from \(previousModel) to \(newModel)", category: .session)
     }
 
+    /// Add an in-chat notification when reasoning level is changed
+    func addReasoningLevelChangeNotification(from previousLevel: String, to newLevel: String) {
+        let notification = ChatMessage.reasoningLevelChange(
+            from: previousLevel.capitalized,
+            to: newLevel.capitalized
+        )
+        messages.append(notification)
+        logger.info("Reasoning level changed from \(previousLevel) to \(newLevel)", category: .session)
+    }
+
     // MARK: - Computed Properties
 
     var canSend: Bool {
