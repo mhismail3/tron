@@ -81,6 +81,8 @@ struct ToolResultRouter: View {
             return ("doc.text.magnifyingglass", .cyan)
         case "ls":
             return ("folder", .yellow)
+        case "browser":
+            return ("globe", .blue)
         default:
             return ("gearshape", .tronTextMuted)
         }
@@ -117,6 +119,7 @@ struct ToolResultRouter: View {
         case "find": return "Find"
         case "glob": return "Glob"
         case "ls": return "Ls"
+        case "browser": return "Browser"
         default: return tool.toolName.capitalized
         }
     }
@@ -150,6 +153,8 @@ struct ToolResultRouter: View {
             return extractPattern(from: args)
         case "ls":
             return extractPath(from: args)
+        case "browser":
+            return extractBrowserAction(from: args)
         default:
             return ""
         }
@@ -199,6 +204,12 @@ struct ToolResultRouter: View {
         case "ls":
             LsResultViewer(
                 path: extractPath(from: tool.arguments),
+                result: result,
+                isExpanded: $isExpanded
+            )
+        case "browser":
+            BrowserResultViewer(
+                action: extractBrowserAction(from: tool.arguments),
                 result: result,
                 isExpanded: $isExpanded
             )
@@ -270,6 +281,26 @@ struct ToolResultRouter: View {
     private func truncateCommand(_ cmd: String) -> String {
         guard cmd.count > 40 else { return cmd }
         return String(cmd.prefix(40)) + "..."
+    }
+
+    /// Extract browser action from arguments
+    private func extractBrowserAction(from args: String) -> String {
+        if let match = args.firstMatch(of: /"action"\s*:\s*"([^"]+)"/) {
+            let action = String(match.1)
+            // Also try to get URL for navigate action
+            if action == "navigate", let urlMatch = args.firstMatch(of: /"url"\s*:\s*"([^"]+)"/) {
+                let url = String(urlMatch.1)
+                return "\(action): \(url)"
+            }
+            // Get selector for click/fill/type actions
+            if ["click", "fill", "type", "select"].contains(action),
+               let selectorMatch = args.firstMatch(of: /"selector"\s*:\s*"([^"]+)"/) {
+                let selector = String(selectorMatch.1)
+                return "\(action): \(selector)"
+            }
+            return action
+        }
+        return ""
     }
 }
 
@@ -1211,6 +1242,51 @@ struct WriteResultViewer: View {
                             .background(Color.tronSurface)
                         }
                     }
+                }
+            }
+        }
+    }
+}
+
+// MARK: - Browser Result Viewer
+
+struct BrowserResultViewer: View {
+    let action: String
+    let result: String
+    @Binding var isExpanded: Bool
+
+    private var displayText: String {
+        if isExpanded || result.count <= 500 {
+            return result
+        }
+        return String(result.prefix(500)) + "..."
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text(displayText)
+                .font(.system(size: 11, design: .monospaced))
+                .foregroundStyle(.tronTextSecondary)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+            if result.count > 500 {
+                Button {
+                    withAnimation(.tronFast) {
+                        isExpanded.toggle()
+                    }
+                } label: {
+                    HStack {
+                        Text(isExpanded ? "Show less" : "Show more")
+                            .font(.system(size: 11, design: .monospaced))
+                        Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
+                            .font(.system(size: 10))
+                    }
+                    .foregroundStyle(.tronTextMuted)
+                    .padding(.vertical, 5)
+                    .frame(maxWidth: .infinity)
+                    .background(Color.tronSurface)
                 }
             }
         }
