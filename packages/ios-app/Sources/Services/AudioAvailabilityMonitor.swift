@@ -123,10 +123,10 @@ class AudioAvailabilityMonitor: ObservableObject {
             return
         }
 
-        let session = AVAudioSession.sharedInstance()
-
         // Check record permission first (this is fast, OK on main thread)
-        switch session.recordPermission {
+        // Use AVAudioApplication.shared.recordPermission (iOS 17+) to avoid deprecation warning
+        let permission = AVAudioApplication.shared.recordPermission
+        switch permission {
         case .denied:
             updateAvailability(available: false, reason: "Microphone access denied")
             return
@@ -147,7 +147,8 @@ class AudioAvailabilityMonitor: ObservableObject {
             do {
                 // Only set the category - do NOT activate the session
                 // Activating would interrupt other apps' audio playback
-                try session.setCategory(.playAndRecord, mode: .default, options: [.defaultToSpeaker, .allowBluetooth])
+                // Use .allowBluetoothHFP instead of deprecated .allowBluetooth
+                try session.setCategory(.playAndRecord, mode: .default, options: [.defaultToSpeaker, .allowBluetoothHFP])
                 return true
             } catch {
                 return false
@@ -163,16 +164,17 @@ class AudioAvailabilityMonitor: ObservableObject {
 
     /// Request microphone permission if not already granted
     func requestPermissionIfNeeded() async -> Bool {
-        let session = AVAudioSession.sharedInstance()
+        // Use AVAudioApplication.shared for iOS 17+ to avoid deprecation
+        let permission = AVAudioApplication.shared.recordPermission
 
-        switch session.recordPermission {
+        switch permission {
         case .granted:
             return true
         case .denied:
             return false
         case .undetermined:
             return await withCheckedContinuation { continuation in
-                session.requestRecordPermission { granted in
+                AVAudioApplication.requestRecordPermission { granted in
                     Task { @MainActor in
                         await self.checkAvailabilityAsync()
                     }

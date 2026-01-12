@@ -162,29 +162,58 @@ struct ChatView: View {
                 }
             }
             ToolbarItem(placement: .topBarTrailing) {
-                // iOS 26 fix: Use NotificationCenter to decouple button action from state mutation
-                Menu {
-                    Button { NotificationCenter.default.post(name: .chatMenuAction, object: "analytics") } label: {
-                        Label("Analytics", systemImage: "chart.bar.xaxis")
+                HStack(spacing: 16) {
+                    // Browser button - only visible when browser session is active
+                    if viewModel.hasBrowserSession {
+                        Button {
+                            viewModel.toggleBrowserWindow()
+                        } label: {
+                            Image(systemName: "globe")
+                                .font(.system(size: 16, weight: .medium))
+                                .foregroundStyle(.tronEmerald)
+                        }
                     }
-                    Button { NotificationCenter.default.post(name: .chatMenuAction, object: "history") } label: {
-                        Label("Session History", systemImage: "clock.arrow.circlepath")
+
+                    // iOS 26 fix: Use NotificationCenter to decouple button action from state mutation
+                    Menu {
+                        Button { NotificationCenter.default.post(name: .chatMenuAction, object: "analytics") } label: {
+                            Label("Analytics", systemImage: "chart.bar.xaxis")
+                        }
+                        Button { NotificationCenter.default.post(name: .chatMenuAction, object: "history") } label: {
+                            Label("Session History", systemImage: "clock.arrow.circlepath")
+                        }
+                        Button { NotificationCenter.default.post(name: .chatMenuAction, object: "context") } label: {
+                            Label("Context Manager", systemImage: "brain")
+                        }
+                        Divider()
+                        Button { NotificationCenter.default.post(name: .chatMenuAction, object: "settings") } label: {
+                            Label("Settings", systemImage: "gearshape")
+                        }
+                    } label: {
+                        Image(systemName: "gearshape")
+                            .font(.system(size: 16, weight: .medium))
+                            .foregroundStyle(.tronEmerald)
                     }
-                    Button { NotificationCenter.default.post(name: .chatMenuAction, object: "context") } label: {
-                        Label("Context Manager", systemImage: "brain")
-                    }
-                    Divider()
-                    Button { NotificationCenter.default.post(name: .chatMenuAction, object: "settings") } label: {
-                        Label("Settings", systemImage: "gearshape")
-                    }
-                } label: {
-                    Image(systemName: "gearshape")
-                        .font(.system(size: 16, weight: .medium))
-                        .foregroundStyle(.tronEmerald)
                 }
             }
         }
         .navigationBarBackButtonHidden(true)
+        // Floating browser window overlay
+        .overlay(alignment: .bottomTrailing) {
+            if viewModel.showBrowserWindow {
+                FloatingBrowserView(
+                    frameImage: viewModel.browserFrame,
+                    currentUrl: viewModel.browserStatus?.currentUrl,
+                    onClose: {
+                        viewModel.showBrowserWindow = false
+                    }
+                )
+                .padding(.trailing, 16)
+                .padding(.bottom, 160) // Above input bar
+                .transition(.scale.combined(with: .opacity))
+            }
+        }
+        .animation(.spring(response: 0.3, dampingFraction: 0.8), value: viewModel.showBrowserWindow)
         .sheet(isPresented: $viewModel.showSettings) {
             SettingsView(rpcClient: rpcClient)
         }
@@ -284,6 +313,11 @@ struct ChatView: View {
             // This is a fire-and-forget operation that doesn't block session entry
             Task {
                 await prefetchModels()
+            }
+
+            // Check browser status in parallel (fire-and-forget)
+            Task {
+                await viewModel.requestBrowserStatus()
             }
 
             // Connect and resume - this is required before loading messages

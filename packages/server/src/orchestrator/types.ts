@@ -32,6 +32,20 @@ export interface EventStoreOrchestratorConfig {
   worktree?: WorktreeCoordinatorConfig;
   /** Pre-existing EventStore instance (for testing) - if provided, eventStoreDbPath is ignored */
   eventStore?: EventStore;
+  /** Browser automation configuration */
+  browser?: BrowserConfig;
+}
+
+/**
+ * Browser service configuration
+ */
+export interface BrowserConfig {
+  /** Run browser in headless mode (default: true) */
+  headless?: boolean;
+  /** Browser viewport size (default: 1280x800) */
+  viewport?: { width: number; height: number };
+  /** Action timeout in ms (default: 30000) */
+  timeout?: number;
 }
 
 // =============================================================================

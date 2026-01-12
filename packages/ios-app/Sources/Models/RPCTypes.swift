@@ -815,3 +815,100 @@ struct MessageDeleteResult: Decodable {
     let deletionEventId: String
     let targetType: String
 }
+
+// MARK: - Browser Methods
+
+/// Start browser stream for a session
+struct BrowserStartStreamParams: Encodable {
+    let sessionId: String
+    let quality: Int?
+    let maxWidth: Int?
+    let maxHeight: Int?
+    let format: String?
+    let everyNthFrame: Int?
+
+    init(
+        sessionId: String,
+        quality: Int? = 60,
+        maxWidth: Int? = 1280,
+        maxHeight: Int? = 800,
+        format: String? = "jpeg",
+        everyNthFrame: Int? = 1
+    ) {
+        self.sessionId = sessionId
+        self.quality = quality
+        self.maxWidth = maxWidth
+        self.maxHeight = maxHeight
+        self.format = format
+        self.everyNthFrame = everyNthFrame
+    }
+}
+
+struct BrowserStartStreamResult: Decodable {
+    let success: Bool
+    let error: String?
+}
+
+/// Stop browser stream for a session
+struct BrowserStopStreamParams: Encodable {
+    let sessionId: String
+}
+
+struct BrowserStopStreamResult: Decodable {
+    let success: Bool
+    let error: String?
+}
+
+/// Get browser status for a session
+struct BrowserGetStatusParams: Encodable {
+    let sessionId: String
+}
+
+struct BrowserGetStatusResult: Decodable {
+    var hasBrowser: Bool
+    var isStreaming: Bool
+    var currentUrl: String?
+
+    init(hasBrowser: Bool, isStreaming: Bool, currentUrl: String?) {
+        self.hasBrowser = hasBrowser
+        self.isStreaming = isStreaming
+        self.currentUrl = currentUrl
+    }
+}
+
+/// Browser frame event data (received via WebSocket events)
+/// Server sends: { type: "browser.frame", sessionId, timestamp, data: { sessionId, data, frameId, timestamp, metadata } }
+struct BrowserFrameEvent: Decodable {
+    let type: String
+    let sessionId: String?
+    let timestamp: String?
+    let data: BrowserFrameData
+
+    struct BrowserFrameData: Decodable {
+        let sessionId: String
+        /// Base64-encoded frame data (JPEG or PNG)
+        let data: String
+        /// Frame sequence number
+        let frameId: Int
+        /// Timestamp when frame was captured (milliseconds)
+        let timestamp: Double
+        /// Optional frame metadata
+        let metadata: BrowserFrameMetadata?
+    }
+
+    /// Convenience accessors for nested data
+    var frameData: String { data.data }
+    var frameId: Int { data.frameId }
+    var frameTimestamp: Double { data.timestamp }
+    var frameSessionId: String { data.sessionId }
+    var metadata: BrowserFrameMetadata? { data.metadata }
+}
+
+struct BrowserFrameMetadata: Decodable {
+    let offsetTop: Double?
+    let pageScaleFactor: Double?
+    let deviceWidth: Double?
+    let deviceHeight: Double?
+    let scrollOffsetX: Double?
+    let scrollOffsetY: Double?
+}

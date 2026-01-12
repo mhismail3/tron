@@ -2,6 +2,7 @@ import SwiftUI
 import Combine
 import os
 import PhotosUI
+import UIKit
 
 // MARK: - Chat View Model
 // Note: ToolCallRecord is defined in EventStoreManager.swift
@@ -32,6 +33,15 @@ class ChatViewModel: ObservableObject {
     @Published var isLoadingMoreMessages = false
     /// Current model's context window size (from server's model.list)
     @Published var currentContextWindow: Int = 200_000
+
+    // MARK: - Browser State
+
+    /// Current browser frame image
+    @Published var browserFrame: UIImage?
+    /// Whether to show the floating browser window
+    @Published var showBrowserWindow = false
+    /// Current browser status
+    @Published var browserStatus: BrowserGetStatusResult?
 
     // MARK: - Internal State (accessible to extensions)
 
@@ -181,6 +191,14 @@ class ChatViewModel: ObservableObject {
 
         rpcClient.onError = { [weak self] message in
             self?.handleError(message)
+        }
+
+        rpcClient.onBrowserFrame = { [weak self] event in
+            self?.handleBrowserFrame(event)
+        }
+
+        rpcClient.onBrowserClosed = { [weak self] sessionId in
+            self?.handleBrowserClosed(sessionId)
         }
     }
 
@@ -336,5 +354,121 @@ class ChatViewModel: ObservableObject {
         if let model = models.first(where: { $0.id == currentModel }) {
             currentContextWindow = model.contextWindow
         }
+    }
+
+    // MARK: - Browser Methods
+
+    /// Handle incoming browser frame from screencast
+    func handleBrowserFrame(_ event: BrowserFrameEvent) {
+        // Decode base64 JPEG - this is fast enough to do on main thread
+        // Streaming at ~10 FPS means ~100ms per frame budget, JPEG decode is <5ms
+        guard let data = Data(base64Encoded: event.frameData),
+              let image = UIImage(data: data) else {
+            return
+        }
+
+        browserFrame = image
+
+        // Update browserStatus to reflect that we have an active streaming session
+        // This handles the case where BrowserDelegate auto-started streaming
+        let wasFirstFrame = browserStatus == nil || browserStatus?.isStreaming != true
+        if wasFirstFrame {
+            browserStatus = BrowserGetStatusResult(
+                hasBrowser: true,
+                isStreaming: true,
+                currentUrl: browserStatus?.currentUrl
+            )
+        }
+
+        // Auto-show browser window only on the FIRST frame (not subsequent frames)
+        // This allows user to close the window and have it stay closed
+        if wasFirstFrame && !showBrowserWindow {
+            showBrowserWindow = true
+            logger.info("Browser window auto-shown on first frame", category: .session)
+        }
+    }
+
+    /// Handle browser session closed
+    func handleBrowserClosed(_ sessionId: String) {
+        browserFrame = nil
+        browserStatus = nil
+        showBrowserWindow = false
+        logger.info("Browser session closed: \(sessionId)", category: .session)
+    }
+
+    /// Request browser status from server
+    func requestBrowserStatus() async {
+        guard let sessionId = rpcClient.currentSessionId else { return }
+
+        do {
+            let status = try await rpcClient.getBrowserStatus(sessionId: sessionId)
+            await MainActor.run {
+                self.browserStatus = status
+            }
+        } catch {
+            logger.error("Failed to get browser status: \(error)", category: .session)
+        }
+    }
+
+    /// Start browser streaming
+    func startBrowserStream() async {
+        guard let sessionId = rpcClient.currentSessionId else { return }
+
+        do {
+            let result = try await rpcClient.startBrowserStream(sessionId: sessionId)
+            if result.success {
+                await MainActor.run {
+                    self.browserStatus = BrowserGetStatusResult(
+                        hasBrowser: true,
+                        isStreaming: true,
+                        currentUrl: nil
+                    )
+                    self.showBrowserWindow = true
+                }
+                logger.info("Browser stream started", category: .session)
+            }
+        } catch {
+            logger.error("Failed to start browser stream: \(error)", category: .session)
+            showErrorAlert("Failed to start browser stream")
+        }
+    }
+
+    /// Stop browser streaming
+    func stopBrowserStream() async {
+        guard let sessionId = rpcClient.currentSessionId else { return }
+
+        do {
+            _ = try await rpcClient.stopBrowserStream(sessionId: sessionId)
+            await MainActor.run {
+                self.browserStatus = BrowserGetStatusResult(
+                    hasBrowser: self.browserStatus?.hasBrowser ?? false,
+                    isStreaming: false,
+                    currentUrl: self.browserStatus?.currentUrl
+                )
+            }
+            logger.info("Browser stream stopped", category: .session)
+        } catch {
+            logger.error("Failed to stop browser stream: \(error)", category: .session)
+        }
+    }
+
+    /// Toggle browser window visibility
+    func toggleBrowserWindow() {
+        if showBrowserWindow {
+            showBrowserWindow = false
+        } else if browserStatus?.hasBrowser == true {
+            showBrowserWindow = true
+            // Start streaming if not already
+            if browserStatus?.isStreaming != true {
+                Task {
+                    await startBrowserStream()
+                }
+            }
+        }
+    }
+
+    /// Whether browser toolbar button should be enabled
+    var hasBrowserSession: Bool {
+        browserStatus?.hasBrowser ?? false
     }
 }

@@ -255,15 +255,19 @@ class CameraModel: NSObject, ObservableObject {
 
     func startSession() {
         guard !session.isRunning else { return }
-        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            self?.session.startRunning()
+        // Capture session reference before dispatching to avoid actor isolation warning
+        let captureSession = session
+        DispatchQueue.global(qos: .userInitiated).async {
+            captureSession.startRunning()
         }
     }
 
     func stopSession() {
         guard session.isRunning else { return }
-        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            self?.session.stopRunning()
+        // Capture session reference before dispatching to avoid actor isolation warning
+        let captureSession = session
+        DispatchQueue.global(qos: .userInitiated).async {
+            captureSession.stopRunning()
         }
     }
 

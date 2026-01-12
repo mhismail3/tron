@@ -60,11 +60,18 @@
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^22.10.1",
+    "playwright-core": "^1.57.0",
     "typescript": "^5.7.2",
     "vitest": "^3.0.0"
   },
   "peerDependencies": {
+    "playwright-core": ">=1.40.0",
     "typescript": ">=5.0.0"
+  },
+  "peerDependenciesMeta": {
+    "playwright-core": {
+      "optional": true
+    }
   },
   "engines": {
     "node": ">=20.0.0"

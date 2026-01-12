@@ -13,6 +13,7 @@
   },
   "dependencies": {
     "@tron/core": "workspace:*",
+    "playwright-core": "^1.57.0",
     "ws": "^8.18.0"
   },
   "devDependencies": {

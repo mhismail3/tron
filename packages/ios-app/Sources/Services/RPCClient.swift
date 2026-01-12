@@ -42,6 +42,10 @@ class RPCClient: ObservableObject {
     var onComplete: (() -> Void)?
     var onError: ((String) -> Void)?
 
+    // Browser event callbacks
+    var onBrowserFrame: ((BrowserFrameEvent) -> Void)?
+    var onBrowserClosed: ((String) -> Void)?  // sessionId
+
     // Global event callbacks (for ALL sessions - used by dashboard)
     var onGlobalComplete: ((String) -> Void)?  // sessionId
     var onGlobalError: ((String, String) -> Void)?  // sessionId, message
@@ -195,6 +199,13 @@ class RPCClient: ObservableObject {
 
         case .connected(let e):
             logger.info("Server version: \(e.version ?? "unknown")", category: .rpc)
+
+        case .browserFrame(let e):
+            // Browser frames don't need session check - they include their own sessionId
+            onBrowserFrame?(e)
+
+        case .browserClosed(let sessionId):
+            onBrowserClosed?(sessionId)
 
         case .unknown(let type):
             logger.debug("Unknown event type: \(type)", category: .events)
@@ -908,6 +919,59 @@ class RPCClient: ObservableObject {
 
         let params = VoiceNotesDeleteParams(filename: filename)
         return try await ws.send(method: "voiceNotes.delete", params: params)
+    }
+
+    // MARK: - Browser Methods
+
+    /// Start browser frame streaming for a session
+    func startBrowserStream(
+        sessionId: String,
+        quality: Int = 60,
+        maxWidth: Int = 1280,
+        maxHeight: Int = 800
+    ) async throws -> BrowserStartStreamResult {
+        guard let ws = webSocket else {
+            throw RPCClientError.connectionNotEstablished
+        }
+
+        let params = BrowserStartStreamParams(
+            sessionId: sessionId,
+            quality: quality,
+            maxWidth: maxWidth,
+            maxHeight: maxHeight,
+            format: "jpeg",
+            everyNthFrame: 1
+        )
+
+        return try await ws.send(method: "browser.startStream", params: params)
+    }
+
+    /// Stop browser frame streaming for a session
+    func stopBrowserStream(sessionId: String) async throws -> BrowserStopStreamResult {
+        guard let ws = webSocket else {
+            throw RPCClientError.connectionNotEstablished
+        }
+
+        let params = BrowserStopStreamParams(sessionId: sessionId)
+        return try await ws.send(method: "browser.stopStream", params: params)
+    }
+
+    /// Get browser status for a session
+    func getBrowserStatus(sessionId: String) async throws -> BrowserGetStatusResult {
+        guard let ws = webSocket else {
+            throw RPCClientError.connectionNotEstablished
+        }
+
+        let params = BrowserGetStatusParams(sessionId: sessionId)
+        return try await ws.send(method: "browser.getStatus", params: params)
+    }
+
+    /// Get browser status for current session
+    func getBrowserStatus() async throws -> BrowserGetStatusResult {
+        guard let sessionId = currentSessionId else {
+            throw RPCClientError.noActiveSession
+        }
+        return try await getBrowserStatus(sessionId: sessionId)
     }
 
     // MARK: - State Accessors

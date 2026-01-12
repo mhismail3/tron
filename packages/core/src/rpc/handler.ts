@@ -83,6 +83,12 @@ import type {
   VoiceNotesDeleteResult,
   MessageDeleteParams,
   MessageDeleteResult,
+  BrowserStartStreamParams,
+  BrowserStartStreamResult,
+  BrowserStopStreamParams,
+  BrowserStopStreamResult,
+  BrowserGetStatusParams,
+  BrowserGetStatusResult,
 } from './types.js';
 import { getNotesDir } from '../settings/loader.js';
 import { ANTHROPIC_MODELS, OPENAI_CODEX_MODELS } from '../providers/models.js';
@@ -108,6 +114,8 @@ export interface RpcContext {
   transcriptionManager?: TranscriptionManager;
   /** Context manager for compaction operations (optional) */
   contextManager?: ContextRpcManager;
+  /** Browser manager for browser automation (optional) */
+  browserManager?: BrowserRpcManager;
 }
 
 /**
@@ -211,6 +219,15 @@ interface MemoryStore {
 interface TranscriptionManager {
   transcribeAudio(params: TranscribeAudioParams): Promise<TranscribeAudioResult>;
   listModels(): Promise<TranscribeListModelsResult>;
+}
+
+/**
+ * Browser manager interface for RPC operations
+ */
+export interface BrowserRpcManager {
+  startStream(params: BrowserStartStreamParams): Promise<BrowserStartStreamResult>;
+  stopStream(params: BrowserStopStreamParams): Promise<BrowserStopStreamResult>;
+  getStatus(params: BrowserGetStatusParams): Promise<BrowserGetStatusResult>;
 }
 
 // =============================================================================
@@ -424,6 +441,14 @@ export class RpcHandler extends EventEmitter {
         // Message methods
         case 'message.delete':
           return this.handleMessageDelete(request);
+
+        // Browser methods
+        case 'browser.startStream':
+          return this.handleBrowserStartStream(request);
+        case 'browser.stopStream':
+          return this.handleBrowserStopStream(request);
+        case 'browser.getStatus':
+          return this.handleBrowserGetStatus(request);
 
         default:
           return this.errorResponse(request.id, 'METHOD_NOT_FOUND', `Unknown method: ${request.method}`);
@@ -1680,6 +1705,70 @@ ${transcribeResult.text}
       }
       const message = error instanceof Error ? error.message : 'Failed to delete message';
       return this.errorResponse(request.id, 'MESSAGE_DELETE_FAILED', message);
+    }
+  }
+
+  // ===========================================================================
+  // Browser Handlers
+  // ===========================================================================
+
+  private async handleBrowserStartStream(request: RpcRequest): Promise<RpcResponse> {
+    if (!this.context.browserManager) {
+      return this.errorResponse(request.id, 'NOT_SUPPORTED', 'Browser manager not available');
+    }
+
+    const params = request.params as BrowserStartStreamParams | undefined;
+
+    if (!params?.sessionId) {
+      return this.errorResponse(request.id, 'INVALID_PARAMS', 'sessionId is required');
+    }
+
+    try {
+      const result = await this.context.browserManager.startStream(params);
+      return this.successResponse(request.id, result);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to start browser stream';
+      return this.errorResponse(request.id, 'BROWSER_ERROR', message);
+    }
+  }
+
+  private async handleBrowserStopStream(request: RpcRequest): Promise<RpcResponse> {
+    if (!this.context.browserManager) {
+      return this.errorResponse(request.id, 'NOT_SUPPORTED', 'Browser manager not available');
+    }
+
+    const params = request.params as BrowserStopStreamParams | undefined;
+
+    if (!params?.sessionId) {
+      return this.errorResponse(request.id, 'INVALID_PARAMS', 'sessionId is required');
+    }
+
+    try {
+      const result = await this.context.browserManager.stopStream(params);
+      return this.successResponse(request.id, result);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to stop browser stream';
+      return this.errorResponse(request.id, 'BROWSER_ERROR', message);
+    }
+  }
+
+  private async handleBrowserGetStatus(request: RpcRequest): Promise<RpcResponse> {
+    if (!this.context.browserManager) {
+      return this.errorResponse(request.id, 'NOT_SUPPORTED', 'Browser manager not available');
+    }
+
+    const params = request.params as BrowserGetStatusParams | undefined;
+
+    if (!params?.sessionId) {
+      return this.errorResponse(request.id, 'INVALID_PARAMS', 'sessionId is required');
+    }
+
+    try {
+      const result = await this.context.browserManager.getStatus(params);
+      return this.successResponse(request.id, result);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to get browser status';
+      return this.errorResponse(request.id, 'BROWSER_ERROR', message);
     }
   }
 

@@ -1258,16 +1258,9 @@ extension UnifiedEventTransformer {
                     }
                 }
 
-            // Config events already processed in pass 1
-            case .configReasoningLevel:
-                break
-
-            // Deletion events already processed in pass 1
-            case .messageDeleted:
-                break
-
+            // Other event types are skipped for state reconstruction
+            // Note: configReasoningLevel and messageDeleted are already processed in pass 1
             default:
-                // Skip other event types for state reconstruction
                 break
             }
         }
@@ -1515,14 +1508,8 @@ extension UnifiedEventTransformer {
                     }
                 }
 
-            // Config events already processed in pass 1
-            case .configReasoningLevel:
-                break
-
-            // Deletion events already processed in pass 1
-            case .messageDeleted:
-                break
-
+            // Other event types are skipped for state reconstruction
+            // Note: configReasoningLevel and messageDeleted are already processed in pass 1
             default:
                 break
             }

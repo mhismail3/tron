@@ -660,6 +660,32 @@ export class TronServer {
       });
     });
 
+    // Forward browser frame events for live streaming
+    this.orchestrator.on('browser.frame', (data) => {
+      this.wsServer?.broadcastEvent({
+        type: 'browser.frame',
+        sessionId: data.sessionId,
+        timestamp: new Date().toISOString(),
+        data: {
+          sessionId: data.sessionId,
+          data: data.data,
+          frameId: data.frameId,
+          timestamp: data.timestamp,
+          metadata: data.metadata,
+        },
+      });
+    });
+
+    // Forward browser closed events
+    this.orchestrator.on('browser.closed', (data) => {
+      this.wsServer?.broadcastEvent({
+        type: 'browser.closed',
+        sessionId: data.sessionId,
+        timestamp: new Date().toISOString(),
+        data: {},
+      });
+    });
+
     this.isRunning = true;
 
     logger.info('Tron server started', {

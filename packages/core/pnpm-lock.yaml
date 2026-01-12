@@ -36,6 +36,9 @@ importers:
       '@types/node':
         specifier: ^22.10.1
         version: 22.19.3
+      playwright-core:
+        specifier: ^1.57.0
+        version: 1.57.0
       typescript:
         specifier: ^5.7.2
         version: 5.9.3
@@ -705,6 +708,11 @@ packages:
 
   pino@9.14.0:
     resolution: {integrity: sha512-8OEwKp5juEvb/MjpIc4hjqfgCNysrS94RIOMXYvpYCdm/jglrKEiAYmiumbmGhCvs+IcInsphYDFwqrjr7398w==}
+    hasBin: true
+
+  playwright-core@1.57.0:
+    resolution: {integrity: sha512-agTcKlMw/mjBWOnD6kFZttAAGHgi/Nw0CZ2o6JqWSbMlI219lAFLZZCyqByTsvVAJq5XA5H8cA6PrvBRpBWEuQ==}
+    engines: {node: '>=18'}
     hasBin: true
 
   postcss@8.5.6:
@@ -1506,6 +1514,8 @@ snapshots:
       safe-stable-stringify: 2.5.0
       sonic-boom: 4.2.0
       thread-stream: 3.1.0
+
+  playwright-core@1.57.0: {}
 
   postcss@8.5.6:
     dependencies:

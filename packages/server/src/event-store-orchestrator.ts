@@ -47,6 +47,7 @@ import {
   GrepTool,
   FindTool,
   LsTool,
+  BrowserTool,
   loadServerAuth,
   getTronDataDir,
   detectProviderFromModel,
@@ -64,6 +65,7 @@ import {
   type WorkingDirectory,
   type ServerAuth,
   type EventType,
+  type BrowserDelegate,
   type ContextSnapshot,
   type DetailedContextSnapshot,
   type PreTurnValidation,
@@ -72,6 +74,7 @@ import {
   type Summarizer,
   type UserContent,
 } from '@tron/core';
+import { BrowserService } from './browser/index.js';
 import {
   normalizeContentBlocks,
   truncateString,
@@ -123,6 +126,7 @@ export class EventStoreOrchestrator extends EventEmitter {
   private config: EventStoreOrchestratorConfig;
   private eventStore: EventStore;
   private worktreeCoordinator: WorktreeCoordinator;
+  private browserService: BrowserService;
   private activeSessions: Map<string, ActiveSession> = new Map();
   private cleanupTimer: ReturnType<typeof setInterval> | null = null;
   private initialized = false;
@@ -149,6 +153,17 @@ export class EventStoreOrchestrator extends EventEmitter {
       deleteWorktreeOnRelease: config.worktree?.deleteWorktreeOnRelease ?? true,
       preserveBranches: config.worktree?.preserveBranches ?? true,
       ...config.worktree,
+    });
+
+    // Initialize BrowserService
+    this.browserService = new BrowserService({ headless: true });
+
+    // Forward browser events
+    this.browserService.on('browser.frame', (frame) => {
+      this.emit('browser.frame', frame);
+    });
+    this.browserService.on('browser.closed', (sessionId) => {
+      this.emit('browser.closed', sessionId);
     });
   }
 
@@ -1584,6 +1599,28 @@ export class EventStoreOrchestrator extends EventEmitter {
     const auth = await this.getAuthForProvider(model);
     const providerType = detectProviderFromModel(model);
 
+    // Create BrowserDelegate for BrowserTool
+    let browserDelegate: BrowserDelegate | undefined;
+    if (this.browserService) {
+      const service = this.browserService;
+      browserDelegate = {
+        execute: (sid, action, params) => service.execute(sid, action as any, params),
+        ensureSession: async (sid) => {
+          await service.createSession(sid);
+          // Auto-start streaming so frames flow to iOS immediately
+          // everyNthFrame: 6 means ~10 FPS (60Hz / 6 = 10 FPS)
+          await service.startScreencast(sid, {
+            format: 'jpeg',
+            quality: 60,
+            maxWidth: 1280,
+            maxHeight: 800,
+            everyNthFrame: 6,
+          });
+        },
+        hasSession: (sid) => service.hasSession(sid),
+      };
+    }
+
     const tools: TronTool[] = [
       new ReadTool({ workingDirectory }),
       new WriteTool({ workingDirectory }),
@@ -1592,6 +1629,7 @@ export class EventStoreOrchestrator extends EventEmitter {
       new GrepTool({ workingDirectory }),
       new FindTool({ workingDirectory }),
       new LsTool({ workingDirectory }),
+      new BrowserTool({ workingDirectory, delegate: browserDelegate }),
     ];
 
     // System prompt is now handled by ContextManager based on provider type

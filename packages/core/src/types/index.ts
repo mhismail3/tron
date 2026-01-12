@@ -38,6 +38,7 @@ export {
 export type {
   ToolParameterSchema,
   ToolParameterProperty,
+  ToolResultContentType,
   TronToolResult,
   ToolProgressCallback,
   ToolExecuteFunction,

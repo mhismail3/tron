@@ -9,6 +9,7 @@ export { BashTool, type BashToolConfig } from './bash.js';
 export { GrepTool, type GrepToolConfig } from './grep.js';
 export { FindTool, type FindToolConfig } from './find.js';
 export { LsTool, type LsToolConfig } from './ls.js';
+export { BrowserTool, type BrowserToolConfig, type BrowserDelegate } from './browser.js';
 
 // Utility functions for token estimation and output truncation
 export {
