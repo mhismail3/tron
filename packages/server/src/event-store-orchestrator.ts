@@ -2237,4 +2237,62 @@ export class EventStoreOrchestrator extends EventEmitter {
       }
     }
   }
+
+  // ===========================================================================
+  // Browser Service Methods (for RPC adapter)
+  // ===========================================================================
+
+  /**
+   * Start browser frame streaming for a session
+   */
+  async startBrowserStream(sessionId: string): Promise<{ success: boolean; error?: string }> {
+    // Create browser session if it doesn't exist
+    if (!this.browserService.hasSession(sessionId)) {
+      const createResult = await this.browserService.createSession(sessionId);
+      if (!createResult.success) {
+        return { success: false, error: createResult.error || 'Failed to create browser session' };
+      }
+    }
+
+    // Start screencast
+    const result = await this.browserService.startScreencast(sessionId);
+    if (!result.success) {
+      return { success: false, error: result.error || 'Failed to start screencast' };
+    }
+
+    return { success: true };
+  }
+
+  /**
+   * Stop browser frame streaming for a session
+   */
+  async stopBrowserStream(sessionId: string): Promise<{ success: boolean; error?: string }> {
+    if (!this.browserService.hasSession(sessionId)) {
+      return { success: true }; // Already not streaming
+    }
+
+    // Stop screencast
+    const result = await this.browserService.stopScreencast(sessionId);
+    if (!result.success) {
+      return { success: false, error: result.error || 'Failed to stop screencast' };
+    }
+
+    return { success: true };
+  }
+
+  /**
+   * Get browser status for a session
+   */
+  async getBrowserStatus(sessionId: string): Promise<{ hasBrowser: boolean; isStreaming: boolean; currentUrl?: string }> {
+    if (!this.browserService.hasSession(sessionId)) {
+      return { hasBrowser: false, isStreaming: false };
+    }
+
+    const session = this.browserService.getSession(sessionId);
+    return {
+      hasBrowser: true,
+      isStreaming: session?.isStreaming ?? false,
+      currentUrl: session?.page?.url(),
+    };
+  }
 }

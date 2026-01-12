@@ -9,4 +9,5 @@ export {
   type EventStoreManager,
   type WorktreeRpcManager,
   type ContextRpcManager,
+  type BrowserRpcManager,
 } from './handler.js';

@@ -95,8 +95,23 @@ struct StreamingToolEndPayload {
         self.toolName = toolName
         self.durationMs = data["duration"] as? Int ?? 0
         self.success = data["success"] as? Bool ?? true
-        self.output = data["output"] as? String
         self.error = data["error"] as? String
+
+        // Handle output as either String or array of content blocks
+        // Server may send: "output": "text" OR "output": [{"type":"text","text":"..."}]
+        if let outputString = data["output"] as? String {
+            self.output = outputString
+        } else if let outputArray = data["output"] as? [[String: Any]] {
+            // Extract text from content blocks and join them
+            self.output = outputArray.compactMap { block -> String? in
+                if block["type"] as? String == "text" {
+                    return block["text"] as? String
+                }
+                return nil
+            }.joined()
+        } else {
+            self.output = nil
+        }
     }
 }
 

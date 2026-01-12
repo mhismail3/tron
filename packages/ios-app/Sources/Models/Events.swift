@@ -78,10 +78,35 @@ struct ToolEndEvent: Decodable {
         let toolName: String?
         let success: Bool
         let result: String?
-        let output: String?  // Server sometimes sends 'output' instead of 'result'
+        let output: String?  // Extracted from string or array format
         let error: String?
         let durationMs: Int?
-        let duration: Int?   // Server sometimes sends 'duration' instead of 'durationMs'
+        let duration: Int?
+
+        enum CodingKeys: String, CodingKey {
+            case toolCallId, toolName, success, result, output, error, durationMs, duration
+        }
+
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            toolCallId = try container.decode(String.self, forKey: .toolCallId)
+            toolName = try container.decodeIfPresent(String.self, forKey: .toolName)
+            success = try container.decode(Bool.self, forKey: .success)
+            result = try container.decodeIfPresent(String.self, forKey: .result)
+            error = try container.decodeIfPresent(String.self, forKey: .error)
+            durationMs = try container.decodeIfPresent(Int.self, forKey: .durationMs)
+            duration = try container.decodeIfPresent(Int.self, forKey: .duration)
+
+            // Handle output as either String or [ContentBlock] array
+            if let outputString = try? container.decodeIfPresent(String.self, forKey: .output) {
+                output = outputString
+            } else if let outputBlocks = try? container.decodeIfPresent([ToolOutputBlock].self, forKey: .output) {
+                // Extract text from content blocks and join them
+                output = outputBlocks.compactMap { $0.text }.joined()
+            } else {
+                output = nil
+            }
+        }
     }
 
     var toolCallId: String { data.toolCallId }
@@ -99,6 +124,13 @@ struct ToolEndEvent: Decodable {
             return data.error ?? "Error"
         }
     }
+}
+
+/// Helper struct for decoding tool output content blocks
+/// Server may send output as [{"type":"text","text":"..."}]
+private struct ToolOutputBlock: Decodable {
+    let type: String
+    let text: String?
 }
 
 struct TurnStartEvent: Decodable {

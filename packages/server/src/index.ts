@@ -4,7 +4,7 @@
  * Main entry point for the Tron WebSocket server.
  * Uses event-sourced session management via EventStoreOrchestrator.
  */
-import { createLogger, getSettings, resolveTronPath, getTronDataDir, type RpcContext, type EventStoreManager, type WorktreeRpcManager, type ContextRpcManager } from '@tron/core';
+import { createLogger, getSettings, resolveTronPath, getTronDataDir, type RpcContext, type EventStoreManager, type WorktreeRpcManager, type ContextRpcManager, type BrowserRpcManager } from '@tron/core';
 import { TronWebSocketServer, type WebSocketServerConfig } from './websocket.js';
 import { EventStoreOrchestrator, type EventStoreOrchestratorConfig } from './event-store-orchestrator.js';
 import { HealthServer, type HealthServerConfig } from './health.js';
@@ -434,6 +434,23 @@ function createContextManager(orchestrator: EventStoreOrchestrator): ContextRpcM
   };
 }
 
+/**
+ * Creates a BrowserRpcManager adapter from EventStoreOrchestrator
+ */
+function createBrowserManager(orchestrator: EventStoreOrchestrator): BrowserRpcManager {
+  return {
+    async startStream(params) {
+      return orchestrator.startBrowserStream(params.sessionId);
+    },
+    async stopStream(params) {
+      return orchestrator.stopBrowserStream(params.sessionId);
+    },
+    async getStatus(params) {
+      return orchestrator.getBrowserStatus(params.sessionId);
+    },
+  };
+}
+
 // Helper functions for tree visualization
 function getDescendantCount(eventId: string, allEvents: any[]): number {
   const children = allEvents.filter(e => e.parentId === eventId);
@@ -549,6 +566,7 @@ export class TronServer {
       eventStore: createEventStoreManager(this.orchestrator),
       worktreeManager: createWorktreeManager(this.orchestrator),
       contextManager: createContextManager(this.orchestrator),
+      browserManager: createBrowserManager(this.orchestrator),
     };
 
     // Initialize WebSocket server
