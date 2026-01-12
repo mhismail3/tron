@@ -297,7 +297,7 @@ export class BrowserService extends EventEmitter {
    * Take a screenshot
    * Always captures viewport-only to ensure consistent dimensions for iOS display
    */
-  private async screenshot(session: BrowserSession, params: Record<string, unknown>): Promise<ActionResult> {
+  private async screenshot(session: BrowserSession, _params: Record<string, unknown>): Promise<ActionResult> {
     try {
       // Always capture viewport only (not full page) to ensure consistent dimensions
       // The viewport is fixed at 1280x800, so all screenshots will be the same size

@@ -191,13 +191,14 @@ describe('BrowserService', () => {
       expect(mockPage.screenshot).toHaveBeenCalled();
     });
 
-    it('should support fullPage parameter', async () => {
+    it('should always use viewport-only (fullPage: false) for consistent dimensions', async () => {
       await service.createSession('test-session');
       vi.mocked(mockPage.screenshot).mockResolvedValue(Buffer.from('fake-image-data'));
 
+      // Even if fullPage: true is passed, it should be ignored
       await service.execute('test-session', 'screenshot', { fullPage: true });
 
-      expect(mockPage.screenshot).toHaveBeenCalledWith(expect.objectContaining({ fullPage: true }));
+      expect(mockPage.screenshot).toHaveBeenCalledWith(expect.objectContaining({ fullPage: false }));
     });
   });
 
