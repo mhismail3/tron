@@ -479,11 +479,13 @@ class ChatViewModel: ObservableObject {
         }
     }
 
-    /// Toggle browser window visibility
+    /// Toggle browser window visibility (explicit user action via globe button)
     func toggleBrowserWindow() {
         if showBrowserWindow {
-            showBrowserWindow = false
-        } else if browserStatus?.hasBrowser == true {
+            // User is closing via globe - same as dismissing
+            userDismissedBrowser()
+        } else if hasBrowserSession {
+            // User explicitly wants to see browser - override the dismiss flag
             showBrowserWindow = true
             // Start streaming if not already
             if browserStatus?.isStreaming != true {
