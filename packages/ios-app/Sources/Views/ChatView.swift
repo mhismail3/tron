@@ -407,28 +407,7 @@ struct ChatView: View {
                         .padding()
                     }
                     .coordinateSpace(name: "scrollContainer")
-                    // DEBUG: Removed .scrollDismissesKeyboard(.interactively) to test Menu gesture handling
-                    // .scrollDismissesKeyboard(.interactively)
-                    // DEBUG: Removed simultaneousGesture to test Menu gesture handling
-                    // GESTURE-BASED DETECTION: Detect user scrolling up via drag gesture
-                    // When user drags finger down on screen, they're scrolling up through content
-                    // .simultaneousGesture(
-                    //     DragGesture(minimumDistance: 30)
-                    //         .onChanged { value in
-                    //             // Skip during grace period (after button tap or send message)
-                    //             guard Date() > autoScrollGraceUntil else { return }
-                    //
-                    //             // User is dragging down (scrolling up through content)
-                    //             // translation.height > 0 means finger moved down
-                    //             if value.translation.height > 40 && autoScrollEnabled {
-                    //                 logger.verbose("User scroll up detected - disabling auto-scroll", category: .ui)
-                    //                 autoScrollEnabled = false
-                    //                 if viewModel.isProcessing {
-                    //                     hasUnreadContent = true
-                    //                 }
-                    //             }
-                    //         }
-                    // )
+                    .scrollDismissesKeyboard(.interactively)
                     // Track distance from bottom to re-enable auto-scroll when user scrolls back
                     .onPreferenceChange(ScrollOffsetPreferenceKey.self) { distanceFromBottom in
                         lastBottomDistance = distanceFromBottom
