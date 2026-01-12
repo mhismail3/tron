@@ -57,9 +57,8 @@ Actions:
   IMPORTANT: Call this AFTER navigate completes. Returns element references (e1, e2, etc.)
   Example: { "action": "snapshot" }
 
-- screenshot: Capture visual screenshot
-  Optional: fullPage (boolean) - capture entire page or just viewport
-  Example: { "action": "screenshot", "fullPage": true }
+- screenshot: Capture visual screenshot of current viewport (1280x800)
+  Example: { "action": "screenshot" }
 
 - click: Click an element
   Required: selector (string) - CSS selector or element reference (e.g., "e1")
@@ -118,10 +117,6 @@ The browser runs headless by default and streams frames to the iOS app.`;
       text: {
         type: 'string' as const,
         description: 'Text for type action',
-      },
-      fullPage: {
-        type: 'boolean' as const,
-        description: 'Capture full page for screenshot action',
       },
       direction: {
         type: 'string' as const,

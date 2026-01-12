@@ -295,13 +295,15 @@ export class BrowserService extends EventEmitter {
 
   /**
    * Take a screenshot
+   * Always captures viewport-only to ensure consistent dimensions for iOS display
    */
   private async screenshot(session: BrowserSession, params: Record<string, unknown>): Promise<ActionResult> {
     try {
-      const fullPage = params.fullPage === true;
+      // Always capture viewport only (not full page) to ensure consistent dimensions
+      // The viewport is fixed at 1280x800, so all screenshots will be the same size
       const screenshot = await session.page.screenshot({
         type: 'png',
-        fullPage,
+        fullPage: false, // Always viewport-only for consistent sizing
       });
 
       return {
@@ -309,6 +311,8 @@ export class BrowserService extends EventEmitter {
         data: {
           screenshot: screenshot.toString('base64'),
           format: 'png',
+          width: this.config.viewport.width,
+          height: this.config.viewport.height,
         },
       };
     } catch (error) {

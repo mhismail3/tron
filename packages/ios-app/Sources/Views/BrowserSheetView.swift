@@ -17,19 +17,22 @@ struct BrowserSheetView: View {
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
-        VStack(spacing: 0) {
-            // Header bar
-            headerBar
-                .padding(.horizontal, 16)
-                .padding(.top, 12)
-                .padding(.bottom, 8)
+        GeometryReader { geometry in
+            VStack(spacing: 0) {
+                // Header bar
+                headerBar
+                    .padding(.horizontal, 16)
+                    .padding(.top, 12)
+                    .padding(.bottom, 8)
 
-            // Browser content
-            if let image = frameImage {
-                browserFrameView(image: image)
-            } else {
-                loadingView
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                // Browser content - constrained to remaining space
+                if let image = frameImage {
+                    browserFrameView(image: image)
+                        .frame(maxHeight: .infinity)
+                } else {
+                    loadingView
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
             }
         }
         .background(Color.tronSurface)
@@ -71,15 +74,16 @@ struct BrowserSheetView: View {
     }
 
     private func browserFrameView(image: UIImage) -> some View {
-        // Calculate aspect ratio to fit image properly
-        let aspectRatio = image.size.width / image.size.height
-
-        return Image(uiImage: image)
-            .resizable()
-            .aspectRatio(aspectRatio, contentMode: .fit)
-            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-            .padding(.horizontal, 12)
-            .padding(.bottom, 12)
+        GeometryReader { geometry in
+            Image(uiImage: image)
+                .resizable()
+                .aspectRatio(contentMode: .fit)
+                .frame(maxWidth: geometry.size.width, maxHeight: geometry.size.height)
+                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                .frame(width: geometry.size.width, height: geometry.size.height)
+        }
+        .padding(.horizontal, 12)
+        .padding(.bottom, 12)
     }
 
     private var loadingView: some View {
