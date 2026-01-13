@@ -187,6 +187,10 @@ class ChatViewModel: ObservableObject {
             self?.handleMessageDeleted(event)
         }
 
+        rpcClient.onSkillRemoved = { [weak self] event in
+            self?.handleSkillRemoved(event)
+        }
+
         rpcClient.onComplete = { [weak self] in
             self?.handleComplete()
         }

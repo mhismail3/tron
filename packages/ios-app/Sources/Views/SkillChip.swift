@@ -103,21 +103,20 @@ struct SkillChipRow: View {
 // MARK: - Message Skill Chips (for MessageBubble - read-only)
 
 /// Row of skill chips displayed in sent messages (no remove button)
+/// Aligned to trailing edge for user messages
 @available(iOS 26.0, *)
 struct MessageSkillChips: View {
     let skills: [Skill]
     let onTap: (Skill) -> Void
 
     var body: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 6) {
-                ForEach(skills) { skill in
-                    SkillChip(
-                        skill: skill,
-                        showRemoveButton: false,
-                        onTap: { onTap(skill) }
-                    )
-                }
+        HStack(spacing: 6) {
+            ForEach(skills) { skill in
+                SkillChip(
+                    skill: skill,
+                    showRemoveButton: false,
+                    onTap: { onTap(skill) }
+                )
             }
         }
     }

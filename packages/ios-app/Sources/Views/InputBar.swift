@@ -788,51 +788,58 @@ struct InputBar: View {
     /// Detect if the user just completed typing @skillname followed by a space
     /// Returns the matched skill if found, nil otherwise
     private func detectCompletedSkillMention(in text: String, skills: [Skill]) -> Skill? {
-        // Pattern: @skillname followed by space or newline
-        // We need to find the last @mention that ends with space/newline
-        guard let atIndex = text.lastIndex(of: "@") else { return nil }
-
-        // Check if @ is at the start or preceded by whitespace/newline
-        if atIndex != text.startIndex {
-            let prevIndex = text.index(before: atIndex)
-            let prevChar = text[prevIndex]
-            // @ must be preceded by whitespace, newline, or be at start
-            guard prevChar.isWhitespace || prevChar.isNewline else {
-                return nil
-            }
-        }
-
-        // Check if @ is inside backticks (code)
-        let beforeAt = text[..<atIndex]
-        let backtickCount = beforeAt.filter { $0 == "`" }.count
-        if backtickCount % 2 != 0 {
-            return nil // Inside code block
-        }
-
-        // Extract text after @
-        let afterAt = String(text[text.index(after: atIndex)...])
-
-        // Must end with space or newline (completed mention)
-        guard afterAt.hasSuffix(" ") || afterAt.hasSuffix("\n") else {
+        // Find all @mentions in the text and check if any match a skill
+        // that isn't already selected
+        let pattern = "@([a-zA-Z0-9][a-zA-Z0-9-]*)(?:\\s|$)"
+        guard let regex = try? NSRegularExpression(pattern: pattern, options: []) else {
             return nil
         }
 
-        // Extract the skill name (everything after @ until the trailing space/newline)
-        let skillName = String(afterAt.dropLast())
+        let nsText = text as NSString
+        let range = NSRange(location: 0, length: nsText.length)
+        let matches = regex.matches(in: text, options: [], range: range)
 
-        // Skip if empty
-        guard !skillName.isEmpty else { return nil }
+        for match in matches.reversed() { // Check most recent first
+            // Get the skill name (capture group 1)
+            guard match.numberOfRanges > 1 else { continue }
+            let skillNameRange = match.range(at: 1)
+            let skillName = nsText.substring(with: skillNameRange)
 
-        // Check if this matches an actual skill (case-insensitive)
-        return skills.first { $0.name.lowercased() == skillName.lowercased() }
+            // Skip if empty
+            guard !skillName.isEmpty else { continue }
+
+            // Check if this @ is at start or preceded by whitespace
+            let atIndex = match.range.location
+            if atIndex > 0 {
+                let prevChar = nsText.character(at: atIndex - 1)
+                let prevCharScalar = Unicode.Scalar(prevChar)!
+                let isWhitespace = CharacterSet.whitespacesAndNewlines.contains(prevCharScalar)
+                guard isWhitespace else { continue }
+            }
+
+            // Check if @ is inside backticks (code)
+            let beforeAt = nsText.substring(to: atIndex)
+            let backtickCount = beforeAt.filter { $0 == "`" }.count
+            if backtickCount % 2 != 0 {
+                continue // Inside code block
+            }
+
+            // Check if this matches an actual skill (case-insensitive)
+            // and isn't already selected
+            if let skill = skills.first(where: { $0.name.lowercased() == skillName.lowercased() }) {
+                if !selectedSkills.contains(where: { $0.name.lowercased() == skillName.lowercased() }) {
+                    return skill
+                }
+            }
+        }
+
+        return nil
     }
 
-    /// Handle a completed @skillname mention by removing the text and adding the chip
+    /// Handle a completed @skillname mention - keep text and add chip
     private func selectCompletedSkillMention(_ skill: Skill, in currentText: String) {
-        // Remove the @skillname from text (including trailing space)
-        if let atIndex = currentText.lastIndex(of: "@") {
-            text = String(currentText[..<atIndex])
-        }
+        // Keep the @skillname text in the input (don't remove it)
+        // The text already contains @skillname + space, so just leave it
 
         // Add skill to selected skills (avoid duplicates)
         if !selectedSkills.contains(where: { $0.name == skill.name }) {
@@ -846,15 +853,12 @@ struct InputBar: View {
         onSkillSelect?(skill)
     }
 
-    /// Select a skill from the mention popup
+    /// Select a skill from the mention popup - complete the @mention and add chip
     private func selectSkillFromMention(_ skill: Skill) {
-        // Remove the @query from text and replace with just @skillname
+        // Replace the partial @query with full @skillname + space
         if let atIndex = text.lastIndex(of: "@") {
-            let afterAt = String(text[text.index(after: atIndex)...])
-            // Check if this is the current mention (no space after it)
-            if !afterAt.contains(" ") && !afterAt.contains("\n") {
-                text = String(text[..<atIndex])
-            }
+            let beforeAt = String(text[..<atIndex])
+            text = beforeAt + "@" + skill.name + " "
         }
 
         // Add skill to selected skills (avoid duplicates)

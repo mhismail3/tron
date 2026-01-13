@@ -506,11 +506,20 @@ struct TextContentView: View {
                     switch segment {
                     case .text(let content):
                         if !content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                            Text(LocalizedStringKey(content))
-                                .font(.system(size: 14, design: .monospaced))
-                                .foregroundStyle(isUser ? .tronEmerald : .tronTextPrimary)
-                                .textSelection(.enabled)
-                                .lineSpacing(4)
+                            // Use styled text for user messages to highlight @skillname
+                            if isUser {
+                                StyledSkillMentionText(text: content)
+                                    .font(.system(size: 14, design: .monospaced))
+                                    .foregroundStyle(.tronEmerald)
+                                    .textSelection(.enabled)
+                                    .lineSpacing(4)
+                            } else {
+                                Text(LocalizedStringKey(content))
+                                    .font(.system(size: 14, design: .monospaced))
+                                    .foregroundStyle(.tronTextPrimary)
+                                    .textSelection(.enabled)
+                                    .lineSpacing(4)
+                            }
                         }
                     case .table(let table):
                         MarkdownTableView(table: table)
@@ -521,6 +530,62 @@ struct TextContentView: View {
         .padding(.vertical, 4)
         .padding(.horizontal, isUser ? 0 : 4)
         .frame(maxWidth: isUser ? nil : .infinity, alignment: .leading)
+    }
+}
+
+// MARK: - Styled Skill Mention Text (highlights @skillname in user messages)
+
+struct StyledSkillMentionText: View {
+    let text: String
+
+    /// Regex pattern for @skillname (alphanumeric and hyphens, followed by space/newline/end)
+    private static let skillMentionPattern = try! NSRegularExpression(
+        pattern: "@([a-zA-Z0-9][a-zA-Z0-9-]*)",
+        options: []
+    )
+
+    var body: some View {
+        buildStyledText()
+    }
+
+    /// Build a Text view with @mentions styled differently
+    private func buildStyledText() -> Text {
+        let nsText = text as NSString
+        let range = NSRange(location: 0, length: nsText.length)
+        let matches = Self.skillMentionPattern.matches(in: text, options: [], range: range)
+
+        if matches.isEmpty {
+            return Text(text)
+        }
+
+        var result = Text("")
+        var lastEnd = 0
+
+        for match in matches {
+            // Add text before the match
+            if match.range.location > lastEnd {
+                let beforeRange = NSRange(location: lastEnd, length: match.range.location - lastEnd)
+                let beforeText = nsText.substring(with: beforeRange)
+                result = result + Text(beforeText)
+            }
+
+            // Add the @mention with special styling
+            let mentionText = nsText.substring(with: match.range)
+            result = result + Text(mentionText)
+                .foregroundColor(.tronCyan)
+                .fontWeight(.medium)
+
+            lastEnd = match.range.location + match.range.length
+        }
+
+        // Add remaining text after last match
+        if lastEnd < nsText.length {
+            let afterRange = NSRange(location: lastEnd, length: nsText.length - lastEnd)
+            let afterText = nsText.substring(with: afterRange)
+            result = result + Text(afterText)
+        }
+
+        return result
     }
 }
 

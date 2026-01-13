@@ -710,6 +710,12 @@ function createSkillManager(orchestrator: EventStoreOrchestrator): SkillRpcManag
         },
       });
 
+      // Broadcast skill removed event via WebSocket for real-time notification
+      orchestrator.emit('skill_removed', {
+        sessionId,
+        skillName,
+      });
+
       return { success: true };
     },
   };
@@ -939,6 +945,17 @@ export class TronServer {
         data: {
           tokensBefore: data.tokensBefore,
           tokensAfter: data.tokensAfter,
+        },
+      });
+    });
+
+    this.orchestrator.on('skill_removed', (data) => {
+      this.wsServer?.broadcastEvent({
+        type: 'agent.skill_removed',
+        sessionId: data.sessionId,
+        timestamp: new Date().toISOString(),
+        data: {
+          skillName: data.skillName,
         },
       });
     });

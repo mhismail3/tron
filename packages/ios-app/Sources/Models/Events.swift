@@ -446,6 +446,19 @@ struct ConnectedEvent: Decodable {
     var clientId: String? { data?.clientId }
 }
 
+struct SkillRemovedEvent: Decodable {
+    let type: String
+    let sessionId: String?
+    let timestamp: String?
+    let data: SkillRemovedData
+
+    struct SkillRemovedData: Decodable {
+        let skillName: String
+    }
+
+    var skillName: String { data.skillName }
+}
+
 // MARK: - Event Type Constants
 
 enum EventType: String {
@@ -460,6 +473,7 @@ enum EventType: String {
     case compaction = "agent.compaction"
     case contextCleared = "agent.context_cleared"
     case messageDeleted = "agent.message_deleted"
+    case skillRemoved = "agent.skill_removed"
     case connected = "connection.established"
     case systemConnected = "system.connected"
     case sessionCreated = "session.created"
@@ -482,6 +496,7 @@ enum ParsedEvent {
     case compaction(CompactionEvent)
     case contextCleared(ContextClearedEvent)
     case messageDeleted(MessageDeletedEvent)
+    case skillRemoved(SkillRemovedEvent)
     case browserFrame(BrowserFrameEvent)
     case browserClosed(String)
     case connected(ConnectedEvent)
@@ -544,6 +559,11 @@ enum ParsedEvent {
                 let event = try decoder.decode(MessageDeletedEvent.self, from: data)
                 logger.info("Message deleted: targetType=\(event.targetType), eventId=\(event.targetEventId)", category: .events)
                 return .messageDeleted(event)
+
+            case EventType.skillRemoved.rawValue:
+                let event = try decoder.decode(SkillRemovedEvent.self, from: data)
+                logger.info("Skill removed: \(event.skillName)", category: .events)
+                return .skillRemoved(event)
 
             case "browser.frame":
                 let event = try decoder.decode(BrowserFrameEvent.self, from: data)

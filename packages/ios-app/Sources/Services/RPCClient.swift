@@ -39,6 +39,7 @@ class RPCClient: ObservableObject {
     var onCompaction: ((CompactionEvent) -> Void)?
     var onContextCleared: ((ContextClearedEvent) -> Void)?
     var onMessageDeleted: ((MessageDeletedEvent) -> Void)?
+    var onSkillRemoved: ((SkillRemovedEvent) -> Void)?
     var onComplete: (() -> Void)?
     var onError: ((String) -> Void)?
 
@@ -188,6 +189,10 @@ class RPCClient: ObservableObject {
         case .messageDeleted(let e):
             guard checkSession(e.sessionId) else { return }
             onMessageDeleted?(e)
+
+        case .skillRemoved(let e):
+            guard checkSession(e.sessionId) else { return }
+            onSkillRemoved?(e)
 
         case .error(let e):
             // Always notify global listeners for dashboard updates

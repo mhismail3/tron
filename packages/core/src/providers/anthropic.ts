@@ -336,6 +336,14 @@ export class AnthropicProvider {
     // Build system prompt - OAuth requires structured format with Claude Code identity
     let systemParam: string | SystemPromptBlock[] | undefined;
 
+    logger.info('[ANTHROPIC] Building system prompt', {
+      isOAuth: this.isOAuth,
+      hasSystemPrompt: !!context.systemPrompt,
+      hasSkillContext: !!context.skillContext,
+      skillContextLength: context.skillContext?.length ?? 0,
+      skillContextPreview: context.skillContext?.substring(0, 100),
+    });
+
     if (this.isOAuth) {
       // OAuth: Use structured array format with cache_control (required by Anthropic)
       const systemBlocks: SystemPromptBlock[] = [
@@ -354,12 +362,18 @@ export class AnthropicProvider {
       }
       // Add skill context as a separate system block (ephemeral, high authority)
       if (context.skillContext) {
+        logger.info('[ANTHROPIC] Adding skill context to system blocks', {
+          skillContextLength: context.skillContext.length,
+        });
         systemBlocks.push({
           type: 'text',
           text: context.skillContext,
           cache_control: { type: 'ephemeral' },
         });
       }
+      logger.info('[ANTHROPIC] System blocks ready', {
+        blockCount: systemBlocks.length,
+      });
       systemParam = systemBlocks;
     } else {
       // API key: Combine system prompt and skill context

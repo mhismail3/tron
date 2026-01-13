@@ -507,18 +507,15 @@ export class TronAgent {
       };
 
       // Debug: Log context being sent to provider
-      logger.debug('Building context for turn', {
+      logger.info('[AGENT] Building context for turn', {
         sessionId: this.sessionId,
         turn: this.currentTurn,
         messageCount: messages.length,
-        messageRoles: messages.map(m => m.role),
         providerType: this.providerType,
         systemPromptLength: context.systemPrompt?.length ?? 0,
-        systemPromptPreview: context.systemPrompt?.substring(0, 100),
-        workingDirectory: this.workingDirectory,
-        hasToolClarification: this.contextManager.requiresToolClarification(),
         hasSkillContext: !!this.currentSkillContext,
         skillContextLength: this.currentSkillContext?.length ?? 0,
+        skillContextPreview: this.currentSkillContext?.substring(0, 100),
       });
 
       // Stream response

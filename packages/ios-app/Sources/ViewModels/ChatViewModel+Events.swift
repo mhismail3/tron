@@ -456,6 +456,14 @@ extension ChatViewModel {
         messages.append(deletedMessage)
     }
 
+    func handleSkillRemoved(_ event: SkillRemovedEvent) {
+        logger.info("Skill removed: \(event.skillName)", category: .events)
+
+        // Add skill removed notification pill to chat
+        let skillRemovedMessage = ChatMessage.skillRemoved(skillName: event.skillName)
+        messages.append(skillRemovedMessage)
+    }
+
     func handleError(_ message: String) {
         logger.error("Agent error: \(message)", category: .events)
         isProcessing = false
