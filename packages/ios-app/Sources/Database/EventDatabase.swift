@@ -373,6 +373,50 @@ class EventDatabase: ObservableObject {
         return children
     }
 
+    /// Get all sessions that were forked from a specific event.
+    /// Finds session.fork events whose sourceEventId matches the given event.
+    func getForkedSessions(fromEventId eventId: String) throws -> [CachedSession] {
+        // Find all session.fork events
+        let sql = """
+            SELECT id, parent_id, session_id, workspace_id, type, timestamp, sequence, payload
+            FROM events WHERE type = 'session.fork'
+        """
+
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+            throw EventDatabaseError.prepareFailed(errorMessage)
+        }
+        defer { sqlite3_finalize(stmt) }
+
+        var forkedSessionIds: [String] = []
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            if let event = try? parseEventRow(stmt) {
+                // Parse the fork payload to check sourceEventId
+                let payload = SessionForkPayload(from: event.payload)
+                if payload?.sourceEventId == eventId {
+                    forkedSessionIds.append(event.sessionId)
+                }
+            }
+        }
+
+        // Fetch the corresponding sessions
+        var sessions: [CachedSession] = []
+        for sessionId in forkedSessionIds {
+            if let session = try getSession(sessionId) {
+                sessions.append(session)
+            }
+        }
+
+        return sessions
+    }
+
+    /// Get sibling branches at a fork point - returns sessions forked from the same event
+    /// as the current session, excluding the current session itself.
+    func getSiblingBranches(forEventId eventId: String, excludingSessionId currentSessionId: String) throws -> [CachedSession] {
+        let allForked = try getForkedSessions(fromEventId: eventId)
+        return allForked.filter { $0.id != currentSessionId }
+    }
+
     func deleteEventsBySession(_ sessionId: String) throws {
         let sql = "DELETE FROM events WHERE session_id = ?"
 

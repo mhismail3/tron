@@ -1,5 +1,27 @@
 import SwiftUI
 import PhotosUI
+import UIKit
+
+// MARK: - Interactive Pop Gesture Enabler
+
+/// Enables the native iOS interactive pop gesture even when the back button is hidden.
+/// Add this as a background to any view that hides the navigation back button.
+private struct InteractivePopGestureEnabler: UIViewControllerRepresentable {
+    func makeUIViewController(context: Context) -> UIViewController {
+        InteractivePopGestureController()
+    }
+
+    func updateUIViewController(_ uiViewController: UIViewController, context: Context) {}
+
+    private class InteractivePopGestureController: UIViewController {
+        override func viewDidAppear(_ animated: Bool) {
+            super.viewDidAppear(animated)
+            // Re-enable the interactive pop gesture
+            navigationController?.interactivePopGestureRecognizer?.isEnabled = true
+            navigationController?.interactivePopGestureRecognizer?.delegate = nil
+        }
+    }
+}
 
 // MARK: - Scroll Position Tracking
 
@@ -162,7 +184,18 @@ struct ChatView: View {
             .background(.clear)
             .navigationBarTitleDisplayMode(.inline)
         .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
+        .navigationBarBackButtonHidden(true)
+        .background(InteractivePopGestureEnabler())
         .toolbar {
+            ToolbarItem(placement: .topBarLeading) {
+                Button {
+                    dismiss()
+                } label: {
+                    Image(systemName: "chevron.left")
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(.tronEmerald)
+                }
+            }
             ToolbarItem(placement: .principal) {
                 VStack(spacing: 2) {
                     Text(eventStoreManager.activeSession?.displayTitle ?? "Chat")
@@ -237,7 +270,8 @@ struct ChatView: View {
         .sheet(isPresented: $showSessionHistory) {
             SessionHistorySheet(
                 sessionId: sessionId,
-                rpcClient: rpcClient
+                rpcClient: rpcClient,
+                eventStoreManager: eventStoreManager
             )
         }
         .sheet(isPresented: $showSessionAnalytics) {

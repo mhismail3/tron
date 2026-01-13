@@ -313,7 +313,7 @@ struct ContextAuditView: View {
 
     private func deleteMessage(eventId: String) async {
         // Optimistic update: immediately hide the message with animation
-        withAnimation(.tronStandard) {
+        _ = withAnimation(.tronStandard) {
             pendingMessageDeletions.insert(eventId)
         }
 
@@ -323,7 +323,7 @@ struct ContextAuditView: View {
             await reloadContextInBackground()
         } catch {
             // Rollback: show the message again if deletion failed
-            withAnimation(.tronStandard) {
+            _ = withAnimation(.tronStandard) {
                 pendingMessageDeletions.remove(eventId)
             }
             errorMessage = "Failed to delete message: \(error.localizedDescription)"
@@ -332,7 +332,7 @@ struct ContextAuditView: View {
 
     private func removeSkillFromContext(skillName: String) async {
         // Optimistic update: immediately hide the skill with animation
-        withAnimation(.tronStandard) {
+        _ = withAnimation(.tronStandard) {
             pendingSkillDeletions.insert(skillName)
         }
 
@@ -343,14 +343,14 @@ struct ContextAuditView: View {
                 await reloadContextInBackground()
             } else {
                 // Rollback: show the skill again if removal failed
-                withAnimation(.tronStandard) {
+                _ = withAnimation(.tronStandard) {
                     pendingSkillDeletions.remove(skillName)
                 }
                 errorMessage = result.error ?? "Failed to remove skill"
             }
         } catch {
             // Rollback: show the skill again if removal failed
-            withAnimation(.tronStandard) {
+            _ = withAnimation(.tronStandard) {
                 pendingSkillDeletions.remove(skillName)
             }
             errorMessage = "Failed to remove skill: \(error.localizedDescription)"

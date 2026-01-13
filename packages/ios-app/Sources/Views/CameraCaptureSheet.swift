@@ -1,5 +1,5 @@
 import SwiftUI
-import AVFoundation
+@preconcurrency import AVFoundation
 
 /// Custom camera capture sheet with styled UI matching the app aesthetic.
 /// Features a square viewport with rounded corners and control buttons.
