@@ -479,21 +479,21 @@ struct TotalSessionTokensView: View {
                             HStack(spacing: 4) {
                                 Image(systemName: "bolt.fill")
                                     .font(.system(size: 10))
-                                    .foregroundStyle(.tronEmerald)
+                                    .foregroundStyle(.tronAmber)
                                 Text("Cache Read")
                                     .font(.system(size: 10, design: .monospaced))
                                     .foregroundStyle(.white.opacity(0.5))
                             }
                             Text(formatTokenCount(cacheReadTokens))
                                 .font(.system(size: 12, weight: .medium, design: .monospaced))
-                                .foregroundStyle(.tronEmerald)
+                                .foregroundStyle(.tronAmber)
                         }
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(10)
                         .background {
                             RoundedRectangle(cornerRadius: 8, style: .continuous)
                                 .fill(.clear)
-                                .glassEffect(.regular.tint(Color.tronEmerald.opacity(0.3)), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                                .glassEffect(.regular.tint(Color.tronAmber.opacity(0.3)), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
                         }
 
                         // Cache creation tokens
