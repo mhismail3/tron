@@ -1697,19 +1697,30 @@ export class EventStoreOrchestrator extends EventEmitter {
     active: ActiveSession,
     options: AgentRunOptions
   ): Promise<string> {
+    // Get session skills already tracked (persistent across turns)
+    const sessionSkills = active.skillTracker.getAddedSkills();
+
     // Log incoming skills for debugging
     logger.info('[SKILL] loadSkillContextForPrompt called', {
       sessionId: active.sessionId,
       skillsProvided: options.skills?.length ?? 0,
       skills: options.skills?.map(s => s.name) ?? [],
+      sessionSkillCount: sessionSkills.length,
+      sessionSkills: sessionSkills.map(s => s.name),
       hasSkillLoader: !!options.skillLoader,
     });
 
-    // Collect skill names from explicitly selected skills only
-    // @mentions in prompt text are handled client-side (converted to chips)
+    // Collect skill names from:
+    // 1. Session skills already in tracker (persistent across turns)
+    // 2. Newly selected skills from options.skills
     const skillNames: Set<string> = new Set();
 
-    // Add explicitly selected skills from options.skills
+    // Add skills already in the session (from skillTracker)
+    for (const addedSkill of sessionSkills) {
+      skillNames.add(addedSkill.name);
+    }
+
+    // Add newly selected skills from options.skills
     if (options.skills && options.skills.length > 0) {
       for (const skill of options.skills) {
         skillNames.add(skill.name);
