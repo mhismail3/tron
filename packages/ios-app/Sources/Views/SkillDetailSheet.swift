@@ -33,13 +33,13 @@ struct SkillDetailSheet: View {
                 ToolbarItem(placement: .principal) {
                     Text(skill.displayName)
                         .font(.system(size: 16, weight: .semibold, design: .monospaced))
-                        .foregroundStyle(.tronEmerald)
+                        .foregroundStyle(.tronCyan)
                 }
             }
         }
         .presentationDetents([.medium, .large])
         .presentationDragIndicator(.hidden)
-        .tint(.tronEmerald)
+        .tint(.tronCyan)
         .preferredColorScheme(.dark)
         .task {
             await loadSkillContent()
@@ -51,7 +51,7 @@ struct SkillDetailSheet: View {
     private var loadingView: some View {
         VStack(spacing: 16) {
             ProgressView()
-                .tint(.tronEmerald)
+                .tint(.tronCyan)
                 .scaleEffect(1.2)
 
             Text("Loading skill content...")
@@ -80,10 +80,10 @@ struct SkillDetailSheet: View {
             } label: {
                 Text("Try Again")
                     .font(.system(size: 14, weight: .medium))
-                    .foregroundStyle(.tronEmerald)
+                    .foregroundStyle(.tronCyan)
                     .padding(.horizontal, 20)
                     .padding(.vertical, 10)
-                    .background(Color.tronEmerald.opacity(0.15))
+                    .background(Color.tronCyan.opacity(0.15))
                     .clipShape(Capsule())
             }
         }
@@ -125,7 +125,7 @@ struct SkillDetailSheet: View {
                 // Description text
                 Text(metadata.description)
                     .font(.system(size: 14, weight: .medium, design: .monospaced))
-                    .foregroundStyle(.tronEmerald)
+                    .foregroundStyle(.tronCyan)
                     .frame(maxWidth: .infinity, alignment: .leading)
 
                 // Metadata row
@@ -137,13 +137,13 @@ struct SkillDetailSheet: View {
                         Text(metadata.source == .project ? "Project" : "Global")
                             .font(.system(size: 10, design: .monospaced))
                     }
-                    .foregroundStyle(.tronEmerald)
+                    .foregroundStyle(.tronCyan)
                     .padding(.horizontal, 8)
                     .padding(.vertical, 6)
                     .background {
                         RoundedRectangle(cornerRadius: 8, style: .continuous)
                             .fill(.clear)
-                            .glassEffect(.regular.tint(Color.tronEmerald.opacity(0.3)), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                            .glassEffect(.regular.tint(Color.tronCyan.opacity(0.25)), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
                     }
 
                     // Auto-inject badge
@@ -160,7 +160,7 @@ struct SkillDetailSheet: View {
                         .background {
                             RoundedRectangle(cornerRadius: 8, style: .continuous)
                                 .fill(.clear)
-                                .glassEffect(.regular.tint(Color.tronAmber.opacity(0.3)), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                                .glassEffect(.regular.tint(Color.tronAmber.opacity(0.25)), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
                         }
                     }
 
@@ -171,13 +171,13 @@ struct SkillDetailSheet: View {
                         ForEach(tags.prefix(3), id: \.self) { tag in
                             Text(tag)
                                 .font(.system(size: 10, weight: .medium, design: .monospaced))
-                                .foregroundStyle(.tronCyan)
+                                .foregroundStyle(.tronCyan.opacity(0.8))
                                 .padding(.horizontal, 8)
                                 .padding(.vertical, 6)
                                 .background {
                                     RoundedRectangle(cornerRadius: 8, style: .continuous)
                                         .fill(.clear)
-                                        .glassEffect(.regular.tint(Color.tronCyan.opacity(0.3)), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                                        .glassEffect(.regular.tint(Color.tronCyan.opacity(0.15)), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
                                 }
                         }
                     }
@@ -187,7 +187,7 @@ struct SkillDetailSheet: View {
             .background {
                 RoundedRectangle(cornerRadius: 12, style: .continuous)
                     .fill(.clear)
-                    .glassEffect(.regular.tint(Color.tronPhthaloGreen.opacity(0.35)), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .glassEffect(.regular.tint(Color.tronCyan.opacity(0.12)), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
             }
         }
     }
@@ -208,7 +208,7 @@ struct SkillDetailSheet: View {
                 } label: {
                     Image(systemName: "doc.on.doc")
                         .font(.system(size: 12))
-                        .foregroundStyle(.white.opacity(0.4))
+                        .foregroundStyle(.tronCyan.opacity(0.6))
                 }
             }
 
@@ -217,11 +217,11 @@ struct SkillDetailSheet: View {
                 HStack {
                     Image(systemName: "doc.text.fill")
                         .font(.system(size: 14))
-                        .foregroundStyle(.tronEmerald)
+                        .foregroundStyle(.tronCyan)
 
                     Text("Content")
                         .font(.system(size: 14, weight: .medium, design: .monospaced))
-                        .foregroundStyle(.tronEmerald)
+                        .foregroundStyle(.tronCyan)
 
                     Spacer()
                 }
@@ -237,7 +237,7 @@ struct SkillDetailSheet: View {
             .background {
                 RoundedRectangle(cornerRadius: 12, style: .continuous)
                     .fill(.clear)
-                    .glassEffect(.regular.tint(Color.tronPhthaloGreen.opacity(0.35)), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .glassEffect(.regular.tint(Color.tronCyan.opacity(0.12)), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
             }
         }
     }
@@ -255,7 +255,7 @@ struct SkillDetailSheet: View {
                     HStack(spacing: 8) {
                         Image(systemName: fileIcon(for: file))
                             .font(.system(size: 12))
-                            .foregroundStyle(.tronPurple)
+                            .foregroundStyle(.tronCyan.opacity(0.8))
 
                         Text(file)
                             .font(.system(size: 12, design: .monospaced))
@@ -267,7 +267,7 @@ struct SkillDetailSheet: View {
                     .background {
                         RoundedRectangle(cornerRadius: 8, style: .continuous)
                             .fill(.clear)
-                            .glassEffect(.regular.tint(Color.tronPurple.opacity(0.25)), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                            .glassEffect(.regular.tint(Color.tronCyan.opacity(0.15)), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
                     }
                 }
             }
@@ -275,7 +275,7 @@ struct SkillDetailSheet: View {
             .background {
                 RoundedRectangle(cornerRadius: 12, style: .continuous)
                     .fill(.clear)
-                    .glassEffect(.regular.tint(Color.tronPurple.opacity(0.3)), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .glassEffect(.regular.tint(Color.tronCyan.opacity(0.12)), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
             }
         }
     }
