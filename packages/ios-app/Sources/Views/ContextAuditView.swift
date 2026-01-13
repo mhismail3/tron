@@ -793,12 +793,16 @@ struct ToolsSection: View {
             // Content
             if isExpanded {
                 ScrollView {
-                    Text(toolsContent.joined(separator: "\n"))
-                        .font(.system(size: 10, design: .monospaced))
-                        .foregroundStyle(.white.opacity(0.6))
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(10)
-                        .textSelection(.enabled)
+                    VStack(alignment: .leading, spacing: 0) {
+                        ForEach(Array(toolsContent.enumerated()), id: \.offset) { index, tool in
+                            ToolItemView(tool: tool)
+                            if index < toolsContent.count - 1 {
+                                Divider()
+                                    .background(Color.white.opacity(0.1))
+                            }
+                        }
+                    }
+                    .padding(.vertical, 4)
                 }
                 .frame(maxHeight: 300)
                 .background(Color.black.opacity(0.2))
@@ -812,6 +816,45 @@ struct ToolsSection: View {
                 .fill(Color.tronClay.opacity(0.15))
         }
         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+    }
+}
+
+// MARK: - Tool Item View
+
+@available(iOS 26.0, *)
+struct ToolItemView: View {
+    let tool: String
+
+    private var toolName: String {
+        if let colonIndex = tool.firstIndex(of: ":") {
+            return String(tool[..<colonIndex])
+        }
+        return tool
+    }
+
+    private var toolDescription: String {
+        if let colonIndex = tool.firstIndex(of: ":") {
+            let afterColon = tool.index(after: colonIndex)
+            return String(tool[afterColon...]).trimmingCharacters(in: .whitespaces)
+        }
+        return ""
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(toolName)
+                .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                .foregroundStyle(.tronClay)
+            if !toolDescription.isEmpty {
+                Text(toolDescription)
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundStyle(.white.opacity(0.5))
+                    .lineLimit(3)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
     }
 }
 

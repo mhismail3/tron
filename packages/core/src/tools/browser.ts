@@ -39,61 +39,11 @@ export class BrowserTool implements TronTool {
   readonly name = 'browser';
   readonly description = `Control a web browser with automation capabilities.
 
-IMPORTANT: Execute browser actions ONE AT A TIME sequentially - wait for each action to complete before starting the next. Do NOT call multiple browser tools in parallel as this causes race conditions.
+CRITICAL: Execute actions ONE AT A TIME sequentially - do not call multiple browser tools in parallel.
 
-Recommended workflow:
-1. navigate to URL → wait for result
-2. snapshot to get page structure → wait for result
-3. screenshot to see visual state → wait for result
-4. interact (click/fill/etc.) → wait for result
-5. repeat as needed
+Actions: navigate, snapshot, screenshot, click, fill, type, select, wait, scroll, close
 
-Actions:
-- navigate: Go to a URL (wait for page to load before other actions)
-  Required: url (string)
-  Example: { "action": "navigate", "url": "https://example.com" }
-
-- snapshot: Get accessibility tree with element references
-  IMPORTANT: Call this AFTER navigate completes. Returns element references (e1, e2, etc.)
-  Example: { "action": "snapshot" }
-
-- screenshot: Capture visual screenshot of current viewport (1280x800)
-  Example: { "action": "screenshot" }
-
-- click: Click an element
-  Required: selector (string) - CSS selector or element reference (e.g., "e1")
-  Example: { "action": "click", "selector": "button.submit" }
-
-- fill: Fill an input field (clears first, then fills)
-  Required: selector (string), value (string)
-  Example: { "action": "fill", "selector": "#email", "value": "test@example.com" }
-
-- type: Type text character by character (triggers JS events)
-  Required: selector (string), text (string)
-  Example: { "action": "type", "selector": "#search", "text": "query" }
-
-- select: Select dropdown option(s)
-  Required: selector (string), value (string or string[])
-  Example: { "action": "select", "selector": "#country", "value": "US" }
-
-- wait: Wait for element or timeout
-  Optional: selector (string), timeout (number in ms)
-  Example: { "action": "wait", "selector": ".loading", "timeout": 5000 }
-
-- scroll: Scroll page or element
-  Required: direction ("up" | "down" | "left" | "right")
-  Optional: amount (number in pixels), selector (string)
-  Example: { "action": "scroll", "direction": "down", "amount": 500 }
-
-- close: Close the browser session
-  Example: { "action": "close" }
-
-Note: Selector conversion is automatic:
-- :contains("text") → :has-text("text") (Playwright format)
-- Element references from snapshot (e1, e2) are automatically resolved
-
-Browser sessions are persistent - once created, you can perform multiple actions.
-The browser runs headless by default and streams frames to the iOS app.`;
+Reference @browser skill for detailed usage, examples, and workflow.`;
 
   readonly parameters = {
     type: 'object' as const,
