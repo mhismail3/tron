@@ -551,7 +551,10 @@ struct UnifiedEventTransformer {
         _ payload: [String: AnyCodable],
         timestamp: Date
     ) -> ChatMessage? {
-        guard let skillName = payload["skillName"]?.value as? String else { return nil }
+        guard let skillName = payload["skillName"]?.value as? String else {
+            logger.warning("skill.removed event missing skillName in payload", category: .events)
+            return nil
+        }
 
         return ChatMessage(
             role: .system,
@@ -1132,6 +1135,10 @@ extension UnifiedEventTransformer {
                  .notificationInterrupted, .configModelSwitch, .configReasoningLevel,
                  .contextCleared, .skillRemoved,
                  .errorAgent, .errorTool, .errorProvider:
+                // Debug: Log skill.removed events being processed (RawEvent version)
+                if eventType == .skillRemoved {
+                    logger.info("[RECONSTRUCT-RAW] Processing skill.removed event: \(event.id)", category: .events)
+                }
                 // Add chat message
                 if var message = transformPersistedEvent(event) {
                     // Set eventId for message deletion tracking (user messages only)
@@ -1139,6 +1146,12 @@ extension UnifiedEventTransformer {
                         message.eventId = event.id
                     }
                     state.messages.append(message)
+                    // Debug: Confirm skill.removed message was created
+                    if eventType == .skillRemoved {
+                        logger.info("[RECONSTRUCT-RAW] skill.removed message created and appended", category: .events)
+                    }
+                } else if eventType == .skillRemoved {
+                    logger.warning("[RECONSTRUCT-RAW] transformPersistedEvent returned nil for skill.removed", category: .events)
                 }
 
                 // Track model switches

@@ -700,6 +700,8 @@ function createSkillManager(orchestrator: EventStoreOrchestrator): SkillRpcManag
       active.skillTracker.removeSkill(skillName);
 
       // Emit skill.removed event
+      // NOTE: orchestrator.appendEvent() automatically uses linearized append for active
+      // sessions, ensuring this event chains correctly and pendingHeadEventId is updated
       await orchestrator.appendEvent({
         sessionId: sessionId as SessionId,
         type: 'skill.removed',

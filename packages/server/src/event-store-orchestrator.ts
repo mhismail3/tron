@@ -21,6 +21,9 @@
  * - `tool.call` / `tool.result` - Discrete tool events
  * - `stream.turn_start/end` - Turn boundaries for reconstruction
  * - `config.*` - Configuration changes (model, reasoning level, etc.)
+ * - `skill.added` / `skill.removed` - Skill context changes
+ * - `context.cleared` - Context clearing events
+ * - `compact.boundary` / `compact.summary` - Compaction events
  *
  * This design is intentional:
  * 1. Streaming deltas are high-frequency, low-value for reconstruction
@@ -29,6 +32,28 @@
  * 4. Session state can be fully reconstructed from persisted events
  *
  * See TurnContentTracker for the in-memory accumulation logic.
+ *
+ * ## CRITICAL: Event Linearization
+ *
+ * All persisted events MUST maintain a linear chain via parentId for proper
+ * session reconstruction. The ancestor chain (getAncestors) walks from head
+ * to root - any event not in this chain will NOT be reconstructed.
+ *
+ * For active sessions, we maintain `pendingHeadEventId` in memory. This MUST
+ * be updated after EVERY event append. The linearization system ensures:
+ *
+ * 1. Events are chained via appendPromiseChain (prevents race conditions)
+ * 2. parentId is captured INSIDE the .then() callback (after previous event)
+ * 3. pendingHeadEventId is updated after successful append
+ *
+ * The public `appendEvent()` method automatically handles linearization for
+ * active sessions. Internal methods use `appendEventLinearized()` directly.
+ *
+ * WITHOUT LINEARIZATION: Out-of-band events (skill.removed, context.cleared,
+ * model switches via RPC) would become orphaned branches because subsequent
+ * agent messages would chain from the stale pendingHeadEventId.
+ *
+ * See orchestrator/event-linearizer.ts for the core implementation.
  */
 import { EventEmitter } from 'events';
 import * as path from 'path';
@@ -89,6 +114,7 @@ import {
 } from './utils/content-normalizer.js';
 import {
   appendEventLinearized as appendEventLinearizedImpl,
+  appendEventLinearizedAsync as appendEventLinearizedAsyncImpl,
   flushPendingEvents as flushPendingEventsImpl,
   flushAllPendingEvents as flushAllPendingEventsImpl,
 } from './orchestrator/event-linearizer.js';
@@ -693,8 +719,47 @@ export class EventStoreOrchestrator extends EventEmitter {
     return this.eventStore.getAncestors(eventId as EventId);
   }
 
+  /**
+   * Append an event to a session.
+   *
+   * CRITICAL: For active sessions (with running agent), this automatically uses
+   * linearized append to maintain proper event chain ordering. This prevents the
+   * "orphaned branch" bug where out-of-band events (like skill.removed, context
+   * clearing, model switches) get skipped because subsequent messages chain from
+   * a stale parent.
+   *
+   * For inactive sessions, uses direct append since no race conditions are possible.
+   */
   async appendEvent(options: AppendEventOptions): Promise<TronSessionEvent> {
-    const event = await this.eventStore.append(options);
+    const active = this.activeSessions.get(options.sessionId);
+
+    let event: TronSessionEvent;
+
+    if (active) {
+      // CRITICAL: For active sessions, use linearized append to:
+      // 1. Wait for any pending appends to complete
+      // 2. Chain from the correct parent (pendingHeadEventId)
+      // 3. Update pendingHeadEventId so subsequent events chain correctly
+      //
+      // Without this, events appended via RPC (skill.removed, etc.) would
+      // use the database head instead of the in-memory pending head, causing
+      // subsequent agent messages to skip over the RPC-appended event.
+      const linearizedEvent = await appendEventLinearizedAsyncImpl(
+        this.eventStore,
+        options.sessionId,
+        active,
+        options.type,
+        options.payload
+      );
+
+      if (!linearizedEvent) {
+        throw new Error(`Failed to append ${options.type} event (linearized append returned null)`);
+      }
+      event = linearizedEvent;
+    } else {
+      // For inactive sessions, direct append is safe (no concurrent events)
+      event = await this.eventStore.append(options);
+    }
 
     // Broadcast event to subscribers
     this.emit('event_new', {

@@ -336,21 +336,16 @@ class EventDatabase: ObservableObject {
     func getAncestors(_ eventId: String) throws -> [SessionEvent] {
         var ancestors: [SessionEvent] = []
         var currentId: String? = eventId
-        var depth = 0
-
-        logger.info("[DB-ANCESTORS] Walking chain from \(eventId)", category: .session)
 
         while let id = currentId {
             guard let event = try getEvent(id) else {
-                logger.warning("[DB-ANCESTORS] Event NOT FOUND at depth \(depth): \(id) - chain broken!", category: .session)
+                logger.warning("Ancestor chain broken at event: \(id)", category: .session)
                 break
             }
             ancestors.insert(event, at: 0)
-            depth += 1
             currentId = event.parentId
         }
 
-        logger.info("[DB-ANCESTORS] Chain complete: \(ancestors.count) events, types: \(ancestors.map { $0.type }.joined(separator: "→"))", category: .session)
         return ancestors
     }
 

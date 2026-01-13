@@ -456,21 +456,21 @@ struct TotalSessionTokensView: View {
                         HStack(spacing: 4) {
                             Image(systemName: "memorychip.fill")
                                 .font(.system(size: 10))
-                                .foregroundStyle(.tronAmber)
+                                .foregroundStyle(.tronAmberLight)
                             Text("Cached")
                                 .font(.system(size: 10, design: .monospaced))
                                 .foregroundStyle(.white.opacity(0.5))
                         }
                         Text(formatTokenCount(cacheReadTokens))
                             .font(.system(size: 12, weight: .medium, design: .monospaced))
-                            .foregroundStyle(.tronAmber)
+                            .foregroundStyle(.tronAmberLight)
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(10)
                     .background {
                         RoundedRectangle(cornerRadius: 8, style: .continuous)
                             .fill(.clear)
-                            .glassEffect(.regular.tint(Color.tronAmber.opacity(0.3)), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                            .glassEffect(.regular.tint(Color.tronAmberLight.opacity(0.3)), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
                     }
                 }
 
@@ -484,7 +484,7 @@ struct TotalSessionTokensView: View {
             .background {
                 RoundedRectangle(cornerRadius: 12, style: .continuous)
                     .fill(.clear)
-                    .glassEffect(.regular.tint(Color.tronBronze.opacity(0.35)), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .glassEffect(.regular.tint(Color.tronBronze.opacity(0.2)), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
             }
         }
     }
