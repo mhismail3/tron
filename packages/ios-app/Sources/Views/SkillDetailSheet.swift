@@ -17,9 +17,6 @@ struct SkillDetailSheet: View {
     var body: some View {
         NavigationStack {
             ZStack {
-                // Background
-                Color.tronBackground.ignoresSafeArea()
-
                 if isLoading {
                     loadingView
                 } else if let error = error {
@@ -30,21 +27,20 @@ struct SkillDetailSheet: View {
                     errorView("Skill not found")
                 }
             }
-            .navigationTitle(skill.name)
             .navigationBarTitleDisplayMode(.inline)
+            .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
             .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    Button("Done") {
-                        dismiss()
-                    }
-                    .foregroundStyle(.tronEmerald)
-                }
-
-                ToolbarItem(placement: .topBarTrailing) {
-                    skillInfoBadge
+                ToolbarItem(placement: .principal) {
+                    Text(skill.name)
+                        .font(.system(size: 16, weight: .semibold, design: .monospaced))
+                        .foregroundStyle(.tronEmerald)
                 }
             }
         }
+        .presentationDetents([.medium, .large])
+        .presentationDragIndicator(.hidden)
+        .tint(.tronEmerald)
+        .preferredColorScheme(.dark)
         .task {
             await loadSkillContent()
         }
@@ -96,92 +92,113 @@ struct SkillDetailSheet: View {
 
     private func contentView(_ metadata: SkillMetadata) -> some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 20) {
-                // Header card
-                headerCard(metadata)
+            VStack(spacing: 16) {
+                // Description section
+                descriptionSection(metadata)
+                    .padding(.horizontal)
 
-                // Content
-                contentCard(metadata)
+                // Content section
+                contentSection(metadata)
+                    .padding(.horizontal)
 
-                // Additional files (if any)
+                // Additional files section (if any)
                 if !metadata.additionalFiles.isEmpty {
-                    additionalFilesCard(metadata)
+                    additionalFilesSection(metadata)
+                        .padding(.horizontal)
                 }
             }
-            .padding()
+            .padding(.vertical)
         }
     }
 
-    private func headerCard(_ metadata: SkillMetadata) -> some View {
+    // MARK: - Sections (matching Context Manager style)
+
+    private func descriptionSection(_ metadata: SkillMetadata) -> some View {
         VStack(alignment: .leading, spacing: 12) {
-            // Description
-            Text(metadata.description)
-                .font(.system(size: 15))
-                .foregroundStyle(.tronTextPrimary)
-                .lineSpacing(4)
+            // Section header (outside the card, like Context Manager)
+            Text("Description")
+                .font(.system(size: 12, weight: .medium, design: .monospaced))
+                .foregroundStyle(.white.opacity(0.6))
 
-            Divider()
-                .background(.tronBorder)
+            // Card content
+            VStack(spacing: 12) {
+                // Description text
+                Text(metadata.description)
+                    .font(.system(size: 14, weight: .medium, design: .monospaced))
+                    .foregroundStyle(.tronEmerald)
+                    .frame(maxWidth: .infinity, alignment: .leading)
 
-            // Metadata row
-            HStack(spacing: 16) {
-                // Source
-                HStack(spacing: 6) {
-                    Image(systemName: metadata.source == .project ? "folder.fill" : "globe")
-                        .font(.system(size: 11))
-                    Text(metadata.source == .project ? "Project" : "Global")
-                        .font(.system(size: 12, weight: .medium))
-                }
-                .foregroundStyle(.tronEmerald)
-
-                // Auto-inject indicator
-                if metadata.autoInject {
-                    HStack(spacing: 6) {
-                        Image(systemName: "bolt.fill")
-                            .font(.system(size: 11))
-                        Text("Auto-inject")
-                            .font(.system(size: 12, weight: .medium))
-                    }
-                    .foregroundStyle(.tronAmber)
-                }
-
-                Spacer()
-
-                // Tags
-                if let tags = metadata.tags, !tags.isEmpty {
+                // Metadata row
+                HStack(spacing: 8) {
+                    // Source badge
                     HStack(spacing: 4) {
+                        Image(systemName: metadata.source == .project ? "folder.fill" : "globe")
+                            .font(.system(size: 10))
+                        Text(metadata.source == .project ? "Project" : "Global")
+                            .font(.system(size: 10, design: .monospaced))
+                    }
+                    .foregroundStyle(.tronEmerald)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 6)
+                    .background {
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .fill(.clear)
+                            .glassEffect(.regular.tint(Color.tronEmerald.opacity(0.3)), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    }
+
+                    // Auto-inject badge
+                    if metadata.autoInject {
+                        HStack(spacing: 4) {
+                            Image(systemName: "bolt.fill")
+                                .font(.system(size: 10))
+                            Text("Auto-inject")
+                                .font(.system(size: 10, design: .monospaced))
+                        }
+                        .foregroundStyle(.tronAmber)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 6)
+                        .background {
+                            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                .fill(.clear)
+                                .glassEffect(.regular.tint(Color.tronAmber.opacity(0.3)), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                        }
+                    }
+
+                    Spacer()
+
+                    // Tags
+                    if let tags = metadata.tags, !tags.isEmpty {
                         ForEach(tags.prefix(3), id: \.self) { tag in
                             Text(tag)
-                                .font(.system(size: 10, weight: .medium))
+                                .font(.system(size: 10, weight: .medium, design: .monospaced))
                                 .foregroundStyle(.tronCyan)
-                                .padding(.horizontal, 6)
-                                .padding(.vertical, 3)
-                                .background(Color.tronCyan.opacity(0.15))
-                                .clipShape(Capsule())
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 6)
+                                .background {
+                                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                        .fill(.clear)
+                                        .glassEffect(.regular.tint(Color.tronCyan.opacity(0.3)), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                                }
                         }
                     }
                 }
             }
+            .padding(14)
+            .background {
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(.clear)
+                    .glassEffect(.regular.tint(Color.tronPhthaloGreen.opacity(0.35)), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            }
         }
-        .padding(16)
-        .background(Color.tronSurface)
-        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .stroke(Color.tronBorder, lineWidth: 0.5)
-        )
     }
 
-    private func contentCard(_ metadata: SkillMetadata) -> some View {
+    private func contentSection(_ metadata: SkillMetadata) -> some View {
         VStack(alignment: .leading, spacing: 12) {
+            // Section header
             HStack {
-                Image(systemName: "doc.text.fill")
-                    .font(.system(size: 12))
-                    .foregroundStyle(.tronEmerald)
-
                 Text("SKILL.md")
-                    .font(.system(size: 13, weight: .semibold, design: .monospaced))
-                    .foregroundStyle(.tronTextPrimary)
+                    .font(.system(size: 12, weight: .medium, design: .monospaced))
+                    .foregroundStyle(.white.opacity(0.6))
 
                 Spacer()
 
@@ -190,89 +207,77 @@ struct SkillDetailSheet: View {
                     UIPasteboard.general.string = metadata.content
                 } label: {
                     Image(systemName: "doc.on.doc")
-                        .font(.system(size: 14))
-                        .foregroundStyle(.tronTextMuted)
+                        .font(.system(size: 12))
+                        .foregroundStyle(.white.opacity(0.4))
                 }
             }
 
-            Divider()
-                .background(.tronBorder)
+            // Card content
+            VStack(alignment: .leading, spacing: 12) {
+                HStack {
+                    Image(systemName: "doc.text.fill")
+                        .font(.system(size: 14))
+                        .foregroundStyle(.tronEmerald)
 
-            // Markdown content
-            Text(LocalizedStringKey(metadata.content))
-                .font(.system(size: 14, design: .monospaced))
-                .foregroundStyle(.tronTextPrimary)
-                .lineSpacing(6)
-                .textSelection(.enabled)
+                    Text("Content")
+                        .font(.system(size: 14, weight: .medium, design: .monospaced))
+                        .foregroundStyle(.tronEmerald)
+
+                    Spacer()
+                }
+
+                // Markdown content
+                Text(LocalizedStringKey(metadata.content))
+                    .font(.system(size: 12, design: .monospaced))
+                    .foregroundStyle(.white.opacity(0.7))
+                    .lineSpacing(4)
+                    .textSelection(.enabled)
+            }
+            .padding(14)
+            .background {
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(.clear)
+                    .glassEffect(.regular.tint(Color.tronPhthaloGreen.opacity(0.35)), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            }
         }
-        .padding(16)
-        .background(Color.tronSurface)
-        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .stroke(Color.tronBorder, lineWidth: 0.5)
-        )
     }
 
-    private func additionalFilesCard(_ metadata: SkillMetadata) -> some View {
+    private func additionalFilesSection(_ metadata: SkillMetadata) -> some View {
         VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Image(systemName: "folder.fill")
-                    .font(.system(size: 12))
-                    .foregroundStyle(.tronEmerald)
+            // Section header
+            Text("Additional Files (\(metadata.additionalFiles.count))")
+                .font(.system(size: 12, weight: .medium, design: .monospaced))
+                .foregroundStyle(.white.opacity(0.6))
 
-                Text("Additional Files")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(.tronTextPrimary)
-
-                Spacer()
-
-                Text("\(metadata.additionalFiles.count)")
-                    .font(.system(size: 11, weight: .medium, design: .monospaced))
-                    .foregroundStyle(.tronTextMuted)
-            }
-
-            Divider()
-                .background(.tronBorder)
-
+            // Card content
             VStack(alignment: .leading, spacing: 8) {
                 ForEach(metadata.additionalFiles, id: \.self) { file in
                     HStack(spacing: 8) {
                         Image(systemName: fileIcon(for: file))
                             .font(.system(size: 12))
-                            .foregroundStyle(.tronTextMuted)
-                            .frame(width: 20)
+                            .foregroundStyle(.tronPurple)
 
                         Text(file)
                             .font(.system(size: 12, design: .monospaced))
-                            .foregroundStyle(.tronTextSecondary)
+                            .foregroundStyle(.white.opacity(0.7))
+
+                        Spacer()
+                    }
+                    .padding(10)
+                    .background {
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .fill(.clear)
+                            .glassEffect(.regular.tint(Color.tronPurple.opacity(0.25)), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
                     }
                 }
             }
+            .padding(14)
+            .background {
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(.clear)
+                    .glassEffect(.regular.tint(Color.tronPurple.opacity(0.3)), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            }
         }
-        .padding(16)
-        .background(Color.tronSurface)
-        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .stroke(Color.tronBorder, lineWidth: 0.5)
-        )
-    }
-
-    private var skillInfoBadge: some View {
-        HStack(spacing: 6) {
-            Image(systemName: skill.autoInject ? "bolt.fill" : "sparkles")
-                .font(.system(size: 10, weight: .semibold))
-                .foregroundStyle(skill.autoInject ? .tronAmber : .tronCyan)
-
-            Text(skill.autoInject ? "Rule" : "Skill")
-                .font(.system(size: 11, weight: .medium))
-                .foregroundStyle(skill.autoInject ? .tronAmber : .tronCyan)
-        }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 5)
-        .background((skill.autoInject ? Color.tronAmber : Color.tronCyan).opacity(0.15))
-        .clipShape(Capsule())
     }
 
     // MARK: - Helpers
