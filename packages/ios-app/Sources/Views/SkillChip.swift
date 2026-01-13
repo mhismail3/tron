@@ -22,7 +22,7 @@ struct SkillChip: View {
                     .foregroundStyle(skill.autoInject ? .tronAmber : .tronCyan)
 
                 // Skill name
-                Text("@\(skill.name)")
+                Text(skill.name)
                     .font(.system(size: 11, weight: .medium, design: .monospaced))
                     .foregroundStyle(.white.opacity(0.9))
                     .lineLimit(1)
@@ -139,7 +139,7 @@ struct SkillChipFallback: View {
                     .font(.system(size: 9, weight: .semibold))
                     .foregroundStyle(skill.autoInject ? .orange : .cyan)
 
-                Text("@\(skill.name)")
+                Text(skill.name)
                     .font(.system(size: 11, weight: .medium, design: .monospaced))
                     .foregroundStyle(.white.opacity(0.9))
                     .lineLimit(1)
