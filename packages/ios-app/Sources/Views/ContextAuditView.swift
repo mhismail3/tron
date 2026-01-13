@@ -196,37 +196,37 @@ struct ContextAuditView: View {
                         SystemHeader()
                             .padding(.horizontal)
 
-                        // System Prompt (standalone container)
-                        SystemPromptSection(
-                            tokens: snapshot.breakdown.systemPrompt,
-                            content: snapshot.systemPromptContent
-                        )
-                        .padding(.horizontal)
-
-                        // Tools (standalone container with badge - clay/ochre)
-                        ToolsSection(
-                            toolsContent: snapshot.toolsContent,
-                            tokens: snapshot.breakdown.tools
-                        )
-                        .padding(.horizontal)
-
-                        // Rules section (immutable, terracotta - right after Tools)
-                        if let rules = snapshot.rules, rules.totalFiles > 0 {
-                            RulesSection(
-                                rules: rules,
-                                onFetchContent: { path in
-                                    // Fetch rule content from server
-                                    try await rpcClient.readFile(path: path)
-                                }
+                        // System section containers with tighter spacing
+                        VStack(spacing: 10) {
+                            // System Prompt (standalone container)
+                            SystemPromptSection(
+                                tokens: snapshot.breakdown.systemPrompt,
+                                content: snapshot.systemPromptContent
                             )
-                                .padding(.horizontal)
-                        }
 
-                        // Skill References (standalone container with badge and token count)
-                        if let skills = skillStore?.skills, !skills.isEmpty {
-                            SkillReferencesSection(skills: skills)
-                                .padding(.horizontal)
+                            // Tools (standalone container with badge - clay/ochre)
+                            ToolsSection(
+                                toolsContent: snapshot.toolsContent,
+                                tokens: snapshot.breakdown.tools
+                            )
+
+                            // Rules section (immutable, terracotta - right after Tools)
+                            if let rules = snapshot.rules, rules.totalFiles > 0 {
+                                RulesSection(
+                                    rules: rules,
+                                    onFetchContent: { path in
+                                        // Fetch rule content from server
+                                        try await rpcClient.readFile(path: path)
+                                    }
+                                )
+                            }
+
+                            // Skill References (standalone container with badge and token count)
+                            if let skills = skillStore?.skills, !skills.isEmpty {
+                                SkillReferencesSection(skills: skills)
+                            }
                         }
+                        .padding(.horizontal)
 
                         // Added Skills section (explicitly added via @skillname or skill sheet, deletable)
                         // These are skills the user explicitly added to the conversation context
@@ -409,7 +409,7 @@ struct TotalSessionTokensView: View {
         VStack(alignment: .leading, spacing: 12) {
             // Section header
             Text("Session Tokens")
-                .font(.system(size: 12, weight: .medium, design: .monospaced))
+                .font(.system(size: 14, weight: .medium, design: .monospaced))
                 .foregroundStyle(.white.opacity(0.6))
 
             // Main content card
@@ -559,7 +559,7 @@ struct ContextUsageGaugeView: View {
         VStack(alignment: .leading, spacing: 12) {
             // Section header
             Text("Context Usage")
-                .font(.system(size: 12, weight: .medium, design: .monospaced))
+                .font(.system(size: 14, weight: .medium, design: .monospaced))
                 .foregroundStyle(.white.opacity(0.6))
 
             // Main content card
@@ -625,7 +625,7 @@ struct ContextUsageGaugeView: View {
 struct TokenBreakdownHeader: View {
     var body: some View {
         Text("Token Breakdown")
-            .font(.system(size: 12, weight: .medium, design: .monospaced))
+            .font(.system(size: 14, weight: .medium, design: .monospaced))
             .foregroundStyle(.white.opacity(0.6))
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.top, 8)
@@ -688,7 +688,7 @@ struct SystemPromptSection: View {
                         .foregroundStyle(.white.opacity(0.4))
                         .rotationEffect(.degrees(isExpanded ? -180 : 0))
                 }
-                .padding(14)
+                .padding(12)
                 .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
             }
             .buttonStyle(.plain)
@@ -706,8 +706,8 @@ struct SystemPromptSection: View {
                 .frame(maxHeight: 300)
                 .background(Color.black.opacity(0.2))
                 .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
-                .padding(.horizontal, 12)
-                .padding(.bottom, 12)
+                .padding(.horizontal, 10)
+                .padding(.bottom, 10)
                 .transition(.opacity.combined(with: .scale(scale: 0.95, anchor: .top)))
             }
         }
@@ -769,7 +769,7 @@ struct ToolsSection: View {
                         .foregroundStyle(.white.opacity(0.4))
                         .rotationEffect(.degrees(isExpanded ? -180 : 0))
                 }
-                .padding(14)
+                .padding(12)
                 .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
             }
             .buttonStyle(.plain)
@@ -787,8 +787,8 @@ struct ToolsSection: View {
                 .frame(maxHeight: 300)
                 .background(Color.black.opacity(0.2))
                 .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
-                .padding(.horizontal, 12)
-                .padding(.bottom, 12)
+                .padding(.horizontal, 10)
+                .padding(.bottom, 10)
                 .transition(.opacity.combined(with: .scale(scale: 0.95, anchor: .top)))
             }
         }
@@ -935,7 +935,7 @@ struct SkillReferencesSection: View {
                         .foregroundStyle(.white.opacity(0.4))
                         .rotationEffect(.degrees(isExpanded ? -180 : 0))
                 }
-                .padding(14)
+                .padding(12)
                 .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
             }
             .buttonStyle(.plain)
@@ -947,8 +947,8 @@ struct SkillReferencesSection: View {
                         SkillReferenceRow(skill: skill)
                     }
                 }
-                .padding(.horizontal, 12)
-                .padding(.bottom, 12)
+                .padding(.horizontal, 10)
+                .padding(.bottom, 10)
                 .transition(.opacity.combined(with: .scale(scale: 0.95, anchor: .top)))
             }
         }
@@ -1264,7 +1264,7 @@ struct RulesSection: View {
                         .foregroundStyle(.white.opacity(0.4))
                         .rotationEffect(.degrees(isExpanded ? -180 : 0))
                 }
-                .padding(14)
+                .padding(12)
                 .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
             }
             .buttonStyle(.plain)
@@ -1286,7 +1286,7 @@ struct RulesSection: View {
                         )
                     }
                 }
-                .padding(12)
+                .padding(10)
                 .transition(.opacity.combined(with: .scale(scale: 0.95, anchor: .top)))
             }
         }
