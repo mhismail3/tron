@@ -17,10 +17,32 @@ struct ContextAuditView: View {
     @State private var isClearing = false
     @State private var isCompacting = false
 
+    // Optimistic deletion state - items being deleted animate out immediately
+    @State private var pendingSkillDeletions: Set<String> = []
+    @State private var pendingMessageDeletions: Set<String> = []
+
+    // Cached token usage to avoid recomputation on every body evaluation
+    @State private var cachedTokenUsage: (input: Int, output: Int, cacheRead: Int) = (0, 0, 0)
+
     /// Whether there are messages in context that can be cleared/compacted
     private var hasMessages: Bool {
         guard let snapshot = detailedSnapshot else { return false }
         return !snapshot.messages.isEmpty
+    }
+
+    /// Skills filtered to exclude those being deleted (for optimistic UI)
+    private var displayedSkills: [AddedSkillInfo] {
+        guard let snapshot = detailedSnapshot else { return [] }
+        return snapshot.addedSkills.filter { !pendingSkillDeletions.contains($0.name) }
+    }
+
+    /// Messages filtered to exclude those being deleted (for optimistic UI)
+    private var displayedMessages: [DetailedMessageInfo] {
+        guard let snapshot = detailedSnapshot else { return [] }
+        return snapshot.messages.filter { message in
+            guard let eventId = message.eventId else { return true }
+            return !pendingMessageDeletions.contains(eventId)
+        }
     }
 
     var body: some View {
@@ -81,7 +103,7 @@ struct ContextAuditView: View {
                             if isCompacting {
                                 ProgressView()
                                     .scaleEffect(0.7)
-                                    .tint(.tronCyan)
+                                    .tint(.tronSlate)
                             } else {
                                 Image(systemName: "arrow.down.right.and.arrow.up.left")
                                     .font(.system(size: 12, weight: .medium))
@@ -89,7 +111,7 @@ struct ContextAuditView: View {
                             Text("Compact")
                                 .font(.system(size: 13, weight: .medium, design: .monospaced))
                         }
-                        .foregroundStyle(hasMessages ? .tronCyan : .tronTextMuted)
+                        .foregroundStyle(hasMessages ? .tronSlate : .tronTextMuted)
                     }
                     .disabled(isCompacting || !hasMessages)
                 }
@@ -109,14 +131,19 @@ struct ContextAuditView: View {
         .preferredColorScheme(.dark)
     }
 
-    /// Get session token usage from EventStoreManager
+    /// Get session token usage from cached values (populated during loadContext)
     private var sessionTokenUsage: (input: Int, output: Int, cacheRead: Int) {
+        cachedTokenUsage
+    }
+
+    /// Calculate and cache token usage (called during data loading)
+    private func updateCachedTokenUsage() {
         guard let session = eventStoreManager.sessions.first(where: { $0.id == sessionId }) else {
-            return (0, 0, 0)
+            cachedTokenUsage = (0, 0, 0)
+            return
         }
-        // Calculate cache tokens from events
         let cacheTokens = calculateCacheTokens()
-        return (session.inputTokens, session.outputTokens, cacheTokens)
+        cachedTokenUsage = (session.inputTokens, session.outputTokens, cacheTokens)
     }
 
     /// Calculate cache read tokens from session events
@@ -177,8 +204,9 @@ struct ContextAuditView: View {
 
                         // Added Skills section (explicitly added via @skillname or skill sheet, deletable)
                         // These are skills the user explicitly added to the conversation context
+                        // Uses displayedSkills for optimistic deletion animations
                         AddedSkillsSection(
-                            skills: snapshot.addedSkills,
+                            skills: displayedSkills,
                             onDelete: { skillName in
                                 Task { await removeSkillFromContext(skillName: skillName) }
                             },
@@ -192,8 +220,9 @@ struct ContextAuditView: View {
                         .padding(.horizontal)
 
                         // Messages breakdown (granular expandable) - using server data
+                        // Uses displayedMessages for optimistic deletion animations
                         DetailedMessagesSection(
-                            messages: snapshot.messages,
+                            messages: displayedMessages,
                             onDelete: { eventId in
                                 Task { await deleteMessage(eventId: eventId) }
                             }
@@ -228,11 +257,30 @@ struct ContextAuditView: View {
 
             detailedSnapshot = try await snapshotTask
             sessionEvents = events
+            updateCachedTokenUsage()
         } catch {
             errorMessage = error.localizedDescription
         }
 
         isLoading = false
+    }
+
+    /// Background reload that doesn't show loading state (used after optimistic updates)
+    private func reloadContextInBackground() async {
+        do {
+            async let snapshotTask = rpcClient.getDetailedContextSnapshot(sessionId: sessionId)
+            let events = try eventStoreManager.getSessionEvents(sessionId)
+
+            detailedSnapshot = try await snapshotTask
+            sessionEvents = events
+            updateCachedTokenUsage()
+
+            // Clear any pending deletions since we now have fresh data
+            pendingSkillDeletions.removeAll()
+            pendingMessageDeletions.removeAll()
+        } catch {
+            errorMessage = error.localizedDescription
+        }
     }
 
     private func clearContext() async {
@@ -264,25 +312,47 @@ struct ContextAuditView: View {
     }
 
     private func deleteMessage(eventId: String) async {
+        // Optimistic update: immediately hide the message with animation
+        withAnimation(.tronStandard) {
+            pendingMessageDeletions.insert(eventId)
+        }
+
         do {
             _ = try await rpcClient.deleteMessage(sessionId, targetEventId: eventId)
-            // Reload context to show updated state
-            await loadContext()
+            // Background reload to sync state (doesn't show loading)
+            await reloadContextInBackground()
         } catch {
+            // Rollback: show the message again if deletion failed
+            withAnimation(.tronStandard) {
+                pendingMessageDeletions.remove(eventId)
+            }
             errorMessage = "Failed to delete message: \(error.localizedDescription)"
         }
     }
 
     private func removeSkillFromContext(skillName: String) async {
+        // Optimistic update: immediately hide the skill with animation
+        withAnimation(.tronStandard) {
+            pendingSkillDeletions.insert(skillName)
+        }
+
         do {
             let result = try await rpcClient.removeSkill(sessionId: sessionId, skillName: skillName)
             if result.success {
-                // Reload context to show updated state
-                await loadContext()
+                // Background reload to sync state (doesn't show loading)
+                await reloadContextInBackground()
             } else {
+                // Rollback: show the skill again if removal failed
+                withAnimation(.tronStandard) {
+                    pendingSkillDeletions.remove(skillName)
+                }
                 errorMessage = result.error ?? "Failed to remove skill"
             }
         } catch {
+            // Rollback: show the skill again if removal failed
+            withAnimation(.tronStandard) {
+                pendingSkillDeletions.remove(skillName)
+            }
             errorMessage = "Failed to remove skill: \(error.localizedDescription)"
         }
     }
@@ -322,17 +392,17 @@ struct TotalSessionTokensView: View {
                 HStack {
                     Image(systemName: "arrow.up.arrow.down")
                         .font(.system(size: 14))
-                        .foregroundStyle(.tronEmerald)
+                        .foregroundStyle(.tronAmberLight)
 
                     Text("Total")
                         .font(.system(size: 14, weight: .medium, design: .monospaced))
-                        .foregroundStyle(.tronEmerald)
+                        .foregroundStyle(.tronAmberLight)
 
                     Spacer()
 
                     Text(formatTokenCount(totalTokens))
                         .font(.system(size: 20, weight: .bold, design: .monospaced))
-                        .foregroundStyle(.tronEmerald)
+                        .foregroundStyle(.tronAmberLight)
                 }
 
                 // Token breakdown row
@@ -342,21 +412,21 @@ struct TotalSessionTokensView: View {
                         HStack(spacing: 4) {
                             Image(systemName: "arrow.up.circle.fill")
                                 .font(.system(size: 10))
-                                .foregroundStyle(.tronCyan)
+                                .foregroundStyle(.tronOrange)
                             Text("Input")
                                 .font(.system(size: 10, design: .monospaced))
                                 .foregroundStyle(.white.opacity(0.5))
                         }
                         Text(formatTokenCount(inputTokens))
                             .font(.system(size: 12, weight: .medium, design: .monospaced))
-                            .foregroundStyle(.tronCyan)
+                            .foregroundStyle(.tronOrange)
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(10)
                     .background {
                         RoundedRectangle(cornerRadius: 8, style: .continuous)
                             .fill(.clear)
-                            .glassEffect(.regular.tint(Color.tronCyan.opacity(0.3)), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                            .glassEffect(.regular.tint(Color.tronOrange.opacity(0.3)), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
                     }
 
                     // Output tokens
@@ -364,21 +434,21 @@ struct TotalSessionTokensView: View {
                         HStack(spacing: 4) {
                             Image(systemName: "arrow.down.circle.fill")
                                 .font(.system(size: 10))
-                                .foregroundStyle(.tronEmerald)
+                                .foregroundStyle(.tronRed)
                             Text("Output")
                                 .font(.system(size: 10, design: .monospaced))
                                 .foregroundStyle(.white.opacity(0.5))
                         }
                         Text(formatTokenCount(outputTokens))
                             .font(.system(size: 12, weight: .medium, design: .monospaced))
-                            .foregroundStyle(.tronEmerald)
+                            .foregroundStyle(.tronRed)
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(10)
                     .background {
                         RoundedRectangle(cornerRadius: 8, style: .continuous)
                             .fill(.clear)
-                            .glassEffect(.regular.tint(Color.tronEmerald.opacity(0.3)), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                            .glassEffect(.regular.tint(Color.tronRed.opacity(0.3)), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
                     }
 
                     // Cache read tokens
@@ -386,21 +456,21 @@ struct TotalSessionTokensView: View {
                         HStack(spacing: 4) {
                             Image(systemName: "memorychip.fill")
                                 .font(.system(size: 10))
-                                .foregroundStyle(.tronPurple)
+                                .foregroundStyle(.tronAmber)
                             Text("Cached")
                                 .font(.system(size: 10, design: .monospaced))
                                 .foregroundStyle(.white.opacity(0.5))
                         }
                         Text(formatTokenCount(cacheReadTokens))
                             .font(.system(size: 12, weight: .medium, design: .monospaced))
-                            .foregroundStyle(.tronPurple)
+                            .foregroundStyle(.tronAmber)
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(10)
                     .background {
                         RoundedRectangle(cornerRadius: 8, style: .continuous)
                             .fill(.clear)
-                            .glassEffect(.regular.tint(Color.tronPurple.opacity(0.3)), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                            .glassEffect(.regular.tint(Color.tronAmber.opacity(0.3)), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
                     }
                 }
 
@@ -414,7 +484,7 @@ struct TotalSessionTokensView: View {
             .background {
                 RoundedRectangle(cornerRadius: 12, style: .continuous)
                     .fill(.clear)
-                    .glassEffect(.regular.tint(Color.tronPhthaloGreen.opacity(0.35)), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .glassEffect(.regular.tint(Color.tronBronze.opacity(0.35)), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
             }
         }
     }
@@ -476,7 +546,7 @@ struct ContextUsageGaugeView: View {
 
                     Text("Current Window")
                         .font(.system(size: 14, weight: .medium, design: .monospaced))
-                        .foregroundStyle(.tronEmerald)
+                        .foregroundStyle(.tronSlate)
 
                     Spacer()
 
@@ -517,7 +587,7 @@ struct ContextUsageGaugeView: View {
             .background {
                 RoundedRectangle(cornerRadius: 12, style: .continuous)
                     .fill(.clear)
-                    .glassEffect(.regular.tint(usageColor.opacity(0.3)), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .glassEffect(.regular.tint(Color.tronSlateDark.opacity(0.5)), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
             }
         }
     }
@@ -574,11 +644,11 @@ struct SystemAndToolsSection: View {
                 HStack {
                     Image(systemName: "gearshape.2.fill")
                         .font(.system(size: 14))
-                        .foregroundStyle(.tronPurple)
+                        .foregroundStyle(.tronGray)
 
                     Text("System, Tools & Skills")
                         .font(.system(size: 14, weight: .medium, design: .monospaced))
-                        .foregroundStyle(.tronPurple)
+                        .foregroundStyle(.tronGray)
 
                     Spacer()
 
@@ -597,9 +667,10 @@ struct SystemAndToolsSection: View {
             .buttonStyle(.plain)
             .background {
                 if !isExpanded {
+                    // Subtle grey container (sub-containers keep their own colors)
                     RoundedRectangle(cornerRadius: 12, style: .continuous)
                         .fill(.clear)
-                        .glassEffect(.regular.tint(Color.tronPurple.opacity(0.3)), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        .glassEffect(.regular.tint(Color.white.opacity(0.08)), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
                 }
             }
 
@@ -640,9 +711,10 @@ struct SystemAndToolsSection: View {
         }
         .background {
             if isExpanded {
+                // Subtle grey container (sub-containers keep their own colors)
                 RoundedRectangle(cornerRadius: 12, style: .continuous)
                     .fill(.clear)
-                    .glassEffect(.regular.tint(Color.tronPurple.opacity(0.3)), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .glassEffect(.regular.tint(Color.white.opacity(0.08)), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
             }
         }
         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
@@ -754,9 +826,9 @@ struct SkillReferencesSection: View {
             }
             .buttonStyle(.plain)
 
-            // Content - list of skill references (frontmatter only)
+            // Content - list of skill references (frontmatter only, lazy for performance)
             if isExpanded {
-                VStack(alignment: .leading, spacing: 6) {
+                LazyVStack(alignment: .leading, spacing: 6) {
                     ForEach(skills) { skill in
                         SkillReferenceRow(skill: skill)
                     }
@@ -856,9 +928,9 @@ struct SkillReferenceRow: View {
             }
         }
         .background {
+            // Lightweight fill instead of glassEffect for better animation performance
             RoundedRectangle(cornerRadius: 6, style: .continuous)
-                .fill(.clear)
-                .glassEffect(.regular.tint(sourceColor.opacity(0.2)), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+                .fill(sourceColor.opacity(0.12))
         }
         .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
         // No context menu - skill references are not removable
@@ -882,11 +954,7 @@ struct AddedSkillRow: View {
     }
 
     private var sourceColor: Color {
-        skill.source == .project ? .tronEmerald : .tronPurple
-    }
-
-    private var addedViaBadge: String {
-        skill.addedVia == .mention ? "@mention" : "selected"
+        skill.source == .project ? .tronEmerald : .tronCyan
     }
 
     var body: some View {
@@ -906,24 +974,13 @@ struct AddedSkillRow: View {
                 HStack(spacing: 8) {
                     Image(systemName: sourceIcon)
                         .font(.system(size: 10))
-                        .foregroundStyle(sourceColor)
+                        .foregroundStyle(.tronCyan)
 
                     Text("@\(skill.name)")
                         .font(.system(size: 11, weight: .medium, design: .monospaced))
                         .foregroundStyle(.tronCyan)
 
                     Spacer()
-
-                    // Added via badge
-                    Text(addedViaBadge)
-                        .font(.system(size: 8, weight: .medium, design: .monospaced))
-                        .foregroundStyle(.tronCyan.opacity(0.8))
-                        .padding(.horizontal, 4)
-                        .padding(.vertical, 2)
-                        .background {
-                            Capsule()
-                                .fill(Color.tronCyan.opacity(0.2))
-                        }
 
                     Image(systemName: "chevron.down")
                         .font(.system(size: 8, weight: .medium))
@@ -975,9 +1032,9 @@ struct AddedSkillRow: View {
             }
         }
         .background {
+            // Teal tint for added skills container (matches skill references)
             RoundedRectangle(cornerRadius: 6, style: .continuous)
-                .fill(.clear)
-                .glassEffect(.regular.tint(sourceColor.opacity(0.2)), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+                .fill(Color.tronCyan.opacity(0.12))
         }
         .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
         .contextMenu {
@@ -986,6 +1043,7 @@ struct AddedSkillRow: View {
                     onDelete?()
                 } label: {
                     Label("Remove from Context", systemImage: "trash")
+                        .foregroundStyle(.red)
                 }
             }
         }
@@ -1025,8 +1083,8 @@ struct AddedSkillsSection: View {
                         .foregroundStyle(.white.opacity(0.3))
                 }
 
-                // Skills list
-                VStack(spacing: 4) {
+                // Skills list (lazy for performance with many skills)
+                LazyVStack(spacing: 4) {
                     ForEach(skills) { skill in
                         AddedSkillRow(
                             skill: skill,
@@ -1076,11 +1134,13 @@ struct DetailedMessagesSection: View {
                         .glassEffect(.regular.tint(Color.tronPhthaloGreen.opacity(0.35)), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
                 }
             } else {
-                VStack(spacing: 4) {
-                    ForEach(Array(messages.enumerated()), id: \.element.index) { index, message in
+                // Lazy for performance with many messages
+                // Uses message.id (from Identifiable) for stable identity during updates
+                LazyVStack(spacing: 4) {
+                    ForEach(messages) { message in
                         DetailedMessageRow(
                             message: message,
-                            isLast: index == messages.count - 1,
+                            isLast: message.index == messages.last?.index,
                             onDelete: message.eventId != nil ? { onDelete?(message.eventId!) } : nil
                         )
                     }
@@ -1216,9 +1276,9 @@ struct DetailedMessageRow: View {
                             }
                             .padding(8)
                             .background {
+                                // Lightweight fill instead of glassEffect
                                 RoundedRectangle(cornerRadius: 6, style: .continuous)
-                                    .fill(.clear)
-                                    .glassEffect(.regular.tint(Color.tronAmber.opacity(0.25)), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+                                    .fill(Color.tronAmber.opacity(0.15))
                             }
                         }
                     }
@@ -1244,9 +1304,9 @@ struct DetailedMessageRow: View {
             }
         }
         .background {
+            // Lightweight fill instead of glassEffect for better animation performance
             RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .fill(.clear)
-                .glassEffect(.regular.tint(iconColor.opacity(0.25)), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                .fill(iconColor.opacity(0.15))
         }
         .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
         .contextMenu {
@@ -1259,7 +1319,7 @@ struct DetailedMessageRow: View {
                 }
             }
         }
-        .animation(.easeInOut(duration: 0.2), value: isExpanded)
+        // Removed duplicate .animation() - withAnimation in button action handles this
     }
 }
 

@@ -43,6 +43,19 @@ extension Color {
     static let tronBlue = Color(hex: "#3B82F6")
     static let tronCyan = Color(hex: "#06B6D4")
 
+    // Warm colors (Tokens theme)
+    static let tronAmberLight = Color(hex: "#FBBF24")   // Yellow for Total tokens
+    static let tronOrange = Color(hex: "#FB923C")       // Orange for Input tokens
+    static let tronRed = Color(hex: "#F87171")          // Soft red for Output tokens
+    static let tronBronze = Color(hex: "#92400E")       // Dark brown container tint
+
+    // Cool neutral (Compact/Window theme)
+    static let tronSlate = Color(hex: "#64748B")        // Slate blue-gray
+    static let tronSlateDark = Color(hex: "#334155")    // Dark slate for containers
+
+    // Neutral gray
+    static let tronGray = Color(hex: "#6B7280")         // De-emphasized elements
+
     // MARK: - Special Colors
 
     /// Phthalo green for iOS 26 liquid glass effect
@@ -217,6 +230,19 @@ extension ShapeStyle where Self == Color {
     static var tronPurple: Color { .tronPurple }
     static var tronBlue: Color { .tronBlue }
     static var tronCyan: Color { .tronCyan }
+
+    // Warm colors (Tokens theme)
+    static var tronAmberLight: Color { .tronAmberLight }
+    static var tronOrange: Color { .tronOrange }
+    static var tronRed: Color { .tronRed }
+    static var tronBronze: Color { .tronBronze }
+
+    // Cool neutral (Compact/Window theme)
+    static var tronSlate: Color { .tronSlate }
+    static var tronSlateDark: Color { .tronSlateDark }
+
+    // Neutral gray
+    static var tronGray: Color { .tronGray }
 
     // Backgrounds
     static var tronBackground: Color { .tronBackground }

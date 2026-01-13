@@ -447,7 +447,7 @@ struct MessageDeletedNotificationView: View {
     }
 }
 
-// MARK: - Skill Removed Notification View (Purple pill-style in-chat notification)
+// MARK: - Skill Removed Notification View (Teal pill-style in-chat notification)
 
 struct SkillRemovedNotificationView: View {
     let skillName: String
@@ -456,23 +456,23 @@ struct SkillRemovedNotificationView: View {
         HStack(spacing: 8) {
             Image(systemName: "sparkles")
                 .font(.system(size: 10, weight: .medium))
-                .foregroundStyle(.purple)
+                .foregroundStyle(.tronCyan)
 
             Text(skillName)
                 .font(.system(size: 11, weight: .medium, design: .monospaced))
-                .foregroundStyle(.purple.opacity(0.9))
+                .foregroundStyle(Color.tronCyan.opacity(0.9))
 
             Text("removed from context")
                 .font(.system(size: 11, design: .monospaced))
-                .foregroundStyle(.purple.opacity(0.6))
+                .foregroundStyle(Color.tronCyan.opacity(0.6))
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
-        .background(Color.purple.opacity(0.1))
+        .background(Color.tronCyan.opacity(0.1))
         .clipShape(Capsule())
         .overlay(
             Capsule()
-                .stroke(Color.purple.opacity(0.3), lineWidth: 0.5)
+                .stroke(Color.tronCyan.opacity(0.3), lineWidth: 0.5)
         )
         .frame(maxWidth: .infinity, alignment: .center)
     }
