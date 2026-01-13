@@ -687,31 +687,30 @@ struct SystemPromptSection: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             // Header
-            Button(action: {
+            HStack {
+                Image(systemName: "doc.text.fill")
+                    .font(.system(size: 14))
+                    .foregroundStyle(.tronPurple)
+                Text("System Prompt")
+                    .font(.system(size: 14, weight: .medium, design: .monospaced))
+                    .foregroundStyle(.tronPurple)
+                Spacer()
+                Text(formatTokens(tokens))
+                    .font(.system(size: 12, weight: .medium, design: .monospaced))
+                    .foregroundStyle(.white.opacity(0.6))
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.4))
+                    .rotationEffect(.degrees(isExpanded ? -180 : 0))
+                    .animation(.spring(response: 0.35, dampingFraction: 0.8), value: isExpanded)
+            }
+            .padding(12)
+            .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .onTapGesture {
                 withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
                     isExpanded.toggle()
                 }
-            }) {
-                HStack {
-                    Image(systemName: "doc.text.fill")
-                        .font(.system(size: 14))
-                        .foregroundStyle(.tronPurple)
-                    Text("System Prompt")
-                        .font(.system(size: 14, weight: .medium, design: .monospaced))
-                        .foregroundStyle(.tronPurple)
-                    Spacer()
-                    Text(formatTokens(tokens))
-                        .font(.system(size: 12, weight: .medium, design: .monospaced))
-                        .foregroundStyle(.white.opacity(0.6))
-                    Image(systemName: "chevron.down")
-                        .font(.system(size: 10, weight: .medium))
-                        .foregroundStyle(.white.opacity(0.4))
-                        .rotationEffect(.degrees(isExpanded ? -180 : 0))
-                }
-                .padding(12)
-                .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
             }
-            .buttonStyle(.plain)
 
             // Content
             if isExpanded {
@@ -728,13 +727,11 @@ struct SystemPromptSection: View {
                 .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
                 .padding(.horizontal, 10)
                 .padding(.bottom, 10)
-                .transition(.opacity.combined(with: .scale(scale: 0.95, anchor: .top)))
             }
         }
         .background {
             RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(.clear)
-                .glassEffect(.regular.tint(Color.tronPurple.opacity(0.12)), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .fill(Color.tronPurple.opacity(0.15))
         }
         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
@@ -757,42 +754,41 @@ struct ToolsSection: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            // Header
-            Button(action: {
+            // Header - using onTapGesture to avoid any button highlight behavior
+            HStack {
+                Image(systemName: "hammer.fill")
+                    .font(.system(size: 14))
+                    .foregroundStyle(.tronClay)
+                Text("Tools")
+                    .font(.system(size: 14, weight: .medium, design: .monospaced))
+                    .foregroundStyle(.tronClay)
+
+                // Count badge
+                Text("\(toolsContent.count)")
+                    .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(Color.tronClay.opacity(0.7))
+                    .clipShape(Capsule())
+
+                Spacer()
+                Text(formatTokens(tokens))
+                    .font(.system(size: 12, weight: .medium, design: .monospaced))
+                    .foregroundStyle(.white.opacity(0.6))
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.4))
+                    .rotationEffect(.degrees(isExpanded ? -180 : 0))
+                    .animation(.spring(response: 0.35, dampingFraction: 0.8), value: isExpanded)
+            }
+            .padding(12)
+            .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .onTapGesture {
                 withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
                     isExpanded.toggle()
                 }
-            }) {
-                HStack {
-                    Image(systemName: "hammer.fill")
-                        .font(.system(size: 14))
-                        .foregroundStyle(.tronClay)
-                    Text("Tools")
-                        .font(.system(size: 14, weight: .medium, design: .monospaced))
-                        .foregroundStyle(.tronClay)
-
-                    // Count badge
-                    Text("\(toolsContent.count)")
-                        .font(.system(size: 10, weight: .semibold, design: .monospaced))
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 2)
-                        .background(Color.tronClay.opacity(0.7))
-                        .clipShape(Capsule())
-
-                    Spacer()
-                    Text(formatTokens(tokens))
-                        .font(.system(size: 12, weight: .medium, design: .monospaced))
-                        .foregroundStyle(.white.opacity(0.6))
-                    Image(systemName: "chevron.down")
-                        .font(.system(size: 10, weight: .medium))
-                        .foregroundStyle(.white.opacity(0.4))
-                        .rotationEffect(.degrees(isExpanded ? -180 : 0))
-                }
-                .padding(12)
-                .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
             }
-            .buttonStyle(.plain)
 
             // Content
             if isExpanded {
@@ -809,13 +805,11 @@ struct ToolsSection: View {
                 .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
                 .padding(.horizontal, 10)
                 .padding(.bottom, 10)
-                .transition(.opacity.combined(with: .scale(scale: 0.95, anchor: .top)))
             }
         }
         .background {
             RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(.clear)
-                .glassEffect(.regular.tint(Color.tronClay.opacity(0.12)), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .fill(Color.tronClay.opacity(0.15))
         }
         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
@@ -842,31 +836,30 @@ struct ExpandableContentSection: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             // Header
-            Button(action: {
+            HStack {
+                Image(systemName: icon)
+                    .font(.system(size: 12))
+                    .foregroundStyle(iconColor.opacity(0.8))
+                Text(title)
+                    .font(.system(size: 12, weight: .medium, design: .monospaced))
+                    .foregroundStyle(.white.opacity(0.7))
+                Spacer()
+                Text(formatTokens(tokens))
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundStyle(.white.opacity(0.5))
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.4))
+                    .rotationEffect(.degrees(isExpanded ? -180 : 0))
+                    .animation(.spring(response: 0.35, dampingFraction: 0.8), value: isExpanded)
+            }
+            .padding(10)
+            .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .onTapGesture {
                 withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
                     isExpanded.toggle()
                 }
-            }) {
-                HStack {
-                    Image(systemName: icon)
-                        .font(.system(size: 12))
-                        .foregroundStyle(iconColor.opacity(0.8))
-                    Text(title)
-                        .font(.system(size: 12, weight: .medium, design: .monospaced))
-                        .foregroundStyle(.white.opacity(0.7))
-                    Spacer()
-                    Text(formatTokens(tokens))
-                        .font(.system(size: 11, design: .monospaced))
-                        .foregroundStyle(.white.opacity(0.5))
-                    Image(systemName: "chevron.down")
-                        .font(.system(size: 10, weight: .medium))
-                        .foregroundStyle(.white.opacity(0.4))
-                        .rotationEffect(.degrees(isExpanded ? -180 : 0))
-                }
-                .padding(10)
-                .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
             }
-            .buttonStyle(.plain)
 
             // Content
             if isExpanded {
@@ -881,13 +874,11 @@ struct ExpandableContentSection: View {
                 .frame(maxHeight: 300)
                 .background(Color.black.opacity(0.2))
                 .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
-                .transition(.opacity.combined(with: .scale(scale: 0.95, anchor: .top)))
             }
         }
         .background {
             RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(.clear)
-                .glassEffect(.regular.tint(iconColor.opacity(0.25)), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                .fill(iconColor.opacity(0.15))
         }
         .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
     }
@@ -921,44 +912,43 @@ struct SkillReferencesSection: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             // Header
-            Button(action: {
+            HStack {
+                Image(systemName: "sparkles")
+                    .font(.system(size: 14))
+                    .foregroundStyle(.tronCyan)
+                Text("Skill References")
+                    .font(.system(size: 14, weight: .medium, design: .monospaced))
+                    .foregroundStyle(.tronCyan)
+
+                // Count badge
+                Text("\(skills.count)")
+                    .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(Color.tronCyan.opacity(0.6))
+                    .clipShape(Capsule())
+
+                Spacer()
+
+                // Token count
+                Text(formatTokens(estimatedTokens))
+                    .font(.system(size: 12, weight: .medium, design: .monospaced))
+                    .foregroundStyle(.white.opacity(0.6))
+
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.4))
+                    .rotationEffect(.degrees(isExpanded ? -180 : 0))
+                    .animation(.spring(response: 0.35, dampingFraction: 0.8), value: isExpanded)
+            }
+            .padding(12)
+            .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .onTapGesture {
                 withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
                     isExpanded.toggle()
                 }
-            }) {
-                HStack {
-                    Image(systemName: "sparkles")
-                        .font(.system(size: 14))
-                        .foregroundStyle(.tronCyan)
-                    Text("Skill References")
-                        .font(.system(size: 14, weight: .medium, design: .monospaced))
-                        .foregroundStyle(.tronCyan)
-
-                    // Count badge
-                    Text("\(skills.count)")
-                        .font(.system(size: 10, weight: .semibold, design: .monospaced))
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 2)
-                        .background(Color.tronCyan.opacity(0.6))
-                        .clipShape(Capsule())
-
-                    Spacer()
-
-                    // Token count
-                    Text(formatTokens(estimatedTokens))
-                        .font(.system(size: 12, weight: .medium, design: .monospaced))
-                        .foregroundStyle(.white.opacity(0.6))
-
-                    Image(systemName: "chevron.down")
-                        .font(.system(size: 10, weight: .medium))
-                        .foregroundStyle(.white.opacity(0.4))
-                        .rotationEffect(.degrees(isExpanded ? -180 : 0))
-                }
-                .padding(12)
-                .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
             }
-            .buttonStyle(.plain)
 
             // Content - list of skill references (frontmatter only, lazy for performance)
             if isExpanded {
@@ -969,13 +959,11 @@ struct SkillReferencesSection: View {
                 }
                 .padding(.horizontal, 10)
                 .padding(.bottom, 10)
-                .transition(.opacity.combined(with: .scale(scale: 0.95, anchor: .top)))
             }
         }
         .background {
             RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(.clear)
-                .glassEffect(.regular.tint(Color.tronCyan.opacity(0.12)), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .fill(Color.tronCyan.opacity(0.15))
         }
         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
@@ -1004,52 +992,51 @@ struct SkillReferenceRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             // Header row
-            Button(action: {
+            HStack(spacing: 8) {
+                Image(systemName: sourceIcon)
+                    .font(.system(size: 10))
+                    .foregroundStyle(sourceColor)
+
+                Text("@\(skill.name)")
+                    .font(.system(size: 11, weight: .medium, design: .monospaced))
+                    .foregroundStyle(.tronCyan)
+
+                Spacer()
+
+                // Auto-inject badge if applicable
+                if let badge = autoInjectBadge {
+                    Text(badge)
+                        .font(.system(size: 8, weight: .medium, design: .monospaced))
+                        .foregroundStyle(.tronAmber)
+                        .padding(.horizontal, 4)
+                        .padding(.vertical, 2)
+                        .background {
+                            Capsule()
+                                .fill(Color.tronAmber.opacity(0.2))
+                        }
+                }
+
+                // Tags if any
+                if let tags = skill.tags, !tags.isEmpty {
+                    Text(tags.prefix(2).joined(separator: ", "))
+                        .font(.system(size: 9, design: .monospaced))
+                        .foregroundStyle(.white.opacity(0.4))
+                        .lineLimit(1)
+                }
+
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 8, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.3))
+                    .rotationEffect(.degrees(isExpanded ? -180 : 0))
+                    .animation(.spring(response: 0.35, dampingFraction: 0.8), value: isExpanded)
+            }
+            .padding(8)
+            .contentShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+            .onTapGesture {
                 withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
                     isExpanded.toggle()
                 }
-            }) {
-                HStack(spacing: 8) {
-                    Image(systemName: sourceIcon)
-                        .font(.system(size: 10))
-                        .foregroundStyle(sourceColor)
-
-                    Text("@\(skill.name)")
-                        .font(.system(size: 11, weight: .medium, design: .monospaced))
-                        .foregroundStyle(.tronCyan)
-
-                    Spacer()
-
-                    // Auto-inject badge if applicable
-                    if let badge = autoInjectBadge {
-                        Text(badge)
-                            .font(.system(size: 8, weight: .medium, design: .monospaced))
-                            .foregroundStyle(.tronAmber)
-                            .padding(.horizontal, 4)
-                            .padding(.vertical, 2)
-                            .background {
-                                Capsule()
-                                    .fill(Color.tronAmber.opacity(0.2))
-                            }
-                    }
-
-                    // Tags if any
-                    if let tags = skill.tags, !tags.isEmpty {
-                        Text(tags.prefix(2).joined(separator: ", "))
-                            .font(.system(size: 9, design: .monospaced))
-                            .foregroundStyle(.white.opacity(0.4))
-                            .lineLimit(1)
-                    }
-
-                    Image(systemName: "chevron.down")
-                        .font(.system(size: 8, weight: .medium))
-                        .foregroundStyle(.white.opacity(0.3))
-                        .rotationEffect(.degrees(isExpanded ? -180 : 0))
-                }
-                .padding(8)
-                .contentShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
             }
-            .buttonStyle(.plain)
 
             // Expanded description (just description, not full content)
             if isExpanded {
@@ -1058,8 +1045,7 @@ struct SkillReferenceRow: View {
                     .foregroundStyle(.white.opacity(0.6))
                     .padding(.horizontal, 8)
                     .padding(.bottom, 8)
-                    .transition(.opacity.combined(with: .scale(scale: 0.95, anchor: .top)))
-            }
+                                }
         }
         .background {
             // Lightweight fill instead of glassEffect for better animation performance
@@ -1094,7 +1080,26 @@ struct AddedSkillRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             // Header row
-            Button(action: {
+            HStack(spacing: 8) {
+                Image(systemName: sourceIcon)
+                    .font(.system(size: 10))
+                    .foregroundStyle(.tronCyan)
+
+                Text("@\(skill.name)")
+                    .font(.system(size: 11, weight: .medium, design: .monospaced))
+                    .foregroundStyle(.tronCyan)
+
+                Spacer()
+
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 8, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.3))
+                    .rotationEffect(.degrees(isExpanded ? -180 : 0))
+                    .animation(.spring(response: 0.35, dampingFraction: 0.8), value: isExpanded)
+            }
+            .padding(8)
+            .contentShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+            .onTapGesture {
                 withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
                     isExpanded.toggle()
                 }
@@ -1104,27 +1109,7 @@ struct AddedSkillRow: View {
                         await fetchContent()
                     }
                 }
-            }) {
-                HStack(spacing: 8) {
-                    Image(systemName: sourceIcon)
-                        .font(.system(size: 10))
-                        .foregroundStyle(.tronCyan)
-
-                    Text("@\(skill.name)")
-                        .font(.system(size: 11, weight: .medium, design: .monospaced))
-                        .foregroundStyle(.tronCyan)
-
-                    Spacer()
-
-                    Image(systemName: "chevron.down")
-                        .font(.system(size: 8, weight: .medium))
-                        .foregroundStyle(.white.opacity(0.3))
-                        .rotationEffect(.degrees(isExpanded ? -180 : 0))
-                }
-                .padding(8)
-                .contentShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
             }
-            .buttonStyle(.plain)
 
             // Expanded full content (scrollable SKILL.md)
             if isExpanded {
@@ -1162,8 +1147,7 @@ struct AddedSkillRow: View {
                     }
                 }
                 .padding(.bottom, 8)
-                .transition(.opacity.combined(with: .scale(scale: 0.95, anchor: .top)))
-            }
+                            }
         }
         .background {
             // Teal tint for added skills container (matches skill references)
@@ -1250,49 +1234,41 @@ struct RulesSection: View {
     var body: some View {
         VStack(spacing: 0) {
             // Header row (tappable)
-            Button(action: {
+            HStack {
+                Image(systemName: "doc.text.fill")
+                    .font(.system(size: 14))
+                    .foregroundStyle(.tronTerracotta)
+
+                Text("Rules")
+                    .font(.system(size: 14, weight: .medium, design: .monospaced))
+                    .foregroundStyle(.tronTerracotta)
+
+                // Count badge
+                Text("\(rules.totalFiles)")
+                    .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(Color.tronTerracotta.opacity(0.7))
+                    .clipShape(Capsule())
+
+                Spacer()
+
+                Text(formatTokens(rules.tokens))
+                    .font(.system(size: 12, weight: .medium, design: .monospaced))
+                    .foregroundStyle(.white.opacity(0.6))
+
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.4))
+                    .rotationEffect(.degrees(isExpanded ? -180 : 0))
+                    .animation(.spring(response: 0.35, dampingFraction: 0.8), value: isExpanded)
+            }
+            .padding(12)
+            .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .onTapGesture {
                 withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
                     isExpanded.toggle()
-                }
-            }) {
-                HStack {
-                    Image(systemName: "doc.text.fill")
-                        .font(.system(size: 14))
-                        .foregroundStyle(.tronTerracotta)
-
-                    Text("Rules")
-                        .font(.system(size: 14, weight: .medium, design: .monospaced))
-                        .foregroundStyle(.tronTerracotta)
-
-                    // Count badge
-                    Text("\(rules.totalFiles)")
-                        .font(.system(size: 10, weight: .semibold, design: .monospaced))
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 2)
-                        .background(Color.tronTerracotta.opacity(0.7))
-                        .clipShape(Capsule())
-
-                    Spacer()
-
-                    Text(formatTokens(rules.tokens))
-                        .font(.system(size: 12, weight: .medium, design: .monospaced))
-                        .foregroundStyle(.white.opacity(0.6))
-
-                    Image(systemName: "chevron.down")
-                        .font(.system(size: 10, weight: .medium))
-                        .foregroundStyle(.white.opacity(0.4))
-                        .rotationEffect(.degrees(isExpanded ? -180 : 0))
-                }
-                .padding(12)
-                .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-            }
-            .buttonStyle(.plain)
-            .background {
-                if !isExpanded {
-                    RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .fill(.clear)
-                        .glassEffect(.regular.tint(Color.tronTerracotta.opacity(0.12)), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
                 }
             }
 
@@ -1307,15 +1283,11 @@ struct RulesSection: View {
                     }
                 }
                 .padding(10)
-                .transition(.opacity.combined(with: .scale(scale: 0.95, anchor: .top)))
             }
         }
         .background {
-            if isExpanded {
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .fill(.clear)
-                    .glassEffect(.regular.tint(Color.tronTerracotta.opacity(0.12)), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-            }
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(Color.tronTerracotta.opacity(0.15))
         }
         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
@@ -1337,7 +1309,34 @@ struct RulesFileRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             // Header row (tappable)
-            Button(action: {
+            HStack(spacing: 10) {
+                Image(systemName: file.icon)
+                    .font(.system(size: 12))
+                    .foregroundStyle(.tronTerracotta.opacity(0.8))
+                    .frame(width: 20)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(file.displayPath)
+                        .font(.system(size: 12, weight: .medium, design: .monospaced))
+                        .foregroundStyle(.white.opacity(0.8))
+                        .lineLimit(1)
+
+                    Text(file.label)
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundStyle(.white.opacity(0.4))
+                }
+
+                Spacer()
+
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 8, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.3))
+                    .rotationEffect(.degrees(isExpanded ? -180 : 0))
+                    .animation(.spring(response: 0.35, dampingFraction: 0.8), value: isExpanded)
+            }
+            .padding(10)
+            .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .onTapGesture {
                 withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
                     isExpanded.toggle()
                 }
@@ -1347,35 +1346,7 @@ struct RulesFileRow: View {
                         await fetchContent()
                     }
                 }
-            }) {
-                HStack(spacing: 10) {
-                    Image(systemName: file.icon)
-                        .font(.system(size: 12))
-                        .foregroundStyle(.tronTerracotta.opacity(0.8))
-                        .frame(width: 20)
-
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(file.displayPath)
-                            .font(.system(size: 12, weight: .medium, design: .monospaced))
-                            .foregroundStyle(.white.opacity(0.8))
-                            .lineLimit(1)
-
-                        Text(file.label)
-                            .font(.system(size: 10, design: .monospaced))
-                            .foregroundStyle(.white.opacity(0.4))
-                    }
-
-                    Spacer()
-
-                    Image(systemName: "chevron.down")
-                        .font(.system(size: 8, weight: .medium))
-                        .foregroundStyle(.white.opacity(0.3))
-                        .rotationEffect(.degrees(isExpanded ? -180 : 0))
-                }
-                .padding(10)
-                .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
             }
-            .buttonStyle(.plain)
 
             // Expanded content
             if isExpanded {
@@ -1434,8 +1405,7 @@ struct RulesFileRow: View {
                 }
                 .padding(.horizontal, 10)
                 .padding(.bottom, 10)
-                .transition(.opacity.combined(with: .scale(scale: 0.95, anchor: .top)))
-            }
+                            }
         }
         .background {
             RoundedRectangle(cornerRadius: 8, style: .continuous)
@@ -1564,51 +1534,50 @@ struct DetailedMessageRow: View {
     var body: some View {
         VStack(spacing: 0) {
             // Header row (tappable)
-            Button(action: {
+            HStack(alignment: .top, spacing: 10) {
+                Image(systemName: icon)
+                    .font(.system(size: 12))
+                    .foregroundStyle(iconColor)
+                    .frame(width: 18)
+                    .padding(.top, 2)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title)
+                        .font(.system(size: 12, weight: .medium, design: .monospaced))
+                        .foregroundStyle(iconColor)
+
+                    // Summary fades out when expanded
+                    Text(message.summary)
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundStyle(.white.opacity(0.5))
+                        .lineLimit(1)
+                        .opacity(isExpanded ? 0 : 1)
+                        .frame(height: isExpanded ? 0 : nil, alignment: .top)
+                        .clipped()
+                }
+
+                Spacer()
+
+                Text(formatTokens(message.tokens))
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundStyle(.white.opacity(0.5))
+                    .padding(.top, 2)
+
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.4))
+                    .rotationEffect(.degrees(isExpanded ? -180 : 0))
+                    .animation(.spring(response: 0.35, dampingFraction: 0.8), value: isExpanded)
+                    .padding(.top, 4)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
+            .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .onTapGesture {
                 withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
                     isExpanded.toggle()
                 }
-            }) {
-                HStack(alignment: .top, spacing: 10) {
-                    Image(systemName: icon)
-                        .font(.system(size: 12))
-                        .foregroundStyle(iconColor)
-                        .frame(width: 18)
-                        .padding(.top, 2)
-
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(title)
-                            .font(.system(size: 12, weight: .medium, design: .monospaced))
-                            .foregroundStyle(iconColor)
-
-                        // Summary fades out when expanded
-                        Text(message.summary)
-                            .font(.system(size: 10, design: .monospaced))
-                            .foregroundStyle(.white.opacity(0.5))
-                            .lineLimit(1)
-                            .opacity(isExpanded ? 0 : 1)
-                            .frame(height: isExpanded ? 0 : nil, alignment: .top)
-                            .clipped()
-                    }
-
-                    Spacer()
-
-                    Text(formatTokens(message.tokens))
-                        .font(.system(size: 10, design: .monospaced))
-                        .foregroundStyle(.white.opacity(0.5))
-                        .padding(.top, 2)
-
-                    Image(systemName: "chevron.down")
-                        .font(.system(size: 10, weight: .medium))
-                        .foregroundStyle(.white.opacity(0.4))
-                        .rotationEffect(.degrees(isExpanded ? -180 : 0))
-                        .padding(.top, 4)
-                }
-                .padding(.horizontal, 12)
-                .padding(.vertical, 10)
-                .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
             }
-            .buttonStyle(.plain)
 
             // Expandable content
             if isExpanded {
@@ -1661,8 +1630,7 @@ struct DetailedMessageRow: View {
                 }
                 .padding(.horizontal, 12)
                 .padding(.bottom, 12)
-                .transition(.opacity.combined(with: .scale(scale: 0.95, anchor: .top)))
-            }
+                            }
         }
         .background {
             // Lightweight fill instead of glassEffect for better animation performance

@@ -167,6 +167,17 @@ extension ButtonStyle where Self == TronSecondaryButtonStyle {
     static var tronSecondary: TronSecondaryButtonStyle { TronSecondaryButtonStyle() }
 }
 
+/// Button style with no visual feedback on press - prevents flicker in expandable sections
+struct NoFeedbackButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+    }
+}
+
+extension ButtonStyle where Self == NoFeedbackButtonStyle {
+    static var noFeedback: NoFeedbackButtonStyle { NoFeedbackButtonStyle() }
+}
+
 // MARK: - Keyboard Handling
 
 extension View {
