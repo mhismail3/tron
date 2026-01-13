@@ -763,6 +763,7 @@ struct VoiceNoteMetadata: Decodable, Identifiable {
     let durationSeconds: Double?
     let language: String?
     let preview: String
+    let transcript: String
 
     var id: String { filename }
 

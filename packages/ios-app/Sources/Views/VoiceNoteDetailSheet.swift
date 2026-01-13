@@ -32,7 +32,7 @@ struct VoiceNoteDetailSheet: View {
                     )
 
                     // Transcription content
-                    Text(note.preview)
+                    Text(note.transcript)
                         .font(.system(size: 15, design: .monospaced))
                         .foregroundStyle(.white.opacity(0.9))
                         .textSelection(.enabled)
@@ -56,13 +56,13 @@ struct VoiceNoteDetailSheet: View {
                         .foregroundStyle(.tronEmerald)
                 }
                 ToolbarItem(placement: .topBarTrailing) {
-                    ShareLink(item: note.preview) {
+                    ShareLink(item: note.transcript) {
                         Image(systemName: "square.and.arrow.up")
                             .font(.system(size: 14, weight: .medium))
                             .foregroundStyle(.tronEmerald)
                             .frame(width: 24, height: 24)
                     }
-                    .disabled(note.preview.isEmpty)
+                    .disabled(note.transcript.isEmpty)
                 }
             }
         }

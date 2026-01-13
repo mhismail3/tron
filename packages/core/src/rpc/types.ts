@@ -1373,8 +1373,10 @@ export interface VoiceNoteMetadata {
   durationSeconds?: number;
   /** Detected language */
   language?: string;
-  /** First line or summary of transcription */
+  /** First line or summary of transcription (truncated to 100 chars) */
   preview: string;
+  /** Full transcription text */
+  transcript: string;
 }
 
 export interface VoiceNotesListResult {

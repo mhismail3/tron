@@ -1608,9 +1608,9 @@ ${transcribeResult.text}
       if (languageMatch?.[1]) language = languageMatch[1];
     }
 
-    // Get preview (first non-frontmatter, non-header line)
+    // Extract full transcript (all non-frontmatter, non-header lines)
     const lines = content.split('\n');
-    let preview = '';
+    const contentLines: string[] = [];
     let inFrontmatter = false;
     for (const line of lines) {
       if (line === '---') {
@@ -1620,10 +1620,11 @@ ${transcribeResult.text}
       if (inFrontmatter) continue;
       if (line.startsWith('#')) continue;
       if (line.trim()) {
-        preview = line.trim().slice(0, 100);
-        break;
+        contentLines.push(line.trim());
       }
     }
+    const transcript = contentLines.join('\n');
+    const preview = transcript.slice(0, 100);
 
     return {
       filename,
@@ -1632,6 +1633,7 @@ ${transcribeResult.text}
       durationSeconds,
       language,
       preview,
+      transcript,
     };
   }
 
