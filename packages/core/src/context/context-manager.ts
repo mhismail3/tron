@@ -42,6 +42,28 @@ export interface ContextManagerConfig {
   };
 }
 
+/** Information about a loaded rules file for context auditing */
+export interface RulesFileSnapshot {
+  /** Absolute path to the file */
+  path: string;
+  /** Path relative to working directory */
+  relativePath: string;
+  /** Level in hierarchy: global, project, or directory */
+  level: 'global' | 'project' | 'directory';
+  /** Depth from project root (-1 for global) */
+  depth: number;
+}
+
+/** Rules section for context snapshot */
+export interface RulesSnapshot {
+  /** List of loaded rules files */
+  files: RulesFileSnapshot[];
+  /** Total number of rules files */
+  totalFiles: number;
+  /** Estimated token count for merged rules content */
+  tokens: number;
+}
+
 export interface ContextSnapshot {
   currentTokens: number;
   contextLimit: number;
@@ -52,6 +74,8 @@ export interface ContextSnapshot {
     tools: number;
     messages: number;
   };
+  /** Loaded rules files (if any) */
+  rules?: RulesSnapshot;
 }
 
 /**

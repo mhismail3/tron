@@ -200,6 +200,8 @@ enum MessageContent: Equatable {
     case messageDeleted(targetType: String)
     /// In-chat notification for skill removal from context
     case skillRemoved(skillName: String)
+    /// In-chat notification for rules loaded on session start
+    case rulesLoaded(count: Int)
 
     var textContent: String {
         switch self {
@@ -241,6 +243,8 @@ enum MessageContent: Equatable {
             return "Deleted \(typeLabel) from context"
         case .skillRemoved(let skillName):
             return "\(skillName) removed from context"
+        case .rulesLoaded(let count):
+            return "Loaded \(count) \(count == 1 ? "rule" : "rules")"
         }
     }
 
@@ -262,7 +266,7 @@ enum MessageContent: Equatable {
 
     var isNotification: Bool {
         switch self {
-        case .modelChange, .interrupted, .transcriptionFailed, .transcriptionNoSpeech, .compaction, .contextCleared, .messageDeleted, .skillRemoved:
+        case .modelChange, .interrupted, .transcriptionFailed, .transcriptionNoSpeech, .compaction, .contextCleared, .messageDeleted, .skillRemoved, .rulesLoaded:
             return true
         default:
             return false
@@ -436,5 +440,10 @@ extension ChatMessage {
     /// In-chat notification for skill removal from context
     static func skillRemoved(skillName: String) -> ChatMessage {
         ChatMessage(role: .system, content: .skillRemoved(skillName: skillName))
+    }
+
+    /// In-chat notification for rules loaded on session start
+    static func rulesLoaded(count: Int) -> ChatMessage {
+        ChatMessage(role: .system, content: .rulesLoaded(count: count))
     }
 }

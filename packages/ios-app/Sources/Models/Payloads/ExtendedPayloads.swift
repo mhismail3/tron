@@ -239,6 +239,8 @@ struct DetailedContextSnapshotResult: Codable {
     let toolsContent: [String]
     /// Skills explicitly added to this session's context
     let addedSkills: [AddedSkillInfo]
+    /// Rules files loaded for this session (immutable, cannot be removed)
+    let rules: LoadedRules?
 }
 
 // MARK: - Worktree Payloads

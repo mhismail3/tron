@@ -115,6 +115,9 @@ struct MessageBubble: View {
         case .skillRemoved(let skillName):
             SkillRemovedNotificationView(skillName: skillName)
 
+        case .rulesLoaded(let count):
+            RulesLoadedNotificationView(count: count)
+
         case .attachments(let attachments):
             // Attachments-only message (no text) - show thumbnails
             AttachedFileThumbnails(attachments: attachments)
@@ -473,6 +476,33 @@ struct SkillRemovedNotificationView: View {
         .overlay(
             Capsule()
                 .stroke(Color.tronCyan.opacity(0.3), lineWidth: 0.5)
+        )
+        .frame(maxWidth: .infinity, alignment: .center)
+    }
+}
+
+// MARK: - Rules Loaded Notification View (Amber pill-style in-chat notification)
+
+struct RulesLoadedNotificationView: View {
+    let count: Int
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "doc.text.fill")
+                .font(.system(size: 10, weight: .medium))
+                .foregroundStyle(.tronAmber)
+
+            Text("Loaded \(count) \(count == 1 ? "rule" : "rules")")
+                .font(.system(size: 11, weight: .medium, design: .monospaced))
+                .foregroundStyle(.tronAmber.opacity(0.9))
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(Color.tronAmber.opacity(0.1))
+        .clipShape(Capsule())
+        .overlay(
+            Capsule()
+                .stroke(Color.tronAmber.opacity(0.3), lineWidth: 0.5)
         )
         .frame(maxWidth: .infinity, alignment: .center)
     }

@@ -13,6 +13,7 @@ import {
   type WorktreeCoordinatorConfig,
   type CurrentTurnToolCall,
   type SkillTracker,
+  type RulesTracker,
 } from '@tron/core';
 import type { TurnContentTracker } from './turn-content-tracker.js';
 
@@ -179,6 +180,12 @@ export interface ActiveSession {
    * Cleared on context clear and compaction.
    */
   skillTracker: SkillTracker;
+  /**
+   * Tracks rules files loaded for this session's context.
+   * Loaded once at session start, reconstructed from events on resume/fork.
+   * Rules are immutable for the session (no remove operation).
+   */
+  rulesTracker: RulesTracker;
 }
 
 // =============================================================================

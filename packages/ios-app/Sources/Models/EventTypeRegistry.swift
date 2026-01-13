@@ -46,6 +46,9 @@ enum PersistedEventType: String, CaseIterable {
     case skillAdded = "skill.added"
     case skillRemoved = "skill.removed"
 
+    // Rules
+    case rulesLoaded = "rules.loaded"
+
     // Compaction/summarization
     case compactBoundary = "compact.boundary"
     case compactSummary = "compact.summary"
@@ -81,7 +84,7 @@ enum PersistedEventType: String, CaseIterable {
         case .messageUser, .messageAssistant, .messageSystem,
              .toolCall, .toolResult,
              .notificationInterrupted, .configModelSwitch, .configReasoningLevel,
-             .contextCleared, .skillRemoved,
+             .contextCleared, .skillRemoved, .rulesLoaded,
              .errorAgent, .errorTool, .errorProvider:
             return true
         default:
@@ -156,6 +159,7 @@ enum PersistedEventType: String, CaseIterable {
         case .notificationInterrupted: return "Session interrupted"
         case .skillAdded: return "Skill added"
         case .skillRemoved: return "Skill removed"
+        case .rulesLoaded: return "Rules loaded"
         case .compactBoundary: return "Compact boundary"
         case .compactSummary: return "Compact summary"
         case .contextCleared: return "Context cleared"

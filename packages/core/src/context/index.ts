@@ -45,6 +45,8 @@ export {
   type ProcessedToolResult,
   type ExportedState,
   type ThresholdLevel,
+  type RulesFileSnapshot,
+  type RulesSnapshot,
 } from './context-manager.js';
 
 export {
@@ -66,3 +68,10 @@ export {
   getToolClarificationMessage,
   type SystemPromptConfig,
 } from './system-prompts.js';
+
+export {
+  RulesTracker,
+  createRulesTracker,
+  type TrackedRulesFile,
+  type RulesTrackingEvent,
+} from './rules-tracker.js';

@@ -206,6 +206,8 @@ struct UnifiedEventTransformer {
             return transformContextCleared(payload, timestamp: ts)
         case .skillRemoved:
             return transformSkillRemoved(payload, timestamp: ts)
+        case .rulesLoaded:
+            return transformRulesLoaded(payload, timestamp: ts)
         default:
             return nil
         }
@@ -559,6 +561,25 @@ struct UnifiedEventTransformer {
         return ChatMessage(
             role: .system,
             content: .skillRemoved(skillName: skillName),
+            timestamp: timestamp
+        )
+    }
+
+    private static func transformRulesLoaded(
+        _ payload: [String: AnyCodable],
+        timestamp: Date
+    ) -> ChatMessage? {
+        guard let totalFiles = payload["totalFiles"]?.value as? Int else {
+            logger.warning("rules.loaded event missing totalFiles in payload", category: .events)
+            return nil
+        }
+
+        // Only show notification if there are rules files
+        guard totalFiles > 0 else { return nil }
+
+        return ChatMessage(
+            role: .system,
+            content: .rulesLoaded(count: totalFiles),
             timestamp: timestamp
         )
     }
@@ -1133,7 +1154,7 @@ extension UnifiedEventTransformer {
 
             case .messageUser, .messageSystem,
                  .notificationInterrupted, .configModelSwitch, .configReasoningLevel,
-                 .contextCleared, .skillRemoved,
+                 .contextCleared, .skillRemoved, .rulesLoaded,
                  .errorAgent, .errorTool, .errorProvider:
                 // Debug: Log skill.removed events being processed (RawEvent version)
                 if eventType == .skillRemoved {
@@ -1393,7 +1414,7 @@ extension UnifiedEventTransformer {
 
             case .messageUser, .messageSystem,
                  .notificationInterrupted, .configModelSwitch, .configReasoningLevel,
-                 .contextCleared, .skillRemoved,
+                 .contextCleared, .skillRemoved, .rulesLoaded,
                  .errorAgent, .errorTool, .errorProvider:
                 // Add chat message using the SessionEvent overload
                 if var message = transformPersistedEvent(event) {

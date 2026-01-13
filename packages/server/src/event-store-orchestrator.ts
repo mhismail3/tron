@@ -80,6 +80,9 @@ import {
   SkillTracker,
   createSkillTracker,
   buildSkillContext,
+  ContextLoader,
+  RulesTracker,
+  createRulesTracker,
   type SkillSource,
   type SkillAddMethod,
   type SkillMetadata,
@@ -105,6 +108,8 @@ import {
   type Summarizer,
   type UserContent,
   type SkillTrackingEvent,
+  type RulesLoadedPayload,
+  type RulesTrackingEvent,
 } from '@tron/core';
 import { BrowserService } from './browser/index.js';
 import {
@@ -295,6 +300,56 @@ export class EventStoreOrchestrator extends EventEmitter {
       options.systemPrompt
     );
 
+    // Load rules files for the session
+    const rulesTracker = createRulesTracker();
+    let rulesHeadEventId = result.rootEvent.id;
+    try {
+      const contextLoader = new ContextLoader({
+        userHome: os.homedir(),
+        projectRoot: workingDir.path,
+      });
+      const loadedContext = await contextLoader.load(workingDir.path);
+
+      // Emit rules.loaded event if any rules files found
+      if (loadedContext.files.length > 0) {
+        const rulesPayload: RulesLoadedPayload = {
+          files: loadedContext.files.map(f => ({
+            path: f.path,
+            relativePath: path.relative(workingDir.path, f.path) || f.path,
+            level: f.level,
+            depth: f.depth,
+            sizeBytes: Buffer.byteLength(f.content, 'utf-8'),
+          })),
+          totalFiles: loadedContext.files.length,
+          mergedTokens: this.estimateTokens(loadedContext.merged),
+        };
+
+        const rulesEvent = await this.eventStore.append({
+          sessionId,
+          type: 'rules.loaded' as EventType,
+          payload: rulesPayload as unknown as Record<string, unknown>,
+          parentId: result.rootEvent.id,
+        });
+
+        rulesTracker.setRules(
+          rulesPayload.files,
+          rulesPayload.mergedTokens,
+          rulesEvent.id,
+          loadedContext.merged
+        );
+        rulesHeadEventId = rulesEvent.id;
+
+        logger.info('Rules loaded', {
+          sessionId,
+          fileCount: loadedContext.files.length,
+          tokens: rulesPayload.mergedTokens,
+        });
+      }
+    } catch (error) {
+      // Log but don't fail session creation if rules loading fails
+      logger.warn('Failed to load rules files', { sessionId, error });
+    }
+
     this.activeSessions.set(sessionId, {
       sessionId,
       agent,
@@ -306,8 +361,8 @@ export class EventStoreOrchestrator extends EventEmitter {
       currentTurn: 0,
       // Encapsulated content tracker for accumulated and per-turn tracking
       turnTracker: new TurnContentTracker(),
-      // Initialize linearization tracking with root event as head
-      pendingHeadEventId: result.rootEvent.id,
+      // Initialize linearization tracking with rules event (or root) as head
+      pendingHeadEventId: rulesHeadEventId,
       appendPromiseChain: Promise.resolve(),
       // Initialize current turn tracking for resume support (accumulated across all turns)
       currentTurnAccumulatedText: '',
@@ -320,6 +375,8 @@ export class EventStoreOrchestrator extends EventEmitter {
       messageEventIds: [],
       // Initialize empty skill tracker (new sessions have no skills)
       skillTracker: createSkillTracker(),
+      // Initialize rules tracker with loaded rules
+      rulesTracker,
     });
 
     this.emit('session_created', {
@@ -406,6 +463,14 @@ export class EventStoreOrchestrator extends EventEmitter {
       addedSkillsCount: skillTracker.count,
     });
 
+    // Reconstruct rules tracker from event history
+    const rulesTracker = RulesTracker.fromEvents(events as RulesTrackingEvent[]);
+
+    logger.info('Rules tracker reconstructed from events', {
+      sessionId,
+      rulesFileCount: rulesTracker.getTotalFiles(),
+    });
+
     this.activeSessions.set(sessionId, {
       sessionId: session.id,
       agent,
@@ -433,6 +498,8 @@ export class EventStoreOrchestrator extends EventEmitter {
       messageEventIds: sessionState.messageEventIds,
       // Restore skill tracker from events
       skillTracker,
+      // Restore rules tracker from events
+      rulesTracker,
     });
 
     logger.info('Session resumed', {
@@ -2536,6 +2603,14 @@ The user has explicitly removed these skills and expects you to respond WITHOUT 
         });
         break;
     }
+  }
+
+  /**
+   * Estimate token count for a string.
+   * Uses 4 chars per token as a rough estimate (consistent with context.compactor).
+   */
+  private estimateTokens(text: string): number {
+    return Math.ceil(text.length / 4);
   }
 
   private sessionRowToInfo(

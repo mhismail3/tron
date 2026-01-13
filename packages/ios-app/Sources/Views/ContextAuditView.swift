@@ -202,6 +202,12 @@ struct ContextAuditView: View {
                         )
                         .padding(.horizontal)
 
+                        // Rules section (immutable, cannot be removed)
+                        if let rules = snapshot.rules, rules.totalFiles > 0 {
+                            RulesSection(rules: rules)
+                                .padding(.horizontal)
+                        }
+
                         // Added Skills section (explicitly added via @skillname or skill sheet, deletable)
                         // These are skills the user explicitly added to the conversation context
                         // Uses displayedSkills for optimistic deletion animations
@@ -1095,6 +1101,126 @@ struct AddedSkillsSection: View {
                 }
             }
         }
+    }
+}
+
+// MARK: - Rules Section (immutable, cannot be removed)
+
+@available(iOS 26.0, *)
+struct RulesSection: View {
+    let rules: LoadedRules
+    @State private var isExpanded = false
+
+    private func formatTokens(_ count: Int) -> String {
+        if count >= 1000 {
+            return String(format: "%.1fk", Double(count) / 1000)
+        }
+        return "\(count)"
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            // Header row (tappable)
+            Button(action: {
+                withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
+                    isExpanded.toggle()
+                }
+            }) {
+                HStack {
+                    Image(systemName: "doc.text.fill")
+                        .font(.system(size: 14))
+                        .foregroundStyle(.tronAmber)
+
+                    Text("Rules")
+                        .font(.system(size: 14, weight: .medium, design: .monospaced))
+                        .foregroundStyle(.tronAmber)
+
+                    // Count badge
+                    Text("\(rules.totalFiles)")
+                        .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(Color.tronAmber.opacity(0.6))
+                        .clipShape(Capsule())
+
+                    Spacer()
+
+                    Text(formatTokens(rules.tokens))
+                        .font(.system(size: 12, weight: .medium, design: .monospaced))
+                        .foregroundStyle(.white.opacity(0.6))
+
+                    Image(systemName: "chevron.down")
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundStyle(.white.opacity(0.4))
+                        .rotationEffect(.degrees(isExpanded ? -180 : 0))
+                }
+                .padding(14)
+                .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            }
+            .buttonStyle(.plain)
+            .background {
+                if !isExpanded {
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .fill(.clear)
+                        .glassEffect(.regular.tint(Color.tronAmber.opacity(0.08)), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                }
+            }
+
+            // Expandable content
+            if isExpanded {
+                VStack(alignment: .leading, spacing: 8) {
+                    ForEach(rules.files) { file in
+                        RulesFileRow(file: file)
+                    }
+                }
+                .padding(12)
+                .transition(.opacity.combined(with: .scale(scale: 0.95, anchor: .top)))
+            }
+        }
+        .background {
+            if isExpanded {
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(.clear)
+                    .glassEffect(.regular.tint(Color.tronAmber.opacity(0.08)), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            }
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+    }
+}
+
+// MARK: - Rules File Row
+
+@available(iOS 26.0, *)
+struct RulesFileRow: View {
+    let file: RulesFile
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: file.icon)
+                .font(.system(size: 12))
+                .foregroundStyle(.tronAmber.opacity(0.7))
+                .frame(width: 20)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(file.relativePath)
+                    .font(.system(size: 12, weight: .medium, design: .monospaced))
+                    .foregroundStyle(.white.opacity(0.8))
+                    .lineLimit(1)
+
+                Text(file.label)
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundStyle(.white.opacity(0.4))
+            }
+
+            Spacer()
+        }
+        .padding(10)
+        .background {
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(Color.tronAmber.opacity(0.06))
+        }
+        // NO context menu - rules cannot be deleted
     }
 }
 

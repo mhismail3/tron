@@ -486,6 +486,21 @@ function createContextManager(orchestrator: EventStoreOrchestrator): ContextRpcM
       // Add skill tracking info from session
       const addedSkills = active?.skillTracker.getAddedSkills() ?? [];
 
+      // Add rules tracking info from session
+      const rulesTracker = active?.rulesTracker;
+      const rules = rulesTracker && rulesTracker.hasRules()
+        ? {
+            files: rulesTracker.getRulesFiles().map(f => ({
+              path: f.path,
+              relativePath: f.relativePath,
+              level: f.level,
+              depth: f.depth,
+            })),
+            totalFiles: rulesTracker.getTotalFiles(),
+            tokens: rulesTracker.getMergedTokens(),
+          }
+        : undefined;
+
       return {
         ...snapshot,
         addedSkills: addedSkills.map(s => ({
@@ -494,6 +509,7 @@ function createContextManager(orchestrator: EventStoreOrchestrator): ContextRpcM
           addedVia: s.addedVia,
           eventId: s.eventId,
         })),
+        rules,
       };
     },
     shouldCompact(sessionId) {

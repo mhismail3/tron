@@ -57,6 +57,12 @@ export {
   isWorktreeCommitEvent,
   isWorktreeReleasedEvent,
   isWorktreeMergedEvent,
+  // Rules events
+  type RulesLevel,
+  type RulesFileInfo,
+  type RulesLoadedPayload,
+  type RulesLoadedEvent,
+  isRulesLoadedEvent,
 } from './types.js';
 
 // Types - State types (with prefixes to avoid conflicts)
