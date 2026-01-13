@@ -164,3 +164,50 @@ export interface SkillRegistryOptions {
   /** Project skills directory name (defaults to .tron/skills) */
   projectSkillsDirName?: string;
 }
+
+// =============================================================================
+// Skill Tracking Types (for session context management)
+// =============================================================================
+
+/** How a skill was added to the session context */
+export type SkillAddMethod = 'mention' | 'explicit';
+
+/** How a skill was removed from context */
+export type SkillRemoveReason = 'manual' | 'clear' | 'compact';
+
+/**
+ * Payload for skill.added event
+ */
+export interface SkillAddedPayload {
+  /** Name of the skill that was added */
+  skillName: string;
+  /** Source of the skill (global or project) */
+  source: SkillSource;
+  /** How the skill was added (via @mention or explicit sheet selection) */
+  addedVia: SkillAddMethod;
+}
+
+/**
+ * Payload for skill.removed event
+ */
+export interface SkillRemovedPayload {
+  /** Name of the skill that was removed */
+  skillName: string;
+  /** Why the skill was removed */
+  removedVia: SkillRemoveReason;
+}
+
+/**
+ * Information about a skill that has been added to session context.
+ * Used in DetailedContextSnapshot response.
+ */
+export interface AddedSkillInfo {
+  /** Skill name */
+  name: string;
+  /** Source of the skill */
+  source: SkillSource;
+  /** How the skill was added */
+  addedVia: SkillAddMethod;
+  /** Event ID for removal tracking */
+  eventId: string;
+}

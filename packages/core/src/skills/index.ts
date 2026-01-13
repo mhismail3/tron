@@ -16,6 +16,12 @@ export type {
   SkillScanError,
   SkillListOptions,
   SkillRegistryOptions,
+  // Skill tracking types
+  SkillAddMethod,
+  SkillRemoveReason,
+  SkillAddedPayload,
+  SkillRemovedPayload,
+  AddedSkillInfo,
 } from './types.js';
 
 // Loader
@@ -41,3 +47,7 @@ export {
   processPromptForSkills,
   buildMessageWithSkillContext,
 } from './skill-injector.js';
+
+// Tracker
+export { SkillTracker, createSkillTracker } from './skill-tracker.js';
+export type { SkillTrackingEvent } from './skill-tracker.js';

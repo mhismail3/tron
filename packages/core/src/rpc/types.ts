@@ -124,6 +124,7 @@ export type RpcMethod =
   | 'skill.list'
   | 'skill.get'
   | 'skill.refresh'
+  | 'skill.remove'
   // Filesystem operations
   | 'filesystem.listDir'
   | 'filesystem.getHome'
@@ -302,6 +303,17 @@ export interface FileAttachment {
   fileName?: string;
 }
 
+/**
+ * Skill reference sent with a prompt (explicitly selected by user)
+ * These are skills the user selected via the skill sheet or @mention
+ */
+export interface PromptSkillReference {
+  /** Skill name */
+  name: string;
+  /** Where the skill is from */
+  source: 'global' | 'project';
+}
+
 /** Send prompt to agent */
 export interface AgentPromptParams {
   /** Session to send to */
@@ -314,6 +326,8 @@ export interface AgentPromptParams {
   attachments?: FileAttachment[];
   /** Reasoning effort level for OpenAI Codex models (low/medium/high/xhigh) */
   reasoningLevel?: 'low' | 'medium' | 'high' | 'xhigh';
+  /** Skills explicitly selected by user (via skill sheet or @mention in prompt) */
+  skills?: PromptSkillReference[];
 }
 
 export interface AgentPromptResult {
@@ -539,6 +553,21 @@ export interface SkillRefreshResult {
   success: boolean;
   /** Number of skills loaded after refresh */
   skillCount: number;
+}
+
+/** Remove a skill from session context */
+export interface SkillRemoveParams {
+  /** Session ID */
+  sessionId: string;
+  /** Name of the skill to remove */
+  skillName: string;
+}
+
+export interface SkillRemoveResult {
+  /** Whether the skill was successfully removed */
+  success: boolean;
+  /** Error message if removal failed */
+  error?: string;
 }
 
 // =============================================================================
@@ -1205,10 +1234,24 @@ export interface ContextDetailedMessageInfo {
   isError?: boolean;
 }
 
+/** Info about a skill explicitly added to session context */
+export interface RpcAddedSkillInfo {
+  /** Skill name */
+  name: string;
+  /** Where the skill was loaded from */
+  source: 'global' | 'project';
+  /** How the skill was added (via @mention or explicit selection) */
+  addedVia: 'mention' | 'explicit';
+  /** Event ID for removal tracking */
+  eventId: string;
+}
+
 export interface ContextGetDetailedSnapshotResult extends ContextGetSnapshotResult {
   messages: ContextDetailedMessageInfo[];
   systemPromptContent: string;
   toolsContent: string[];
+  /** Skills explicitly added to this session's context */
+  addedSkills: RpcAddedSkillInfo[];
 }
 
 /** Check if compaction is needed */

@@ -237,6 +237,8 @@ struct DetailedContextSnapshotResult: Codable {
     let messages: [DetailedMessageInfo]
     let systemPromptContent: String
     let toolsContent: [String]
+    /// Skills explicitly added to this session's context
+    let addedSkills: [AddedSkillInfo]
 }
 
 // MARK: - Worktree Payloads

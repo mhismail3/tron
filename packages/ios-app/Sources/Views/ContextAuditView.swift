@@ -7,9 +7,6 @@ struct ContextAuditView: View {
     let rpcClient: RPCClient
     let sessionId: String
     var skillStore: SkillStore?
-    /// Skills explicitly added to this session's context (via @mention or skill sheet)
-    /// These are tracked by the parent view and passed in
-    var addedSkills: [Skill] = []
 
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject var eventStoreManager: EventStoreManager
@@ -181,10 +178,9 @@ struct ContextAuditView: View {
                         // Added Skills section (explicitly added via @skillname or skill sheet, deletable)
                         // These are skills the user explicitly added to the conversation context
                         AddedSkillsSection(
-                            skills: skillStore?.regularSkills ?? [],
+                            skills: snapshot.addedSkills,
                             onDelete: { skillName in
-                                // TODO: Implement skill removal from context
-                                // This would call an RPC to remove the skill from the session context
+                                Task { await removeSkillFromContext(skillName: skillName) }
                             },
                             onFetchContent: { skillName in
                                 // Fetch full SKILL.md content from server
@@ -274,6 +270,20 @@ struct ContextAuditView: View {
             await loadContext()
         } catch {
             errorMessage = "Failed to delete message: \(error.localizedDescription)"
+        }
+    }
+
+    private func removeSkillFromContext(skillName: String) async {
+        do {
+            let result = try await rpcClient.removeSkill(sessionId: sessionId, skillName: skillName)
+            if result.success {
+                // Reload context to show updated state
+                await loadContext()
+            } else {
+                errorMessage = result.error ?? "Failed to remove skill"
+            }
+        } catch {
+            errorMessage = "Failed to remove skill: \(error.localizedDescription)"
         }
     }
 }
@@ -859,7 +869,7 @@ struct SkillReferenceRow: View {
 
 @available(iOS 26.0, *)
 struct AddedSkillRow: View {
-    let skill: Skill
+    let skill: AddedSkillInfo
     var onDelete: (() -> Void)?
     var onFetchContent: ((String) async -> String?)?
 
@@ -873,6 +883,10 @@ struct AddedSkillRow: View {
 
     private var sourceColor: Color {
         skill.source == .project ? .tronEmerald : .tronPurple
+    }
+
+    private var addedViaBadge: String {
+        skill.addedVia == .mention ? "@mention" : "selected"
     }
 
     var body: some View {
@@ -900,13 +914,16 @@ struct AddedSkillRow: View {
 
                     Spacer()
 
-                    // Tags if any
-                    if let tags = skill.tags, !tags.isEmpty {
-                        Text(tags.prefix(2).joined(separator: ", "))
-                            .font(.system(size: 9, design: .monospaced))
-                            .foregroundStyle(.white.opacity(0.4))
-                            .lineLimit(1)
-                    }
+                    // Added via badge
+                    Text(addedViaBadge)
+                        .font(.system(size: 8, weight: .medium, design: .monospaced))
+                        .foregroundStyle(.tronCyan.opacity(0.8))
+                        .padding(.horizontal, 4)
+                        .padding(.vertical, 2)
+                        .background {
+                            Capsule()
+                                .fill(Color.tronCyan.opacity(0.2))
+                        }
 
                     Image(systemName: "chevron.down")
                         .font(.system(size: 8, weight: .medium))
@@ -921,13 +938,6 @@ struct AddedSkillRow: View {
             // Expanded full content (scrollable SKILL.md)
             if isExpanded {
                 VStack(alignment: .leading, spacing: 8) {
-                    // Description header
-                    Text(skill.description)
-                        .font(.system(size: 10, weight: .medium, design: .monospaced))
-                        .foregroundStyle(.white.opacity(0.7))
-                        .padding(.horizontal, 8)
-                        .padding(.top, 4)
-
                     // Full SKILL.md content
                     if isLoadingContent {
                         HStack {
@@ -994,7 +1004,7 @@ struct AddedSkillRow: View {
 
 @available(iOS 26.0, *)
 struct AddedSkillsSection: View {
-    let skills: [Skill]
+    let skills: [AddedSkillInfo]
     var onDelete: ((String) -> Void)?
     var onFetchContent: ((String) async -> String?)?
 

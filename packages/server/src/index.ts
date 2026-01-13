@@ -4,7 +4,7 @@
  * Main entry point for the Tron WebSocket server.
  * Uses event-sourced session management via EventStoreOrchestrator.
  */
-import { createLogger, getSettings, resolveTronPath, getTronDataDir, SkillRegistry, type RpcContext, type EventStoreManager, type WorktreeRpcManager, type ContextRpcManager, type BrowserRpcManager, type SkillRpcManager, type SkillListParams, type SkillListResult, type SkillGetParams, type SkillGetResult, type SkillRefreshParams, type SkillRefreshResult, type RpcSkillInfo, type RpcSkillMetadata } from '@tron/core';
+import { createLogger, getSettings, resolveTronPath, getTronDataDir, SkillRegistry, type RpcContext, type EventStoreManager, type WorktreeRpcManager, type ContextRpcManager, type BrowserRpcManager, type SkillRpcManager, type SkillListParams, type SkillListResult, type SkillGetParams, type SkillGetResult, type SkillRefreshParams, type SkillRefreshResult, type SkillRemoveParams, type SkillRemoveResult, type RpcSkillInfo, type RpcSkillMetadata, type SessionId } from '@tron/core';
 import { TronWebSocketServer, type WebSocketServerConfig } from './websocket.js';
 import { EventStoreOrchestrator, type EventStoreOrchestratorConfig } from './event-store-orchestrator.js';
 import { HealthServer, type HealthServerConfig } from './health.js';
@@ -137,6 +137,40 @@ function createRpcContext(orchestrator: EventStoreOrchestrator): RpcContext {
     },
     agentManager: {
       async prompt(params) {
+        // Create a skill loader that can load skill content by name
+        // This closure captures the session context to load from the correct directory
+        const skillLoader = async (skillNames: string[]) => {
+          try {
+            // Get session's working directory
+            const session = await orchestrator.getSession(params.sessionId);
+            if (!session?.workingDirectory) {
+              logger.warn('Cannot load skills - no working directory', { sessionId: params.sessionId });
+              return [];
+            }
+
+            // Get or create skill registry for this directory
+            const registry = new SkillRegistry({ workingDirectory: session.workingDirectory });
+            await registry.initialize();
+
+            // Load each skill by name
+            const loadedSkills: Array<{ name: string; content: string }> = [];
+            for (const name of skillNames) {
+              const skill = registry.get(name);
+              if (skill) {
+                loadedSkills.push({ name: skill.name, content: skill.content });
+                logger.debug('Loaded skill content', { name: skill.name, contentLength: skill.content.length });
+              } else {
+                logger.warn('Skill not found', { name, sessionId: params.sessionId });
+              }
+            }
+
+            return loadedSkills;
+          } catch (err) {
+            logger.error('Error loading skills', { error: err, sessionId: params.sessionId });
+            return [];
+          }
+        };
+
         // Start the agent run asynchronously - response will be streamed via events
         orchestrator.runAgent({
           sessionId: params.sessionId,
@@ -144,6 +178,8 @@ function createRpcContext(orchestrator: EventStoreOrchestrator): RpcContext {
           reasoningLevel: params.reasoningLevel,
           images: params.images,
           attachments: params.attachments,
+          skills: params.skills,
+          skillLoader,
         }).catch(err => {
           console.error('Agent run error:', err);
         });
@@ -414,7 +450,21 @@ function createContextManager(orchestrator: EventStoreOrchestrator): ContextRpcM
       return orchestrator.getContextSnapshot(sessionId);
     },
     getDetailedContextSnapshot(sessionId) {
-      return orchestrator.getDetailedContextSnapshot(sessionId);
+      const snapshot = orchestrator.getDetailedContextSnapshot(sessionId);
+      const active = orchestrator.getActiveSession(sessionId);
+
+      // Add skill tracking info from session
+      const addedSkills = active?.skillTracker.getAddedSkills() ?? [];
+
+      return {
+        ...snapshot,
+        addedSkills: addedSkills.map(s => ({
+          name: s.name,
+          source: s.source,
+          addedVia: s.addedVia,
+          eventId: s.eventId,
+        })),
+      };
     },
     shouldCompact(sessionId) {
       return orchestrator.shouldCompact(sessionId);
@@ -594,6 +644,35 @@ function createSkillManager(orchestrator: EventStoreOrchestrator): SkillRpcManag
         success: true,
         skillCount: registry.size,
       };
+    },
+
+    async removeSkill(params: SkillRemoveParams): Promise<SkillRemoveResult> {
+      const { sessionId, skillName } = params;
+
+      // Check if skill is tracked in the session
+      const active = orchestrator.getActiveSession(sessionId);
+      if (!active) {
+        return { success: false, error: 'Session not active' };
+      }
+
+      if (!active.skillTracker.hasSkill(skillName)) {
+        return { success: false, error: 'Skill not in session context' };
+      }
+
+      // Remove from skill tracker
+      active.skillTracker.removeSkill(skillName);
+
+      // Emit skill.removed event
+      await orchestrator.appendEvent({
+        sessionId: sessionId as SessionId,
+        type: 'skill.removed',
+        payload: {
+          skillName,
+          removedVia: 'manual',
+        },
+      });
+
+      return { success: true };
     },
   };
 }

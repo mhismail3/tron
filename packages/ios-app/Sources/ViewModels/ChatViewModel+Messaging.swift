@@ -55,12 +55,13 @@ extension ChatViewModel {
         // Send to server
         Task {
             do {
-                logger.debug("Calling rpcClient.sendPrompt() with \(fileAttachments.count) attachments...", category: .chat)
+                logger.debug("Calling rpcClient.sendPrompt() with \(fileAttachments.count) attachments, \(skills?.count ?? 0) skills...", category: .chat)
                 try await rpcClient.sendPrompt(
                     text,
                     images: nil,  // Legacy - no longer used
                     attachments: fileAttachments.isEmpty ? nil : fileAttachments,
-                    reasoningLevel: reasoningLevel
+                    reasoningLevel: reasoningLevel,
+                    skills: skills
                 )
                 logger.info("Prompt sent successfully", category: .chat)
             } catch {

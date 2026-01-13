@@ -214,4 +214,177 @@ final class SkillStoreTests: XCTestCase {
 
         XCTAssertNil(skillStore.find(name: "non-existent-skill"))
     }
+
+    // MARK: - Tests: Skill Tracking Models
+
+    /// Test AddedSkillInfo JSON decoding
+    func testAddedSkillInfoDecoding() throws {
+        let json = """
+        {
+            "name": "test-skill",
+            "source": "global",
+            "addedVia": "mention",
+            "eventId": "evt_123"
+        }
+        """.data(using: .utf8)!
+
+        let decoder = JSONDecoder()
+        let skillInfo = try decoder.decode(AddedSkillInfo.self, from: json)
+
+        XCTAssertEqual(skillInfo.name, "test-skill")
+        XCTAssertEqual(skillInfo.source, .global)
+        XCTAssertEqual(skillInfo.addedVia, .mention)
+        XCTAssertEqual(skillInfo.eventId, "evt_123")
+        XCTAssertEqual(skillInfo.id, "test-skill")
+    }
+
+    /// Test AddedSkillInfo decoding with project source
+    func testAddedSkillInfoProjectSource() throws {
+        let json = """
+        {
+            "name": "my-project-skill",
+            "source": "project",
+            "addedVia": "explicit",
+            "eventId": "evt_456"
+        }
+        """.data(using: .utf8)!
+
+        let decoder = JSONDecoder()
+        let skillInfo = try decoder.decode(AddedSkillInfo.self, from: json)
+
+        XCTAssertEqual(skillInfo.name, "my-project-skill")
+        XCTAssertEqual(skillInfo.source, .project)
+        XCTAssertEqual(skillInfo.addedVia, .explicit)
+        XCTAssertEqual(skillInfo.eventId, "evt_456")
+    }
+
+    /// Test SkillAddMethod enum decoding
+    func testSkillAddMethodDecoding() throws {
+        let mentionJSON = "\"mention\"".data(using: .utf8)!
+        let explicitJSON = "\"explicit\"".data(using: .utf8)!
+
+        let decoder = JSONDecoder()
+
+        let mention = try decoder.decode(SkillAddMethod.self, from: mentionJSON)
+        XCTAssertEqual(mention, .mention)
+
+        let explicit = try decoder.decode(SkillAddMethod.self, from: explicitJSON)
+        XCTAssertEqual(explicit, .explicit)
+    }
+
+    /// Test SkillRemoveResponse decoding - success case
+    func testSkillRemoveResponseSuccess() throws {
+        let json = """
+        {
+            "success": true
+        }
+        """.data(using: .utf8)!
+
+        let decoder = JSONDecoder()
+        let response = try decoder.decode(SkillRemoveResponse.self, from: json)
+
+        XCTAssertTrue(response.success)
+        XCTAssertNil(response.error)
+    }
+
+    /// Test SkillRemoveResponse decoding - error case
+    func testSkillRemoveResponseError() throws {
+        let json = """
+        {
+            "success": false,
+            "error": "Skill not in session context"
+        }
+        """.data(using: .utf8)!
+
+        let decoder = JSONDecoder()
+        let response = try decoder.decode(SkillRemoveResponse.self, from: json)
+
+        XCTAssertFalse(response.success)
+        XCTAssertEqual(response.error, "Skill not in session context")
+    }
+
+    /// Test AddedSkillInfo array decoding (as it appears in snapshot)
+    func testAddedSkillInfoArrayDecoding() throws {
+        let json = """
+        [
+            {
+                "name": "skill-one",
+                "source": "global",
+                "addedVia": "mention",
+                "eventId": "evt_1"
+            },
+            {
+                "name": "skill-two",
+                "source": "project",
+                "addedVia": "explicit",
+                "eventId": "evt_2"
+            }
+        ]
+        """.data(using: .utf8)!
+
+        let decoder = JSONDecoder()
+        let skills = try decoder.decode([AddedSkillInfo].self, from: json)
+
+        XCTAssertEqual(skills.count, 2)
+
+        XCTAssertEqual(skills[0].name, "skill-one")
+        XCTAssertEqual(skills[0].source, .global)
+        XCTAssertEqual(skills[0].addedVia, .mention)
+
+        XCTAssertEqual(skills[1].name, "skill-two")
+        XCTAssertEqual(skills[1].source, .project)
+        XCTAssertEqual(skills[1].addedVia, .explicit)
+    }
+
+    /// Test AddedSkillInfo Equatable conformance
+    func testAddedSkillInfoEquatable() throws {
+        let skill1 = AddedSkillInfo(
+            name: "test",
+            source: .global,
+            addedVia: .mention,
+            eventId: "evt_1"
+        )
+        let skill2 = AddedSkillInfo(
+            name: "test",
+            source: .global,
+            addedVia: .mention,
+            eventId: "evt_1"
+        )
+        let skill3 = AddedSkillInfo(
+            name: "different",
+            source: .project,
+            addedVia: .explicit,
+            eventId: "evt_2"
+        )
+
+        XCTAssertEqual(skill1, skill2)
+        XCTAssertNotEqual(skill1, skill3)
+    }
+
+    /// Test AddedSkillInfo Identifiable conformance (uses name as id)
+    func testAddedSkillInfoIdentifiable() throws {
+        let skill = AddedSkillInfo(
+            name: "my-skill",
+            source: .global,
+            addedVia: .mention,
+            eventId: "evt_123"
+        )
+
+        XCTAssertEqual(skill.id, "my-skill")
+    }
+
+    /// Test SkillRemoveParams encoding
+    func testSkillRemoveParamsEncoding() throws {
+        let params = SkillRemoveParams(
+            sessionId: "session_abc",
+            skillName: "test-skill"
+        )
+
+        let encoder = JSONEncoder()
+        let data = try encoder.encode(params)
+        let json = try JSONSerialization.jsonObject(with: data) as? [String: String]
+
+        XCTAssertEqual(json?["sessionId"], "session_abc")
+        XCTAssertEqual(json?["skillName"], "test-skill")
+    }
 }

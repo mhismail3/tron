@@ -82,6 +82,9 @@ export type EventType =
   | 'compact.summary'
   // Context clearing
   | 'context.cleared'
+  // Skill tracking
+  | 'skill.added'
+  | 'skill.removed'
   // Metadata
   | 'metadata.update'
   | 'metadata.tag'

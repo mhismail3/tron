@@ -161,25 +161,39 @@ struct SessionHistoryResult: Decodable {
 
 // MARK: - Agent Methods
 
+/// Skill reference for wire format (sent with prompts)
+struct SkillReferenceParam: Encodable {
+    let name: String
+    let source: String  // "global" or "project"
+
+    init(from skill: Skill) {
+        self.name = skill.name
+        self.source = skill.source.rawValue
+    }
+}
+
 struct AgentPromptParams: Encodable {
     let sessionId: String
     let prompt: String
     let images: [ImageAttachment]?
     let attachments: [FileAttachment]?
     let reasoningLevel: String?
+    let skills: [SkillReferenceParam]?
 
     init(
         sessionId: String,
         prompt: String,
         images: [ImageAttachment]? = nil,
         attachments: [FileAttachment]? = nil,
-        reasoningLevel: String? = nil
+        reasoningLevel: String? = nil,
+        skills: [Skill]? = nil
     ) {
         self.sessionId = sessionId
         self.prompt = prompt
         self.images = images
         self.attachments = attachments
         self.reasoningLevel = reasoningLevel
+        self.skills = skills?.map { SkillReferenceParam(from: $0) }
     }
 }
 
@@ -945,4 +959,9 @@ struct SkillRefreshParams: Encodable {
     init(sessionId: String? = nil) {
         self.sessionId = sessionId
     }
+}
+
+struct SkillRemoveParams: Encodable {
+    let sessionId: String
+    let skillName: String
 }

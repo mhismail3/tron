@@ -52,6 +52,13 @@ import {
   getTronDataDir,
   detectProviderFromModel,
   KeywordSummarizer,
+  SkillTracker,
+  createSkillTracker,
+  extractSkillReferences,
+  buildSkillContext,
+  type SkillSource,
+  type SkillAddMethod,
+  type SkillMetadata,
   type AgentConfig,
   type TurnResult,
   type TronEvent,
@@ -73,6 +80,7 @@ import {
   type CompactionResult,
   type Summarizer,
   type UserContent,
+  type SkillTrackingEvent,
 } from '@tron/core';
 import { BrowserService } from './browser/index.js';
 import {
@@ -287,6 +295,8 @@ export class EventStoreOrchestrator extends EventEmitter {
       thisTurnToolCalls: new Map(),
       // Initialize parallel event ID tracking for context manager messages
       messageEventIds: [],
+      // Initialize empty skill tracker (new sessions have no skills)
+      skillTracker: createSkillTracker(),
     });
 
     this.emit('session_created', {
@@ -361,6 +371,18 @@ export class EventStoreOrchestrator extends EventEmitter {
       messageCount: sessionState.messages.length,
     });
 
+    // Reconstruct skill tracker from event history
+    // Use getAncestors to follow parent_id chain for forked sessions
+    const events = session.headEventId
+      ? await this.eventStore.getAncestors(session.headEventId)
+      : [];
+    const skillTracker = SkillTracker.fromEvents(events as SkillTrackingEvent[]);
+
+    logger.info('Skill tracker reconstructed from events', {
+      sessionId,
+      addedSkillsCount: skillTracker.count,
+    });
+
     this.activeSessions.set(sessionId, {
       sessionId: session.id,
       agent,
@@ -386,6 +408,8 @@ export class EventStoreOrchestrator extends EventEmitter {
       reasoningLevel,
       // Restore parallel event ID tracking from persisted state
       messageEventIds: sessionState.messageEventIds,
+      // Restore skill tracker from events
+      skillTracker,
     });
 
     logger.info('Session resumed', {
@@ -670,6 +694,15 @@ export class EventStoreOrchestrator extends EventEmitter {
     if (active) {
       active.lastActivity = new Date();
       active.pendingHeadEventId = toEventId as EventId;
+
+      // Reconstruct skill tracker from events up to the new head
+      const events = await this.eventStore.getAncestors(toEventId as EventId);
+      active.skillTracker = SkillTracker.fromEvents(events as SkillTrackingEvent[]);
+
+      logger.info('Skill tracker reconstructed after rewind', {
+        sessionId,
+        addedSkillsCount: active.skillTracker.count,
+      });
     }
 
     this.emit('session_rewound', {
@@ -805,12 +838,19 @@ export class EventStoreOrchestrator extends EventEmitter {
       // This prevents race conditions where stream events (turn_start, etc.) capture wrong parentId
       await active.appendPromiseChain;
 
+      // Track skills and load content BEFORE building user content
+      // This allows skill context to be prepended to the prompt
+      const skillContext = await this.loadSkillContextForPrompt(active, options);
+
       // Build user content from prompt and any attachments
       const userContent: UserContent[] = [];
 
-      // Add text prompt
-      if (options.prompt) {
-        userContent.push({ type: 'text', text: options.prompt });
+      // Add text prompt with skill context prepended
+      if (options.prompt || skillContext) {
+        const promptWithSkills = skillContext
+          ? `${skillContext}\n\n${options.prompt || ''}`
+          : options.prompt || '';
+        userContent.push({ type: 'text', text: promptWithSkills });
       }
 
       // Add images from legacy images array
@@ -1355,6 +1395,9 @@ export class EventStoreOrchestrator extends EventEmitter {
       editedSummary: opts?.editedSummary,
     });
 
+    // Clear skill tracker (skills don't survive compaction)
+    active.skillTracker.clear();
+
     // Store compaction events in EventStore (linearized)
     await active.appendPromiseChain;
 
@@ -1449,6 +1492,9 @@ export class EventStoreOrchestrator extends EventEmitter {
 
     // Clear all messages from context manager
     cm.clearMessages();
+
+    // Clear skill tracker (skills don't survive context clear)
+    active.skillTracker.clear();
 
     const tokensAfter = cm.getCurrentTokens();
 
@@ -1596,6 +1642,194 @@ export class EventStoreOrchestrator extends EventEmitter {
   // ===========================================================================
   // Private Methods
   // ===========================================================================
+
+  /**
+   * Load skill content and build context for a prompt.
+   *
+   * This method:
+   * 1. Tracks skills (creates skill.added events for new skills)
+   * 2. Collects all skill names (from @mentions and explicit selection)
+   * 3. Loads skill content via the skillLoader callback
+   * 4. Builds and returns the skill context XML block
+   *
+   * @returns Skill context string to prepend to prompt, or empty string if no skills
+   */
+  private async loadSkillContextForPrompt(
+    active: ActiveSession,
+    options: AgentRunOptions
+  ): Promise<string> {
+    // Collect skill names from both sources
+    const skillNames: Set<string> = new Set();
+
+    // 1. Extract @mentions from prompt text
+    if (options.prompt) {
+      const mentions = extractSkillReferences(options.prompt);
+      for (const mention of mentions) {
+        skillNames.add(mention.name);
+      }
+    }
+
+    // 2. Add explicitly selected skills from options.skills
+    if (options.skills && options.skills.length > 0) {
+      for (const skill of options.skills) {
+        skillNames.add(skill.name);
+      }
+    }
+
+    // If no skills, return empty string
+    if (skillNames.size === 0) {
+      return '';
+    }
+
+    // Track skills (creates events) - do this first so events are in order
+    await this.trackSkillsForPrompt(active, options);
+
+    // If no skill loader provided, we can't load content
+    if (!options.skillLoader) {
+      logger.warn('Skills referenced but no skillLoader provided', {
+        sessionId: active.sessionId,
+        skillCount: skillNames.size,
+      });
+      return '';
+    }
+
+    // Load skill content
+    const loadedSkills = await options.skillLoader(Array.from(skillNames));
+
+    if (loadedSkills.length === 0) {
+      logger.warn('No skill content loaded', {
+        sessionId: active.sessionId,
+        requestedSkills: Array.from(skillNames),
+      });
+      return '';
+    }
+
+    // Build skill context using buildSkillContext
+    // Convert LoadedSkillContent to SkillMetadata format for buildSkillContext
+    const skillMetadata: SkillMetadata[] = loadedSkills.map(s => ({
+      name: s.name,
+      content: s.content,
+      description: '',
+      frontmatter: {},
+      source: 'global' as const,
+      path: '',
+      skillMdPath: '',
+      additionalFiles: [],
+      lastModified: Date.now(),
+    }));
+
+    const skillContext = buildSkillContext(skillMetadata);
+
+    logger.debug('[SKILL] Built skill context', {
+      sessionId: active.sessionId,
+      skillCount: loadedSkills.length,
+      contextLength: skillContext.length,
+    });
+
+    return skillContext;
+  }
+
+  /**
+   * Track skills explicitly added with a prompt.
+   *
+   * Skills are tracked when:
+   * 1. User types @skill-name in the prompt (extracted via extractSkillReferences)
+   * 2. User explicitly selects skills via the skill sheet (passed in options.skills)
+   *
+   * For each skill not already tracked:
+   * - Creates a skill.added event (persisted to EventStore)
+   * - Adds the skill to the session's skillTracker
+   *
+   * This ensures skill tracking is:
+   * - Persisted (events can be replayed for session resume/fork/rewind)
+   * - Deferred until prompt send (not tracked while typing)
+   * - Deduplicated (skills already in context are not re-added)
+   */
+  private async trackSkillsForPrompt(
+    active: ActiveSession,
+    options: AgentRunOptions
+  ): Promise<void> {
+    // Collect skills to track from both sources
+    const skillsToTrack: Array<{
+      name: string;
+      source: SkillSource;
+      addedVia: SkillAddMethod;
+    }> = [];
+
+    // 1. Extract @mentions from prompt text
+    if (options.prompt) {
+      const mentions = extractSkillReferences(options.prompt);
+      for (const mention of mentions) {
+        // Default to 'global' source for @mentions since we don't have source info
+        // The actual skill content lookup happens elsewhere
+        skillsToTrack.push({
+          name: mention.name,
+          source: 'global', // Will be resolved when skill content is loaded
+          addedVia: 'mention',
+        });
+      }
+    }
+
+    // 2. Add explicitly selected skills from options.skills
+    if (options.skills && options.skills.length > 0) {
+      for (const skill of options.skills) {
+        // Check if this skill was already added via @mention (avoid duplicates)
+        const alreadyFromMention = skillsToTrack.some(
+          s => s.name === skill.name && s.addedVia === 'mention'
+        );
+
+        if (!alreadyFromMention) {
+          skillsToTrack.push({
+            name: skill.name,
+            source: skill.source,
+            addedVia: 'explicit',
+          });
+        } else {
+          // If skill was @mentioned AND explicitly selected, update source from explicit
+          // since explicit selection has more accurate source info
+          const existing = skillsToTrack.find(s => s.name === skill.name);
+          if (existing) {
+            existing.source = skill.source;
+          }
+        }
+      }
+    }
+
+    // Track each skill that's not already in the session's context
+    for (const skill of skillsToTrack) {
+      if (!active.skillTracker.hasSkill(skill.name)) {
+        // Create skill.added event (linearized)
+        const parentId = active.pendingHeadEventId ?? undefined;
+        const skillEvent = await this.eventStore.append({
+          sessionId: active.sessionId,
+          type: 'skill.added',
+          payload: {
+            skillName: skill.name,
+            source: skill.source,
+            addedVia: skill.addedVia,
+          },
+          parentId,
+        });
+        active.pendingHeadEventId = skillEvent.id;
+
+        // Update in-memory tracker
+        active.skillTracker.addSkill(
+          skill.name,
+          skill.source,
+          skill.addedVia,
+          skillEvent.id
+        );
+
+        logger.debug('[SKILL] skill.added event created', {
+          sessionId: active.sessionId,
+          skillName: skill.name,
+          source: skill.source,
+          addedVia: skill.addedVia,
+          eventId: skillEvent.id,
+        });
+      }
+    }
+  }
 
   /**
    * Transform message content for LLM consumption.

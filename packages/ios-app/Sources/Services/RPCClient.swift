@@ -318,7 +318,8 @@ class RPCClient: ObservableObject {
         _ prompt: String,
         images: [ImageAttachment]? = nil,
         attachments: [FileAttachment]? = nil,
-        reasoningLevel: String? = nil
+        reasoningLevel: String? = nil,
+        skills: [Skill]? = nil
     ) async throws {
         guard let ws = webSocket,
               let sessionId = currentSessionId else {
@@ -330,7 +331,8 @@ class RPCClient: ObservableObject {
             prompt: prompt,
             images: images,
             attachments: attachments,
-            reasoningLevel: reasoningLevel
+            reasoningLevel: reasoningLevel,
+            skills: skills
         )
 
         let result: AgentPromptResult = try await ws.send(
@@ -1010,6 +1012,16 @@ class RPCClient: ObservableObject {
 
         let params = SkillRefreshParams(sessionId: sessionId ?? currentSessionId)
         return try await ws.send(method: "skill.refresh", params: params)
+    }
+
+    /// Remove a skill from session context
+    func removeSkill(sessionId: String, skillName: String) async throws -> SkillRemoveResponse {
+        guard let ws = webSocket else {
+            throw RPCClientError.connectionNotEstablished
+        }
+
+        let params = SkillRemoveParams(sessionId: sessionId, skillName: skillName)
+        return try await ws.send(method: "skill.remove", params: params)
     }
 
     // MARK: - State Accessors

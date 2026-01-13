@@ -86,3 +86,32 @@ struct SkillRefreshResponse: Codable {
     let success: Bool
     let skillCount: Int
 }
+
+/// Response from skill.remove RPC call
+struct SkillRemoveResponse: Codable {
+    let success: Bool
+    let error: String?
+}
+
+// MARK: - Skill Tracking Types
+
+/// How a skill was added to the session context
+enum SkillAddMethod: String, Codable {
+    case mention   // Added via @skillname
+    case explicit  // Added via skill sheet selection
+}
+
+/// Information about a skill that has been explicitly added to session context
+/// Used in DetailedContextSnapshot response
+struct AddedSkillInfo: Identifiable, Codable, Equatable {
+    /// Skill name
+    let name: String
+    /// Where the skill was loaded from
+    let source: SkillSource
+    /// How the skill was added
+    let addedVia: SkillAddMethod
+    /// Event ID for removal tracking
+    let eventId: String
+
+    var id: String { name }
+}

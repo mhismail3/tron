@@ -95,6 +95,8 @@ import type {
   SkillGetResult,
   SkillRefreshParams,
   SkillRefreshResult,
+  SkillRemoveParams,
+  SkillRemoveResult,
 } from './types.js';
 import { getNotesDir } from '../settings/loader.js';
 import { ANTHROPIC_MODELS, OPENAI_CODEX_MODELS } from '../providers/models.js';
@@ -245,6 +247,7 @@ export interface SkillRpcManager {
   listSkills(params: SkillListParams): Promise<SkillListResult>;
   getSkill(params: SkillGetParams): Promise<SkillGetResult>;
   refreshSkills(params: SkillRefreshParams): Promise<SkillRefreshResult>;
+  removeSkill(params: SkillRemoveParams): Promise<SkillRemoveResult>;
 }
 
 // =============================================================================
@@ -474,6 +477,8 @@ export class RpcHandler extends EventEmitter {
           return this.handleSkillGet(request);
         case 'skill.refresh':
           return this.handleSkillRefresh(request);
+        case 'skill.remove':
+          return this.handleSkillRemove(request);
 
         default:
           return this.errorResponse(request.id, 'METHOD_NOT_FOUND', `Unknown method: ${request.method}`);
@@ -1849,6 +1854,29 @@ ${transcribeResult.text}
       return this.successResponse(request.id, result);
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Failed to refresh skills';
+      return this.errorResponse(request.id, 'SKILL_ERROR', message);
+    }
+  }
+
+  private async handleSkillRemove(request: RpcRequest): Promise<RpcResponse> {
+    if (!this.context.skillManager) {
+      return this.errorResponse(request.id, 'NOT_SUPPORTED', 'Skill manager not available');
+    }
+
+    const params = request.params as SkillRemoveParams | undefined;
+
+    if (!params?.sessionId) {
+      return this.errorResponse(request.id, 'INVALID_PARAMS', 'sessionId is required');
+    }
+    if (!params?.skillName) {
+      return this.errorResponse(request.id, 'INVALID_PARAMS', 'skillName is required');
+    }
+
+    try {
+      const result = await this.context.skillManager.removeSkill(params);
+      return this.successResponse(request.id, result);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to remove skill';
       return this.errorResponse(request.id, 'SKILL_ERROR', message);
     }
   }

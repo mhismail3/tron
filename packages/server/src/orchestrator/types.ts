@@ -12,6 +12,7 @@ import {
   type WorkingDirectory,
   type WorktreeCoordinatorConfig,
   type CurrentTurnToolCall,
+  type SkillTracker,
 } from '@tron/core';
 import type { TurnContentTracker } from './turn-content-tracker.js';
 
@@ -172,6 +173,12 @@ export interface ActiveSession {
    * May be undefined for messages created during current session (not yet persisted).
    */
   messageEventIds: (string | undefined)[];
+  /**
+   * Tracks skills explicitly added to this session's context.
+   * Reconstructed from events on session resume/fork/rewind.
+   * Cleared on context clear and compaction.
+   */
+  skillTracker: SkillTracker;
 }
 
 // =============================================================================
@@ -188,6 +195,22 @@ export interface FileAttachment {
   fileName?: string;
 }
 
+/** Skill reference passed with a prompt (explicitly selected by user) */
+export interface PromptSkillRef {
+  /** Skill name */
+  name: string;
+  /** Where the skill is from */
+  source: 'global' | 'project';
+}
+
+/** Loaded skill content for injection into prompt */
+export interface LoadedSkillContent {
+  /** Skill name */
+  name: string;
+  /** Full SKILL.md content */
+  content: string;
+}
+
 export interface AgentRunOptions {
   sessionId: string;
   prompt: string;
@@ -198,6 +221,13 @@ export interface AgentRunOptions {
   images?: FileAttachment[];
   /** Optional file attachments (images and PDFs) */
   attachments?: FileAttachment[];
+  /** Skills explicitly selected by user (via skill sheet or @mention in prompt) */
+  skills?: PromptSkillRef[];
+  /**
+   * Callback to load skill content by names.
+   * Called after skills are tracked to inject skill content into the prompt.
+   */
+  skillLoader?: (skillNames: string[]) => Promise<LoadedSkillContent[]>;
 }
 
 export interface AgentEvent {
