@@ -73,10 +73,11 @@ class AudioAvailabilityMonitor: ObservableObject {
     }
 
     /// Poll periodically to detect phone calls and other interruptions
+    /// Uses 10-second interval since notifications handle most urgent cases (interruptions, route changes)
     private func startPolling() {
         pollingTask = Task { [weak self] in
             while !Task.isCancelled {
-                try? await Task.sleep(for: .seconds(3))
+                try? await Task.sleep(for: .seconds(10))
                 // Only poll when in foreground
                 if self?.isInForeground == true {
                     await self?.checkAvailabilityAsync()

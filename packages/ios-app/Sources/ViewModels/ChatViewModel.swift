@@ -80,7 +80,7 @@ class ChatViewModel: ObservableObject {
 
     var pendingTextDelta = ""
     var textUpdateTask: Task<Void, Never>?
-    let textUpdateInterval: UInt64 = 50_000_000 // 50ms in nanoseconds
+    let textUpdateInterval: UInt64 = 100_000_000 // 100ms in nanoseconds - balances smooth UI with reduced updates
 
     // MARK: - Event Store Reference
 

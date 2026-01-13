@@ -33,6 +33,22 @@ extension EventStoreManager {
         }
     }
 
+    // MARK: - Background State
+
+    /// Set background state to pause polling and save battery
+    /// Call this from scene phase changes in TronMobileApp
+    func setBackgroundState(_ inBackground: Bool) {
+        guard isInBackground != inBackground else { return }
+
+        setIsInBackground(inBackground)
+
+        if inBackground {
+            logger.info("App entering background - pausing dashboard polling", category: .session)
+        } else {
+            logger.info("App returning to foreground - resuming dashboard polling", category: .session)
+        }
+    }
+
     // MARK: - Dashboard Polling
 
     /// Start polling for session processing states (call when dashboard is visible)
@@ -47,8 +63,18 @@ extension EventStoreManager {
             await self?.preWarmConnection()
 
             while !Task.isCancelled {
+                // Skip polling when in background
+                if self?.isInBackground == true {
+                    try? await Task.sleep(for: .seconds(5))
+                    continue
+                }
+
                 await self?.pollAllSessionStates()
-                try? await Task.sleep(for: .seconds(2))
+
+                // Adaptive polling interval: 2s when processing, 10s when idle
+                let hasProcessing = self?.processingSessionIds.isEmpty == false
+                let interval = hasProcessing ? 2 : 10
+                try? await Task.sleep(for: .seconds(interval))
             }
         }
     }

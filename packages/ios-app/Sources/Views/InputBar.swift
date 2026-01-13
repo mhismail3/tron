@@ -258,7 +258,7 @@ struct InputBar: View {
                     )
                     onAddAttachment(attachment)
                 } catch {
-                    print("Failed to read document: \(error)")
+                    logger.warning("Failed to read document: \(error.localizedDescription)", category: .chat)
                 }
             }
         }

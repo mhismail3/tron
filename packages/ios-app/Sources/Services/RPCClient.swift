@@ -123,6 +123,11 @@ class RPCClient: ObservableObject {
         await connect()
     }
 
+    /// Forward background state to WebSocketService to pause heartbeats and save battery
+    func setBackgroundState(_ inBackground: Bool) {
+        webSocket?.setBackgroundState(inBackground)
+    }
+
     // MARK: - Event Handling
 
     private func handleEventData(_ data: Data) {

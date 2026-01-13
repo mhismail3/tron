@@ -72,6 +72,12 @@ final class WebSocketService: ObservableObject {
 
     var onEvent: ((Data) -> Void)?
 
+    // MARK: - Background State
+
+    /// Tracks whether the app is in the background to pause heartbeats and save battery
+    /// Note: We only pause heartbeats, we don't disconnect - reconnecting is expensive and error-prone
+    private var isInBackground = false
+
     init(serverURL: URL) {
         self.serverURL = serverURL
     }
@@ -146,6 +152,20 @@ final class WebSocketService: ObservableObject {
 
         connectionState = .disconnected
         logger.logWebSocketState("Disconnected")
+    }
+
+    /// Set background state to pause heartbeats and save battery
+    /// Call this from scene phase changes in TronMobileApp
+    /// Note: We only pause heartbeats, not disconnect - reconnecting is expensive
+    func setBackgroundState(_ inBackground: Bool) {
+        guard isInBackground != inBackground else { return }
+        isInBackground = inBackground
+
+        if inBackground {
+            logger.info("App entering background - pausing heartbeats", category: .websocket)
+        } else {
+            logger.info("App returning to foreground - resuming heartbeats", category: .websocket)
+        }
     }
 
     // MARK: - Request/Response
@@ -314,6 +334,12 @@ final class WebSocketService: ObservableObject {
         while isConnectedFlag {
             try? await Task.sleep(for: .seconds(30))
             guard isConnectedFlag else { break }
+
+            // Skip pings when in background to save battery and radio wake-ups
+            if isInBackground {
+                logger.verbose("Skipping ping - app in background", category: .websocket)
+                continue
+            }
 
             pingCount += 1
             do {

@@ -53,6 +53,9 @@ class EventStoreManager: ObservableObject {
     var pollingTask: Task<Void, Never>?
     private(set) var isPollingActive = false
 
+    /// Tracks whether the app is in the background to pause polling and save battery
+    private(set) var isInBackground = false
+
     // MARK: - Initialization
 
     init(eventDB: EventDatabase, rpcClient: RPCClient) {
@@ -107,6 +110,10 @@ class EventStoreManager: ObservableObject {
 
     func setIsPollingActive(_ value: Bool) {
         isPollingActive = value
+    }
+
+    func setIsInBackground(_ value: Bool) {
+        isInBackground = value
     }
 
     func clearSessions() {
