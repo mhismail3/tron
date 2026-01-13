@@ -1813,101 +1813,105 @@ struct ForkConfirmationSheet: View {
     @State private var isForking = false
 
     var body: some View {
-        VStack(spacing: 24) {
-            // Icon
-            Image(systemName: "arrow.triangle.branch")
-                .font(.system(size: 44, weight: .light))
-                .foregroundStyle(.tronPurple)
-                .frame(width: 72, height: 72)
-                .background {
-                    Circle()
-                        .fill(.clear)
-                        .glassEffect(.regular.tint(Color.tronPurple.opacity(0.25)), in: Circle())
+        ZStack {
+            // Centered content
+            VStack(spacing: 20) {
+                // Icon
+                Image(systemName: "arrow.triangle.branch")
+                    .font(.system(size: 44, weight: .light))
+                    .foregroundStyle(.tronPurple)
+                    .frame(width: 72, height: 72)
+                    .background {
+                        Circle()
+                            .fill(.clear)
+                            .glassEffect(.regular.tint(Color.tronPurple.opacity(0.25)), in: Circle())
+                    }
+
+                // Title and description
+                VStack(spacing: 8) {
+                    Text("Fork Session")
+                        .font(.system(size: 20, weight: .semibold))
+                        .foregroundStyle(.tronTextPrimary)
+
+                    Text("Create a new branch from this point")
+                        .font(.system(size: 14, design: .monospaced))
+                        .foregroundStyle(.tronTextMuted)
+
+                    // Show the fork point summary
+                    if let event = event {
+                        HStack(spacing: 6) {
+                            Image(systemName: "quote.opening")
+                                .font(.system(size: 10))
+                                .foregroundStyle(.tronPurple.opacity(0.5))
+
+                            Text(event.summary)
+                                .font(.system(size: 12, design: .monospaced))
+                                .foregroundStyle(.tronTextSecondary)
+                                .lineLimit(2)
+
+                            Image(systemName: "quote.closing")
+                                .font(.system(size: 10))
+                                .foregroundStyle(.tronPurple.opacity(0.5))
+                        }
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 8)
+                        .background(Color.tronPurple.opacity(0.1))
+                        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                        .padding(.top, 8)
+                    }
                 }
+            }
+            .padding(.horizontal, 24)
+
+            // Corner buttons
+            VStack {
+                HStack {
+                    // Cancel button (top left)
+                    Button {
+                        dismiss()
+                    } label: {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 14, weight: .medium))
+                            .foregroundStyle(.tronTextMuted)
+                            .frame(width: 32, height: 32)
+                            .background(Color.tronSurface.opacity(0.8))
+                            .clipShape(Circle())
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(isForking)
+
+                    Spacer()
+
+                    // Fork button (top right)
+                    Button {
+                        Task {
+                            await performFork()
+                        }
+                    } label: {
+                        Group {
+                            if isForking {
+                                ProgressView()
+                                    .scaleEffect(0.7)
+                                    .tint(.white)
+                            } else {
+                                Image(systemName: "arrow.triangle.branch")
+                                    .font(.system(size: 14, weight: .medium))
+                            }
+                        }
+                        .foregroundStyle(.white)
+                        .frame(width: 32, height: 32)
+                        .background(Color.tronPurple)
+                        .clipShape(Circle())
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(isForking)
+                }
+                .padding(.horizontal, 20)
                 .padding(.top, 20)
 
-            // Title and description
-            VStack(spacing: 8) {
-                Text("Fork Session")
-                    .font(.system(size: 20, weight: .semibold))
-                    .foregroundStyle(.tronTextPrimary)
-
-                Text("Create a new branch from this point")
-                    .font(.system(size: 14, design: .monospaced))
-                    .foregroundStyle(.tronTextMuted)
-
-                // Show the fork point summary
-                if let event = event {
-                    HStack(spacing: 6) {
-                        Image(systemName: "quote.opening")
-                            .font(.system(size: 10))
-                            .foregroundStyle(.tronPurple.opacity(0.5))
-
-                        Text(event.summary)
-                            .font(.system(size: 12, design: .monospaced))
-                            .foregroundStyle(.tronTextSecondary)
-                            .lineLimit(2)
-
-                        Image(systemName: "quote.closing")
-                            .font(.system(size: 10))
-                            .foregroundStyle(.tronPurple.opacity(0.5))
-                    }
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 8)
-                    .background(Color.tronPurple.opacity(0.1))
-                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-                    .padding(.top, 8)
-                }
+                Spacer()
             }
-
-            Spacer()
-
-            // Buttons
-            VStack(spacing: 12) {
-                Button {
-                    Task {
-                        await performFork()
-                    }
-                } label: {
-                    HStack(spacing: 6) {
-                        if isForking {
-                            ProgressView()
-                                .scaleEffect(0.8)
-                                .tint(.white)
-                        } else {
-                            Image(systemName: "arrow.triangle.branch")
-                                .font(.system(size: 12))
-                        }
-                        Text("Fork Session")
-                            .font(.system(size: 15, weight: .semibold))
-                    }
-                    .foregroundStyle(.white)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 14)
-                    .background {
-                        RoundedRectangle(cornerRadius: 12, style: .continuous)
-                            .fill(.clear)
-                            .glassEffect(.regular.tint(Color.tronPurple.opacity(0.6)), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-                    }
-                }
-                .buttonStyle(.plain)
-                .disabled(isForking)
-
-                Button {
-                    dismiss()
-                } label: {
-                    Text("Cancel")
-                        .font(.system(size: 15, weight: .medium))
-                        .foregroundStyle(.tronTextSecondary)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 14)
-                }
-                .buttonStyle(.plain)
-                .disabled(isForking)
-            }
-            .padding(.bottom, 20)
         }
-        .padding(.horizontal, 24)
         .presentationDetents([.medium])
         .presentationDragIndicator(.hidden)
         .preferredColorScheme(.dark)
