@@ -95,6 +95,61 @@ describe('SkillTracker', () => {
       expect(tracker.hasSkill('skill-c')).toBe(true);
       expect(tracker.getAddedSkills()).toHaveLength(2);
     });
+
+    it('tracks removed skill in removedSkillNames', () => {
+      tracker.addSkill('my-skill', 'global', 'mention', 'event-1');
+      tracker.removeSkill('my-skill');
+
+      expect(tracker.getRemovedSkillNames()).toContain('my-skill');
+    });
+  });
+
+  describe('getRemovedSkillNames', () => {
+    it('returns empty array for new tracker', () => {
+      expect(tracker.getRemovedSkillNames()).toEqual([]);
+    });
+
+    it('returns skill names that were removed', () => {
+      tracker.addSkill('skill-a', 'global', 'mention', 'event-1');
+      tracker.addSkill('skill-b', 'global', 'mention', 'event-2');
+      tracker.removeSkill('skill-a');
+
+      expect(tracker.getRemovedSkillNames()).toEqual(['skill-a']);
+    });
+
+    it('clears skill from removedSkillNames when re-added', () => {
+      // Add then remove a skill
+      tracker.addSkill('my-skill', 'global', 'mention', 'event-1');
+      tracker.removeSkill('my-skill');
+
+      // Verify it's in removed list
+      expect(tracker.getRemovedSkillNames()).toContain('my-skill');
+
+      // Re-add the skill
+      tracker.addSkill('my-skill', 'global', 'mention', 'event-2');
+
+      // Should no longer be in removed list
+      expect(tracker.getRemovedSkillNames()).not.toContain('my-skill');
+      expect(tracker.hasSkill('my-skill')).toBe(true);
+    });
+
+    it('handles multiple add/remove/re-add cycles', () => {
+      // First cycle: add -> remove
+      tracker.addSkill('skill-a', 'global', 'mention', 'event-1');
+      tracker.removeSkill('skill-a');
+      expect(tracker.getRemovedSkillNames()).toContain('skill-a');
+
+      // Second cycle: re-add -> remove again
+      tracker.addSkill('skill-a', 'global', 'mention', 'event-2');
+      expect(tracker.getRemovedSkillNames()).not.toContain('skill-a');
+      tracker.removeSkill('skill-a');
+      expect(tracker.getRemovedSkillNames()).toContain('skill-a');
+
+      // Third cycle: re-add
+      tracker.addSkill('skill-a', 'global', 'mention', 'event-3');
+      expect(tracker.getRemovedSkillNames()).not.toContain('skill-a');
+      expect(tracker.hasSkill('skill-a')).toBe(true);
+    });
   });
 
   describe('clear', () => {
@@ -109,6 +164,20 @@ describe('SkillTracker', () => {
       expect(tracker.hasSkill('skill-a')).toBe(false);
       expect(tracker.hasSkill('skill-b')).toBe(false);
       expect(tracker.hasSkill('skill-c')).toBe(false);
+    });
+
+    it('clears removedSkillNames as well', () => {
+      tracker.addSkill('skill-a', 'global', 'mention', 'event-1');
+      tracker.removeSkill('skill-a');
+
+      // Verify skill is in removed list
+      expect(tracker.getRemovedSkillNames()).toContain('skill-a');
+
+      tracker.clear();
+
+      // Both added and removed should be cleared
+      expect(tracker.getAddedSkills()).toHaveLength(0);
+      expect(tracker.getRemovedSkillNames()).toHaveLength(0);
     });
   });
 
@@ -274,7 +343,7 @@ describe('SkillTracker.fromEvents', () => {
 });
 
 // =============================================================================
-// Fork & Rewind Tests (Integration)
+// Fork Tests (Integration)
 // =============================================================================
 
 describe('Skill Tracking - Fork Scenarios', () => {
@@ -316,34 +385,6 @@ describe('Skill Tracking - Fork Scenarios', () => {
     // Fork should have both
     expect(forkTracker.hasSkill('parent-skill')).toBe(true);
     expect(forkTracker.hasSkill('fork-skill')).toBe(true);
-  });
-});
-
-describe('Skill Tracking - Rewind Scenarios', () => {
-  it('rebuilds skill state from events up to HEAD', () => {
-    // Full event history
-    const allEvents: MockEvent[] = [
-      { id: 'e1', type: 'skill.added', payload: { skillName: 'skill-before-rewind', source: 'global', addedVia: 'mention' } },
-      { id: 'e2', type: 'message.user', payload: { content: 'some message' } },
-      { id: 'e3', type: 'skill.added', payload: { skillName: 'skill-after-rewind-point', source: 'project', addedVia: 'explicit' } },
-    ];
-
-    // Simulate rewind to e2 by only including events up to e2
-    const eventsUpToRewindPoint: MockEvent[] = [
-      { id: 'e1', type: 'skill.added', payload: { skillName: 'skill-before-rewind', source: 'global', addedVia: 'mention' } },
-      { id: 'e2', type: 'message.user', payload: { content: 'some message' } },
-    ];
-
-    const trackerBeforeRewind = SkillTracker.fromEvents(allEvents);
-    const trackerAfterRewind = SkillTracker.fromEvents(eventsUpToRewindPoint);
-
-    // Before rewind: both skills present
-    expect(trackerBeforeRewind.hasSkill('skill-before-rewind')).toBe(true);
-    expect(trackerBeforeRewind.hasSkill('skill-after-rewind-point')).toBe(true);
-
-    // After rewind: only skill before rewind point
-    expect(trackerAfterRewind.hasSkill('skill-before-rewind')).toBe(true);
-    expect(trackerAfterRewind.hasSkill('skill-after-rewind-point')).toBe(false);
   });
 });
 

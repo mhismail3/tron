@@ -2,7 +2,7 @@
  * @fileoverview EventStore - High-level API for Event-Sourced Sessions
  *
  * Provides the main interface for creating sessions, appending events,
- * retrieving state, and performing tree operations (fork, rewind).
+ * retrieving state, and performing tree operations (fork).
  */
 
 import * as crypto from 'crypto';
@@ -551,23 +551,6 @@ export class EventStore {
         rootEvent: forkEvent,
       };
     });
-  }
-
-  // ===========================================================================
-  // Rewind Operation
-  // ===========================================================================
-
-  async rewind(sessionId: SessionId, toEventId: EventId): Promise<void> {
-    const event = await this.backend.getEvent(toEventId);
-    if (!event) {
-      throw new Error(`Event not found: ${toEventId}`);
-    }
-
-    if (event.sessionId !== sessionId) {
-      throw new Error(`Event ${toEventId} does not belong to session ${sessionId}`);
-    }
-
-    await this.backend.updateSessionHead(sessionId, toEventId);
   }
 
   // ===========================================================================

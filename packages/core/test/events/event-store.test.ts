@@ -499,71 +499,6 @@ describe('EventStore', () => {
     });
   });
 
-  describe('rewind operation', () => {
-    let sessionId: SessionId;
-    let rewindPointId: EventId;
-
-    beforeEach(async () => {
-      const result = await store.createSession({
-        workspacePath: '/test',
-        workingDirectory: '/test',
-        model: 'test',
-      });
-      sessionId = result.session.id;
-
-      await store.append({
-        sessionId,
-        type: 'message.user',
-        payload: { content: 'Hello', turn: 1 },
-      });
-
-      rewindPointId = (await store.append({
-        sessionId,
-        type: 'message.assistant',
-        payload: {
-          content: [{ type: 'text', text: 'Hi' }],
-          turn: 1,
-          tokenUsage: { inputTokens: 5, outputTokens: 5 },
-          stopReason: 'end_turn',
-          model: 'test',
-        },
-      })).id;
-
-      await store.append({
-        sessionId,
-        type: 'message.user',
-        payload: { content: 'Continue', turn: 2 },
-      });
-    });
-
-    it('should move session head back to rewind point', async () => {
-      await store.rewind(sessionId, rewindPointId);
-
-      const session = await store.getSession(sessionId);
-      expect(session?.headEventId).toBe(rewindPointId);
-    });
-
-    it('should preserve rewound-over events', async () => {
-      await store.rewind(sessionId, rewindPointId);
-
-      // All events still exist
-      const events = await store.getEventsBySession(sessionId);
-      expect(events.length).toBe(4); // root + 3 messages
-    });
-
-    it('should allow new events from rewound point', async () => {
-      await store.rewind(sessionId, rewindPointId);
-
-      const newEvent = await store.append({
-        sessionId,
-        type: 'message.user',
-        payload: { content: 'Alternative path', turn: 2 },
-      });
-
-      expect(newEvent.parentId).toBe(rewindPointId);
-    });
-  });
-
   describe('search', () => {
     let sessionId: SessionId;
     let workspaceId: WorkspaceId;
@@ -831,34 +766,6 @@ describe('EventStore', () => {
       const forkedState = await store.getStateAtHead(forkedSession.id);
       expect(forkedState.reasoningLevel).toBe('high');
     });
-
-    it('should handle rewind and reasoning level correctly', async () => {
-      await store.append({
-        sessionId,
-        type: 'config.reasoning_level',
-        payload: { previousLevel: undefined, newLevel: 'low' },
-      });
-
-      const rewindPoint = await store.append({
-        sessionId,
-        type: 'message.user',
-        payload: { content: 'Hello', turn: 1 },
-      });
-
-      // Change reasoning level after rewind point
-      await store.append({
-        sessionId,
-        type: 'config.reasoning_level',
-        payload: { previousLevel: 'low', newLevel: 'high' },
-      });
-
-      // Rewind to before the second reasoning level change
-      await store.rewind(sessionId, rewindPoint.id);
-
-      // Should have the earlier reasoning level
-      const state = await store.getStateAtHead(sessionId);
-      expect(state.reasoningLevel).toBe('low');
-    });
   });
 
   describe('message deletion', () => {
@@ -954,42 +861,6 @@ describe('EventStore', () => {
       const forkedMessages = await store.getMessagesAtHead(forkedSession.id);
       expect(forkedMessages.length).toBe(1);
       expect(forkedMessages[0]!.role).toBe('assistant');
-    });
-
-    it('should work with rewind (rewind past deletion restores message)', async () => {
-      const msg1 = await store.append({
-        sessionId,
-        type: 'message.user',
-        payload: { content: 'Message 1', turn: 1 },
-      });
-
-      const rewindPoint = await store.append({
-        sessionId,
-        type: 'message.assistant',
-        payload: {
-          content: [{ type: 'text', text: 'Response' }],
-          turn: 1,
-          tokenUsage: { inputTokens: 10, outputTokens: 20 },
-          stopReason: 'end_turn',
-          model: 'test',
-        },
-      });
-
-      // Delete msg1 after rewind point
-      await store.deleteMessage(sessionId, msg1.id);
-
-      // Verify msg1 is deleted
-      let messages = await store.getMessagesAtHead(sessionId);
-      expect(messages.length).toBe(1);
-      expect(messages[0]!.role).toBe('assistant');
-
-      // Rewind to before deletion
-      await store.rewind(sessionId, rewindPoint.id);
-
-      // Now msg1 should be visible again
-      messages = await store.getMessagesAtHead(sessionId);
-      expect(messages.length).toBe(2);
-      expect(messages[0]!.role).toBe('user');
     });
 
     it('should reject deletion of non-message events', async () => {

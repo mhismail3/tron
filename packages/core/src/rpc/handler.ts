@@ -26,8 +26,6 @@ import type {
   SessionDeleteResult,
   SessionForkParams,
   SessionForkResult,
-  SessionRewindParams,
-  SessionRewindResult,
   AgentPromptParams,
   AgentPromptResult,
   AgentAbortParams,
@@ -196,7 +194,6 @@ interface SessionManager {
   deleteSession(sessionId: string): Promise<boolean>;
   // Updated to use EventId-based operations (EventStore integration)
   forkSession(sessionId: string, fromEventId?: string): Promise<SessionForkResult>;
-  rewindSession(sessionId: string, toEventId: string): Promise<SessionRewindResult>;
   switchModel(sessionId: string, model: string): Promise<ModelSwitchResult>;
 }
 
@@ -357,8 +354,6 @@ export class RpcHandler extends EventEmitter {
           return this.handleSessionDelete(request);
         case 'session.fork':
           return this.handleSessionFork(request);
-        case 'session.rewind':
-          return this.handleSessionRewind(request);
 
         // Agent methods
         case 'agent.prompt':
@@ -582,25 +577,6 @@ export class RpcHandler extends EventEmitter {
     const result = await this.context.sessionManager.forkSession(
       params.sessionId,
       params.fromEventId // Pass eventId, sessionManager handles conversion
-    );
-
-    return this.successResponse(request.id, result);
-  }
-
-  private async handleSessionRewind(request: RpcRequest): Promise<RpcResponse> {
-    const params = request.params as SessionRewindParams | undefined;
-
-    if (!params?.sessionId) {
-      return this.errorResponse(request.id, 'INVALID_PARAMS', 'sessionId is required');
-    }
-    if (!params.toEventId) {
-      return this.errorResponse(request.id, 'INVALID_PARAMS', 'toEventId is required');
-    }
-
-    // Rewind now uses EventStore via EventId
-    const result = await this.context.sessionManager.rewindSession(
-      params.sessionId,
-      params.toEventId // Pass eventId, sessionManager handles conversion
     );
 
     return this.successResponse(request.id, result);

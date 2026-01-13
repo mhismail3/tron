@@ -12,7 +12,6 @@ import type {
   SessionListResult,
   SessionDeleteResult,
   SessionForkResult,
-  SessionRewindResult,
   AgentPromptResult,
   AgentAbortResult,
   AgentGetStateResult,
@@ -106,18 +105,6 @@ export function createSessionForkResponse(
     newSessionId: `session_fork_${Date.now()}`,
     forkedFrom: 'session_original',
     messageCount: 3,
-    ...overrides,
-  });
-}
-
-export function createSessionRewindResponse(
-  id: string,
-  overrides: Partial<SessionRewindResult> = {},
-): RpcResponse<SessionRewindResult> {
-  return createResponse(id, {
-    sessionId: 'session_123',
-    newMessageCount: 5,
-    removedCount: 3,
     ...overrides,
   });
 }

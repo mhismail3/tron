@@ -569,48 +569,6 @@ describe('Linearization Pattern', () => {
       // (fork event's parentId points to e3 in original session)
       expect(forkResult.rootEvent.parentId).toBe(eventIds[3]);
     });
-
-    it('rewind followed by new event should create one branch point', async () => {
-      const session = await eventStore.createSession({
-        workspacePath: '/test',
-        workingDirectory: '/test',
-        model: 'claude-sonnet-4-20250514',
-      });
-
-      // Create linear chain: root -> e1 -> e2 -> e3 -> e4 -> e5
-      let currentHead: EventId = session.rootEvent.id;
-      const eventIds: EventId[] = [session.rootEvent.id];
-
-      for (let i = 1; i <= 5; i++) {
-        const event = await eventStore.append({
-          sessionId: session.session.id,
-          type: 'message.user',
-          payload: { content: `Message ${i}` },
-          parentId: currentHead,
-        });
-        eventIds.push(event.id);
-        currentHead = event.id;
-      }
-
-      // Rewind to event 2
-      await eventStore.rewind(session.session.id, eventIds[2]);
-
-      // Now add a new event - its parent should be event 2
-      // Simulating what the orchestrator does after rewind:
-      // pendingHeadEventId = toEventId (e2)
-      const newEvent = await eventStore.append({
-        sessionId: session.session.id,
-        type: 'message.user',
-        payload: { content: 'After rewind' },
-        parentId: eventIds[2], // Parent is rewind point
-      });
-
-      // Event 2 now has 2 children: e3 (original) and newEvent (after rewind)
-      expect(newEvent.parentId).toBe(eventIds[2]);
-
-      const events = await eventStore.getEventsBySession(session.session.id);
-      expect(countBranchPoints(events)).toBe(1); // e2 is the only branch point
-    });
   });
 });
 

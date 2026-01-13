@@ -3,7 +3,7 @@
  *
  * Export session tree visualization components for:
  * - New session dialog (pick fork point)
- * - Active session view (see history, fork/rewind)
+ * - Active session view (see history, fork)
  * - Sidebar (compact timeline)
  */
 

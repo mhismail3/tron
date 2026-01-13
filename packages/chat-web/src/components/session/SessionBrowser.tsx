@@ -219,7 +219,7 @@ export function SessionBrowser({
 
   // Handle tree node click
   const handleNodeClick = useCallback(
-    (nodeId: string, action: 'fork' | 'rewind' | 'select') => {
+    (nodeId: string, action: 'fork' | 'select') => {
       if (action === 'fork' && activeSessionId) {
         const node = sessionHistory.treeNodes.find((n) => n.id === nodeId);
         setForkConfirmation({

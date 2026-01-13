@@ -419,10 +419,10 @@ describe('useEventStore', () => {
   });
 
   // ===========================================================================
-  // Fork/Rewind Operations
+  // Fork Operations
   // ===========================================================================
 
-  describe('Fork/Rewind Operations', () => {
+  describe('Fork Operations', () => {
     it('should fail fork without RPC connection', async () => {
       const { result } = renderHook(() => useEventStore({ autoSync: false }));
 
@@ -465,72 +465,6 @@ describe('useEventStore', () => {
       });
       expect(forkResult?.newSessionId).toBe('session-2');
       expect(forkResult?.rootEventId).toBe('event-fork-1');
-    });
-
-    it('should fail rewind without RPC connection', async () => {
-      const { result } = renderHook(() => useEventStore({ autoSync: false }));
-
-      await waitFor(() => {
-        expect(result.current.state.isInitialized).toBe(true);
-      });
-
-      let rewindResult: boolean = true;
-      await act(async () => {
-        rewindResult = await result.current.rewind('session-1', 'event-2');
-      });
-
-      expect(rewindResult).toBe(false);
-    });
-
-    it('should call RPC for rewind when connected', async () => {
-      const mockRpcCall = vi.fn().mockResolvedValue({});
-
-      const { result } = renderHook(() =>
-        useEventStore({ rpcCall: mockRpcCall, autoSync: false })
-      );
-
-      await waitFor(() => {
-        expect(result.current.state.isInitialized).toBe(true);
-      });
-
-      // Set up a session to rewind
-      const session: CachedSession = {
-        id: 'session-1',
-        workspaceId: 'ws-1',
-        rootEventId: 'event-1',
-        headEventId: 'event-3',
-        title: null,
-        latestModel: 'claude-sonnet-4',
-        endedAt: null,
-        workingDirectory: '/test',
-        createdAt: '2024-01-01T00:00:00Z',
-        lastActivityAt: '2024-01-01T00:00:00Z',
-        eventCount: 3,
-        messageCount: 2,
-      };
-
-      await act(async () => {
-        await result.current.cacheSession(session);
-      });
-
-      let rewindResult: boolean = false;
-      await act(async () => {
-        rewindResult = await result.current.rewind('session-1', 'event-2');
-      });
-
-      expect(mockRpcCall).toHaveBeenCalledWith('session.rewind', {
-        sessionId: 'session-1',
-        toEventId: 'event-2',
-      });
-      expect(rewindResult).toBe(true);
-
-      // Check that session was updated locally
-      let updatedSession: CachedSession | null = null;
-      await act(async () => {
-        updatedSession = await result.current.getSession('session-1');
-      });
-
-      expect(updatedSession?.headEventId).toBe('event-2');
     });
   });
 

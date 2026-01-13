@@ -2,7 +2,7 @@
  * @fileoverview Skill Tracker
  *
  * Manages tracking of skills explicitly added to a session's context.
- * Supports event-sourced reconstruction for session resume/fork/rewind.
+ * Supports event-sourced reconstruction for session resume/fork.
  */
 
 import type {
@@ -124,7 +124,6 @@ export class SkillTracker {
    * This is the key method for supporting:
    * - Session resume: Replay events to rebuild state
    * - Fork: Events include parent ancestry, state is inherited
-   * - Rewind: Only events up to HEAD are included, state reflects that point
    *
    * @param events - Array of events in chronological order
    * @returns New SkillTracker with reconstructed state

@@ -187,15 +187,6 @@
   background: #d97706;
 }
 
-.preview-action.rewind {
-  background: var(--tree-node-assistant, #8b5cf6);
-  color: white;
-}
-
-.preview-action.rewind:hover {
-  background: #7c3aed;
-}
-
 /* =============================================================================
    Confirmation
    ============================================================================= */
@@ -263,14 +254,6 @@
 
 .confirm-proceed.fork:hover {
   background: #d97706;
-}
-
-.confirm-proceed.rewind {
-  background: var(--tree-node-assistant, #8b5cf6);
-}
-
-.confirm-proceed.rewind:hover {
-  background: #7c3aed;
 }
 
 /* =============================================================================

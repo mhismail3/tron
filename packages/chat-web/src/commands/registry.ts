@@ -42,15 +42,6 @@ export const BUILT_IN_COMMANDS: Command[] = [
     },
   },
   {
-    name: 'rewind',
-    description: 'Rewind to a previous message',
-    category: 'session',
-    requiresSession: true,
-    handler: () => {
-      // Show message selector
-    },
-  },
-  {
     name: 'clear',
     alias: 'c',
     description: 'Clear message display',

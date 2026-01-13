@@ -2,7 +2,7 @@ import SwiftUI
 
 // MARK: - Session Tree View
 
-/// Tree visualization for session history showing events, branch points, and fork/rewind capabilities.
+/// Tree visualization for session history showing events, branch points, and fork capabilities.
 struct SessionTreeView: View {
     let events: [SessionEvent]
     let headEventId: String?
@@ -11,7 +11,6 @@ struct SessionTreeView: View {
     /// Fork context for displaying parent session events differently
     var forkContext: SessionHistorySheet.ForkContext?
     let onFork: (String) -> Void
-    let onRewind: (String) -> Void
     var isLoading: Bool = false
 
     var body: some View {
@@ -49,8 +48,7 @@ struct SessionTreeView: View {
                                     isFromParentSession: forkContext?.parentEventIds.contains(event.id) ?? false,
                                     depth: nodeDepths[event.id] ?? 0,
                                     onSelect: { selectedEventId = event.id },
-                                    onFork: { onFork(event.id) },
-                                    onRewind: { onRewind(event.id) }
+                                    onFork: { onFork(event.id) }
                                 )
                             }
                         }
@@ -298,7 +296,6 @@ struct TreeNodeRow: View {
     let hasNextSibling: Bool  // Whether there's another event at this depth after this one
     let onSelect: () -> Void
     let onFork: () -> Void
-    let onRewind: () -> Void
 
     @State private var isExpanded = false
 
@@ -337,7 +334,7 @@ struct TreeNodeRow: View {
         isFromParentSession ? .tronTextMuted : .tronTextPrimary
     }
 
-    init(event: SessionEvent, isHead: Bool, isSelected: Bool, isOnPath: Bool, isBranchPoint: Bool, isFromParentSession: Bool = false, depth: Int, hasNextSibling: Bool = false, onSelect: @escaping () -> Void, onFork: @escaping () -> Void, onRewind: @escaping () -> Void) {
+    init(event: SessionEvent, isHead: Bool, isSelected: Bool, isOnPath: Bool, isBranchPoint: Bool, isFromParentSession: Bool = false, depth: Int, hasNextSibling: Bool = false, onSelect: @escaping () -> Void, onFork: @escaping () -> Void) {
         self.event = event
         self.isHead = isHead
         self.isSelected = isSelected
@@ -348,7 +345,6 @@ struct TreeNodeRow: View {
         self.hasNextSibling = hasNextSibling
         self.onSelect = onSelect
         self.onFork = onFork
-        self.onRewind = onRewind
     }
 
     var body: some View {
@@ -474,20 +470,6 @@ struct TreeNodeRow: View {
                                 .padding(.horizontal, 10)
                                 .padding(.vertical, 5)
                                 .background(Color.tronAmber)
-                                .clipShape(Capsule())
-                            }
-
-                            Button(action: onRewind) {
-                                HStack(spacing: 3) {
-                                    Image(systemName: "arrow.uturn.backward")
-                                        .font(.system(size: 10))
-                                    Text("Rewind")
-                                        .font(.system(size: 11, weight: .medium))
-                                }
-                                .foregroundStyle(.white)
-                                .padding(.horizontal, 10)
-                                .padding(.vertical, 5)
-                                .background(Color.tronPurple)
                                 .clipShape(Capsule())
                             }
 
@@ -745,7 +727,6 @@ struct SessionHistorySheet: View {
 
     enum ActionConfirm {
         case fork(String)
-        case rewind(String)
     }
 
     var body: some View {
@@ -765,9 +746,6 @@ struct SessionHistorySheet: View {
                         forkContext: forkContext,
                         onFork: { eventId in
                             actionConfirm = .fork(eventId)
-                        },
-                        onRewind: { eventId in
-                            actionConfirm = .rewind(eventId)
                         },
                         isLoading: isLoading
                     )
@@ -905,37 +883,6 @@ struct SessionHistorySheet: View {
                     .buttonStyle(.borderedProminent)
                     .tint(.tronAmber)
                 }
-
-            case .rewind(let eventId):
-                Image(systemName: "arrow.uturn.backward")
-                    .font(.system(size: 48, weight: .light))
-                    .foregroundStyle(.tronPurple)
-
-                Text("Rewind Session?")
-                    .font(.title2.weight(.semibold))
-                    .foregroundStyle(.tronTextPrimary)
-
-                Text("This will move HEAD back to this event. Events after this point will remain in history but won't be active.")
-                    .font(.subheadline)
-                    .foregroundStyle(.tronTextSecondary)
-                    .multilineTextAlignment(.center)
-                    .padding(.horizontal)
-
-                HStack(spacing: 16) {
-                    Button("Cancel") {
-                        actionConfirm = nil
-                    }
-                    .buttonStyle(.bordered)
-                    .tint(.tronTextSecondary)
-
-                    Button("Rewind") {
-                        Task {
-                            await performRewind(eventId)
-                        }
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .tint(.tronPurple)
-                }
             }
         }
         .padding(32)
@@ -958,26 +905,5 @@ struct SessionHistorySheet: View {
         }
     }
 
-    private func performRewind(_ eventId: String) async {
-        logger.debug("Rewind initiated: sessionId=\(sessionId), toEventId=\(eventId)", category: .session)
-        if let event = events.first(where: { $0.id == eventId }) {
-            logger.debug("Rewind target: type=\(event.type), sequence=\(event.sequence)", category: .session)
-        }
-        let currentHeadId = eventStoreManager.activeSession?.headEventId
-        if let headId = currentHeadId, let currentHead = events.first(where: { $0.id == headId }) {
-            logger.debug("Current HEAD: type=\(currentHead.type), sequence=\(currentHead.sequence)", category: .session)
-        } else {
-            logger.debug("Current HEAD: \(currentHeadId ?? "unknown")", category: .session)
-        }
-
-        do {
-            try await eventStoreManager.rewindSession(sessionId, toEventId: eventId)
-            logger.debug("Rewind succeeded, dismissing sheet", category: .session)
-            dismiss()
-        } catch {
-            logger.error("Rewind FAILED: \(error)", category: .session)
-            actionConfirm = nil
-        }
-    }
 }
 

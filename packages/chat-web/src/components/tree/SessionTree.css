@@ -260,15 +260,6 @@
   background: #d97706;
 }
 
-.action-btn.rewind {
-  background: var(--tree-node-assistant);
-  color: white;
-}
-
-.action-btn.rewind:hover {
-  background: #7c3aed;
-}
-
 /* =============================================================================
    Loading & Empty States
    ============================================================================= */

@@ -410,10 +410,6 @@ export function reducer(state: AppState, action: AppAction): AppState {
     case 'SET_HEAD_EVENT':
       return { ...state, headEventId: action.payload };
 
-    case 'REWIND_TO_EVENT':
-      // Update the head event ID; the UI will need to refetch messages
-      return { ...state, headEventId: action.payload };
-
     // =========================================================================
     // UI (Web-specific)
     // =========================================================================

@@ -93,19 +93,6 @@ export function ChatArea({ onSubmit, onCommand, onStop, onModelChange, rpcCall, 
     [sessionHistory, onSessionChange]
   );
 
-  // Handle rewind
-  const handleRewind = useCallback(
-    async (eventId: string) => {
-      const success = await sessionHistory.rewind(eventId);
-      if (success) {
-        // Refresh the messages after rewind
-        dispatch({ type: 'REWIND_TO_EVENT', payload: eventId });
-        setShowHistoryPanel(false);
-      }
-    },
-    [sessionHistory, dispatch]
-  );
-
   // Fetch past sessions when browser is opened
   useEffect(() => {
     if (showSessionBrowser && rpcCall) {
@@ -340,7 +327,6 @@ export function ChatArea({ onSubmit, onCommand, onStop, onModelChange, rpcCall, 
         headEventId={sessionHistory.headEventId}
         sessionId={state.sessionId}
         onFork={handleFork}
-        onRewind={handleRewind}
         isLoading={sessionHistory.isLoading}
       />
 

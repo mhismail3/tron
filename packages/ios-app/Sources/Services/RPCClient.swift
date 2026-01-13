@@ -492,24 +492,6 @@ class RPCClient: ObservableObject {
         return result
     }
 
-    func rewindSession(_ sessionId: String, toEventId: String) async throws -> SessionRewindResult {
-        guard let ws = webSocket else {
-            logger.error("[REWIND] Cannot rewind - WebSocket not connected", category: .session)
-            throw RPCClientError.connectionNotEstablished
-        }
-
-        let params = SessionRewindParams(sessionId: sessionId, toEventId: toEventId)
-        logger.info("[REWIND] Sending rewind request: sessionId=\(sessionId), toEventId=\(toEventId)", category: .session)
-
-        let result: SessionRewindResult = try await ws.send(
-            method: "session.rewind",
-            params: params
-        )
-
-        logger.info("[REWIND] Rewind succeeded: newHeadEventId=\(result.newHeadEventId), previousHeadEventId=\(result.previousHeadEventId ?? "unknown")", category: .session)
-        return result
-    }
-
     // MARK: - Message Methods
 
     /// Delete a message from a session.

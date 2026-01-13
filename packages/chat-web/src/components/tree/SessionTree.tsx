@@ -45,8 +45,8 @@ export interface SessionTreeProps {
   headNodeId?: string;
   /** ID of the currently selected node */
   selectedNodeId?: string;
-  /** Callback when a node is clicked (for fork/rewind) */
-  onNodeClick?: (nodeId: string, action: 'fork' | 'rewind' | 'select') => void;
+  /** Callback when a node is clicked (for fork) */
+  onNodeClick?: (nodeId: string, action: 'fork' | 'select') => void;
   /** Callback when hovering over a node */
   onNodeHover?: (nodeId: string | null) => void;
   /** Whether to show compact view (sidebar) or expanded (dialog) */
@@ -100,7 +100,6 @@ interface TreeNodeItemProps {
   variant: 'compact' | 'expanded';
   onSelect: () => void;
   onFork: () => void;
-  onRewind: () => void;
   onHover: (hovering: boolean) => void;
 }
 
@@ -113,7 +112,6 @@ function TreeNodeItem({
   variant,
   onSelect,
   onFork,
-  onRewind,
   onHover,
 }: TreeNodeItemProps) {
   const [showActions, setShowActions] = useState(false);
@@ -173,7 +171,6 @@ function TreeNodeItem({
       onKeyDown={(e) => {
         if (e.key === 'Enter') onSelect();
         if (e.key === 'f' && e.ctrlKey) onFork();
-        if (e.key === 'r' && e.ctrlKey) onRewind();
       }}
     >
       {/* Connector line to parent */}
@@ -223,17 +220,6 @@ function TreeNodeItem({
             type="button"
           >
             ⎇ Fork
-          </button>
-          <button
-            className="action-btn rewind"
-            onClick={(e) => {
-              e.stopPropagation();
-              onRewind();
-            }}
-            title="Rewind to this point"
-            type="button"
-          >
-            ↩ Rewind
           </button>
         </div>
       )}
@@ -313,7 +299,6 @@ export function SessionTree({
             variant={variant}
             onSelect={() => onNodeClick?.(node.id, 'select')}
             onFork={() => onNodeClick?.(node.id, 'fork')}
-            onRewind={() => onNodeClick?.(node.id, 'rewind')}
             onHover={(hovering) => {
               setHoveredNodeId(hovering ? node.id : null);
               onNodeHover?.(hovering ? node.id : null);

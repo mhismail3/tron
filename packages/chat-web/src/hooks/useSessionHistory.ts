@@ -1,8 +1,8 @@
 /**
  * @fileoverview Session History Hook
  *
- * Loads session events from server and provides tree visualization,
- * fork, and rewind functionality for the session history panel.
+ * Loads session events from server and provides tree visualization
+ * and fork functionality for the session history panel.
  */
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
@@ -58,8 +58,6 @@ export interface UseSessionHistoryReturn {
   refresh: () => Promise<void>;
   /** Fork session from an event */
   fork: (eventId: string) => Promise<{ newSessionId: string; rootEventId: string } | null>;
-  /** Rewind session to an event */
-  rewind: (eventId: string) => Promise<boolean>;
 }
 
 // =============================================================================
@@ -213,34 +211,6 @@ export function useSessionHistory({
     [sessionId, rpcCall]
   );
 
-  // Rewind operation
-  const rewind = useCallback(
-    async (eventId: string): Promise<boolean> => {
-      if (!sessionId) return false;
-
-      setError(null);
-
-      try {
-        await rpcCall<{
-          sessionId: string;
-          newHeadEventId: string;
-          previousHeadEventId: string;
-        }>('session.rewind', {
-          sessionId,
-          toEventId: eventId,
-        });
-
-        setHeadEventId(eventId);
-        return true;
-      } catch (err) {
-        const errorMessage = err instanceof Error ? err.message : 'Rewind failed';
-        setError(errorMessage);
-        return false;
-      }
-    },
-    [sessionId, rpcCall]
-  );
-
   // Refresh function
   const refresh = useCallback(async () => {
     await fetchEvents();
@@ -257,7 +227,6 @@ export function useSessionHistory({
     branchCount,
     refresh,
     fork,
-    rewind,
   };
 }
 

@@ -106,7 +106,6 @@ import {
   type CreateSessionOptions,
   type SessionInfo,
   type ForkResult,
-  type RewindResult,
   type WorktreeInfo,
 } from './orchestrator/types.js';
 
@@ -119,7 +118,6 @@ export type {
   CreateSessionOptions,
   SessionInfo,
   ForkResult,
-  RewindResult,
   WorktreeInfo,
 };
 
@@ -606,7 +604,7 @@ export class EventStoreOrchestrator extends EventEmitter {
   }
 
   // ===========================================================================
-  // Fork & Rewind
+  // Fork
   // ===========================================================================
 
   async forkSession(sessionId: string, fromEventId?: string): Promise<ForkResult> {
@@ -666,56 +664,6 @@ export class EventStoreOrchestrator extends EventEmitter {
       forkedFromEventId: eventIdToFork,
       forkedFromSessionId: sessionId,
       worktree: buildWorktreeInfo(workingDir),
-    };
-  }
-
-  async rewindSession(sessionId: string, toEventId: string): Promise<RewindResult> {
-    const session = await this.eventStore.getSession(sessionId as SessionId);
-    if (!session) {
-      throw new Error(`Session not found: ${sessionId}`);
-    }
-
-    // P0 FIX: Prevent rewind during active agent processing
-    // Rewinding pendingHeadEventId while stream events are queued would cause
-    // queued events to chain to rewind point instead of being abandoned
-    const active = this.activeSessions.get(sessionId);
-    if (active?.isProcessing) {
-      throw new Error('Cannot rewind session while agent is processing');
-    }
-
-    const previousHeadEventId = session.headEventId!;
-
-    await this.eventStore.rewind(sessionId as SessionId, toEventId as EventId);
-
-    // If this is an active session, refresh the cached data
-    // CRITICAL: Sync in-memory head after rewind to prevent race conditions
-    // Without this, the next event would chain to the old head instead of rewind point
-    if (active) {
-      active.lastActivity = new Date();
-      active.pendingHeadEventId = toEventId as EventId;
-
-      // Reconstruct skill tracker from events up to the new head
-      const events = await this.eventStore.getAncestors(toEventId as EventId);
-      active.skillTracker = SkillTracker.fromEvents(events as SkillTrackingEvent[]);
-
-      logger.info('Skill tracker reconstructed after rewind', {
-        sessionId,
-        addedSkillsCount: active.skillTracker.count,
-      });
-    }
-
-    this.emit('session_rewound', {
-      sessionId,
-      previousHeadEventId,
-      newHeadEventId: toEventId,
-    });
-
-    logger.info('Session rewound', { sessionId, toEventId });
-
-    return {
-      sessionId,
-      newHeadEventId: toEventId,
-      previousHeadEventId,
     };
   }
 
@@ -1686,7 +1634,25 @@ export class EventStoreOrchestrator extends EventEmitter {
       hasSkillLoader: !!options.skillLoader,
     });
 
-    // Check for removed skills that need a "stop following" instruction
+    // Collect skill names from explicitly selected skills only
+    // @mentions in prompt text are handled client-side (converted to chips)
+    const skillNames: Set<string> = new Set();
+
+    // Add explicitly selected skills from options.skills
+    if (options.skills && options.skills.length > 0) {
+      for (const skill of options.skills) {
+        skillNames.add(skill.name);
+      }
+    }
+
+    // Track skills FIRST (creates events and updates tracker)
+    // This must happen BEFORE checking removed skills, so that re-added skills
+    // are properly removed from the removedSkillNames set
+    if (skillNames.size > 0) {
+      await this.trackSkillsForPrompt(active, options);
+    }
+
+    // NOW check for removed skills (after tracking, so re-added skills are excluded)
     const removedSkills = active.skillTracker.getRemovedSkillNames();
     let removedSkillsInstruction = '';
     if (removedSkills.length > 0) {
@@ -1702,17 +1668,6 @@ Do NOT follow instructions from these removed skills. Respond normally without t
       });
     }
 
-    // Collect skill names from explicitly selected skills only
-    // @mentions in prompt text are handled client-side (converted to chips)
-    const skillNames: Set<string> = new Set();
-
-    // Add explicitly selected skills from options.skills
-    if (options.skills && options.skills.length > 0) {
-      for (const skill of options.skills) {
-        skillNames.add(skill.name);
-      }
-    }
-
     // If no skills to add, return just the removed skills instruction (if any)
     if (skillNames.size === 0) {
       logger.info('[SKILL] No skills to load - returning removed skills instruction only', {
@@ -1720,9 +1675,6 @@ Do NOT follow instructions from these removed skills. Respond normally without t
       });
       return removedSkillsInstruction;
     }
-
-    // Track skills (creates events) - do this first so events are in order
-    await this.trackSkillsForPrompt(active, options);
 
     // If no skill loader provided, we can't load content
     if (!options.skillLoader) {
@@ -1798,7 +1750,7 @@ Do NOT follow instructions from these removed skills. Respond normally without t
    * - Adds the skill to the session's skillTracker
    *
    * This ensures skill tracking is:
-   * - Persisted (events can be replayed for session resume/fork/rewind)
+   * - Persisted (events can be replayed for session resume/fork)
    * - Deferred until prompt send (not tracked while typing)
    * - Deduplicated (skills already in context are not re-added)
    */

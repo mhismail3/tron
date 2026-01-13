@@ -47,8 +47,6 @@ export type {
   SessionDeleteResult,
   SessionForkParams,
   SessionForkResult,
-  SessionRewindParams,
-  SessionRewindResult,
   // Agent types
   AgentPromptParams,
   AgentPromptResult,

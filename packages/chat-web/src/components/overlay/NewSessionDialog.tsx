@@ -164,10 +164,8 @@ export function NewSessionDialog({
 
   // Handle node click in tree
   const handleNodeClick = useCallback(
-    (nodeId: string, action: 'fork' | 'rewind' | 'select') => {
-      if (action === 'fork' || action === 'select') {
-        setSelectedEventId(nodeId);
-      }
+    (nodeId: string, action: 'fork' | 'select') => {
+      setSelectedEventId(nodeId);
     },
     []
   );

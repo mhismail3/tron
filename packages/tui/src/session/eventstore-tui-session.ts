@@ -4,7 +4,7 @@
  * A TUI session implementation that uses the EventStore for all persistence.
  * This provides:
  * - Full event sourcing with immutable event log
- * - Tree structure for fork/rewind operations
+ * - Tree structure for fork operations
  * - Direct database access (local-first performance)
  * - State reconstruction from events at any point in time
  *
@@ -138,15 +138,6 @@ export interface ForkResult {
   forkedFromEventId: string;
   /** Session ID the fork was created from */
   forkedFromSessionId: string;
-}
-
-export interface RewindResult {
-  /** Session ID */
-  sessionId: string;
-  /** New head event ID after rewind */
-  newHeadEventId: string;
-  /** Previous head event ID before rewind */
-  previousHeadEventId: string;
 }
 
 export interface ToolCallRecord {
@@ -507,7 +498,7 @@ export class EventStoreTuiSession {
   }
 
   // ===========================================================================
-  // Fork & Rewind Operations
+  // Fork Operations
   // ===========================================================================
 
   /**
@@ -540,42 +531,6 @@ export class EventStoreTuiSession {
       rootEventId: result.rootEvent.id,
       forkedFromEventId: forkFromEventId,
       forkedFromSessionId: this.sessionId,
-    };
-  }
-
-  /**
-   * Rewind session to a previous event
-   */
-  async rewind(toEventId: EventId): Promise<RewindResult> {
-    this.ensureReady();
-
-    if (!this.sessionId) {
-      throw new Error('No session to rewind');
-    }
-
-    // Get current head
-    const session = await this.eventStore.getSession(this.sessionId);
-    if (!session?.headEventId) {
-      throw new Error('Cannot determine current head');
-    }
-
-    const previousHeadEventId = session.headEventId;
-
-    // Validate the target event exists and is an ancestor
-    const event = await this.eventStore.getEvent(toEventId);
-    if (!event) {
-      throw new Error(`Event not found: ${toEventId}`);
-    }
-
-    await this.eventStore.rewind(this.sessionId, toEventId);
-
-    // Clear and reload cached state
-    await this.reloadCachedState();
-
-    return {
-      sessionId: this.sessionId,
-      newHeadEventId: toEventId,
-      previousHeadEventId,
     };
   }
 

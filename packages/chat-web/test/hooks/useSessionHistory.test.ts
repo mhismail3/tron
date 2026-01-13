@@ -2,7 +2,7 @@
  * @fileoverview Tests for useSessionHistory Hook
  *
  * Tests for the hook that loads session events from server
- * and provides tree visualization, fork, and rewind functionality.
+ * and provides tree visualization and fork functionality.
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
@@ -332,59 +332,6 @@ describe('useSessionHistory', () => {
 
       expect(forkResult).toBeNull();
       expect(result.current.error).toBe('Fork failed');
-    });
-  });
-
-  describe('rewind operation', () => {
-    it('should call session.rewind RPC', async () => {
-      mockRpcCall
-        .mockResolvedValueOnce({ events: [], hasMore: false })
-        .mockResolvedValueOnce({
-          sessionId: 'session_1',
-          newHeadEventId: 'evt_2',
-          previousHeadEventId: 'evt_5',
-        });
-
-      const { result } = renderHook(() =>
-        useSessionHistory({ sessionId: 'session_1', rpcCall: mockRpcCall })
-      );
-
-      await waitFor(() => {
-        expect(result.current.isLoading).toBe(false);
-      });
-
-      let success = false;
-      await act(async () => {
-        success = await result.current.rewind('evt_2');
-      });
-
-      expect(mockRpcCall).toHaveBeenCalledWith('session.rewind', {
-        sessionId: 'session_1',
-        toEventId: 'evt_2',
-      });
-      expect(success).toBe(true);
-    });
-
-    it('should handle rewind errors gracefully', async () => {
-      mockRpcCall
-        .mockResolvedValueOnce({ events: [], hasMore: false })
-        .mockRejectedValueOnce(new Error('Rewind failed'));
-
-      const { result } = renderHook(() =>
-        useSessionHistory({ sessionId: 'session_1', rpcCall: mockRpcCall })
-      );
-
-      await waitFor(() => {
-        expect(result.current.isLoading).toBe(false);
-      });
-
-      let success = false;
-      await act(async () => {
-        success = await result.current.rewind('evt_2');
-      });
-
-      expect(success).toBe(false);
-      expect(result.current.error).toBe('Rewind failed');
     });
   });
 

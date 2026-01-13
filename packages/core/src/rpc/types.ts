@@ -89,7 +89,6 @@ export type RpcMethod =
   | 'session.list'
   | 'session.delete'
   | 'session.fork'
-  | 'session.rewind'
   | 'session.getHead'
   | 'session.getState'
   // Worktree operations
@@ -241,19 +240,6 @@ export interface SessionForkResult {
   rootEventId: string;
   forkedFromEventId: string;
   forkedFromSessionId: string;
-}
-
-/** Rewind session to specific event */
-export interface SessionRewindParams {
-  sessionId: string;
-  /** Event ID to rewind to (must be ancestor of current head) */
-  toEventId: string;
-}
-
-export interface SessionRewindResult {
-  sessionId: string;
-  newHeadEventId: string;
-  previousHeadEventId: string;
 }
 
 /** Get session head event */
@@ -992,7 +978,6 @@ export type RpcEventType =
   | 'session.ended'
   | 'session.updated'
   | 'session.forked'
-  | 'session.rewound'
   // Event sync events (for real-time event broadcasting)
   | 'events.new'
   | 'events.batch'
@@ -1064,15 +1049,6 @@ export interface SessionForkedEvent {
   newSessionId: string;
   newRootEventId: string;
   name?: string;
-}
-
-/**
- * Event data for session rewind notification
- */
-export interface SessionRewoundEvent {
-  sessionId: string;
-  previousHeadEventId: string;
-  newHeadEventId: string;
 }
 
 /**

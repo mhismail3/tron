@@ -4,7 +4,7 @@
  * These tests verify that the orchestrator correctly uses EventStore for:
  * - Session creation and management
  * - Event appending and retrieval
- * - Tree operations (fork, rewind)
+ * - Tree operations (fork)
  * - Event broadcasting
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
@@ -540,75 +540,6 @@ describe('EventStore Integration', () => {
 
       expect(rootEventIdx).toBeLessThan(userEventIdx);
       expect(userEventIdx).toBeLessThan(forkEventIdx);
-    });
-  });
-
-  describe('rewind operation', () => {
-    let sessionId: SessionId;
-    let eventIds: EventId[] = [];
-
-    beforeEach(async () => {
-      const result = await eventStore.createSession({
-        workspacePath: '/test/project',
-        workingDirectory: '/test/project',
-        model: 'claude-sonnet-4-20250514',
-      });
-      sessionId = result.session.id;
-      eventIds = [result.rootEvent.id];
-
-      // Create conversation
-      for (const msg of ['Hello', 'Hi!', 'How are you?', 'Good, thanks!']) {
-        const event = await eventStore.append({
-          sessionId,
-          type: eventIds.length % 2 === 1 ? 'message.user' : 'message.assistant',
-          payload: { content: msg },
-        });
-        eventIds.push(event.id);
-      }
-    });
-
-    it('should move head back to rewind point', async () => {
-      const rewindToId = eventIds[2]; // After "Hi!"
-
-      await eventStore.rewind(sessionId, rewindToId);
-
-      const session = await eventStore.getSession(sessionId);
-      expect(session?.headEventId).toBe(rewindToId);
-    });
-
-    it('should preserve rewound-over events', async () => {
-      const rewindToId = eventIds[2];
-
-      await eventStore.rewind(sessionId, rewindToId);
-
-      // Events still exist
-      const event = await eventStore.getEvent(eventIds[4]);
-      expect(event).not.toBeNull();
-    });
-
-    it('should show fewer messages after rewind', async () => {
-      const rewindToId = eventIds[2];
-
-      await eventStore.rewind(sessionId, rewindToId);
-
-      const messages = await eventStore.getMessagesAtHead(sessionId);
-      expect(messages.length).toBe(2); // Just Hello and Hi!
-    });
-
-    it('should allow new events from rewound point', async () => {
-      const rewindToId = eventIds[2];
-
-      await eventStore.rewind(sessionId, rewindToId);
-
-      await eventStore.append({
-        sessionId,
-        type: 'message.user',
-        payload: { content: 'New direction' },
-      });
-
-      const messages = await eventStore.getMessagesAtHead(sessionId);
-      expect(messages.length).toBe(3);
-      expect(messages[2].content).toBe('New direction');
     });
   });
 

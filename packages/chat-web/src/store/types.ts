@@ -193,7 +193,6 @@ export type AppAction =
 
   // Session history (Web-specific)
   | { type: 'SET_HEAD_EVENT'; payload: string | null }
-  | { type: 'REWIND_TO_EVENT'; payload: string }
 
   // UI (Web-specific)
   | { type: 'SET_SIDEBAR_OPEN'; payload: boolean }

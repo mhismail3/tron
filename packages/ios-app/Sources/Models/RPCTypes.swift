@@ -336,7 +336,7 @@ struct SystemPingResult: Decodable {
     let pong: Bool
 }
 
-// MARK: - Session Delete/Fork/Rewind
+// MARK: - Session Delete/Fork
 
 struct SessionDeleteParams: Encodable {
     let sessionId: String
@@ -365,17 +365,6 @@ struct ForkWorktreeInfo: Decodable {
     let branch: String?  // Can be null for non-isolated sessions
     let baseCommit: String?  // Can be null for non-isolated sessions
     let path: String
-}
-
-struct SessionRewindParams: Encodable {
-    let sessionId: String
-    let toEventId: String  // Event ID to rewind to
-}
-
-struct SessionRewindResult: Decodable {
-    let sessionId: String
-    let newHeadEventId: String  // The new HEAD after rewind
-    let previousHeadEventId: String?  // The previous HEAD before rewind
 }
 
 // MARK: - Model Methods

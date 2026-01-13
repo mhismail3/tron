@@ -144,28 +144,6 @@ export interface ForkSessionResult {
   messageCount: number;
 }
 
-/**
- * Options for rewinding a session
- */
-export interface RewindSessionOptions {
-  /** Session to rewind */
-  sessionId: string;
-  /** Message index to rewind to */
-  toIndex: number;
-}
-
-/**
- * Result of rewinding a session
- */
-export interface RewindSessionResult {
-  /** Session ID */
-  sessionId: string;
-  /** New message count */
-  newMessageCount: number;
-  /** Messages removed */
-  removedCount: number;
-}
-
 // =============================================================================
 // JSONL Persistence
 // =============================================================================

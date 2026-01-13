@@ -80,14 +80,12 @@ export interface UseEventStoreReturn {
   /** Get tree visualization for a session */
   getTree: (sessionId: string) => Promise<EventTreeNode[]>;
 
-  // Fork/Rewind Operations
+  // Fork Operations
   /** Fork session from an event, creating a new branch */
   fork: (sessionId: string, fromEventId?: string) => Promise<{
     newSessionId: string;
     rootEventId: string;
   } | null>;
-  /** Rewind session to a previous event */
-  rewind: (sessionId: string, toEventId: string) => Promise<boolean>;
   /** Get messages at a specific event (for preview) */
   getMessagesAtEvent: (eventId: string) => Promise<DisplayMessage[]>;
 
@@ -286,7 +284,7 @@ export function useEventStore(options: UseEventStoreOptions = {}): UseEventStore
   }, []);
 
   // ===========================================================================
-  // Fork/Rewind Operations
+  // Fork Operations
   // ===========================================================================
 
   const fork = useCallback(
@@ -322,39 +320,6 @@ export function useEventStore(options: UseEventStoreOptions = {}): UseEventStore
       } catch (err) {
         console.error('[EventStore] Fork failed:', err);
         return null;
-      }
-    },
-    [rpcCall]
-  );
-
-  const rewind = useCallback(
-    async (sessionId: string, toEventId: string): Promise<boolean> => {
-      if (!rpcCall) {
-        console.error('[EventStore] Cannot rewind: no RPC connection');
-        return false;
-      }
-
-      try {
-        await rpcCall('session.rewind', {
-          sessionId,
-          toEventId,
-        });
-
-        // Sync to get updated session state
-        if (dbRef.current) {
-          const session = await dbRef.current.getSession(sessionId);
-          if (session) {
-            await dbRef.current.putSession({
-              ...session,
-              headEventId: toEventId,
-            });
-          }
-        }
-
-        return true;
-      } catch (err) {
-        console.error('[EventStore] Rewind failed:', err);
-        return false;
       }
     },
     [rpcCall]
@@ -530,7 +495,6 @@ export function useEventStore(options: UseEventStoreOptions = {}): UseEventStore
     getStateAtHead,
     getTree,
     fork,
-    rewind,
     getMessagesAtEvent,
     sync,
     fullSync,

@@ -123,14 +123,6 @@ function createRpcContext(orchestrator: EventStoreOrchestrator): RpcContext {
           worktree: result.worktree,
         };
       },
-      async rewindSession(sessionId, toEventId) {
-        const result = await orchestrator.rewindSession(sessionId, toEventId);
-        return {
-          sessionId: result.sessionId,
-          newHeadEventId: result.newHeadEventId,
-          previousHeadEventId: result.previousHeadEventId,
-        };
-      },
       async switchModel(sessionId, model) {
         return orchestrator.switchModel(sessionId, model);
       },
@@ -1103,7 +1095,6 @@ export type {
   CreateSessionOptions,
   SessionInfo,
   ForkResult,
-  RewindResult,
 } from './event-store-orchestrator.js';
 export { HealthServer } from './health.js';
 export type { HealthServerConfig, HealthResponse } from './health.js';

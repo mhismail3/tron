@@ -21,8 +21,6 @@ import type {
   SessionDeleteResult,
   SessionForkParams,
   SessionForkResult,
-  SessionRewindParams,
-  SessionRewindResult,
   AgentPromptParams,
   AgentPromptResult,
   AgentAbortParams,
@@ -313,10 +311,6 @@ export class RpcClient {
 
   sessionFork(params: SessionForkParams): Promise<SessionForkResult> {
     return this.request('session.fork', params);
-  }
-
-  sessionRewind(params: SessionRewindParams): Promise<SessionRewindResult> {
-    return this.request('session.rewind', params);
   }
 
   // Agent methods

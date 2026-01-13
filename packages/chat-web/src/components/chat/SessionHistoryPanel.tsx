@@ -1,7 +1,7 @@
 /**
  * @fileoverview Session History Panel
  *
- * A collapsible panel showing the session's event tree with fork/rewind capabilities.
+ * A collapsible panel showing the session's event tree with fork capabilities.
  * Can be toggled from the StatusBar or via keyboard shortcut.
  */
 
@@ -27,8 +27,6 @@ export interface SessionHistoryPanelProps {
   sessionId: string | null;
   /** Callback when user wants to fork from an event */
   onFork: (eventId: string) => void;
-  /** Callback when user wants to rewind to an event */
-  onRewind: (eventId: string) => void;
   /** Whether an operation is in progress */
   isLoading?: boolean;
 }
@@ -56,14 +54,6 @@ function ForkIcon() {
   );
 }
 
-function RewindIcon() {
-  return (
-    <svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12.066 11.2a1 1 0 000 1.6l5.334 4A1 1 0 0019 16V8a1 1 0 00-1.6-.8l-5.334 4zM4.066 11.2a1 1 0 000 1.6l5.334 4A1 1 0 0011 16V8a1 1 0 00-1.6-.8l-5.334 4z" />
-    </svg>
-  );
-}
-
 // =============================================================================
 // Main Component
 // =============================================================================
@@ -75,11 +65,10 @@ export function SessionHistoryPanel({
   headEventId,
   sessionId,
   onFork,
-  onRewind,
   isLoading = false,
 }: SessionHistoryPanelProps) {
   const [selectedEventId, setSelectedEventId] = useState<string | null>(null);
-  const [actionConfirm, setActionConfirm] = useState<{ type: 'fork' | 'rewind'; eventId: string } | null>(null);
+  const [actionConfirm, setActionConfirm] = useState<{ type: 'fork'; eventId: string } | null>(null);
 
   // Convert events to tree nodes
   const treeNodes: TreeNode[] = useMemo(() => {
@@ -99,11 +88,11 @@ export function SessionHistoryPanel({
 
   // Handle node click
   const handleNodeClick = useCallback(
-    (nodeId: string, action: 'fork' | 'rewind' | 'select') => {
+    (nodeId: string, action: 'fork' | 'select') => {
       if (action === 'select') {
         setSelectedEventId(nodeId);
         setActionConfirm(null);
-      } else if (action === 'fork' || action === 'rewind') {
+      } else if (action === 'fork') {
         setSelectedEventId(nodeId);
         setActionConfirm({ type: action, eventId: nodeId });
       }
@@ -115,15 +104,10 @@ export function SessionHistoryPanel({
   const handleConfirmAction = useCallback(() => {
     if (!actionConfirm) return;
 
-    if (actionConfirm.type === 'fork') {
-      onFork(actionConfirm.eventId);
-    } else {
-      onRewind(actionConfirm.eventId);
-    }
-
+    onFork(actionConfirm.eventId);
     setActionConfirm(null);
     onClose();
-  }, [actionConfirm, onFork, onRewind, onClose]);
+  }, [actionConfirm, onFork, onClose]);
 
   // Cancel action
   const handleCancelAction = useCallback(() => {
@@ -218,16 +202,6 @@ export function SessionHistoryPanel({
                 <ForkIcon />
                 Fork
               </button>
-              <button
-                className="preview-action rewind"
-                onClick={() =>
-                  handleNodeClick(selectedEventId!, 'rewind')
-                }
-                type="button"
-              >
-                <RewindIcon />
-                Rewind
-              </button>
             </div>
           )}
         </div>
@@ -237,23 +211,11 @@ export function SessionHistoryPanel({
       {actionConfirm && (
         <div className="history-panel-confirm">
           <div className="confirm-message">
-            {actionConfirm.type === 'fork' ? (
-              <>
-                <strong>Fork session?</strong>
-                <p>
-                  This will create a new branch from this point. Your current
-                  work will be preserved on the original branch.
-                </p>
-              </>
-            ) : (
-              <>
-                <strong>Rewind session?</strong>
-                <p>
-                  This will move HEAD back to this point. Events after this
-                  point will remain in history but won't be visible.
-                </p>
-              </>
-            )}
+            <strong>Fork session?</strong>
+            <p>
+              This will create a new branch from this point. Your current
+              work will be preserved on the original branch.
+            </p>
           </div>
           <div className="confirm-actions">
             <button
@@ -264,11 +226,11 @@ export function SessionHistoryPanel({
               Cancel
             </button>
             <button
-              className={`confirm-proceed ${actionConfirm.type}`}
+              className="confirm-proceed fork"
               onClick={handleConfirmAction}
               type="button"
             >
-              {actionConfirm.type === 'fork' ? 'Fork' : 'Rewind'}
+              Fork
             </button>
           </div>
         </div>

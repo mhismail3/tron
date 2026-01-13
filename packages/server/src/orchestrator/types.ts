@@ -175,7 +175,7 @@ export interface ActiveSession {
   messageEventIds: (string | undefined)[];
   /**
    * Tracks skills explicitly added to this session's context.
-   * Reconstructed from events on session resume/fork/rewind.
+   * Reconstructed from events on session resume/fork.
    * Cleared on context clear and compaction.
    */
   skillTracker: SkillTracker;
@@ -273,7 +273,7 @@ export interface SessionInfo {
 }
 
 // =============================================================================
-// Fork/Rewind Types
+// Fork Types
 // =============================================================================
 
 export interface ForkResult {
@@ -283,10 +283,4 @@ export interface ForkResult {
   forkedFromSessionId: string;
   /** Worktree status for the forked session */
   worktree?: WorktreeInfo;
-}
-
-export interface RewindResult {
-  sessionId: string;
-  newHeadEventId: string;
-  previousHeadEventId: string;
 }

@@ -1,6 +1,6 @@
 import Foundation
 
-// MARK: - Session Operations (CRUD, Fork, Rewind)
+// MARK: - Session Operations (CRUD, Fork)
 
 extension EventStoreManager {
 
@@ -85,7 +85,7 @@ extension EventStoreManager {
         logger.debug("Updated session \(sessionId) tokens: in=\(inputTokens) out=\(outputTokens) lastTurnIn=\(lastTurnInputTokens) cost=\(cost)", category: .session)
     }
 
-    // MARK: - Tree Operations (Fork/Rewind)
+    // MARK: - Tree Operations (Fork)
 
     /// Fork a session at a specific event (or HEAD if nil)
     /// This fetches the parent session's history and stores it in local DB (with original session_id).
@@ -196,54 +196,6 @@ extension EventStoreManager {
 
         logger.info("[FORK] Fork complete: \(sessionId) → \(result.newSessionId) from event \(fromEventId ?? "HEAD")", category: .session)
         return result.newSessionId
-    }
-
-    /// Rewind a session to a specific event
-    func rewindSession(_ sessionId: String, toEventId: String) async throws {
-        logger.info("[REWIND] Starting rewind: sessionId=\(sessionId), toEventId=\(toEventId)", category: .session)
-
-        // Get current session state for comparison
-        guard var session = try eventDB.getSession(sessionId) else {
-            logger.error("[REWIND] Session not found: \(sessionId)", category: .session)
-            throw EventStoreError.sessionNotFound
-        }
-
-        let previousHeadEventId = session.headEventId
-        logger.info("[REWIND] Current HEAD: \(previousHeadEventId ?? "nil")", category: .session)
-
-        // Validate the target event exists and is an ancestor
-        guard let targetEvent = try eventDB.getEvent(toEventId) else {
-            logger.error("[REWIND] Target event not found: \(toEventId)", category: .session)
-            throw EventStoreError.eventNotFound(toEventId)
-        }
-
-        // Verify target belongs to this session
-        guard targetEvent.sessionId == sessionId else {
-            logger.error("[REWIND] Target event \(toEventId) belongs to different session: \(targetEvent.sessionId)", category: .session)
-            throw EventStoreError.invalidEventId(toEventId)
-        }
-
-        logger.info("[REWIND] Target event valid: type=\(targetEvent.type), sequence=\(targetEvent.sequence)", category: .session)
-
-        // Call server FIRST to ensure server state is updated
-        logger.info("[REWIND] Calling server to update HEAD...", category: .session)
-        let result = try await rpcClient.rewindSession(sessionId, toEventId: toEventId)
-        logger.info("[REWIND] Server confirmed: newHeadEventId=\(result.newHeadEventId), previousHead=\(result.previousHeadEventId ?? "unknown")", category: .session)
-
-        // Now update local state to match server
-        session.headEventId = toEventId
-        try eventDB.insertSession(session)
-        logger.info("[REWIND] Local HEAD updated: \(previousHeadEventId ?? "nil") → \(toEventId)", category: .session)
-
-        // Log the ancestor chain for verification
-        let ancestors = try eventDB.getAncestors(toEventId)
-        logger.info("[REWIND] New ancestor chain has \(ancestors.count) events", category: .session)
-
-        // Notify views to refresh
-        sessionUpdated.send(sessionId)
-        loadSessions()
-
-        logger.info("[REWIND] Rewind complete: session \(sessionId) HEAD moved from \(previousHeadEventId ?? "nil") to \(toEventId)", category: .session)
     }
 
     /// Get events for a session

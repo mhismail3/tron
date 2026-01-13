@@ -1,14 +1,14 @@
 /**
- * @fileoverview Tests for RPC Session Fork/Rewind Operations
+ * @fileoverview Tests for RPC Session Fork Operations
  *
  * These tests verify that the RpcHandler correctly processes
- * fork and rewind requests through the session manager interface.
+ * fork requests through the session manager interface.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { RpcHandler, type RpcContext } from '../../src/rpc/handler.js';
-import type { SessionForkResult, SessionRewindResult } from '../../src/rpc/types.js';
+import type { SessionForkResult } from '../../src/rpc/types.js';
 
-describe('RpcHandler - Session Fork & Rewind', () => {
+describe('RpcHandler - Session Fork', () => {
   let handler: RpcHandler;
   let mockContext: RpcContext;
 
@@ -60,11 +60,6 @@ describe('RpcHandler - Session Fork & Rewind', () => {
           forkedFromEventId: 'evt_3',
           forkedFromSessionId: 'sess_test',
         } as SessionForkResult),
-        rewindSession: vi.fn().mockResolvedValue({
-          sessionId: 'sess_test',
-          newHeadEventId: 'evt_1',
-          previousHeadEventId: 'evt_5',
-        } as SessionRewindResult),
       },
       agentManager: {
         prompt: vi.fn().mockResolvedValue({ acknowledged: true }),
@@ -135,49 +130,6 @@ describe('RpcHandler - Session Fork & Rewind', () => {
     });
   });
 
-  describe('session.rewind', () => {
-    it('should rewind a session to a specific event', async () => {
-      const response = await handler.handle({
-        id: 'req_4',
-        method: 'session.rewind',
-        params: { sessionId: 'sess_test', toEventId: 'evt_1' },
-      });
-
-      expect(response.success).toBe(true);
-      expect(response.result).toEqual({
-        sessionId: 'sess_test',
-        newHeadEventId: 'evt_1',
-        previousHeadEventId: 'evt_5',
-      });
-      expect(mockContext.sessionManager.rewindSession).toHaveBeenCalledWith(
-        'sess_test',
-        'evt_1'
-      );
-    });
-
-    it('should require sessionId', async () => {
-      const response = await handler.handle({
-        id: 'req_5',
-        method: 'session.rewind',
-        params: { toEventId: 'evt_1' },
-      });
-
-      expect(response.success).toBe(false);
-      expect(response.error?.code).toBe('INVALID_PARAMS');
-    });
-
-    it('should require toEventId', async () => {
-      const response = await handler.handle({
-        id: 'req_6',
-        method: 'session.rewind',
-        params: { sessionId: 'sess_test' },
-      });
-
-      expect(response.success).toBe(false);
-      expect(response.error?.code).toBe('INVALID_PARAMS');
-    });
-  });
-
   describe('memory.getHandoffs', () => {
     it('should list handoffs', async () => {
       (mockContext.memoryStore.listHandoffs as any).mockResolvedValue([
@@ -228,8 +180,7 @@ describe('RpcHandler - Cross-Interface Session Continuity', () => {
     // This test verifies the user story:
     // 1. Start session in Terminal
     // 2. Fork or continue in Web
-    // 3. Rewind if needed
-    // 4. Handoffs enable context recovery
+    // 3. Handoffs enable context recovery
 
     const mockContext: RpcContext = {
       sessionManager: {
@@ -275,11 +226,6 @@ describe('RpcHandler - Cross-Interface Session Continuity', () => {
           rootEventId: 'evt_fork_root',
           forkedFromEventId: 'evt_2',
           forkedFromSessionId: 'sess_terminal',
-        }),
-        rewindSession: vi.fn().mockResolvedValue({
-          sessionId: 'sess_terminal',
-          newHeadEventId: 'evt_1',
-          previousHeadEventId: 'evt_4',
         }),
       },
       agentManager: {
@@ -334,19 +280,7 @@ describe('RpcHandler - Cross-Interface Session Continuity', () => {
       forkedFromSessionId: 'sess_terminal',
     });
 
-    // Step 3: Rewind original after bad approach
-    const rewindResponse = await handler.handle({
-      id: 'rewind_1',
-      method: 'session.rewind',
-      params: { sessionId: 'sess_terminal', toEventId: 'evt_1' },
-    });
-    expect(rewindResponse.success).toBe(true);
-    expect(rewindResponse.result).toMatchObject({
-      sessionId: 'sess_terminal',
-      newHeadEventId: 'evt_1',
-    });
-
-    // Step 4: Get handoffs for context
+    // Step 3: Get handoffs for context
     const handoffsResponse = await handler.handle({
       id: 'handoffs_1',
       method: 'memory.getHandoffs',

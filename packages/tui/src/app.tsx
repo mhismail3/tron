@@ -1014,18 +1014,6 @@ export function App({ config, auth }: AppProps): React.ReactElement {
         });
         break;
 
-      case 'rewind':
-        dispatch({
-          type: 'ADD_MESSAGE',
-          payload: {
-            id: `msg_${messageIdRef.current++}`,
-            role: 'system',
-            content: `## Rewind *(coming soon)*\n- Rewind to a specific message\n- Undo recent exchanges\n- Create checkpoints before changes`,
-            timestamp: new Date().toISOString(),
-          },
-        });
-        break;
-
       case 'branch':
         dispatch({
           type: 'ADD_MESSAGE',

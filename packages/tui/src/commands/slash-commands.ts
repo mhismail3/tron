@@ -59,10 +59,6 @@ export const BUILT_IN_COMMANDS: SlashCommand[] = [
     shortcut: 'r',
   },
   {
-    name: 'rewind',
-    description: 'Rewind to a previous point in the session',
-  },
-  {
     name: 'branch',
     description: 'Branch/fork from a point in the session',
   },
