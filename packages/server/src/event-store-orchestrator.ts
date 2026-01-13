@@ -918,10 +918,19 @@ export class EventStoreOrchestrator extends EventEmitter {
       // Record user message event (linearized to prevent spurious branches)
       // CRITICAL: Pass parentId from in-memory state, then update it after append
       const userMsgParentId = active.pendingHeadEventId ?? undefined;
+
+      // Build payload with optional skills for chat history display
+      const userMsgPayload: { content: unknown; skills?: { name: string; source: string }[] } = {
+        content: messageContent,
+      };
+      if (options.skills && options.skills.length > 0) {
+        userMsgPayload.skills = options.skills.map(s => ({ name: s.name, source: s.source }));
+      }
+
       const userMsgEvent = await this.eventStore.append({
         sessionId: active.sessionId,
         type: 'message.user',
-        payload: { content: messageContent },
+        payload: userMsgPayload,
         parentId: userMsgParentId,
       });
       active.pendingHeadEventId = userMsgEvent.id;

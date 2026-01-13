@@ -198,6 +198,8 @@ enum MessageContent: Equatable {
     case contextCleared(tokensBefore: Int, tokensAfter: Int)
     /// In-chat notification for message deletion from context
     case messageDeleted(targetType: String)
+    /// In-chat notification for skill removal from context
+    case skillRemoved(skillName: String)
 
     var textContent: String {
         switch self {
@@ -237,6 +239,8 @@ enum MessageContent: Equatable {
                            targetType == "message.assistant" ? "assistant message" :
                            targetType == "tool.result" ? "tool result" : "message"
             return "Deleted \(typeLabel) from context"
+        case .skillRemoved(let skillName):
+            return "\(skillName) removed from context"
         }
     }
 
@@ -258,7 +262,7 @@ enum MessageContent: Equatable {
 
     var isNotification: Bool {
         switch self {
-        case .modelChange, .interrupted, .transcriptionFailed, .transcriptionNoSpeech, .compaction, .contextCleared, .messageDeleted:
+        case .modelChange, .interrupted, .transcriptionFailed, .transcriptionNoSpeech, .compaction, .contextCleared, .messageDeleted, .skillRemoved:
             return true
         default:
             return false
@@ -427,5 +431,10 @@ extension ChatMessage {
     /// In-chat notification for message deletion from context
     static func messageDeleted(targetType: String) -> ChatMessage {
         ChatMessage(role: .system, content: .messageDeleted(targetType: targetType))
+    }
+
+    /// In-chat notification for skill removal from context
+    static func skillRemoved(skillName: String) -> ChatMessage {
+        ChatMessage(role: .system, content: .skillRemoved(skillName: skillName))
     }
 }

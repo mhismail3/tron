@@ -18,6 +18,8 @@ struct UserMessagePayload {
     let isToolResultContext: Bool
     /// Attachments to this message (images, PDFs, documents)
     let attachments: [Attachment]?
+    /// Skills referenced in this message (rendered as chips above the message)
+    let skills: [Skill]?
 
     init?(from payload: [String: AnyCodable]) {
         var extractedAttachments: [Attachment] = []
@@ -107,6 +109,24 @@ struct UserMessagePayload {
         self.turn = payload.int("turn") ?? 1
         self.imageCount = payload.int("imageCount")
         self.attachments = extractedAttachments.isEmpty ? nil : extractedAttachments
+
+        // Parse skills from payload
+        if let skillsArray = payload["skills"]?.value as? [[String: Any]] {
+            self.skills = skillsArray.compactMap { skillDict -> Skill? in
+                guard let name = skillDict["name"] as? String else { return nil }
+                let sourceString = skillDict["source"] as? String ?? "project"
+                let source: SkillSource = sourceString == "global" ? .global : .project
+                return Skill(
+                    name: name,
+                    description: "",
+                    source: source,
+                    autoInject: false,
+                    tags: nil
+                )
+            }
+        } else {
+            self.skills = nil
+        }
     }
 }
 

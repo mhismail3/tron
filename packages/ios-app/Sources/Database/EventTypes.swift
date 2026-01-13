@@ -376,6 +376,10 @@ enum SessionEventType: String, Codable {
     // Notifications (in-chat pill notifications)
     case notificationInterrupted = "notification.interrupted"
 
+    // Skills
+    case skillAdded = "skill.added"
+    case skillRemoved = "skill.removed"
+
     case compactBoundary = "compact.boundary"
     case compactSummary = "compact.summary"
 

@@ -204,6 +204,8 @@ struct UnifiedEventTransformer {
             return transformProviderError(payload, timestamp: ts)
         case .contextCleared:
             return transformContextCleared(payload, timestamp: ts)
+        case .skillRemoved:
+            return transformSkillRemoved(payload, timestamp: ts)
         default:
             return nil
         }
@@ -236,14 +238,15 @@ struct UnifiedEventTransformer {
             return nil
         }
 
-        // Skip empty user messages (unless they have attachments)
-        guard !parsed.content.isEmpty || parsed.attachments != nil else { return nil }
+        // Skip empty user messages (unless they have attachments or skills)
+        guard !parsed.content.isEmpty || parsed.attachments != nil || parsed.skills != nil else { return nil }
 
         return ChatMessage(
             role: .user,
             content: .text(parsed.content),
             timestamp: timestamp,
-            attachments: parsed.attachments
+            attachments: parsed.attachments,
+            skills: parsed.skills
         )
     }
 
@@ -540,6 +543,19 @@ struct UnifiedEventTransformer {
                 tokensBefore: parsed.tokensBefore,
                 tokensAfter: parsed.tokensAfter
             ),
+            timestamp: timestamp
+        )
+    }
+
+    private static func transformSkillRemoved(
+        _ payload: [String: AnyCodable],
+        timestamp: Date
+    ) -> ChatMessage? {
+        guard let skillName = payload["skillName"]?.value as? String else { return nil }
+
+        return ChatMessage(
+            role: .system,
+            content: .skillRemoved(skillName: skillName),
             timestamp: timestamp
         )
     }

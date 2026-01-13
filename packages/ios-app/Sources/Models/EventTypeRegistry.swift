@@ -42,6 +42,10 @@ enum PersistedEventType: String, CaseIterable {
     // Notifications (in-chat pill notifications)
     case notificationInterrupted = "notification.interrupted"
 
+    // Skills
+    case skillAdded = "skill.added"
+    case skillRemoved = "skill.removed"
+
     // Compaction/summarization
     case compactBoundary = "compact.boundary"
     case compactSummary = "compact.summary"
@@ -77,7 +81,7 @@ enum PersistedEventType: String, CaseIterable {
         case .messageUser, .messageAssistant, .messageSystem,
              .toolCall, .toolResult,
              .notificationInterrupted, .configModelSwitch, .configReasoningLevel,
-             .contextCleared,
+             .contextCleared, .skillRemoved,
              .errorAgent, .errorTool, .errorProvider:
             return true
         default:
@@ -150,6 +154,8 @@ enum PersistedEventType: String, CaseIterable {
         case .configReasoningLevel: return "Reasoning level changed"
         case .messageDeleted: return "Message deleted"
         case .notificationInterrupted: return "Session interrupted"
+        case .skillAdded: return "Skill added"
+        case .skillRemoved: return "Skill removed"
         case .compactBoundary: return "Compact boundary"
         case .compactSummary: return "Compact summary"
         case .contextCleared: return "Context cleared"

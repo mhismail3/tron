@@ -20,6 +20,11 @@ struct MessageBubble: View {
 
     var body: some View {
         VStack(alignment: isUserMessage ? .trailing : .leading, spacing: 4) {
+            // Show attachments above skills for user messages (thumbnails at top)
+            if let attachments = message.attachments, !attachments.isEmpty {
+                AttachedFileThumbnails(attachments: attachments)
+            }
+
             // Show skills above text for user messages (iOS 26 glass chips)
             if let skills = message.skills, !skills.isEmpty {
                 if #available(iOS 26.0, *) {
@@ -36,11 +41,6 @@ struct MessageBubble: View {
                         }
                     }
                 }
-            }
-
-            // Show attachments above text for user messages
-            if let attachments = message.attachments, !attachments.isEmpty {
-                AttachedFileThumbnails(attachments: attachments)
             }
 
             contentView
@@ -111,6 +111,9 @@ struct MessageBubble: View {
 
         case .messageDeleted(let targetType):
             MessageDeletedNotificationView(targetType: targetType)
+
+        case .skillRemoved(let skillName):
+            SkillRemovedNotificationView(skillName: skillName)
 
         case .attachments(let attachments):
             // Attachments-only message (no text) - show thumbnails
@@ -439,6 +442,37 @@ struct MessageDeletedNotificationView: View {
         .overlay(
             Capsule()
                 .stroke(Color.tronAmber.opacity(0.3), lineWidth: 0.5)
+        )
+        .frame(maxWidth: .infinity, alignment: .center)
+    }
+}
+
+// MARK: - Skill Removed Notification View (Purple pill-style in-chat notification)
+
+struct SkillRemovedNotificationView: View {
+    let skillName: String
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "sparkles")
+                .font(.system(size: 10, weight: .medium))
+                .foregroundStyle(.purple)
+
+            Text(skillName)
+                .font(.system(size: 11, weight: .medium, design: .monospaced))
+                .foregroundStyle(.purple.opacity(0.9))
+
+            Text("removed from context")
+                .font(.system(size: 11, design: .monospaced))
+                .foregroundStyle(.purple.opacity(0.6))
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(Color.purple.opacity(0.1))
+        .clipShape(Capsule())
+        .overlay(
+            Capsule()
+                .stroke(Color.purple.opacity(0.3), lineWidth: 0.5)
         )
         .frame(maxWidth: .infinity, alignment: .center)
     }
