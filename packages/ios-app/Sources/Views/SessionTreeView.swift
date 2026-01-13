@@ -1,5 +1,17 @@
 import SwiftUI
 
+// MARK: - Session Fork Context
+
+/// Context about the fork relationship for UI display
+struct SessionForkContext {
+    let parentSessionId: String
+    let forkEventId: String  // The event we forked from (in parent session)
+    let forkPointEventId: String  // The session.fork event in this session
+    let parentSessionTitle: String?
+    /// IDs of events that belong to the parent session (displayed differently)
+    let parentEventIds: Set<String>
+}
+
 // MARK: - Sibling Branch Info
 
 /// Information about a sibling branch (another session forked from the same event)
@@ -24,7 +36,7 @@ class SessionHistoryViewModel: ObservableObject {
     @Published var siblingBranches: [String: [SiblingBranchInfo]] = [:]  // keyed by fork point event ID
     @Published var expandedBranchPoints: Set<String> = []
     @Published var isLoading = true
-    @Published var forkContext: SessionHistorySheet.ForkContext?
+    @Published var forkContext: SessionForkContext?
 
     private let eventStoreManager: EventStoreManager
     private let rpcClient: RPCClient
@@ -145,7 +157,7 @@ class SessionHistoryViewModel: ObservableObject {
     }
 
     /// Build fork context from events to identify parent session events
-    private func buildForkContext(events: [SessionEvent], currentSessionId: String) -> SessionHistorySheet.ForkContext? {
+    private func buildForkContext(events: [SessionEvent], currentSessionId: String) -> SessionForkContext? {
         // Find the session.fork event in this session
         let forkEvents = events.filter { event in
             event.eventType == .sessionFork && event.sessionId == currentSessionId
@@ -171,7 +183,7 @@ class SessionHistoryViewModel: ObservableObject {
         }
         let parentEventIds = Set(parentEvents.map { $0.id })
 
-        return SessionHistorySheet.ForkContext(
+        return SessionForkContext(
             parentSessionId: parentSessionId,
             forkEventId: forkEventId,
             forkPointEventId: forkEvent.id,
@@ -184,11 +196,12 @@ class SessionHistoryViewModel: ObservableObject {
 // MARK: - Session History View (Redesigned)
 
 /// Clean, mobile-first session history with clear inherited/current separation.
+@available(iOS 26.0, *)
 struct SessionHistoryView: View {
     let events: [SessionEvent]
     let headEventId: String?
     let sessionId: String
-    var forkContext: SessionHistorySheet.ForkContext?
+    var forkContext: SessionForkContext?
     let onFork: (String) -> Void
     var isLoading: Bool = false
 
@@ -292,7 +305,7 @@ struct SessionHistoryView: View {
 
     @ViewBuilder
     private func LinearSessionContent(proxy: ScrollViewProxy) -> some View {
-        SectionCard(title: "Session Timeline", icon: "clock", accentColor: .tronPurple) {
+        GlassSectionCard(title: "Session Timeline", icon: "clock", accentColor: .tronPurple) {
             VStack(spacing: 2) {
                 ForEach(sortedEvents.filter { isSignificantEvent($0) }) { event in
                     EventRow(
@@ -319,6 +332,7 @@ struct SessionHistoryView: View {
 
 // MARK: - Inherited Section
 
+@available(iOS 26.0, *)
 struct InheritedSection: View {
     let events: [SessionEvent]
     let forkPointEvent: SessionEvent?
@@ -330,14 +344,14 @@ struct InheritedSection: View {
         VStack(spacing: 0) {
             // Header (always visible, tappable)
             Button {
-                withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
+                withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) {
                     isExpanded.toggle()
                 }
             } label: {
                 HStack(spacing: 12) {
-                    Image(systemName: "arrow.triangle.branch")
+                    Image(systemName: "clock.arrow.circlepath")
                         .font(.system(size: 14))
-                        .foregroundStyle(.tronAmber)
+                        .foregroundStyle(.tronPurple)
 
                     VStack(alignment: .leading, spacing: 2) {
                         Text("Inherited from \(parentTitle ?? "parent")")
@@ -351,17 +365,17 @@ struct InheritedSection: View {
 
                     Spacer()
 
-                    Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
+                    Image(systemName: "chevron.down")
                         .font(.system(size: 12, weight: .medium))
                         .foregroundStyle(.tronTextMuted)
+                        .rotationEffect(.degrees(isExpanded ? -180 : 0))
                 }
                 .padding(14)
-                .background(Color.tronAmber.opacity(0.08))
-                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                .overlay(
+                .background {
                     RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .stroke(Color.tronAmber.opacity(0.2), lineWidth: 1)
-                )
+                        .fill(.clear)
+                        .glassEffect(.regular.tint(Color.tronPurple.opacity(0.25)), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                }
             }
             .buttonStyle(.plain)
 
@@ -378,8 +392,12 @@ struct InheritedSection: View {
                         )
                     }
                 }
+                .padding(.vertical, 8)
+                .padding(.horizontal, 4)
+                .background(Color.white.opacity(0.03))
+                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
                 .padding(.top, 8)
-                .transition(.opacity.combined(with: .move(edge: .top)))
+                .transition(.opacity.combined(with: .scale(scale: 0.98, anchor: .top)))
             }
 
             // Fork point indicator (always visible)
@@ -393,13 +411,14 @@ struct InheritedSection: View {
 
 // MARK: - This Session Section
 
+@available(iOS 26.0, *)
 struct ThisSessionSection: View {
     let events: [SessionEvent]
     let headEventId: String?
     let onFork: (String) -> Void
 
     var body: some View {
-        SectionCard(title: "This Session", icon: "sparkles", accentColor: .tronPurple) {
+        GlassSectionCard(title: "This Session", icon: "sparkles", accentColor: .tronPurple) {
             if events.isEmpty || (events.count == 1 && events.first?.eventType == .sessionFork) {
                 // Empty state - just forked, no new messages
                 VStack(spacing: 8) {
@@ -437,7 +456,7 @@ struct ThisSessionSection: View {
     }
 }
 
-// MARK: - Section Card
+// MARK: - Section Card (Legacy)
 
 struct SectionCard<Content: View>: View {
     let title: String
@@ -472,6 +491,41 @@ struct SectionCard<Content: View>: View {
     }
 }
 
+// MARK: - Glass Section Card (iOS 26+)
+
+@available(iOS 26.0, *)
+struct GlassSectionCard<Content: View>: View {
+    let title: String
+    let icon: String
+    let accentColor: Color
+    @ViewBuilder let content: () -> Content
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            // Section header
+            HStack(spacing: 6) {
+                Image(systemName: icon)
+                    .font(.system(size: 10))
+                Text(title.uppercased())
+                    .font(.system(size: 10, weight: .semibold, design: .monospaced))
+            }
+            .foregroundStyle(accentColor.opacity(0.8))
+            .padding(.leading, 4)
+
+            // Content with glass effect
+            VStack(spacing: 0) {
+                content()
+            }
+            .padding(12)
+            .background {
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(.clear)
+                    .glassEffect(.regular.tint(accentColor.opacity(0.2)), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            }
+        }
+    }
+}
+
 // MARK: - Fork Point Indicator
 
 struct ForkPointIndicator: View {
@@ -480,7 +534,7 @@ struct ForkPointIndicator: View {
     var body: some View {
         HStack(spacing: 8) {
             Rectangle()
-                .fill(Color.tronAmber.opacity(0.3))
+                .fill(Color.tronPurple.opacity(0.3))
                 .frame(height: 1)
 
             HStack(spacing: 4) {
@@ -489,14 +543,14 @@ struct ForkPointIndicator: View {
                 Text("FORKED HERE")
                     .font(.system(size: 9, weight: .bold, design: .monospaced))
             }
-            .foregroundStyle(.tronAmber)
+            .foregroundStyle(.tronPurple)
             .padding(.horizontal, 10)
             .padding(.vertical, 4)
-            .background(Color.tronAmber.opacity(0.12))
+            .background(Color.tronPurple.opacity(0.12))
             .clipShape(Capsule())
 
             Rectangle()
-                .fill(Color.tronAmber.opacity(0.3))
+                .fill(Color.tronPurple.opacity(0.3))
                 .frame(height: 1)
         }
     }
@@ -542,12 +596,15 @@ struct EventRow: View {
                         .clipShape(Capsule())
                 }
 
-                // Fork button (shown on hover/tap area)
+                // Fork button with circular background
                 if showForkButton {
                     Button(action: onFork) {
                         Image(systemName: "arrow.triangle.branch")
                             .font(.system(size: 10))
-                            .foregroundStyle(.tronAmber.opacity(0.6))
+                            .foregroundStyle(.tronPurple)
+                            .frame(width: 28, height: 28)
+                            .background(Color.tronPurple.opacity(0.15))
+                            .clipShape(Circle())
                     }
                     .buttonStyle(.plain)
                 }
@@ -586,7 +643,7 @@ struct EventRow: View {
     private var iconColor: Color {
         switch event.eventType {
         case .sessionStart: return .tronSuccess
-        case .sessionFork: return .tronAmber
+        case .sessionFork: return .tronPurple
         case .messageUser: return .tronBlue
         case .messageAssistant: return .tronPurple
         case .toolCall: return .tronCyan
@@ -644,7 +701,7 @@ struct SessionTreeView: View {
     let sessionId: String
     @Binding var selectedEventId: String?
     /// Fork context for displaying parent session events differently
-    var forkContext: SessionHistorySheet.ForkContext?
+    var forkContext: SessionForkContext?
     /// Sibling branches keyed by fork point event ID
     var siblingBranches: [String: [SiblingBranchInfo]] = [:]
     /// Currently expanded branch points
@@ -828,7 +885,7 @@ struct SessionTreeView: View {
 // MARK: - Fork Context Header
 
 struct ForkContextHeader: View {
-    let context: SessionHistorySheet.ForkContext
+    let context: SessionForkContext
 
     var body: some View {
         HStack(spacing: 8) {
@@ -913,7 +970,7 @@ struct ForkDivider: View {
 
 struct TreeStatsHeader: View {
     let events: [SessionEvent]
-    var forkContext: SessionHistorySheet.ForkContext?
+    var forkContext: SessionForkContext?
     var totalBranchCount: Int = 0  // Sibling branches from other sessions
 
     private var localBranchCount: Int {
@@ -1629,6 +1686,7 @@ struct GhostEventRow: View {
 
 // MARK: - Session History Sheet
 
+@available(iOS 26.0, *)
 struct SessionHistorySheet: View {
     @Environment(\.dismiss) private var dismiss
 
@@ -1650,16 +1708,6 @@ struct SessionHistorySheet: View {
         ))
     }
 
-    /// Context about the fork relationship for UI display
-    struct ForkContext {
-        let parentSessionId: String
-        let forkEventId: String  // The event we forked from (in parent session)
-        let forkPointEventId: String  // The session.fork event in this session
-        let parentSessionTitle: String?
-        /// IDs of events that belong to the parent session (displayed differently)
-        let parentEventIds: Set<String>
-    }
-
     enum ActionConfirm {
         case fork(String)
     }
@@ -1679,7 +1727,9 @@ struct SessionHistorySheet: View {
                         sessionId: sessionId,
                         forkContext: viewModel.forkContext,
                         onFork: { eventId in
-                            actionConfirm = .fork(eventId)
+                            withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) {
+                                actionConfirm = .fork(eventId)
+                            }
                         },
                         isLoading: viewModel.isLoading
                     )
@@ -1690,7 +1740,7 @@ struct SessionHistorySheet: View {
             .toolbar {
                 ToolbarItem(placement: .principal) {
                     Text("Session History")
-                        .font(.system(size: 16, weight: .semibold))
+                        .font(.system(size: 16, weight: .semibold, design: .monospaced))
                         .foregroundStyle(.tronPurple)
                 }
                 ToolbarItem(placement: .topBarTrailing) {
@@ -1702,6 +1752,9 @@ struct SessionHistorySheet: View {
                 }
             }
         }
+        .presentationDetents([.medium, .large])
+        .presentationDragIndicator(.hidden)
+        .tint(.tronPurple)
         .preferredColorScheme(.dark)
         .task {
             await viewModel.loadEvents()
@@ -1710,41 +1763,116 @@ struct SessionHistorySheet: View {
 
     @ViewBuilder
     private func confirmationView(for confirm: ActionConfirm) -> some View {
-        VStack(spacing: 24) {
-            switch confirm {
-            case .fork(let eventId):
-                Image(systemName: "arrow.triangle.branch")
-                    .font(.system(size: 48, weight: .light))
-                    .foregroundStyle(.tronAmber)
+        switch confirm {
+        case .fork(let eventId):
+            // Find the event to show context
+            let forkEvent = viewModel.events.first(where: { $0.id == eventId })
 
-                Text("Fork Session?")
-                    .font(.title2.weight(.semibold))
-                    .foregroundStyle(.tronTextPrimary)
+            VStack(spacing: 0) {
+                Spacer()
 
-                Text("This will create a new session branch from this point. Your current work will be preserved.")
-                    .font(.subheadline)
-                    .foregroundStyle(.tronTextSecondary)
-                    .multilineTextAlignment(.center)
-                    .padding(.horizontal)
+                // Liquid glass confirmation card
+                VStack(spacing: 20) {
+                    // Icon
+                    Image(systemName: "arrow.triangle.branch")
+                        .font(.system(size: 44, weight: .light))
+                        .foregroundStyle(.tronPurple)
+                        .frame(width: 72, height: 72)
+                        .background {
+                            Circle()
+                                .fill(.clear)
+                                .glassEffect(.regular.tint(Color.tronPurple.opacity(0.25)), in: Circle())
+                        }
 
-                HStack(spacing: 16) {
-                    Button("Cancel") {
-                        actionConfirm = nil
-                    }
-                    .buttonStyle(.bordered)
-                    .tint(.tronTextSecondary)
+                    // Title and description
+                    VStack(spacing: 8) {
+                        Text("Fork Session")
+                            .font(.system(size: 20, weight: .semibold))
+                            .foregroundStyle(.tronTextPrimary)
 
-                    Button("Fork") {
-                        Task {
-                            await performFork(eventId)
+                        Text("Create a new branch from this point")
+                            .font(.system(size: 14, design: .monospaced))
+                            .foregroundStyle(.tronTextMuted)
+
+                        // Show the fork point summary
+                        if let event = forkEvent {
+                            HStack(spacing: 6) {
+                                Image(systemName: "quote.opening")
+                                    .font(.system(size: 10))
+                                    .foregroundStyle(.tronPurple.opacity(0.5))
+
+                                Text(event.summary)
+                                    .font(.system(size: 12, design: .monospaced))
+                                    .foregroundStyle(.tronTextSecondary)
+                                    .lineLimit(1)
+
+                                Image(systemName: "quote.closing")
+                                    .font(.system(size: 10))
+                                    .foregroundStyle(.tronPurple.opacity(0.5))
+                            }
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 6)
+                            .background(Color.tronPurple.opacity(0.1))
+                            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                            .padding(.top, 4)
                         }
                     }
-                    .buttonStyle(.borderedProminent)
-                    .tint(.tronAmber)
+
+                    // Buttons
+                    HStack(spacing: 12) {
+                        Button {
+                            withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) {
+                                actionConfirm = nil
+                            }
+                        } label: {
+                            Text("Cancel")
+                                .font(.system(size: 15, weight: .medium))
+                                .foregroundStyle(.tronTextSecondary)
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 14)
+                                .background {
+                                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                        .fill(.clear)
+                                        .glassEffect(.regular.tint(Color.white.opacity(0.1)), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                                }
+                        }
+                        .buttonStyle(.plain)
+
+                        Button {
+                            Task {
+                                await performFork(eventId)
+                            }
+                        } label: {
+                            HStack(spacing: 6) {
+                                Image(systemName: "arrow.triangle.branch")
+                                    .font(.system(size: 12))
+                                Text("Fork")
+                                    .font(.system(size: 15, weight: .semibold))
+                            }
+                            .foregroundStyle(.white)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 14)
+                            .background {
+                                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                    .fill(.clear)
+                                    .glassEffect(.regular.tint(Color.tronPurple.opacity(0.6)), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                            }
+                        }
+                        .buttonStyle(.plain)
+                    }
                 }
+                .padding(24)
+                .background {
+                    RoundedRectangle(cornerRadius: 24, style: .continuous)
+                        .fill(.clear)
+                        .glassEffect(.regular.tint(Color.tronSurface.opacity(0.8)), in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+                }
+                .padding(.horizontal, 20)
+                .transition(.opacity.combined(with: .scale(scale: 0.95)))
+
+                Spacer()
             }
         }
-        .padding(32)
     }
 
     private func performFork(_ eventId: String) async {
@@ -1760,7 +1888,9 @@ struct SessionHistorySheet: View {
             dismiss()
         } catch {
             logger.error("Fork FAILED: \(error)", category: .session)
-            actionConfirm = nil
+            withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) {
+                actionConfirm = nil
+            }
         }
     }
 
