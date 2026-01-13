@@ -1813,9 +1813,11 @@ struct ForkConfirmationSheet: View {
     @State private var isForking = false
 
     var body: some View {
-        ZStack {
+        NavigationStack {
             // Centered content
             VStack(spacing: 20) {
+                Spacer()
+
                 // Icon
                 Image(systemName: "arrow.triangle.branch")
                     .font(.system(size: 44, weight: .light))
@@ -1860,66 +1862,51 @@ struct ForkConfirmationSheet: View {
                         .padding(.top, 8)
                     }
                 }
+
+                Spacer()
             }
             .padding(.horizontal, 24)
-
-            // Corner buttons
-            VStack {
-                HStack {
-                    // Cancel button (top left)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
                     Button {
                         dismiss()
                     } label: {
                         Image(systemName: "xmark")
-                            .font(.system(size: 14, weight: .medium))
+                            .font(.system(size: 14, weight: .semibold))
                             .foregroundStyle(.tronTextSecondary)
-                            .frame(width: 36, height: 36)
-                            .background {
-                                Circle()
-                                    .fill(.clear)
-                                    .glassEffect(.regular.tint(Color.white.opacity(0.1)), in: Circle())
-                            }
                     }
-                    .buttonStyle(.plain)
                     .disabled(isForking)
-
-                    Spacer()
-
-                    // Fork button (top right)
+                }
+                ToolbarItem(placement: .principal) {
+                    Text("Fork Session")
+                        .font(.system(size: 16, weight: .semibold, design: .monospaced))
+                        .foregroundStyle(.tronPurple)
+                }
+                ToolbarItem(placement: .topBarTrailing) {
                     Button {
                         Task {
                             await performFork()
                         }
                     } label: {
-                        Group {
-                            if isForking {
-                                ProgressView()
-                                    .scaleEffect(0.7)
-                                    .tint(.white)
-                            } else {
-                                Image(systemName: "arrow.triangle.branch")
-                                    .font(.system(size: 14, weight: .medium))
-                            }
-                        }
-                        .foregroundStyle(.white)
-                        .frame(width: 36, height: 36)
-                        .background {
-                            Circle()
-                                .fill(.clear)
-                                .glassEffect(.regular.tint(Color.tronPurple.opacity(0.5)), in: Circle())
+                        if isForking {
+                            ProgressView()
+                                .scaleEffect(0.8)
+                                .tint(.tronPurple)
+                        } else {
+                            Image(systemName: "checkmark")
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundStyle(.tronPurple)
                         }
                     }
-                    .buttonStyle(.plain)
                     .disabled(isForking)
                 }
-                .padding(.horizontal, 20)
-                .padding(.top, 20)
-
-                Spacer()
             }
         }
-        .presentationDetents([.medium])
+        .presentationDetents([.medium, .large])
         .presentationDragIndicator(.hidden)
+        .tint(.tronPurple)
         .preferredColorScheme(.dark)
     }
 
