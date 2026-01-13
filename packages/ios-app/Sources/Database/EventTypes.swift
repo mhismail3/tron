@@ -158,11 +158,90 @@ struct SessionEvent: Identifiable, Codable {
         case .compactBoundary:
             return "Context compacted"
 
-        case .unknown:
-            return type
+        case .compactSummary:
+            return "Context summarized"
 
-        default:
-            return type
+        case .rulesLoaded:
+            let count = payload.int("count") ?? 0
+            if count > 0 {
+                return "Rules loaded (\(count))"
+            }
+            return "Rules loaded"
+
+        case .contextCleared:
+            return "Context cleared"
+
+        case .skillAdded:
+            let name = payload.string("name") ?? payload.string("skillName") ?? ""
+            if !name.isEmpty {
+                return "Skill: \(name)"
+            }
+            return "Skill added"
+
+        case .skillRemoved:
+            let name = payload.string("name") ?? payload.string("skillName") ?? ""
+            if !name.isEmpty {
+                return "Skill removed: \(name)"
+            }
+            return "Skill removed"
+
+        case .sessionBranch:
+            return "Branch created"
+
+        case .messageSystem:
+            return "System message"
+
+        case .messageDeleted:
+            return "Message deleted"
+
+        case .configPromptUpdate:
+            return "Prompt updated"
+
+        case .configReasoningLevel:
+            let level = payload.string("level") ?? payload.string("reasoningLevel") ?? ""
+            if !level.isEmpty {
+                return "Reasoning: \(level)"
+            }
+            return "Reasoning level changed"
+
+        case .metadataUpdate:
+            return "Metadata updated"
+
+        case .metadataTag:
+            let tag = payload.string("tag") ?? ""
+            if !tag.isEmpty {
+                return "Tag: \(tag)"
+            }
+            return "Tag added"
+
+        case .fileRead:
+            if let path = payload.string("path") ?? payload.string("file_path") {
+                return "Read: \(URL(fileURLWithPath: path).lastPathComponent)"
+            }
+            return "File read"
+
+        case .fileWrite:
+            if let path = payload.string("path") ?? payload.string("file_path") {
+                return "Write: \(URL(fileURLWithPath: path).lastPathComponent)"
+            }
+            return "File written"
+
+        case .fileEdit:
+            if let path = payload.string("path") ?? payload.string("file_path") {
+                return "Edit: \(URL(fileURLWithPath: path).lastPathComponent)"
+            }
+            return "File edited"
+
+        case .streamTextDelta, .streamThinkingDelta:
+            return "Streaming..."
+
+        case .unknown:
+            // Format raw type into friendly name: "rules.loaded" -> "Rules loaded"
+            let formatted = type
+                .replacingOccurrences(of: ".", with: " ")
+                .replacingOccurrences(of: "_", with: " ")
+                .capitalized
+            return formatted
         }
     }
 
@@ -382,6 +461,12 @@ enum SessionEventType: String, Codable {
 
     case compactBoundary = "compact.boundary"
     case compactSummary = "compact.summary"
+
+    // Rules tracking
+    case rulesLoaded = "rules.loaded"
+
+    // Context
+    case contextCleared = "context.cleared"
 
     case metadataUpdate = "metadata.update"
     case metadataTag = "metadata.tag"

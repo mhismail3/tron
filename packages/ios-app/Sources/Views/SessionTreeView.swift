@@ -237,11 +237,28 @@ struct SessionHistoryView: View {
         switch event.eventType {
         case .sessionStart, .sessionFork, .messageUser, .messageAssistant, .toolCall, .toolResult:
             return true
-        case .streamTurnStart, .streamTurnEnd, .compactBoundary:
+        case .streamTurnStart, .streamTurnEnd, .compactBoundary, .streamTextDelta, .streamThinkingDelta:
             return false  // Hide streaming noise
         default:
             return true
         }
+    }
+
+    // MARK: - Pre-computed Filtered Events (Performance Optimization)
+
+    /// Significant events for linear session display - computed once
+    private var significantEvents: [SessionEvent] {
+        sortedEvents.filter { isSignificantEvent($0) }
+    }
+
+    /// Significant inherited events - computed once
+    private var significantInheritedEvents: [SessionEvent] {
+        inheritedEvents.filter { isSignificantEvent($0) }
+    }
+
+    /// Significant events from this session - computed once
+    private var significantThisSessionEvents: [SessionEvent] {
+        thisSessionEvents.filter { isSignificantEvent($0) }
     }
 
     var body: some View {
@@ -275,7 +292,7 @@ struct SessionHistoryView: View {
     private func ForkedSessionContent(proxy: ScrollViewProxy) -> some View {
         // Inherited Section (collapsible)
         InheritedSection(
-            events: inheritedEvents.filter { isSignificantEvent($0) },
+            events: significantInheritedEvents,
             forkPointEvent: forkPointEvent,
             isExpanded: $isInheritedExpanded,
             parentSessionId: forkContext?.parentSessionId,
@@ -284,7 +301,7 @@ struct SessionHistoryView: View {
 
         // This Session Section
         ThisSessionSection(
-            events: thisSessionEvents.filter { isSignificantEvent($0) },
+            events: significantThisSessionEvents,
             headEventId: headEventId,
             onFork: onFork
         )
@@ -305,8 +322,8 @@ struct SessionHistoryView: View {
     @ViewBuilder
     private func LinearSessionContent(proxy: ScrollViewProxy) -> some View {
         SectionCard(title: "Session Timeline", icon: "clock", accentColor: .tronPurple) {
-            VStack(spacing: 2) {
-                ForEach(sortedEvents.filter { isSignificantEvent($0) }) { event in
+            LazyVStack(spacing: 2) {
+                ForEach(significantEvents) { event in
                     EventRow(
                         event: event,
                         isHead: event.id == headEventId,
@@ -391,7 +408,7 @@ struct InheritedSection: View {
 
             // Expanded content
             if isExpanded {
-                VStack(spacing: 2) {
+                LazyVStack(spacing: 2) {
                     ForEach(events) { event in
                         EventRow(
                             event: event,
@@ -446,7 +463,7 @@ struct ThisSessionSection: View {
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 24)
             } else {
-                VStack(spacing: 2) {
+                LazyVStack(spacing: 2) {
                     ForEach(events) { event in
                         // Skip the fork event itself in display
                         if event.eventType != .sessionFork {
@@ -591,11 +608,18 @@ struct EventRow: View {
                     .foregroundStyle(isMuted ? iconColor.opacity(0.5) : iconColor)
                     .frame(width: 20)
 
-                // Summary
+                // Summary + expand indicator
                 Text(event.summary)
                     .font(.system(size: 12, design: .monospaced))
                     .foregroundStyle(isMuted ? .tronTextMuted : .tronTextPrimary)
                     .lineLimit(1)
+
+                // Expand indicator (if has content) - placed next to event name
+                if hasExpandableContent {
+                    Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
+                        .font(.system(size: 9, weight: .medium))
+                        .foregroundStyle(.tronTextMuted)
+                }
 
                 Spacer()
 
@@ -608,13 +632,6 @@ struct EventRow: View {
                         .padding(.vertical, 2)
                         .background(Color.tronPurple)
                         .clipShape(Capsule())
-                }
-
-                // Expand indicator (if has content)
-                if hasExpandableContent {
-                    Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
-                        .font(.system(size: 9, weight: .medium))
-                        .foregroundStyle(.tronTextMuted)
                 }
 
                 // Fork button with circular background
@@ -654,7 +671,6 @@ struct EventRow: View {
                     .background(Color.tronSurfaceElevated.opacity(0.5))
                     .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                     .padding(.top, 4)
-                    .padding(.leading, 30) // Align under content
                     .transition(.opacity.combined(with: .scale(scale: 0.98, anchor: .top)))
             }
         }
@@ -665,12 +681,20 @@ struct EventRow: View {
         switch event.eventType {
         case .sessionStart:
             Image(systemName: "play.circle.fill")
+        case .sessionEnd:
+            Image(systemName: "stop.circle.fill")
         case .sessionFork:
+            Image(systemName: "arrow.triangle.branch")
+        case .sessionBranch:
             Image(systemName: "arrow.triangle.branch")
         case .messageUser:
             Image(systemName: "person.fill")
         case .messageAssistant:
             Image(systemName: "cpu")
+        case .messageSystem:
+            Image(systemName: "gearshape.fill")
+        case .messageDeleted:
+            Image(systemName: "trash.fill")
         case .toolCall:
             Image(systemName: "wrench.and.screwdriver")
         case .toolResult:
@@ -679,6 +703,26 @@ struct EventRow: View {
             } else {
                 Image(systemName: "checkmark.circle.fill")
             }
+        case .rulesLoaded:
+            Image(systemName: "doc.text.fill")
+        case .contextCleared:
+            Image(systemName: "clear.fill")
+        case .skillAdded, .skillRemoved:
+            Image(systemName: "sparkles")
+        case .compactBoundary, .compactSummary:
+            Image(systemName: "arrow.down.right.and.arrow.up.left")
+        case .configModelSwitch:
+            Image(systemName: "arrow.triangle.2.circlepath")
+        case .configPromptUpdate, .configReasoningLevel:
+            Image(systemName: "slider.horizontal.3")
+        case .fileRead, .fileWrite, .fileEdit:
+            Image(systemName: "doc.fill")
+        case .errorAgent, .errorTool, .errorProvider:
+            Image(systemName: "exclamationmark.triangle.fill")
+        case .notificationInterrupted:
+            Image(systemName: "pause.circle.fill")
+        case .metadataUpdate, .metadataTag:
+            Image(systemName: "tag.fill")
         default:
             Image(systemName: "circle.fill")
         }
@@ -687,15 +731,28 @@ struct EventRow: View {
     private var iconColor: Color {
         switch event.eventType {
         case .sessionStart: return .tronSuccess
-        case .sessionFork: return .tronPurple
+        case .sessionEnd: return .tronTextMuted
+        case .sessionFork, .sessionBranch: return .tronPurple
         case .messageUser: return .tronBlue
-        case .messageAssistant: return .tronPurple
+        case .messageAssistant: return .tronSuccess
+        case .messageSystem: return .tronTextMuted
+        case .messageDeleted: return .tronError
         case .toolCall: return .tronCyan
         case .toolResult:
             if (event.payload["isError"]?.value as? Bool) == true {
                 return .tronError
             }
             return .tronSuccess
+        case .rulesLoaded: return .tronPurple
+        case .contextCleared: return .tronCyan
+        case .skillAdded: return .tronSuccess
+        case .skillRemoved: return .tronWarning
+        case .compactBoundary, .compactSummary: return .tronCyan
+        case .configModelSwitch, .configPromptUpdate, .configReasoningLevel: return .tronPurple
+        case .fileRead, .fileWrite, .fileEdit: return .tronCyan
+        case .errorAgent, .errorTool, .errorProvider: return .tronError
+        case .notificationInterrupted: return .tronWarning
+        case .metadataUpdate, .metadataTag: return .tronTextMuted
         default: return .tronTextMuted
         }
     }
