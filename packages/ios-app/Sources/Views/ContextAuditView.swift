@@ -22,7 +22,7 @@ struct ContextAuditView: View {
     @State private var pendingMessageDeletions: Set<String> = []
 
     // Cached token usage to avoid recomputation on every body evaluation
-    @State private var cachedTokenUsage: (input: Int, output: Int, cacheRead: Int) = (0, 0, 0)
+    @State private var cachedTokenUsage: (input: Int, output: Int, cacheRead: Int, cacheCreation: Int) = (0, 0, 0, 0)
 
     /// Whether there are messages in context that can be cleared/compacted
     private var hasMessages: Bool {
@@ -132,32 +132,18 @@ struct ContextAuditView: View {
     }
 
     /// Get session token usage from cached values (populated during loadContext)
-    private var sessionTokenUsage: (input: Int, output: Int, cacheRead: Int) {
+    private var sessionTokenUsage: (input: Int, output: Int, cacheRead: Int, cacheCreation: Int) {
         cachedTokenUsage
     }
 
     /// Calculate and cache token usage (called during data loading)
+    /// Now uses session-level totals directly instead of iterating through events
     private func updateCachedTokenUsage() {
         guard let session = eventStoreManager.sessions.first(where: { $0.id == sessionId }) else {
-            cachedTokenUsage = (0, 0, 0)
+            cachedTokenUsage = (0, 0, 0, 0)
             return
         }
-        let cacheTokens = calculateCacheTokens()
-        cachedTokenUsage = (session.inputTokens, session.outputTokens, cacheTokens)
-    }
-
-    /// Calculate cache read tokens from session events
-    private func calculateCacheTokens() -> Int {
-        var total = 0
-        for event in sessionEvents {
-            if event.eventType == .messageAssistant || event.eventType == .streamTurnEnd {
-                if let tokenUsage = event.payload["tokenUsage"]?.value as? [String: Any],
-                   let cacheRead = tokenUsage["cacheReadTokens"] as? Int {
-                    total += cacheRead
-                }
-            }
-        }
-        return total
+        cachedTokenUsage = (session.inputTokens, session.outputTokens, session.cacheReadTokens, session.cacheCreationTokens)
     }
 
     private var contentView: some View {
@@ -184,7 +170,8 @@ struct ContextAuditView: View {
                         TotalSessionTokensView(
                             inputTokens: sessionTokenUsage.input,
                             outputTokens: sessionTokenUsage.output,
-                            cacheReadTokens: sessionTokenUsage.cacheRead
+                            cacheReadTokens: sessionTokenUsage.cacheRead,
+                            cacheCreationTokens: sessionTokenUsage.cacheCreation
                         )
                         .padding(.horizontal)
 
@@ -391,9 +378,15 @@ struct TotalSessionTokensView: View {
     let inputTokens: Int
     let outputTokens: Int
     let cacheReadTokens: Int
+    let cacheCreationTokens: Int
 
     private var totalTokens: Int {
         inputTokens + outputTokens
+    }
+
+    /// Whether any cache tokens exist (hides cache section if none)
+    private var hasCacheTokens: Bool {
+        cacheReadTokens > 0 || cacheCreationTokens > 0
     }
 
     private func formatTokenCount(_ count: Int) -> String {
@@ -476,27 +469,54 @@ struct TotalSessionTokensView: View {
                             .fill(.clear)
                             .glassEffect(.regular.tint(Color.tronRed.opacity(0.3)), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
                     }
+                }
 
-                    // Cache read tokens
-                    VStack(alignment: .leading, spacing: 4) {
-                        HStack(spacing: 4) {
-                            Image(systemName: "memorychip.fill")
-                                .font(.system(size: 10))
-                                .foregroundStyle(.tronAmberLight)
-                            Text("Cached")
-                                .font(.system(size: 10, design: .monospaced))
-                                .foregroundStyle(.white.opacity(0.5))
+                // Cache tokens row (only shown if cache tokens exist)
+                if hasCacheTokens {
+                    HStack(spacing: 8) {
+                        // Cache read tokens
+                        VStack(alignment: .leading, spacing: 4) {
+                            HStack(spacing: 4) {
+                                Image(systemName: "bolt.fill")
+                                    .font(.system(size: 10))
+                                    .foregroundStyle(.tronEmerald)
+                                Text("Cache Read")
+                                    .font(.system(size: 10, design: .monospaced))
+                                    .foregroundStyle(.white.opacity(0.5))
+                            }
+                            Text(formatTokenCount(cacheReadTokens))
+                                .font(.system(size: 12, weight: .medium, design: .monospaced))
+                                .foregroundStyle(.tronEmerald)
                         }
-                        Text(formatTokenCount(cacheReadTokens))
-                            .font(.system(size: 12, weight: .medium, design: .monospaced))
-                            .foregroundStyle(.tronAmberLight)
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(10)
-                    .background {
-                        RoundedRectangle(cornerRadius: 8, style: .continuous)
-                            .fill(.clear)
-                            .glassEffect(.regular.tint(Color.tronAmberLight.opacity(0.3)), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(10)
+                        .background {
+                            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                .fill(.clear)
+                                .glassEffect(.regular.tint(Color.tronEmerald.opacity(0.3)), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                        }
+
+                        // Cache creation tokens
+                        VStack(alignment: .leading, spacing: 4) {
+                            HStack(spacing: 4) {
+                                Image(systemName: "memorychip.fill")
+                                    .font(.system(size: 10))
+                                    .foregroundStyle(.tronAmberLight)
+                                Text("Cache Write")
+                                    .font(.system(size: 10, design: .monospaced))
+                                    .foregroundStyle(.white.opacity(0.5))
+                            }
+                            Text(formatTokenCount(cacheCreationTokens))
+                                .font(.system(size: 12, weight: .medium, design: .monospaced))
+                                .foregroundStyle(.tronAmberLight)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(10)
+                        .background {
+                            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                .fill(.clear)
+                                .glassEffect(.regular.tint(Color.tronAmberLight.opacity(0.3)), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                        }
                     }
                 }
 

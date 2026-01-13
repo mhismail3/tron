@@ -157,7 +157,9 @@ export interface Context {
   tools?: Tool[];
   /** Working directory for file operations (used by some providers for context) */
   workingDirectory?: string;
-  /** Skill context to inject as system-level instructions (ephemeral, not cached) */
+  /** Rules content from AGENTS.md / CLAUDE.md hierarchy (cacheable, static) */
+  rulesContent?: string;
+  /** Skill context to inject as system-level instructions (ephemeral, changes per-skill) */
   skillContext?: string;
 }
 

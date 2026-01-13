@@ -147,7 +147,12 @@ describe('EventStoreTuiSession', () => {
       const tuiSession = new EventStoreTuiSession(config);
       const result = await tuiSession.initialize();
 
-      expect(result.systemPrompt).toContain('Test Agent Context');
+      // Rules content is now accessed via getRulesContent() for agent.setRulesContent()
+      // The systemPrompt is deprecated for rules (now returns empty)
+      const rulesContent = tuiSession.getRulesContent();
+      expect(rulesContent).toContain('Test Agent Context');
+      // Also verify it's in the context.merged field
+      expect(result.context?.merged).toContain('Test Agent Context');
     });
   });
 

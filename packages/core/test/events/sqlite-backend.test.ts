@@ -832,4 +832,126 @@ describe('SQLiteBackend', () => {
       expect(typeof stats.totalEvents).toBe('number');
     });
   });
+
+  describe('cache token tracking', () => {
+    let workspaceId: WorkspaceId;
+    let sessionId: SessionId;
+
+    beforeEach(async () => {
+      const workspace = await backend.createWorkspace({ path: '/test' });
+      workspaceId = workspace.id;
+
+      const session = await backend.createSession({
+        workspaceId,
+        workingDirectory: '/test',
+        model: 'claude-sonnet-4-20250514',
+      });
+      sessionId = session.id;
+    });
+
+    it('should increment total_cache_read_tokens correctly', async () => {
+      await backend.incrementSessionCounters(sessionId, {
+        eventCount: 1,
+        cacheReadTokens: 500,
+      });
+
+      const session = await backend.getSession(sessionId);
+      expect(session?.totalCacheReadTokens).toBe(500);
+
+      // Increment again
+      await backend.incrementSessionCounters(sessionId, {
+        eventCount: 1,
+        cacheReadTokens: 300,
+      });
+
+      const updated = await backend.getSession(sessionId);
+      expect(updated?.totalCacheReadTokens).toBe(800);
+    });
+
+    it('should increment total_cache_creation_tokens correctly', async () => {
+      await backend.incrementSessionCounters(sessionId, {
+        eventCount: 1,
+        cacheCreationTokens: 1000,
+      });
+
+      const session = await backend.getSession(sessionId);
+      expect(session?.totalCacheCreationTokens).toBe(1000);
+
+      // Increment again
+      await backend.incrementSessionCounters(sessionId, {
+        eventCount: 1,
+        cacheCreationTokens: 200,
+      });
+
+      const updated = await backend.getSession(sessionId);
+      expect(updated?.totalCacheCreationTokens).toBe(1200);
+    });
+
+    it('should return cache tokens in rowToSession()', async () => {
+      await backend.incrementSessionCounters(sessionId, {
+        eventCount: 1,
+        inputTokens: 100,
+        outputTokens: 50,
+        cacheReadTokens: 500,
+        cacheCreationTokens: 1000,
+      });
+
+      const session = await backend.getSession(sessionId);
+
+      expect(session).not.toBeNull();
+      expect(session?.totalInputTokens).toBe(100);
+      expect(session?.totalOutputTokens).toBe(50);
+      expect(session?.totalCacheReadTokens).toBe(500);
+      expect(session?.totalCacheCreationTokens).toBe(1000);
+    });
+
+    it('should handle null cache tokens in existing events gracefully', async () => {
+      // Increment only input/output tokens (no cache tokens)
+      await backend.incrementSessionCounters(sessionId, {
+        eventCount: 1,
+        inputTokens: 100,
+        outputTokens: 50,
+      });
+
+      const session = await backend.getSession(sessionId);
+
+      expect(session?.totalInputTokens).toBe(100);
+      expect(session?.totalOutputTokens).toBe(50);
+      expect(session?.totalCacheReadTokens).toBe(0);
+      expect(session?.totalCacheCreationTokens).toBe(0);
+    });
+
+    it('should store cache tokens in events table', async () => {
+      const event: AssistantMessageEvent = {
+        id: EventId('evt_cache_test'),
+        parentId: null,
+        sessionId,
+        workspaceId,
+        timestamp: new Date().toISOString(),
+        type: 'message.assistant',
+        sequence: 0,
+        payload: {
+          content: [{ type: 'text', text: 'Hello' }],
+          turn: 1,
+          tokenUsage: {
+            inputTokens: 100,
+            outputTokens: 50,
+            cacheReadTokens: 500,
+            cacheCreationTokens: 1000,
+          },
+          stopReason: 'end_turn',
+          model: 'claude-sonnet-4-20250514',
+        },
+      };
+
+      await backend.insertEvent(event);
+
+      const retrieved = await backend.getEvent(event.id);
+      expect(retrieved).not.toBeNull();
+      // Payload should contain the token usage with cache tokens
+      const payload = retrieved?.payload as any;
+      expect(payload.tokenUsage.cacheReadTokens).toBe(500);
+      expect(payload.tokenUsage.cacheCreationTokens).toBe(1000);
+    });
+  });
 });

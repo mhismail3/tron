@@ -339,51 +339,86 @@ export class AnthropicProvider {
     logger.info('[ANTHROPIC] Building system prompt', {
       isOAuth: this.isOAuth,
       hasSystemPrompt: !!context.systemPrompt,
+      hasRulesContent: !!context.rulesContent,
+      rulesContentLength: context.rulesContent?.length ?? 0,
       hasSkillContext: !!context.skillContext,
       skillContextLength: context.skillContext?.length ?? 0,
-      skillContextPreview: context.skillContext?.substring(0, 100),
     });
 
     if (this.isOAuth) {
-      // OAuth: Use structured array format with cache_control (required by Anthropic)
-      const systemBlocks: SystemPromptBlock[] = [
-        {
-          type: 'text',
-          text: getOAuthSystemPromptPrefix(),
-          cache_control: { type: 'ephemeral' },
-        },
-      ];
+      // OAuth: Use structured array format with cache_control for prompt caching
+      //
+      // Cache strategy:
+      // 1. Build system blocks: OAuth prefix + system prompt + rules + skill context
+      // 2. Put cache_control on the LAST block to cache the entire system prompt
+      // 3. When skill context changes (added/removed), cache auto-invalidates
+      //    and a new cache is created - no worse than not caching at all
+      //
+      // Anthropic requires minimum 1024 tokens for caching to take effect.
+      // The cache_control marks the end of the cached prefix.
+
+      const systemBlocks: SystemPromptBlock[] = [];
+
+      // Block 1: OAuth prefix (required, small - ~12 tokens)
+      // No cache_control here - too small to cache alone
+      systemBlocks.push({
+        type: 'text',
+        text: getOAuthSystemPromptPrefix(),
+      });
+
+      // Block 2: System prompt (TRON core prompt, ~500-1000 tokens)
       if (context.systemPrompt) {
         systemBlocks.push({
           type: 'text',
           text: context.systemPrompt,
-          cache_control: { type: 'ephemeral' },
         });
       }
-      // Add skill context as a separate system block (ephemeral, high authority)
-      if (context.skillContext) {
-        logger.info('[ANTHROPIC] Adding skill context to system blocks', {
-          skillContextLength: context.skillContext.length,
+
+      // Block 3: Rules content (AGENTS.md/CLAUDE.md, static for session)
+      // This is often the largest block and makes caching worthwhile
+      if (context.rulesContent) {
+        systemBlocks.push({
+          type: 'text',
+          text: `# Project Rules\n\n${context.rulesContent}`,
         });
+      }
+
+      // Block 4: Skill context (persists until manually removed from context)
+      // Include in cached portion - cache will auto-invalidate when skill changes
+      if (context.skillContext) {
         systemBlocks.push({
           type: 'text',
           text: context.skillContext,
-          cache_control: { type: 'ephemeral' },
         });
       }
+
+      // Add cache_control to the LAST block (rules or skill, whichever is last)
+      // This caches ALL system content. When skill is added/removed/changed,
+      // the cache simply misses and creates a new cache - same cost as not caching.
+      const lastBlock = systemBlocks[systemBlocks.length - 1];
+      if (lastBlock) {
+        lastBlock.cache_control = { type: 'ephemeral' };
+      }
+
+      // Calculate approximate token count for all cached content
+      const cachedTokenEstimate = systemBlocks
+        .reduce((acc, b) => acc + Math.ceil(b.text.length / 4), 0);
+
       logger.info('[ANTHROPIC] System blocks ready', {
         blockCount: systemBlocks.length,
+        hasSkillContext: !!context.skillContext,
+        estimatedCachedTokens: cachedTokenEstimate,
+        cacheThresholdMet: cachedTokenEstimate >= 1024,
       });
+
       systemParam = systemBlocks;
     } else {
-      // API key: Combine system prompt and skill context
-      if (context.skillContext) {
-        systemParam = context.systemPrompt
-          ? `${context.systemPrompt}\n\n${context.skillContext}`
-          : context.skillContext;
-      } else {
-        systemParam = context.systemPrompt;
-      }
+      // API key: Combine system prompt, rules, and skill context into single string
+      const parts: string[] = [];
+      if (context.systemPrompt) parts.push(context.systemPrompt);
+      if (context.rulesContent) parts.push(`# Project Rules\n\n${context.rulesContent}`);
+      if (context.skillContext) parts.push(context.skillContext);
+      systemParam = parts.length > 0 ? parts.join('\n\n') : undefined;
     }
 
     // Build request parameters
@@ -441,9 +476,14 @@ export class AnthropicProvider {
                   cache_creation_input_tokens?: number;
                   cache_read_input_tokens?: number;
                 };
+                // Log raw usage to debug cache token extraction
+                logger.debug(`[CACHE] Raw API usage: ${JSON.stringify(event.message.usage)}`);
                 inputTokens = usage.input_tokens ?? 0;
                 cacheCreationTokens = usage.cache_creation_input_tokens ?? 0;
                 cacheReadTokens = usage.cache_read_input_tokens ?? 0;
+                if (cacheCreationTokens > 0 || cacheReadTokens > 0) {
+                  logger.debug(`[CACHE] Anthropic API returned cache tokens: read=${cacheReadTokens}, creation=${cacheCreationTokens}`);
+                }
               }
               break;
 

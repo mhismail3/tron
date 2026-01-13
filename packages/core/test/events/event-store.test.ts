@@ -768,6 +768,162 @@ describe('EventStore', () => {
     });
   });
 
+  describe('cache token tracking', () => {
+    let sessionId: SessionId;
+
+    beforeEach(async () => {
+      const result = await store.createSession({
+        workspacePath: '/test',
+        workingDirectory: '/test',
+        model: 'claude-sonnet-4-20250514',
+      });
+      sessionId = result.session.id;
+    });
+
+    it('should extract cache tokens from message.assistant payload', async () => {
+      await store.append({
+        sessionId,
+        type: 'message.user',
+        payload: { content: 'Hello', turn: 1 },
+      });
+
+      await store.append({
+        sessionId,
+        type: 'message.assistant',
+        payload: {
+          content: [{ type: 'text', text: 'Hi' }],
+          turn: 1,
+          tokenUsage: {
+            inputTokens: 100,
+            outputTokens: 50,
+            cacheReadTokens: 500,
+            cacheCreationTokens: 200,
+          },
+          stopReason: 'end_turn',
+          model: 'claude-sonnet-4-20250514',
+        },
+      });
+
+      const session = await store.getSession(sessionId);
+      expect(session?.totalCacheReadTokens).toBe(500);
+      expect(session?.totalCacheCreationTokens).toBe(200);
+    });
+
+    it('should accumulate cache tokens across multiple events', async () => {
+      // First turn
+      await store.append({
+        sessionId,
+        type: 'message.user',
+        payload: { content: 'Hello', turn: 1 },
+      });
+
+      await store.append({
+        sessionId,
+        type: 'message.assistant',
+        payload: {
+          content: [{ type: 'text', text: 'Hi' }],
+          turn: 1,
+          tokenUsage: {
+            inputTokens: 100,
+            outputTokens: 50,
+            cacheReadTokens: 0,
+            cacheCreationTokens: 1000, // First request creates cache
+          },
+          stopReason: 'end_turn',
+          model: 'claude-sonnet-4-20250514',
+        },
+      });
+
+      // Second turn - should read from cache
+      await store.append({
+        sessionId,
+        type: 'message.user',
+        payload: { content: 'How are you?', turn: 2 },
+      });
+
+      await store.append({
+        sessionId,
+        type: 'message.assistant',
+        payload: {
+          content: [{ type: 'text', text: 'I am fine' }],
+          turn: 2,
+          tokenUsage: {
+            inputTokens: 150,
+            outputTokens: 30,
+            cacheReadTokens: 800, // Reading from cache
+            cacheCreationTokens: 0,
+          },
+          stopReason: 'end_turn',
+          model: 'claude-sonnet-4-20250514',
+        },
+      });
+
+      const session = await store.getSession(sessionId);
+      expect(session?.totalCacheReadTokens).toBe(800); // 0 + 800
+      expect(session?.totalCacheCreationTokens).toBe(1000); // 1000 + 0
+    });
+
+    it('should include cache tokens in getStateAtHead', async () => {
+      await store.append({
+        sessionId,
+        type: 'message.user',
+        payload: { content: 'Hello', turn: 1 },
+      });
+
+      await store.append({
+        sessionId,
+        type: 'message.assistant',
+        payload: {
+          content: [{ type: 'text', text: 'Hi' }],
+          turn: 1,
+          tokenUsage: {
+            inputTokens: 100,
+            outputTokens: 50,
+            cacheReadTokens: 500,
+            cacheCreationTokens: 200,
+          },
+          stopReason: 'end_turn',
+          model: 'claude-sonnet-4-20250514',
+        },
+      });
+
+      const state = await store.getStateAtHead(sessionId);
+      expect(state.tokenUsage.cacheReadTokens).toBe(500);
+      expect(state.tokenUsage.cacheCreationTokens).toBe(200);
+    });
+
+    it('should handle events without cache tokens (backward compatibility)', async () => {
+      await store.append({
+        sessionId,
+        type: 'message.user',
+        payload: { content: 'Hello', turn: 1 },
+      });
+
+      // Message without cache tokens (legacy event)
+      await store.append({
+        sessionId,
+        type: 'message.assistant',
+        payload: {
+          content: [{ type: 'text', text: 'Hi' }],
+          turn: 1,
+          tokenUsage: {
+            inputTokens: 100,
+            outputTokens: 50,
+            // No cacheReadTokens or cacheCreationTokens
+          },
+          stopReason: 'end_turn',
+          model: 'claude-sonnet-4-20250514',
+        },
+      });
+
+      const session = await store.getSession(sessionId);
+      expect(session?.totalInputTokens).toBe(100);
+      expect(session?.totalOutputTokens).toBe(50);
+      expect(session?.totalCacheReadTokens).toBe(0);
+      expect(session?.totalCacheCreationTokens).toBe(0);
+    });
+  });
+
   describe('message deletion', () => {
     let sessionId: SessionId;
 

@@ -717,19 +717,22 @@ export class EventStoreTuiSession {
   // ===========================================================================
 
   /**
-   * Build the system prompt
+   * Build the system prompt.
+   * Note: Rules content is now handled by agent.setRulesContent() for consistent
+   * caching behavior across TUI, server, and iOS clients.
+   * @deprecated Use agent.setRulesContent(getRulesContent()) instead
    */
   buildSystemPrompt(): string {
-    const sections: string[] = [];
+    // Rules are now injected via agent.setRulesContent() for proper cache_control handling
+    // This method is kept for backwards compatibility but returns empty
+    return '';
+  }
 
-    // Add project context from AGENTS.md
-    if (this.loadedContext?.merged) {
-      sections.push('# Project Context\n');
-      sections.push(this.loadedContext.merged);
-      sections.push('');
-    }
-
-    return sections.join('\n').trim();
+  /**
+   * Get rules content from loaded context (for agent.setRulesContent())
+   */
+  getRulesContent(): string | undefined {
+    return this.loadedContext?.merged;
   }
 
   // ===========================================================================

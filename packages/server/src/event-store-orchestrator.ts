@@ -339,6 +339,9 @@ export class EventStoreOrchestrator extends EventEmitter {
         );
         rulesHeadEventId = rulesEvent.id;
 
+        // Inject rules content into agent for context building
+        agent.setRulesContent(loadedContext.merged);
+
         logger.info('Rules loaded', {
           sessionId,
           fileCount: loadedContext.files.length,
@@ -470,6 +473,27 @@ export class EventStoreOrchestrator extends EventEmitter {
       sessionId,
       rulesFileCount: rulesTracker.getTotalFiles(),
     });
+
+    // Re-load rules content from disk for the agent
+    // (RulesTracker.fromEvents doesn't preserve merged content)
+    if (rulesTracker.hasRules()) {
+      try {
+        const contextLoader = new ContextLoader({
+          userHome: os.homedir(),
+          projectRoot: workingDir.path,
+        });
+        const loadedContext = await contextLoader.load(workingDir.path);
+        if (loadedContext.merged) {
+          agent.setRulesContent(loadedContext.merged);
+          logger.info('Rules content reloaded for resumed session', {
+            sessionId,
+            rulesContentLength: loadedContext.merged.length,
+          });
+        }
+      } catch (error) {
+        logger.warn('Failed to reload rules content for resumed session', { sessionId, error });
+      }
+    }
 
     this.activeSessions.set(sessionId, {
       sessionId: session.id,
@@ -2645,6 +2669,11 @@ The user has explicitly removed these skills and expects you to respond WITHOUT 
     isActive: boolean,
     workingDir?: WorkingDirectory
   ): SessionInfo {
+    const cacheReadTokens = row.totalCacheReadTokens ?? 0;
+    const cacheCreationTokens = row.totalCacheCreationTokens ?? 0;
+    if (cacheReadTokens > 0 || cacheCreationTokens > 0) {
+      logger.debug(`[CACHE] sessionRowToInfo: session=${row.id}, cacheRead=${cacheReadTokens}, cacheCreation=${cacheCreationTokens}`);
+    }
     return {
       sessionId: row.id,
       workingDirectory: workingDir?.path ?? row.workingDirectory,
@@ -2655,6 +2684,8 @@ The user has explicitly removed these skills and expects you to respond WITHOUT 
       inputTokens: row.totalInputTokens ?? 0,
       outputTokens: row.totalOutputTokens ?? 0,
       lastTurnInputTokens: row.lastTurnInputTokens ?? 0,
+      cacheReadTokens,
+      cacheCreationTokens,
       cost: row.totalCost ?? 0,
       createdAt: row.createdAt,
       lastActivity: row.lastActivityAt,

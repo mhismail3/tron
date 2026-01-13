@@ -102,6 +102,9 @@ interface OpenAIStreamChunk {
     prompt_tokens: number;
     completion_tokens: number;
     total_tokens: number;
+    prompt_tokens_details?: {
+      cached_tokens?: number;
+    };
   };
 }
 
@@ -323,6 +326,7 @@ export class OpenAIProvider {
       const toolCalls: Map<number, { id: string; name: string; args: string }> = new Map();
       let inputTokens = 0;
       let outputTokens = 0;
+      let cacheReadTokens = 0;
       let textStarted = false;
       const toolCallsStarted = new Set<number>();
 
@@ -349,6 +353,7 @@ export class OpenAIProvider {
             if (chunk.usage) {
               inputTokens = chunk.usage.prompt_tokens;
               outputTokens = chunk.usage.completion_tokens;
+              cacheReadTokens = chunk.usage.prompt_tokens_details?.cached_tokens ?? 0;
             }
 
             const choice = chunk.choices[0];
@@ -455,7 +460,7 @@ export class OpenAIProvider {
               const message: AssistantMessage = {
                 role: 'assistant',
                 content,
-                usage: { inputTokens, outputTokens },
+                usage: { inputTokens, outputTokens, cacheReadTokens },
                 stopReason: this.mapStopReason(choice.finish_reason),
               };
 

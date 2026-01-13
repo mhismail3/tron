@@ -176,7 +176,8 @@ describe('ContextLoader', () => {
         '# Project Context\n\nProject-specific rules.'
       );
 
-      const loader = new ContextLoader({ projectRoot: projectDir });
+      // Use isolated globalDir to avoid loading real ~/.tron/AGENTS.md
+      const loader = new ContextLoader({ projectRoot: projectDir, userHome: globalDir });
       const context = await loader.load(projectDir);
 
       expect(context).toBeDefined();
@@ -304,7 +305,8 @@ describe('ContextLoader', () => {
 
   describe('Missing Files', () => {
     it('should handle missing project context gracefully', async () => {
-      const loader = new ContextLoader({ projectRoot: projectDir });
+      // Use isolated globalDir (which has no .tron/AGENTS.md) to avoid loading real global context
+      const loader = new ContextLoader({ projectRoot: projectDir, userHome: globalDir });
       const context = await loader.load(projectDir);
 
       expect(context.merged).toBe('');
@@ -312,8 +314,10 @@ describe('ContextLoader', () => {
     });
 
     it('should handle inaccessible directories', async () => {
+      // Use isolated globalDir to avoid loading real ~/.tron/AGENTS.md
       const loader = new ContextLoader({
         projectRoot: path.join(tempDir, 'nonexistent'),
+        userHome: globalDir,
       });
       const context = await loader.load(path.join(tempDir, 'nonexistent'));
 

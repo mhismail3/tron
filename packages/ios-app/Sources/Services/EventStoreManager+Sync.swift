@@ -174,6 +174,8 @@ extension EventStoreManager {
             inputTokens: info.inputTokens ?? 0,
             outputTokens: info.outputTokens ?? 0,
             lastTurnInputTokens: info.lastTurnInputTokens ?? 0,
+            cacheReadTokens: info.cacheReadTokens ?? 0,
+            cacheCreationTokens: info.cacheCreationTokens ?? 0,
             cost: info.cost ?? 0,
             isFork: info.isFork
         )

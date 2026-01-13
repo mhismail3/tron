@@ -418,6 +418,10 @@ struct CachedSession: Identifiable, Codable {
     var outputTokens: Int
     /// Current context size (input_tokens from last API call)
     var lastTurnInputTokens: Int
+    /// Total tokens read from prompt cache
+    var cacheReadTokens: Int = 0
+    /// Total tokens written to prompt cache
+    var cacheCreationTokens: Int = 0
     var cost: Double
 
     /// Backward compatibility: expose latestModel as model
@@ -440,6 +444,12 @@ struct CachedSession: Identifiable, Codable {
     /// Formatted token counts (e.g., "↓1.2k ↑3.4k")
     var formattedTokens: String {
         TokenFormatter.formatPair(input: inputTokens, output: outputTokens)
+    }
+
+    /// Formatted cache tokens - separate read/creation for visibility
+    var formattedCacheTokens: String? {
+        if cacheReadTokens == 0 && cacheCreationTokens == 0 { return nil }
+        return "⚡\(cacheReadTokens.formattedTokenCount) read, \(cacheCreationTokens.formattedTokenCount) write"
     }
 
     /// Formatted cost string (e.g., "$0.12")

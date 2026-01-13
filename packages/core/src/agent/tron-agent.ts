@@ -188,6 +188,14 @@ export class TronAgent {
   }
 
   /**
+   * Set rules content from AGENTS.md / CLAUDE.md hierarchy.
+   * This is static for the session and cacheable by the provider.
+   */
+  setRulesContent(rulesContent: string | undefined): void {
+    this.contextManager.setRulesContent(rulesContent);
+  }
+
+  /**
    * Enable or disable auto-compaction.
    * When enabled and a summarizer is set, context will be compacted automatically.
    */
@@ -503,6 +511,7 @@ export class TronAgent {
           parameters: tool.parameters,
         })),
         workingDirectory: this.workingDirectory,
+        rulesContent: this.contextManager.getRulesContent(),
         skillContext: this.currentSkillContext,
       };
 
@@ -513,6 +522,8 @@ export class TronAgent {
         messageCount: messages.length,
         providerType: this.providerType,
         systemPromptLength: context.systemPrompt?.length ?? 0,
+        hasRulesContent: !!context.rulesContent,
+        rulesContentLength: context.rulesContent?.length ?? 0,
         hasSkillContext: !!this.currentSkillContext,
         skillContextLength: this.currentSkillContext?.length ?? 0,
         skillContextPreview: this.currentSkillContext?.substring(0, 100),

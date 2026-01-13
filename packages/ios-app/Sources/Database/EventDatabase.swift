@@ -100,6 +100,8 @@ class EventDatabase: ObservableObject {
                 input_tokens INTEGER DEFAULT 0,
                 output_tokens INTEGER DEFAULT 0,
                 last_turn_input_tokens INTEGER DEFAULT 0,
+                cache_read_tokens INTEGER DEFAULT 0,
+                cache_creation_tokens INTEGER DEFAULT 0,
                 cost REAL DEFAULT 0
             )
         """)
@@ -121,6 +123,18 @@ class EventDatabase: ObservableObject {
         // Migration: Add last_turn_input_tokens column for current context size tracking
         do {
             try execute("ALTER TABLE sessions ADD COLUMN last_turn_input_tokens INTEGER DEFAULT 0")
+        } catch {
+            // Column already exists, ignore
+        }
+
+        // Migration: Add cache token columns for prompt caching tracking
+        do {
+            try execute("ALTER TABLE sessions ADD COLUMN cache_read_tokens INTEGER DEFAULT 0")
+        } catch {
+            // Column already exists, ignore
+        }
+        do {
+            try execute("ALTER TABLE sessions ADD COLUMN cache_creation_tokens INTEGER DEFAULT 0")
         } catch {
             // Column already exists, ignore
         }
@@ -583,8 +597,9 @@ class EventDatabase: ObservableObject {
             INSERT OR REPLACE INTO sessions
             (id, workspace_id, root_event_id, head_event_id, title, latest_model,
              working_directory, created_at, last_activity_at, ended_at, event_count,
-             message_count, input_tokens, output_tokens, last_turn_input_tokens, cost, is_fork)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             message_count, input_tokens, output_tokens, last_turn_input_tokens,
+             cache_read_tokens, cache_creation_tokens, cost, is_fork)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """
 
         var stmt: OpaquePointer?
@@ -608,8 +623,10 @@ class EventDatabase: ObservableObject {
         sqlite3_bind_int(stmt, 13, Int32(session.inputTokens))
         sqlite3_bind_int(stmt, 14, Int32(session.outputTokens))
         sqlite3_bind_int(stmt, 15, Int32(session.lastTurnInputTokens))
-        sqlite3_bind_double(stmt, 16, session.cost)
-        sqlite3_bind_int(stmt, 17, Int32(session.isFork == true ? 1 : 0))
+        sqlite3_bind_int(stmt, 16, Int32(session.cacheReadTokens))
+        sqlite3_bind_int(stmt, 17, Int32(session.cacheCreationTokens))
+        sqlite3_bind_double(stmt, 18, session.cost)
+        sqlite3_bind_int(stmt, 19, Int32(session.isFork == true ? 1 : 0))
 
         guard sqlite3_step(stmt) == SQLITE_DONE else {
             throw EventDatabaseError.insertFailed(errorMessage)
@@ -620,7 +637,8 @@ class EventDatabase: ObservableObject {
         let sql = """
             SELECT id, workspace_id, root_event_id, head_event_id, title, latest_model,
                    working_directory, created_at, last_activity_at, ended_at, event_count,
-                   message_count, input_tokens, output_tokens, last_turn_input_tokens, cost, is_fork
+                   message_count, input_tokens, output_tokens, last_turn_input_tokens,
+                   cache_read_tokens, cache_creation_tokens, cost, is_fork
             FROM sessions WHERE id = ?
         """
 
@@ -643,7 +661,8 @@ class EventDatabase: ObservableObject {
         let sql = """
             SELECT id, workspace_id, root_event_id, head_event_id, title, latest_model,
                    working_directory, created_at, last_activity_at, ended_at, event_count,
-                   message_count, input_tokens, output_tokens, last_turn_input_tokens, cost, is_fork
+                   message_count, input_tokens, output_tokens, last_turn_input_tokens,
+                   cache_read_tokens, cache_creation_tokens, cost, is_fork
             FROM sessions ORDER BY last_activity_at DESC
         """
 
@@ -1016,8 +1035,10 @@ class EventDatabase: ObservableObject {
         let inputTokens = Int(sqlite3_column_int(stmt, 12))
         let outputTokens = Int(sqlite3_column_int(stmt, 13))
         let lastTurnInputTokens = Int(sqlite3_column_int(stmt, 14))
-        let cost = sqlite3_column_double(stmt, 15)
-        let isFork = sqlite3_column_int(stmt, 16) != 0
+        let cacheReadTokens = Int(sqlite3_column_int(stmt, 15))
+        let cacheCreationTokens = Int(sqlite3_column_int(stmt, 16))
+        let cost = sqlite3_column_double(stmt, 17)
+        let isFork = sqlite3_column_int(stmt, 18) != 0
 
         return CachedSession(
             id: id,
@@ -1035,6 +1056,8 @@ class EventDatabase: ObservableObject {
             inputTokens: inputTokens,
             outputTokens: outputTokens,
             lastTurnInputTokens: lastTurnInputTokens,
+            cacheReadTokens: cacheReadTokens,
+            cacheCreationTokens: cacheCreationTokens,
             cost: cost,
             isFork: isFork
         )

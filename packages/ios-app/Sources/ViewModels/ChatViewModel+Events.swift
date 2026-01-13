@@ -300,6 +300,7 @@ extension ChatViewModel {
             // - inputTokens: accumulated for billing
             // - outputTokens: accumulated
             // - lastTurnInputTokens: current context size for context bar
+            // - cacheReadTokens/cacheCreationTokens: accumulated cache tokens
             // - cost: accumulated cost from all turns
             if let manager = eventStoreManager {
                 do {
@@ -308,6 +309,8 @@ extension ChatViewModel {
                         inputTokens: accumulatedInputTokens,
                         outputTokens: accumulatedOutputTokens,
                         lastTurnInputTokens: lastTurnInputTokens,
+                        cacheReadTokens: accumulatedCacheReadTokens,
+                        cacheCreationTokens: accumulatedCacheCreationTokens,
                         cost: accumulatedCost
                     )
                 } catch {

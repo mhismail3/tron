@@ -613,9 +613,6 @@ export function App({ config, auth }: AppProps): React.ReactElement {
         sessionId: initResult.sessionId,
       };
 
-      // Build system prompt with all context sources
-      const systemPrompt = tuiSession.buildSystemPrompt();
-
       const agent = new TronAgent(
         {
           provider: {
@@ -624,16 +621,24 @@ export function App({ config, auth }: AppProps): React.ReactElement {
           },
           tools,
           maxTurns: 50,
-          systemPrompt: systemPrompt || undefined,
+          // No custom systemPrompt - agent uses TRON_CORE_PROMPT by default
         },
         agentOptions
       );
+
+      // Set rules content for proper cache_control handling
+      // Rules are now handled by the agent's ContextManager, not system prompt
+      const rulesContent = tuiSession.getRulesContent();
+      if (rulesContent) {
+        agent.setRulesContent(rulesContent);
+      }
 
       debugLog.agent('created', {
         sessionId: initResult.sessionId,
         model: config.model ?? DEFAULT_MODEL,
         toolCount: tools.length,
-        hasSystemPrompt: !!systemPrompt,
+        hasRulesContent: !!rulesContent,
+        rulesContentLength: rulesContent?.length ?? 0,
       });
 
       // Subscribe to events for streaming

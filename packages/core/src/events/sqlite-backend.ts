@@ -71,6 +71,10 @@ export interface SessionRow {
   /** Current context size (input_tokens from last API call) */
   lastTurnInputTokens: number;
   totalCost: number;
+  /** Total tokens read from prompt cache */
+  totalCacheReadTokens: number;
+  /** Total tokens written to prompt cache */
+  totalCacheCreationTokens: number;
   tags: string[];
   /** Backward compatible alias for latestModel */
   model: string;
@@ -126,6 +130,10 @@ export interface IncrementCountersOptions {
   /** Current context size (SET, not incremented) */
   lastTurnInputTokens?: number;
   cost?: number;
+  /** Tokens read from prompt cache (incremented) */
+  cacheReadTokens?: number;
+  /** Tokens written to prompt cache (incremented) */
+  cacheCreationTokens?: number;
 }
 
 // =============================================================================
@@ -225,6 +233,14 @@ export class SQLiteBackend {
     // Migration 003: Add last_turn_input_tokens column for current context size tracking
     if (!columnNames.includes('last_turn_input_tokens')) {
       db.exec("ALTER TABLE sessions ADD COLUMN last_turn_input_tokens INTEGER DEFAULT 0");
+    }
+
+    // Migration 004: Add cache token columns for prompt caching tracking
+    if (!columnNames.includes('total_cache_read_tokens')) {
+      db.exec("ALTER TABLE sessions ADD COLUMN total_cache_read_tokens INTEGER DEFAULT 0");
+    }
+    if (!columnNames.includes('total_cache_creation_tokens')) {
+      db.exec("ALTER TABLE sessions ADD COLUMN total_cache_creation_tokens INTEGER DEFAULT 0");
     }
 
     // Migration 002: Remove provider, status columns; rename model -> latest_model
@@ -539,6 +555,8 @@ export class SQLiteBackend {
       totalInputTokens: 0,
       totalOutputTokens: 0,
       lastTurnInputTokens: 0,
+      totalCacheReadTokens: 0,
+      totalCacheCreationTokens: 0,
       totalCost: 0,
       tags: options.tags ?? [],
       // Backward compatibility aliases
@@ -708,6 +726,14 @@ export class SQLiteBackend {
       updates.push('total_cost = total_cost + ?');
       params.push(counters.cost);
     }
+    if (counters.cacheReadTokens) {
+      updates.push('total_cache_read_tokens = total_cache_read_tokens + ?');
+      params.push(counters.cacheReadTokens);
+    }
+    if (counters.cacheCreationTokens) {
+      updates.push('total_cache_creation_tokens = total_cache_creation_tokens + ?');
+      params.push(counters.cacheCreationTokens);
+    }
 
     if (updates.length === 0) return;
 
@@ -744,6 +770,8 @@ export class SQLiteBackend {
       totalOutputTokens: row.total_output_tokens,
       lastTurnInputTokens: row.last_turn_input_tokens ?? 0,
       totalCost: row.total_cost ?? 0,
+      totalCacheReadTokens: row.total_cache_read_tokens ?? 0,
+      totalCacheCreationTokens: row.total_cache_creation_tokens ?? 0,
       tags: JSON.parse(row.tags || '[]'),
       // Backward compatibility aliases
       model: latestModel,

@@ -34,6 +34,8 @@ export interface ContextManagerConfig {
   /** Working directory for file operations */
   workingDirectory?: string;
   tools?: Tool[];
+  /** Rules content from AGENTS.md / CLAUDE.md hierarchy */
+  rulesContent?: string;
   compaction?: {
     /** Threshold ratio (0-1) to trigger compaction suggestion (default: 0.70) */
     threshold?: number;
@@ -194,6 +196,8 @@ export class ContextManager {
     preserveRecentTurns: number;
   };
   private onCompactionNeededCallback?: () => void;
+  /** Rules content from AGENTS.md / CLAUDE.md hierarchy */
+  private rulesContent: string | undefined;
 
   // Cached values for performance
   private cachedSystemPromptTokens: number | null = null;
@@ -206,6 +210,7 @@ export class ContextManager {
     this.customSystemPrompt = config.systemPrompt;
     this.workingDirectory = config.workingDirectory ?? process.cwd();
     this.tools = config.tools ?? [];
+    this.rulesContent = config.rulesContent;
     this.messages = [];
     this.tokenCache = new WeakMap();
     this.compactionConfig = {
@@ -305,6 +310,23 @@ export class ContextManager {
    */
   getWorkingDirectory(): string {
     return this.workingDirectory;
+  }
+
+  /**
+   * Set rules content from AGENTS.md / CLAUDE.md hierarchy.
+   * Invalidates cached token counts.
+   */
+  setRulesContent(content: string | undefined): void {
+    this.rulesContent = content;
+    // Invalidate system prompt cache since rules affect total size
+    this.cachedSystemPromptTokens = null;
+  }
+
+  /**
+   * Get rules content from AGENTS.md / CLAUDE.md hierarchy.
+   */
+  getRulesContent(): string | undefined {
+    return this.rulesContent;
   }
 
   /**

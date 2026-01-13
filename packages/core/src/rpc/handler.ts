@@ -204,6 +204,9 @@ interface SessionInfo {
   messageCount: number;
   inputTokens: number;
   outputTokens: number;
+  lastTurnInputTokens: number;
+  cacheReadTokens: number;
+  cacheCreationTokens: number;
   cost: number;
   createdAt: string;
   lastActivity: string;
@@ -546,6 +549,9 @@ export class RpcHandler extends EventEmitter {
         messageCount: s.messageCount,
         inputTokens: s.inputTokens,
         outputTokens: s.outputTokens,
+        lastTurnInputTokens: s.lastTurnInputTokens,
+        cacheReadTokens: s.cacheReadTokens,
+        cacheCreationTokens: s.cacheCreationTokens,
         cost: s.cost,
         createdAt: s.createdAt,
         lastActivity: s.lastActivity,

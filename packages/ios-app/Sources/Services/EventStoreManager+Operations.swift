@@ -29,6 +29,8 @@ extension EventStoreManager {
             inputTokens: 0,
             outputTokens: 0,
             lastTurnInputTokens: 0,
+            cacheReadTokens: 0,
+            cacheCreationTokens: 0,
             cost: 0
         )
 
@@ -65,8 +67,18 @@ extension EventStoreManager {
     ///   - inputTokens: Total accumulated input tokens (for billing)
     ///   - outputTokens: Total accumulated output tokens
     ///   - lastTurnInputTokens: Current context size (from last turn's input_tokens)
+    ///   - cacheReadTokens: Total accumulated cache read tokens
+    ///   - cacheCreationTokens: Total accumulated cache creation tokens
     ///   - cost: Total accumulated cost from all turns
-    func updateSessionTokens(sessionId: String, inputTokens: Int, outputTokens: Int, lastTurnInputTokens: Int, cost: Double) throws {
+    func updateSessionTokens(
+        sessionId: String,
+        inputTokens: Int,
+        outputTokens: Int,
+        lastTurnInputTokens: Int,
+        cacheReadTokens: Int,
+        cacheCreationTokens: Int,
+        cost: Double
+    ) throws {
         guard var session = try eventDB.getSession(sessionId) else {
             logger.warning("Cannot update tokens: session \(sessionId) not found", category: .session)
             return
@@ -75,6 +87,8 @@ extension EventStoreManager {
         session.inputTokens = inputTokens
         session.outputTokens = outputTokens
         session.lastTurnInputTokens = lastTurnInputTokens
+        session.cacheReadTokens = cacheReadTokens
+        session.cacheCreationTokens = cacheCreationTokens
         session.cost = cost
 
         try eventDB.insertSession(session)
@@ -82,7 +96,7 @@ extension EventStoreManager {
         // Reload sessions to update in-memory array
         loadSessions()
 
-        logger.debug("Updated session \(sessionId) tokens: in=\(inputTokens) out=\(outputTokens) lastTurnIn=\(lastTurnInputTokens) cost=\(cost)", category: .session)
+        logger.debug("Updated session \(sessionId) tokens: in=\(inputTokens) out=\(outputTokens) lastTurnIn=\(lastTurnInputTokens) cacheRead=\(cacheReadTokens) cacheCreation=\(cacheCreationTokens) cost=\(cost)", category: .session)
     }
 
     // MARK: - Tree Operations (Fork)
@@ -175,6 +189,8 @@ extension EventStoreManager {
             inputTokens: 0,
             outputTokens: 0,
             lastTurnInputTokens: 0,
+            cacheReadTokens: 0,
+            cacheCreationTokens: 0,
             cost: 0.0,
             lastUserPrompt: sourceSession?.lastUserPrompt,
             lastAssistantResponse: sourceSession?.lastAssistantResponse,

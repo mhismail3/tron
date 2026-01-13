@@ -269,6 +269,10 @@ export interface SessionInfo {
   outputTokens: number;
   /** Current context size (input_tokens from last API call) */
   lastTurnInputTokens: number;
+  /** Total tokens read from prompt cache */
+  cacheReadTokens: number;
+  /** Total tokens written to prompt cache */
+  cacheCreationTokens: number;
   cost: number;
   createdAt: string;
   lastActivity: string;

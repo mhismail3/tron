@@ -474,6 +474,155 @@ describe('OpenAI Provider', () => {
     });
   });
 
+  describe('Cache Token Extraction', () => {
+    it('should extract cached_tokens from prompt_tokens_details', async () => {
+      const provider = new OpenAIProvider({
+        apiKey: 'sk-test',
+        model: 'gpt-4o',
+      });
+
+      // Mock response with prompt_tokens_details.cached_tokens
+      const mockStreamData = [
+        'data: {"id":"chatcmpl-123","object":"chat.completion.chunk","created":1234567890,"model":"gpt-4o","choices":[{"index":0,"delta":{"role":"assistant","content":"Hello!"},"finish_reason":null}]}\n\n',
+        'data: {"id":"chatcmpl-123","object":"chat.completion.chunk","created":1234567890,"model":"gpt-4o","choices":[{"index":0,"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":1000,"completion_tokens":5,"total_tokens":1005,"prompt_tokens_details":{"cached_tokens":800}}}\n\n',
+        'data: [DONE]\n\n',
+      ];
+
+      const encoder = new TextEncoder();
+      let dataIndex = 0;
+
+      const mockReadableStream = new ReadableStream({
+        pull(controller) {
+          if (dataIndex < mockStreamData.length) {
+            controller.enqueue(encoder.encode(mockStreamData[dataIndex]));
+            dataIndex++;
+          } else {
+            controller.close();
+          }
+        },
+      });
+
+      global.fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        body: mockReadableStream,
+      });
+
+      const context = {
+        messages: [{ role: 'user' as const, content: 'Hello' }],
+      };
+
+      let doneEvent: any = null;
+      for await (const event of provider.stream(context)) {
+        if (event.type === 'done') {
+          doneEvent = event;
+        }
+      }
+
+      expect(doneEvent).not.toBeNull();
+      expect(doneEvent.message.usage).toBeDefined();
+      expect(doneEvent.message.usage.inputTokens).toBe(1000);
+      expect(doneEvent.message.usage.outputTokens).toBe(5);
+      expect(doneEvent.message.usage.cacheReadTokens).toBe(800);
+    });
+
+    it('should handle missing prompt_tokens_details gracefully', async () => {
+      const provider = new OpenAIProvider({
+        apiKey: 'sk-test',
+        model: 'gpt-4o',
+      });
+
+      // Mock response without prompt_tokens_details
+      const mockStreamData = [
+        'data: {"id":"chatcmpl-123","object":"chat.completion.chunk","created":1234567890,"model":"gpt-4o","choices":[{"index":0,"delta":{"role":"assistant","content":"Hello!"},"finish_reason":null}]}\n\n',
+        'data: {"id":"chatcmpl-123","object":"chat.completion.chunk","created":1234567890,"model":"gpt-4o","choices":[{"index":0,"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":500,"completion_tokens":5,"total_tokens":505}}\n\n',
+        'data: [DONE]\n\n',
+      ];
+
+      const encoder = new TextEncoder();
+      let dataIndex = 0;
+
+      const mockReadableStream = new ReadableStream({
+        pull(controller) {
+          if (dataIndex < mockStreamData.length) {
+            controller.enqueue(encoder.encode(mockStreamData[dataIndex]));
+            dataIndex++;
+          } else {
+            controller.close();
+          }
+        },
+      });
+
+      global.fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        body: mockReadableStream,
+      });
+
+      const context = {
+        messages: [{ role: 'user' as const, content: 'Hello' }],
+      };
+
+      let doneEvent: any = null;
+      for await (const event of provider.stream(context)) {
+        if (event.type === 'done') {
+          doneEvent = event;
+        }
+      }
+
+      expect(doneEvent).not.toBeNull();
+      expect(doneEvent.message.usage.inputTokens).toBe(500);
+      expect(doneEvent.message.usage.outputTokens).toBe(5);
+      expect(doneEvent.message.usage.cacheReadTokens).toBe(0);
+    });
+
+    it('should handle prompt_tokens_details without cached_tokens', async () => {
+      const provider = new OpenAIProvider({
+        apiKey: 'sk-test',
+        model: 'gpt-4o',
+      });
+
+      // Mock response with prompt_tokens_details but no cached_tokens
+      const mockStreamData = [
+        'data: {"id":"chatcmpl-123","object":"chat.completion.chunk","created":1234567890,"model":"gpt-4o","choices":[{"index":0,"delta":{"role":"assistant","content":"Hello!"},"finish_reason":null}]}\n\n',
+        'data: {"id":"chatcmpl-123","object":"chat.completion.chunk","created":1234567890,"model":"gpt-4o","choices":[{"index":0,"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":500,"completion_tokens":5,"total_tokens":505,"prompt_tokens_details":{}}}\n\n',
+        'data: [DONE]\n\n',
+      ];
+
+      const encoder = new TextEncoder();
+      let dataIndex = 0;
+
+      const mockReadableStream = new ReadableStream({
+        pull(controller) {
+          if (dataIndex < mockStreamData.length) {
+            controller.enqueue(encoder.encode(mockStreamData[dataIndex]));
+            dataIndex++;
+          } else {
+            controller.close();
+          }
+        },
+      });
+
+      global.fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        body: mockReadableStream,
+      });
+
+      const context = {
+        messages: [{ role: 'user' as const, content: 'Hello' }],
+      };
+
+      let doneEvent: any = null;
+      for await (const event of provider.stream(context)) {
+        if (event.type === 'done') {
+          doneEvent = event;
+        }
+      }
+
+      expect(doneEvent).not.toBeNull();
+      expect(doneEvent.message.usage.inputTokens).toBe(500);
+      expect(doneEvent.message.usage.cacheReadTokens).toBe(0);
+    });
+  });
+
   describe('Multi-Turn Conversation', () => {
     it('should properly convert tool result messages', async () => {
       const provider = new OpenAIProvider({

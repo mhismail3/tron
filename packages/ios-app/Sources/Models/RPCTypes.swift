@@ -70,6 +70,10 @@ struct SessionInfo: Decodable, Identifiable, Hashable {
     let outputTokens: Int?
     /// Current context size (input_tokens from last API call)
     let lastTurnInputTokens: Int?
+    /// Total tokens read from prompt cache
+    let cacheReadTokens: Int?
+    /// Total tokens written to prompt cache
+    let cacheCreationTokens: Int?
     let cost: Double?
     let isActive: Bool
     let workingDirectory: String?
@@ -101,6 +105,14 @@ struct SessionInfo: Decodable, Identifiable, Hashable {
     /// Formatted token counts (e.g., "↓1.2k ↑3.4k")
     var formattedTokens: String {
         TokenFormatter.formatPair(input: inputTokens ?? 0, output: outputTokens ?? 0)
+    }
+
+    /// Formatted cache tokens - separate read/creation for visibility
+    var formattedCacheTokens: String? {
+        let read = cacheReadTokens ?? 0
+        let creation = cacheCreationTokens ?? 0
+        if read == 0 && creation == 0 { return nil }
+        return "⚡\(read.formattedTokenCount) read, \(creation.formattedTokenCount) write"
     }
 
     /// Formatted cost string (e.g., "$0.12")

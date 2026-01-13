@@ -22,6 +22,9 @@ import {
   type TokenUsage,
 } from './types.js';
 import { calculateCost } from '../usage/index.js';
+import { createLogger } from '../logging/logger.js';
+
+const logger = createLogger('event-store');
 
 // =============================================================================
 // Types
@@ -192,7 +195,16 @@ export class EventStore {
       // Update session head and counters
       await this.backend.updateSessionHead(options.sessionId, event.id);
 
-      const counters: { eventCount: number; messageCount?: number; inputTokens?: number; outputTokens?: number; lastTurnInputTokens?: number; cost?: number } = {
+      const counters: {
+        eventCount: number;
+        messageCount?: number;
+        inputTokens?: number;
+        outputTokens?: number;
+        lastTurnInputTokens?: number;
+        cost?: number;
+        cacheReadTokens?: number;
+        cacheCreationTokens?: number;
+      } = {
         eventCount: 1,
       };
 
@@ -208,6 +220,15 @@ export class EventStore {
         counters.outputTokens = payload.tokenUsage.outputTokens;
         // Set current context size (not accumulated - represents context window utilization)
         counters.lastTurnInputTokens = payload.tokenUsage.inputTokens;
+        // Track cache tokens for prompt caching efficiency
+        if (payload.tokenUsage.cacheReadTokens) {
+          counters.cacheReadTokens = payload.tokenUsage.cacheReadTokens;
+          logger.debug(`[CACHE] Storing cacheReadTokens: ${payload.tokenUsage.cacheReadTokens}`);
+        }
+        if (payload.tokenUsage.cacheCreationTokens) {
+          counters.cacheCreationTokens = payload.tokenUsage.cacheCreationTokens;
+          logger.debug(`[CACHE] Storing cacheCreationTokens: ${payload.tokenUsage.cacheCreationTokens}`);
+        }
         // Use pre-calculated cost if provided (from agent with full cache token pricing),
         // otherwise calculate from tokenUsage
         if (payload.cost !== undefined) {
@@ -390,6 +411,8 @@ export class EventStore {
     const messageEventIds: (string | undefined)[] = [];
     let inputTokens = 0;
     let outputTokens = 0;
+    let cacheReadTokens = 0;
+    let cacheCreationTokens = 0;
     let turnCount = 0;
     let currentTurn = 0;
 
@@ -446,6 +469,8 @@ export class EventStore {
         if (payload.tokenUsage) {
           inputTokens += payload.tokenUsage.inputTokens;
           outputTokens += payload.tokenUsage.outputTokens;
+          cacheReadTokens += payload.tokenUsage.cacheReadTokens ?? 0;
+          cacheCreationTokens += payload.tokenUsage.cacheCreationTokens ?? 0;
         }
       } else if (evt.type === 'message.assistant') {
         const payload = evt.payload as {
@@ -461,6 +486,8 @@ export class EventStore {
         if (payload.tokenUsage) {
           inputTokens += payload.tokenUsage.inputTokens;
           outputTokens += payload.tokenUsage.outputTokens;
+          cacheReadTokens += payload.tokenUsage.cacheReadTokens ?? 0;
+          cacheCreationTokens += payload.tokenUsage.cacheCreationTokens ?? 0;
         }
         if (payload.turn && payload.turn > currentTurn) {
           currentTurn = payload.turn;
@@ -488,7 +515,7 @@ export class EventStore {
       headEventId: eventId,
       messages,
       messageEventIds,
-      tokenUsage: { inputTokens, outputTokens },
+      tokenUsage: { inputTokens, outputTokens, cacheReadTokens, cacheCreationTokens },
       turnCount,
       model: session?.latestModel ?? 'unknown',
       workingDirectory: session?.workingDirectory ?? '',
