@@ -22,6 +22,8 @@ tron/
 │   ├── server/     # WebSocket server for dual-interface support
 │   ├── tui/        # Terminal user interface
 │   └── chat-web/   # Web chat interface
+├── docs/           # Documentation
+│   └── skills.md   # Skills system guide
 ├── .tron/          # User configuration and data
 │   ├── skills/     # Built-in and custom skills
 │   ├── hooks/      # User-defined hooks
@@ -81,6 +83,42 @@ Tron uses a four-level memory hierarchy:
 4. **Global (Learnings)**: Cross-project patterns
 
 The key insight: **Clear, don't compact**. Save state to a ledger, wipe context, resume fresh.
+
+## Skills
+
+Skills are reusable context packages that extend Tron's capabilities. Create a `SKILL.md` file with optional YAML frontmatter:
+
+```markdown
+---
+autoInject: true
+tags: [rules, typescript]
+---
+TypeScript coding standards for this project.
+
+## Rules
+
+- Use strict mode
+- No `any` types
+- Prefer `const` over `let`
+```
+
+**Locations:**
+- `~/.tron/skills/` — Global skills (all projects)
+- `.tron/skills/` — Project skills (override global)
+
+**Usage:**
+- Auto-inject skills (`autoInject: true`) are included in every prompt
+- Reference skills explicitly with `@skill-name` in prompts
+
+**Frontmatter options:**
+| Option | Type | Description |
+|--------|------|-------------|
+| `autoInject` | boolean | Include in every prompt |
+| `version` | string | Semantic version |
+| `tools` | string[] | Associated tools |
+| `tags` | string[] | Categorization tags |
+
+See [docs/skills.md](docs/skills.md) for the complete guide.
 
 ## Development
 

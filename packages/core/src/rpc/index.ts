@@ -10,4 +10,5 @@ export {
   type WorktreeRpcManager,
   type ContextRpcManager,
   type BrowserRpcManager,
+  type SkillRpcManager,
 } from './handler.js';

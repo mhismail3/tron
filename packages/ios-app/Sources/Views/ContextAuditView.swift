@@ -6,6 +6,10 @@ import SwiftUI
 struct ContextAuditView: View {
     let rpcClient: RPCClient
     let sessionId: String
+    var skillStore: SkillStore?
+    /// Skills explicitly added to this session's context (via @mention or skill sheet)
+    /// These are tracked by the parent view and passed in
+    var addedSkills: [Skill] = []
 
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject var eventStoreManager: EventStoreManager
@@ -25,8 +29,6 @@ struct ContextAuditView: View {
     var body: some View {
         NavigationStack {
             ZStack {
-                Color.tronSurface.ignoresSafeArea()
-
                 if isLoading {
                     ProgressView()
                         .tint(.tronEmerald)
@@ -166,12 +168,30 @@ struct ContextAuditView: View {
                         TokenBreakdownHeader()
                             .padding(.horizontal)
 
-                        // System Prompt + Tools (combined expandable section)
+                        // System Prompt + Tools + Skill References (combined expandable section)
                         SystemAndToolsSection(
                             systemPromptTokens: snapshot.breakdown.systemPrompt,
                             toolsTokens: snapshot.breakdown.tools,
                             systemPromptContent: snapshot.systemPromptContent,
-                            toolsContent: snapshot.toolsContent
+                            toolsContent: snapshot.toolsContent,
+                            allSkills: skillStore?.skills ?? []
+                        )
+                        .padding(.horizontal)
+
+                        // Added Skills section (explicitly added via @skillname or skill sheet, deletable)
+                        // These are skills the user explicitly added to the conversation context
+                        AddedSkillsSection(
+                            skills: skillStore?.regularSkills ?? [],
+                            onDelete: { skillName in
+                                // TODO: Implement skill removal from context
+                                // This would call an RPC to remove the skill from the session context
+                            },
+                            onFetchContent: { skillName in
+                                // Fetch full SKILL.md content from server
+                                guard let store = skillStore else { return nil }
+                                let metadata = await store.getSkill(name: skillName, sessionId: sessionId)
+                                return metadata?.content
+                            }
                         )
                         .padding(.horizontal)
 
@@ -326,7 +346,7 @@ struct TotalSessionTokensView: View {
                     .background {
                         RoundedRectangle(cornerRadius: 8, style: .continuous)
                             .fill(.clear)
-                            .glassEffect(.regular.tint(Color.tronCyan.opacity(0.15)), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                            .glassEffect(.regular.tint(Color.tronCyan.opacity(0.3)), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
                     }
 
                     // Output tokens
@@ -348,7 +368,7 @@ struct TotalSessionTokensView: View {
                     .background {
                         RoundedRectangle(cornerRadius: 8, style: .continuous)
                             .fill(.clear)
-                            .glassEffect(.regular.tint(Color.tronEmerald.opacity(0.15)), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                            .glassEffect(.regular.tint(Color.tronEmerald.opacity(0.3)), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
                     }
 
                     // Cache read tokens
@@ -370,7 +390,7 @@ struct TotalSessionTokensView: View {
                     .background {
                         RoundedRectangle(cornerRadius: 8, style: .continuous)
                             .fill(.clear)
-                            .glassEffect(.regular.tint(Color.tronPurple.opacity(0.15)), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                            .glassEffect(.regular.tint(Color.tronPurple.opacity(0.3)), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
                     }
                 }
 
@@ -384,7 +404,7 @@ struct TotalSessionTokensView: View {
             .background {
                 RoundedRectangle(cornerRadius: 12, style: .continuous)
                     .fill(.clear)
-                    .glassEffect(.regular.tint(Color.tronPhthaloGreen.opacity(0.15)), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .glassEffect(.regular.tint(Color.tronPhthaloGreen.opacity(0.35)), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
             }
         }
     }
@@ -487,7 +507,7 @@ struct ContextUsageGaugeView: View {
             .background {
                 RoundedRectangle(cornerRadius: 12, style: .continuous)
                     .fill(.clear)
-                    .glassEffect(.regular.tint(usageColor.opacity(0.12)), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .glassEffect(.regular.tint(usageColor.opacity(0.3)), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
             }
         }
     }
@@ -514,10 +534,13 @@ struct SystemAndToolsSection: View {
     let toolsTokens: Int
     let systemPromptContent: String
     let toolsContent: [String]
+    /// All available skills (shown as Skill References - frontmatter only, NOT removable)
+    var allSkills: [Skill] = []
 
     @State private var isExpanded = false
     @State private var showingSystemPrompt = false
     @State private var showingTools = false
+    @State private var showingSkillRefs = false
 
     private var totalTokens: Int {
         systemPromptTokens + toolsTokens
@@ -543,7 +566,7 @@ struct SystemAndToolsSection: View {
                         .font(.system(size: 14))
                         .foregroundStyle(.tronPurple)
 
-                    Text("System & Tools")
+                    Text("System, Tools & Skills")
                         .font(.system(size: 14, weight: .medium, design: .monospaced))
                         .foregroundStyle(.tronPurple)
 
@@ -566,7 +589,7 @@ struct SystemAndToolsSection: View {
                 if !isExpanded {
                     RoundedRectangle(cornerRadius: 12, style: .continuous)
                         .fill(.clear)
-                        .glassEffect(.regular.tint(Color.tronPurple.opacity(0.12)), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        .glassEffect(.regular.tint(Color.tronPurple.opacity(0.3)), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
                 }
             }
 
@@ -592,6 +615,14 @@ struct SystemAndToolsSection: View {
                         content: toolsContent.joined(separator: "\n"),
                         isExpanded: $showingTools
                     )
+
+                    // Skill References - frontmatter only, not removable
+                    if !allSkills.isEmpty {
+                        SkillReferencesSection(
+                            skills: allSkills,
+                            isExpanded: $showingSkillRefs
+                        )
+                    }
                 }
                 .padding(12)
                 .transition(.opacity.combined(with: .scale(scale: 0.95, anchor: .top)))
@@ -601,7 +632,7 @@ struct SystemAndToolsSection: View {
             if isExpanded {
                 RoundedRectangle(cornerRadius: 12, style: .continuous)
                     .fill(.clear)
-                    .glassEffect(.regular.tint(Color.tronPurple.opacity(0.12)), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .glassEffect(.regular.tint(Color.tronPurple.opacity(0.3)), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
             }
         }
         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
@@ -674,9 +705,328 @@ struct ExpandableContentSection: View {
         .background {
             RoundedRectangle(cornerRadius: 8, style: .continuous)
                 .fill(.clear)
-                .glassEffect(.regular.tint(iconColor.opacity(0.08)), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                .glassEffect(.regular.tint(iconColor.opacity(0.25)), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
         }
         .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+    }
+}
+
+// MARK: - Skill References Section (frontmatter only, not removable)
+
+@available(iOS 26.0, *)
+struct SkillReferencesSection: View {
+    let skills: [Skill]
+    @Binding var isExpanded: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            // Header
+            Button(action: {
+                withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
+                    isExpanded.toggle()
+                }
+            }) {
+                HStack {
+                    Image(systemName: "sparkles")
+                        .font(.system(size: 12))
+                        .foregroundStyle(Color.tronCyan.opacity(0.8))
+                    Text("Skill References (\(skills.count))")
+                        .font(.system(size: 12, weight: .medium, design: .monospaced))
+                        .foregroundStyle(.white.opacity(0.7))
+                    Spacer()
+                    Image(systemName: "chevron.down")
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundStyle(.white.opacity(0.4))
+                        .rotationEffect(.degrees(isExpanded ? -180 : 0))
+                }
+                .padding(10)
+                .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+            }
+            .buttonStyle(.plain)
+
+            // Content - list of skill references (frontmatter only)
+            if isExpanded {
+                VStack(alignment: .leading, spacing: 6) {
+                    ForEach(skills) { skill in
+                        SkillReferenceRow(skill: skill)
+                    }
+                }
+                .padding(.horizontal, 10)
+                .padding(.bottom, 10)
+                .transition(.opacity.combined(with: .scale(scale: 0.95, anchor: .top)))
+            }
+        }
+        .background {
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(.clear)
+                .glassEffect(.regular.tint(Color.tronCyan.opacity(0.25)), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+    }
+}
+
+// MARK: - Skill Reference Row (lightweight, no delete option)
+
+@available(iOS 26.0, *)
+struct SkillReferenceRow: View {
+    let skill: Skill
+
+    @State private var isExpanded = false
+
+    private var sourceIcon: String {
+        skill.source == .project ? "folder.fill" : "globe"
+    }
+
+    private var sourceColor: Color {
+        skill.source == .project ? .tronEmerald : .tronPurple
+    }
+
+    private var autoInjectBadge: String? {
+        skill.autoInject ? "auto" : nil
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            // Header row
+            Button(action: {
+                withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
+                    isExpanded.toggle()
+                }
+            }) {
+                HStack(spacing: 8) {
+                    Image(systemName: sourceIcon)
+                        .font(.system(size: 10))
+                        .foregroundStyle(sourceColor)
+
+                    Text("@\(skill.name)")
+                        .font(.system(size: 11, weight: .medium, design: .monospaced))
+                        .foregroundStyle(.tronCyan)
+
+                    Spacer()
+
+                    // Auto-inject badge if applicable
+                    if let badge = autoInjectBadge {
+                        Text(badge)
+                            .font(.system(size: 8, weight: .medium, design: .monospaced))
+                            .foregroundStyle(.tronAmber)
+                            .padding(.horizontal, 4)
+                            .padding(.vertical, 2)
+                            .background {
+                                Capsule()
+                                    .fill(Color.tronAmber.opacity(0.2))
+                            }
+                    }
+
+                    // Tags if any
+                    if let tags = skill.tags, !tags.isEmpty {
+                        Text(tags.prefix(2).joined(separator: ", "))
+                            .font(.system(size: 9, design: .monospaced))
+                            .foregroundStyle(.white.opacity(0.4))
+                            .lineLimit(1)
+                    }
+
+                    Image(systemName: "chevron.down")
+                        .font(.system(size: 8, weight: .medium))
+                        .foregroundStyle(.white.opacity(0.3))
+                        .rotationEffect(.degrees(isExpanded ? -180 : 0))
+                }
+                .padding(8)
+                .contentShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+            }
+            .buttonStyle(.plain)
+
+            // Expanded description (just description, not full content)
+            if isExpanded {
+                Text(skill.description)
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundStyle(.white.opacity(0.6))
+                    .padding(.horizontal, 8)
+                    .padding(.bottom, 8)
+                    .transition(.opacity.combined(with: .scale(scale: 0.95, anchor: .top)))
+            }
+        }
+        .background {
+            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                .fill(.clear)
+                .glassEffect(.regular.tint(sourceColor.opacity(0.2)), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+        // No context menu - skill references are not removable
+    }
+}
+
+// MARK: - Added Skill Row (shows full SKILL.md content, deletable)
+
+@available(iOS 26.0, *)
+struct AddedSkillRow: View {
+    let skill: Skill
+    var onDelete: (() -> Void)?
+    var onFetchContent: ((String) async -> String?)?
+
+    @State private var isExpanded = false
+    @State private var fullContent: String?
+    @State private var isLoadingContent = false
+
+    private var sourceIcon: String {
+        skill.source == .project ? "folder.fill" : "globe"
+    }
+
+    private var sourceColor: Color {
+        skill.source == .project ? .tronEmerald : .tronPurple
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            // Header row
+            Button(action: {
+                withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
+                    isExpanded.toggle()
+                }
+                // Fetch content on first expand
+                if isExpanded && fullContent == nil && !isLoadingContent {
+                    Task {
+                        await fetchContent()
+                    }
+                }
+            }) {
+                HStack(spacing: 8) {
+                    Image(systemName: sourceIcon)
+                        .font(.system(size: 10))
+                        .foregroundStyle(sourceColor)
+
+                    Text("@\(skill.name)")
+                        .font(.system(size: 11, weight: .medium, design: .monospaced))
+                        .foregroundStyle(.tronCyan)
+
+                    Spacer()
+
+                    // Tags if any
+                    if let tags = skill.tags, !tags.isEmpty {
+                        Text(tags.prefix(2).joined(separator: ", "))
+                            .font(.system(size: 9, design: .monospaced))
+                            .foregroundStyle(.white.opacity(0.4))
+                            .lineLimit(1)
+                    }
+
+                    Image(systemName: "chevron.down")
+                        .font(.system(size: 8, weight: .medium))
+                        .foregroundStyle(.white.opacity(0.3))
+                        .rotationEffect(.degrees(isExpanded ? -180 : 0))
+                }
+                .padding(8)
+                .contentShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+            }
+            .buttonStyle(.plain)
+
+            // Expanded full content (scrollable SKILL.md)
+            if isExpanded {
+                VStack(alignment: .leading, spacing: 8) {
+                    // Description header
+                    Text(skill.description)
+                        .font(.system(size: 10, weight: .medium, design: .monospaced))
+                        .foregroundStyle(.white.opacity(0.7))
+                        .padding(.horizontal, 8)
+                        .padding(.top, 4)
+
+                    // Full SKILL.md content
+                    if isLoadingContent {
+                        HStack {
+                            ProgressView()
+                                .scaleEffect(0.7)
+                                .tint(.tronCyan)
+                            Text("Loading content...")
+                                .font(.system(size: 10, design: .monospaced))
+                                .foregroundStyle(.white.opacity(0.4))
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding(12)
+                    } else if let content = fullContent {
+                        ScrollView {
+                            Text(content)
+                                .font(.system(size: 10, design: .monospaced))
+                                .foregroundStyle(.white.opacity(0.6))
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(10)
+                                .textSelection(.enabled)
+                        }
+                        .frame(maxHeight: 300)
+                        .background(Color.black.opacity(0.2))
+                        .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+                        .padding(.horizontal, 8)
+                    } else {
+                        Text("Content not available")
+                            .font(.system(size: 10, design: .monospaced))
+                            .foregroundStyle(.white.opacity(0.4))
+                            .padding(8)
+                    }
+                }
+                .padding(.bottom, 8)
+                .transition(.opacity.combined(with: .scale(scale: 0.95, anchor: .top)))
+            }
+        }
+        .background {
+            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                .fill(.clear)
+                .glassEffect(.regular.tint(sourceColor.opacity(0.2)), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+        .contextMenu {
+            if onDelete != nil {
+                Button(role: .destructive) {
+                    onDelete?()
+                } label: {
+                    Label("Remove from Context", systemImage: "trash")
+                }
+            }
+        }
+    }
+
+    private func fetchContent() async {
+        isLoadingContent = true
+        if let fetch = onFetchContent {
+            fullContent = await fetch(skill.name)
+        }
+        isLoadingContent = false
+    }
+}
+
+// MARK: - Added Skills Section (explicitly added skills with full content, deletable)
+
+@available(iOS 26.0, *)
+struct AddedSkillsSection: View {
+    let skills: [Skill]
+    var onDelete: ((String) -> Void)?
+    var onFetchContent: ((String) async -> String?)?
+
+    var body: some View {
+        // Only show if there are added skills
+        if !skills.isEmpty {
+            VStack(alignment: .leading, spacing: 12) {
+                // Section header
+                HStack {
+                    Text("Added Skills (\(skills.count))")
+                        .font(.system(size: 12, weight: .medium, design: .monospaced))
+                        .foregroundStyle(.white.opacity(0.6))
+
+                    Spacer()
+
+                    Text("tap to expand")
+                        .font(.system(size: 9, design: .monospaced))
+                        .foregroundStyle(.white.opacity(0.3))
+                }
+
+                // Skills list
+                VStack(spacing: 4) {
+                    ForEach(skills) { skill in
+                        AddedSkillRow(
+                            skill: skill,
+                            onDelete: { onDelete?(skill.name) },
+                            onFetchContent: onFetchContent
+                        )
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -713,7 +1063,7 @@ struct DetailedMessagesSection: View {
                 .background {
                     RoundedRectangle(cornerRadius: 12, style: .continuous)
                         .fill(.clear)
-                        .glassEffect(.regular.tint(Color.tronPhthaloGreen.opacity(0.12)), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        .glassEffect(.regular.tint(Color.tronPhthaloGreen.opacity(0.35)), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
                 }
             } else {
                 VStack(spacing: 4) {
@@ -858,7 +1208,7 @@ struct DetailedMessageRow: View {
                             .background {
                                 RoundedRectangle(cornerRadius: 6, style: .continuous)
                                     .fill(.clear)
-                                    .glassEffect(.regular.tint(Color.tronAmber.opacity(0.08)), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+                                    .glassEffect(.regular.tint(Color.tronAmber.opacity(0.25)), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
                             }
                         }
                     }
@@ -886,7 +1236,7 @@ struct DetailedMessageRow: View {
         .background {
             RoundedRectangle(cornerRadius: 10, style: .continuous)
                 .fill(.clear)
-                .glassEffect(.regular.tint(iconColor.opacity(0.1)), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                .glassEffect(.regular.tint(iconColor.opacity(0.25)), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
         }
         .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
         .contextMenu {

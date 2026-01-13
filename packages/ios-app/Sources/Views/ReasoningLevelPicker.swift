@@ -139,7 +139,7 @@ struct ReasoningLevelPillLabel: View {
             if includeGlassEffect {
                 Capsule()
                     .fill(.clear)
-                    .glassEffect(.regular.tint(levelColor.opacity(0.4)), in: .capsule)
+                    .glassEffect(.regular.tint(levelColor.opacity(0.35)), in: .capsule)
             }
         }
         .contentShape(Capsule())

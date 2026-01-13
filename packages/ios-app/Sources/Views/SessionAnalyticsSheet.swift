@@ -59,7 +59,6 @@ struct SessionAnalyticsSheet: View {
                     }
                 }
             }
-            .background(Color.tronSurface)
             .navigationBarTitleDisplayMode(.inline)
             .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
             .toolbar {

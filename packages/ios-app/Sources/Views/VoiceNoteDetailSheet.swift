@@ -27,7 +27,7 @@ struct VoiceNoteDetailSheet: View {
                     }
                     .padding()
                     .glassEffect(
-                        .regular.tint(Color.tronPhthaloGreen.opacity(0.1)),
+                        .regular.tint(Color.tronPhthaloGreen.opacity(0.35)),
                         in: RoundedRectangle(cornerRadius: 12, style: .continuous)
                     )
 
@@ -39,7 +39,6 @@ struct VoiceNoteDetailSheet: View {
                 }
                 .padding()
             }
-            .background(Color.tronSurface)
             .navigationBarTitleDisplayMode(.inline)
             .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
             .toolbar {

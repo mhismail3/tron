@@ -82,6 +82,12 @@
 		VOICE001000000009A0000001 /* VoiceNotesRecordingSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = VOICE00100000000AA0000001 /* VoiceNotesRecordingSheet.swift */; };
 		VOICE00100000000BA0000001 /* VoiceNotesRecorder.swift in Sources */ = {isa = PBXBuildFile; fileRef = VOICE00100000000CA0000001 /* VoiceNotesRecorder.swift */; };
 		AUDIO00100000000DA0000001 /* AudioAvailabilityMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = AUDIO00100000000EA0000001 /* AudioAvailabilityMonitor.swift */; };
+		SKILL00100000000100000001 /* Skill.swift in Sources */ = {isa = PBXBuildFile; fileRef = SKILL00100000000200000001 /* Skill.swift */; };
+		SKILL00100000000300000001 /* SkillStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = SKILL00100000000400000001 /* SkillStore.swift */; };
+		SKILL00100000000700000001 /* SkillStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = SKILL00100000000800000001 /* SkillStoreTests.swift */; };
+		SKILL00100000000900000001 /* SkillChip.swift in Sources */ = {isa = PBXBuildFile; fileRef = SKILL00100000001000000001 /* SkillChip.swift */; };
+		SKILL00100000001100000001 /* SkillMentionPopup.swift in Sources */ = {isa = PBXBuildFile; fileRef = SKILL00100000001200000001 /* SkillMentionPopup.swift */; };
+		SKILL00100000001300000001 /* SkillDetailSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = SKILL00100000001400000001 /* SkillDetailSheet.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -173,6 +179,12 @@
 		VOICE00100000000AA0000001 /* VoiceNotesRecordingSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceNotesRecordingSheet.swift; sourceTree = "<group>"; };
 		VOICE00100000000CA0000001 /* VoiceNotesRecorder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceNotesRecorder.swift; sourceTree = "<group>"; };
 		AUDIO00100000000EA0000001 /* AudioAvailabilityMonitor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioAvailabilityMonitor.swift; sourceTree = "<group>"; };
+		SKILL00100000000200000001 /* Skill.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Skill.swift; sourceTree = "<group>"; };
+		SKILL00100000000400000001 /* SkillStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SkillStore.swift; sourceTree = "<group>"; };
+		SKILL00100000000800000001 /* SkillStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SkillStoreTests.swift; sourceTree = "<group>"; };
+		SKILL00100000001000000001 /* SkillChip.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SkillChip.swift; sourceTree = "<group>"; };
+		SKILL00100000001200000001 /* SkillMentionPopup.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SkillMentionPopup.swift; sourceTree = "<group>"; };
+		SKILL00100000001400000001 /* SkillDetailSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SkillDetailSheet.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXGroup section */
@@ -184,6 +196,7 @@
 				FOLDER00100000004A00000001 /* FolderCreationTests.swift */,
 				IMGCMP0010000000100000001 /* ImageCompressorTests.swift */,
 				7A113B9D98B4711E36919F2A /* RecentSessionsTests.swift */,
+				SKILL00100000000800000001 /* SkillStoreTests.swift */,
 				0123F7482F532CD8FBA61F0E /* UnifiedEventTransformerTests.swift */,
 			);
 			path = Tests;
@@ -229,6 +242,7 @@
 				E5C3B6B3DA1A77E2A09976D5 /* InputHistoryStore.swift */,
 				F1C2A3B4D5E6F708192A3B4C /* AudioRecorder.swift */,
 				B9DD45A3974192F927E1B73A /* RPCClient.swift */,
+				SKILL00100000000400000001 /* SkillStore.swift */,
 				18C18EEFAB81D6052EB39694 /* TronLogger.swift */,
 				VOICE00100000000CA0000001 /* VoiceNotesRecorder.swift */,
 				AUDIO00100000000EA0000001 /* AudioAvailabilityMonitor.swift */,
@@ -290,6 +304,9 @@
 				9EC65CD838F5540EC3B1AA02 /* SessionTreeView.swift */,
 				42E47B6EAD030227C54F0028 /* SettingsView.swift */,
 				VOICE001000000004A0000001 /* SineWaveView.swift */,
+				SKILL00100000001000000001 /* SkillChip.swift */,
+				SKILL00100000001200000001 /* SkillMentionPopup.swift */,
+				SKILL00100000001400000001 /* SkillDetailSheet.swift */,
 				69203645DAFCA91156124C1F /* ToolResultViewers.swift */,
 				VOICE001000000006A0000001 /* VoiceNoteDetailSheet.swift */,
 				VOICE001000000008A0000001 /* VoiceNotesListView.swift */,
@@ -349,6 +366,7 @@
 				4C46C2D9874A2C1C807D43A0 /* EventTypeRegistry.swift */,
 				67E30FC4A871038322F79EB0 /* Message.swift */,
 				B082B6CE011A17ED14F3393B /* RPCTypes.swift */,
+				SKILL00100000000200000001 /* Skill.swift */,
 				D8570EA3731FBC504D7AB252 /* UnifiedEventTransformer.swift */,
 				5968571F13D0263D95DDF1E3 /* Payloads */,
 			);
@@ -496,6 +514,11 @@
 				B4AEC8956304E794BC187E01 /* ModelSwitcher.swift in Sources */,
 				A3BCE182EB003CB62D1D96E6 /* RPCClient.swift in Sources */,
 				0186B0083110F291EA235935 /* RPCTypes.swift in Sources */,
+				SKILL00100000000100000001 /* Skill.swift in Sources */,
+				SKILL00100000000300000001 /* SkillStore.swift in Sources */,
+				SKILL00100000000900000001 /* SkillChip.swift in Sources */,
+				SKILL00100000001100000001 /* SkillMentionPopup.swift in Sources */,
+				SKILL00100000001300000001 /* SkillDetailSheet.swift in Sources */,
 				136A2E352353C637D95DB9B2 /* SessionAnalyticsSheet.swift in Sources */,
 				1401327824254E4B259C40C7 /* SessionPayloads.swift in Sources */,
 				834644A22FBBDC1872C1DE2A /* SessionSidebar.swift in Sources */,
@@ -536,6 +559,7 @@
 				FOLDER00100000003A00000001 /* FolderCreationTests.swift in Sources */,
 				IMGCMP0010000000200000001 /* ImageCompressorTests.swift in Sources */,
 				A30DB8557BB5D3E5CFD61ADD /* RecentSessionsTests.swift in Sources */,
+				SKILL00100000000700000001 /* SkillStoreTests.swift in Sources */,
 				814753F04077C3B98C1BF843 /* UnifiedEventTransformerTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

@@ -89,6 +89,12 @@ import type {
   BrowserStopStreamResult,
   BrowserGetStatusParams,
   BrowserGetStatusResult,
+  SkillListParams,
+  SkillListResult,
+  SkillGetParams,
+  SkillGetResult,
+  SkillRefreshParams,
+  SkillRefreshResult,
 } from './types.js';
 import { getNotesDir } from '../settings/loader.js';
 import { ANTHROPIC_MODELS, OPENAI_CODEX_MODELS } from '../providers/models.js';
@@ -116,6 +122,8 @@ export interface RpcContext {
   contextManager?: ContextRpcManager;
   /** Browser manager for browser automation (optional) */
   browserManager?: BrowserRpcManager;
+  /** Skill manager for skill operations (optional) */
+  skillManager?: SkillRpcManager;
 }
 
 /**
@@ -228,6 +236,15 @@ export interface BrowserRpcManager {
   startStream(params: BrowserStartStreamParams): Promise<BrowserStartStreamResult>;
   stopStream(params: BrowserStopStreamParams): Promise<BrowserStopStreamResult>;
   getStatus(params: BrowserGetStatusParams): Promise<BrowserGetStatusResult>;
+}
+
+/**
+ * Skill manager interface for RPC operations
+ */
+export interface SkillRpcManager {
+  listSkills(params: SkillListParams): Promise<SkillListResult>;
+  getSkill(params: SkillGetParams): Promise<SkillGetResult>;
+  refreshSkills(params: SkillRefreshParams): Promise<SkillRefreshResult>;
 }
 
 // =============================================================================
@@ -449,6 +466,14 @@ export class RpcHandler extends EventEmitter {
           return this.handleBrowserStopStream(request);
         case 'browser.getStatus':
           return this.handleBrowserGetStatus(request);
+
+        // Skill methods
+        case 'skill.list':
+          return this.handleSkillList(request);
+        case 'skill.get':
+          return this.handleSkillGet(request);
+        case 'skill.refresh':
+          return this.handleSkillRefresh(request);
 
         default:
           return this.errorResponse(request.id, 'METHOD_NOT_FOUND', `Unknown method: ${request.method}`);
@@ -1769,6 +1794,62 @@ ${transcribeResult.text}
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Failed to get browser status';
       return this.errorResponse(request.id, 'BROWSER_ERROR', message);
+    }
+  }
+
+  // ===========================================================================
+  // Skill Handlers
+  // ===========================================================================
+
+  private async handleSkillList(request: RpcRequest): Promise<RpcResponse> {
+    if (!this.context.skillManager) {
+      return this.errorResponse(request.id, 'NOT_SUPPORTED', 'Skill manager not available');
+    }
+
+    const params = (request.params || {}) as SkillListParams;
+
+    try {
+      const result = await this.context.skillManager.listSkills(params);
+      return this.successResponse(request.id, result);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to list skills';
+      return this.errorResponse(request.id, 'SKILL_ERROR', message);
+    }
+  }
+
+  private async handleSkillGet(request: RpcRequest): Promise<RpcResponse> {
+    if (!this.context.skillManager) {
+      return this.errorResponse(request.id, 'NOT_SUPPORTED', 'Skill manager not available');
+    }
+
+    const params = request.params as SkillGetParams | undefined;
+
+    if (!params?.name) {
+      return this.errorResponse(request.id, 'INVALID_PARAMS', 'name is required');
+    }
+
+    try {
+      const result = await this.context.skillManager.getSkill(params);
+      return this.successResponse(request.id, result);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to get skill';
+      return this.errorResponse(request.id, 'SKILL_ERROR', message);
+    }
+  }
+
+  private async handleSkillRefresh(request: RpcRequest): Promise<RpcResponse> {
+    if (!this.context.skillManager) {
+      return this.errorResponse(request.id, 'NOT_SUPPORTED', 'Skill manager not available');
+    }
+
+    const params = (request.params || {}) as SkillRefreshParams;
+
+    try {
+      const result = await this.context.skillManager.refreshSkills(params);
+      return this.successResponse(request.id, result);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to refresh skills';
+      return this.errorResponse(request.id, 'SKILL_ERROR', message);
     }
   }
 

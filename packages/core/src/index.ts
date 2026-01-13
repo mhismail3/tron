@@ -55,6 +55,9 @@ export * from './tmux/index.js';
 // Re-export context loading
 export * from './context/index.js';
 
+// Re-export skills
+export * from './skills/index.js';
+
 // Re-export events (Event Sourcing system)
 export * from './events/index.js';
 

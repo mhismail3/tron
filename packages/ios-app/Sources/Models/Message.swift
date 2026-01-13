@@ -54,6 +54,8 @@ struct ChatMessage: Identifiable, Equatable {
     var incrementalTokens: TokenUsage?
     /// Files attached to this message (unified model - images, PDFs, documents)
     var attachments: [Attachment]?
+    /// Skills referenced in this message (rendered as chips above the message)
+    var skills: [Skill]?
 
     // MARK: - Enriched Metadata (Phase 1)
     // These fields come from server-side event store enhancements
@@ -85,6 +87,7 @@ struct ChatMessage: Identifiable, Equatable {
         tokenUsage: TokenUsage? = nil,
         incrementalTokens: TokenUsage? = nil,
         attachments: [Attachment]? = nil,
+        skills: [Skill]? = nil,
         model: String? = nil,
         latencyMs: Int? = nil,
         turnNumber: Int? = nil,
@@ -100,6 +103,7 @@ struct ChatMessage: Identifiable, Equatable {
         self.tokenUsage = tokenUsage
         self.incrementalTokens = incrementalTokens
         self.attachments = attachments
+        self.skills = skills
         self.model = model
         self.latencyMs = latencyMs
         self.turnNumber = turnNumber
@@ -364,9 +368,9 @@ struct ImageContent: Equatable, Identifiable {
 // MARK: - Message Extensions
 
 extension ChatMessage {
-    /// Create a user message with optional attachments
-    static func user(_ text: String, attachments: [Attachment]? = nil) -> ChatMessage {
-        ChatMessage(role: .user, content: .text(text), attachments: attachments)
+    /// Create a user message with optional attachments and skills
+    static func user(_ text: String, attachments: [Attachment]? = nil, skills: [Skill]? = nil) -> ChatMessage {
+        ChatMessage(role: .user, content: .text(text), attachments: attachments, skills: skills)
     }
 
     static func assistant(_ text: String) -> ChatMessage {

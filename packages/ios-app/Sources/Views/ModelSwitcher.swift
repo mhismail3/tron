@@ -24,7 +24,7 @@ struct ModelPillLabel: View {
             if includeGlassEffect {
                 Capsule()
                     .fill(.clear)
-                    .glassEffect(.regular.tint(Color.tronPhthaloGreen.opacity(0.4)), in: .capsule)
+                    .glassEffect(.regular.tint(Color.tronPhthaloGreen.opacity(0.35)), in: .capsule)
             }
         }
         .contentShape(Capsule())
@@ -99,7 +99,7 @@ struct ModelPickerMenu: View {
             .background {
                 Capsule()
                     .fill(.clear)
-                    .glassEffect(.regular.tint(Color.tronPhthaloGreen.opacity(0.4)), in: .capsule)
+                    .glassEffect(.regular.tint(Color.tronPhthaloGreen.opacity(0.35)), in: .capsule)
             }
             .contentShape(Capsule())
         }

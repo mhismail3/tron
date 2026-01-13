@@ -120,9 +120,10 @@ export type RpcMethod =
   | 'memory.search'
   | 'memory.addEntry'
   | 'memory.getHandoffs'
-  // Skill execution
-  | 'skill.execute'
+  // Skill operations
   | 'skill.list'
+  | 'skill.get'
+  | 'skill.refresh'
   // Filesystem operations
   | 'filesystem.listDir'
   | 'filesystem.getHome'
@@ -463,32 +464,81 @@ export interface MemoryGetHandoffsResult {
 // Skill Methods
 // =============================================================================
 
-/** Execute skill */
-export interface SkillExecuteParams {
-  sessionId: string;
-  skillName: string;
-  arguments?: Record<string, unknown>;
+/**
+ * Skill info returned in list operations
+ */
+export interface RpcSkillInfo {
+  /** Skill name (folder name, used as @reference) */
+  name: string;
+  /** Short description (first non-header line of SKILL.md) */
+  description: string;
+  /** Where the skill was loaded from */
+  source: 'global' | 'project';
+  /** Whether this skill auto-injects into every prompt (Rules) */
+  autoInject: boolean;
+  /** Tags for categorization */
+  tags?: string[];
 }
 
-export interface SkillExecuteResult {
-  success: boolean;
-  output?: string;
-  error?: string;
+/**
+ * Full skill metadata with content
+ */
+export interface RpcSkillMetadata extends RpcSkillInfo {
+  /** Full SKILL.md content (after frontmatter stripped) */
+  content: string;
+  /** Absolute path to skill folder */
+  path: string;
+  /** List of additional files in the skill folder */
+  additionalFiles: string[];
 }
 
 /** List available skills */
-export interface SkillListParams {}
+export interface SkillListParams {
+  /** Session ID to get working directory for project skills */
+  sessionId?: string;
+  /** Filter by source (global, project) */
+  source?: 'global' | 'project';
+  /** Filter for auto-inject skills only */
+  autoInjectOnly?: boolean;
+  /** Include full content in results */
+  includeContent?: boolean;
+}
 
 export interface SkillListResult {
-  skills: Array<{
-    name: string;
-    description: string;
-    arguments?: Array<{
-      name: string;
-      description: string;
-      required: boolean;
-    }>;
-  }>;
+  /** List of skills (with or without content based on includeContent param) */
+  skills: RpcSkillInfo[] | RpcSkillMetadata[];
+  /** Total number of skills */
+  totalCount: number;
+  /** Number of auto-inject skills (Rules) */
+  autoInjectCount: number;
+}
+
+/** Get a single skill by name */
+export interface SkillGetParams {
+  /** Session ID to get working directory for project skills */
+  sessionId?: string;
+  /** Skill name */
+  name: string;
+}
+
+export interface SkillGetResult {
+  /** Skill metadata with full content */
+  skill: RpcSkillMetadata | null;
+  /** Whether the skill was found */
+  found: boolean;
+}
+
+/** Refresh skills cache */
+export interface SkillRefreshParams {
+  /** Session ID to get working directory for project skills */
+  sessionId?: string;
+}
+
+export interface SkillRefreshResult {
+  /** Whether the refresh was successful */
+  success: boolean;
+  /** Number of skills loaded after refresh */
+  skillCount: number;
 }
 
 // =============================================================================

@@ -39,6 +39,17 @@ struct InputBar: View {
     // Context manager action
     var onContextTap: (() -> Void)?
 
+    // Skills integration
+    var skillStore: SkillStore?
+    var onSkillSelect: ((Skill) -> Void)?
+
+    /// Selected skills to be sent with the message (rendered as chips)
+    @Binding var selectedSkills: [Skill]
+    /// Callback when a skill is removed from selection
+    var onSkillRemove: ((Skill) -> Void)?
+    /// Callback when skill detail sheet should be shown
+    var onSkillDetailTap: ((Skill) -> Void)?
+
     /// Binding to control focus (used to prevent keyboard after response)
     @Binding var shouldFocus: Bool
 
@@ -47,6 +58,8 @@ struct InputBar: View {
     @State private var showingImagePicker = false
     @State private var showCamera = false
     @State private var showFilePicker = false
+    @State private var showSkillMentionPopup = false
+    @State private var skillMentionQuery = ""
     @State private var isMicPulsing = false
     @State private var showMicButton = false
     @State private var showAttachmentButton = false
@@ -68,11 +81,31 @@ struct InputBar: View {
 
     var body: some View {
         VStack(spacing: 10) {
+            // Skill mention popup (appears above everything when typing @)
+            if showSkillMentionPopup, let store = skillStore {
+                SkillMentionPopup(
+                    skills: store.skills,
+                    query: skillMentionQuery,
+                    onSelect: { skill in
+                        selectSkillFromMention(skill)
+                    },
+                    onDismiss: {
+                        dismissSkillMentionPopup()
+                    }
+                )
+                .padding(.horizontal, 16)
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+
+            // Selected skills row (rendered as chips above attachments)
+            if !selectedSkills.isEmpty {
+                skillChipsRow
+            }
+
             // Unified attachments preview (new model)
             if !attachments.isEmpty {
                 attachmentsRow
             }
-
 
             // Status pills row - floating liquid glass elements
             if shouldShowStatusPills {
@@ -187,6 +220,10 @@ struct InputBar: View {
             } else if supportsReasoning != true && showReasoningPill {
                 hideReasoningPill()
             }
+        }
+        // Detect @ mentions for skill popup
+        .onChange(of: text) { _, newText in
+            detectSkillMention(in: newText)
         }
         // Camera picker sheet
         .sheet(isPresented: $showCamera) {
@@ -360,7 +397,7 @@ struct InputBar: View {
                     .background {
                         Capsule()
                             .fill(.clear)
-                            .glassEffect(.regular.tint(Color.tronPhthaloGreen.opacity(0.4)), in: .capsule)
+                            .glassEffect(.regular.tint(Color.tronPhthaloGreen.opacity(0.35)), in: .capsule)
                     }
                     .contentShape(Capsule())
                 }
@@ -397,7 +434,7 @@ struct InputBar: View {
                     .background {
                         Capsule()
                             .fill(.clear)
-                            .glassEffect(.regular.tint(reasoningLevelColor(reasoningLevel).opacity(0.4)), in: .capsule)
+                            .glassEffect(.regular.tint(reasoningLevelColor(reasoningLevel).opacity(0.35)), in: .capsule)
                     }
                     .contentShape(Capsule())
                 }
@@ -470,7 +507,7 @@ struct InputBar: View {
             .contentShape(Capsule())
         }
         .buttonStyle(.plain)
-        .glassEffect(.regular.tint(Color.tronPhthaloGreen.opacity(0.4)).interactive(), in: .capsule)
+        .glassEffect(.regular.tint(Color.tronPhthaloGreen.opacity(0.35)).interactive(), in: .capsule)
     }
 
     // MARK: - Unified Attachments Row
@@ -491,6 +528,11 @@ struct InputBar: View {
 
     // MARK: - Attachment Button (iOS 26 Liquid Glass)
 
+    /// Whether skills are available for selection
+    private var hasSkillsAvailable: Bool {
+        skillStore != nil && (skillStore?.totalCount ?? 0) > 0
+    }
+
     private var attachmentButtonGlass: some View {
         Menu {
             // iOS 26 fix: Use NotificationCenter to decouple button action from state mutation
@@ -505,17 +547,37 @@ struct InputBar: View {
             Button { NotificationCenter.default.post(name: .attachmentMenuAction, object: "files") } label: {
                 Label("Choose File", systemImage: "folder")
             }
-        } label: {
-            Image(systemName: "plus")
-                .font(.system(size: 14, weight: .semibold))
-                .foregroundStyle(isProcessing ? Color.tronEmerald.opacity(0.3) : Color.tronEmerald)
-                .frame(width: actionButtonSize, height: actionButtonSize)
-                .background {
-                    Circle()
-                        .fill(.clear)
-                        .glassEffect(.regular.tint(Color.tronPhthaloGreen.opacity(0.3)).interactive(), in: .circle)
+
+            // Skills section (only show if skillStore is configured)
+            if skillStore != nil {
+                Divider()
+
+                Button { NotificationCenter.default.post(name: .attachmentMenuAction, object: "skills") } label: {
+                    Label("Add Skill", systemImage: "sparkles")
                 }
-                .contentShape(Circle())
+            }
+        } label: {
+            ZStack(alignment: .topTrailing) {
+                Image(systemName: "plus")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(isProcessing ? Color.tronEmerald.opacity(0.3) : Color.tronEmerald)
+                    .frame(width: actionButtonSize, height: actionButtonSize)
+                    .background {
+                        Circle()
+                            .fill(.clear)
+                            .glassEffect(.regular.tint(Color.tronPhthaloGreen.opacity(0.35)).interactive(), in: .circle)
+                    }
+                    .contentShape(Circle())
+
+                // Skills available indicator - small sparkles badge
+                if hasSkillsAvailable && !isProcessing {
+                    Image(systemName: "sparkle")
+                        .font(.system(size: 8, weight: .bold))
+                        .foregroundStyle(.tronCyan)
+                        .offset(x: 2, y: -2)
+                        .transition(.scale.combined(with: .opacity))
+                }
+            }
         }
         .matchedGeometryEffect(id: "attachmentButtonMorph", in: attachmentButtonNamespace)
         .disabled(isProcessing)
@@ -526,6 +588,12 @@ struct InputBar: View {
             case "camera": showCamera = true
             case "photos": showingImagePicker = true
             case "files": showFilePicker = true
+            case "skills":
+                // Show the non-blocking skill mention popup instead of the old sheet
+                withAnimation(.tronStandard) {
+                    showSkillMentionPopup = true
+                    skillMentionQuery = "" // Start with empty query to show all skills
+                }
             default: break
             }
         }
@@ -563,7 +631,7 @@ struct InputBar: View {
             .padding(.trailing, textFieldTrailingPadding)
             .padding(.vertical, 10)
             .frame(minHeight: 40)
-            .glassEffect(.regular.tint(Color.tronPhthaloGreen.opacity(0.3)), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+            .glassEffect(.regular.tint(Color.tronPhthaloGreen.opacity(0.35)), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
             .lineLimit(1...8)
             .focused($isFocused)
             .disabled(isProcessing)
@@ -668,6 +736,96 @@ struct InputBar: View {
         }
     }
 
+    /// Insert a skill reference (@skillname) into the text field
+    private func insertSkillReference(_ skill: Skill) {
+        let reference = "@\(skill.name) "
+
+        // If text is empty or ends with space/newline, just append
+        if text.isEmpty || text.hasSuffix(" ") || text.hasSuffix("\n") {
+            text += reference
+        } else {
+            // Add a space before the reference
+            text += " " + reference
+        }
+
+        // Notify via callback if provided
+        onSkillSelect?(skill)
+    }
+
+    // MARK: - Skill Mention Detection
+
+    /// Detect @ mentions in the text and show/hide the popup accordingly
+    private func detectSkillMention(in newText: String) {
+        guard skillStore != nil else { return }
+
+        if let query = SkillMentionDetector.detectMention(in: newText) {
+            skillMentionQuery = query
+            if !showSkillMentionPopup {
+                withAnimation(.tronStandard) {
+                    showSkillMentionPopup = true
+                }
+            }
+        } else {
+            if showSkillMentionPopup {
+                withAnimation(.tronStandard) {
+                    showSkillMentionPopup = false
+                    skillMentionQuery = ""
+                }
+            }
+        }
+    }
+
+    /// Select a skill from the mention popup
+    private func selectSkillFromMention(_ skill: Skill) {
+        // Remove the @query from text and replace with just @skillname
+        if let atIndex = text.lastIndex(of: "@") {
+            let afterAt = String(text[text.index(after: atIndex)...])
+            // Check if this is the current mention (no space after it)
+            if !afterAt.contains(" ") && !afterAt.contains("\n") {
+                text = String(text[..<atIndex])
+            }
+        }
+
+        // Add skill to selected skills (avoid duplicates)
+        if !selectedSkills.contains(where: { $0.name == skill.name }) {
+            selectedSkills.append(skill)
+        }
+
+        // Dismiss popup
+        dismissSkillMentionPopup()
+
+        // Notify via callback
+        onSkillSelect?(skill)
+    }
+
+    /// Dismiss the skill mention popup
+    private func dismissSkillMentionPopup() {
+        withAnimation(.tronStandard) {
+            showSkillMentionPopup = false
+            skillMentionQuery = ""
+        }
+    }
+
+    /// Remove a skill from the selected skills
+    private func removeSelectedSkill(_ skill: Skill) {
+        selectedSkills.removeAll { $0.name == skill.name }
+        onSkillRemove?(skill)
+    }
+
+    // MARK: - Skill Chips Row
+
+    private var skillChipsRow: some View {
+        SkillChipRow(
+            skills: selectedSkills,
+            onRemove: { skill in
+                removeSelectedSkill(skill)
+            },
+            onTap: { skill in
+                onSkillDetailTap?(skill)
+            }
+        )
+    }
+
     // MARK: - Action Button
 
     private var actionButton: some View {
@@ -722,7 +880,7 @@ struct InputBar: View {
         }
         .matchedGeometryEffect(id: "actionButtonMorph", in: actionButtonNamespace)
         .glassEffect(
-            .regular.tint(canSend && !isProcessing ? Color.tronEmeraldDark : Color.tronPhthaloGreen.opacity(0.3)).interactive(),
+            .regular.tint(canSend && !isProcessing ? Color.tronEmeraldDark : Color.tronPhthaloGreen.opacity(0.35)).interactive(),
             in: .circle
         )
         .disabled(!isProcessing && !canSend)
@@ -838,7 +996,7 @@ struct InputBar: View {
         if shouldPulseMicTint {
             return Color.red.opacity(isMicPulsing ? 0.45 : 0.25)
         }
-        return Color.tronPhthaloGreen.opacity(0.3)
+        return Color.tronPhthaloGreen.opacity(0.35)
     }
 
     private func updateMicPulse(shouldPulse: Bool) {
@@ -1042,6 +1200,9 @@ struct InputBar: View {
             reasoningLevel: .constant("medium"),
             currentModelInfo: nil,
             onReasoningLevelChange: nil,
+            selectedSkills: .constant([]),
+            onSkillRemove: nil,
+            onSkillDetailTap: nil,
             shouldFocus: .constant(false)
         )
     }

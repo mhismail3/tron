@@ -4,7 +4,7 @@
  * Main entry point for the Tron WebSocket server.
  * Uses event-sourced session management via EventStoreOrchestrator.
  */
-import { createLogger, getSettings, resolveTronPath, getTronDataDir, type RpcContext, type EventStoreManager, type WorktreeRpcManager, type ContextRpcManager, type BrowserRpcManager } from '@tron/core';
+import { createLogger, getSettings, resolveTronPath, getTronDataDir, SkillRegistry, type RpcContext, type EventStoreManager, type WorktreeRpcManager, type ContextRpcManager, type BrowserRpcManager, type SkillRpcManager, type SkillListParams, type SkillListResult, type SkillGetParams, type SkillGetResult, type SkillRefreshParams, type SkillRefreshResult, type RpcSkillInfo, type RpcSkillMetadata } from '@tron/core';
 import { TronWebSocketServer, type WebSocketServerConfig } from './websocket.js';
 import { EventStoreOrchestrator, type EventStoreOrchestratorConfig } from './event-store-orchestrator.js';
 import { HealthServer, type HealthServerConfig } from './health.js';
@@ -451,6 +451,153 @@ function createBrowserManager(orchestrator: EventStoreOrchestrator): BrowserRpcM
   };
 }
 
+/**
+ * Creates a SkillRpcManager adapter
+ * Skills are loaded from:
+ * - Global: ~/.tron/skills/
+ * - Project: .tron/skills/ (relative to session working directory)
+ */
+function createSkillManager(orchestrator: EventStoreOrchestrator): SkillRpcManager {
+  // Map of working directory -> SkillRegistry
+  const registries = new Map<string, SkillRegistry>();
+
+  async function getOrCreateRegistry(workingDirectory: string): Promise<SkillRegistry> {
+    let registry = registries.get(workingDirectory);
+    if (!registry) {
+      registry = new SkillRegistry({ workingDirectory });
+      await registry.initialize();
+      registries.set(workingDirectory, registry);
+    }
+    return registry;
+  }
+
+  async function getWorkingDirectoryForSession(sessionId?: string): Promise<string | null> {
+    if (!sessionId) return null;
+    const session = await orchestrator.getSession(sessionId);
+    return session?.workingDirectory ?? null;
+  }
+
+  return {
+    async listSkills(params: SkillListParams): Promise<SkillListResult> {
+      const workingDir = await getWorkingDirectoryForSession(params.sessionId);
+      if (!workingDir) {
+        // No session - return global skills only from default registry
+        const registry = await getOrCreateRegistry(process.cwd());
+        const skills = params.includeContent
+          ? registry.listFull({ source: 'global', autoInjectOnly: params.autoInjectOnly })
+          : registry.list({ source: 'global', autoInjectOnly: params.autoInjectOnly });
+
+        // Helper to extract autoInject from either SkillInfo or SkillMetadata
+        const getAutoInject = (s: any): boolean =>
+          'frontmatter' in s ? (s.frontmatter?.autoInject ?? false) : (s.autoInject ?? false);
+        const getTags = (s: any): string[] | undefined =>
+          'frontmatter' in s ? s.frontmatter?.tags : s.tags;
+
+        const autoInjectCount = skills.filter(s => getAutoInject(s)).length;
+
+        return {
+          skills: skills.map(s => params.includeContent
+            ? {
+                name: s.name,
+                description: s.description,
+                source: s.source,
+                autoInject: getAutoInject(s),
+                tags: getTags(s),
+                content: (s as any).content,
+                path: (s as any).path,
+                additionalFiles: (s as any).additionalFiles,
+              } as RpcSkillMetadata
+            : {
+                name: s.name,
+                description: s.description,
+                source: s.source,
+                autoInject: getAutoInject(s),
+                tags: getTags(s),
+              } as RpcSkillInfo
+          ),
+          totalCount: skills.length,
+          autoInjectCount,
+        };
+      }
+
+      const registry = await getOrCreateRegistry(workingDir);
+      const skills = params.includeContent
+        ? registry.listFull({ source: params.source, autoInjectOnly: params.autoInjectOnly })
+        : registry.list({ source: params.source, autoInjectOnly: params.autoInjectOnly });
+
+      // Helper to extract autoInject from either SkillInfo or SkillMetadata
+      const getAutoInject = (s: any): boolean =>
+        'frontmatter' in s ? (s.frontmatter?.autoInject ?? false) : (s.autoInject ?? false);
+      const getTags = (s: any): string[] | undefined =>
+        'frontmatter' in s ? s.frontmatter?.tags : s.tags;
+
+      const autoInjectCount = registry.list({ autoInjectOnly: true }).length;
+
+      return {
+        skills: skills.map(s => params.includeContent
+          ? {
+              name: s.name,
+              description: s.description,
+              source: s.source,
+              autoInject: getAutoInject(s),
+              tags: getTags(s),
+              content: (s as any).content,
+              path: (s as any).path,
+              additionalFiles: (s as any).additionalFiles,
+            } as RpcSkillMetadata
+          : {
+              name: s.name,
+              description: s.description,
+              source: s.source,
+              autoInject: getAutoInject(s),
+              tags: getTags(s),
+            } as RpcSkillInfo
+        ),
+        totalCount: skills.length,
+        autoInjectCount,
+      };
+    },
+
+    async getSkill(params: SkillGetParams): Promise<SkillGetResult> {
+      const workingDir = await getWorkingDirectoryForSession(params.sessionId);
+      const registry = await getOrCreateRegistry(workingDir ?? process.cwd());
+
+      const skill = registry.get(params.name);
+      if (!skill) {
+        return { skill: null, found: false };
+      }
+
+      return {
+        skill: {
+          name: skill.name,
+          description: skill.description,
+          source: skill.source,
+          autoInject: skill.frontmatter.autoInject ?? false,
+          tags: skill.frontmatter.tags,
+          content: skill.content,
+          path: skill.path,
+          additionalFiles: skill.additionalFiles,
+        },
+        found: true,
+      };
+    },
+
+    async refreshSkills(params: SkillRefreshParams): Promise<SkillRefreshResult> {
+      const workingDir = await getWorkingDirectoryForSession(params.sessionId);
+      const effectiveDir = workingDir ?? process.cwd();
+
+      // Clear the cached registry and reinitialize
+      registries.delete(effectiveDir);
+      const registry = await getOrCreateRegistry(effectiveDir);
+
+      return {
+        success: true,
+        skillCount: registry.size,
+      };
+    },
+  };
+}
+
 // Helper functions for tree visualization
 function getDescendantCount(eventId: string, allEvents: any[]): number {
   const children = allEvents.filter(e => e.parentId === eventId);
@@ -567,6 +714,7 @@ export class TronServer {
       worktreeManager: createWorktreeManager(this.orchestrator),
       contextManager: createContextManager(this.orchestrator),
       browserManager: createBrowserManager(this.orchestrator),
+      skillManager: createSkillManager(this.orchestrator),
     };
 
     // Initialize WebSocket server

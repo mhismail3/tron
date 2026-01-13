@@ -11,6 +11,7 @@ class AppState: ObservableObject {
     @AppStorage("defaultModel") var defaultModel = "claude-opus-4-5-20251101"
 
     private var _rpcClient: RPCClient?
+    private var _skillStore: SkillStore?
 
     var rpcClient: RPCClient {
         if let client = _rpcClient {
@@ -19,6 +20,16 @@ class AppState: ObservableObject {
         let client = RPCClient(serverURL: serverURL)
         _rpcClient = client
         return client
+    }
+
+    var skillStore: SkillStore {
+        if let store = _skillStore {
+            return store
+        }
+        let store = SkillStore()
+        store.configure(rpcClient: rpcClient)
+        _skillStore = store
+        return store
     }
 
     var serverURL: URL {
@@ -42,6 +53,10 @@ class AppState: ObservableObject {
         self.useTLS = useTLS
 
         // Recreate client with new URL
-        _rpcClient = RPCClient(serverURL: serverURL)
+        let newClient = RPCClient(serverURL: serverURL)
+        _rpcClient = newClient
+
+        // Update skill store with new client
+        _skillStore?.configure(rpcClient: newClient)
     }
 }

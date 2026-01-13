@@ -34,6 +34,12 @@ struct ChatView: View {
     /// Reasoning level for OpenAI Codex models (low/medium/high/xhigh)
     /// Persisted per-session via UserDefaults
     @State private var reasoningLevel: String = "medium"
+    /// Selected skills for the current message (shown as chips above input bar)
+    @State private var selectedSkills: [Skill] = []
+    /// Skill to show in detail sheet (when skill chip is tapped in a message)
+    @State private var skillForDetailSheet: Skill?
+    /// Whether to show the skill detail sheet
+    @State private var showSkillDetailSheet = false
 
     /// UserDefaults key for storing reasoning level per session
     private var reasoningLevelKey: String { "tron.reasoningLevel.\(sessionId)" }
@@ -56,10 +62,12 @@ struct ChatView: View {
 
     private let sessionId: String
     private let rpcClient: RPCClient
+    private let skillStore: SkillStore?
 
-    init(rpcClient: RPCClient, sessionId: String) {
+    init(rpcClient: RPCClient, sessionId: String, skillStore: SkillStore? = nil) {
         self.sessionId = sessionId
         self.rpcClient = rpcClient
+        self.skillStore = skillStore
         _viewModel = StateObject(wrappedValue: ChatViewModel(rpcClient: rpcClient, sessionId: sessionId))
     }
 
@@ -101,7 +109,13 @@ struct ChatView: View {
                             hasUnreadContent = false
                             // Grace period to prevent gesture detection during initial scroll animation
                             autoScrollGraceUntil = Date().addingTimeInterval(0.8)
-                            viewModel.sendMessage(reasoningLevel: currentModelInfo?.supportsReasoning == true ? reasoningLevel : nil)
+                            // Pass selected skills and clear them after sending
+                            let skillsToSend = selectedSkills
+                            selectedSkills = []
+                            viewModel.sendMessage(
+                                reasoningLevel: currentModelInfo?.supportsReasoning == true ? reasoningLevel : nil,
+                                skills: skillsToSend.isEmpty ? nil : skillsToSend
+                            )
                         },
                         onAbort: viewModel.abortAgent,
                         onMicTap: viewModel.toggleRecording,
@@ -129,6 +143,15 @@ struct ChatView: View {
                         },
                         onContextTap: {
                             showContextAudit = true
+                        },
+                        skillStore: skillStore,
+                        selectedSkills: $selectedSkills,
+                        onSkillRemove: { _ in
+                            // Skill removed from selection - no additional action needed
+                        },
+                        onSkillDetailTap: { skill in
+                            skillForDetailSheet = skill
+                            showSkillDetailSheet = true
                         },
                         shouldFocus: $inputFocused
                     )
@@ -217,7 +240,8 @@ struct ChatView: View {
         .sheet(isPresented: $showContextAudit) {
             ContextAuditView(
                 rpcClient: rpcClient,
-                sessionId: sessionId
+                sessionId: sessionId,
+                skillStore: skillStore
             )
         }
         .sheet(isPresented: $showSessionHistory) {
@@ -229,6 +253,11 @@ struct ChatView: View {
         .sheet(isPresented: $showSessionAnalytics) {
             SessionAnalyticsSheet(sessionId: sessionId)
                 .environmentObject(eventStoreManager)
+        }
+        .sheet(isPresented: $showSkillDetailSheet) {
+            if let skill = skillForDetailSheet, let store = skillStore {
+                SkillDetailSheet(skill: skill, skillStore: store)
+            }
         }
         .alert("Error", isPresented: $viewModel.showError) {
             Button("OK") { viewModel.clearError() }
@@ -310,6 +339,13 @@ struct ChatView: View {
             // This is a fire-and-forget operation that doesn't block session entry
             Task {
                 await prefetchModels()
+            }
+
+            // Refresh and load skills in parallel (fire-and-forget)
+            // Using refreshAndLoadSkills to detect any skill changes on disk
+            // (e.g., skills added/removed while app was closed)
+            Task {
+                await skillStore?.refreshAndLoadSkills(sessionId: sessionId)
             }
 
             // Check browser status in parallel (fire-and-forget)
@@ -414,7 +450,10 @@ struct ChatView: View {
                             }
 
                             ForEach(viewModel.messages) { message in
-                                MessageBubble(message: message)
+                                MessageBubble(message: message) { skill in
+                                    skillForDetailSheet = skill
+                                    showSkillDetailSheet = true
+                                }
                                     .id(message.id)
                                     .transition(.asymmetric(
                                         insertion: .opacity.combined(with: .move(edge: .bottom)),

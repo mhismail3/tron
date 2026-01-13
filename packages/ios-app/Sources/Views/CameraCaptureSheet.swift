@@ -77,7 +77,6 @@ struct CameraCaptureSheet: View {
             .frame(maxWidth: .infinity)
         }
         .padding(.horizontal, 24)
-        .background(Color.tronSurface)
         .presentationDetents([.medium])
         .presentationDragIndicator(.hidden)
         .preferredColorScheme(.dark)
@@ -98,10 +97,10 @@ struct CameraCaptureSheet: View {
                 Button(action: retake) {
                     Image(systemName: "arrow.counterclockwise")
                         .font(.system(size: 18, weight: .semibold))
-                        .foregroundStyle(.white.opacity(0.7))
+                        .foregroundStyle(.white.opacity(0.9))
                         .frame(width: 52, height: 52)
                 }
-                .glassEffect(.regular.tint(Color.white.opacity(0.1)).interactive(), in: .circle)
+                .glassEffect(.regular.tint(Color.white.opacity(0.25)).interactive(), in: .circle)
 
                 // Use Photo - primary action
                 Button(action: usePhoto) {
@@ -110,7 +109,7 @@ struct CameraCaptureSheet: View {
                         .foregroundStyle(.white)
                         .frame(width: 64, height: 64)
                 }
-                .glassEffect(.regular.tint(Color.tronEmerald.opacity(0.6)).interactive(), in: .circle)
+                .glassEffect(.regular.tint(Color.tronEmerald.opacity(0.65)).interactive(), in: .circle)
 
                 // Placeholder for symmetry
                 Color.clear
@@ -123,11 +122,11 @@ struct CameraCaptureSheet: View {
                 Button(action: { cameraModel.toggleTorch() }) {
                     Image(systemName: cameraModel.isTorchOn ? "moon.fill" : "moon")
                         .font(.system(size: 18, weight: .semibold))
-                        .foregroundStyle(cameraModel.isTorchOn ? .tronEmerald : .white.opacity(0.7))
+                        .foregroundStyle(cameraModel.isTorchOn ? .tronEmerald : .white.opacity(0.9))
                         .frame(width: 52, height: 52)
                 }
                 .glassEffect(
-                    .regular.tint(cameraModel.isTorchOn ? Color.tronEmerald.opacity(0.3) : Color.white.opacity(0.1)).interactive(),
+                    .regular.tint(cameraModel.isTorchOn ? Color.tronEmerald.opacity(0.4) : Color.white.opacity(0.25)).interactive(),
                     in: .circle
                 )
                 .disabled(!cameraModel.isAuthorized || !cameraModel.hasTorch)
@@ -151,10 +150,10 @@ struct CameraCaptureSheet: View {
                 Button(action: flipCamera) {
                     Image(systemName: "arrow.triangle.2.circlepath.camera")
                         .font(.system(size: 18, weight: .semibold))
-                        .foregroundStyle(.white.opacity(0.7))
+                        .foregroundStyle(.white.opacity(0.9))
                         .frame(width: 52, height: 52)
                 }
-                .glassEffect(.regular.tint(Color.white.opacity(0.1)).interactive(), in: .circle)
+                .glassEffect(.regular.tint(Color.white.opacity(0.25)).interactive(), in: .circle)
                 .disabled(!cameraModel.isAuthorized)
                 .opacity(cameraModel.isAuthorized ? 1 : 0.3)
             }

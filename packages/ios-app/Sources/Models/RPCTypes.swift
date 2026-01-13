@@ -912,3 +912,37 @@ struct BrowserFrameMetadata: Decodable {
     let scrollOffsetX: Double?
     let scrollOffsetY: Double?
 }
+
+// MARK: - Skill Methods
+
+struct SkillListParams: Encodable {
+    let sessionId: String?
+    let source: String?
+    let autoInjectOnly: Bool?
+    let includeContent: Bool?
+
+    init(sessionId: String? = nil, source: String? = nil, autoInjectOnly: Bool? = nil, includeContent: Bool? = nil) {
+        self.sessionId = sessionId
+        self.source = source
+        self.autoInjectOnly = autoInjectOnly
+        self.includeContent = includeContent
+    }
+}
+
+struct SkillGetParams: Encodable {
+    let sessionId: String?
+    let name: String
+
+    init(sessionId: String? = nil, name: String) {
+        self.sessionId = sessionId
+        self.name = name
+    }
+}
+
+struct SkillRefreshParams: Encodable {
+    let sessionId: String?
+
+    init(sessionId: String? = nil) {
+        self.sessionId = sessionId
+    }
+}

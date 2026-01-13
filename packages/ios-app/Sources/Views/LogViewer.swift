@@ -23,7 +23,6 @@ struct LogViewer: View {
                 // Log list
                 logList
             }
-            .background(Color.tronSurface)
             .navigationBarTitleDisplayMode(.inline)
             .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
             .toolbar {

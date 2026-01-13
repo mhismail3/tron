@@ -143,7 +143,8 @@ struct ContentView: View {
                        eventStoreManager.sessionExists(sessionId) {
                         ChatView(
                             rpcClient: appState.rpcClient,
-                            sessionId: sessionId
+                            sessionId: sessionId,
+                            skillStore: appState.skillStore
                         )
                     } else if eventStoreManager.sessions.isEmpty {
                         WelcomePage(
@@ -442,7 +443,7 @@ struct NewSessionFlow: View {
                                 if workingDirectory.isEmpty {
                                     Text("Select Workspace")
                                         .font(.system(size: 14, weight: .regular, design: .monospaced))
-                                        .foregroundStyle(.tronEmerald.opacity(0.4))
+                                        .foregroundStyle(.tronEmerald)
                                 } else {
                                     Text(displayWorkspacePath)
                                         .font(.system(size: 14, weight: .regular, design: .monospaced))
@@ -459,7 +460,7 @@ struct NewSessionFlow: View {
                             .padding(.vertical, 14)
                             .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                         }
-                        .glassEffect(.regular.tint(Color.tronPhthaloGreen.opacity(0.15)).interactive(), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        .glassEffect(.regular.tint(Color.tronPhthaloGreen.opacity(0.35)).interactive(), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
 
                         Text("The directory where the agent will operate")
                             .font(.system(size: 11, design: .monospaced))
@@ -498,7 +499,7 @@ struct NewSessionFlow: View {
                                 if isLoadingModels && selectedModel.isEmpty {
                                     Text("Loading...")
                                         .font(.system(size: 14, weight: .regular, design: .monospaced))
-                                        .foregroundStyle(.tronEmerald.opacity(0.4))
+                                        .foregroundStyle(.tronEmerald.opacity(0.8))
                                 } else {
                                     Text(selectedModelDisplayName)
                                         .font(.system(size: 14, weight: .regular, design: .monospaced))
@@ -516,7 +517,7 @@ struct NewSessionFlow: View {
                             .background {
                                 RoundedRectangle(cornerRadius: 12, style: .continuous)
                                     .fill(.clear)
-                                    .glassEffect(.regular.tint(Color.tronPhthaloGreen.opacity(0.15)), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                                    .glassEffect(.regular.tint(Color.tronPhthaloGreen.opacity(0.35)), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
                             }
                             .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                         }
@@ -561,7 +562,6 @@ struct NewSessionFlow: View {
                 .padding(.horizontal, 20)
                 .padding(.top, 20)
             }
-            .background(Color.tronSurface)
             .navigationBarTitleDisplayMode(.inline)
             .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
             .toolbar {
@@ -883,7 +883,7 @@ struct RecentSessionRow: View {
                         Spacer()
                         Text(session.formattedDate)
                             .font(.system(size: 9, design: .monospaced))
-                            .foregroundStyle(.white.opacity(0.4))
+                            .foregroundStyle(.white.opacity(0.9))
                     }
 
                     // Model + tokens/cost on same row
@@ -897,7 +897,7 @@ struct RecentSessionRow: View {
                         // Tokens and cost
                         Text(session.formattedTokens)
                             .font(.system(size: 9, design: .monospaced))
-                            .foregroundStyle(.white.opacity(0.35))
+                            .foregroundStyle(.white.opacity(0.45))
 
                         Text(session.formattedCost)
                             .font(.system(size: 9, weight: .medium, design: .monospaced))
@@ -910,7 +910,7 @@ struct RecentSessionRow: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .glassEffect(.regular.tint(Color.tronPhthaloGreen.opacity(0.12)).interactive(), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .glassEffect(.regular.tint(Color.tronPhthaloGreen.opacity(0.35)).interactive(), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
     }
 }
 
@@ -934,8 +934,6 @@ struct SessionPreviewSheet: View {
     var body: some View {
         NavigationStack {
             ZStack {
-                Color.tronSurface.ignoresSafeArea()
-
                 if isLoading {
                     VStack(spacing: 16) {
                         ProgressView()
@@ -1077,7 +1075,7 @@ struct SessionPreviewSheet: View {
         }
         .padding()
         .frame(maxWidth: .infinity, alignment: .leading)
-        .glassEffect(.regular.tint(Color.tronPhthaloGreen.opacity(0.1)), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .glassEffect(.regular.tint(Color.tronPhthaloGreen.opacity(0.35)), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 
     // MARK: - Display Messages
@@ -1169,8 +1167,6 @@ struct WorkspaceSelector: View {
     var body: some View {
         NavigationStack {
             ZStack {
-                Color.tronSurface.ignoresSafeArea()
-
                 if isLoading && entries.isEmpty {
                     // Only show full loading on initial load
                     ProgressView()
@@ -1277,7 +1273,6 @@ struct WorkspaceSelector: View {
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 12)
-            .background(Color.tronSurface)
 
             // Directory entries
             ScrollView {
@@ -1337,9 +1332,7 @@ struct WorkspaceSelector: View {
                     }
                 }
             }
-            .background(Color.tronSurface)
         }
-        .background(Color.tronSurface)
     }
 
     private func loadHome() async {

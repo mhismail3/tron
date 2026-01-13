@@ -5,28 +5,29 @@ import PhotosUI
 
 extension ChatViewModel {
 
-    func sendMessage(reasoningLevel: String? = nil) {
+    func sendMessage(reasoningLevel: String? = nil, skills: [Skill]? = nil) {
         let text = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty || !attachments.isEmpty else {
             logger.verbose("sendMessage() called but no text or attachments to send", category: .chat)
             return
         }
 
-        logger.info("Sending message: \"\(text.prefix(100))...\" with \(attachments.count) attachments, reasoningLevel=\(reasoningLevel ?? "nil")", category: .chat)
+        logger.info("Sending message: \"\(text.prefix(100))...\" with \(attachments.count) attachments, \(skills?.count ?? 0) skills, reasoningLevel=\(reasoningLevel ?? "nil")", category: .chat)
 
         // Reset browser dismiss flag for new prompt - browser can auto-open again
         userDismissedBrowserThisTurn = false
 
-        // Create user message with attachments displayed as thumbnails above text
+        // Create user message with attachments and skills displayed above text
         let attachmentsToShow = attachments.isEmpty ? nil : attachments
+        let skillsToShow = skills?.isEmpty == false ? skills : nil
         if !text.isEmpty {
-            let userMessage = ChatMessage.user(text, attachments: attachmentsToShow)
+            let userMessage = ChatMessage.user(text, attachments: attachmentsToShow, skills: skillsToShow)
             appendMessage(userMessage)
-            logger.debug("Added user text message with \(attachments.count) attachments", category: .chat)
+            logger.debug("Added user text message with \(attachments.count) attachments and \(skills?.count ?? 0) skills", category: .chat)
             currentTurn += 1
         } else if !attachments.isEmpty {
             // If only attachments (no text), still show them in chat
-            let attachmentMessage = ChatMessage(role: .user, content: .attachments(attachments), attachments: attachments)
+            let attachmentMessage = ChatMessage(role: .user, content: .attachments(attachments), attachments: attachments, skills: skillsToShow)
             appendMessage(attachmentMessage)
             logger.debug("Added attachment-only message with \(attachments.count) attachments", category: .chat)
         }

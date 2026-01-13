@@ -4,6 +4,7 @@ import SwiftUI
 
 struct MessageBubble: View {
     let message: ChatMessage
+    var onSkillTap: ((Skill) -> Void)?
 
     private var isUserMessage: Bool {
         message.role == .user
@@ -19,6 +20,24 @@ struct MessageBubble: View {
 
     var body: some View {
         VStack(alignment: isUserMessage ? .trailing : .leading, spacing: 4) {
+            // Show skills above text for user messages (iOS 26 glass chips)
+            if let skills = message.skills, !skills.isEmpty {
+                if #available(iOS 26.0, *) {
+                    MessageSkillChips(skills: skills) { skill in
+                        onSkillTap?(skill)
+                    }
+                } else {
+                    // Fallback for older iOS
+                    HStack(spacing: 6) {
+                        ForEach(skills) { skill in
+                            SkillChipFallback(skill: skill) {
+                                onSkillTap?(skill)
+                            }
+                        }
+                    }
+                }
+            }
+
             // Show attachments above text for user messages
             if let attachments = message.attachments, !attachments.isEmpty {
                 AttachedFileThumbnails(attachments: attachments)

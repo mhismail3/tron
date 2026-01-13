@@ -974,6 +974,44 @@ class RPCClient: ObservableObject {
         return try await getBrowserStatus(sessionId: sessionId)
     }
 
+    // MARK: - Skill Methods
+
+    /// List available skills
+    func listSkills(sessionId: String? = nil, source: String? = nil) async throws -> SkillListResponse {
+        guard let ws = webSocket else {
+            throw RPCClientError.connectionNotEstablished
+        }
+
+        let params = SkillListParams(
+            sessionId: sessionId ?? currentSessionId,
+            source: source
+        )
+        return try await ws.send(method: "skill.list", params: params)
+    }
+
+    /// Get a skill by name
+    func getSkill(name: String, sessionId: String? = nil) async throws -> SkillGetResponse {
+        guard let ws = webSocket else {
+            throw RPCClientError.connectionNotEstablished
+        }
+
+        let params = SkillGetParams(
+            sessionId: sessionId ?? currentSessionId,
+            name: name
+        )
+        return try await ws.send(method: "skill.get", params: params)
+    }
+
+    /// Refresh skills cache
+    func refreshSkills(sessionId: String? = nil) async throws -> SkillRefreshResponse {
+        guard let ws = webSocket else {
+            throw RPCClientError.connectionNotEstablished
+        }
+
+        let params = SkillRefreshParams(sessionId: sessionId ?? currentSessionId)
+        return try await ws.send(method: "skill.refresh", params: params)
+    }
+
     // MARK: - State Accessors
 
     var isConnected: Bool {

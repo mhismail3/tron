@@ -405,6 +405,40 @@ export class EventStoreOrchestrator extends EventEmitter {
       throw new Error('Cannot end session while processing');
     }
 
+    // Check if session exists in EventStore before attempting to append events
+    // This handles the case where a stale session ID is sent (e.g., from iOS app
+    // with a previous database) - we should succeed silently (idempotent delete)
+    const session = await this.eventStore.getSession(sessionId as SessionId);
+    if (!session) {
+      logger.info('Session not found in EventStore, cleaning up local state only', { sessionId });
+
+      // Clean up any local state even if session doesn't exist in DB
+      if (active) {
+        this.activeSessions.delete(sessionId);
+      }
+
+      // Release worktree if any (may not exist, that's fine)
+      try {
+        await this.worktreeCoordinator.release(sessionId as SessionId, {
+          mergeTo: options?.mergeTo,
+          mergeStrategy: options?.mergeStrategy,
+          commitMessage: options?.commitMessage,
+        });
+      } catch (err) {
+        // Worktree may not exist for this session, ignore
+        logger.debug('No worktree to release for session', { sessionId, err });
+      }
+
+      // Clean up browser session if it exists
+      if (this.browserService && this.browserService.hasSession(sessionId)) {
+        logger.debug('Closing browser session during session end', { sessionId });
+        await this.browserService.closeSession(sessionId);
+      }
+
+      this.emit('session_ended', { sessionId, reason: 'not_found' });
+      return;
+    }
+
     // Chain the session.end event append to ensure proper linearization
     // CRITICAL: Previous code had the same race condition as switchModel() where
     // concurrent calls could capture the same pendingHeadEventId

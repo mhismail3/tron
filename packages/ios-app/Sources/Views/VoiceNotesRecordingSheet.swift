@@ -62,7 +62,6 @@ struct VoiceNotesRecordingSheet: View {
                     .padding(.bottom, 40)
             }
             .padding(.horizontal, 24)
-            .background(Color.tronSurface)
             .navigationBarTitleDisplayMode(.inline)
             .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
             .toolbar {
@@ -108,10 +107,10 @@ struct VoiceNotesRecordingSheet: View {
                 Button(action: onCancel) {
                     Image(systemName: "xmark")
                         .font(.system(size: 18, weight: .semibold))
-                        .foregroundStyle(.white.opacity(0.7))
+                        .foregroundStyle(.white.opacity(0.9))
                         .frame(width: 52, height: 52)
                 }
-                .glassEffect(.regular.tint(Color.white.opacity(0.1)).interactive(), in: .circle)
+                .glassEffect(.regular.tint(Color.white.opacity(0.25)).interactive(), in: .circle)
                 .disabled(isSaving)
 
                 // Save - larger primary button, vertically centered with others
@@ -126,17 +125,17 @@ struct VoiceNotesRecordingSheet: View {
                             .frame(width: 64, height: 64)
                     }
                 }
-                .glassEffect(.regular.tint(Color.tronEmerald.opacity(0.6)).interactive(), in: .circle)
+                .glassEffect(.regular.tint(Color.tronEmerald.opacity(0.65)).interactive(), in: .circle)
                 .disabled(isSaving)
 
                 // Re-record - smaller button
                 Button(action: handleReRecord) {
                     Image(systemName: "arrow.counterclockwise")
                         .font(.system(size: 18, weight: .semibold))
-                        .foregroundStyle(.white.opacity(0.7))
+                        .foregroundStyle(.white.opacity(0.9))
                         .frame(width: 52, height: 52)
                 }
-                .glassEffect(.regular.tint(Color.white.opacity(0.1)).interactive(), in: .circle)
+                .glassEffect(.regular.tint(Color.white.opacity(0.25)).interactive(), in: .circle)
                 .disabled(isSaving)
             }
         } else {
@@ -146,10 +145,10 @@ struct VoiceNotesRecordingSheet: View {
                 Button(action: onCancel) {
                     Image(systemName: "xmark")
                         .font(.system(size: 18, weight: .semibold))
-                        .foregroundStyle(.white.opacity(0.7))
+                        .foregroundStyle(.white.opacity(0.9))
                         .frame(width: 52, height: 52)
                 }
-                .glassEffect(.regular.tint(Color.white.opacity(0.1)).interactive(), in: .circle)
+                .glassEffect(.regular.tint(Color.white.opacity(0.25)).interactive(), in: .circle)
 
                 // Record/Stop
                 Button(action: handleRecordTap) {
@@ -159,7 +158,7 @@ struct VoiceNotesRecordingSheet: View {
                         .frame(width: 72, height: 72)
                 }
                 .glassEffect(
-                    .regular.tint(recorder.isRecording ? Color.red.opacity(0.5) : Color.tronEmerald.opacity(0.5)).interactive(),
+                    .regular.tint(recorder.isRecording ? Color.red.opacity(0.6) : Color.tronEmerald.opacity(0.6)).interactive(),
                     in: .circle
                 )
             }
