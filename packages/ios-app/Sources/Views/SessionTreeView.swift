@@ -267,7 +267,6 @@ struct SessionHistoryView: View {
                 }
             }
         }
-        .background(Color.tronBackground)
     }
 
     // MARK: - Forked Session Layout
@@ -305,7 +304,7 @@ struct SessionHistoryView: View {
 
     @ViewBuilder
     private func LinearSessionContent(proxy: ScrollViewProxy) -> some View {
-        GlassSectionCard(title: "Session Timeline", icon: "clock", accentColor: .tronPurple) {
+        SectionCard(title: "Session Timeline", icon: "clock", accentColor: .tronPurple) {
             VStack(spacing: 2) {
                 ForEach(sortedEvents.filter { isSignificantEvent($0) }) { event in
                     EventRow(
@@ -411,14 +410,13 @@ struct InheritedSection: View {
 
 // MARK: - This Session Section
 
-@available(iOS 26.0, *)
 struct ThisSessionSection: View {
     let events: [SessionEvent]
     let headEventId: String?
     let onFork: (String) -> Void
 
     var body: some View {
-        GlassSectionCard(title: "This Session", icon: "sparkles", accentColor: .tronPurple) {
+        SectionCard(title: "This Session", icon: "sparkles", accentColor: .tronPurple) {
             if events.isEmpty || (events.count == 1 && events.first?.eventType == .sessionFork) {
                 // Empty state - just forked, no new messages
                 VStack(spacing: 8) {
@@ -567,9 +565,14 @@ struct EventRow: View {
 
     @State private var isExpanded = false
 
+    /// Whether this event has expandable content to show
+    private var hasExpandableContent: Bool {
+        event.expandedContent != nil
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            // Main row
+            // Main row - tappable to expand
             HStack(spacing: 10) {
                 // Icon
                 eventIcon
@@ -596,6 +599,13 @@ struct EventRow: View {
                         .clipShape(Capsule())
                 }
 
+                // Expand indicator (if has content)
+                if hasExpandableContent {
+                    Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
+                        .font(.system(size: 9, weight: .medium))
+                        .foregroundStyle(.tronTextMuted)
+                }
+
                 // Fork button with circular background
                 if showForkButton {
                     Button(action: onFork) {
@@ -613,6 +623,29 @@ struct EventRow: View {
             .padding(.horizontal, 10)
             .background(isHead ? Color.tronPurple.opacity(0.1) : Color.clear)
             .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .onTapGesture {
+                if hasExpandableContent {
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        isExpanded.toggle()
+                    }
+                }
+            }
+
+            // Expanded content
+            if isExpanded, let content = event.expandedContent {
+                Text(content)
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundStyle(isMuted ? .tronTextMuted : .tronTextSecondary)
+                    .lineLimit(12)
+                    .padding(10)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Color.tronSurfaceElevated.opacity(0.5))
+                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    .padding(.top, 4)
+                    .padding(.leading, 30) // Align under content
+                    .transition(.opacity.combined(with: .scale(scale: 0.98, anchor: .top)))
+            }
         }
     }
 
@@ -1695,7 +1728,7 @@ struct SessionHistorySheet: View {
     let eventStoreManager: EventStoreManager
 
     @StateObject private var viewModel: SessionHistoryViewModel
-    @State private var actionConfirm: ActionConfirm?
+    @State private var forkEventId: String?
 
     init(sessionId: String, rpcClient: RPCClient, eventStoreManager: EventStoreManager) {
         self.sessionId = sessionId
@@ -1708,33 +1741,18 @@ struct SessionHistorySheet: View {
         ))
     }
 
-    enum ActionConfirm {
-        case fork(String)
-    }
-
     var body: some View {
         NavigationStack {
-            ZStack {
-                Color.tronBackground
-                    .ignoresSafeArea()
-
-                if let confirm = actionConfirm {
-                    confirmationView(for: confirm)
-                } else {
-                    SessionHistoryView(
-                        events: viewModel.events,
-                        headEventId: viewModel.headEventId,
-                        sessionId: sessionId,
-                        forkContext: viewModel.forkContext,
-                        onFork: { eventId in
-                            withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) {
-                                actionConfirm = .fork(eventId)
-                            }
-                        },
-                        isLoading: viewModel.isLoading
-                    )
-                }
-            }
+            SessionHistoryView(
+                events: viewModel.events,
+                headEventId: viewModel.headEventId,
+                sessionId: sessionId,
+                forkContext: viewModel.forkContext,
+                onFork: { eventId in
+                    forkEventId = eventId
+                },
+                isLoading: viewModel.isLoading
+            )
             .navigationBarTitleDisplayMode(.inline)
             .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
             .toolbar {
@@ -1759,125 +1777,146 @@ struct SessionHistorySheet: View {
         .task {
             await viewModel.loadEvents()
         }
-    }
-
-    @ViewBuilder
-    private func confirmationView(for confirm: ActionConfirm) -> some View {
-        switch confirm {
-        case .fork(let eventId):
-            // Find the event to show context
-            let forkEvent = viewModel.events.first(where: { $0.id == eventId })
-
-            VStack(spacing: 0) {
-                Spacer()
-
-                // Liquid glass confirmation card
-                VStack(spacing: 20) {
-                    // Icon
-                    Image(systemName: "arrow.triangle.branch")
-                        .font(.system(size: 44, weight: .light))
-                        .foregroundStyle(.tronPurple)
-                        .frame(width: 72, height: 72)
-                        .background {
-                            Circle()
-                                .fill(.clear)
-                                .glassEffect(.regular.tint(Color.tronPurple.opacity(0.25)), in: Circle())
-                        }
-
-                    // Title and description
-                    VStack(spacing: 8) {
-                        Text("Fork Session")
-                            .font(.system(size: 20, weight: .semibold))
-                            .foregroundStyle(.tronTextPrimary)
-
-                        Text("Create a new branch from this point")
-                            .font(.system(size: 14, design: .monospaced))
-                            .foregroundStyle(.tronTextMuted)
-
-                        // Show the fork point summary
-                        if let event = forkEvent {
-                            HStack(spacing: 6) {
-                                Image(systemName: "quote.opening")
-                                    .font(.system(size: 10))
-                                    .foregroundStyle(.tronPurple.opacity(0.5))
-
-                                Text(event.summary)
-                                    .font(.system(size: 12, design: .monospaced))
-                                    .foregroundStyle(.tronTextSecondary)
-                                    .lineLimit(1)
-
-                                Image(systemName: "quote.closing")
-                                    .font(.system(size: 10))
-                                    .foregroundStyle(.tronPurple.opacity(0.5))
-                            }
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 6)
-                            .background(Color.tronPurple.opacity(0.1))
-                            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-                            .padding(.top, 4)
-                        }
-                    }
-
-                    // Buttons
-                    HStack(spacing: 12) {
-                        Button {
-                            withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) {
-                                actionConfirm = nil
-                            }
-                        } label: {
-                            Text("Cancel")
-                                .font(.system(size: 15, weight: .medium))
-                                .foregroundStyle(.tronTextSecondary)
-                                .frame(maxWidth: .infinity)
-                                .padding(.vertical, 14)
-                                .background {
-                                    RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                        .fill(.clear)
-                                        .glassEffect(.regular.tint(Color.white.opacity(0.1)), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-                                }
-                        }
-                        .buttonStyle(.plain)
-
-                        Button {
-                            Task {
-                                await performFork(eventId)
-                            }
-                        } label: {
-                            HStack(spacing: 6) {
-                                Image(systemName: "arrow.triangle.branch")
-                                    .font(.system(size: 12))
-                                Text("Fork")
-                                    .font(.system(size: 15, weight: .semibold))
-                            }
-                            .foregroundStyle(.white)
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 14)
-                            .background {
-                                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                    .fill(.clear)
-                                    .glassEffect(.regular.tint(Color.tronPurple.opacity(0.6)), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-                            }
-                        }
-                        .buttonStyle(.plain)
-                    }
-                }
-                .padding(24)
-                .background {
-                    RoundedRectangle(cornerRadius: 24, style: .continuous)
-                        .fill(.clear)
-                        .glassEffect(.regular.tint(Color.tronSurface.opacity(0.8)), in: RoundedRectangle(cornerRadius: 24, style: .continuous))
-                }
-                .padding(.horizontal, 20)
-                .transition(.opacity.combined(with: .scale(scale: 0.95)))
-
-                Spacer()
-            }
+        .sheet(item: Binding(
+            get: { forkEventId.map { ForkEventWrapper(eventId: $0) } },
+            set: { forkEventId = $0?.eventId }
+        )) { wrapper in
+            ForkConfirmationSheet(
+                eventId: wrapper.eventId,
+                event: viewModel.events.first(where: { $0.id == wrapper.eventId }),
+                sessionId: sessionId,
+                eventStoreManager: eventStoreManager,
+                onDismissParent: { dismiss() }
+            )
         }
     }
+}
 
-    private func performFork(_ eventId: String) async {
+/// Wrapper to make eventId identifiable for sheet presentation
+private struct ForkEventWrapper: Identifiable {
+    let eventId: String
+    var id: String { eventId }
+}
+
+// MARK: - Fork Confirmation Sheet
+
+@available(iOS 26.0, *)
+struct ForkConfirmationSheet: View {
+    @Environment(\.dismiss) private var dismiss
+
+    let eventId: String
+    let event: SessionEvent?
+    let sessionId: String
+    let eventStoreManager: EventStoreManager
+    let onDismissParent: () -> Void
+
+    @State private var isForking = false
+
+    var body: some View {
+        VStack(spacing: 24) {
+            // Icon
+            Image(systemName: "arrow.triangle.branch")
+                .font(.system(size: 44, weight: .light))
+                .foregroundStyle(.tronPurple)
+                .frame(width: 72, height: 72)
+                .background {
+                    Circle()
+                        .fill(.clear)
+                        .glassEffect(.regular.tint(Color.tronPurple.opacity(0.25)), in: Circle())
+                }
+                .padding(.top, 20)
+
+            // Title and description
+            VStack(spacing: 8) {
+                Text("Fork Session")
+                    .font(.system(size: 20, weight: .semibold))
+                    .foregroundStyle(.tronTextPrimary)
+
+                Text("Create a new branch from this point")
+                    .font(.system(size: 14, design: .monospaced))
+                    .foregroundStyle(.tronTextMuted)
+
+                // Show the fork point summary
+                if let event = event {
+                    HStack(spacing: 6) {
+                        Image(systemName: "quote.opening")
+                            .font(.system(size: 10))
+                            .foregroundStyle(.tronPurple.opacity(0.5))
+
+                        Text(event.summary)
+                            .font(.system(size: 12, design: .monospaced))
+                            .foregroundStyle(.tronTextSecondary)
+                            .lineLimit(2)
+
+                        Image(systemName: "quote.closing")
+                            .font(.system(size: 10))
+                            .foregroundStyle(.tronPurple.opacity(0.5))
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                    .background(Color.tronPurple.opacity(0.1))
+                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    .padding(.top, 8)
+                }
+            }
+
+            Spacer()
+
+            // Buttons
+            VStack(spacing: 12) {
+                Button {
+                    Task {
+                        await performFork()
+                    }
+                } label: {
+                    HStack(spacing: 6) {
+                        if isForking {
+                            ProgressView()
+                                .scaleEffect(0.8)
+                                .tint(.white)
+                        } else {
+                            Image(systemName: "arrow.triangle.branch")
+                                .font(.system(size: 12))
+                        }
+                        Text("Fork Session")
+                            .font(.system(size: 15, weight: .semibold))
+                    }
+                    .foregroundStyle(.white)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 14)
+                    .background {
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .fill(.clear)
+                            .glassEffect(.regular.tint(Color.tronPurple.opacity(0.6)), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    }
+                }
+                .buttonStyle(.plain)
+                .disabled(isForking)
+
+                Button {
+                    dismiss()
+                } label: {
+                    Text("Cancel")
+                        .font(.system(size: 15, weight: .medium))
+                        .foregroundStyle(.tronTextSecondary)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 14)
+                }
+                .buttonStyle(.plain)
+                .disabled(isForking)
+            }
+            .padding(.bottom, 20)
+        }
+        .padding(.horizontal, 24)
+        .presentationDetents([.height(340)])
+        .presentationDragIndicator(.visible)
+        .preferredColorScheme(.dark)
+    }
+
+    private func performFork() async {
+        isForking = true
         logger.debug("Fork initiated: sessionId=\(sessionId), fromEventId=\(eventId)", category: .session)
-        if let event = viewModel.events.first(where: { $0.id == eventId }) {
+        if let event = event {
             logger.debug("Fork point: type=\(event.type), sequence=\(event.sequence)", category: .session)
         }
 
@@ -1886,13 +1925,11 @@ struct SessionHistorySheet: View {
             logger.debug("Fork succeeded: newSessionId=\(newSessionId)", category: .session)
             eventStoreManager.setActiveSession(newSessionId)
             dismiss()
+            onDismissParent()
         } catch {
             logger.error("Fork FAILED: \(error)", category: .session)
-            withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) {
-                actionConfirm = nil
-            }
+            isForking = false
         }
     }
-
 }
 
