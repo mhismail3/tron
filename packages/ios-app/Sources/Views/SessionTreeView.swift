@@ -278,7 +278,7 @@ struct SessionHistoryView: View {
             events: inheritedEvents.filter { isSignificantEvent($0) },
             forkPointEvent: forkPointEvent,
             isExpanded: $isInheritedExpanded,
-            parentTitle: forkContext?.parentSessionTitle,
+            parentSessionId: forkContext?.parentSessionId,
             onFork: onFork
         )
 
@@ -336,47 +336,58 @@ struct InheritedSection: View {
     let events: [SessionEvent]
     let forkPointEvent: SessionEvent?
     @Binding var isExpanded: Bool
-    let parentTitle: String?
+    let parentSessionId: String?
     let onFork: (String) -> Void
+
+    /// Truncated session ID for display (first 8 chars)
+    private var displaySessionId: String {
+        guard let id = parentSessionId else { return "unknown" }
+        return String(id.prefix(8))
+    }
 
     var body: some View {
         VStack(spacing: 0) {
-            // Header (always visible, tappable)
-            Button {
-                withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) {
-                    isExpanded.toggle()
-                }
-            } label: {
-                HStack(spacing: 12) {
-                    Image(systemName: "clock.arrow.circlepath")
-                        .font(.system(size: 14))
-                        .foregroundStyle(.tronPurple)
+            // Header (always visible, entire container tappable)
+            HStack(spacing: 12) {
+                Image(systemName: "clock.arrow.circlepath")
+                    .font(.system(size: 14))
+                    .foregroundStyle(.tronPurple)
 
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Inherited from \(parentTitle ?? "parent")")
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack(spacing: 6) {
+                        Text("Inherited from")
                             .font(.system(size: 13, weight: .medium))
                             .foregroundStyle(.tronTextPrimary)
 
-                        Text("\(events.count) events")
-                            .font(.system(size: 11, design: .monospaced))
-                            .foregroundStyle(.tronTextMuted)
+                        Text(displaySessionId)
+                            .font(.system(size: 12, weight: .medium, design: .monospaced))
+                            .foregroundStyle(.tronPurple)
                     }
 
-                    Spacer()
-
-                    Image(systemName: "chevron.down")
-                        .font(.system(size: 12, weight: .medium))
+                    Text("\(events.count) events")
+                        .font(.system(size: 11, design: .monospaced))
                         .foregroundStyle(.tronTextMuted)
-                        .rotationEffect(.degrees(isExpanded ? -180 : 0))
                 }
-                .padding(14)
-                .background {
-                    RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .fill(.clear)
-                        .glassEffect(.regular.tint(Color.tronPurple.opacity(0.25)), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+
+                Spacer()
+
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(.tronTextMuted)
+                    .rotationEffect(.degrees(isExpanded ? -180 : 0))
+            }
+            .padding(14)
+            .background {
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(.clear)
+                    .glassEffect(.regular.tint(Color.tronPurple.opacity(0.25)), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            }
+            .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .onTapGesture {
+                withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) {
+                    isExpanded.toggle()
                 }
             }
-            .buttonStyle(.plain)
 
             // Expanded content
             if isExpanded {
