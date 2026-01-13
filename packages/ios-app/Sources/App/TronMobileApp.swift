@@ -1260,10 +1260,11 @@ struct WorkspaceSelector: View {
     private var directoryList: some View {
         VStack(spacing: 0) {
             // Current path header - same dark background as list
-            HStack {
+            HStack(spacing: 16) {
                 Image(systemName: "folder.fill")
                     .font(.system(size: 12))
                     .foregroundStyle(.tronEmerald)
+                    .frame(width: 16)
                 Text(currentPath)
                     .font(.system(size: 11, weight: .regular, design: .monospaced))
                     .foregroundStyle(.tronEmerald.opacity(0.7))
@@ -1282,10 +1283,11 @@ struct WorkspaceSelector: View {
                         Button {
                             navigateUp()
                         } label: {
-                            HStack {
+                            HStack(spacing: 16) {
                                 Image(systemName: "arrow.up.circle")
                                     .font(.system(size: 14))
                                     .foregroundStyle(.tronEmerald)
+                                    .frame(width: 16)
                                 Text("Go Up")
                                     .font(.system(size: 13, weight: .medium, design: .monospaced))
                                     .foregroundStyle(.tronEmerald)
@@ -1308,10 +1310,11 @@ struct WorkspaceSelector: View {
                         Button {
                             navigateTo(entry.path)
                         } label: {
-                            HStack {
+                            HStack(spacing: 16) {
                                 Image(systemName: "folder.fill")
                                     .font(.system(size: 14))
                                     .foregroundStyle(.tronEmerald)
+                                    .frame(width: 16)
                                 Text(entry.name)
                                     .font(.system(size: 13, weight: .regular, design: .monospaced))
                                     .foregroundStyle(.tronEmerald)
@@ -1389,10 +1392,11 @@ struct WorkspaceSelector: View {
         if isCreatingFolder {
             // Inline text field for folder name
             VStack(spacing: 0) {
-                HStack(spacing: 12) {
+                HStack(spacing: 16) {
                     Image(systemName: "folder.badge.plus")
                         .font(.system(size: 14))
                         .foregroundStyle(.tronEmerald)
+                        .frame(width: 16)
 
                     TextField("Folder name", text: $newFolderName)
                         .font(.system(size: 13, weight: .regular, design: .monospaced))
@@ -1458,10 +1462,11 @@ struct WorkspaceSelector: View {
             Button {
                 startFolderCreation()
             } label: {
-                HStack {
+                HStack(spacing: 16) {
                     Image(systemName: "folder.badge.plus")
                         .font(.system(size: 14))
                         .foregroundStyle(.tronEmerald.opacity(0.8))
+                        .frame(width: 16)
                     Text("New Folder")
                         .font(.system(size: 13, weight: .medium, design: .monospaced))
                         .foregroundStyle(.tronEmerald.opacity(0.8))
