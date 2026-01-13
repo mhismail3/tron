@@ -112,7 +112,7 @@ struct SkillMentionPopup: View {
             RoundedRectangle(cornerRadius: 16, style: .continuous)
                 .fill(.clear)
                 .glassEffect(
-                    .regular.tint(Color.tronEmerald.opacity(0.12)),
+                    .regular.tint(Color.tronCyan.opacity(0.15)),
                     in: RoundedRectangle(cornerRadius: 16, style: .continuous)
                 )
         }
