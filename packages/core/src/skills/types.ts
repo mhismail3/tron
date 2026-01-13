@@ -20,6 +20,10 @@
  * YAML frontmatter parsed from SKILL.md
  */
 export interface SkillFrontmatter {
+  /** Human-readable name for display (falls back to folder name if not set) */
+  name?: string;
+  /** Short description of what this skill does */
+  description?: string;
   /** Auto-inject this skill into every prompt (acts as a "Rule") */
   autoInject?: boolean;
   /** Semantic version of the skill */
@@ -43,7 +47,9 @@ export type SkillSource = 'global' | 'project';
 export interface SkillMetadata {
   /** Skill name (folder name, used as @reference) */
   name: string;
-  /** Short description (first non-header line of SKILL.md) */
+  /** Human-readable display name (from frontmatter, falls back to folder name) */
+  displayName: string;
+  /** Short description (from frontmatter or first non-header line of SKILL.md) */
   description: string;
   /** Full SKILL.md content (after frontmatter stripped) */
   content: string;
@@ -66,6 +72,7 @@ export interface SkillMetadata {
  */
 export interface SkillInfo {
   name: string;
+  displayName: string;
   description: string;
   source: SkillSource;
   autoInject: boolean;

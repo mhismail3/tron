@@ -249,10 +249,10 @@ struct SkillMentionDetector {
 
             SkillMentionPopup(
                 skills: [
-                    Skill(name: "typescript-rules", description: "TypeScript coding standards and best practices", source: .global, autoInject: false, tags: ["coding", "typescript"]),
-                    Skill(name: "api-design", description: "RESTful API design patterns", source: .global, autoInject: false, tags: ["api"]),
-                    Skill(name: "project-context", description: "Project-specific context and rules", source: .project, autoInject: true, tags: ["context"]),
-                    Skill(name: "testing", description: "Testing best practices", source: .project, autoInject: false, tags: ["testing"])
+                    Skill(name: "typescript-rules", displayName: "TypeScript Rules", description: "TypeScript coding standards and best practices", source: .global, autoInject: false, tags: ["coding", "typescript"]),
+                    Skill(name: "api-design", displayName: "API Design", description: "RESTful API design patterns", source: .global, autoInject: false, tags: ["api"]),
+                    Skill(name: "project-context", displayName: "Project Context", description: "Project-specific context and rules", source: .project, autoInject: true, tags: ["context"]),
+                    Skill(name: "testing", displayName: "Testing", description: "Testing best practices", source: .project, autoInject: false, tags: ["testing"])
                 ],
                 query: "type",
                 onSelect: { _ in },

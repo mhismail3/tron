@@ -15,6 +15,7 @@ final class SkillStoreTests: XCTestCase {
     func createSkill(name: String, autoInject: Bool = false, description: String = "Test skill") -> Skill {
         return Skill(
             name: name,
+            displayName: name.split(separator: "-").map { $0.capitalized }.joined(separator: " "),
             description: description,
             source: .global,
             autoInject: autoInject,

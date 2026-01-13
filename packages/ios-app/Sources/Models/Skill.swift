@@ -14,7 +14,9 @@ enum SkillSource: String, Codable {
 struct Skill: Identifiable, Codable, Equatable {
     /// Skill name (folder name, used as @reference)
     let name: String
-    /// Short description (first non-header line of SKILL.md)
+    /// Human-readable display name (from frontmatter, falls back to folder name)
+    let displayName: String
+    /// Short description (from frontmatter or first non-header line of SKILL.md)
     let description: String
     /// Where the skill was loaded from
     let source: SkillSource
@@ -27,7 +29,7 @@ struct Skill: Identifiable, Codable, Equatable {
 
     // Coding keys for JSON decoding
     private enum CodingKeys: String, CodingKey {
-        case name, description, source, autoInject, tags
+        case name, displayName, description, source, autoInject, tags
     }
 }
 
@@ -37,7 +39,9 @@ struct Skill: Identifiable, Codable, Equatable {
 struct SkillMetadata: Identifiable, Codable, Equatable {
     /// Skill name (folder name, used as @reference)
     let name: String
-    /// Short description (first non-header line of SKILL.md)
+    /// Human-readable display name (from frontmatter, falls back to folder name)
+    let displayName: String
+    /// Short description (from frontmatter or first non-header line of SKILL.md)
     let description: String
     /// Where the skill was loaded from
     let source: SkillSource
@@ -58,6 +62,7 @@ struct SkillMetadata: Identifiable, Codable, Equatable {
     var asSkill: Skill {
         Skill(
             name: name,
+            displayName: displayName,
             description: description,
             source: source,
             autoInject: autoInject,

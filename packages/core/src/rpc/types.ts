@@ -470,7 +470,9 @@ export interface MemoryGetHandoffsResult {
 export interface RpcSkillInfo {
   /** Skill name (folder name, used as @reference) */
   name: string;
-  /** Short description (first non-header line of SKILL.md) */
+  /** Human-readable display name (from frontmatter, falls back to folder name) */
+  displayName: string;
+  /** Short description (from frontmatter or first non-header line of SKILL.md) */
   description: string;
   /** Where the skill was loaded from */
   source: 'global' | 'project';

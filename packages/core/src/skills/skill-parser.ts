@@ -107,6 +107,12 @@ function parseSimpleYaml(yaml: string): SkillFrontmatter {
     const value = parseYamlValue(rawValue);
 
     switch (key) {
+      case 'name':
+        result.name = String(value);
+        break;
+      case 'description':
+        result.description = String(value);
+        break;
       case 'autoInject':
         result.autoInject = value === true || value === 'true';
         break;

@@ -183,6 +183,7 @@ struct SkillChipFallback: View {
             SkillChip(
                 skill: Skill(
                     name: "typescript-rules",
+                    displayName: "TypeScript Rules",
                     description: "TypeScript coding standards",
                     source: .global,
                     autoInject: false,
@@ -193,6 +194,7 @@ struct SkillChipFallback: View {
             SkillChip(
                 skill: Skill(
                     name: "project-context",
+                    displayName: "Project Context",
                     description: "Project-specific context",
                     source: .project,
                     autoInject: true,
@@ -204,9 +206,9 @@ struct SkillChipFallback: View {
         // Row with remove buttons (InputBar style)
         SkillChipRow(
             skills: [
-                Skill(name: "api-design", description: "API design patterns", source: .global, autoInject: false, tags: nil),
-                Skill(name: "testing", description: "Testing best practices", source: .project, autoInject: false, tags: nil),
-                Skill(name: "rules", description: "Project rules", source: .global, autoInject: true, tags: nil)
+                Skill(name: "api-design", displayName: "API Design", description: "API design patterns", source: .global, autoInject: false, tags: nil),
+                Skill(name: "testing", displayName: "Testing", description: "Testing best practices", source: .project, autoInject: false, tags: nil),
+                Skill(name: "rules", displayName: "Rules", description: "Project rules", source: .global, autoInject: true, tags: nil)
             ],
             onRemove: { _ in },
             onTap: { _ in }
@@ -215,7 +217,7 @@ struct SkillChipFallback: View {
         // Message chips (read-only)
         MessageSkillChips(
             skills: [
-                Skill(name: "swift-style", description: "Swift coding style", source: .global, autoInject: false, tags: nil)
+                Skill(name: "swift-style", displayName: "Swift Style", description: "Swift coding style", source: .global, autoInject: false, tags: nil)
             ],
             onTap: { _ in }
         )

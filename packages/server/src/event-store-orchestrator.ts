@@ -791,12 +791,18 @@ export class EventStoreOrchestrator extends EventEmitter {
 
       // Set skill context on agent (will be injected into system prompt)
       if (skillContext) {
+        const isRemovedInstruction = skillContext.includes('<removed-skills>');
         logger.info('[SKILL] Setting skill context on agent', {
           sessionId: active.sessionId,
           skillContextLength: skillContext.length,
+          contextType: isRemovedInstruction ? 'removed-skills-instruction' : 'skill-content',
+          preview: skillContext.substring(0, 150),
         });
         active.agent.setSkillContext(skillContext);
       } else {
+        logger.info('[SKILL] No skill context to set (clearing)', {
+          sessionId: active.sessionId,
+        });
         active.agent.setSkillContext(undefined);
       }
 
@@ -1658,9 +1664,15 @@ export class EventStoreOrchestrator extends EventEmitter {
     if (removedSkills.length > 0) {
       const skillList = removedSkills.map(s => `@${s}`).join(', ');
       removedSkillsInstruction = `<removed-skills>
-The following skills were previously referenced but have been REMOVED from this session's context.
-You MUST ignore any @mentions of these skills in previous messages: ${skillList}
-Do NOT follow instructions from these removed skills. Respond normally without those skill behaviors.
+CRITICAL: The following skills have been REMOVED from this session: ${skillList}
+
+You MUST completely stop applying these skill behaviors starting NOW. This includes:
+- Do NOT use any special speaking styles, tones, or personas from these skills
+- Do NOT follow any formatting rules from these skills
+- Do NOT apply any behavioral modifications from these skills
+- Respond in your normal, default manner
+
+The user has explicitly removed these skills and expects you to respond WITHOUT them.
 </removed-skills>`;
       logger.info('[SKILL] Including removed skills instruction', {
         sessionId: active.sessionId,
@@ -1710,6 +1722,7 @@ Do NOT follow instructions from these removed skills. Respond normally without t
     // Convert LoadedSkillContent to SkillMetadata format for buildSkillContext
     const skillMetadata: SkillMetadata[] = loadedSkills.map(s => ({
       name: s.name,
+      displayName: s.name,
       content: s.content,
       description: '',
       frontmatter: {},

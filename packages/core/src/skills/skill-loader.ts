@@ -122,7 +122,7 @@ async function loadSkill(
   const rawContent = await fs.readFile(skillMdPath, 'utf-8');
 
   // Parse frontmatter and content
-  const { frontmatter, content, description } = parseSkillMd(rawContent);
+  const { frontmatter, content, description: extractedDescription } = parseSkillMd(rawContent);
 
   // List additional files in the skill folder
   const allEntries = await fs.readdir(skillPath, { withFileTypes: true });
@@ -130,8 +130,15 @@ async function loadSkill(
     .filter(e => e.isFile() && e.name !== SKILL_MD_FILENAME)
     .map(e => e.name);
 
+  // Prefer frontmatter name/description over derived values
+  // The folder name is always used as the reference name (@skill-name)
+  // But the display name can be overridden in frontmatter
+  const displayName = frontmatter.name ?? name;
+  const description = frontmatter.description ?? extractedDescription;
+
   return {
-    name,
+    name,  // Always use folder name for @reference
+    displayName,  // Human-readable name for UI display
     description,
     content,
     frontmatter,

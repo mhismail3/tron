@@ -572,6 +572,7 @@ function createSkillManager(orchestrator: EventStoreOrchestrator): SkillRpcManag
           'frontmatter' in s ? (s.frontmatter?.autoInject ?? false) : (s.autoInject ?? false);
         const getTags = (s: any): string[] | undefined =>
           'frontmatter' in s ? s.frontmatter?.tags : s.tags;
+        const getDisplayName = (s: any): string => s.displayName ?? s.name;
 
         const autoInjectCount = skills.filter(s => getAutoInject(s)).length;
 
@@ -579,6 +580,7 @@ function createSkillManager(orchestrator: EventStoreOrchestrator): SkillRpcManag
           skills: skills.map(s => params.includeContent
             ? {
                 name: s.name,
+                displayName: getDisplayName(s),
                 description: s.description,
                 source: s.source,
                 autoInject: getAutoInject(s),
@@ -589,6 +591,7 @@ function createSkillManager(orchestrator: EventStoreOrchestrator): SkillRpcManag
               } as RpcSkillMetadata
             : {
                 name: s.name,
+                displayName: getDisplayName(s),
                 description: s.description,
                 source: s.source,
                 autoInject: getAutoInject(s),
@@ -610,6 +613,7 @@ function createSkillManager(orchestrator: EventStoreOrchestrator): SkillRpcManag
         'frontmatter' in s ? (s.frontmatter?.autoInject ?? false) : (s.autoInject ?? false);
       const getTags = (s: any): string[] | undefined =>
         'frontmatter' in s ? s.frontmatter?.tags : s.tags;
+      const getDisplayName = (s: any): string => s.displayName ?? s.name;
 
       const autoInjectCount = registry.list({ autoInjectOnly: true }).length;
 
@@ -617,6 +621,7 @@ function createSkillManager(orchestrator: EventStoreOrchestrator): SkillRpcManag
         skills: skills.map(s => params.includeContent
           ? {
               name: s.name,
+              displayName: getDisplayName(s),
               description: s.description,
               source: s.source,
               autoInject: getAutoInject(s),
@@ -627,6 +632,7 @@ function createSkillManager(orchestrator: EventStoreOrchestrator): SkillRpcManag
             } as RpcSkillMetadata
           : {
               name: s.name,
+              displayName: getDisplayName(s),
               description: s.description,
               source: s.source,
               autoInject: getAutoInject(s),
@@ -650,6 +656,7 @@ function createSkillManager(orchestrator: EventStoreOrchestrator): SkillRpcManag
       return {
         skill: {
           name: skill.name,
+          displayName: skill.displayName,
           description: skill.description,
           source: skill.source,
           autoInject: skill.frontmatter.autoInject ?? false,

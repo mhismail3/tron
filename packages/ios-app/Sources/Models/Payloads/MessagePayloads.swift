@@ -116,8 +116,10 @@ struct UserMessagePayload {
                 guard let name = skillDict["name"] as? String else { return nil }
                 let sourceString = skillDict["source"] as? String ?? "project"
                 let source: SkillSource = sourceString == "global" ? .global : .project
+                let displayName = skillDict["displayName"] as? String ?? name
                 return Skill(
                     name: name,
+                    displayName: displayName,
                     description: "",
                     source: source,
                     autoInject: false,

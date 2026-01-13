@@ -121,6 +121,7 @@ export class SkillRegistry {
 
       result.push({
         name: skill.name,
+        displayName: skill.displayName,
         description: skill.description,
         source: skill.source,
         autoInject: skill.frontmatter.autoInject ?? false,

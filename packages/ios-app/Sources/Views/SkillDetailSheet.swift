@@ -31,7 +31,7 @@ struct SkillDetailSheet: View {
             .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
             .toolbar {
                 ToolbarItem(placement: .principal) {
-                    Text(skill.name)
+                    Text(skill.displayName)
                         .font(.system(size: 16, weight: .semibold, design: .monospaced))
                         .foregroundStyle(.tronEmerald)
                 }
@@ -325,6 +325,7 @@ struct SkillDetailSheet: View {
     SkillDetailSheet(
         skill: Skill(
             name: "typescript-rules",
+            displayName: "TypeScript Rules",
             description: "TypeScript coding standards and best practices for the project",
             source: .global,
             autoInject: false,
