@@ -163,15 +163,6 @@ struct ChatView: View {
             .navigationBarTitleDisplayMode(.inline)
         .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
         .toolbar {
-            ToolbarItem(placement: .topBarLeading) {
-                Button {
-                    dismiss()
-                } label: {
-                    Image(systemName: "chevron.left")
-                        .font(.system(size: 16, weight: .semibold))
-                        .foregroundStyle(.tronEmerald)
-                }
-            }
             ToolbarItem(placement: .principal) {
                 VStack(spacing: 2) {
                     Text(eventStoreManager.activeSession?.displayTitle ?? "Chat")
@@ -220,7 +211,6 @@ struct ChatView: View {
                 }
             }
         }
-        .navigationBarBackButtonHidden(true)
         // Browser sheet (replaces floating window)
         .sheet(isPresented: $viewModel.showBrowserWindow) {
             if #available(iOS 26.0, *) {
