@@ -1908,8 +1908,8 @@ struct ForkConfirmationSheet: View {
             .padding(.bottom, 20)
         }
         .padding(.horizontal, 24)
-        .presentationDetents([.height(340)])
-        .presentationDragIndicator(.visible)
+        .presentationDetents([.medium])
+        .presentationDragIndicator(.hidden)
         .preferredColorScheme(.dark)
     }
 
