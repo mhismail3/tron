@@ -2,10 +2,14 @@
  * @fileoverview Skill Content Injection Tests (TDD)
  *
  * Tests for the skill content loading and injection flow:
- * - loadSkillContextForPrompt extracts skills from @mentions and explicit selection
+ * - loadSkillContextForPrompt loads skills from explicit selection (options.skills)
  * - skillLoader callback is invoked with skill names
  * - buildSkillContext generates proper XML output
  * - Skill context is prepended to user prompt in runAgent
+ *
+ * Note: @mentions in prompt text are handled client-side (iOS app converts them to
+ * explicit skill chips). The server only processes explicit skills from options.skills.
+ * extractSkillReferences is still available for client-side use.
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { EventStore, extractSkillReferences, buildSkillContext, type SkillMetadata } from '@tron/core';
@@ -59,10 +63,10 @@ Follow REST conventions. Use proper HTTP methods. Return consistent response sha
 };
 
 // =============================================================================
-// Unit Tests: extractSkillReferences
+// Unit Tests: extractSkillReferences (for client-side @mention detection)
 // =============================================================================
 
-describe('extractSkillReferences', () => {
+describe('extractSkillReferences (client-side utility)', () => {
   it('extracts @mention from text', () => {
     const refs = extractSkillReferences('Help me with @typescript-rules');
     expect(refs).toHaveLength(1);
@@ -217,7 +221,8 @@ describe('Skill Content Injection', () => {
       expect(result).toContain('Shakespearean');
     });
 
-    it('extracts @mentions from prompt and loads content', async () => {
+    it('ignores @mentions in prompt (client-side responsibility)', async () => {
+      // @mentions in prompt text are handled client-side - server ignores them
       const session = await orchestrator.createSession({
         workingDirectory: testDir,
       });
@@ -230,15 +235,17 @@ describe('Skill Content Injection', () => {
       const result = await (orchestrator as any).loadSkillContextForPrompt(active, {
         sessionId: session.sessionId,
         prompt: 'Help me with @typescript-rules please',
+        // No explicit skills - only @mention in text
         skillLoader: skillLoaderMock,
       });
 
-      expect(skillLoaderMock).toHaveBeenCalledWith(['typescript-rules']);
-      expect(result).toContain('typescript-rules');
-      expect(result).toContain('strict TypeScript');
+      // Should NOT call skillLoader since no explicit skills provided
+      expect(skillLoaderMock).not.toHaveBeenCalled();
+      expect(result).toBe('');
     });
 
-    it('combines explicit skills and @mentions', async () => {
+    it('only uses explicit skills array, ignoring @mentions in prompt', async () => {
+      // Server only processes options.skills, not @mentions in prompt text
       const session = await orchestrator.createSession({
         workingDirectory: testDir,
       });
@@ -246,25 +253,22 @@ describe('Skill Content Injection', () => {
 
       const skillLoaderMock = vi.fn().mockResolvedValue([
         mockSkills['old-timey-english'],
-        mockSkills['api-design'],
       ]);
 
       const result = await (orchestrator as any).loadSkillContextForPrompt(active, {
         sessionId: session.sessionId,
-        prompt: 'Help with @api-design',
-        skills: [{ name: 'old-timey-english', source: 'global' }],
+        prompt: 'Help with @api-design', // This @mention is IGNORED
+        skills: [{ name: 'old-timey-english', source: 'global' }], // Only this is used
         skillLoader: skillLoaderMock,
       });
 
-      // Should have both skills
-      expect(skillLoaderMock).toHaveBeenCalledWith(
-        expect.arrayContaining(['old-timey-english', 'api-design'])
-      );
+      // Should only have the explicit skill, not the @mention
+      expect(skillLoaderMock).toHaveBeenCalledWith(['old-timey-english']);
       expect(result).toContain('old-timey-english');
-      expect(result).toContain('api-design');
+      expect(result).not.toContain('api-design');
     });
 
-    it('deduplicates skills mentioned both explicitly and via @mention', async () => {
+    it('loads multiple explicit skills', async () => {
       const session = await orchestrator.createSession({
         workingDirectory: testDir,
       });
@@ -272,20 +276,27 @@ describe('Skill Content Injection', () => {
 
       const skillLoaderMock = vi.fn().mockResolvedValue([
         mockSkills['typescript-rules'],
+        mockSkills['api-design'],
       ]);
 
-      await (orchestrator as any).loadSkillContextForPrompt(active, {
+      const result = await (orchestrator as any).loadSkillContextForPrompt(active, {
         sessionId: session.sessionId,
-        prompt: 'Use @typescript-rules for this',
-        skills: [{ name: 'typescript-rules', source: 'global' }],
+        prompt: 'Help me build an API',
+        skills: [
+          { name: 'typescript-rules', source: 'global' },
+          { name: 'api-design', source: 'global' },
+        ],
         skillLoader: skillLoaderMock,
       });
 
-      // Should only call with one instance despite duplicate
-      expect(skillLoaderMock).toHaveBeenCalledWith(['typescript-rules']);
+      expect(skillLoaderMock).toHaveBeenCalledWith(
+        expect.arrayContaining(['typescript-rules', 'api-design'])
+      );
+      expect(result).toContain('typescript-rules');
+      expect(result).toContain('api-design');
     });
 
-    it('returns empty string when skillLoader not provided', async () => {
+    it('returns empty string when skillLoader not provided but skills are', async () => {
       const session = await orchestrator.createSession({
         workingDirectory: testDir,
       });
@@ -293,7 +304,8 @@ describe('Skill Content Injection', () => {
 
       const result = await (orchestrator as any).loadSkillContextForPrompt(active, {
         sessionId: session.sessionId,
-        prompt: 'Use @typescript-rules',
+        prompt: 'Test prompt',
+        skills: [{ name: 'test-skill', source: 'global' }],
         // No skillLoader provided
       });
 
@@ -310,7 +322,8 @@ describe('Skill Content Injection', () => {
 
       const result = await (orchestrator as any).loadSkillContextForPrompt(active, {
         sessionId: session.sessionId,
-        prompt: 'Use @non-existent-skill',
+        prompt: 'Test prompt',
+        skills: [{ name: 'non-existent-skill', source: 'global' }],
         skillLoader: skillLoaderMock,
       });
 

@@ -72,6 +72,8 @@ export class TronAgent {
   private currentReasoningLevel: 'low' | 'medium' | 'high' | 'xhigh' | undefined;
   /** Summarizer for auto-compaction */
   private summarizer: Summarizer | null = null;
+  /** Skill context to inject into system prompt for current run */
+  private currentSkillContext: string | undefined;
   /** JSONL log file path for turn metadata */
   private turnLogPath: string;
   /** Whether auto-compaction is enabled */
@@ -175,6 +177,14 @@ export class TronAgent {
   setSummarizer(summarizer: Summarizer): void {
     this.summarizer = summarizer;
     logger.info('Summarizer configured', { sessionId: this.sessionId });
+  }
+
+  /**
+   * Set skill context to inject into system prompt for the next run.
+   * This is cleared after each run completes.
+   */
+  setSkillContext(skillContext: string | undefined): void {
+    this.currentSkillContext = skillContext;
   }
 
   /**
@@ -493,6 +503,7 @@ export class TronAgent {
           parameters: tool.parameters,
         })),
         workingDirectory: this.workingDirectory,
+        skillContext: this.currentSkillContext,
       };
 
       // Debug: Log context being sent to provider
@@ -506,6 +517,8 @@ export class TronAgent {
         systemPromptPreview: context.systemPrompt?.substring(0, 100),
         workingDirectory: this.workingDirectory,
         hasToolClarification: this.contextManager.requiresToolClarification(),
+        hasSkillContext: !!this.currentSkillContext,
+        skillContextLength: this.currentSkillContext?.length ?? 0,
       });
 
       // Stream response

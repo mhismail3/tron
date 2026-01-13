@@ -137,20 +137,44 @@ function createRpcContext(orchestrator: EventStoreOrchestrator): RpcContext {
     },
     agentManager: {
       async prompt(params) {
+        // Log incoming prompt params for debugging skills
+        logger.info('[RPC] agent.prompt received', {
+          sessionId: params.sessionId,
+          promptLength: params.prompt?.length ?? 0,
+          hasSkills: !!params.skills,
+          skillCount: params.skills?.length ?? 0,
+          skillNames: params.skills?.map(s => s.name) ?? [],
+        });
+
         // Create a skill loader that can load skill content by name
         // This closure captures the session context to load from the correct directory
         const skillLoader = async (skillNames: string[]) => {
+          logger.info('[SKILL-LOADER] skillLoader called', {
+            skillNames,
+            sessionId: params.sessionId,
+          });
+
           try {
             // Get session's working directory
             const session = await orchestrator.getSession(params.sessionId);
             if (!session?.workingDirectory) {
-              logger.warn('Cannot load skills - no working directory', { sessionId: params.sessionId });
+              logger.warn('[SKILL-LOADER] Cannot load skills - no working directory', { sessionId: params.sessionId });
               return [];
             }
+
+            logger.info('[SKILL-LOADER] Loading skills from registry', {
+              workingDirectory: session.workingDirectory,
+              skillNames,
+            });
 
             // Get or create skill registry for this directory
             const registry = new SkillRegistry({ workingDirectory: session.workingDirectory });
             await registry.initialize();
+
+            logger.info('[SKILL-LOADER] Registry initialized', {
+              totalSkills: registry.list().length,
+              availableSkills: registry.list().map(s => s.name),
+            });
 
             // Load each skill by name
             const loadedSkills: Array<{ name: string; content: string }> = [];
@@ -158,15 +182,29 @@ function createRpcContext(orchestrator: EventStoreOrchestrator): RpcContext {
               const skill = registry.get(name);
               if (skill) {
                 loadedSkills.push({ name: skill.name, content: skill.content });
-                logger.debug('Loaded skill content', { name: skill.name, contentLength: skill.content.length });
+                logger.info('[SKILL-LOADER] Loaded skill content', {
+                  name: skill.name,
+                  contentLength: skill.content.length,
+                  contentPreview: skill.content.substring(0, 100) + '...',
+                });
               } else {
-                logger.warn('Skill not found', { name, sessionId: params.sessionId });
+                logger.warn('[SKILL-LOADER] Skill not found in registry', {
+                  name,
+                  sessionId: params.sessionId,
+                  availableSkills: registry.list().map(s => s.name),
+                });
               }
             }
 
+            logger.info('[SKILL-LOADER] Returning loaded skills', {
+              requestedCount: skillNames.length,
+              loadedCount: loadedSkills.length,
+              loadedNames: loadedSkills.map(s => s.name),
+            });
+
             return loadedSkills;
           } catch (err) {
-            logger.error('Error loading skills', { error: err, sessionId: params.sessionId });
+            logger.error('[SKILL-LOADER] Error loading skills', { error: err, sessionId: params.sessionId });
             return [];
           }
         };

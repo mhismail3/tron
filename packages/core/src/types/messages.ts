@@ -157,6 +157,8 @@ export interface Context {
   tools?: Tool[];
   /** Working directory for file operations (used by some providers for context) */
   workingDirectory?: string;
+  /** Skill context to inject as system-level instructions (ephemeral, not cached) */
+  skillContext?: string;
 }
 
 // Tool and ToolInputSchema are re-exported from ./tools.js

@@ -352,10 +352,24 @@ export class AnthropicProvider {
           cache_control: { type: 'ephemeral' },
         });
       }
+      // Add skill context as a separate system block (ephemeral, high authority)
+      if (context.skillContext) {
+        systemBlocks.push({
+          type: 'text',
+          text: context.skillContext,
+          cache_control: { type: 'ephemeral' },
+        });
+      }
       systemParam = systemBlocks;
     } else {
-      // API key: Use simple string format
-      systemParam = context.systemPrompt;
+      // API key: Combine system prompt and skill context
+      if (context.skillContext) {
+        systemParam = context.systemPrompt
+          ? `${context.systemPrompt}\n\n${context.skillContext}`
+          : context.skillContext;
+      } else {
+        systemParam = context.systemPrompt;
+      }
     }
 
     // Build request parameters

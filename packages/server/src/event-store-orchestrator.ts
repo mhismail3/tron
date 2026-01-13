@@ -54,7 +54,6 @@ import {
   KeywordSummarizer,
   SkillTracker,
   createSkillTracker,
-  extractSkillReferences,
   buildSkillContext,
   type SkillSource,
   type SkillAddMethod,
@@ -839,18 +838,26 @@ export class EventStoreOrchestrator extends EventEmitter {
       await active.appendPromiseChain;
 
       // Track skills and load content BEFORE building user content
-      // This allows skill context to be prepended to the prompt
+      // Skill context is now injected as a system block (not user message)
       const skillContext = await this.loadSkillContextForPrompt(active, options);
+
+      // Set skill context on agent (will be injected into system prompt)
+      if (skillContext) {
+        logger.info('[SKILL] Setting skill context on agent', {
+          sessionId: active.sessionId,
+          skillContextLength: skillContext.length,
+        });
+        active.agent.setSkillContext(skillContext);
+      } else {
+        active.agent.setSkillContext(undefined);
+      }
 
       // Build user content from prompt and any attachments
       const userContent: UserContent[] = [];
 
-      // Add text prompt with skill context prepended
-      if (options.prompt || skillContext) {
-        const promptWithSkills = skillContext
-          ? `${skillContext}\n\n${options.prompt || ''}`
-          : options.prompt || '';
-        userContent.push({ type: 'text', text: promptWithSkills });
+      // Add text prompt (skill context is now in system prompt, not here)
+      if (options.prompt) {
+        userContent.push({ type: 'text', text: options.prompt });
       }
 
       // Add images from legacy images array
@@ -1648,9 +1655,13 @@ export class EventStoreOrchestrator extends EventEmitter {
    *
    * This method:
    * 1. Tracks skills (creates skill.added events for new skills)
-   * 2. Collects all skill names (from @mentions and explicit selection)
+   * 2. Collects skill names from explicitly selected skills (options.skills)
    * 3. Loads skill content via the skillLoader callback
    * 4. Builds and returns the skill context XML block
+   *
+   * Note: @mentions in prompt text are NOT extracted here. The iOS client handles
+   * @mention detection and converts them to explicit skill chips before sending.
+   * This ensures only skills the user explicitly selected (via chip) are included.
    *
    * @returns Skill context string to prepend to prompt, or empty string if no skills
    */
@@ -1658,18 +1669,19 @@ export class EventStoreOrchestrator extends EventEmitter {
     active: ActiveSession,
     options: AgentRunOptions
   ): Promise<string> {
-    // Collect skill names from both sources
+    // Log incoming skills for debugging
+    logger.info('[SKILL] loadSkillContextForPrompt called', {
+      sessionId: active.sessionId,
+      skillsProvided: options.skills?.length ?? 0,
+      skills: options.skills?.map(s => s.name) ?? [],
+      hasSkillLoader: !!options.skillLoader,
+    });
+
+    // Collect skill names from explicitly selected skills only
+    // @mentions in prompt text are handled client-side (converted to chips)
     const skillNames: Set<string> = new Set();
 
-    // 1. Extract @mentions from prompt text
-    if (options.prompt) {
-      const mentions = extractSkillReferences(options.prompt);
-      for (const mention of mentions) {
-        skillNames.add(mention.name);
-      }
-    }
-
-    // 2. Add explicitly selected skills from options.skills
+    // Add explicitly selected skills from options.skills
     if (options.skills && options.skills.length > 0) {
       for (const skill of options.skills) {
         skillNames.add(skill.name);
@@ -1678,6 +1690,7 @@ export class EventStoreOrchestrator extends EventEmitter {
 
     // If no skills, return empty string
     if (skillNames.size === 0) {
+      logger.info('[SKILL] No skills to load - returning empty context');
       return '';
     }
 
@@ -1686,18 +1699,28 @@ export class EventStoreOrchestrator extends EventEmitter {
 
     // If no skill loader provided, we can't load content
     if (!options.skillLoader) {
-      logger.warn('Skills referenced but no skillLoader provided', {
+      logger.warn('[SKILL] Skills referenced but no skillLoader provided', {
         sessionId: active.sessionId,
         skillCount: skillNames.size,
+        skillNames: Array.from(skillNames),
       });
       return '';
     }
 
     // Load skill content
+    logger.info('[SKILL] Calling skillLoader for skills', {
+      skillNames: Array.from(skillNames),
+    });
     const loadedSkills = await options.skillLoader(Array.from(skillNames));
 
+    logger.info('[SKILL] skillLoader returned', {
+      requestedCount: skillNames.size,
+      loadedCount: loadedSkills.length,
+      loadedNames: loadedSkills.map(s => s.name),
+    });
+
     if (loadedSkills.length === 0) {
-      logger.warn('No skill content loaded', {
+      logger.warn('[SKILL] No skill content loaded', {
         sessionId: active.sessionId,
         requestedSkills: Array.from(skillNames),
       });
@@ -1720,10 +1743,11 @@ export class EventStoreOrchestrator extends EventEmitter {
 
     const skillContext = buildSkillContext(skillMetadata);
 
-    logger.debug('[SKILL] Built skill context', {
+    logger.info('[SKILL] Built skill context successfully', {
       sessionId: active.sessionId,
       skillCount: loadedSkills.length,
       contextLength: skillContext.length,
+      contextPreview: skillContext.substring(0, 200) + '...',
     });
 
     return skillContext;
@@ -1732,9 +1756,11 @@ export class EventStoreOrchestrator extends EventEmitter {
   /**
    * Track skills explicitly added with a prompt.
    *
-   * Skills are tracked when:
-   * 1. User types @skill-name in the prompt (extracted via extractSkillReferences)
-   * 2. User explicitly selects skills via the skill sheet (passed in options.skills)
+   * Skills are tracked when explicitly selected via the skill sheet or
+   * @mention detection in the client (passed in options.skills).
+   *
+   * Note: @mentions in prompt text are NOT extracted here. The iOS client handles
+   * @mention detection and converts them to explicit skill chips before sending.
    *
    * For each skill not already tracked:
    * - Creates a skill.added event (persisted to EventStore)
@@ -1749,49 +1775,22 @@ export class EventStoreOrchestrator extends EventEmitter {
     active: ActiveSession,
     options: AgentRunOptions
   ): Promise<void> {
-    // Collect skills to track from both sources
+    // Collect skills to track from explicitly selected skills only
+    // @mentions in prompt text are handled client-side (converted to chips)
     const skillsToTrack: Array<{
       name: string;
       source: SkillSource;
       addedVia: SkillAddMethod;
     }> = [];
 
-    // 1. Extract @mentions from prompt text
-    if (options.prompt) {
-      const mentions = extractSkillReferences(options.prompt);
-      for (const mention of mentions) {
-        // Default to 'global' source for @mentions since we don't have source info
-        // The actual skill content lookup happens elsewhere
-        skillsToTrack.push({
-          name: mention.name,
-          source: 'global', // Will be resolved when skill content is loaded
-          addedVia: 'mention',
-        });
-      }
-    }
-
-    // 2. Add explicitly selected skills from options.skills
+    // Add explicitly selected skills from options.skills
     if (options.skills && options.skills.length > 0) {
       for (const skill of options.skills) {
-        // Check if this skill was already added via @mention (avoid duplicates)
-        const alreadyFromMention = skillsToTrack.some(
-          s => s.name === skill.name && s.addedVia === 'mention'
-        );
-
-        if (!alreadyFromMention) {
-          skillsToTrack.push({
-            name: skill.name,
-            source: skill.source,
-            addedVia: 'explicit',
-          });
-        } else {
-          // If skill was @mentioned AND explicitly selected, update source from explicit
-          // since explicit selection has more accurate source info
-          const existing = skillsToTrack.find(s => s.name === skill.name);
-          if (existing) {
-            existing.source = skill.source;
-          }
-        }
+        skillsToTrack.push({
+          name: skill.name,
+          source: skill.source,
+          addedVia: 'explicit',
+        });
       }
     }
 
