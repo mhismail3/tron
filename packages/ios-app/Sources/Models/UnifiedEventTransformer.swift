@@ -1130,7 +1130,7 @@ extension UnifiedEventTransformer {
 
             case .messageUser, .messageSystem,
                  .notificationInterrupted, .configModelSwitch, .configReasoningLevel,
-                 .contextCleared,
+                 .contextCleared, .skillRemoved,
                  .errorAgent, .errorTool, .errorProvider:
                 // Add chat message
                 if var message = transformPersistedEvent(event) {
@@ -1380,7 +1380,7 @@ extension UnifiedEventTransformer {
 
             case .messageUser, .messageSystem,
                  .notificationInterrupted, .configModelSwitch, .configReasoningLevel,
-                 .contextCleared,
+                 .contextCleared, .skillRemoved,
                  .errorAgent, .errorTool, .errorProvider:
                 // Add chat message using the SessionEvent overload
                 if var message = transformPersistedEvent(event) {
