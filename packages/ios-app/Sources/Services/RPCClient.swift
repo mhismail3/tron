@@ -1016,6 +1016,27 @@ class RPCClient: ObservableObject {
         return try await ws.send(method: "skill.remove", params: params)
     }
 
+    // MARK: - File Reading
+
+    /// Read file content from server
+    func readFile(path: String) async throws -> String {
+        guard let ws = webSocket else {
+            throw RPCClientError.connectionNotEstablished
+        }
+
+        struct ReadFileParams: Codable {
+            let path: String
+        }
+
+        struct ReadFileResult: Codable {
+            let content: String
+        }
+
+        let params = ReadFileParams(path: path)
+        let result: ReadFileResult = try await ws.send(method: "file.read", params: params)
+        return result.content
+    }
+
     // MARK: - State Accessors
 
     var isConnected: Bool {

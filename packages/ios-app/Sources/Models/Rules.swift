@@ -65,6 +65,19 @@ struct RulesFile: Identifiable, Codable, Equatable {
     /// Label for this file's level (convenience accessor)
     var label: String { level.label }
 
+    /// Display path formatted for UI - shows ~/.tron/<file> for global rules
+    var displayPath: String {
+        switch level {
+        case .global:
+            // Extract filename from path and show as ~/.tron/<filename>
+            let filename = (path as NSString).lastPathComponent
+            return "~/.tron/\(filename)"
+        case .project, .directory:
+            // Use relativePath for project/directory level
+            return relativePath
+        }
+    }
+
     // MARK: - Codable
 
     enum CodingKeys: String, CodingKey {

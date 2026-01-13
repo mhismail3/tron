@@ -43,11 +43,16 @@ extension Color {
     static let tronBlue = Color(hex: "#3B82F6")
     static let tronCyan = Color(hex: "#06B6D4")
 
-    // Warm colors (Tokens theme)
-    static let tronAmberLight = Color(hex: "#FBBF24")   // Yellow for Total tokens
-    static let tronOrange = Color(hex: "#FB923C")       // Orange for Input tokens
-    static let tronRed = Color(hex: "#F87171")          // Soft red for Output tokens
-    static let tronBronze = Color(hex: "#92400E")       // Dark brown container tint
+    // Warm colors (Tokens theme) - Earthy/muted palette
+    static let tronAmberLight = Color(hex: "#D97706")   // Warm honey amber for Total tokens
+    static let tronOrange = Color(hex: "#C2410C")       // Burnt orange for Input tokens
+    static let tronRed = Color(hex: "#B45309")          // Terracotta/rust for Output tokens
+    static let tronBronze = Color(hex: "#78350F")       // Dark earth brown container tint
+
+    // Earthy accent colors
+    static let tronTerracotta = Color(hex: "#9A3412")   // Terracotta for Rules
+    static let tronClay = Color(hex: "#A16207")         // Clay/ochre for Tools
+    static let tronSienna = Color(hex: "#B45309")       // Burnt sienna accent
 
     // Cool neutral (Compact/Window theme)
     static let tronSlate = Color(hex: "#64748B")        // Slate blue-gray
@@ -236,6 +241,11 @@ extension ShapeStyle where Self == Color {
     static var tronOrange: Color { .tronOrange }
     static var tronRed: Color { .tronRed }
     static var tronBronze: Color { .tronBronze }
+
+    // Earthy accent colors
+    static var tronTerracotta: Color { .tronTerracotta }
+    static var tronClay: Color { .tronClay }
+    static var tronSienna: Color { .tronSienna }
 
     // Cool neutral (Compact/Window theme)
     static var tronSlate: Color { .tronSlate }

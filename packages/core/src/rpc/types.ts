@@ -128,6 +128,8 @@ export type RpcMethod =
   | 'filesystem.listDir'
   | 'filesystem.getHome'
   | 'filesystem.createDir'
+  // File operations
+  | 'file.read'
   // Search
   | 'search.content'
   | 'search.events'
@@ -1224,12 +1226,38 @@ export interface RpcAddedSkillInfo {
   eventId: string;
 }
 
+/** Info about a loaded rules file */
+export interface RpcRulesFileInfo {
+  /** Absolute path to the file */
+  path: string;
+  /** Path relative to working directory */
+  relativePath: string;
+  /** Level in hierarchy: global, project, or directory */
+  level: 'global' | 'project' | 'directory';
+  /** Depth from project root (-1 for global) */
+  depth: number;
+  /** File size in bytes (optional) */
+  sizeBytes?: number;
+}
+
+/** Rules loaded for the session */
+export interface RpcRulesInfo {
+  /** List of loaded rules files */
+  files: RpcRulesFileInfo[];
+  /** Total number of rules files */
+  totalFiles: number;
+  /** Estimated token count for merged rules content */
+  tokens: number;
+}
+
 export interface ContextGetDetailedSnapshotResult extends ContextGetSnapshotResult {
   messages: ContextDetailedMessageInfo[];
   systemPromptContent: string;
   toolsContent: string[];
   /** Skills explicitly added to this session's context */
   addedSkills: RpcAddedSkillInfo[];
+  /** Rules files loaded for this session (if any) */
+  rules?: RpcRulesInfo;
 }
 
 /** Check if compaction is needed */

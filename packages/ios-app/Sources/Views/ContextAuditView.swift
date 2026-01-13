@@ -192,19 +192,39 @@ struct ContextAuditView: View {
                         TokenBreakdownHeader()
                             .padding(.horizontal)
 
-                        // System Prompt + Tools + Skill References (combined expandable section)
-                        SystemAndToolsSection(
-                            systemPromptTokens: snapshot.breakdown.systemPrompt,
-                            toolsTokens: snapshot.breakdown.tools,
-                            systemPromptContent: snapshot.systemPromptContent,
-                            toolsContent: snapshot.toolsContent,
-                            allSkills: skillStore?.skills ?? []
+                        // System header (non-expandable)
+                        SystemHeader()
+                            .padding(.horizontal)
+
+                        // System Prompt (standalone container)
+                        SystemPromptSection(
+                            tokens: snapshot.breakdown.systemPrompt,
+                            content: snapshot.systemPromptContent
                         )
                         .padding(.horizontal)
 
-                        // Rules section (immutable, cannot be removed)
+                        // Tools (standalone container with badge - clay/ochre)
+                        ToolsSection(
+                            toolsContent: snapshot.toolsContent,
+                            tokens: snapshot.breakdown.tools
+                        )
+                        .padding(.horizontal)
+
+                        // Rules section (immutable, terracotta - right after Tools)
                         if let rules = snapshot.rules, rules.totalFiles > 0 {
-                            RulesSection(rules: rules)
+                            RulesSection(
+                                rules: rules,
+                                onFetchContent: { path in
+                                    // Fetch rule content from server
+                                    try await rpcClient.readFile(path: path)
+                                }
+                            )
+                                .padding(.horizontal)
+                        }
+
+                        // Skill References (standalone container with badge and token count)
+                        if let skills = skillStore?.skills, !skills.isEmpty {
+                            SkillReferencesSection(skills: skills)
                                 .padding(.horizontal)
                         }
 
@@ -612,25 +632,30 @@ struct TokenBreakdownHeader: View {
     }
 }
 
-// MARK: - System and Tools Section
+// MARK: - System Header
 
 @available(iOS 26.0, *)
-struct SystemAndToolsSection: View {
-    let systemPromptTokens: Int
-    let toolsTokens: Int
-    let systemPromptContent: String
-    let toolsContent: [String]
-    /// All available skills (shown as Skill References - frontmatter only, NOT removable)
-    var allSkills: [Skill] = []
-
-    @State private var isExpanded = false
-    @State private var showingSystemPrompt = false
-    @State private var showingTools = false
-    @State private var showingSkillRefs = false
-
-    private var totalTokens: Int {
-        systemPromptTokens + toolsTokens
+struct SystemHeader: View {
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "gearshape.2.fill")
+                .font(.system(size: 12))
+                .foregroundStyle(.tronGray)
+            Text("System")
+                .font(.system(size: 12, weight: .medium, design: .monospaced))
+                .foregroundStyle(.white.opacity(0.6))
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
+}
+
+// MARK: - System Prompt Section (standalone container)
+
+@available(iOS 26.0, *)
+struct SystemPromptSection: View {
+    let tokens: Int
+    let content: String
+    @State private var isExpanded = false
 
     private func formatTokens(_ count: Int) -> String {
         if count >= 1000 {
@@ -640,28 +665,24 @@ struct SystemAndToolsSection: View {
     }
 
     var body: some View {
-        VStack(spacing: 0) {
-            // Header row (tappable)
+        VStack(alignment: .leading, spacing: 0) {
+            // Header
             Button(action: {
                 withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
                     isExpanded.toggle()
                 }
             }) {
                 HStack {
-                    Image(systemName: "gearshape.2.fill")
+                    Image(systemName: "doc.text.fill")
                         .font(.system(size: 14))
-                        .foregroundStyle(.tronGray)
-
-                    Text("System, Tools & Skills")
+                        .foregroundStyle(.tronPurple)
+                    Text("System Prompt")
                         .font(.system(size: 14, weight: .medium, design: .monospaced))
-                        .foregroundStyle(.tronGray)
-
+                        .foregroundStyle(.tronPurple)
                     Spacer()
-
-                    Text(formatTokens(totalTokens))
+                    Text(formatTokens(tokens))
                         .font(.system(size: 12, weight: .medium, design: .monospaced))
                         .foregroundStyle(.white.opacity(0.6))
-
                     Image(systemName: "chevron.down")
                         .font(.system(size: 10, weight: .medium))
                         .foregroundStyle(.white.opacity(0.4))
@@ -671,57 +692,110 @@ struct SystemAndToolsSection: View {
                 .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
             }
             .buttonStyle(.plain)
-            .background {
-                if !isExpanded {
-                    // Subtle grey container (sub-containers keep their own colors)
-                    RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .fill(.clear)
-                        .glassEffect(.regular.tint(Color.white.opacity(0.08)), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-                }
-            }
 
-            // Expandable content
+            // Content
             if isExpanded {
-                VStack(alignment: .leading, spacing: 8) {
-                    // System Prompt - expandable
-                    ExpandableContentSection(
-                        icon: "doc.text.fill",
-                        iconColor: .tronPurple,
-                        title: "System Prompt",
-                        tokens: systemPromptTokens,
-                        content: systemPromptContent,
-                        isExpanded: $showingSystemPrompt
-                    )
-
-                    // Tools - expandable
-                    ExpandableContentSection(
-                        icon: "hammer.fill",
-                        iconColor: .tronAmber,
-                        title: "Tools (\(toolsContent.count))",
-                        tokens: toolsTokens,
-                        content: toolsContent.joined(separator: "\n"),
-                        isExpanded: $showingTools
-                    )
-
-                    // Skill References - frontmatter only, not removable
-                    if !allSkills.isEmpty {
-                        SkillReferencesSection(
-                            skills: allSkills,
-                            isExpanded: $showingSkillRefs
-                        )
-                    }
+                ScrollView {
+                    Text(content)
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundStyle(.white.opacity(0.6))
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(10)
+                        .textSelection(.enabled)
                 }
-                .padding(12)
+                .frame(maxHeight: 300)
+                .background(Color.black.opacity(0.2))
+                .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+                .padding(.horizontal, 12)
+                .padding(.bottom, 12)
                 .transition(.opacity.combined(with: .scale(scale: 0.95, anchor: .top)))
             }
         }
         .background {
-            if isExpanded {
-                // Subtle grey container (sub-containers keep their own colors)
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .fill(.clear)
-                    .glassEffect(.regular.tint(Color.white.opacity(0.08)), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(.clear)
+                .glassEffect(.regular.tint(Color.tronPurple.opacity(0.12)), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+    }
+}
+
+// MARK: - Tools Section (standalone container with badge - clay/ochre)
+
+@available(iOS 26.0, *)
+struct ToolsSection: View {
+    let toolsContent: [String]
+    let tokens: Int
+    @State private var isExpanded = false
+
+    private func formatTokens(_ count: Int) -> String {
+        if count >= 1000 {
+            return String(format: "%.1fk", Double(count) / 1000)
+        }
+        return "\(count)"
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            // Header
+            Button(action: {
+                withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
+                    isExpanded.toggle()
+                }
+            }) {
+                HStack {
+                    Image(systemName: "hammer.fill")
+                        .font(.system(size: 14))
+                        .foregroundStyle(.tronClay)
+                    Text("Tools")
+                        .font(.system(size: 14, weight: .medium, design: .monospaced))
+                        .foregroundStyle(.tronClay)
+
+                    // Count badge
+                    Text("\(toolsContent.count)")
+                        .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(Color.tronClay.opacity(0.7))
+                        .clipShape(Capsule())
+
+                    Spacer()
+                    Text(formatTokens(tokens))
+                        .font(.system(size: 12, weight: .medium, design: .monospaced))
+                        .foregroundStyle(.white.opacity(0.6))
+                    Image(systemName: "chevron.down")
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundStyle(.white.opacity(0.4))
+                        .rotationEffect(.degrees(isExpanded ? -180 : 0))
+                }
+                .padding(14)
+                .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
             }
+            .buttonStyle(.plain)
+
+            // Content
+            if isExpanded {
+                ScrollView {
+                    Text(toolsContent.joined(separator: "\n"))
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundStyle(.white.opacity(0.6))
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(10)
+                        .textSelection(.enabled)
+                }
+                .frame(maxHeight: 300)
+                .background(Color.black.opacity(0.2))
+                .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+                .padding(.horizontal, 12)
+                .padding(.bottom, 12)
+                .transition(.opacity.combined(with: .scale(scale: 0.95, anchor: .top)))
+            }
+        }
+        .background {
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(.clear)
+                .glassEffect(.regular.tint(Color.tronClay.opacity(0.12)), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         }
         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
@@ -799,12 +873,30 @@ struct ExpandableContentSection: View {
     }
 }
 
-// MARK: - Skill References Section (frontmatter only, not removable)
+// MARK: - Skill References Section (standalone container, frontmatter only, not removable)
 
 @available(iOS 26.0, *)
 struct SkillReferencesSection: View {
     let skills: [Skill]
-    @Binding var isExpanded: Bool
+    @State private var isExpanded = false
+
+    /// Estimated tokens for all skill frontmatter (description + metadata)
+    /// Rough estimate: ~50 tokens per skill on average for frontmatter
+    private var estimatedTokens: Int {
+        skills.reduce(0) { total, skill in
+            // Estimate based on description length + metadata overhead
+            let descriptionTokens = skill.description.count / 4  // ~4 chars per token
+            let metadataTokens = 20  // name, tags, source, etc.
+            return total + descriptionTokens + metadataTokens
+        }
+    }
+
+    private func formatTokens(_ count: Int) -> String {
+        if count >= 1000 {
+            return String(format: "%.1fk", Double(count) / 1000)
+        }
+        return "\(count)"
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -816,19 +908,35 @@ struct SkillReferencesSection: View {
             }) {
                 HStack {
                     Image(systemName: "sparkles")
-                        .font(.system(size: 12))
-                        .foregroundStyle(Color.tronCyan.opacity(0.8))
-                    Text("Skill References (\(skills.count))")
-                        .font(.system(size: 12, weight: .medium, design: .monospaced))
-                        .foregroundStyle(.white.opacity(0.7))
+                        .font(.system(size: 14))
+                        .foregroundStyle(.tronCyan)
+                    Text("Skill References")
+                        .font(.system(size: 14, weight: .medium, design: .monospaced))
+                        .foregroundStyle(.tronCyan)
+
+                    // Count badge
+                    Text("\(skills.count)")
+                        .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(Color.tronCyan.opacity(0.6))
+                        .clipShape(Capsule())
+
                     Spacer()
+
+                    // Token count
+                    Text(formatTokens(estimatedTokens))
+                        .font(.system(size: 12, weight: .medium, design: .monospaced))
+                        .foregroundStyle(.white.opacity(0.6))
+
                     Image(systemName: "chevron.down")
                         .font(.system(size: 10, weight: .medium))
                         .foregroundStyle(.white.opacity(0.4))
                         .rotationEffect(.degrees(isExpanded ? -180 : 0))
                 }
-                .padding(10)
-                .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                .padding(14)
+                .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
             }
             .buttonStyle(.plain)
 
@@ -839,17 +947,17 @@ struct SkillReferencesSection: View {
                         SkillReferenceRow(skill: skill)
                     }
                 }
-                .padding(.horizontal, 10)
-                .padding(.bottom, 10)
+                .padding(.horizontal, 12)
+                .padding(.bottom, 12)
                 .transition(.opacity.combined(with: .scale(scale: 0.95, anchor: .top)))
             }
         }
         .background {
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
                 .fill(.clear)
-                .glassEffect(.regular.tint(Color.tronCyan.opacity(0.25)), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                .glassEffect(.regular.tint(Color.tronCyan.opacity(0.12)), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         }
-        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 }
 
@@ -1109,6 +1217,7 @@ struct AddedSkillsSection: View {
 @available(iOS 26.0, *)
 struct RulesSection: View {
     let rules: LoadedRules
+    var onFetchContent: ((String) async throws -> String)?
     @State private var isExpanded = false
 
     private func formatTokens(_ count: Int) -> String {
@@ -1129,11 +1238,11 @@ struct RulesSection: View {
                 HStack {
                     Image(systemName: "doc.text.fill")
                         .font(.system(size: 14))
-                        .foregroundStyle(.tronAmber)
+                        .foregroundStyle(.tronTerracotta)
 
                     Text("Rules")
                         .font(.system(size: 14, weight: .medium, design: .monospaced))
-                        .foregroundStyle(.tronAmber)
+                        .foregroundStyle(.tronTerracotta)
 
                     // Count badge
                     Text("\(rules.totalFiles)")
@@ -1141,7 +1250,7 @@ struct RulesSection: View {
                         .foregroundStyle(.white)
                         .padding(.horizontal, 6)
                         .padding(.vertical, 2)
-                        .background(Color.tronAmber.opacity(0.6))
+                        .background(Color.tronTerracotta.opacity(0.7))
                         .clipShape(Capsule())
 
                     Spacer()
@@ -1163,7 +1272,7 @@ struct RulesSection: View {
                 if !isExpanded {
                     RoundedRectangle(cornerRadius: 12, style: .continuous)
                         .fill(.clear)
-                        .glassEffect(.regular.tint(Color.tronAmber.opacity(0.08)), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        .glassEffect(.regular.tint(Color.tronTerracotta.opacity(0.12)), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
                 }
             }
 
@@ -1171,7 +1280,10 @@ struct RulesSection: View {
             if isExpanded {
                 VStack(alignment: .leading, spacing: 8) {
                     ForEach(rules.files) { file in
-                        RulesFileRow(file: file)
+                        RulesFileRow(
+                            file: file,
+                            onFetchContent: onFetchContent
+                        )
                     }
                 }
                 .padding(12)
@@ -1182,45 +1294,148 @@ struct RulesSection: View {
             if isExpanded {
                 RoundedRectangle(cornerRadius: 12, style: .continuous)
                     .fill(.clear)
-                    .glassEffect(.regular.tint(Color.tronAmber.opacity(0.08)), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .glassEffect(.regular.tint(Color.tronTerracotta.opacity(0.12)), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
             }
         }
         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 }
 
-// MARK: - Rules File Row
+// MARK: - Rules File Row (expandable to view content)
 
 @available(iOS 26.0, *)
 struct RulesFileRow: View {
     let file: RulesFile
+    var content: String?
+    var onFetchContent: ((String) async throws -> String)?
+
+    @State private var isExpanded = false
+    @State private var loadedContent: String?
+    @State private var isLoadingContent = false
+    @State private var loadError: String?
 
     var body: some View {
-        HStack(spacing: 10) {
-            Image(systemName: file.icon)
-                .font(.system(size: 12))
-                .foregroundStyle(.tronAmber.opacity(0.7))
-                .frame(width: 20)
+        VStack(alignment: .leading, spacing: 0) {
+            // Header row (tappable)
+            Button(action: {
+                withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
+                    isExpanded.toggle()
+                }
+                // Fetch content on first expand if not already loaded
+                if isExpanded && loadedContent == nil && !isLoadingContent {
+                    Task {
+                        await fetchContent()
+                    }
+                }
+            }) {
+                HStack(spacing: 10) {
+                    Image(systemName: file.icon)
+                        .font(.system(size: 12))
+                        .foregroundStyle(.tronTerracotta.opacity(0.8))
+                        .frame(width: 20)
 
-            VStack(alignment: .leading, spacing: 2) {
-                Text(file.relativePath)
-                    .font(.system(size: 12, weight: .medium, design: .monospaced))
-                    .foregroundStyle(.white.opacity(0.8))
-                    .lineLimit(1)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(file.displayPath)
+                            .font(.system(size: 12, weight: .medium, design: .monospaced))
+                            .foregroundStyle(.white.opacity(0.8))
+                            .lineLimit(1)
 
-                Text(file.label)
-                    .font(.system(size: 10, design: .monospaced))
-                    .foregroundStyle(.white.opacity(0.4))
+                        Text(file.label)
+                            .font(.system(size: 10, design: .monospaced))
+                            .foregroundStyle(.white.opacity(0.4))
+                    }
+
+                    Spacer()
+
+                    Image(systemName: "chevron.down")
+                        .font(.system(size: 8, weight: .medium))
+                        .foregroundStyle(.white.opacity(0.3))
+                        .rotationEffect(.degrees(isExpanded ? -180 : 0))
+                }
+                .padding(10)
+                .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
             }
+            .buttonStyle(.plain)
 
-            Spacer()
+            // Expanded content
+            if isExpanded {
+                VStack(alignment: .leading, spacing: 8) {
+                    if isLoadingContent {
+                        HStack {
+                            ProgressView()
+                                .scaleEffect(0.7)
+                                .tint(.tronTerracotta)
+                            Text("Loading content...")
+                                .font(.system(size: 10, design: .monospaced))
+                                .foregroundStyle(.white.opacity(0.4))
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding(12)
+                    } else if let error = loadError {
+                        VStack(alignment: .leading, spacing: 4) {
+                            HStack(spacing: 6) {
+                                Image(systemName: "exclamationmark.triangle.fill")
+                                    .font(.system(size: 10))
+                                    .foregroundStyle(.tronError)
+                                Text("Failed to load content")
+                                    .font(.system(size: 10, weight: .medium, design: .monospaced))
+                                    .foregroundStyle(.tronError)
+                            }
+                            Text(error)
+                                .font(.system(size: 9, design: .monospaced))
+                                .foregroundStyle(.white.opacity(0.4))
+                            Text("Path: \(file.path)")
+                                .font(.system(size: 9, design: .monospaced))
+                                .foregroundStyle(.white.opacity(0.3))
+                                .lineLimit(2)
+                        }
+                        .padding(10)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(Color.tronError.opacity(0.1))
+                        .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+                    } else if let displayContent = loadedContent ?? content {
+                        ScrollView {
+                            Text(displayContent)
+                                .font(.system(size: 10, design: .monospaced))
+                                .foregroundStyle(.white.opacity(0.6))
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(10)
+                                .textSelection(.enabled)
+                        }
+                        .frame(maxHeight: 300)
+                        .background(Color.black.opacity(0.2))
+                        .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+                    } else {
+                        Text("Content not available")
+                            .font(.system(size: 10, design: .monospaced))
+                            .foregroundStyle(.white.opacity(0.4))
+                            .padding(8)
+                    }
+                }
+                .padding(.horizontal, 10)
+                .padding(.bottom, 10)
+                .transition(.opacity.combined(with: .scale(scale: 0.95, anchor: .top)))
+            }
         }
-        .padding(10)
         .background {
             RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(Color.tronAmber.opacity(0.06))
+                .fill(Color.tronTerracotta.opacity(0.08))
         }
+        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
         // NO context menu - rules cannot be deleted
+    }
+
+    private func fetchContent() async {
+        isLoadingContent = true
+        loadError = nil
+        if let fetch = onFetchContent {
+            do {
+                loadedContent = try await fetch(file.path)
+            } catch {
+                loadError = error.localizedDescription
+            }
+        }
+        isLoadingContent = false
     }
 }
 

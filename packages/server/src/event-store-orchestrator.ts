@@ -1446,7 +1446,34 @@ export class EventStoreOrchestrator extends EventEmitter {
       }
     }
 
-    return snapshot;
+    // Include rules data from the session's rules tracker
+    if (active.rulesTracker.hasRules()) {
+      const rulesFiles = active.rulesTracker.getRulesFiles();
+      snapshot.rules = {
+        files: rulesFiles.map(f => ({
+          path: f.path,
+          relativePath: f.relativePath,
+          level: f.level,
+          depth: f.depth,
+        })),
+        totalFiles: rulesFiles.length,
+        tokens: active.rulesTracker.getMergedTokens(),
+      };
+    }
+
+    // Include added skills from the session's skill tracker
+    const addedSkills = active.skillTracker.getAddedSkills();
+    const result = {
+      ...snapshot,
+      addedSkills: addedSkills.map(s => ({
+        name: s.name,
+        source: s.source,
+        addedVia: s.addedVia,
+        eventId: s.eventId,
+      })),
+    };
+
+    return result;
   }
 
   /**

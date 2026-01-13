@@ -475,6 +475,10 @@ export class RpcHandler extends EventEmitter {
         case 'skill.remove':
           return this.handleSkillRemove(request);
 
+        // File operations
+        case 'file.read':
+          return this.handleFileRead(request);
+
         default:
           return this.errorResponse(request.id, 'METHOD_NOT_FOUND', `Unknown method: ${request.method}`);
       }
@@ -1854,6 +1858,46 @@ ${transcribeResult.text}
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Failed to remove skill';
       return this.errorResponse(request.id, 'SKILL_ERROR', message);
+    }
+  }
+
+  // ===========================================================================
+  // File Operations
+  // ===========================================================================
+
+  private async handleFileRead(request: RpcRequest): Promise<RpcResponse> {
+    const params = request.params as { path?: string } | undefined;
+
+    if (!params?.path) {
+      return this.errorResponse(request.id, 'INVALID_PARAMS', 'path is required');
+    }
+
+    // Security check: only allow reading files within home directory or project directories
+    const filePath = params.path;
+    const homeDir = os.homedir();
+
+    // Normalize path to prevent directory traversal attacks
+    const normalizedPath = path.normalize(filePath);
+
+    // Only allow absolute paths that are within safe directories
+    // For now, allow reading from home directory and its subdirectories
+    if (!normalizedPath.startsWith(homeDir)) {
+      return this.errorResponse(
+        request.id,
+        'PERMISSION_DENIED',
+        'Can only read files within home directory'
+      );
+    }
+
+    try {
+      const content = await fs.readFile(normalizedPath, 'utf-8');
+      return this.successResponse(request.id, { content });
+    } catch (error) {
+      if (error instanceof Error && 'code' in error && error.code === 'ENOENT') {
+        return this.errorResponse(request.id, 'FILE_NOT_FOUND', 'File not found');
+      }
+      const message = error instanceof Error ? error.message : 'Failed to read file';
+      return this.errorResponse(request.id, 'FILE_ERROR', message);
     }
   }
 
