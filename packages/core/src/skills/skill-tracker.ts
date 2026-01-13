@@ -42,9 +42,15 @@ export interface SkillTrackingEvent {
  */
 export class SkillTracker {
   private addedSkills: Map<string, TrackedSkill> = new Map();
+  /**
+   * Skills that were explicitly removed (for "stop following" instruction)
+   * These persist until context is cleared/compacted
+   */
+  private removedSkillNames: Set<string> = new Set();
 
   /**
-   * Record that a skill has been added to context
+   * Record that a skill has been added to context.
+   * If the skill was previously removed, it's taken off the removed list.
    */
   addSkill(
     skillName: string,
@@ -53,14 +59,21 @@ export class SkillTracker {
     eventId: string
   ): void {
     this.addedSkills.set(skillName, { eventId, source, addedVia });
+    // If re-adding a previously removed skill, take it off the removed list
+    this.removedSkillNames.delete(skillName);
   }
 
   /**
-   * Record that a skill has been removed from context
+   * Record that a skill has been removed from context.
+   * The skill is also added to removedSkillNames so the model
+   * can be instructed to stop following any @mentions.
    * @returns true if the skill was removed, false if it wasn't present
    */
   removeSkill(skillName: string): boolean {
-    return this.addedSkills.delete(skillName);
+    const wasPresent = this.addedSkills.delete(skillName);
+    // Track as removed so we can tell the model to stop following it
+    this.removedSkillNames.add(skillName);
+    return wasPresent;
   }
 
   /**
@@ -90,10 +103,19 @@ export class SkillTracker {
   }
 
   /**
-   * Clear all added skills (for context clear/compact)
+   * Get skill names that were explicitly removed.
+   * Used to instruct the model to stop following @mentions of these skills.
+   */
+  getRemovedSkillNames(): string[] {
+    return Array.from(this.removedSkillNames);
+  }
+
+  /**
+   * Clear all added skills and removed tracking (for context clear/compact)
    */
   clear(): void {
     this.addedSkills.clear();
+    this.removedSkillNames.clear();
   }
 
   /**

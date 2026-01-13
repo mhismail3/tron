@@ -1686,6 +1686,22 @@ export class EventStoreOrchestrator extends EventEmitter {
       hasSkillLoader: !!options.skillLoader,
     });
 
+    // Check for removed skills that need a "stop following" instruction
+    const removedSkills = active.skillTracker.getRemovedSkillNames();
+    let removedSkillsInstruction = '';
+    if (removedSkills.length > 0) {
+      const skillList = removedSkills.map(s => `@${s}`).join(', ');
+      removedSkillsInstruction = `<removed-skills>
+The following skills were previously referenced but have been REMOVED from this session's context.
+You MUST ignore any @mentions of these skills in previous messages: ${skillList}
+Do NOT follow instructions from these removed skills. Respond normally without those skill behaviors.
+</removed-skills>`;
+      logger.info('[SKILL] Including removed skills instruction', {
+        sessionId: active.sessionId,
+        removedSkills,
+      });
+    }
+
     // Collect skill names from explicitly selected skills only
     // @mentions in prompt text are handled client-side (converted to chips)
     const skillNames: Set<string> = new Set();
@@ -1697,10 +1713,12 @@ export class EventStoreOrchestrator extends EventEmitter {
       }
     }
 
-    // If no skills, return empty string
+    // If no skills to add, return just the removed skills instruction (if any)
     if (skillNames.size === 0) {
-      logger.info('[SKILL] No skills to load - returning empty context');
-      return '';
+      logger.info('[SKILL] No skills to load - returning removed skills instruction only', {
+        hasRemovedInstruction: removedSkillsInstruction.length > 0,
+      });
+      return removedSkillsInstruction;
     }
 
     // Track skills (creates events) - do this first so events are in order
@@ -1759,6 +1777,10 @@ export class EventStoreOrchestrator extends EventEmitter {
       contextPreview: skillContext.substring(0, 200) + '...',
     });
 
+    // Combine removed skills instruction with skill context
+    if (removedSkillsInstruction) {
+      return `${removedSkillsInstruction}\n\n${skillContext}`;
+    }
     return skillContext;
   }
 
