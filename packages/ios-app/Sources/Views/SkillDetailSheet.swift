@@ -101,11 +101,9 @@ struct SkillDetailSheet: View {
                 contentSection(metadata)
                     .padding(.horizontal)
 
-                // Additional files section (if any)
-                if !metadata.additionalFiles.isEmpty {
-                    additionalFilesSection(metadata)
-                        .padding(.horizontal)
-                }
+                // Additional files section (always shown)
+                additionalFilesSection(metadata)
+                    .padding(.horizontal)
             }
             .padding(.vertical)
         }
@@ -130,20 +128,20 @@ struct SkillDetailSheet: View {
 
                 // Metadata row
                 HStack(spacing: 8) {
-                    // Source badge
+                    // Source badge (emerald for project scope visibility)
                     HStack(spacing: 4) {
                         Image(systemName: metadata.source == .project ? "folder.fill" : "globe")
                             .font(.system(size: 10))
                         Text(metadata.source == .project ? "Project" : "Global")
                             .font(.system(size: 10, design: .monospaced))
                     }
-                    .foregroundStyle(.tronCyan)
+                    .foregroundStyle(.tronEmerald)
                     .padding(.horizontal, 8)
                     .padding(.vertical, 6)
                     .background {
                         RoundedRectangle(cornerRadius: 8, style: .continuous)
                             .fill(.clear)
-                            .glassEffect(.regular.tint(Color.tronCyan.opacity(0.25)), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                            .glassEffect(.regular.tint(Color.tronEmerald.opacity(0.25)), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
                     }
 
                     // Auto-inject badge
@@ -166,18 +164,18 @@ struct SkillDetailSheet: View {
 
                     Spacer()
 
-                    // Tags
+                    // Tags (purple for visual distinction)
                     if let tags = metadata.tags, !tags.isEmpty {
                         ForEach(tags.prefix(3), id: \.self) { tag in
                             Text(tag)
                                 .font(.system(size: 10, weight: .medium, design: .monospaced))
-                                .foregroundStyle(.tronCyan.opacity(0.8))
+                                .foregroundStyle(.tronPurple.opacity(0.9))
                                 .padding(.horizontal, 8)
                                 .padding(.vertical, 6)
                                 .background {
                                     RoundedRectangle(cornerRadius: 8, style: .continuous)
                                         .fill(.clear)
-                                        .glassEffect(.regular.tint(Color.tronCyan.opacity(0.15)), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                                        .glassEffect(.regular.tint(Color.tronPurple.opacity(0.2)), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
                                 }
                         }
                     }
@@ -245,37 +243,45 @@ struct SkillDetailSheet: View {
     private func additionalFilesSection(_ metadata: SkillMetadata) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             // Section header
-            Text("Additional Files (\(metadata.additionalFiles.count))")
+            Text("Other Files")
                 .font(.system(size: 12, weight: .medium, design: .monospaced))
                 .foregroundStyle(.white.opacity(0.6))
 
-            // Card content
-            VStack(alignment: .leading, spacing: 8) {
-                ForEach(metadata.additionalFiles, id: \.self) { file in
-                    HStack(spacing: 8) {
-                        Image(systemName: fileIcon(for: file))
-                            .font(.system(size: 12))
-                            .foregroundStyle(.tronCyan.opacity(0.8))
+            if metadata.additionalFiles.isEmpty {
+                // Empty state
+                Text("No other files")
+                    .font(.system(size: 12, design: .monospaced))
+                    .foregroundStyle(.white.opacity(0.3))
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            } else {
+                // Card content with files
+                VStack(alignment: .leading, spacing: 8) {
+                    ForEach(metadata.additionalFiles, id: \.self) { file in
+                        HStack(spacing: 8) {
+                            Image(systemName: fileIcon(for: file))
+                                .font(.system(size: 12))
+                                .foregroundStyle(.tronCyan.opacity(0.8))
 
-                        Text(file)
-                            .font(.system(size: 12, design: .monospaced))
-                            .foregroundStyle(.white.opacity(0.7))
+                            Text(file)
+                                .font(.system(size: 12, design: .monospaced))
+                                .foregroundStyle(.white.opacity(0.7))
 
-                        Spacer()
-                    }
-                    .padding(10)
-                    .background {
-                        RoundedRectangle(cornerRadius: 8, style: .continuous)
-                            .fill(.clear)
-                            .glassEffect(.regular.tint(Color.tronCyan.opacity(0.15)), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                            Spacer()
+                        }
+                        .padding(10)
+                        .background {
+                            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                .fill(.clear)
+                                .glassEffect(.regular.tint(Color.tronCyan.opacity(0.15)), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                        }
                     }
                 }
-            }
-            .padding(14)
-            .background {
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .fill(.clear)
-                    .glassEffect(.regular.tint(Color.tronCyan.opacity(0.12)), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .padding(14)
+                .background {
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .fill(.clear)
+                        .glassEffect(.regular.tint(Color.tronCyan.opacity(0.12)), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                }
             }
         }
     }
