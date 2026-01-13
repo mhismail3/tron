@@ -1872,10 +1872,13 @@ struct ForkConfirmationSheet: View {
                     } label: {
                         Image(systemName: "xmark")
                             .font(.system(size: 14, weight: .medium))
-                            .foregroundStyle(.tronTextMuted)
-                            .frame(width: 32, height: 32)
-                            .background(Color.tronSurface.opacity(0.8))
-                            .clipShape(Circle())
+                            .foregroundStyle(.tronTextSecondary)
+                            .frame(width: 36, height: 36)
+                            .background {
+                                Circle()
+                                    .fill(.clear)
+                                    .glassEffect(.regular.tint(Color.white.opacity(0.1)), in: Circle())
+                            }
                     }
                     .buttonStyle(.plain)
                     .disabled(isForking)
@@ -1899,9 +1902,12 @@ struct ForkConfirmationSheet: View {
                             }
                         }
                         .foregroundStyle(.white)
-                        .frame(width: 32, height: 32)
-                        .background(Color.tronPurple)
-                        .clipShape(Circle())
+                        .frame(width: 36, height: 36)
+                        .background {
+                            Circle()
+                                .fill(.clear)
+                                .glassEffect(.regular.tint(Color.tronPurple.opacity(0.5)), in: Circle())
+                        }
                     }
                     .buttonStyle(.plain)
                     .disabled(isForking)
