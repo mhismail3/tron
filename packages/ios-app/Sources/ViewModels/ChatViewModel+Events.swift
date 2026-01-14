@@ -6,6 +6,13 @@ import UIKit
 extension ChatViewModel {
 
     func handleTextDelta(_ delta: String) {
+        // Skip text if AskUserQuestion was called in this turn
+        // (AskUserQuestion should be the final visible entry when called)
+        guard !askUserQuestionCalledInTurn else {
+            logger.verbose("Skipping text delta - AskUserQuestion was called in this turn", category: .events)
+            return
+        }
+
         // If there's no active streaming message, create a new one
         if streamingMessageId == nil {
             let newStreamingMessage = ChatMessage.streaming()
@@ -94,6 +101,10 @@ extension ChatViewModel {
     /// Handle AskUserQuestion tool start - creates special message (sheet opens on tool.end)
     private func handleAskUserQuestionToolStart(_ event: ToolStartEvent) {
         logger.info("AskUserQuestion tool detected, parsing params", category: .events)
+
+        // Mark that AskUserQuestion was called in this turn
+        // This suppresses any subsequent text deltas (question should be final entry)
+        askUserQuestionCalledInTurn = true
 
         // Parse the params from JSON arguments
         guard let paramsData = event.formattedArguments.data(using: .utf8),
@@ -250,6 +261,9 @@ extension ChatViewModel {
 
     func handleTurnStart(_ event: TurnStartEvent) {
         logger.info("Turn \(event.turnNumber) started", category: .events)
+
+        // Reset AskUserQuestion tracking for the new turn
+        askUserQuestionCalledInTurn = false
 
         // Finalize any streaming text from the previous turn
         if streamingMessageId != nil && !streamingText.isEmpty {

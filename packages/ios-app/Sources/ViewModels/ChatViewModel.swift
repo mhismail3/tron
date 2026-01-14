@@ -53,6 +53,8 @@ class ChatViewModel: ObservableObject {
     @Published var currentAskUserQuestionData: AskUserQuestionToolData?
     /// Pending answers keyed by question ID
     @Published var askUserQuestionAnswers: [String: AskUserQuestionAnswer] = [:]
+    /// Whether AskUserQuestion was called in the current turn (to suppress subsequent text)
+    var askUserQuestionCalledInTurn = false
 
     // MARK: - Plan Mode State
 
@@ -576,16 +578,17 @@ class ChatViewModel: ObservableObject {
 
     /// Open the AskUserQuestion sheet for a tool call
     func openAskUserQuestionSheet(for data: AskUserQuestionToolData) {
-        // Only open if the question is still pending
-        guard data.status == .pending else {
+        // Allow opening for pending (to answer) or answered (to view)
+        guard data.status == .pending || data.status == .answered else {
             logger.info("Not opening AskUserQuestion sheet - status is \(data.status)", category: .session)
             return
         }
         currentAskUserQuestionData = data
-        // Initialize answers from data (in case of re-opening)
+        // Initialize answers from data (in case of re-opening or viewing answered)
         askUserQuestionAnswers = data.answers
         showAskUserQuestionSheet = true
-        logger.info("Opened AskUserQuestion sheet for \(data.params.questions.count) questions", category: .session)
+        let mode = data.status == .answered ? "read-only" : "interactive"
+        logger.info("Opened AskUserQuestion sheet (\(mode)) for \(data.params.questions.count) questions", category: .session)
     }
 
     /// Handle AskUserQuestion answers submission (async mode: sends as new prompt)

@@ -292,7 +292,8 @@ struct ChatView: View {
                     },
                     onDismiss: {
                         viewModel.dismissAskUserQuestionSheet()
-                    }
+                    },
+                    readOnly: data.status == .answered
                 )
             }
         }

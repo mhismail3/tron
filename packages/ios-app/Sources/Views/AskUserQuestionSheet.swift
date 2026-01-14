@@ -3,12 +3,13 @@ import SwiftUI
 // MARK: - AskUserQuestion Sheet
 
 /// Sheet for answering AskUserQuestion tool calls
-/// Uses amber/gold theme for attention-grabbing UI
+/// Uses iOS 26 liquid glass styling with amber theme
 @available(iOS 26.0, *)
 struct AskUserQuestionSheet: View {
     let toolData: AskUserQuestionToolData
     let onSubmit: ([AskUserQuestionAnswer]) -> Void
     let onDismiss: () -> Void
+    var readOnly: Bool = false
 
     @Environment(\.dismiss) private var dismiss
     @State private var currentQuestionIndex = 0
@@ -39,18 +40,14 @@ struct AskUserQuestionSheet: View {
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
-                // Progress header
-                progressHeader
-                    .padding(.horizontal, 16)
-                    .padding(.top, 8)
-
                 // Context (if provided)
                 if let context = toolData.params.context {
                     Text(context)
                         .font(.system(size: 14, design: .monospaced))
                         .foregroundStyle(.tronTextSecondary)
                         .padding(.horizontal, 16)
-                        .padding(.vertical, 8)
+                        .padding(.vertical, 12)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                 }
 
                 // Questions pager
@@ -60,36 +57,51 @@ struct AskUserQuestionSheet: View {
                             question: question,
                             answer: binding(for: question),
                             questionNumber: index + 1,
-                            totalQuestions: questions.count
+                            totalQuestions: questions.count,
+                            readOnly: readOnly
                         )
                         .tag(index)
                     }
                 }
                 .tabViewStyle(.page(indexDisplayMode: .never))
-                .animation(.easeInOut, value: currentQuestionIndex)
+                .animation(.easeInOut(duration: 0.25), value: currentQuestionIndex)
 
-                // Bottom bar
-                bottomBar
-                    .padding(.horizontal, 16)
-                    .padding(.bottom, 16)
+                // Bottom: Centered dot indicators
+                pageIndicators
             }
-            .background(Color.tronBackground)
             .navigationBarTitleDisplayMode(.inline)
             .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
             .toolbar {
                 ToolbarItem(placement: .principal) {
-                    Text("Questions")
+                    Text(readOnly ? "Answers" : "Questions")
                         .font(.system(size: 16, weight: .semibold, design: .monospaced))
-                        .foregroundStyle(.tronAmber)
+                        .foregroundStyle(readOnly ? .tronSuccess : .tronAmber)
                 }
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button {
-                        dismiss()
-                        onDismiss()
-                    } label: {
-                        Image(systemName: "xmark.circle.fill")
-                            .font(.system(size: 24))
-                            .foregroundStyle(.tronTextMuted)
+                    HStack(spacing: 12) {
+                        // Submit button (when complete and not read-only)
+                        if isComplete && !readOnly {
+                            Button {
+                                submitAnswers()
+                            } label: {
+                                Text("Submit")
+                                    .font(.system(size: 14, weight: .semibold, design: .monospaced))
+                                    .foregroundStyle(.tronBackground)
+                                    .padding(.horizontal, 14)
+                                    .padding(.vertical, 6)
+                            }
+                            .glassEffect(.regular.tint(Color.tronAmber.opacity(0.65)).interactive(), in: .capsule)
+                        }
+
+                        // Close button
+                        Button {
+                            dismiss()
+                            onDismiss()
+                        } label: {
+                            Image(systemName: "xmark.circle.fill")
+                                .font(.system(size: 24))
+                                .foregroundStyle(.tronTextMuted)
+                        }
                     }
                 }
             }
@@ -104,25 +116,20 @@ struct AskUserQuestionSheet: View {
         }
     }
 
-    // MARK: - Progress Header
+    // MARK: - Page Indicators
 
-    private var progressHeader: some View {
-        HStack(spacing: 8) {
-            // Dot indicators
+    private var pageIndicators: some View {
+        HStack(spacing: 10) {
             ForEach(0..<questions.count, id: \.self) { index in
                 Circle()
                     .fill(dotColor(for: index))
                     .frame(width: 8, height: 8)
+                    .scaleEffect(index == currentQuestionIndex ? 1.2 : 1.0)
+                    .animation(.easeInOut(duration: 0.2), value: currentQuestionIndex)
             }
-
-            Spacer()
-
-            // Progress text
-            Text("\(answeredCount) of \(questions.count)")
-                .font(.system(size: 13, weight: .medium, design: .monospaced))
-                .foregroundStyle(.tronTextSecondary)
         }
-        .padding(.vertical, 8)
+        .padding(.vertical, 16)
+        .frame(maxWidth: .infinity)
     }
 
     private func dotColor(for index: Int) -> Color {
@@ -133,62 +140,6 @@ struct AskUserQuestionSheet: View {
             return .tronAmber.opacity(0.5)
         } else {
             return .tronTextMuted.opacity(0.3)
-        }
-    }
-
-    // MARK: - Bottom Bar
-
-    private var bottomBar: some View {
-        HStack {
-            // Previous button
-            Button {
-                withAnimation {
-                    currentQuestionIndex = max(0, currentQuestionIndex - 1)
-                }
-            } label: {
-                HStack(spacing: 4) {
-                    Image(systemName: "chevron.left")
-                    Text("Prev")
-                }
-                .font(.system(size: 14, weight: .medium, design: .monospaced))
-                .foregroundStyle(currentQuestionIndex > 0 ? .tronAmber : .tronTextMuted)
-            }
-            .disabled(currentQuestionIndex == 0)
-
-            Spacer()
-
-            // Submit button (only on last question or when complete)
-            if isComplete || currentQuestionIndex == questions.count - 1 {
-                Button {
-                    submitAnswers()
-                } label: {
-                    HStack(spacing: 4) {
-                        Text("Submit")
-                        Image(systemName: "arrow.right.circle.fill")
-                    }
-                    .font(.system(size: 14, weight: .semibold, design: .monospaced))
-                    .foregroundStyle(.tronBackground)
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 8)
-                    .background(isComplete ? Color.tronAmber : Color.tronTextMuted)
-                    .clipShape(Capsule())
-                }
-                .disabled(!isComplete)
-            } else {
-                // Next button
-                Button {
-                    withAnimation {
-                        currentQuestionIndex = min(questions.count - 1, currentQuestionIndex + 1)
-                    }
-                } label: {
-                    HStack(spacing: 4) {
-                        Text("Next")
-                        Image(systemName: "chevron.right")
-                    }
-                    .font(.system(size: 14, weight: .medium, design: .monospaced))
-                    .foregroundStyle(.tronAmber)
-                }
-            }
         }
     }
 
@@ -226,30 +177,45 @@ struct QuestionCardView: View {
     @Binding var answer: AskUserQuestionAnswer
     let questionNumber: Int
     let totalQuestions: Int
+    var readOnly: Bool = false
 
     @State private var otherText = ""
 
     var body: some View {
-        ScrollView {
+        ScrollView(.vertical) {
             VStack(alignment: .leading, spacing: 16) {
+                // Question number badge
+                HStack {
+                    Text("\(questionNumber) of \(totalQuestions)")
+                        .font(.system(size: 12, weight: .medium, design: .monospaced))
+                        .foregroundStyle(.tronAmber.opacity(0.7))
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 4)
+                        .background(Color.tronAmber.opacity(0.12))
+                        .clipShape(Capsule())
+
+                    Spacer()
+
+                    // Mode indicator
+                    Text(question.mode == .single ? "Select one" : "Select multiple")
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundStyle(.tronTextMuted)
+                }
+
                 // Question text
                 Text(question.question)
                     .font(.system(size: 18, weight: .medium))
                     .foregroundStyle(.tronTextPrimary)
-                    .padding(.bottom, 8)
+                    .padding(.bottom, 4)
 
-                // Mode indicator
-                Text(question.mode == .single ? "Select one" : "Select all that apply")
-                    .font(.system(size: 12, design: .monospaced))
-                    .foregroundStyle(.tronTextMuted)
-
-                // Options
-                VStack(spacing: 8) {
+                // Options with glass effect
+                VStack(spacing: 10) {
                     ForEach(question.options) { option in
-                        OptionRowView(
+                        GlassOptionRowView(
                             option: option,
                             isSelected: isSelected(option),
-                            mode: question.mode
+                            mode: question.mode,
+                            readOnly: readOnly
                         ) {
                             toggleOption(option)
                         }
@@ -268,23 +234,24 @@ struct QuestionCardView: View {
                             .font(.system(size: 16, design: .monospaced))
                             .foregroundStyle(.tronTextPrimary)
                             .padding(12)
-                            .background(Color.tronSurface)
-                            .clipShape(RoundedRectangle(cornerRadius: 8))
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 8)
-                                    .stroke(otherText.isEmpty ? Color.tronBorder : Color.tronAmber, lineWidth: 1)
+                            .glassEffect(
+                                .regular.tint(Color.tronAmber.opacity(otherText.isEmpty ? 0.05 : 0.15)),
+                                in: RoundedRectangle(cornerRadius: 10, style: .continuous)
                             )
+                            .disabled(readOnly)
                             .onChange(of: otherText) { _, newValue in
+                                guard !readOnly else { return }
                                 answer.otherValue = newValue.isEmpty ? nil : newValue
                             }
                     }
                     .padding(.top, 8)
                 }
 
-                Spacer(minLength: 60)
+                Spacer(minLength: 40)
             }
-            .padding(16)
+            .padding(20)
         }
+        .scrollBounceBehavior(.basedOnSize)
         .onAppear {
             otherText = answer.otherValue ?? ""
         }
@@ -312,13 +279,14 @@ struct QuestionCardView: View {
     }
 }
 
-// MARK: - Option Row View
+// MARK: - Glass Option Row View
 
 @available(iOS 26.0, *)
-struct OptionRowView: View {
+struct GlassOptionRowView: View {
     let option: AskUserQuestionOption
     let isSelected: Bool
     let mode: AskUserQuestion.SelectionMode
+    var readOnly: Bool = false
     let action: () -> Void
 
     var body: some View {
@@ -327,9 +295,9 @@ struct OptionRowView: View {
                 // Selection indicator
                 selectionIndicator
 
-                VStack(alignment: .leading, spacing: 2) {
+                VStack(alignment: .leading, spacing: 3) {
                     Text(option.label)
-                        .font(.system(size: 16))
+                        .font(.system(size: 16, weight: isSelected ? .medium : .regular))
                         .foregroundStyle(.tronTextPrimary)
 
                     if let description = option.description {
@@ -340,16 +308,22 @@ struct OptionRowView: View {
                 }
 
                 Spacer()
+
+                // Checkmark for selected state
+                if isSelected {
+                    Image(systemName: "checkmark")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(.tronAmber)
+                }
             }
-            .padding(12)
-            .background(isSelected ? Color.tronAmber.opacity(0.15) : Color.tronSurface)
-            .clipShape(RoundedRectangle(cornerRadius: 10))
-            .overlay(
-                RoundedRectangle(cornerRadius: 10)
-                    .stroke(isSelected ? Color.tronAmber : Color.tronBorder, lineWidth: 1)
-            )
+            .padding(14)
         }
         .buttonStyle(.plain)
+        .disabled(readOnly)
+        .glassEffect(
+            .regular.tint(Color.tronAmber.opacity(isSelected ? 0.25 : 0.08)).interactive(),
+            in: RoundedRectangle(cornerRadius: 12, style: .continuous)
+        )
     }
 
     @ViewBuilder
@@ -357,20 +331,20 @@ struct OptionRowView: View {
         if mode == .single {
             // Radio button
             Circle()
-                .strokeBorder(isSelected ? Color.tronAmber : Color.tronTextMuted, lineWidth: 2)
-                .frame(width: 20, height: 20)
+                .strokeBorder(isSelected ? Color.tronAmber : Color.tronTextMuted.opacity(0.5), lineWidth: 2)
+                .frame(width: 22, height: 22)
                 .overlay {
                     if isSelected {
                         Circle()
                             .fill(Color.tronAmber)
-                            .frame(width: 10, height: 10)
+                            .frame(width: 12, height: 12)
                     }
                 }
         } else {
             // Checkbox
-            RoundedRectangle(cornerRadius: 4)
-                .strokeBorder(isSelected ? Color.tronAmber : Color.tronTextMuted, lineWidth: 2)
-                .frame(width: 20, height: 20)
+            RoundedRectangle(cornerRadius: 5)
+                .strokeBorder(isSelected ? Color.tronAmber : Color.tronTextMuted.opacity(0.5), lineWidth: 2)
+                .frame(width: 22, height: 22)
                 .overlay {
                     if isSelected {
                         Image(systemName: "checkmark")

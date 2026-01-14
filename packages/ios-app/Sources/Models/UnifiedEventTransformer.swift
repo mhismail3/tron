@@ -240,6 +240,17 @@ struct UnifiedEventTransformer {
             return nil
         }
 
+        // AskUserQuestion answer prompts - render as a chip instead of full text
+        if parsed.content.contains("[Answers to your questions]") {
+            // Count the questions by parsing the message (count ** markers)
+            let questionCount = parsed.content.components(separatedBy: "\n**").count - 1
+            return ChatMessage(
+                role: .user,
+                content: .answeredQuestions(questionCount: max(1, questionCount)),
+                timestamp: timestamp
+            )
+        }
+
         // Skip empty user messages (unless they have attachments or skills)
         guard !parsed.content.isEmpty || parsed.attachments != nil || parsed.skills != nil else { return nil }
 
@@ -281,25 +292,38 @@ struct UnifiedEventTransformer {
     /// The server sends content blocks in exact streaming order via `currentTurnContentSequence`.
     /// We process each block in order, creating separate messages for text and tool use.
     ///
+    /// Special handling for AskUserQuestion:
+    /// - Detected by tool name and converted to `MessageContent.askUserQuestion`
+    /// - Text AFTER AskUserQuestion is skipped (question should be final entry)
+    /// - Status (pending/answered/superseded) detected from subsequent events
+    ///
     /// - Parameters:
     ///   - payload: The message.assistant event payload
     ///   - timestamp: Event timestamp
     ///   - toolCalls: Map of toolCallId -> ToolCallPayload for tool details
     ///   - toolResults: Map of toolCallId -> ToolResultPayload for results
+    ///   - allEvents: Optional array of all events for AskUserQuestion status detection
     /// - Returns: Array of ChatMessages in content block order
     private static func transformAssistantMessageInterleaved(
         _ payload: [String: AnyCodable],
         timestamp: Date,
         toolCalls: [String: ToolCallPayload],
-        toolResults: [String: ToolResultPayload]
+        toolResults: [String: ToolResultPayload],
+        allEvents: [RawEvent]? = nil
     ) -> [ChatMessage] {
         let parsed = AssistantMessagePayload(from: payload)
         guard let blocks = parsed.contentBlocks else { return [] }
 
         var messages: [ChatMessage] = []
+        var sawAskUserQuestion = false  // Track if AskUserQuestion was seen
 
         for block in blocks {
             guard let blockType = block["type"] as? String else { continue }
+
+            // If AskUserQuestion was already processed, skip subsequent text blocks
+            if sawAskUserQuestion && blockType == "text" {
+                continue
+            }
 
             if blockType == "text", let text = block["text"] as? String, !text.isEmpty {
                 // Create text message - only first message gets metadata
@@ -319,6 +343,30 @@ struct UnifiedEventTransformer {
                 let toolCall = toolCalls[toolUseId]
                 let result = toolResults[toolUseId]
 
+                // Use tool.call details if available, otherwise fall back to content block
+                let toolName = toolCall?.name ?? (block["name"] as? String) ?? "Unknown"
+
+                // Check if this is AskUserQuestion - handle specially
+                if toolName == "AskUserQuestion" {
+                    sawAskUserQuestion = true
+                    if let askUserMessage = transformAskUserQuestionToolUse(
+                        toolUseId: toolUseId,
+                        toolCall: toolCall,
+                        contentBlock: block,
+                        timestamp: timestamp,
+                        tokenUsage: messages.isEmpty ? parsed.tokenUsage : nil,
+                        model: messages.isEmpty ? parsed.model : nil,
+                        turn: parsed.turn,
+                        allEvents: allEvents
+                    ) {
+                        messages.append(askUserMessage)
+                    }
+                    continue
+                }
+
+                // Regular tool handling
+                let turn = toolCall?.turn ?? parsed.turn
+
                 // Determine status based on result
                 let status: ToolStatus
                 if let result = result {
@@ -334,10 +382,6 @@ struct UnifiedEventTransformer {
                 } else {
                     resultContent = nil
                 }
-
-                // Use tool.call details if available, otherwise fall back to content block
-                let toolName = toolCall?.name ?? (block["name"] as? String) ?? "Unknown"
-                let turn = toolCall?.turn ?? parsed.turn
 
                 // Arguments: use tool.call string if available, else serialize content block input
                 let arguments: String
@@ -375,6 +419,422 @@ struct UnifiedEventTransformer {
         }
 
         return messages
+    }
+
+    /// Transform an AskUserQuestion tool_use content block into proper AskUserQuestionToolData.
+    ///
+    /// This ensures AskUserQuestion tool calls render as interactive question chips
+    /// instead of generic tool results on session restoration.
+    private static func transformAskUserQuestionToolUse(
+        toolUseId: String,
+        toolCall: ToolCallPayload?,
+        contentBlock: [String: Any],
+        timestamp: Date,
+        tokenUsage: TokenUsage?,
+        model: String?,
+        turn: Int,
+        allEvents: [RawEvent]?
+    ) -> ChatMessage? {
+        // Parse the params from arguments
+        let argumentsJson: String
+        if let toolCallArgs = toolCall?.arguments {
+            argumentsJson = toolCallArgs
+        } else if let inputDict = contentBlock["input"] as? [String: Any],
+                  let jsonData = try? JSONSerialization.data(withJSONObject: inputDict),
+                  let jsonString = String(data: jsonData, encoding: .utf8) {
+            argumentsJson = jsonString
+        } else {
+            logger.warning("AskUserQuestion: Could not extract arguments", category: .events)
+            return nil
+        }
+
+        guard let paramsData = argumentsJson.data(using: .utf8),
+              let params = try? JSONDecoder().decode(AskUserQuestionParams.self, from: paramsData) else {
+            logger.warning("AskUserQuestion: Could not decode params from arguments", category: .events)
+            return nil
+        }
+
+        // Determine status and parse answers from subsequent events
+        let detection: AskUserQuestionDetectionResult
+        if let events = allEvents {
+            detection = detectAskUserQuestionStatusAndAnswers(toolUseId: toolUseId, params: params, events: events)
+        } else {
+            detection = AskUserQuestionDetectionResult(status: .pending, answers: [:], answerMessageContent: nil)
+        }
+
+        // Build result if answered
+        let result: AskUserQuestionResult?
+        if detection.status == .answered && !detection.answers.isEmpty {
+            result = AskUserQuestionResult(
+                answers: Array(detection.answers.values),
+                complete: true,
+                submittedAt: ""  // Not available from persisted data
+            )
+        } else {
+            result = nil
+        }
+
+        let toolData = AskUserQuestionToolData(
+            toolCallId: toolUseId,
+            params: params,
+            answers: detection.answers,
+            status: detection.status,
+            result: result
+        )
+
+        return ChatMessage(
+            role: .assistant,
+            content: .askUserQuestion(toolData),
+            timestamp: timestamp,
+            tokenUsage: tokenUsage,
+            model: model,
+            turnNumber: turn
+        )
+    }
+
+    /// Result of detecting AskUserQuestion status - includes both status and parsed answers
+    private struct AskUserQuestionDetectionResult {
+        let status: AskUserQuestionStatus
+        let answers: [String: AskUserQuestionAnswer]
+        let answerMessageContent: String?
+    }
+
+    /// Detect if an AskUserQuestion was answered or superseded, and extract answers if available.
+    private static func detectAskUserQuestionStatusAndAnswers(
+        toolUseId: String,
+        params: AskUserQuestionParams,
+        events: [RawEvent]
+    ) -> AskUserQuestionDetectionResult {
+        // Find the tool.call event index for this toolUseId
+        guard let toolCallIndex = events.firstIndex(where: {
+            $0.type == PersistedEventType.toolCall.rawValue &&
+            (ToolCallPayload(from: $0.payload)?.toolCallId == toolUseId)
+        }) else {
+            // No tool.call event found - assume pending
+            return AskUserQuestionDetectionResult(status: .pending, answers: [:], answerMessageContent: nil)
+        }
+
+        // Look at subsequent events for user messages
+        for i in (toolCallIndex + 1)..<events.count {
+            let event = events[i]
+            if event.type == PersistedEventType.messageUser.rawValue {
+                guard let content = event.payload["content"]?.value as? String else { continue }
+                if content.contains("[Answers to your questions]") {
+                    // Parse the answers from the message content
+                    let answers = parseAnswersFromMessage(content: content, params: params)
+                    return AskUserQuestionDetectionResult(status: .answered, answers: answers, answerMessageContent: content)
+                } else {
+                    // User sent a different message - question was skipped
+                    return AskUserQuestionDetectionResult(status: .superseded, answers: [:], answerMessageContent: nil)
+                }
+            }
+        }
+
+        // No user message after - still pending
+        return AskUserQuestionDetectionResult(status: .pending, answers: [:], answerMessageContent: nil)
+    }
+
+    /// Overload for SessionEvent array (from SQLite database)
+    private static func detectAskUserQuestionStatusAndAnswers(
+        toolUseId: String,
+        params: AskUserQuestionParams,
+        events: [SessionEvent]
+    ) -> AskUserQuestionDetectionResult {
+        // Find the tool.call event index for this toolUseId
+        guard let toolCallIndex = events.firstIndex(where: {
+            $0.type == PersistedEventType.toolCall.rawValue &&
+            (ToolCallPayload(from: $0.payload)?.toolCallId == toolUseId)
+        }) else {
+            // No tool.call event found - assume pending
+            return AskUserQuestionDetectionResult(status: .pending, answers: [:], answerMessageContent: nil)
+        }
+
+        // Look at subsequent events for user messages
+        for i in (toolCallIndex + 1)..<events.count {
+            let event = events[i]
+            if event.type == PersistedEventType.messageUser.rawValue {
+                guard let content = event.payload["content"]?.value as? String else { continue }
+                if content.contains("[Answers to your questions]") {
+                    // Parse the answers from the message content
+                    let answers = parseAnswersFromMessage(content: content, params: params)
+                    return AskUserQuestionDetectionResult(status: .answered, answers: answers, answerMessageContent: content)
+                } else {
+                    // User sent a different message - question was skipped
+                    return AskUserQuestionDetectionResult(status: .superseded, answers: [:], answerMessageContent: nil)
+                }
+            }
+        }
+
+        // No user message after - still pending
+        return AskUserQuestionDetectionResult(status: .pending, answers: [:], answerMessageContent: nil)
+    }
+
+    /// Parse answers from the formatted answer message content.
+    /// Format:
+    /// ```
+    /// [Answers to your questions]
+    ///
+    /// **Question text?**
+    /// Answer: SelectedValue1, SelectedValue2
+    ///
+    /// **Question text 2?**
+    /// Answer: [Other] custom input
+    /// ```
+    private static func parseAnswersFromMessage(
+        content: String,
+        params: AskUserQuestionParams
+    ) -> [String: AskUserQuestionAnswer] {
+        var answers: [String: AskUserQuestionAnswer] = [:]
+
+        // Split by question markers (lines starting with **)
+        let lines = content.components(separatedBy: "\n")
+        var currentQuestionText: String?
+        var currentAnswerLine: String?
+
+        for line in lines {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+
+            // Check for question line: **Question text?**
+            if trimmed.hasPrefix("**") && trimmed.hasSuffix("**") {
+                // Save previous question/answer pair if exists
+                if let questionText = currentQuestionText, let answerLine = currentAnswerLine {
+                    if let answer = parseAnswerForQuestion(questionText: questionText, answerLine: answerLine, params: params) {
+                        answers[answer.questionId] = answer
+                    }
+                }
+
+                // Extract new question text (remove ** markers)
+                currentQuestionText = String(trimmed.dropFirst(2).dropLast(2))
+                currentAnswerLine = nil
+            }
+            // Check for answer line: Answer: ...
+            else if trimmed.hasPrefix("Answer:") {
+                currentAnswerLine = String(trimmed.dropFirst(7)).trimmingCharacters(in: .whitespaces)
+            }
+        }
+
+        // Don't forget the last question/answer pair
+        if let questionText = currentQuestionText, let answerLine = currentAnswerLine {
+            if let answer = parseAnswerForQuestion(questionText: questionText, answerLine: answerLine, params: params) {
+                answers[answer.questionId] = answer
+            }
+        }
+
+        return answers
+    }
+
+    /// Parse a single answer line and match it to a question from params
+    private static func parseAnswerForQuestion(
+        questionText: String,
+        answerLine: String,
+        params: AskUserQuestionParams
+    ) -> AskUserQuestionAnswer? {
+        // Find the matching question by text
+        guard let question = params.questions.first(where: { $0.question == questionText }) else {
+            logger.verbose("Could not find question matching: \(questionText)", category: .events)
+            return nil
+        }
+
+        // Check for [Other] prefix
+        if answerLine.hasPrefix("[Other]") {
+            let otherValue = String(answerLine.dropFirst(7)).trimmingCharacters(in: .whitespaces)
+            return AskUserQuestionAnswer(
+                questionId: question.id,
+                selectedValues: [],
+                otherValue: otherValue.isEmpty ? nil : otherValue
+            )
+        }
+
+        // Check for "(no selection)"
+        if answerLine == "(no selection)" {
+            return AskUserQuestionAnswer(
+                questionId: question.id,
+                selectedValues: [],
+                otherValue: nil
+            )
+        }
+
+        // Parse comma-separated values
+        let selectedValues = answerLine.components(separatedBy: ", ").map { $0.trimmingCharacters(in: .whitespaces) }
+        return AskUserQuestionAnswer(
+            questionId: question.id,
+            selectedValues: selectedValues,
+            otherValue: nil
+        )
+    }
+
+    // MARK: - SessionEvent Overloads (for SQLite database events)
+
+    /// Overload of transformAssistantMessageInterleaved for SessionEvent array
+    private static func transformAssistantMessageInterleaved(
+        _ payload: [String: AnyCodable],
+        timestamp: Date,
+        toolCalls: [String: ToolCallPayload],
+        toolResults: [String: ToolResultPayload],
+        allEvents: [SessionEvent]?
+    ) -> [ChatMessage] {
+        let parsed = AssistantMessagePayload(from: payload)
+        guard let blocks = parsed.contentBlocks else { return [] }
+
+        var messages: [ChatMessage] = []
+        var sawAskUserQuestion = false
+
+        for block in blocks {
+            guard let blockType = block["type"] as? String else { continue }
+
+            if sawAskUserQuestion && blockType == "text" {
+                continue
+            }
+
+            if blockType == "text", let text = block["text"] as? String, !text.isEmpty {
+                messages.append(ChatMessage(
+                    role: .assistant,
+                    content: .text(text),
+                    timestamp: timestamp,
+                    tokenUsage: messages.isEmpty ? parsed.tokenUsage : nil,
+                    model: messages.isEmpty ? parsed.model : nil,
+                    latencyMs: messages.isEmpty ? parsed.latencyMs : nil,
+                    turnNumber: parsed.turn,
+                    hasThinking: messages.isEmpty ? parsed.hasThinking : nil,
+                    stopReason: messages.isEmpty ? parsed.stopReason?.rawValue : nil
+                ))
+            } else if blockType == "tool_use", let toolUseId = block["id"] as? String {
+                let toolCall = toolCalls[toolUseId]
+                let result = toolResults[toolUseId]
+                let toolName = toolCall?.name ?? (block["name"] as? String) ?? "Unknown"
+
+                if toolName == "AskUserQuestion" {
+                    sawAskUserQuestion = true
+                    if let askUserMessage = transformAskUserQuestionToolUse(
+                        toolUseId: toolUseId,
+                        toolCall: toolCall,
+                        contentBlock: block,
+                        timestamp: timestamp,
+                        tokenUsage: messages.isEmpty ? parsed.tokenUsage : nil,
+                        model: messages.isEmpty ? parsed.model : nil,
+                        turn: parsed.turn,
+                        allSessionEvents: allEvents
+                    ) {
+                        messages.append(askUserMessage)
+                    }
+                    continue
+                }
+
+                let turn = toolCall?.turn ?? parsed.turn
+                let status: ToolStatus
+                if let result = result {
+                    status = result.isError ? .error : .success
+                } else {
+                    status = .running
+                }
+
+                let resultContent: String?
+                if let result = result {
+                    resultContent = result.content.isEmpty ? "(no output)" : result.content
+                } else {
+                    resultContent = nil
+                }
+
+                let arguments: String
+                if let toolCallArgs = toolCall?.arguments {
+                    arguments = toolCallArgs
+                } else if let inputDict = block["input"] as? [String: Any],
+                          let jsonData = try? JSONSerialization.data(withJSONObject: inputDict, options: [.sortedKeys]),
+                          let jsonString = String(data: jsonData, encoding: .utf8) {
+                    arguments = jsonString
+                } else {
+                    arguments = "{}"
+                }
+
+                messages.append(ChatMessage(
+                    role: .assistant,
+                    content: .toolUse(ToolUseData(
+                        toolName: toolName,
+                        toolCallId: toolUseId,
+                        arguments: arguments,
+                        status: status,
+                        result: resultContent,
+                        durationMs: result?.durationMs
+                    )),
+                    timestamp: timestamp,
+                    tokenUsage: messages.isEmpty ? parsed.tokenUsage : nil,
+                    model: messages.isEmpty ? parsed.model : nil,
+                    latencyMs: messages.isEmpty ? parsed.latencyMs : nil,
+                    turnNumber: turn,
+                    hasThinking: messages.isEmpty ? parsed.hasThinking : nil,
+                    stopReason: messages.isEmpty ? parsed.stopReason?.rawValue : nil
+                ))
+            }
+        }
+
+        return messages
+    }
+
+    /// Overload of transformAskUserQuestionToolUse for SessionEvent array
+    private static func transformAskUserQuestionToolUse(
+        toolUseId: String,
+        toolCall: ToolCallPayload?,
+        contentBlock: [String: Any],
+        timestamp: Date,
+        tokenUsage: TokenUsage?,
+        model: String?,
+        turn: Int,
+        allSessionEvents: [SessionEvent]?
+    ) -> ChatMessage? {
+        let argumentsJson: String
+        if let toolCallArgs = toolCall?.arguments {
+            argumentsJson = toolCallArgs
+        } else if let inputDict = contentBlock["input"] as? [String: Any],
+                  let jsonData = try? JSONSerialization.data(withJSONObject: inputDict),
+                  let jsonString = String(data: jsonData, encoding: .utf8) {
+            argumentsJson = jsonString
+        } else {
+            logger.warning("AskUserQuestion: Could not extract arguments", category: .events)
+            return nil
+        }
+
+        guard let paramsData = argumentsJson.data(using: .utf8),
+              let params = try? JSONDecoder().decode(AskUserQuestionParams.self, from: paramsData) else {
+            logger.warning("AskUserQuestion: Could not decode params from arguments", category: .events)
+            return nil
+        }
+
+        // Determine status and parse answers from subsequent events
+        let detection: AskUserQuestionDetectionResult
+        if let events = allSessionEvents {
+            detection = detectAskUserQuestionStatusAndAnswers(toolUseId: toolUseId, params: params, events: events)
+        } else {
+            detection = AskUserQuestionDetectionResult(status: .pending, answers: [:], answerMessageContent: nil)
+        }
+
+        // Build result if answered
+        let result: AskUserQuestionResult?
+        if detection.status == .answered && !detection.answers.isEmpty {
+            result = AskUserQuestionResult(
+                answers: Array(detection.answers.values),
+                complete: true,
+                submittedAt: ""  // Not available from persisted data
+            )
+        } else {
+            result = nil
+        }
+
+        let toolData = AskUserQuestionToolData(
+            toolCallId: toolUseId,
+            params: params,
+            answers: detection.answers,
+            status: detection.status,
+            result: result
+        )
+
+        return ChatMessage(
+            role: .assistant,
+            content: .askUserQuestion(toolData),
+            timestamp: timestamp,
+            tokenUsage: tokenUsage,
+            model: model,
+            turnNumber: turn
+        )
     }
 
     private static func transformSystemMessage(
@@ -1131,7 +1591,8 @@ extension UnifiedEventTransformer {
                     event.payload,
                     timestamp: parseTimestamp(event.timestamp),
                     toolCalls: toolCalls,
-                    toolResults: toolResults
+                    toolResults: toolResults,
+                    allEvents: sorted  // Pass events for AskUserQuestion status detection
                 )
                 // Set eventId on the first message for deletion tracking
                 // (interleaved may produce multiple messages from one event)
@@ -1393,7 +1854,8 @@ extension UnifiedEventTransformer {
                     event.payload,
                     timestamp: parseTimestamp(event.timestamp),
                     toolCalls: toolCalls,
-                    toolResults: toolResults
+                    toolResults: toolResults,
+                    allEvents: sorted  // Pass events for AskUserQuestion status detection
                 )
                 // Set eventId on the first message for deletion tracking
                 // (interleaved may produce multiple messages from one event)

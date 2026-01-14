@@ -148,7 +148,33 @@ struct MessageBubble: View {
                 // Fallback for older iOS
                 AskUserQuestionFallbackView(questionCount: data.params.questions.count)
             }
+
+        case .answeredQuestions(let count):
+            AnsweredQuestionsChipView(questionCount: count)
         }
+    }
+}
+
+// MARK: - Answered Questions Chip View
+
+struct AnsweredQuestionsChipView: View {
+    let questionCount: Int
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "checkmark.circle.fill")
+                .font(.system(size: 14, weight: .medium))
+                .foregroundStyle(.tronSuccess)
+
+            Text("Answered agent's questions")
+                .font(.system(size: 13, weight: .medium, design: .monospaced))
+                .foregroundStyle(.tronTextSecondary)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(Color.tronSurface.opacity(0.6))
+        .clipShape(Capsule())
+        .frame(maxWidth: .infinity, alignment: .trailing)
     }
 }
 

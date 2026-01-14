@@ -30,11 +30,11 @@ struct AskUserQuestionToolViewer: View {
 
                 Spacer()
 
-                // Show chevron only when answerable
-                if data.status == .pending {
+                // Show chevron for pending and answered (tappable states)
+                if data.status == .pending || data.status == .answered {
                     Image(systemName: "chevron.right")
                         .font(.system(size: 14, weight: .medium))
-                        .foregroundStyle(.tronAmber)
+                        .foregroundStyle(data.status == .pending ? .tronAmber : .tronSuccess)
                 }
             }
             .padding(12)
@@ -46,7 +46,7 @@ struct AskUserQuestionToolViewer: View {
             )
         }
         .buttonStyle(.plain)
-        .disabled(data.status != .pending)
+        .disabled(data.status == .superseded) // Only superseded is non-tappable
         .opacity(data.status == .superseded ? 0.5 : 1.0)
     }
 
@@ -73,7 +73,7 @@ struct AskUserQuestionToolViewer: View {
         case .pending:
             return "Tap to answer"
         case .answered:
-            return "Answered"
+            return "Tap to view answers"
         case .superseded:
             return "Skipped"
         }
@@ -124,7 +124,7 @@ struct AskUserQuestionCompactViewer: View {
             .clipShape(Capsule())
         }
         .buttonStyle(.plain)
-        .disabled(data.status != .pending)
+        .disabled(data.status == .superseded) // Only superseded is non-tappable
         .opacity(data.status == .superseded ? 0.5 : 1.0)
     }
 

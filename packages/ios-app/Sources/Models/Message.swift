@@ -208,6 +208,8 @@ enum MessageContent: Equatable {
     case planModeExited(reason: String, planPath: String?)
     /// AskUserQuestion tool call (rendered as interactive question sheet)
     case askUserQuestion(AskUserQuestionToolData)
+    /// User answered agent's questions (rendered as a chip)
+    case answeredQuestions(questionCount: Int)
 
     var textContent: String {
         switch self {
@@ -257,6 +259,8 @@ enum MessageContent: Equatable {
             return "Plan mode \(reason)"
         case .askUserQuestion(let data):
             return "[\(data.params.questions.count) questions]"
+        case .answeredQuestions(let count):
+            return "Answered \(count) \(count == 1 ? "question" : "questions")"
         }
     }
 

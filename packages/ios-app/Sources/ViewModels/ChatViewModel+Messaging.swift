@@ -14,9 +14,14 @@ extension ChatViewModel {
 
         logger.info("Sending message: \"\(text.prefix(100))...\" with \(attachments.count) attachments, \(skills?.count ?? 0) skills, reasoningLevel=\(reasoningLevel ?? "nil")", category: .chat)
 
-        // Mark any pending AskUserQuestion chips as superseded
-        // (user chose to send a different message instead of answering)
-        markPendingQuestionsAsSuperseded()
+        // Check if this is an AskUserQuestion answer prompt - don't mark as superseded
+        let isAnswerPrompt = text.hasPrefix("[Answers to your questions]")
+
+        if !isAnswerPrompt {
+            // Mark any pending AskUserQuestion chips as superseded
+            // (user chose to send a different message instead of answering)
+            markPendingQuestionsAsSuperseded()
+        }
 
         // Reset browser dismiss flag for new prompt - browser can auto-open again
         userDismissedBrowserThisTurn = false
@@ -25,9 +30,20 @@ extension ChatViewModel {
         let attachmentsToShow = attachments.isEmpty ? nil : attachments
         let skillsToShow = skills?.isEmpty == false ? skills : nil
         if !text.isEmpty {
-            let userMessage = ChatMessage.user(text, attachments: attachmentsToShow, skills: skillsToShow)
-            appendMessage(userMessage)
-            logger.debug("Added user text message with \(attachments.count) attachments and \(skills?.count ?? 0) skills", category: .chat)
+            if isAnswerPrompt {
+                // Show "Answered agent's questions" chip instead of full text
+                let questionCount = text.components(separatedBy: "\n**").count - 1
+                let answerChip = ChatMessage(
+                    role: .user,
+                    content: .answeredQuestions(questionCount: max(1, questionCount))
+                )
+                appendMessage(answerChip)
+                logger.debug("Added answered questions chip", category: .chat)
+            } else {
+                let userMessage = ChatMessage.user(text, attachments: attachmentsToShow, skills: skillsToShow)
+                appendMessage(userMessage)
+                logger.debug("Added user text message with \(attachments.count) attachments and \(skills?.count ?? 0) skills", category: .chat)
+            }
             currentTurn += 1
         } else if !attachments.isEmpty {
             // If only attachments (no text), still show them in chat

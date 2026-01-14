@@ -42,7 +42,12 @@ The user will see a question sheet with selectable options. Questions can be sin
 Rules:
 - Maximum 5 questions per call
 - Each question must have at least 2 options
-- Question IDs must be unique within the call`;
+- Question IDs must be unique within the call
+
+IMPORTANT: When using this tool, do NOT output any text response after calling it.
+The question tool should be the FINAL action in your response. The user will see the
+questions in a dedicated UI and their answers will come back as a new message. Do not
+add any explanatory text, summaries, or follow-up comments after the tool call.`;
 
   readonly parameters = {
     type: 'object' as const,
