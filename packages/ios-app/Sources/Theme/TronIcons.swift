@@ -230,20 +230,3 @@ struct ThinkingIndicator: View {
     }
 }
 
-// MARK: - Streaming Cursor
-
-struct StreamingCursor: View {
-    @State private var visible = true
-
-    var body: some View {
-        Rectangle()
-            .fill(Color.tronEmerald)
-            .frame(width: 2, height: 18)
-            .opacity(visible ? 1 : 0)
-            .animation(
-                .easeInOut(duration: 0.5).repeatForever(autoreverses: true),
-                value: visible
-            )
-            .onAppear { visible = false }
-    }
-}

@@ -930,18 +930,14 @@ struct StreamingContentView: View {
                 .frame(width: 2)
                 .padding(.trailing, 12)
 
-            HStack(alignment: .bottom, spacing: 2) {
-                if text.isEmpty {
-                    Text(" ")
-                        .font(.system(size: 14, design: .monospaced))
-                } else {
-                    Text(LocalizedStringKey(text))
-                        .font(.system(size: 14, design: .monospaced))
-                        .foregroundStyle(.tronTextPrimary)
-                        .lineSpacing(4)
-                }
-
-                StreamingCursor()
+            if text.isEmpty {
+                Text(" ")
+                    .font(.system(size: 14, design: .monospaced))
+            } else {
+                Text(LocalizedStringKey(text))
+                    .font(.system(size: 14, design: .monospaced))
+                    .foregroundStyle(.tronTextPrimary)
+                    .lineSpacing(4)
             }
         }
         .padding(.vertical, 4)
