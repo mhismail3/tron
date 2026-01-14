@@ -202,6 +202,12 @@ enum MessageContent: Equatable {
     case skillRemoved(skillName: String)
     /// In-chat notification for rules loaded on session start
     case rulesLoaded(count: Int)
+    /// In-chat notification for plan mode entered
+    case planModeEntered(skillName: String, blockedTools: [String])
+    /// In-chat notification for plan mode exited
+    case planModeExited(reason: String, planPath: String?)
+    /// AskUserQuestion tool call (rendered as interactive question sheet)
+    case askUserQuestion(AskUserQuestionToolData)
 
     var textContent: String {
         switch self {
@@ -245,6 +251,12 @@ enum MessageContent: Equatable {
             return "\(skillName) removed from context"
         case .rulesLoaded(let count):
             return "Loaded \(count) \(count == 1 ? "rule" : "rules")"
+        case .planModeEntered(let skillName, _):
+            return "Plan mode active (\(skillName))"
+        case .planModeExited(let reason, _):
+            return "Plan mode \(reason)"
+        case .askUserQuestion(let data):
+            return "[\(data.params.questions.count) questions]"
         }
     }
 
@@ -266,11 +278,18 @@ enum MessageContent: Equatable {
 
     var isNotification: Bool {
         switch self {
-        case .modelChange, .interrupted, .transcriptionFailed, .transcriptionNoSpeech, .compaction, .contextCleared, .messageDeleted, .skillRemoved, .rulesLoaded:
+        case .modelChange, .interrupted, .transcriptionFailed, .transcriptionNoSpeech, .compaction, .contextCleared, .messageDeleted, .skillRemoved, .rulesLoaded, .planModeEntered, .planModeExited:
             return true
         default:
             return false
         }
+    }
+
+    var isAskUserQuestion: Bool {
+        if case .askUserQuestion = self {
+            return true
+        }
+        return false
     }
 }
 
@@ -445,5 +464,136 @@ extension ChatMessage {
     /// In-chat notification for rules loaded on session start
     static func rulesLoaded(count: Int) -> ChatMessage {
         ChatMessage(role: .system, content: .rulesLoaded(count: count))
+    }
+
+    /// In-chat notification for plan mode entering
+    static func planModeEntered(skillName: String, blockedTools: [String]) -> ChatMessage {
+        ChatMessage(role: .system, content: .planModeEntered(skillName: skillName, blockedTools: blockedTools))
+    }
+
+    /// In-chat notification for plan mode exiting
+    static func planModeExited(reason: String, planPath: String?) -> ChatMessage {
+        ChatMessage(role: .system, content: .planModeExited(reason: reason, planPath: planPath))
+    }
+}
+
+// MARK: - AskUserQuestion Types
+
+/// A single option in a question
+struct AskUserQuestionOption: Codable, Identifiable, Equatable {
+    /// Display label for the option
+    let label: String
+    /// Optional value (defaults to label if not provided)
+    let value: String?
+    /// Optional description providing more context
+    let description: String?
+
+    /// ID uses value if present, otherwise label
+    var id: String { value ?? label }
+}
+
+/// A single question with options
+struct AskUserQuestion: Codable, Identifiable, Equatable {
+    /// Unique identifier for this question
+    let id: String
+    /// The question text
+    let question: String
+    /// Available options to choose from
+    let options: [AskUserQuestionOption]
+    /// Selection mode: single choice or multiple choice
+    let mode: SelectionMode
+    /// Whether to allow a free-form "Other" option
+    let allowOther: Bool?
+    /// Placeholder text for the "Other" input field
+    let otherPlaceholder: String?
+
+    /// Selection mode for a question
+    enum SelectionMode: String, Codable, Equatable {
+        case single
+        case multi
+    }
+}
+
+/// Parameters for the AskUserQuestion tool call
+struct AskUserQuestionParams: Codable, Equatable {
+    /// Array of questions (1-5)
+    let questions: [AskUserQuestion]
+    /// Optional context to provide alongside the questions
+    let context: String?
+}
+
+/// A user's answer to a single question
+struct AskUserQuestionAnswer: Codable, Equatable {
+    /// ID of the question being answered
+    let questionId: String
+    /// Selected option values (labels or explicit values)
+    var selectedValues: [String]
+    /// Free-form response if allowOther was true
+    var otherValue: String?
+
+    init(questionId: String, selectedValues: [String], otherValue: String?) {
+        self.questionId = questionId
+        self.selectedValues = selectedValues
+        self.otherValue = otherValue
+    }
+}
+
+/// The complete result from the AskUserQuestion tool
+struct AskUserQuestionResult: Codable, Equatable {
+    /// All answers provided by the user
+    let answers: [AskUserQuestionAnswer]
+    /// Whether all questions were answered
+    let complete: Bool
+    /// ISO 8601 timestamp of when the result was submitted
+    let submittedAt: String
+}
+
+/// Status for AskUserQuestion in async mode
+/// In async mode, the tool returns immediately and user answers as a new prompt
+enum AskUserQuestionStatus: Equatable {
+    /// Awaiting user response - the question chip is answerable
+    case pending
+    /// User submitted answers - chip shows completion
+    case answered
+    /// User sent a different message - chip is disabled (skipped)
+    case superseded
+}
+
+/// Tool data for AskUserQuestion tracking (in-chat state)
+struct AskUserQuestionToolData: Equatable {
+    /// The tool call ID from the agent
+    let toolCallId: String
+    /// The question parameters
+    let params: AskUserQuestionParams
+    /// Current answers keyed by question ID
+    var answers: [String: AskUserQuestionAnswer]
+    /// Status in async mode (pending/answered/superseded)
+    var status: AskUserQuestionStatus
+    /// Final result (set when submitted)
+    var result: AskUserQuestionResult?
+
+    /// Check if all questions have been answered
+    var isComplete: Bool {
+        params.questions.allSatisfy { question in
+            if let answer = answers[question.id] {
+                return !answer.selectedValues.isEmpty || (answer.otherValue?.isEmpty == false)
+            }
+            return false
+        }
+    }
+
+    /// Number of questions answered
+    var answeredCount: Int {
+        params.questions.filter { question in
+            if let answer = answers[question.id] {
+                return !answer.selectedValues.isEmpty || (answer.otherValue?.isEmpty == false)
+            }
+            return false
+        }.count
+    }
+
+    /// Total number of questions
+    var totalCount: Int {
+        params.questions.count
     }
 }

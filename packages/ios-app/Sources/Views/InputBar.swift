@@ -50,10 +50,9 @@ struct InputBar: View {
     /// Callback when skill detail sheet should be shown
     var onSkillDetailTap: ((Skill) -> Void)?
 
-    /// Binding to control focus (used to prevent keyboard after response)
-    @Binding var shouldFocus: Bool
-
     @FocusState private var isFocused: Bool
+    /// Prevents auto-focus immediately after agent finishes responding
+    @State private var blockFocusUntil: Date = .distantPast
     @ObservedObject private var audioMonitor = AudioAvailabilityMonitor.shared
     @State private var showingImagePicker = false
     @State private var showCamera = false
@@ -172,15 +171,21 @@ struct InputBar: View {
             // Reset state for clean re-entry on next appearance
             resetIntroState()
         }
-        .onChange(of: shouldFocus) { _, newValue in
-            if newValue && !isProcessing {
-                isFocused = true
-            } else if !newValue {
+        // Block any focus attempts immediately after agent finishes
+        .onChange(of: isFocused) { _, newValue in
+            if newValue && Date() < blockFocusUntil {
+                // Immediately cancel focus attempt
                 isFocused = false
             }
         }
-        .onChange(of: isFocused) { _, newValue in
-            shouldFocus = newValue
+        .animation(nil, value: isFocused) // Disable focus animations to prevent jitter
+        // Dismiss keyboard when agent finishes
+        .onChange(of: isProcessing) { wasProcessing, isNowProcessing in
+            if wasProcessing && !isNowProcessing {
+                // Agent finished - dismiss keyboard and block focus attempts
+                isFocused = false
+                blockFocusUntil = Date().addingTimeInterval(0.5)
+            }
         }
         // Animate reasoning pill when model changes or first loads
         .onChange(of: currentModelInfo?.id) { oldModelId, newModelId in
@@ -1263,8 +1268,7 @@ struct InputBar: View {
             onReasoningLevelChange: nil,
             selectedSkills: .constant([]),
             onSkillRemove: nil,
-            onSkillDetailTap: nil,
-            shouldFocus: .constant(false)
+            onSkillDetailTap: nil
         )
     }
     .preferredColorScheme(.dark)

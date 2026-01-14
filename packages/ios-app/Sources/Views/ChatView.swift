@@ -51,8 +51,6 @@ struct ChatView: View {
     @State private var isLoadingModels = false
     /// Optimistic model name for instant UI update
     @State private var optimisticModelName: String?
-    /// Controls input field focus - set to false after response to prevent keyboard
-    @State private var inputFocused = false
     /// Reasoning level for OpenAI Codex models (low/medium/high/xhigh)
     /// Persisted per-session via UserDefaults
     @State private var reasoningLevel: String = "medium"
@@ -138,6 +136,7 @@ struct ChatView: View {
                                 reasoningLevel: currentModelInfo?.supportsReasoning == true ? reasoningLevel : nil,
                                 skills: skillsToSend.isEmpty ? nil : skillsToSend
                             )
+                            // Note: Keyboard dismissal is handled in InputBar via isProcessing onChange
                         },
                         onAbort: viewModel.abortAgent,
                         onMicTap: viewModel.toggleRecording,
@@ -174,8 +173,7 @@ struct ChatView: View {
                         onSkillDetailTap: { skill in
                             skillForDetailSheet = skill
                             showSkillDetailSheet = true
-                        },
-                        shouldFocus: $inputFocused
+                        }
                     )
                     .id(sessionId)
                 }
@@ -283,6 +281,21 @@ struct ChatView: View {
                 SkillDetailSheet(skill: skill, skillStore: store)
             }
         }
+        .sheet(isPresented: $viewModel.showAskUserQuestionSheet) {
+            if #available(iOS 26.0, *), let data = viewModel.currentAskUserQuestionData {
+                AskUserQuestionSheet(
+                    toolData: data,
+                    onSubmit: { answers in
+                        Task {
+                            await viewModel.submitAskUserQuestionAnswers(answers)
+                        }
+                    },
+                    onDismiss: {
+                        viewModel.dismissAskUserQuestionSheet()
+                    }
+                )
+            }
+        }
         .alert("Error", isPresented: $viewModel.showError) {
             Button("OK") { viewModel.clearError() }
         } message: {
@@ -313,13 +326,6 @@ struct ChatView: View {
             // Add in-chat notification for reasoning level change
             if previousLevel != level {
                 viewModel.addReasoningLevelChangeNotification(from: previousLevel, to: level)
-            }
-        }
-        // Prevent keyboard from auto-opening after response completes
-        .onChange(of: viewModel.isProcessing) { wasProcessing, isNowProcessing in
-            if wasProcessing && !isNowProcessing {
-                // Response just finished - dismiss keyboard
-                inputFocused = false
             }
         }
         .onAppear {
@@ -477,10 +483,16 @@ struct ChatView: View {
                             }
 
                             ForEach(viewModel.messages) { message in
-                                MessageBubble(message: message) { skill in
-                                    skillForDetailSheet = skill
-                                    showSkillDetailSheet = true
-                                }
+                                MessageBubble(
+                                    message: message,
+                                    onSkillTap: { skill in
+                                        skillForDetailSheet = skill
+                                        showSkillDetailSheet = true
+                                    },
+                                    onAskUserQuestionTap: { data in
+                                        viewModel.openAskUserQuestionSheet(for: data)
+                                    }
+                                )
                                     .id(message.id)
                                     .transition(.asymmetric(
                                         insertion: .opacity.combined(with: .move(edge: .bottom)),

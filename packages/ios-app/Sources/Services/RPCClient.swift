@@ -40,6 +40,8 @@ class RPCClient: ObservableObject {
     var onContextCleared: ((ContextClearedEvent) -> Void)?
     var onMessageDeleted: ((MessageDeletedEvent) -> Void)?
     var onSkillRemoved: ((SkillRemovedEvent) -> Void)?
+    var onPlanModeEntered: ((PlanModeEnteredEvent) -> Void)?
+    var onPlanModeExited: ((PlanModeExitedEvent) -> Void)?
     var onComplete: (() -> Void)?
     var onError: ((String) -> Void)?
 
@@ -198,6 +200,14 @@ class RPCClient: ObservableObject {
         case .skillRemoved(let e):
             guard checkSession(e.sessionId) else { return }
             onSkillRemoved?(e)
+
+        case .planModeEntered(let e):
+            guard checkSession(e.sessionId) else { return }
+            onPlanModeEntered?(e)
+
+        case .planModeExited(let e):
+            guard checkSession(e.sessionId) else { return }
+            onPlanModeExited?(e)
 
         case .error(let e):
             // Always notify global listeners for dashboard updates
@@ -518,6 +528,27 @@ class RPCClient: ObservableObject {
 
         logger.info("[DELETE] Delete succeeded: deletionEventId=\(result.deletionEventId), targetType=\(result.targetType)", category: .session)
         return result
+    }
+
+    // MARK: - Tool Result Methods
+
+    /// Send a tool result for interactive tools like AskUserQuestion.
+    /// This unblocks the agent which is waiting for user input.
+    func sendToolResult(sessionId: String, toolCallId: String, result: AskUserQuestionResult) async throws {
+        guard let ws = webSocket else {
+            logger.error("[TOOL_RESULT] Cannot send tool result - WebSocket not connected", category: .session)
+            throw RPCClientError.connectionNotEstablished
+        }
+
+        let params = ToolResultParams(sessionId: sessionId, toolCallId: toolCallId, result: result)
+        logger.info("[TOOL_RESULT] Sending tool result: sessionId=\(sessionId), toolCallId=\(toolCallId)", category: .session)
+
+        let response: ToolResultResponse = try await ws.send(
+            method: "tool.result",
+            params: params
+        )
+
+        logger.info("[TOOL_RESULT] Tool result sent successfully: success=\(response.success)", category: .session)
     }
 
     // MARK: - Model Methods

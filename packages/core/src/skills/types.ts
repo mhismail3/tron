@@ -32,6 +32,12 @@ export interface SkillFrontmatter {
   tools?: string[];
   /** Tags for categorization and filtering */
   tags?: string[];
+  /**
+   * Enable plan mode when this skill is activated.
+   * Plan mode blocks write operations (Write, Edit, Bash) until the plan is approved.
+   * The agent can only use read-only tools until user approves via AskUserQuestion.
+   */
+  planMode?: boolean;
 }
 
 // =============================================================================

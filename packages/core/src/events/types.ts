@@ -102,7 +102,11 @@ export type EventType =
   // Error events
   | 'error.agent'
   | 'error.tool'
-  | 'error.provider';
+  | 'error.provider'
+  // Plan mode events
+  | 'plan.mode_entered'
+  | 'plan.mode_exited'
+  | 'plan.created';
 
 // =============================================================================
 // Base Event Structure
@@ -703,6 +707,10 @@ export type SessionEvent =
   | WorktreeMergedEvent
   // Rules
   | RulesLoadedEvent
+  // Plan mode
+  | PlanModeEnteredEvent
+  | PlanModeExitedEvent
+  | PlanCreatedEvent
   // Errors
   | ErrorAgentEvent
   | ErrorToolEvent
@@ -790,6 +798,22 @@ export function isMessageDeletedEvent(event: SessionEvent): event is MessageDele
 
 export function isConfigEvent(event: SessionEvent): event is ConfigModelSwitchEvent | ConfigPromptUpdateEvent | ConfigReasoningLevelEvent {
   return event.type.startsWith('config.');
+}
+
+export function isPlanModeEnteredEvent(event: SessionEvent): event is PlanModeEnteredEvent {
+  return event.type === 'plan.mode_entered';
+}
+
+export function isPlanModeExitedEvent(event: SessionEvent): event is PlanModeExitedEvent {
+  return event.type === 'plan.mode_exited';
+}
+
+export function isPlanCreatedEvent(event: SessionEvent): event is PlanCreatedEvent {
+  return event.type === 'plan.created';
+}
+
+export function isPlanEvent(event: SessionEvent): event is PlanModeEnteredEvent | PlanModeExitedEvent | PlanCreatedEvent {
+  return event.type.startsWith('plan.');
 }
 
 // =============================================================================
@@ -1012,4 +1036,52 @@ export interface RulesLoadedPayload {
 export interface RulesLoadedEvent extends BaseEvent {
   type: 'rules.loaded';
   payload: RulesLoadedPayload;
+}
+
+// =============================================================================
+// Plan Mode Events
+// =============================================================================
+
+/**
+ * Plan mode entered event - marks when plan mode is activated
+ * Plan mode blocks write operations until plan is approved
+ */
+export interface PlanModeEnteredEvent extends BaseEvent {
+  type: 'plan.mode_entered';
+  payload: {
+    /** Skill that triggered plan mode */
+    skillName: string;
+    /** Tools blocked during plan mode (typically Write, Edit, Bash) */
+    blockedTools: string[];
+  };
+}
+
+/**
+ * Plan mode exited event - marks when plan mode ends
+ */
+export interface PlanModeExitedEvent extends BaseEvent {
+  type: 'plan.mode_exited';
+  payload: {
+    /** Reason plan mode ended */
+    reason: 'approved' | 'cancelled' | 'timeout';
+    /** Path to approved plan file (only present when approved) */
+    planPath?: string;
+  };
+}
+
+/**
+ * Plan created event - marks when a plan file is written
+ */
+export interface PlanCreatedEvent extends BaseEvent {
+  type: 'plan.created';
+  payload: {
+    /** Absolute path to the plan file */
+    planPath: string;
+    /** Human-readable title of the plan */
+    title: string;
+    /** SHA-256 hash of plan content */
+    contentHash: string;
+    /** Estimated token count of the plan */
+    tokens?: number;
+  };
 }

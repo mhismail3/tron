@@ -95,3 +95,19 @@ export {
   agentStartEvent,
   agentEndEvent,
 } from './events.js';
+
+// AskUserQuestion
+export type {
+  AskUserQuestionOption,
+  AskUserQuestion,
+  AskUserQuestionParams,
+  AskUserQuestionAnswer,
+  AskUserQuestionResult,
+  ValidationResult,
+} from './ask-user-question.js';
+
+export {
+  validateAskUserQuestionParams,
+  isAskUserQuestionComplete,
+  createAskUserQuestionResult,
+} from './ask-user-question.js';

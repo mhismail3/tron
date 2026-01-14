@@ -95,6 +95,8 @@ import type {
   SkillRefreshResult,
   SkillRemoveParams,
   SkillRemoveResult,
+  ToolResultParams,
+  ToolResultResult,
 } from './types.js';
 import { getNotesDir } from '../settings/loader.js';
 import { ANTHROPIC_MODELS, OPENAI_CODEX_MODELS } from '../providers/models.js';
@@ -124,6 +126,16 @@ export interface RpcContext {
   browserManager?: BrowserRpcManager;
   /** Skill manager for skill operations (optional) */
   skillManager?: SkillRpcManager;
+  /** Tool call tracker for interactive tools (optional) */
+  toolCallTracker?: ToolCallTrackerManager;
+}
+
+/**
+ * Tool call tracker interface for managing pending interactive tool calls
+ */
+export interface ToolCallTrackerManager {
+  resolve(toolCallId: string, result: unknown): boolean;
+  hasPending(toolCallId: string): boolean;
 }
 
 /**
@@ -481,6 +493,10 @@ export class RpcHandler extends EventEmitter {
         // File operations
         case 'file.read':
           return this.handleFileRead(request);
+
+        // Tool operations
+        case 'tool.result':
+          return this.handleToolResult(request);
 
         default:
           return this.errorResponse(request.id, 'METHOD_NOT_FOUND', `Unknown method: ${request.method}`);
@@ -1907,6 +1923,51 @@ ${transcribeResult.text}
       const message = error instanceof Error ? error.message : 'Failed to read file';
       return this.errorResponse(request.id, 'FILE_ERROR', message);
     }
+  }
+
+  // ===========================================================================
+  // Tool Result Handler
+  // ===========================================================================
+
+  private async handleToolResult(request: RpcRequest): Promise<RpcResponse> {
+    if (!this.context.toolCallTracker) {
+      return this.errorResponse(request.id, 'NOT_SUPPORTED', 'Tool call tracker not available');
+    }
+
+    const params = request.params as ToolResultParams | undefined;
+
+    if (!params?.sessionId) {
+      return this.errorResponse(request.id, 'INVALID_PARAMS', 'sessionId is required');
+    }
+    if (!params?.toolCallId) {
+      return this.errorResponse(request.id, 'INVALID_PARAMS', 'toolCallId is required');
+    }
+    if (params.result === undefined) {
+      return this.errorResponse(request.id, 'INVALID_PARAMS', 'result is required');
+    }
+
+    // Check if the tool call is pending
+    if (!this.context.toolCallTracker.hasPending(params.toolCallId)) {
+      return this.errorResponse(
+        request.id,
+        'NOT_FOUND',
+        `No pending tool call found with ID: ${params.toolCallId}`
+      );
+    }
+
+    // Resolve the pending tool call
+    const resolved = this.context.toolCallTracker.resolve(params.toolCallId, params.result);
+
+    if (!resolved) {
+      return this.errorResponse(
+        request.id,
+        'TOOL_RESULT_FAILED',
+        'Failed to resolve tool call'
+      );
+    }
+
+    const result: ToolResultResult = { success: true };
+    return this.successResponse(request.id, result);
   }
 
   // ===========================================================================

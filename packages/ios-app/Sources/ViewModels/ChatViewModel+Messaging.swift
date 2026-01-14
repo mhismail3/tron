@@ -14,6 +14,10 @@ extension ChatViewModel {
 
         logger.info("Sending message: \"\(text.prefix(100))...\" with \(attachments.count) attachments, \(skills?.count ?? 0) skills, reasoningLevel=\(reasoningLevel ?? "nil")", category: .chat)
 
+        // Mark any pending AskUserQuestion chips as superseded
+        // (user chose to send a different message instead of answering)
+        markPendingQuestionsAsSuperseded()
+
         // Reset browser dismiss flag for new prompt - browser can auto-open again
         userDismissedBrowserThisTurn = false
 

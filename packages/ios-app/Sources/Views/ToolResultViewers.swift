@@ -83,6 +83,8 @@ struct ToolResultRouter: View {
             return ("folder", .yellow)
         case "browser":
             return ("globe", .blue)
+        case "askuserquestion":
+            return ("questionmark.circle.fill", .tronAmber)
         default:
             return ("gearshape", .tronTextMuted)
         }

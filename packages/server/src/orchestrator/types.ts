@@ -186,6 +186,18 @@ export interface ActiveSession {
    * Rules are immutable for the session (no remove operation).
    */
   rulesTracker: RulesTracker;
+  /**
+   * Plan mode state - tracks whether the session is in read-only plan mode.
+   * Reconstructed from events on session resume/fork.
+   */
+  planMode: {
+    /** Whether plan mode is currently active */
+    isActive: boolean;
+    /** Skill that triggered plan mode */
+    skillName?: string;
+    /** Tools blocked during plan mode (e.g., Write, Edit, Bash) */
+    blockedTools: string[];
+  };
 }
 
 // =============================================================================

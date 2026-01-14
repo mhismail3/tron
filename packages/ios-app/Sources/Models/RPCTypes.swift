@@ -832,6 +832,19 @@ struct MessageDeleteResult: Decodable {
     let targetType: String
 }
 
+// MARK: - Tool Result Methods
+
+/// Send tool result for interactive tools like AskUserQuestion
+struct ToolResultParams: Encodable {
+    let sessionId: String
+    let toolCallId: String
+    let result: AskUserQuestionResult
+}
+
+struct ToolResultResponse: Decodable {
+    let success: Bool
+}
+
 // MARK: - Browser Methods
 
 /// Start browser stream for a session

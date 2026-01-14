@@ -8,6 +8,7 @@
 
 /* Begin PBXBuildFile section */
 		ATTACH0010000000300000001 /* Attachment.swift in Sources */ = {isa = PBXBuildFile; fileRef = ATTACH0010000000100000001 /* Attachment.swift */; };
+		ASKQTEST001000000020001 /* AskUserQuestionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = ASKQTEST001000000010001 /* AskUserQuestionTests.swift */; };
 		ATTACH0010000000400000001 /* AttachmentTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = ATTACH0010000000200000001 /* AttachmentTests.swift */; };
 		IMGCMP0010000000200000001 /* ImageCompressorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = IMGCMP0010000000100000001 /* ImageCompressorTests.swift */; };
 		IMGCMP0010000000400000001 /* ImageCompressor.swift in Sources */ = {isa = PBXBuildFile; fileRef = IMGCMP0010000000300000001 /* ImageCompressor.swift */; };
@@ -89,6 +90,9 @@
 		SKILL00100000000900000001 /* SkillChip.swift in Sources */ = {isa = PBXBuildFile; fileRef = SKILL00100000001000000001 /* SkillChip.swift */; };
 		SKILL00100000001100000001 /* SkillMentionPopup.swift in Sources */ = {isa = PBXBuildFile; fileRef = SKILL00100000001200000001 /* SkillMentionPopup.swift */; };
 		SKILL00100000001300000001 /* SkillDetailSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = SKILL00100000001400000001 /* SkillDetailSheet.swift */; };
+		PLANMODE001000000020001 /* PlanModeViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = PLANMODE001000000010001 /* PlanModeViews.swift */; };
+		ASKQUEST001000000020001 /* AskUserQuestionViewer.swift in Sources */ = {isa = PBXBuildFile; fileRef = ASKQUEST001000000010001 /* AskUserQuestionViewer.swift */; };
+		ASKSHEET001000000020001 /* AskUserQuestionSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = ASKSHEET001000000010001 /* AskUserQuestionSheet.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -187,12 +191,17 @@
 		SKILL00100000001000000001 /* SkillChip.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SkillChip.swift; sourceTree = "<group>"; };
 		SKILL00100000001200000001 /* SkillMentionPopup.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SkillMentionPopup.swift; sourceTree = "<group>"; };
 		SKILL00100000001400000001 /* SkillDetailSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SkillDetailSheet.swift; sourceTree = "<group>"; };
+		PLANMODE001000000010001 /* PlanModeViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlanModeViews.swift; sourceTree = "<group>"; };
+		ASKQUEST001000000010001 /* AskUserQuestionViewer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AskUserQuestionViewer.swift; sourceTree = "<group>"; };
+		ASKSHEET001000000010001 /* AskUserQuestionSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AskUserQuestionSheet.swift; sourceTree = "<group>"; };
+		ASKQTEST001000000010001 /* AskUserQuestionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AskUserQuestionTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXGroup section */
 		161F8AEF8FBE5C9C772B5263 /* Tests */ = {
 			isa = PBXGroup;
 			children = (
+				ASKQTEST001000000010001 /* AskUserQuestionTests.swift */,
 				ATTACH0010000000200000001 /* AttachmentTests.swift */,
 				A013DFE849DA84E8EA5F545C /* EventDatabaseTests.swift */,
 				FOLDER00100000004A00000001 /* FolderCreationTests.swift */,
@@ -287,6 +296,8 @@
 		8019A5A03208D1ACB7D52BA9 /* Views */ = {
 			isa = PBXGroup;
 			children = (
+				ASKSHEET001000000010001 /* AskUserQuestionSheet.swift */,
+				ASKQUEST001000000010001 /* AskUserQuestionViewer.swift */,
 				ATTACHBUB0000000000100001 /* AttachmentBubble.swift */,
 				CAMERAPICK00000000100001 /* CameraPicker.swift */,
 				CAMCAPSHEET000000100001 /* CameraCaptureSheet.swift */,
@@ -300,6 +311,7 @@
 				AD61CD33CD78B1F23CDBABD7 /* LogViewer.swift */,
 				C37E248C562712A416669C61 /* MessageBubble.swift */,
 				7F6BD19519452787421FD54D /* ModelSwitcher.swift */,
+				PLANMODE001000000010001 /* PlanModeViews.swift */,
 				A1B2C3D4E5F60718293A4B5C /* ReasoningLevelPicker.swift */,
 				A98EEAD5A6421EB34B269C1A /* SessionAnalyticsSheet.swift */,
 				766753AA2F765B13E1B4676A /* SessionSidebar.swift */,
@@ -551,6 +563,9 @@
 				VOICE001000000009A0000001 /* VoiceNotesRecordingSheet.swift in Sources */,
 				VOICE00100000000BA0000001 /* VoiceNotesRecorder.swift in Sources */,
 				AUDIO00100000000DA0000001 /* AudioAvailabilityMonitor.swift in Sources */,
+				PLANMODE001000000020001 /* PlanModeViews.swift in Sources */,
+				ASKQUEST001000000020001 /* AskUserQuestionViewer.swift in Sources */,
+				ASKSHEET001000000020001 /* AskUserQuestionSheet.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -558,6 +573,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				ASKQTEST001000000020001 /* AskUserQuestionTests.swift in Sources */,
 				ATTACH0010000000400000001 /* AttachmentTests.swift in Sources */,
 				FACF3272EAAA614047FA83C8 /* EventDatabaseTests.swift in Sources */,
 				FOLDER00100000003A00000001 /* FolderCreationTests.swift in Sources */,

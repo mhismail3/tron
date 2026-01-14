@@ -73,6 +73,7 @@ import {
   FindTool,
   LsTool,
   BrowserTool,
+  AskUserQuestionTool,
   loadServerAuth,
   getTronDataDir,
   detectProviderFromModel,
@@ -110,6 +111,8 @@ import {
   type SkillTrackingEvent,
   type RulesLoadedPayload,
   type RulesTrackingEvent,
+  isPlanModeEnteredEvent,
+  isPlanModeExitedEvent,
 } from '@tron/core';
 import { BrowserService } from './browser/index.js';
 import {
@@ -380,6 +383,11 @@ export class EventStoreOrchestrator extends EventEmitter {
       skillTracker: createSkillTracker(),
       // Initialize rules tracker with loaded rules
       rulesTracker,
+      // Initialize plan mode as inactive
+      planMode: {
+        isActive: false,
+        blockedTools: [],
+      },
     });
 
     this.emit('session_created', {
@@ -474,6 +482,16 @@ export class EventStoreOrchestrator extends EventEmitter {
       rulesFileCount: rulesTracker.getTotalFiles(),
     });
 
+    // Reconstruct plan mode state from event history
+    const planMode = this.reconstructPlanModeFromEvents(events as TronSessionEvent[]);
+    if (planMode.isActive) {
+      logger.info('Plan mode reconstructed from events', {
+        sessionId,
+        skillName: planMode.skillName,
+        blockedTools: planMode.blockedTools,
+      });
+    }
+
     // Re-load rules content from disk for the agent
     // (RulesTracker.fromEvents doesn't preserve merged content)
     if (rulesTracker.hasRules()) {
@@ -524,6 +542,8 @@ export class EventStoreOrchestrator extends EventEmitter {
       skillTracker,
       // Restore rules tracker from events
       rulesTracker,
+      // Restore plan mode state from events
+      planMode,
     });
 
     logger.info('Session resumed', {
@@ -2092,6 +2112,8 @@ The user has explicitly removed these skills and expects you to respond WITHOUT 
       };
     }
 
+    // AskUserQuestion uses async mode - no delegate needed
+    // Questions are presented immediately, user answers as a new prompt
     const tools: TronTool[] = [
       new ReadTool({ workingDirectory }),
       new WriteTool({ workingDirectory }),
@@ -2101,6 +2123,7 @@ The user has explicitly removed these skills and expects you to respond WITHOUT 
       new FindTool({ workingDirectory }),
       new LsTool({ workingDirectory }),
       new BrowserTool({ workingDirectory, delegate: browserDelegate }),
+      new AskUserQuestionTool({ workingDirectory }),
     ];
 
     // System prompt is now handled by ContextManager based on provider type
@@ -2794,5 +2817,177 @@ The user has explicitly removed these skills and expects you to respond WITHOUT 
       isStreaming: session?.isStreaming ?? false,
       currentUrl: session?.page?.url(),
     };
+  }
+
+  // ===========================================================================
+  // Plan Mode Methods
+  // ===========================================================================
+
+  /**
+   * Check if a session is in plan mode
+   */
+  isInPlanMode(sessionId: string): boolean {
+    const active = this.activeSessions.get(sessionId);
+    return active?.planMode.isActive ?? false;
+  }
+
+  /**
+   * Get the list of blocked tools for a session
+   */
+  getBlockedTools(sessionId: string): string[] {
+    const active = this.activeSessions.get(sessionId);
+    return active?.planMode.blockedTools ?? [];
+  }
+
+  /**
+   * Check if a specific tool is blocked for a session
+   */
+  isToolBlocked(sessionId: string, toolName: string): boolean {
+    const active = this.activeSessions.get(sessionId);
+    if (!active?.planMode.isActive) return false;
+    return active.planMode.blockedTools.includes(toolName);
+  }
+
+  /**
+   * Get a descriptive error message for blocked tools
+   */
+  getPlanModeBlockedToolMessage(toolName: string): string {
+    return `Tool "${toolName}" is blocked during plan mode. ` +
+      `The session is in read-only exploration mode until the plan is approved. ` +
+      `Use AskUserQuestion to present your plan and get user approval.`;
+  }
+
+  /**
+   * Enter plan mode for a session
+   * @param sessionId - Session ID
+   * @param options - Plan mode options (skill name and blocked tools)
+   */
+  async enterPlanMode(
+    sessionId: string,
+    options: { skillName: string; blockedTools: string[] }
+  ): Promise<void> {
+    const active = this.activeSessions.get(sessionId);
+    if (!active) {
+      throw new Error(`Session not found: ${sessionId}`);
+    }
+
+    if (active.planMode.isActive) {
+      throw new Error(`Session ${sessionId} is already in plan mode`);
+    }
+
+    // Append plan.mode_entered event
+    const parentId = active.pendingHeadEventId ?? undefined;
+    const event = await this.eventStore.append({
+      sessionId: sessionId as SessionId,
+      type: 'plan.mode_entered' as EventType,
+      payload: {
+        skillName: options.skillName,
+        blockedTools: options.blockedTools,
+      },
+      parentId,
+    });
+
+    active.pendingHeadEventId = event.id;
+
+    // Update in-memory state
+    active.planMode = {
+      isActive: true,
+      skillName: options.skillName,
+      blockedTools: options.blockedTools,
+    };
+
+    logger.info('Plan mode entered', {
+      sessionId,
+      skillName: options.skillName,
+      blockedTools: options.blockedTools,
+      eventId: event.id,
+    });
+
+    this.emit('plan.mode_entered', {
+      sessionId,
+      skillName: options.skillName,
+      blockedTools: options.blockedTools,
+    });
+  }
+
+  /**
+   * Exit plan mode for a session
+   * @param sessionId - Session ID
+   * @param options - Exit options (reason and optional plan path)
+   */
+  async exitPlanMode(
+    sessionId: string,
+    options: { reason: 'approved' | 'cancelled' | 'timeout'; planPath?: string }
+  ): Promise<void> {
+    const active = this.activeSessions.get(sessionId);
+    if (!active) {
+      throw new Error(`Session not found: ${sessionId}`);
+    }
+
+    if (!active.planMode.isActive) {
+      throw new Error(`Session ${sessionId} is not in plan mode`);
+    }
+
+    // Build payload (only include planPath if present)
+    const payload: Record<string, unknown> = { reason: options.reason };
+    if (options.planPath) {
+      payload.planPath = options.planPath;
+    }
+
+    // Append plan.mode_exited event
+    const parentId = active.pendingHeadEventId ?? undefined;
+    const event = await this.eventStore.append({
+      sessionId: sessionId as SessionId,
+      type: 'plan.mode_exited' as EventType,
+      payload,
+      parentId,
+    });
+
+    active.pendingHeadEventId = event.id;
+
+    // Update in-memory state
+    active.planMode = {
+      isActive: false,
+      blockedTools: [],
+    };
+
+    logger.info('Plan mode exited', {
+      sessionId,
+      reason: options.reason,
+      planPath: options.planPath,
+      eventId: event.id,
+    });
+
+    this.emit('plan.mode_exited', {
+      sessionId,
+      reason: options.reason,
+      planPath: options.planPath,
+    });
+  }
+
+  /**
+   * Reconstruct plan mode state from event history
+   * @private
+   */
+  private reconstructPlanModeFromEvents(
+    events: TronSessionEvent[]
+  ): { isActive: boolean; skillName?: string; blockedTools: string[] } {
+    let planModeActive = false;
+    let skillName: string | undefined;
+    let blockedTools: string[] = [];
+
+    for (const event of events) {
+      if (isPlanModeEnteredEvent(event)) {
+        planModeActive = true;
+        skillName = event.payload.skillName;
+        blockedTools = event.payload.blockedTools;
+      } else if (isPlanModeExitedEvent(event)) {
+        planModeActive = false;
+        skillName = undefined;
+        blockedTools = [];
+      }
+    }
+
+    return { isActive: planModeActive, skillName, blockedTools };
   }
 }

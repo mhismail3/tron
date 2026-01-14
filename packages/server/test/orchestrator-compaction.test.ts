@@ -97,6 +97,7 @@ describe('Orchestrator Compaction', () => {
       expect(snapshot.breakdown).toEqual({
         systemPrompt: 0,
         tools: 0,
+        rules: 0,
         messages: 0,
       });
     });

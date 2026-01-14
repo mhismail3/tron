@@ -56,6 +56,12 @@ extension ChatViewModel {
         flushPendingTextUpdates()
         finalizeStreamingMessage()
 
+        // Check if this is an AskUserQuestion tool call
+        if event.toolName.lowercased() == "askuserquestion" {
+            handleAskUserQuestionToolStart(event)
+            return
+        }
+
         let tool = ToolUseData(
             toolName: event.toolName,
             toolCallId: event.toolCallId,
@@ -85,11 +91,73 @@ extension ChatViewModel {
         }
     }
 
+    /// Handle AskUserQuestion tool start - creates special message (sheet opens on tool.end)
+    private func handleAskUserQuestionToolStart(_ event: ToolStartEvent) {
+        logger.info("AskUserQuestion tool detected, parsing params", category: .events)
+
+        // Parse the params from JSON arguments
+        guard let paramsData = event.formattedArguments.data(using: .utf8),
+              let params = try? JSONDecoder().decode(AskUserQuestionParams.self, from: paramsData) else {
+            logger.error("Failed to parse AskUserQuestion params: \(event.formattedArguments.prefix(500))", category: .events)
+            // Fall back to regular tool display
+            let tool = ToolUseData(
+                toolName: event.toolName,
+                toolCallId: event.toolCallId,
+                arguments: event.formattedArguments,
+                status: .running
+            )
+            let message = ChatMessage(role: .assistant, content: .toolUse(tool))
+            messages.append(message)
+            return
+        }
+
+        // Create AskUserQuestion tool data with pending status
+        // In async mode, the tool returns immediately and user answers as a new prompt
+        let toolData = AskUserQuestionToolData(
+            toolCallId: event.toolCallId,
+            params: params,
+            answers: [:],
+            status: .pending,  // Pending = waiting for user response
+            result: nil
+        )
+
+        // Create message with AskUserQuestion content
+        let message = ChatMessage(role: .assistant, content: .askUserQuestion(toolData))
+        messages.append(message)
+
+        // Track tool call for persistence
+        let record = ToolCallRecord(
+            toolCallId: event.toolCallId,
+            toolName: event.toolName,
+            arguments: event.formattedArguments
+        )
+        currentTurnToolCalls.append(record)
+
+        // Note: Sheet auto-opens on tool.end, not tool.start (async mode)
+    }
+
     func handleToolEnd(_ event: ToolEndEvent) {
         logger.info("Tool ended: \(event.toolCallId) success=\(event.success) duration=\(event.durationMs ?? 0)ms", category: .events)
         logger.debug("Tool result: \(event.displayResult.prefix(300))", category: .events)
 
-        // Find and update the tool message
+        // Check if this is an AskUserQuestion tool end
+        if let index = messages.lastIndex(where: {
+            if case .askUserQuestion(let data) = $0.content {
+                return data.toolCallId == event.toolCallId
+            }
+            return false
+        }) {
+            if case .askUserQuestion(var data) = messages[index].content {
+                // In async mode, tool.end means questions are ready for user
+                // Status is already .pending, now auto-open the sheet
+                messages[index].content = .askUserQuestion(data)
+                logger.info("AskUserQuestion tool.end - opening sheet for user input", category: .events)
+                openAskUserQuestionSheet(for: data)
+            }
+            return
+        }
+
+        // Find and update regular tool message
         if let index = messages.lastIndex(where: {
             if case .toolUse(let tool) = $0.content {
                 return tool.toolCallId == event.toolCallId
@@ -496,6 +564,20 @@ extension ChatViewModel {
         Task {
             await refreshContextFromServer()
         }
+    }
+
+    func handlePlanModeEntered(_ event: PlanModeEnteredEvent) {
+        logger.info("Plan mode entered: skill=\(event.skillName), blocked=\(event.blockedTools.joined(separator: ", "))", category: .events)
+
+        // Update state and add notification to chat
+        enterPlanMode(skillName: event.skillName, blockedTools: event.blockedTools)
+    }
+
+    func handlePlanModeExited(_ event: PlanModeExitedEvent) {
+        logger.info("Plan mode exited: reason=\(event.reason), planPath=\(event.planPath ?? "none")", category: .events)
+
+        // Update state and add notification to chat
+        exitPlanMode(reason: event.reason, planPath: event.planPath)
     }
 
     func handleError(_ message: String) {

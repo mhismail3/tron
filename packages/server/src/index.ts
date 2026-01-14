@@ -854,6 +854,8 @@ export class TronServer {
     await this.orchestrator.initialize();
 
     // Create RpcContext adapter
+    // Note: toolCallTracker removed - AskUserQuestion now uses async mode
+    // where answers are submitted as new prompts, not tool results
     const rpcContext: RpcContext = {
       ...createRpcContext(this.orchestrator),
       eventStore: createEventStoreManager(this.orchestrator),

@@ -464,6 +464,40 @@ struct SkillRemovedEvent: Decodable {
     var skillName: String { data.skillName }
 }
 
+// MARK: - Plan Mode Events
+
+/// Event fired when plan mode is entered (read-only enforcement begins)
+struct PlanModeEnteredEvent: Decodable {
+    let type: String
+    let sessionId: String?
+    let timestamp: String?
+    let data: PlanModeEnteredData
+
+    struct PlanModeEnteredData: Decodable {
+        let skillName: String
+        let blockedTools: [String]
+    }
+
+    var skillName: String { data.skillName }
+    var blockedTools: [String] { data.blockedTools }
+}
+
+/// Event fired when plan mode is exited (read-only enforcement ends)
+struct PlanModeExitedEvent: Decodable {
+    let type: String
+    let sessionId: String?
+    let timestamp: String?
+    let data: PlanModeExitedData
+
+    struct PlanModeExitedData: Decodable {
+        let reason: String  // "approved", "cancelled", "timeout"
+        let planPath: String?
+    }
+
+    var reason: String { data.reason }
+    var planPath: String? { data.planPath }
+}
+
 // MARK: - Event Type Constants
 
 enum EventType: String {
@@ -479,6 +513,8 @@ enum EventType: String {
     case contextCleared = "agent.context_cleared"
     case messageDeleted = "agent.message_deleted"
     case skillRemoved = "agent.skill_removed"
+    case planModeEntered = "plan.mode_entered"
+    case planModeExited = "plan.mode_exited"
     case connected = "connection.established"
     case systemConnected = "system.connected"
     case sessionCreated = "session.created"
@@ -502,6 +538,8 @@ enum ParsedEvent {
     case contextCleared(ContextClearedEvent)
     case messageDeleted(MessageDeletedEvent)
     case skillRemoved(SkillRemovedEvent)
+    case planModeEntered(PlanModeEnteredEvent)
+    case planModeExited(PlanModeExitedEvent)
     case browserFrame(BrowserFrameEvent)
     case browserClosed(String)
     case connected(ConnectedEvent)
@@ -569,6 +607,16 @@ enum ParsedEvent {
                 let event = try decoder.decode(SkillRemovedEvent.self, from: data)
                 logger.info("Skill removed: \(event.skillName)", category: .events)
                 return .skillRemoved(event)
+
+            case EventType.planModeEntered.rawValue:
+                let event = try decoder.decode(PlanModeEnteredEvent.self, from: data)
+                logger.info("Plan mode entered: skill=\(event.skillName), blocked=\(event.blockedTools.joined(separator: ", "))", category: .events)
+                return .planModeEntered(event)
+
+            case EventType.planModeExited.rawValue:
+                let event = try decoder.decode(PlanModeExitedEvent.self, from: data)
+                logger.info("Plan mode exited: reason=\(event.reason)", category: .events)
+                return .planModeExited(event)
 
             case "browser.frame":
                 let event = try decoder.decode(BrowserFrameEvent.self, from: data)

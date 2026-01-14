@@ -11,4 +11,5 @@ export {
   type ContextRpcManager,
   type BrowserRpcManager,
   type SkillRpcManager,
+  type ToolCallTrackerManager,
 } from './handler.js';

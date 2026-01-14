@@ -63,6 +63,14 @@ export {
   type RulesLoadedPayload,
   type RulesLoadedEvent,
   isRulesLoadedEvent,
+  // Plan mode events
+  type PlanModeEnteredEvent,
+  type PlanModeExitedEvent,
+  type PlanCreatedEvent,
+  isPlanModeEnteredEvent,
+  isPlanModeExitedEvent,
+  isPlanCreatedEvent,
+  isPlanEvent,
 } from './types.js';
 
 // Types - State types (with prefixes to avoid conflicts)
