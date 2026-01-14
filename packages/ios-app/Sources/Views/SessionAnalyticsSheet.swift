@@ -25,7 +25,7 @@ struct SessionAnalyticsSheet: View {
                     ProgressView("Loading analytics...")
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {
-                    ScrollView {
+                    ScrollView(.vertical, showsIndicators: true) {
                         VStack(spacing: 24) {
                             // Session info header
                             if let session = session {

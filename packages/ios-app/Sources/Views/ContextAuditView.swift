@@ -155,7 +155,7 @@ struct ContextAuditView: View {
     private var contextView: some View {
         Group {
             if let snapshot = detailedSnapshot {
-                ScrollView {
+                ScrollView(.vertical, showsIndicators: true) {
                     VStack(spacing: 16) {
                         // Usage gauge
                         ContextUsageGaugeView(

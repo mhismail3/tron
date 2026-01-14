@@ -91,7 +91,7 @@ struct SkillDetailSheet: View {
     }
 
     private func contentView(_ metadata: SkillMetadata) -> some View {
-        ScrollView {
+        ScrollView(.vertical, showsIndicators: true) {
             VStack(spacing: 16) {
                 // Description section
                 descriptionSection(metadata)

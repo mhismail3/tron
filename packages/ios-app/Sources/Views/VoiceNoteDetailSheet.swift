@@ -9,7 +9,7 @@ struct VoiceNoteDetailSheet: View {
 
     var body: some View {
         NavigationStack {
-            ScrollView {
+            ScrollView(.vertical, showsIndicators: true) {
                 VStack(alignment: .leading, spacing: 16) {
                     // Metadata header
                     HStack {
