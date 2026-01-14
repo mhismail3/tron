@@ -107,6 +107,39 @@ describe('Event Types', () => {
       expect(end.type).toBe('turn_end');
     });
 
+    it('should define turn_end with contextLimit for context tracking', () => {
+      const turnEnd: TronEvent = {
+        type: 'turn_end',
+        sessionId: 'sess_123',
+        timestamp: new Date().toISOString(),
+        turn: 1,
+        duration: 1000,
+        tokenUsage: {
+          inputTokens: 5000,
+          outputTokens: 1000,
+          cacheReadTokens: 2000,
+          cacheCreationTokens: 500,
+        },
+        contextLimit: 200_000, // NEW: Current model's context limit
+      };
+
+      expect(turnEnd.type).toBe('turn_end');
+      expect((turnEnd as { contextLimit?: number }).contextLimit).toBe(200_000);
+    });
+
+    it('should allow turn_end without contextLimit for backwards compatibility', () => {
+      const turnEnd: TronEvent = {
+        type: 'turn_end',
+        sessionId: 'sess_123',
+        timestamp: new Date().toISOString(),
+        turn: 1,
+        duration: 500,
+      };
+
+      expect(turnEnd.type).toBe('turn_end');
+      expect((turnEnd as { contextLimit?: number }).contextLimit).toBeUndefined();
+    });
+
     it('should define message update events', () => {
       const event: TronEvent = {
         type: 'message_update',

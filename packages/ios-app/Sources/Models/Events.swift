@@ -172,9 +172,11 @@ struct TurnEndEvent: Decodable {
         let tokenUsage: TokenUsage?
         let stopReason: String?
         let cost: Double?
+        /// Current model's context window limit (for syncing iOS state after model switch)
+        let contextLimit: Int?
 
         enum CodingKeys: String, CodingKey {
-            case turn, turnNumber, duration, tokenUsage, stopReason, cost
+            case turn, turnNumber, duration, tokenUsage, stopReason, cost, contextLimit
         }
 
         init(from decoder: Decoder) throws {
@@ -184,6 +186,7 @@ struct TurnEndEvent: Decodable {
             duration = try container.decodeIfPresent(Int.self, forKey: .duration)
             tokenUsage = try container.decodeIfPresent(TokenUsage.self, forKey: .tokenUsage)
             stopReason = try container.decodeIfPresent(String.self, forKey: .stopReason)
+            contextLimit = try container.decodeIfPresent(Int.self, forKey: .contextLimit)
 
             // Handle cost as either Double or String
             if let costDouble = try? container.decodeIfPresent(Double.self, forKey: .cost) {
@@ -201,6 +204,8 @@ struct TurnEndEvent: Decodable {
     var tokenUsage: TokenUsage? { data?.tokenUsage }
     var stopReason: String? { data?.stopReason }
     var cost: Double? { data?.cost }
+    /// Current model's context window limit
+    var contextLimit: Int? { data?.contextLimit }
 }
 
 struct CompleteEvent: Decodable {

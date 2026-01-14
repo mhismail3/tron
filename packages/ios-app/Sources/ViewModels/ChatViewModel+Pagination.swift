@@ -127,13 +127,20 @@ extension ChatViewModel {
                 // Fallback to reconstructed state if session not found
                 let usage = state.totalTokenUsage
                 if usage.inputTokens > 0 || usage.outputTokens > 0 {
+                    // Accumulated totals for billing
                     accumulatedInputTokens = usage.inputTokens
                     accumulatedOutputTokens = usage.outputTokens
                     accumulatedCacheReadTokens = usage.cacheReadTokens ?? 0
                     accumulatedCacheCreationTokens = usage.cacheCreationTokens ?? 0
-                    // Use inputTokens as lastTurnInputTokens in fallback (best available)
-                    lastTurnInputTokens = usage.inputTokens
-                    totalTokenUsage = usage
+                    // Use state.lastTurnInputTokens for context bar (current context size)
+                    lastTurnInputTokens = state.lastTurnInputTokens
+                    // totalTokenUsage: inputTokens = context size for bar, outputTokens = accumulated
+                    totalTokenUsage = TokenUsage(
+                        inputTokens: state.lastTurnInputTokens,
+                        outputTokens: usage.outputTokens,
+                        cacheReadTokens: usage.cacheReadTokens,
+                        cacheCreationTokens: usage.cacheCreationTokens
+                    )
                 }
             }
 
@@ -141,6 +148,11 @@ extension ChatViewModel {
         } catch {
             logger.error("Failed to load messages from EventDatabase: \(error.localizedDescription)", category: .session)
         }
+
+        // Validate against server (authoritative source of context state)
+        // This ensures context window and token counts are accurate after session resume,
+        // especially if model was switched or skills were added/removed while away
+        await refreshContextFromServer()
     }
 
     /// Load more older messages when user scrolls to top
@@ -207,12 +219,20 @@ extension ChatViewModel {
                 // Fallback to reconstructed state if session not found
                 let usage = state.totalTokenUsage
                 if usage.inputTokens > 0 || usage.outputTokens > 0 {
+                    // Accumulated totals for billing
                     accumulatedInputTokens = usage.inputTokens
                     accumulatedOutputTokens = usage.outputTokens
                     accumulatedCacheReadTokens = usage.cacheReadTokens ?? 0
                     accumulatedCacheCreationTokens = usage.cacheCreationTokens ?? 0
-                    lastTurnInputTokens = usage.inputTokens
-                    totalTokenUsage = usage
+                    // Use state.lastTurnInputTokens for context bar (current context size)
+                    lastTurnInputTokens = state.lastTurnInputTokens
+                    // totalTokenUsage: inputTokens = context size for bar, outputTokens = accumulated
+                    totalTokenUsage = TokenUsage(
+                        inputTokens: state.lastTurnInputTokens,
+                        outputTokens: usage.outputTokens,
+                        cacheReadTokens: usage.cacheReadTokens,
+                        cacheCreationTokens: usage.cacheCreationTokens
+                    )
                 }
             }
 

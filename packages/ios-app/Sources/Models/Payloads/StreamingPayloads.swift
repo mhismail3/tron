@@ -131,6 +131,8 @@ struct StreamingTurnEndPayload {
     let tokenUsage: TokenUsage?
     let stopReason: String?
     let durationMs: Int?
+    /// Current model's context window limit (for syncing iOS state after model switch)
+    let contextLimit: Int?
 
     init?(from data: [String: Any]) {
         guard let turn = data["turn"] as? Int ?? data["turnNumber"] as? Int else { return nil }
@@ -149,6 +151,7 @@ struct StreamingTurnEndPayload {
 
         self.stopReason = data["stopReason"] as? String
         self.durationMs = data["duration"] as? Int
+        self.contextLimit = data["contextLimit"] as? Int
     }
 }
 

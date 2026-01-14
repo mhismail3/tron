@@ -727,6 +727,7 @@ export class TronAgent {
           cacheCreationTokens: assistantMessage.usage.cacheCreationTokens,
         } : undefined,
         cost: turnCost?.total,
+        contextLimit: this.contextManager.getContextLimit(),
       });
 
       // ==========================================================================

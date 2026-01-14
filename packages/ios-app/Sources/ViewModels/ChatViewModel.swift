@@ -362,6 +362,48 @@ class ChatViewModel: ObservableObject {
         }
     }
 
+    /// Refresh context state from server (authoritative source)
+    /// Call after: session resume, model switch, skill add/remove, context clear/compaction
+    /// This ensures iOS state stays in sync with server's context calculations
+    /// Includes retry logic for transient network failures
+    func refreshContextFromServer() async {
+        guard let sessionId = rpcClient.currentSessionId else {
+            logger.debug("No session ID available for context refresh", category: .session)
+            return
+        }
+
+        // Retry up to 3 times with exponential backoff (100ms, 200ms, 400ms)
+        let maxRetries = 3
+        var lastError: Error?
+
+        for attempt in 1...maxRetries {
+            do {
+                let snapshot = try await rpcClient.getContextSnapshot(sessionId: sessionId)
+                await MainActor.run {
+                    self.currentContextWindow = snapshot.contextLimit
+                    self.lastTurnInputTokens = snapshot.currentTokens
+                    // Also update previousTurnFinalInputTokens to fix delta calculations after session resume
+                    self.previousTurnFinalInputTokens = snapshot.currentTokens
+                }
+                logger.debug("Context refreshed from server: \(snapshot.currentTokens)/\(snapshot.contextLimit)", category: .session)
+                return  // Success, exit retry loop
+            } catch {
+                lastError = error
+                if attempt < maxRetries {
+                    // Exponential backoff: 100ms, 200ms, 400ms
+                    let delayMs = UInt64(100 * (1 << (attempt - 1)))
+                    try? await Task.sleep(nanoseconds: delayMs * 1_000_000)
+                    logger.debug("Context refresh attempt \(attempt) failed, retrying in \(delayMs)ms", category: .session)
+                }
+            }
+        }
+
+        // All retries failed
+        if let error = lastError {
+            logger.warning("Failed to refresh context from server after \(maxRetries) attempts: \(error.localizedDescription)", category: .session)
+        }
+    }
+
     // MARK: - Browser Methods
 
     /// Handle incoming browser frame from screencast

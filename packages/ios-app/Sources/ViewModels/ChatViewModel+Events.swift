@@ -269,6 +269,12 @@ extension ChatViewModel {
         turnStartMessageIndex = nil
         firstTextMessageIdForTurn = nil
 
+        // Update context window if server provides it (ensures iOS stays in sync after model switch)
+        if let contextLimit = event.contextLimit {
+            currentContextWindow = contextLimit
+            logger.debug("Updated context window from turn_end: \(contextLimit)", category: .events)
+        }
+
         // Update token tracking
         if let usage = event.tokenUsage {
             // Store last turn's input tokens for context bar calculation
@@ -393,6 +399,9 @@ extension ChatViewModel {
         finalizeStreamingMessage()
         thinkingText = ""
 
+        // Reset browser dismiss flag for next turn
+        userDismissedBrowserThisTurn = false
+
         // Update dashboard with final response and tool count
         eventStoreManager?.setSessionProcessing(sessionId, isProcessing: false)
         eventStoreManager?.updateSessionDashboardInfo(
@@ -406,6 +415,12 @@ extension ChatViewModel {
 
         // Close browser session when agent completes
         closeBrowserSession()
+
+        // Refresh context from server to ensure accuracy after all operations
+        // This covers: skill.added, rules.loaded, and any other context changes
+        Task {
+            await refreshContextFromServer()
+        }
     }
 
     func handleCompaction(_ event: CompactionEvent) {
@@ -428,6 +443,11 @@ extension ChatViewModel {
             reason: event.reason
         )
         messages.append(compactionMessage)
+
+        // Refresh context from server to ensure context limit is also current
+        Task {
+            await refreshContextFromServer()
+        }
     }
 
     func handleContextCleared(_ event: ContextClearedEvent) {
@@ -449,6 +469,11 @@ extension ChatViewModel {
             tokensAfter: event.tokensAfter
         )
         messages.append(clearedMessage)
+
+        // Refresh context from server to ensure context limit is also current
+        Task {
+            await refreshContextFromServer()
+        }
     }
 
     func handleMessageDeleted(_ event: MessageDeletedEvent) {
@@ -465,6 +490,12 @@ extension ChatViewModel {
         // Add skill removed notification pill to chat
         let skillRemovedMessage = ChatMessage.skillRemoved(skillName: event.skillName)
         messages.append(skillRemovedMessage)
+
+        // Refresh context from server - skill removal changes context size
+        // Server is authoritative source for accurate token counts after context changes
+        Task {
+            await refreshContextFromServer()
+        }
     }
 
     func handleError(_ message: String) {

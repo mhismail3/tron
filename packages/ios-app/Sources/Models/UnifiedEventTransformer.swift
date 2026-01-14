@@ -877,7 +877,10 @@ extension UnifiedEventTransformer {
     /// including messages, token usage, and model info.
     struct ReconstructedState {
         var messages: [ChatMessage]
+        /// Accumulated token usage across all turns (for billing/statistics)
         var totalTokenUsage: TokenUsage
+        /// Last turn's input tokens (represents current context window size for progress bar)
+        var lastTurnInputTokens: Int
         var currentModel: String?
         var currentTurn: Int
         var workingDirectory: String?
@@ -1041,6 +1044,7 @@ extension UnifiedEventTransformer {
         init() {
             self.messages = []
             self.totalTokenUsage = TokenUsage(inputTokens: 0, outputTokens: 0, cacheReadTokens: nil, cacheCreationTokens: nil)
+            self.lastTurnInputTokens = 0
             self.currentModel = nil
             self.currentTurn = 0
             self.workingDirectory = nil
@@ -1137,16 +1141,18 @@ extension UnifiedEventTransformer {
                 state.messages.append(contentsOf: interleaved)
 
                 // Track token usage from assistant messages
-                // Input tokens: use LAST turn's value (represents current context size)
-                // Output tokens: ACCUMULATE (total generated content)
+                // totalTokenUsage: ACCUMULATE all tokens (for billing/statistics)
+                // lastTurnInputTokens: LAST turn's value (for context bar display)
                 let payload = AssistantMessagePayload(from: event.payload)
                 if let usage = payload.tokenUsage {
                     state.totalTokenUsage = TokenUsage(
-                        inputTokens: usage.inputTokens,  // Current context, not accumulated
+                        inputTokens: state.totalTokenUsage.inputTokens + usage.inputTokens,
                         outputTokens: state.totalTokenUsage.outputTokens + usage.outputTokens,
                         cacheReadTokens: (state.totalTokenUsage.cacheReadTokens ?? 0) + (usage.cacheReadTokens ?? 0),
                         cacheCreationTokens: (state.totalTokenUsage.cacheCreationTokens ?? 0) + (usage.cacheCreationTokens ?? 0)
                     )
+                    // Track last turn's input tokens for context bar (current context size)
+                    state.lastTurnInputTokens = usage.inputTokens
                 }
                 if payload.turn > state.currentTurn {
                     state.currentTurn = payload.turn
@@ -1397,16 +1403,18 @@ extension UnifiedEventTransformer {
                 state.messages.append(contentsOf: interleaved)
 
                 // Track token usage from assistant messages
-                // Input tokens: use LAST turn's value (represents current context size)
-                // Output tokens: ACCUMULATE (total generated content)
+                // totalTokenUsage: ACCUMULATE all tokens (for billing/statistics)
+                // lastTurnInputTokens: LAST turn's value (for context bar display)
                 let payload = AssistantMessagePayload(from: event.payload)
                 if let usage = payload.tokenUsage {
                     state.totalTokenUsage = TokenUsage(
-                        inputTokens: usage.inputTokens,  // Current context, not accumulated
+                        inputTokens: state.totalTokenUsage.inputTokens + usage.inputTokens,
                         outputTokens: state.totalTokenUsage.outputTokens + usage.outputTokens,
                         cacheReadTokens: (state.totalTokenUsage.cacheReadTokens ?? 0) + (usage.cacheReadTokens ?? 0),
                         cacheCreationTokens: (state.totalTokenUsage.cacheCreationTokens ?? 0) + (usage.cacheCreationTokens ?? 0)
                     )
+                    // Track last turn's input tokens for context bar (current context size)
+                    state.lastTurnInputTokens = usage.inputTokens
                 }
                 if payload.turn > state.currentTurn {
                     state.currentTurn = payload.turn

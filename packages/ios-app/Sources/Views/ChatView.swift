@@ -420,6 +420,9 @@ struct ChatView: View {
                     )
                     // Note: Model switch event is created by server and syncs automatically
                 }
+                // Refresh context from server to ensure accuracy after model switch
+                // This validates context limit and current token count
+                await viewModel.refreshContextFromServer()
             } catch {
                 await MainActor.run {
                     // Revert optimistic update on failure

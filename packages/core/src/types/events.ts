@@ -194,6 +194,8 @@ export interface TurnEndEvent extends BaseTronEvent {
   };
   /** Cost for this turn in USD */
   cost?: number;
+  /** Current model's context window limit (for iOS sync after model switch) */
+  contextLimit?: number;
 }
 
 /**
