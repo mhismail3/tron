@@ -49,6 +49,7 @@ struct AskUserQuestionSheet: View {
                             answer: binding(for: questions[0]),
                             questionNumber: 1,
                             totalQuestions: 1,
+                            status: toolData.status,
                             readOnly: readOnly
                         )
                         .padding(.horizontal, 16)
@@ -61,6 +62,7 @@ struct AskUserQuestionSheet: View {
                                     answer: binding(for: question),
                                     questionNumber: index + 1,
                                     totalQuestions: questions.count,
+                                    status: toolData.status,
                                     readOnly: readOnly
                                 )
                                 .padding(.horizontal, 16)
@@ -131,12 +133,24 @@ struct AskUserQuestionSheet: View {
 
     private func dotColor(for index: Int) -> Color {
         let question = questions[index]
+        let accentColor = statusAccentColor
         if let answer = answers[question.id], !answer.selectedValues.isEmpty || answer.otherValue?.isEmpty == false {
-            return .tronAmber
+            return accentColor
         } else if index == currentQuestionIndex {
-            return .tronAmber.opacity(0.5)
+            return accentColor.opacity(0.5)
         } else {
             return .tronTextMuted.opacity(0.3)
+        }
+    }
+
+    private var statusAccentColor: Color {
+        switch toolData.status {
+        case .pending:
+            return .tronAmber
+        case .answered:
+            return .tronSuccess
+        case .superseded:
+            return .tronTextMuted
         }
     }
 
@@ -174,9 +188,21 @@ struct QuestionCardView: View {
     @Binding var answer: AskUserQuestionAnswer
     let questionNumber: Int
     let totalQuestions: Int
+    var status: AskUserQuestionStatus = .pending
     var readOnly: Bool = false
 
     @State private var otherText = ""
+
+    private var accentColor: Color {
+        switch status {
+        case .pending:
+            return .tronAmber
+        case .answered:
+            return .tronSuccess
+        case .superseded:
+            return .tronTextMuted
+        }
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -191,7 +217,7 @@ struct QuestionCardView: View {
                         .foregroundStyle(.tronTextMuted.opacity(0.5))
                     Text("\(questionNumber)/\(totalQuestions)")
                         .font(.system(size: 11, weight: .medium, design: .monospaced))
-                        .foregroundStyle(.tronAmber.opacity(0.7))
+                        .foregroundStyle(accentColor.opacity(0.7))
                 }
 
                 Spacer()
@@ -211,6 +237,7 @@ struct QuestionCardView: View {
                         option: option,
                         isSelected: isSelected(option),
                         mode: question.mode,
+                        accentColor: accentColor,
                         readOnly: readOnly
                     ) {
                         toggleOption(option)
@@ -235,7 +262,7 @@ struct QuestionCardView: View {
                             RoundedRectangle(cornerRadius: 6, style: .continuous)
                                 .fill(.clear)
                                 .glassEffect(
-                                    .regular.tint(Color.tronAmber.opacity(otherText.isEmpty ? 0.06 : 0.15)),
+                                    .regular.tint(accentColor.opacity(otherText.isEmpty ? 0.06 : 0.15)),
                                     in: RoundedRectangle(cornerRadius: 6, style: .continuous)
                                 )
                         }
@@ -281,6 +308,7 @@ struct CompactOptionRowView: View {
     let option: AskUserQuestionOption
     let isSelected: Bool
     let mode: AskUserQuestion.SelectionMode
+    var accentColor: Color = .tronAmber
     var readOnly: Bool = false
     let action: () -> Void
 
@@ -309,7 +337,7 @@ struct CompactOptionRowView: View {
                 if isSelected {
                     Image(systemName: "checkmark")
                         .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(.tronAmber)
+                        .foregroundStyle(accentColor)
                 }
             }
             .padding(.horizontal, 10)
@@ -322,7 +350,7 @@ struct CompactOptionRowView: View {
             RoundedRectangle(cornerRadius: 6, style: .continuous)
                 .fill(.clear)
                 .glassEffect(
-                    .regular.tint(Color.tronAmber.opacity(isSelected ? 0.22 : 0.06)).interactive(),
+                    .regular.tint(accentColor.opacity(isSelected ? 0.22 : 0.06)).interactive(),
                     in: RoundedRectangle(cornerRadius: 6, style: .continuous)
                 )
         }
@@ -332,24 +360,24 @@ struct CompactOptionRowView: View {
     private var selectionIndicator: some View {
         if mode == .single {
             Circle()
-                .strokeBorder(isSelected ? Color.tronAmber : Color.tronTextMuted.opacity(0.35), lineWidth: 1.5)
+                .strokeBorder(isSelected ? accentColor : Color.tronTextMuted.opacity(0.35), lineWidth: 1.5)
                 .frame(width: 16, height: 16)
                 .overlay {
                     if isSelected {
                         Circle()
-                            .fill(Color.tronAmber)
+                            .fill(accentColor)
                             .frame(width: 8, height: 8)
                     }
                 }
         } else {
             RoundedRectangle(cornerRadius: 3)
-                .strokeBorder(isSelected ? Color.tronAmber : Color.tronTextMuted.opacity(0.35), lineWidth: 1.5)
+                .strokeBorder(isSelected ? accentColor : Color.tronTextMuted.opacity(0.35), lineWidth: 1.5)
                 .frame(width: 16, height: 16)
                 .overlay {
                     if isSelected {
                         Image(systemName: "checkmark")
                             .font(.system(size: 9, weight: .bold))
-                            .foregroundStyle(.tronAmber)
+                            .foregroundStyle(accentColor)
                     }
                 }
         }
