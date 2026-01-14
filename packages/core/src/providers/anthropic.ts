@@ -392,15 +392,33 @@ export class AnthropicProvider {
         });
       }
 
-      // Add cache_control to the LAST block (rules or skill, whichever is last)
-      // This caches ALL system content. When skill is added/removed/changed,
-      // the cache simply misses and creates a new cache - same cost as not caching.
+      // =======================================================================
+      // PROMPT CACHING FOR OAUTH
+      // =======================================================================
+      //
+      // How Anthropic prompt caching works:
+      // 1. Add cache_control: { type: 'ephemeral' } to mark cache breakpoints
+      // 2. Anthropic caches everything FROM THE START up to each breakpoint
+      // 3. Request order: tools → system → messages
+      // 4. Subsequent requests with identical content get cache READS (90% cheaper)
+      //
+      // Minimum token thresholds (content up to breakpoint):
+      // - Claude Opus 4.5: ~4096 tokens (discovered empirically)
+      // - Claude Sonnet: 1024 tokens (documented)
+      // - Claude Haiku: 2048 tokens (documented)
+      //
+      // Our strategy: Mark the LAST system block with cache_control
+      // This caches: all tools + all system blocks = typically 4000+ tokens
+      //
+      // When skills change, the cache auto-invalidates and a new cache is
+      // created on the next request - same cost as not caching at all.
+      // =======================================================================
       const lastBlock = systemBlocks[systemBlocks.length - 1];
       if (lastBlock) {
         lastBlock.cache_control = { type: 'ephemeral' };
       }
 
-      // Calculate approximate token count for all cached content
+      // Calculate approximate token count for system blocks only
       const cachedTokenEstimate = systemBlocks
         .reduce((acc, b) => acc + Math.ceil(b.text.length / 4), 0);
 
@@ -414,11 +432,42 @@ export class AnthropicProvider {
       systemParam = systemBlocks;
     } else {
       // API key: Combine system prompt, rules, and skill context into single string
+      // (No caching for API key auth - only OAuth supports prompt caching)
       const parts: string[] = [];
       if (context.systemPrompt) parts.push(context.systemPrompt);
       if (context.rulesContent) parts.push(`# Project Rules\n\n${context.rulesContent}`);
       if (context.skillContext) parts.push(context.skillContext);
       systemParam = parts.length > 0 ? parts.join('\n\n') : undefined;
+    }
+
+    // =======================================================================
+    // CACHE TOKEN ESTIMATION
+    // =======================================================================
+    // Estimate total cached tokens (tools + system) for threshold check.
+    // The cache breakpoint on the last system block caches everything before it,
+    // including all tool definitions.
+    //
+    // Token estimation: chars/4 + 15% overhead for tokenization metadata
+    // (JSON structure, parameter names, etc. add extra tokens)
+    // =======================================================================
+    const toolTokenEstimate = tools
+      ? tools.reduce((acc, t) => acc + Math.ceil((t.description?.length ?? 0) / 4) + Math.ceil(JSON.stringify(t.input_schema ?? {}).length / 4), 0)
+      : 0;
+    const systemTokenEstimate = Array.isArray(systemParam)
+      ? systemParam.reduce((acc, b) => acc + Math.ceil(b.text.length / 4), 0)
+      : 0;
+
+    if (this.isOAuth) {
+      // Apply 15% overhead factor - actual tokens are higher due to tokenization
+      const adjustedEstimate = Math.ceil((toolTokenEstimate + systemTokenEstimate) * 1.15);
+      logger.info('[CACHE] Request summary', {
+        toolTokens: toolTokenEstimate,
+        systemTokens: systemTokenEstimate,
+        rawEstimate: toolTokenEstimate + systemTokenEstimate,
+        adjustedEstimate,
+        threshold: 4096,  // Opus requires ~4096 tokens minimum for caching
+        meetsThreshold: adjustedEstimate >= 4096,
+      });
     }
 
     // Build request parameters
@@ -476,14 +525,17 @@ export class AnthropicProvider {
                   cache_creation_input_tokens?: number;
                   cache_read_input_tokens?: number;
                 };
-                // Log raw usage to debug cache token extraction
-                logger.debug(`[CACHE] Raw API usage: ${JSON.stringify(event.message.usage)}`);
+                // Log raw usage for cache debugging
                 inputTokens = usage.input_tokens ?? 0;
                 cacheCreationTokens = usage.cache_creation_input_tokens ?? 0;
                 cacheReadTokens = usage.cache_read_input_tokens ?? 0;
-                if (cacheCreationTokens > 0 || cacheReadTokens > 0) {
-                  logger.debug(`[CACHE] Anthropic API returned cache tokens: read=${cacheReadTokens}, creation=${cacheCreationTokens}`);
-                }
+                logger.info('[CACHE] API response', {
+                  inputTokens,
+                  cacheCreationTokens,
+                  cacheReadTokens,
+                  cacheHit: cacheReadTokens > 0,
+                  cacheWrite: cacheCreationTokens > 0,
+                });
               }
               break;
 
