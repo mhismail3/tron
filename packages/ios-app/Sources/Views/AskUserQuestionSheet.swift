@@ -3,7 +3,8 @@ import SwiftUI
 // MARK: - AskUserQuestion Sheet
 
 /// Sheet for answering AskUserQuestion tool calls
-/// Uses iOS 26 liquid glass styling matching Context Manager
+/// Displays ONLY questions/answers - no surrounding context or agent messages
+/// Uses iOS 26 liquid glass styling
 @available(iOS 26.0, *)
 struct AskUserQuestionSheet: View {
     let toolData: AskUserQuestionToolData
@@ -30,56 +31,15 @@ struct AskUserQuestionSheet: View {
 
     var body: some View {
         NavigationStack {
-            ScrollView(.vertical) {
-                VStack(alignment: .leading, spacing: 12) {
-                    // Context (if provided)
-                    if let context = toolData.params.context {
-                        Text(context)
-                            .font(.system(size: 12, design: .monospaced))
-                            .foregroundStyle(.tronTextSecondary)
-                            .padding(.horizontal, 16)
-                            .padding(.top, 4)
-                    }
-
-                    // Questions
-                    if questions.count == 1 {
-                        // Single question - no paging needed
-                        QuestionCardView(
-                            question: questions[0],
-                            answer: binding(for: questions[0]),
-                            questionNumber: 1,
-                            totalQuestions: 1,
-                            status: toolData.status,
-                            readOnly: readOnly
-                        )
-                        .padding(.horizontal, 16)
-                    } else {
-                        // Multiple questions - use TabView pager
-                        TabView(selection: $currentQuestionIndex) {
-                            ForEach(Array(questions.enumerated()), id: \.element.id) { index, question in
-                                QuestionCardView(
-                                    question: question,
-                                    answer: binding(for: question),
-                                    questionNumber: index + 1,
-                                    totalQuestions: questions.count,
-                                    status: toolData.status,
-                                    readOnly: readOnly
-                                )
-                                .padding(.horizontal, 16)
-                                .tag(index)
-                            }
-                        }
-                        .tabViewStyle(.page(indexDisplayMode: .never))
-                        .frame(minHeight: 280)
-                        .animation(.easeInOut(duration: 0.2), value: currentQuestionIndex)
-
-                        // Dot indicators for multiple questions
-                        pageIndicators
-                    }
+            VStack(spacing: 0) {
+                if questions.count == 1 {
+                    // Single question - simple scrollable content
+                    singleQuestionView
+                } else {
+                    // Multiple questions - TabView with scrollable cards + bottom dots
+                    multipleQuestionsView
                 }
-                .padding(.bottom, 12)
             }
-            .scrollBounceBehavior(.basedOnSize)
             .navigationBarTitleDisplayMode(.inline)
             .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
             .toolbar {
@@ -115,20 +75,76 @@ struct AskUserQuestionSheet: View {
         }
     }
 
+    // MARK: - Single Question View
+
+    private var singleQuestionView: some View {
+        ScrollView(.vertical) {
+            QuestionCardView(
+                question: questions[0],
+                answer: binding(for: questions[0]),
+                questionNumber: 1,
+                totalQuestions: 1,
+                status: toolData.status,
+                readOnly: readOnly
+            )
+            .padding(.horizontal, 16)
+            .padding(.top, 8)
+            .padding(.bottom, 20)
+        }
+        .scrollBounceBehavior(.basedOnSize)
+    }
+
+    // MARK: - Multiple Questions View
+
+    private var multipleQuestionsView: some View {
+        VStack(spacing: 0) {
+            // TabView takes available space
+            TabView(selection: $currentQuestionIndex) {
+                ForEach(Array(questions.enumerated()), id: \.element.id) { index, question in
+                    ScrollView(.vertical) {
+                        QuestionCardView(
+                            question: question,
+                            answer: binding(for: question),
+                            questionNumber: index + 1,
+                            totalQuestions: questions.count,
+                            status: toolData.status,
+                            readOnly: readOnly
+                        )
+                        .padding(.horizontal, 16)
+                        .padding(.top, 8)
+                        .padding(.bottom, 20)
+                    }
+                    .scrollBounceBehavior(.basedOnSize)
+                    .tag(index)
+                }
+            }
+            .tabViewStyle(.page(indexDisplayMode: .never))
+            .animation(.easeInOut(duration: 0.2), value: currentQuestionIndex)
+
+            // Page indicators pinned at bottom
+            pageIndicators
+                .padding(.bottom, 16)
+        }
+    }
+
     // MARK: - Page Indicators
 
     private var pageIndicators: some View {
-        HStack(spacing: 6) {
+        HStack(spacing: 8) {
             ForEach(0..<questions.count, id: \.self) { index in
                 Circle()
                     .fill(dotColor(for: index))
-                    .frame(width: 6, height: 6)
-                    .scaleEffect(index == currentQuestionIndex ? 1.3 : 1.0)
+                    .frame(width: 8, height: 8)
+                    .scaleEffect(index == currentQuestionIndex ? 1.2 : 1.0)
                     .animation(.easeInOut(duration: 0.15), value: currentQuestionIndex)
+                    .onTapGesture {
+                        withAnimation(.easeInOut(duration: 0.2)) {
+                            currentQuestionIndex = index
+                        }
+                    }
             }
         }
-        .padding(.vertical, 8)
-        .frame(maxWidth: .infinity)
+        .padding(.vertical, 12)
     }
 
     private func dotColor(for index: Int) -> Color {
@@ -451,7 +467,7 @@ struct CompactOptionRowView: View {
                         otherPlaceholder: nil
                     )
                 ],
-                context: "Planning the implementation"
+                context: nil
             ),
             answers: [:],
             status: .pending,
