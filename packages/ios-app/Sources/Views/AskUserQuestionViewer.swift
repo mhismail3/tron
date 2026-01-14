@@ -3,51 +3,62 @@ import SwiftUI
 // MARK: - AskUserQuestion Tool Viewer
 
 /// In-chat viewer for AskUserQuestion tool calls
-/// Shows a summary card that can be tapped to open the question sheet
+/// Compact chip style matching SkillChip - glassy capsule with status colors
 /// Uses async model: pending → answered or superseded
 @available(iOS 26.0, *)
 struct AskUserQuestionToolViewer: View {
     let data: AskUserQuestionToolData
     let onTap: () -> Void
 
+    private var questionCount: Int {
+        data.params.questions.count
+    }
+
     var body: some View {
         Button(action: onTap) {
-            HStack(spacing: 12) {
+            HStack(spacing: 6) {
                 // Status icon
                 statusIcon
 
-                VStack(alignment: .leading, spacing: 4) {
-                    // Title
-                    Text(statusTitle)
-                        .font(.system(size: 15, weight: .semibold))
-                        .foregroundStyle(statusColor)
+                // Status text
+                Text(statusText)
+                    .font(.system(size: 11, weight: .medium, design: .monospaced))
+                    .foregroundStyle(textColor)
+                    .lineLimit(1)
 
-                    // Subtitle
-                    Text("\(data.params.questions.count) question(s)")
-                        .font(.system(size: 12, design: .monospaced))
-                        .foregroundStyle(.tronTextSecondary)
+                // Question count badge (for multiple questions)
+                if questionCount > 1 {
+                    Text("(\(questionCount))")
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundStyle(textColor.opacity(0.7))
                 }
 
-                Spacer()
-
-                // Show chevron for pending and answered (tappable states)
-                if data.status == .pending || data.status == .answered {
+                // Chevron for tappable states
+                if data.status != .superseded {
                     Image(systemName: "chevron.right")
-                        .font(.system(size: 14, weight: .medium))
-                        .foregroundStyle(data.status == .pending ? .tronAmber : .tronSuccess)
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundStyle(textColor.opacity(0.6))
                 }
             }
-            .padding(12)
-            .background(Color.tronSurface)
-            .clipShape(RoundedRectangle(cornerRadius: 12))
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background {
+                Capsule()
+                    .fill(.clear)
+                    .glassEffect(
+                        .regular.tint(tintColor.opacity(0.35)),
+                        in: .capsule
+                    )
+            }
             .overlay(
-                RoundedRectangle(cornerRadius: 12)
-                    .stroke(borderColor, lineWidth: 1)
+                Capsule()
+                    .strokeBorder(tintColor.opacity(0.4), lineWidth: 0.5)
             )
+            .contentShape(Capsule())
         }
         .buttonStyle(.plain)
-        .disabled(data.status == .superseded) // Only superseded is non-tappable
-        .opacity(data.status == .superseded ? 0.5 : 1.0)
+        .disabled(data.status == .superseded)
+        .opacity(data.status == .superseded ? 0.6 : 1.0)
     }
 
     @ViewBuilder
@@ -55,31 +66,31 @@ struct AskUserQuestionToolViewer: View {
         switch data.status {
         case .pending:
             Image(systemName: "questionmark.circle.fill")
-                .font(.system(size: 24))
+                .font(.system(size: 12, weight: .medium))
                 .foregroundStyle(.tronAmber)
         case .answered:
             Image(systemName: "checkmark.circle.fill")
-                .font(.system(size: 24))
+                .font(.system(size: 12, weight: .medium))
                 .foregroundStyle(.tronSuccess)
         case .superseded:
             Image(systemName: "xmark.circle.fill")
-                .font(.system(size: 24))
+                .font(.system(size: 12, weight: .medium))
                 .foregroundStyle(.tronTextMuted)
         }
     }
 
-    private var statusTitle: String {
+    private var statusText: String {
         switch data.status {
         case .pending:
-            return "Tap to answer"
+            return questionCount == 1 ? "Answer question" : "Answer questions"
         case .answered:
-            return "Tap to view answers"
+            return "Answered"
         case .superseded:
             return "Skipped"
         }
     }
 
-    private var statusColor: Color {
+    private var textColor: Color {
         switch data.status {
         case .pending:
             return .tronAmber
@@ -90,59 +101,14 @@ struct AskUserQuestionToolViewer: View {
         }
     }
 
-    private var borderColor: Color {
+    private var tintColor: Color {
         switch data.status {
         case .pending:
-            return .tronAmber.opacity(0.5)
+            return .tronAmber
         case .answered:
-            return .tronSuccess.opacity(0.5)
+            return .tronSuccess
         case .superseded:
-            return .tronBorder
-        }
-    }
-}
-
-// MARK: - Compact Viewer (for collapsed state)
-
-@available(iOS 26.0, *)
-struct AskUserQuestionCompactViewer: View {
-    let data: AskUserQuestionToolData
-    let onTap: () -> Void
-
-    var body: some View {
-        Button(action: onTap) {
-            HStack(spacing: 8) {
-                statusIcon
-
-                Text("\(data.params.questions.count) questions")
-                    .font(.system(size: 13, design: .monospaced))
-                    .foregroundStyle(.tronTextSecondary)
-            }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
-            .background(Color.tronSurface.opacity(0.5))
-            .clipShape(Capsule())
-        }
-        .buttonStyle(.plain)
-        .disabled(data.status == .superseded) // Only superseded is non-tappable
-        .opacity(data.status == .superseded ? 0.5 : 1.0)
-    }
-
-    @ViewBuilder
-    private var statusIcon: some View {
-        switch data.status {
-        case .pending:
-            Image(systemName: "questionmark.circle.fill")
-                .font(.system(size: 16))
-                .foregroundStyle(.tronAmber)
-        case .answered:
-            Image(systemName: "checkmark.circle.fill")
-                .font(.system(size: 16))
-                .foregroundStyle(.tronSuccess)
-        case .superseded:
-            Image(systemName: "xmark.circle.fill")
-                .font(.system(size: 16))
-                .foregroundStyle(.tronTextMuted)
+            return .tronTextMuted
         }
     }
 }
@@ -151,11 +117,39 @@ struct AskUserQuestionCompactViewer: View {
 
 #if DEBUG
 @available(iOS 26.0, *)
-#Preview("Pending") {
-    VStack {
+#Preview("All States") {
+    VStack(spacing: 16) {
+        // Pending - single question
         AskUserQuestionToolViewer(
             data: AskUserQuestionToolData(
-                toolCallId: "call_123",
+                toolCallId: "call_1",
+                params: AskUserQuestionParams(
+                    questions: [
+                        AskUserQuestion(
+                            id: "q1",
+                            question: "What approach?",
+                            options: [
+                                AskUserQuestionOption(label: "A", value: nil, description: nil),
+                                AskUserQuestionOption(label: "B", value: nil, description: nil)
+                            ],
+                            mode: .single,
+                            allowOther: nil,
+                            otherPlaceholder: nil
+                        )
+                    ],
+                    context: nil
+                ),
+                answers: [:],
+                status: .pending,
+                result: nil
+            ),
+            onTap: { }
+        )
+
+        // Pending - multiple questions
+        AskUserQuestionToolViewer(
+            data: AskUserQuestionToolData(
+                toolCallId: "call_2",
                 params: AskUserQuestionParams(
                     questions: [
                         AskUserQuestion(
@@ -189,17 +183,11 @@ struct AskUserQuestionCompactViewer: View {
             ),
             onTap: { }
         )
-        .padding()
-    }
-    .background(Color.tronBackground)
-}
 
-@available(iOS 26.0, *)
-#Preview("Answered") {
-    VStack {
+        // Answered
         AskUserQuestionToolViewer(
             data: AskUserQuestionToolData(
-                toolCallId: "call_123",
+                toolCallId: "call_3",
                 params: AskUserQuestionParams(
                     questions: [
                         AskUserQuestion(
@@ -226,17 +214,11 @@ struct AskUserQuestionCompactViewer: View {
             ),
             onTap: { }
         )
-        .padding()
-    }
-    .background(Color.tronBackground)
-}
 
-@available(iOS 26.0, *)
-#Preview("Superseded") {
-    VStack {
+        // Superseded
         AskUserQuestionToolViewer(
             data: AskUserQuestionToolData(
-                toolCallId: "call_123",
+                toolCallId: "call_4",
                 params: AskUserQuestionParams(
                     questions: [
                         AskUserQuestion(
@@ -259,8 +241,9 @@ struct AskUserQuestionCompactViewer: View {
             ),
             onTap: { }
         )
-        .padding()
     }
+    .padding()
     .background(Color.tronBackground)
+    .preferredColorScheme(.dark)
 }
 #endif
