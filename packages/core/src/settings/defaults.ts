@@ -130,6 +130,15 @@ export const DEFAULT_SETTINGS: TronSettings = {
       maxEntries: 1000,          // Max 1k directory entries
       maxOutputTokens: 10000,    // 10k tokens (~40k chars)
     },
+    astGrep: {
+      defaultLimit: 50,
+      maxLimit: 200,
+      defaultContext: 0,
+      maxOutputTokens: 15000,    // 15k tokens (~60k chars)
+      binaryPath: 'sg',          // Primary binary name, falls back to 'ast-grep'
+      skipDirectories: DEFAULT_SKIP_DIRECTORIES,
+      requireConfirmationForReplace: false,  // Auto-apply by default
+    },
   },
 
   // Context Configuration

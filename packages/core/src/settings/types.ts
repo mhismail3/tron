@@ -160,6 +160,26 @@ export interface LsToolSettings {
 }
 
 /**
+ * AstGrep tool configuration
+ */
+export interface AstGrepToolSettings {
+  /** Default result limit (default: 50) */
+  defaultLimit: number;
+  /** Maximum result limit (default: 200) */
+  maxLimit: number;
+  /** Default context lines (default: 0) */
+  defaultContext: number;
+  /** Maximum output size in tokens (default: 15,000) */
+  maxOutputTokens: number;
+  /** Binary name to use (default: 'sg', falls back to 'ast-grep') */
+  binaryPath: string;
+  /** Directories to skip during search */
+  skipDirectories: string[];
+  /** Require user confirmation before applying replacements */
+  requireConfirmationForReplace: boolean;
+}
+
+/**
  * All tool settings
  */
 export interface ToolSettings {
@@ -168,6 +188,7 @@ export interface ToolSettings {
   find: FindToolSettings;
   grep: GrepToolSettings;
   ls: LsToolSettings;
+  astGrep: AstGrepToolSettings;
 }
 
 // =============================================================================

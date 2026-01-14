@@ -327,6 +327,7 @@ async function runNonInteractive(config: CliConfig): Promise<void> {
     WriteTool,
     EditTool,
     BashTool,
+    AstGrepTool,
   } = await import('@tron/core');
 
   // Create tools
@@ -335,6 +336,7 @@ async function runNonInteractive(config: CliConfig): Promise<void> {
     new WriteTool({ workingDirectory: config.workingDirectory }),
     new EditTool({ workingDirectory: config.workingDirectory }),
     new BashTool({ workingDirectory: config.workingDirectory }),
+    new AstGrepTool({ workingDirectory: config.workingDirectory }),
   ];
 
   // Create agent with auth

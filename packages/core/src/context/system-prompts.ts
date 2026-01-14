@@ -22,19 +22,20 @@ const logger = createLogger('context:system-prompts');
 /**
  * Core Tron system prompt defining the assistant's role and capabilities.
  * This is provider-agnostic and gets adapted for each provider.
+ *
+ * NOTE: This is a minimal FALLBACK prompt. The authoritative tool documentation
+ * comes from each tool's schema (name, description, parameters) which is passed
+ * directly to the model.
+ *
+ * Users should customize their system prompt by creating:
+ *   - ~/.tron/SYSTEM.md (global)
+ *   - .tron/SYSTEM.md (project-level, takes precedence)
+ *
+ * See loadSystemPromptFromFileSync() for the loading logic.
  */
 export const TRON_CORE_PROMPT = `You are Tron, an AI coding assistant with full access to the user's file system.
 
-You have access to the following tools:
-- read: Read files from the file system
-- write: Write content to files
-- edit: Make targeted edits to existing files
-- bash: Execute shell commands
-- grep: Search for patterns in files
-- find: Find files by name or pattern
-- ls: List directory contents
-
-When the user asks you to work with files or code, you can directly read, write, and edit files using these tools. You are operating on the server machine with full file system access.
+When the user asks you to work with files or code, you can directly read, write, and edit files using the available tools. You are operating on the server machine with full file system access.
 
 Be helpful, accurate, and efficient. When working with code:
 1. Read existing files to understand context before making changes

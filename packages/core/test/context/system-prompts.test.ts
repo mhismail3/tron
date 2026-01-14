@@ -21,14 +21,13 @@ describe('System Prompts', () => {
       expect(TRON_CORE_PROMPT).toContain('AI coding assistant');
     });
 
-    it('lists all tools', () => {
-      expect(TRON_CORE_PROMPT).toContain('read:');
-      expect(TRON_CORE_PROMPT).toContain('write:');
-      expect(TRON_CORE_PROMPT).toContain('edit:');
-      expect(TRON_CORE_PROMPT).toContain('bash:');
-      expect(TRON_CORE_PROMPT).toContain('grep:');
-      expect(TRON_CORE_PROMPT).toContain('find:');
-      expect(TRON_CORE_PROMPT).toContain('ls:');
+    it('is minimal fallback - tool schemas are authoritative', () => {
+      // TRON_CORE_PROMPT is now a minimal fallback. Tool schemas passed to the model
+      // are the authoritative source of tool documentation. Users should customize
+      // their system prompt via ~/.tron/SYSTEM.md or .tron/SYSTEM.md
+      expect(TRON_CORE_PROMPT).toContain('available tools');
+      expect(TRON_CORE_PROMPT).not.toContain('read:');
+      expect(TRON_CORE_PROMPT).not.toContain('write:');
     });
   });
 
