@@ -242,6 +242,15 @@ struct ChatView: View {
                 }
             }
         }
+        // Safari sheet (OpenBrowser tool)
+        .sheet(isPresented: Binding(
+            get: { viewModel.safariURL != nil },
+            set: { if !$0 { viewModel.safariURL = nil } }
+        )) {
+            if let url = viewModel.safariURL {
+                SafariView(url: url)
+            }
+        }
         // Browser sheet (replaces floating window)
         .sheet(isPresented: $viewModel.showBrowserWindow) {
             if #available(iOS 26.0, *) {

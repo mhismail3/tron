@@ -14,6 +14,7 @@ export {
   AskUserQuestionTool,
   type AskUserQuestionConfig,
 } from './ask-user-question.js';
+export { OpenBrowserTool, type OpenBrowserConfig } from './open-browser.js';
 
 // Utility functions for token estimation and output truncation
 export {

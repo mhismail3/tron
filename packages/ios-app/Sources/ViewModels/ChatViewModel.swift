@@ -45,6 +45,11 @@ class ChatViewModel: ObservableObject {
     /// Whether user manually dismissed browser sheet this turn (prevents auto-reopen)
     var userDismissedBrowserThisTurn = false
 
+    // MARK: - Safari State (OpenBrowser Tool)
+
+    /// URL to open in native Safari (set by OpenBrowser tool)
+    @Published var safariURL: URL?
+
     // MARK: - AskUserQuestion State
 
     /// Whether to show the AskUserQuestion sheet

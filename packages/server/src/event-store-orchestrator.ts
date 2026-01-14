@@ -74,6 +74,7 @@ import {
   LsTool,
   BrowserTool,
   AskUserQuestionTool,
+  OpenBrowserTool,
   loadServerAuth,
   getTronDataDir,
   detectProviderFromModel,
@@ -2124,6 +2125,7 @@ The user has explicitly removed these skills and expects you to respond WITHOUT 
       new LsTool({ workingDirectory }),
       new BrowserTool({ workingDirectory, delegate: browserDelegate }),
       new AskUserQuestionTool({ workingDirectory }),
+      new OpenBrowserTool({ workingDirectory }),
     ];
 
     // System prompt is now handled by ContextManager based on provider type

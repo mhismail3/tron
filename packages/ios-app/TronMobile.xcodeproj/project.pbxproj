@@ -93,6 +93,7 @@
 		PLANMODE001000000020001 /* PlanModeViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = PLANMODE001000000010001 /* PlanModeViews.swift */; };
 		ASKQUEST001000000020001 /* AskUserQuestionViewer.swift in Sources */ = {isa = PBXBuildFile; fileRef = ASKQUEST001000000010001 /* AskUserQuestionViewer.swift */; };
 		ASKSHEET001000000020001 /* AskUserQuestionSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = ASKSHEET001000000010001 /* AskUserQuestionSheet.swift */; };
+		SAFARIVIEW00000000200001 /* SafariView.swift in Sources */ = {isa = PBXBuildFile; fileRef = SAFARIVIEW00000000100001 /* SafariView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -195,6 +196,7 @@
 		ASKQUEST001000000010001 /* AskUserQuestionViewer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AskUserQuestionViewer.swift; sourceTree = "<group>"; };
 		ASKSHEET001000000010001 /* AskUserQuestionSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AskUserQuestionSheet.swift; sourceTree = "<group>"; };
 		ASKQTEST001000000010001 /* AskUserQuestionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AskUserQuestionTests.swift; sourceTree = "<group>"; };
+		SAFARIVIEW00000000100001 /* SafariView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SafariView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXGroup section */
@@ -317,6 +319,7 @@
 				766753AA2F765B13E1B4676A /* SessionSidebar.swift */,
 				9EC65CD838F5540EC3B1AA02 /* SessionTreeView.swift */,
 				42E47B6EAD030227C54F0028 /* SettingsView.swift */,
+				SAFARIVIEW00000000100001 /* SafariView.swift */,
 				VOICE001000000004A0000001 /* SineWaveView.swift */,
 				SKILL00100000001000000001 /* SkillChip.swift */,
 				SKILL00100000001200000001 /* SkillMentionPopup.swift */,
@@ -566,6 +569,7 @@
 				PLANMODE001000000020001 /* PlanModeViews.swift in Sources */,
 				ASKQUEST001000000020001 /* AskUserQuestionViewer.swift in Sources */,
 				ASKSHEET001000000020001 /* AskUserQuestionSheet.swift in Sources */,
+				SAFARIVIEW00000000200001 /* SafariView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

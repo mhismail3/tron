@@ -69,6 +69,12 @@ extension ChatViewModel {
             return
         }
 
+        // Check if this is an OpenBrowser tool call
+        if event.toolName.lowercased() == "openbrowser" {
+            handleOpenBrowserToolStart(event)
+            // Don't return - still display as regular tool use
+        }
+
         let tool = ToolUseData(
             toolName: event.toolName,
             toolCallId: event.toolCallId,
@@ -145,6 +151,23 @@ extension ChatViewModel {
         currentTurnToolCalls.append(record)
 
         // Note: Sheet auto-opens on tool.end, not tool.start (async mode)
+    }
+
+    /// Handle OpenBrowser tool start - opens Safari in-app browser
+    private func handleOpenBrowserToolStart(_ event: ToolStartEvent) {
+        logger.info("OpenBrowser tool detected, parsing URL", category: .events)
+
+        // Extract URL directly from arguments dictionary
+        guard let args = event.arguments,
+              let urlValue = args["url"],
+              let urlString = urlValue.value as? String,
+              let url = URL(string: urlString) else {
+            logger.error("Failed to parse OpenBrowser URL from arguments", category: .events)
+            return
+        }
+
+        logger.info("Opening Safari with URL: \(urlString)", category: .events)
+        safariURL = url
     }
 
     func handleToolEnd(_ event: ToolEndEvent) {
