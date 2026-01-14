@@ -66,7 +66,9 @@ export {
   buildGoogleSystemPrompt,
   requiresToolClarificationMessage,
   getToolClarificationMessage,
+  loadSystemPromptFromFileSync,
   type SystemPromptConfig,
+  type LoadedSystemPrompt,
 } from './system-prompts.js';
 
 export {

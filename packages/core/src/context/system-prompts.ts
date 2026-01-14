@@ -8,7 +8,12 @@
  * separately by each provider and CANNOT be modified.
  */
 
+import * as fs from 'fs';
+import * as path from 'path';
 import type { ProviderType } from '../providers/index.js';
+import { createLogger } from '../logging/logger.js';
+
+const logger = createLogger('context:system-prompts');
 
 // =============================================================================
 // Tron Core System Prompt
@@ -41,6 +46,90 @@ Be helpful, accurate, and efficient. When working with code:
  * Working directory template - append to system prompt
  */
 export const WORKING_DIRECTORY_SUFFIX = '\n\nCurrent working directory: {workingDirectory}';
+
+// =============================================================================
+// File-Based System Prompt Loading
+// =============================================================================
+
+/** Maximum file size for SYSTEM.md (100KB = ~25,000 tokens) */
+const MAX_SYSTEM_PROMPT_FILE_SIZE = 100 * 1024;
+
+/**
+ * Result of loading a system prompt from file
+ */
+export interface LoadedSystemPrompt {
+  /** File content */
+  content: string;
+  /** Source of the prompt (global or project) */
+  source: 'global' | 'project';
+}
+
+/**
+ * Load system prompt from filesystem hierarchy (synchronous).
+ *
+ * Priority order:
+ * 1. Project: .tron/SYSTEM.md in working directory
+ * 2. Global: ~/.tron/SYSTEM.md
+ *
+ * Returns null if no files exist or if errors occur.
+ *
+ * @param options - Configuration for file loading
+ * @returns Loaded prompt with source, or null if not found
+ */
+export function loadSystemPromptFromFileSync(options: {
+  workingDirectory: string;
+  userHome?: string;
+}): LoadedSystemPrompt | null {
+  const userHome = options.userHome ?? process.env.HOME ?? '';
+
+  // 1. Try project-level SYSTEM.md first (.tron/SYSTEM.md)
+  const projectPath = path.join(options.workingDirectory, '.tron', 'SYSTEM.md');
+  try {
+    const stats = fs.statSync(projectPath);
+
+    // Check file size limit
+    if (stats.size > MAX_SYSTEM_PROMPT_FILE_SIZE) {
+      logger.warn('Project SYSTEM.md exceeds size limit', {
+        path: projectPath,
+        size: stats.size,
+        limit: MAX_SYSTEM_PROMPT_FILE_SIZE,
+      });
+    } else {
+      const content = fs.readFileSync(projectPath, 'utf-8');
+      logger.debug('Loaded system prompt from project', { path: projectPath });
+      return { content, source: 'project' };
+    }
+  } catch (err) {
+    // File doesn't exist or is unreadable - continue to global
+  }
+
+  // 2. Try global SYSTEM.md (~/.tron/SYSTEM.md)
+  if (userHome) {
+    const globalPath = path.join(userHome, '.tron', 'SYSTEM.md');
+    try {
+      const stats = fs.statSync(globalPath);
+
+      // Check file size limit
+      if (stats.size > MAX_SYSTEM_PROMPT_FILE_SIZE) {
+        logger.warn('Global SYSTEM.md exceeds size limit', {
+          path: globalPath,
+          size: stats.size,
+          limit: MAX_SYSTEM_PROMPT_FILE_SIZE,
+        });
+        return null;
+      }
+
+      const content = fs.readFileSync(globalPath, 'utf-8');
+      logger.debug('Loaded system prompt from global', { path: globalPath });
+      return { content, source: 'global' };
+    } catch (err) {
+      // File doesn't exist or is unreadable
+    }
+  }
+
+  // No files found
+  return null;
+}
 
 // =============================================================================
 // Provider-Specific System Prompt Builders

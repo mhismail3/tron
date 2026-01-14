@@ -120,6 +120,41 @@ TypeScript coding standards for this project.
 
 See [docs/skills.md](docs/skills.md) for the complete guide.
 
+## System Prompt Customization
+
+Customize Tron's core identity and behavior using `SYSTEM.md` files:
+
+**Locations:**
+- `~/.tron/SYSTEM.md` — Global default prompt (all projects)
+- `.tron/SYSTEM.md` — Project-specific prompt (overrides global)
+
+**Priority:**
+1. Programmatic `systemPrompt` parameter (highest)
+2. Project `.tron/SYSTEM.md`
+3. Global `~/.tron/SYSTEM.md`
+4. Built-in default prompt (fallback)
+
+**Example `SYSTEM.md`:**
+```markdown
+You are Tron, a specialized TypeScript assistant for this project.
+
+You have access to these tools:
+- read, write, edit: File operations
+- bash: Execute commands
+- grep, find: Search and discovery
+
+Guidelines:
+- Follow project's TypeScript strict mode
+- Prefer composition over inheritance
+- Write tests for all new features
+```
+
+**Best practices:**
+- Keep prompts concise (<1000 tokens recommended)
+- Focus on project-specific patterns and constraints
+- Avoid redundant information (tools are described elsewhere)
+- Update as project conventions evolve
+
 ## Development
 
 This project uses **Bun** and follows strict Test-Driven Development:

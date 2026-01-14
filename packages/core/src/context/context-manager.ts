@@ -19,6 +19,7 @@ import {
   requiresToolClarificationMessage,
   getToolClarificationMessage,
   TRON_CORE_PROMPT,
+  loadSystemPromptFromFileSync,
 } from './system-prompts.js';
 
 // =============================================================================
@@ -29,10 +30,12 @@ export type ThresholdLevel = 'normal' | 'warning' | 'alert' | 'critical' | 'exce
 
 export interface ContextManagerConfig {
   model: string;
-  /** Custom system prompt - if not provided, uses TRON_CORE_PROMPT */
+  /** Custom system prompt - if not provided, loads from SYSTEM.md or uses TRON_CORE_PROMPT */
   systemPrompt?: string;
   /** Working directory for file operations */
   workingDirectory?: string;
+  /** User home directory for loading global SYSTEM.md (defaults to process.env.HOME) */
+  userHome?: string;
   tools?: Tool[];
   /** Rules content from AGENTS.md / CLAUDE.md hierarchy */
   rulesContent?: string;
@@ -208,7 +211,6 @@ export class ContextManager {
     this.model = config.model;
     this.providerType = detectProviderFromModel(config.model);
     this.contextLimit = getContextLimit(config.model);
-    this.customSystemPrompt = config.systemPrompt;
     this.workingDirectory = config.workingDirectory ?? process.cwd();
     this.tools = config.tools ?? [];
     this.rulesContent = config.rulesContent;
@@ -218,6 +220,24 @@ export class ContextManager {
       threshold: config.compaction?.threshold ?? 0.70,
       preserveRecentTurns: config.compaction?.preserveRecentTurns ?? 3,
     };
+
+    // Load system prompt with priority: programmatic > file-based > hardcoded
+    if (config.systemPrompt) {
+      // Explicit programmatic override takes highest priority
+      this.customSystemPrompt = config.systemPrompt;
+    } else {
+      // Try loading from SYSTEM.md files
+      const loaded = loadSystemPromptFromFileSync({
+        workingDirectory: this.workingDirectory,
+        userHome: config.userHome,
+      });
+      if (loaded) {
+        this.customSystemPrompt = loaded.content;
+      } else {
+        // No explicit prompt and no file found - will use TRON_CORE_PROMPT
+        this.customSystemPrompt = undefined;
+      }
+    }
   }
 
   // ===========================================================================
