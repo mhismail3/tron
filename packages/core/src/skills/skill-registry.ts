@@ -2,7 +2,7 @@
  * @fileoverview Skill Registry
  *
  * In-memory cache for loaded skills with precedence handling.
- * Project skills override global skills with the same name.
+ * Project skills take precedence over global skills with the same name.
  * Provides get(), list(), and getAutoInjectSkills() methods.
  */
 
@@ -51,30 +51,31 @@ export class SkillRegistry {
       { globalSkillsDir: this.globalSkillsDir }
     );
 
-    // Process global skills first
-    for (const skill of globalResult.skills) {
-      this.skills.set(skill.name, skill);
-    }
-
-    // Log any global errors
-    for (const error of globalResult.errors) {
-      logger.warn('Error loading global skill', {
-        path: error.path,
-        message: error.message,
-      });
-    }
-
-    // Process project skills (override global by name)
+    // Process project skills first (they take precedence)
     for (const skill of projectResult.skills) {
-      if (this.skills.has(skill.name)) {
-        logger.debug('Project skill overrides global', { name: skill.name });
-      }
       this.skills.set(skill.name, skill);
     }
 
     // Log any project errors
     for (const error of projectResult.errors) {
       logger.warn('Error loading project skill', {
+        path: error.path,
+        message: error.message,
+      });
+    }
+
+    // Process global skills (only add if not already present from project)
+    for (const skill of globalResult.skills) {
+      if (!this.skills.has(skill.name)) {
+        this.skills.set(skill.name, skill);
+      } else {
+        logger.debug('Project skill shadows global', { name: skill.name });
+      }
+    }
+
+    // Log any global errors
+    for (const error of globalResult.errors) {
+      logger.warn('Error loading global skill', {
         path: error.path,
         message: error.message,
       });
