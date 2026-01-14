@@ -41,6 +41,9 @@ pids/
 *.swp
 *.swo
 *~
+*.xcuserstate
+project.xcworkspace/
+xcuserdata/
 
 # OS
 .DS_Store
