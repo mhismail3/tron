@@ -1189,6 +1189,7 @@ export interface ContextGetSnapshotResult {
   breakdown: {
     systemPrompt: number;
     tools: number;
+    rules: number;
     messages: number;
   };
 }

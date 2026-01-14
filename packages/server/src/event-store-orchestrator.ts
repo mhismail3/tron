@@ -1428,6 +1428,7 @@ export class EventStoreOrchestrator extends EventEmitter {
         breakdown: {
           systemPrompt: 0,
           tools: 0,
+          rules: 0,
           messages: 0,
         },
       };
@@ -1451,6 +1452,7 @@ export class EventStoreOrchestrator extends EventEmitter {
         breakdown: {
           systemPrompt: 0,
           tools: 0,
+          rules: 0,
           messages: 0,
         },
         messages: [],

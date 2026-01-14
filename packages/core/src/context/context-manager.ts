@@ -74,6 +74,7 @@ export interface ContextSnapshot {
   breakdown: {
     systemPrompt: number;
     tools: number;
+    rules: number;
     messages: number;
   };
   /** Loaded rules files (if any) */
@@ -350,10 +351,12 @@ export class ContextManager {
 
   /**
    * Get current total token count.
+   * Includes: system prompt + tools + rules + messages
    */
   getCurrentTokens(): number {
     let total = this.estimateSystemPromptTokens();
     total += this.estimateToolsTokens();
+    total += this.estimateRulesTokens();
     for (const msg of this.messages) {
       total += this.tokenCache.get(msg) ?? this.estimateMessageTokens(msg);
     }
@@ -391,6 +394,7 @@ export class ContextManager {
       breakdown: {
         systemPrompt: this.estimateSystemPromptTokens(),
         tools: this.estimateToolsTokens(),
+        rules: this.estimateRulesTokens(),
         messages: this.getMessagesTokens(),
       },
     };
@@ -762,6 +766,15 @@ export class ContextManager {
       this.tools.reduce((sum, t) => sum + JSON.stringify(t).length / 4, 0)
     );
     return this.cachedToolsTokens;
+  }
+
+  private estimateRulesTokens(): number {
+    if (!this.rulesContent) {
+      return 0;
+    }
+    // Include the "# Project Rules\n\n" header that gets added by the provider
+    const headerLength = 18; // "# Project Rules\n\n"
+    return Math.ceil((this.rulesContent.length + headerLength) / 4);
   }
 
   private getMessagesTokens(): number {

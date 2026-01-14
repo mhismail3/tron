@@ -176,6 +176,7 @@ struct ContextSnapshotResult: Codable {
     struct ContextBreakdown: Codable {
         let systemPrompt: Int
         let tools: Int
+        let rules: Int
         let messages: Int
     }
 }
