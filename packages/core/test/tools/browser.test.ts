@@ -20,7 +20,7 @@ describe('BrowserTool', () => {
 
   describe('tool definition', () => {
     it('should have correct name and description', () => {
-      expect(tool.name).toBe('browser');
+      expect(tool.name).toBe('Browser');
       expect(tool.description).toContain('Control a web browser');
     });
 

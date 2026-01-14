@@ -280,7 +280,7 @@ describe('WebSocket Tool End Emission - Full Data', () => {
     const toolExecutionEndEvent = {
       type: 'tool_execution_end',
       toolCallId: 'test-tool-123',
-      toolName: 'browser',
+      toolName: 'Browser',
       result: { content: largeResult },
       isError: false,
       duration: 100,
@@ -461,7 +461,7 @@ describe('Deferred Truncation - Integration Flow', () => {
       type: 'agent.tool_end',
       data: {
         toolCallId: 'browser-screenshot-123',
-        toolName: 'browser',
+        toolName: 'Browser',
         success: true,
         output: 'Screenshot captured (base64): ...truncated for display...', // Text can be truncated
         details: {

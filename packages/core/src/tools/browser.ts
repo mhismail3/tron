@@ -41,7 +41,7 @@ interface BrowserSession {
  * See anthropic.ts for caching implementation details.
  */
 export class BrowserTool implements TronTool {
-  readonly name = 'browser';
+  readonly name = 'Browser';
   readonly description = `Control a web browser with automation capabilities.
 
 IMPORTANT: Execute browser actions ONE AT A TIME sequentially - wait for each action to complete before starting the next. Do NOT call multiple browser tools in parallel as this causes race conditions.
