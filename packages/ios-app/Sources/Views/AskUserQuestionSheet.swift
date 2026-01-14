@@ -3,7 +3,7 @@ import SwiftUI
 // MARK: - AskUserQuestion Sheet
 
 /// Sheet for answering AskUserQuestion tool calls
-/// Uses iOS 26 liquid glass styling with amber theme
+/// Uses iOS 26 liquid glass styling matching Context Manager
 @available(iOS 26.0, *)
 struct AskUserQuestionSheet: View {
     let toolData: AskUserQuestionToolData
@@ -19,8 +19,8 @@ struct AskUserQuestionSheet: View {
         toolData.params.questions
     }
 
-    private var isComplete: Bool {
-        questions.allSatisfy { question in
+    private var hasAnyAnswer: Bool {
+        questions.contains { question in
             if let answer = answers[question.id] {
                 return !answer.selectedValues.isEmpty || (answer.otherValue?.isEmpty == false)
             }
@@ -28,80 +28,78 @@ struct AskUserQuestionSheet: View {
         }
     }
 
-    private var answeredCount: Int {
-        questions.filter { question in
-            if let answer = answers[question.id] {
-                return !answer.selectedValues.isEmpty || (answer.otherValue?.isEmpty == false)
-            }
-            return false
-        }.count
-    }
-
     var body: some View {
         NavigationStack {
-            VStack(spacing: 0) {
-                // Context (if provided)
-                if let context = toolData.params.context {
-                    Text(context)
-                        .font(.system(size: 14, design: .monospaced))
-                        .foregroundStyle(.tronTextSecondary)
-                        .padding(.horizontal, 16)
-                        .padding(.vertical, 12)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
+            ScrollView(.vertical) {
+                VStack(alignment: .leading, spacing: 12) {
+                    // Context (if provided)
+                    if let context = toolData.params.context {
+                        Text(context)
+                            .font(.system(size: 12, design: .monospaced))
+                            .foregroundStyle(.tronTextSecondary)
+                            .padding(.horizontal, 16)
+                            .padding(.top, 4)
+                    }
 
-                // Questions pager
-                TabView(selection: $currentQuestionIndex) {
-                    ForEach(Array(questions.enumerated()), id: \.element.id) { index, question in
+                    // Questions
+                    if questions.count == 1 {
+                        // Single question - no paging needed
                         QuestionCardView(
-                            question: question,
-                            answer: binding(for: question),
-                            questionNumber: index + 1,
-                            totalQuestions: questions.count,
+                            question: questions[0],
+                            answer: binding(for: questions[0]),
+                            questionNumber: 1,
+                            totalQuestions: 1,
                             readOnly: readOnly
                         )
-                        .tag(index)
+                        .padding(.horizontal, 16)
+                    } else {
+                        // Multiple questions - use TabView pager
+                        TabView(selection: $currentQuestionIndex) {
+                            ForEach(Array(questions.enumerated()), id: \.element.id) { index, question in
+                                QuestionCardView(
+                                    question: question,
+                                    answer: binding(for: question),
+                                    questionNumber: index + 1,
+                                    totalQuestions: questions.count,
+                                    readOnly: readOnly
+                                )
+                                .padding(.horizontal, 16)
+                                .tag(index)
+                            }
+                        }
+                        .tabViewStyle(.page(indexDisplayMode: .never))
+                        .frame(minHeight: 280)
+                        .animation(.easeInOut(duration: 0.2), value: currentQuestionIndex)
+
+                        // Dot indicators for multiple questions
+                        pageIndicators
                     }
                 }
-                .tabViewStyle(.page(indexDisplayMode: .never))
-                .animation(.easeInOut(duration: 0.25), value: currentQuestionIndex)
-
-                // Bottom: Centered dot indicators
-                pageIndicators
+                .padding(.bottom, 12)
             }
+            .scrollBounceBehavior(.basedOnSize)
             .navigationBarTitleDisplayMode(.inline)
             .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
             .toolbar {
                 ToolbarItem(placement: .principal) {
                     Text(readOnly ? "Answers" : "Questions")
-                        .font(.system(size: 16, weight: .semibold, design: .monospaced))
+                        .font(.system(size: 15, weight: .semibold, design: .monospaced))
                         .foregroundStyle(readOnly ? .tronSuccess : .tronAmber)
                 }
                 ToolbarItem(placement: .topBarTrailing) {
-                    HStack(spacing: 12) {
-                        // Submit button (when complete and not read-only)
-                        if isComplete && !readOnly {
-                            Button {
-                                submitAnswers()
-                            } label: {
-                                Text("Submit")
-                                    .font(.system(size: 14, weight: .semibold, design: .monospaced))
-                                    .foregroundStyle(.tronBackground)
-                                    .padding(.horizontal, 14)
-                                    .padding(.vertical, 6)
-                            }
-                            .glassEffect(.regular.tint(Color.tronAmber.opacity(0.65)).interactive(), in: .capsule)
-                        }
-
-                        // Close button
+                    if !readOnly {
                         Button {
-                            dismiss()
-                            onDismiss()
+                            submitAnswers()
                         } label: {
-                            Image(systemName: "xmark.circle.fill")
-                                .font(.system(size: 24))
-                                .foregroundStyle(.tronTextMuted)
+                            HStack(spacing: 4) {
+                                Image(systemName: "paperplane.fill")
+                                    .font(.system(size: 11, weight: .medium))
+                                Text("Submit")
+                                    .font(.system(size: 13, weight: .medium, design: .monospaced))
+                            }
+                            .foregroundStyle(hasAnyAnswer ? .tronAmber : .tronTextMuted)
                         }
+                        .disabled(!hasAnyAnswer)
                     }
                 }
             }
@@ -111,7 +109,6 @@ struct AskUserQuestionSheet: View {
         .tint(.tronAmber)
         .preferredColorScheme(.dark)
         .onAppear {
-            // Initialize answers from tool data
             answers = toolData.answers
         }
     }
@@ -119,16 +116,16 @@ struct AskUserQuestionSheet: View {
     // MARK: - Page Indicators
 
     private var pageIndicators: some View {
-        HStack(spacing: 10) {
+        HStack(spacing: 6) {
             ForEach(0..<questions.count, id: \.self) { index in
                 Circle()
                     .fill(dotColor(for: index))
-                    .frame(width: 8, height: 8)
-                    .scaleEffect(index == currentQuestionIndex ? 1.2 : 1.0)
-                    .animation(.easeInOut(duration: 0.2), value: currentQuestionIndex)
+                    .frame(width: 6, height: 6)
+                    .scaleEffect(index == currentQuestionIndex ? 1.3 : 1.0)
+                    .animation(.easeInOut(duration: 0.15), value: currentQuestionIndex)
             }
         }
-        .padding(.vertical, 16)
+        .padding(.vertical, 8)
         .frame(maxWidth: .infinity)
     }
 
@@ -182,76 +179,75 @@ struct QuestionCardView: View {
     @State private var otherText = ""
 
     var body: some View {
-        ScrollView(.vertical) {
-            VStack(alignment: .leading, spacing: 16) {
-                // Question number badge
-                HStack {
-                    Text("\(questionNumber) of \(totalQuestions)")
-                        .font(.system(size: 12, weight: .medium, design: .monospaced))
+        VStack(alignment: .leading, spacing: 8) {
+            // Header: mode indicator + question number (left aligned)
+            HStack(spacing: 8) {
+                Text(question.mode == .single ? "Select one" : "Select multiple")
+                    .font(.system(size: 11, weight: .medium, design: .monospaced))
+                    .foregroundStyle(.tronTextMuted)
+
+                if totalQuestions > 1 {
+                    Text("·")
+                        .foregroundStyle(.tronTextMuted.opacity(0.5))
+                    Text("\(questionNumber)/\(totalQuestions)")
+                        .font(.system(size: 11, weight: .medium, design: .monospaced))
                         .foregroundStyle(.tronAmber.opacity(0.7))
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 4)
-                        .background(Color.tronAmber.opacity(0.12))
-                        .clipShape(Capsule())
-
-                    Spacer()
-
-                    // Mode indicator
-                    Text(question.mode == .single ? "Select one" : "Select multiple")
-                        .font(.system(size: 11, design: .monospaced))
-                        .foregroundStyle(.tronTextMuted)
                 }
 
-                // Question text
-                Text(question.question)
-                    .font(.system(size: 18, weight: .medium))
-                    .foregroundStyle(.tronTextPrimary)
-                    .padding(.bottom, 4)
-
-                // Options with glass effect
-                VStack(spacing: 10) {
-                    ForEach(question.options) { option in
-                        GlassOptionRowView(
-                            option: option,
-                            isSelected: isSelected(option),
-                            mode: question.mode,
-                            readOnly: readOnly
-                        ) {
-                            toggleOption(option)
-                        }
-                    }
-                }
-
-                // Other option
-                if question.allowOther == true {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("Other")
-                            .font(.system(size: 14, weight: .medium))
-                            .foregroundStyle(.tronTextSecondary)
-
-                        TextField(question.otherPlaceholder ?? "Enter your answer...", text: $otherText)
-                            .textFieldStyle(.plain)
-                            .font(.system(size: 16, design: .monospaced))
-                            .foregroundStyle(.tronTextPrimary)
-                            .padding(12)
-                            .glassEffect(
-                                .regular.tint(Color.tronAmber.opacity(otherText.isEmpty ? 0.05 : 0.15)),
-                                in: RoundedRectangle(cornerRadius: 10, style: .continuous)
-                            )
-                            .disabled(readOnly)
-                            .onChange(of: otherText) { _, newValue in
-                                guard !readOnly else { return }
-                                answer.otherValue = newValue.isEmpty ? nil : newValue
-                            }
-                    }
-                    .padding(.top, 8)
-                }
-
-                Spacer(minLength: 40)
+                Spacer()
             }
-            .padding(20)
+
+            // Question text
+            Text(question.question)
+                .font(.system(size: 14, weight: .medium, design: .monospaced))
+                .foregroundStyle(.tronTextPrimary)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.bottom, 2)
+
+            // Options
+            VStack(spacing: 4) {
+                ForEach(question.options) { option in
+                    CompactOptionRowView(
+                        option: option,
+                        isSelected: isSelected(option),
+                        mode: question.mode,
+                        readOnly: readOnly
+                    ) {
+                        toggleOption(option)
+                    }
+                }
+            }
+
+            // Other option
+            if question.allowOther == true {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Other")
+                        .font(.system(size: 11, weight: .medium, design: .monospaced))
+                        .foregroundStyle(.tronTextMuted)
+
+                    TextField(question.otherPlaceholder ?? "Enter your answer...", text: $otherText)
+                        .textFieldStyle(.plain)
+                        .font(.system(size: 13, design: .monospaced))
+                        .foregroundStyle(.tronTextPrimary)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 8)
+                        .background {
+                            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                .fill(.clear)
+                                .glassEffect(
+                                    .regular.tint(Color.tronAmber.opacity(otherText.isEmpty ? 0.06 : 0.15)),
+                                    in: RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                )
+                        }
+                        .disabled(readOnly)
+                        .onChange(of: otherText) { _, newValue in
+                            guard !readOnly else { return }
+                            answer.otherValue = newValue.isEmpty ? nil : newValue
+                        }
+                }
+                .padding(.top, 4)
+            }
         }
-        .scrollBounceBehavior(.basedOnSize)
         .onAppear {
             otherText = answer.otherValue ?? ""
         }
@@ -263,13 +259,12 @@ struct QuestionCardView: View {
     }
 
     private func toggleOption(_ option: AskUserQuestionOption) {
+        guard !readOnly else { return }
         let value = option.value ?? option.label
 
         if question.mode == .single {
-            // Single select: replace selection
             answer.selectedValues = [value]
         } else {
-            // Multi select: toggle
             if answer.selectedValues.contains(value) {
                 answer.selectedValues.removeAll { $0 == value }
             } else {
@@ -279,10 +274,10 @@ struct QuestionCardView: View {
     }
 }
 
-// MARK: - Glass Option Row View
+// MARK: - Compact Option Row View
 
 @available(iOS 26.0, *)
-struct GlassOptionRowView: View {
+struct CompactOptionRowView: View {
     let option: AskUserQuestionOption
     let isSelected: Bool
     let mode: AskUserQuestion.SelectionMode
@@ -291,18 +286,19 @@ struct GlassOptionRowView: View {
 
     var body: some View {
         Button(action: action) {
-            HStack(spacing: 12) {
+            HStack(spacing: 8) {
                 // Selection indicator
                 selectionIndicator
 
-                VStack(alignment: .leading, spacing: 3) {
+                // Label and description
+                VStack(alignment: .leading, spacing: 0) {
                     Text(option.label)
-                        .font(.system(size: 16, weight: isSelected ? .medium : .regular))
+                        .font(.system(size: 13, weight: isSelected ? .medium : .regular, design: .monospaced))
                         .foregroundStyle(.tronTextPrimary)
 
                     if let description = option.description {
                         Text(description)
-                            .font(.system(size: 13))
+                            .font(.system(size: 11, design: .monospaced))
                             .foregroundStyle(.tronTextSecondary)
                     }
                 }
@@ -312,43 +308,47 @@ struct GlassOptionRowView: View {
                 // Checkmark for selected state
                 if isSelected {
                     Image(systemName: "checkmark")
-                        .font(.system(size: 14, weight: .semibold))
+                        .font(.system(size: 11, weight: .semibold))
                         .foregroundStyle(.tronAmber)
                 }
             }
-            .padding(14)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 7)
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .disabled(readOnly)
-        .glassEffect(
-            .regular.tint(Color.tronAmber.opacity(isSelected ? 0.25 : 0.08)).interactive(),
-            in: RoundedRectangle(cornerRadius: 12, style: .continuous)
-        )
+        .background {
+            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                .fill(.clear)
+                .glassEffect(
+                    .regular.tint(Color.tronAmber.opacity(isSelected ? 0.22 : 0.06)).interactive(),
+                    in: RoundedRectangle(cornerRadius: 6, style: .continuous)
+                )
+        }
     }
 
     @ViewBuilder
     private var selectionIndicator: some View {
         if mode == .single {
-            // Radio button
             Circle()
-                .strokeBorder(isSelected ? Color.tronAmber : Color.tronTextMuted.opacity(0.5), lineWidth: 2)
-                .frame(width: 22, height: 22)
+                .strokeBorder(isSelected ? Color.tronAmber : Color.tronTextMuted.opacity(0.35), lineWidth: 1.5)
+                .frame(width: 16, height: 16)
                 .overlay {
                     if isSelected {
                         Circle()
                             .fill(Color.tronAmber)
-                            .frame(width: 12, height: 12)
+                            .frame(width: 8, height: 8)
                     }
                 }
         } else {
-            // Checkbox
-            RoundedRectangle(cornerRadius: 5)
-                .strokeBorder(isSelected ? Color.tronAmber : Color.tronTextMuted.opacity(0.5), lineWidth: 2)
-                .frame(width: 22, height: 22)
+            RoundedRectangle(cornerRadius: 3)
+                .strokeBorder(isSelected ? Color.tronAmber : Color.tronTextMuted.opacity(0.35), lineWidth: 1.5)
+                .frame(width: 16, height: 16)
                 .overlay {
                     if isSelected {
                         Image(systemName: "checkmark")
-                            .font(.system(size: 12, weight: .bold))
+                            .font(.system(size: 9, weight: .bold))
                             .foregroundStyle(.tronAmber)
                     }
                 }
@@ -360,7 +360,7 @@ struct GlassOptionRowView: View {
 
 #if DEBUG
 @available(iOS 26.0, *)
-#Preview {
+#Preview("Single Question") {
     AskUserQuestionSheet(
         toolData: AskUserQuestionToolData(
             toolCallId: "call_123",
@@ -368,15 +368,47 @@ struct GlassOptionRowView: View {
                 questions: [
                     AskUserQuestion(
                         id: "q1",
-                        question: "What approach would you prefer for implementing this feature?",
+                        question: "What is your favorite color?",
                         options: [
-                            AskUserQuestionOption(label: "Approach A", value: nil, description: "Use existing patterns"),
-                            AskUserQuestionOption(label: "Approach B", value: nil, description: "Create new abstraction"),
-                            AskUserQuestionOption(label: "Approach C", value: nil, description: "Refactor first")
+                            AskUserQuestionOption(label: "Red", value: nil, description: nil),
+                            AskUserQuestionOption(label: "Blue", value: nil, description: nil),
+                            AskUserQuestionOption(label: "Green", value: nil, description: nil),
+                            AskUserQuestionOption(label: "Yellow", value: nil, description: nil),
+                            AskUserQuestionOption(label: "Purple", value: nil, description: nil)
                         ],
                         mode: .single,
                         allowOther: true,
-                        otherPlaceholder: "Describe your preferred approach..."
+                        otherPlaceholder: "Enter a custom color..."
+                    )
+                ],
+                context: nil
+            ),
+            answers: [:],
+            status: .pending,
+            result: nil
+        ),
+        onSubmit: { _ in },
+        onDismiss: { }
+    )
+}
+
+@available(iOS 26.0, *)
+#Preview("Multiple Questions") {
+    AskUserQuestionSheet(
+        toolData: AskUserQuestionToolData(
+            toolCallId: "call_123",
+            params: AskUserQuestionParams(
+                questions: [
+                    AskUserQuestion(
+                        id: "q1",
+                        question: "What approach would you prefer?",
+                        options: [
+                            AskUserQuestionOption(label: "Approach A", value: nil, description: "Use existing patterns"),
+                            AskUserQuestionOption(label: "Approach B", value: nil, description: "Create new abstraction")
+                        ],
+                        mode: .single,
+                        allowOther: nil,
+                        otherPlaceholder: nil
                     ),
                     AskUserQuestion(
                         id: "q2",
@@ -391,7 +423,7 @@ struct GlassOptionRowView: View {
                         otherPlaceholder: nil
                     )
                 ],
-                context: "I'm planning to implement the AskUserQuestion feature."
+                context: "Planning the implementation"
             ),
             answers: [:],
             status: .pending,
