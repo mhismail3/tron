@@ -154,20 +154,6 @@ struct InputBar: View {
             .animation(.tronStandard, value: shouldShowActionButton)
             .animation(micButtonAnimation, value: shouldShowMicButton)
         }
-        // iOS 26: No background - elements float with glass effects only
-        // Swipe down gesture to dismiss keyboard
-        .simultaneousGesture(
-            DragGesture(minimumDistance: 20, coordinateSpace: .local)
-                .onEnded { value in
-                    // Detect downward swipe (positive Y translation)
-                    // and ensure it's more vertical than horizontal
-                    let isDownwardSwipe = value.translation.height > 30
-                    let isVertical = abs(value.translation.height) > abs(value.translation.width) * 1.5
-                    if isDownwardSwipe && isVertical && isFocused {
-                        isFocused = false
-                    }
-                }
-        )
         // Sync focus state with parent control
         .onAppear {
             // Reset state to ensure fresh animation on each appearance
