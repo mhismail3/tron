@@ -87,9 +87,9 @@ struct AskUserQuestionSheet: View {
                 status: toolData.status,
                 readOnly: readOnly
             )
-            .padding(.horizontal, 16)
-            .padding(.top, 8)
-            .padding(.bottom, 20)
+            .padding(.horizontal, 20)
+            .padding(.top, 16)
+            .padding(.bottom, 24)
         }
         .scrollBounceBehavior(.basedOnSize)
     }
@@ -110,9 +110,9 @@ struct AskUserQuestionSheet: View {
                             status: toolData.status,
                             readOnly: readOnly
                         )
-                        .padding(.horizontal, 16)
-                        .padding(.top, 8)
-                        .padding(.bottom, 20)
+                        .padding(.horizontal, 20)
+                        .padding(.top, 16)
+                        .padding(.bottom, 24)
                     }
                     .scrollBounceBehavior(.basedOnSize)
                     .tag(index)
@@ -221,7 +221,7 @@ struct QuestionCardView: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 12) {
             // Header: mode indicator + question number (left aligned)
             HStack(spacing: 8) {
                 Text(question.mode == .single ? "Select one" : "Select multiple")
@@ -241,13 +241,14 @@ struct QuestionCardView: View {
 
             // Question text
             Text(question.question)
-                .font(.system(size: 14, weight: .medium, design: .monospaced))
+                .font(.system(size: 15, weight: .medium, design: .monospaced))
                 .foregroundStyle(.tronTextPrimary)
                 .fixedSize(horizontal: false, vertical: true)
-                .padding(.bottom, 2)
+                .lineSpacing(4)
+                .padding(.bottom, 4)
 
             // Options
-            VStack(spacing: 4) {
+            VStack(spacing: 8) {
                 ForEach(question.options) { option in
                     CompactOptionRowView(
                         option: option,
@@ -263,23 +264,23 @@ struct QuestionCardView: View {
 
             // Other option
             if question.allowOther == true {
-                VStack(alignment: .leading, spacing: 4) {
+                VStack(alignment: .leading, spacing: 6) {
                     Text("Other")
                         .font(.system(size: 11, weight: .medium, design: .monospaced))
                         .foregroundStyle(.tronTextMuted)
 
                     TextField(question.otherPlaceholder ?? "Enter your answer...", text: $otherText)
                         .textFieldStyle(.plain)
-                        .font(.system(size: 13, design: .monospaced))
+                        .font(.system(size: 14, design: .monospaced))
                         .foregroundStyle(.tronTextPrimary)
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 8)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 12)
                         .background {
-                            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                            RoundedRectangle(cornerRadius: 8, style: .continuous)
                                 .fill(.clear)
                                 .glassEffect(
                                     .regular.tint(accentColor.opacity(otherText.isEmpty ? 0.06 : 0.15)),
-                                    in: RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                    in: RoundedRectangle(cornerRadius: 8, style: .continuous)
                                 )
                         }
                         .disabled(readOnly)
@@ -288,7 +289,7 @@ struct QuestionCardView: View {
                             answer.otherValue = newValue.isEmpty ? nil : newValue
                         }
                 }
-                .padding(.top, 4)
+                .padding(.top, 8)
             }
         }
         .onAppear {
@@ -335,15 +336,16 @@ struct CompactOptionRowView: View {
                 selectionIndicator
 
                 // Label and description
-                VStack(alignment: .leading, spacing: 0) {
+                VStack(alignment: .leading, spacing: 2) {
                     Text(option.label)
-                        .font(.system(size: 13, weight: isSelected ? .medium : .regular, design: .monospaced))
+                        .font(.system(size: 14, weight: isSelected ? .medium : .regular, design: .monospaced))
                         .foregroundStyle(.tronTextPrimary)
 
                     if let description = option.description {
                         Text(description)
-                            .font(.system(size: 11, design: .monospaced))
+                            .font(.system(size: 12, design: .monospaced))
                             .foregroundStyle(.tronTextSecondary)
+                            .lineSpacing(2)
                     }
                 }
 
@@ -352,22 +354,22 @@ struct CompactOptionRowView: View {
                 // Checkmark for selected state
                 if isSelected {
                     Image(systemName: "checkmark")
-                        .font(.system(size: 11, weight: .semibold))
+                        .font(.system(size: 12, weight: .semibold))
                         .foregroundStyle(accentColor)
                 }
             }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 7)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 12)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .disabled(readOnly)
         .background {
-            RoundedRectangle(cornerRadius: 6, style: .continuous)
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
                 .fill(.clear)
                 .glassEffect(
                     .regular.tint(accentColor.opacity(isSelected ? 0.22 : 0.06)).interactive(),
-                    in: RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    in: RoundedRectangle(cornerRadius: 8, style: .continuous)
                 )
         }
     }
