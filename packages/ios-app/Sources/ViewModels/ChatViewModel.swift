@@ -591,7 +591,7 @@ class ChatViewModel: ObservableObject {
         logger.info("Opened AskUserQuestion sheet (\(mode)) for \(data.params.questions.count) questions", category: .session)
     }
 
-    /// Handle AskUserQuestion answers submission via tool.result RPC
+    /// Handle AskUserQuestion answers submission (async mode: sends as new prompt)
     func submitAskUserQuestionAnswers(_ answers: [AskUserQuestionAnswer]) async {
         guard let data = currentAskUserQuestionData else {
             logger.error("Cannot submit answers - no current question data", category: .session)
@@ -615,7 +615,7 @@ class ChatViewModel: ObservableObject {
             submittedAt: ISO8601DateFormatter().string(from: Date())
         )
 
-        logger.info("Submitting AskUserQuestion tool result for toolCallId=\(data.toolCallId)", category: .session)
+        logger.info("Submitting AskUserQuestion answers as prompt for toolCallId=\(data.toolCallId)", category: .session)
 
         // Update the chip status to .answered BEFORE sending
         if let index = messages.lastIndex(where: {
@@ -637,40 +637,19 @@ class ChatViewModel: ObservableObject {
             }
         }
 
-        // Add the "Answered questions" chip to chat
-        let questionCount = data.params.questions.count
-        let answerChip = ChatMessage(
-            role: .user,
-            content: .answeredQuestions(questionCount: questionCount)
-        )
-        appendMessage(answerChip)
+        // Format answers as a user prompt and send
+        let answerPrompt = formatAnswersAsPrompt(data: data, answers: answers)
 
         // Clear state before sending
         showAskUserQuestionSheet = false
         currentAskUserQuestionData = nil
         askUserQuestionAnswers = [:]
 
-        // Set processing state and create streaming placeholder
-        isProcessing = true
-        eventStoreManager?.setSessionProcessing(sessionId, isProcessing: true)
+        // Send as a new prompt (this triggers a new agent turn)
+        inputText = answerPrompt
+        sendMessage()
 
-        let streamingMessage = ChatMessage.streaming()
-        messages.append(streamingMessage)
-        streamingMessageId = streamingMessage.id
-        streamingText = ""
-
-        // Send tool result via RPC (this unblocks the agent)
-        do {
-            try await rpcClient.sendToolResult(
-                sessionId: sessionId,
-                toolCallId: data.toolCallId,
-                result: result
-            )
-            logger.info("AskUserQuestion tool result sent successfully", category: .session)
-        } catch {
-            logger.error("Failed to send tool result: \(error.localizedDescription)", category: .session)
-            handleError(error.localizedDescription)
-        }
+        logger.info("AskUserQuestion answers submitted as prompt", category: .session)
     }
 
     /// Format answers into a user prompt for the agent
