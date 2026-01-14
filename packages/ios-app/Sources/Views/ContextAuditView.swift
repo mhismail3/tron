@@ -400,10 +400,15 @@ struct TotalSessionTokensView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            // Section header
-            Text("Session Tokens")
-                .font(.system(size: 14, weight: .medium, design: .monospaced))
-                .foregroundStyle(.white.opacity(0.6))
+            // Section header with explanatory subtitle
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Session Totals")
+                    .font(.system(size: 14, weight: .medium, design: .monospaced))
+                    .foregroundStyle(.white.opacity(0.6))
+                Text("Accumulated tokens across all turns (for billing)")
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundStyle(.white.opacity(0.35))
+            }
 
             // Main content card
             VStack(spacing: 12) {
@@ -413,7 +418,7 @@ struct TotalSessionTokensView: View {
                         .font(.system(size: 14))
                         .foregroundStyle(.tronAmberLight)
 
-                    Text("Total")
+                    Text("Accumulated")
                         .font(.system(size: 14, weight: .medium, design: .monospaced))
                         .foregroundStyle(.tronAmberLight)
 
@@ -521,7 +526,7 @@ struct TotalSessionTokensView: View {
                 }
 
                 // Footer explanation
-                Text("Cumulative usage for this session")
+                Text("Input grows each turn • Output sums all responses")
                     .font(.system(size: 10, design: .monospaced))
                     .foregroundStyle(.white.opacity(0.4))
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -577,10 +582,15 @@ struct ContextUsageGaugeView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            // Section header
-            Text("Context Usage")
-                .font(.system(size: 14, weight: .medium, design: .monospaced))
-                .foregroundStyle(.white.opacity(0.6))
+            // Section header with explanatory subtitle
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Context Window")
+                    .font(.system(size: 14, weight: .medium, design: .monospaced))
+                    .foregroundStyle(.white.opacity(0.6))
+                Text("What's being sent to the model this turn")
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundStyle(.white.opacity(0.35))
+            }
 
             // Main content card
             VStack(spacing: 12) {
@@ -590,7 +600,7 @@ struct ContextUsageGaugeView: View {
                         .font(.system(size: 14))
                         .foregroundStyle(usageColor)
 
-                    Text("Current Window")
+                    Text("Current Size")
                         .font(.system(size: 14, weight: .medium, design: .monospaced))
                         .foregroundStyle(.tronSlate)
 
@@ -644,11 +654,16 @@ struct ContextUsageGaugeView: View {
 @available(iOS 26.0, *)
 struct TokenBreakdownHeader: View {
     var body: some View {
-        Text("Token Breakdown")
-            .font(.system(size: 14, weight: .medium, design: .monospaced))
-            .foregroundStyle(.white.opacity(0.6))
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.top, 8)
+        VStack(alignment: .leading, spacing: 2) {
+            Text("Window Breakdown")
+                .font(.system(size: 14, weight: .medium, design: .monospaced))
+                .foregroundStyle(.white.opacity(0.6))
+            Text("Components that make up the Context Window above")
+                .font(.system(size: 10, design: .monospaced))
+                .foregroundStyle(.white.opacity(0.35))
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.top, 8)
     }
 }
 
