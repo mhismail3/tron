@@ -362,6 +362,10 @@ struct InputBar: View {
                     onRemove: { removeSelectedSkill(skill) },
                     onTap: { onSkillDetailTap?(skill) }
                 )
+                .transition(.asymmetric(
+                    insertion: .scale(scale: 0.8).combined(with: .opacity),
+                    removal: .scale(scale: 0.6).combined(with: .opacity)
+                ))
             }
 
             // Line break to ensure attachments always start on new row above skills
@@ -374,9 +378,15 @@ struct InputBar: View {
                 AttachmentBubble(attachment: attachment) {
                     onRemoveAttachment(attachment)
                 }
+                .transition(.asymmetric(
+                    insertion: .scale(scale: 0.8).combined(with: .opacity),
+                    removal: .scale(scale: 0.6).combined(with: .opacity)
+                ))
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+        .animation(.spring(response: 0.35, dampingFraction: 0.8), value: selectedSkills.count)
+        .animation(.spring(response: 0.35, dampingFraction: 0.8), value: attachments.count)
     }
 
     // MARK: - Legacy Combined Status Row (kept for reference)
