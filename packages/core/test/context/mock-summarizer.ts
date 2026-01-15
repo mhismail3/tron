@@ -212,3 +212,64 @@ export class MockSummarizer implements Summarizer {
 export function createMockSummarizer(config?: MockSummarizerConfig): MockSummarizer {
   return new MockSummarizer(config);
 }
+
+// =============================================================================
+// Test Variants
+// =============================================================================
+
+/**
+ * Summarizer that returns a fixed-size summary for predictable compression testing.
+ * Useful for testing exact compression ratios.
+ */
+export class FixedSizeSummarizer implements Summarizer {
+  constructor(private summaryTokens: number) {}
+
+  async summarize(messages: Message[]): Promise<SummaryResult> {
+    const chars = this.summaryTokens * 4 - 20; // Reserve for structure
+    const narrative = '[FIXED] ' + 'x'.repeat(Math.max(0, chars));
+
+    return {
+      extractedData: {
+        currentGoal: 'Fixed test goal',
+        completedSteps: ['Fixed step'],
+        pendingTasks: [],
+        keyDecisions: [],
+        filesModified: [],
+        topicsDiscussed: ['testing'],
+        userPreferences: [],
+        importantContext: [],
+      },
+      narrative,
+    };
+  }
+}
+
+/**
+ * Summarizer that throws an error for failure testing.
+ */
+export class FailingSummarizer implements Summarizer {
+  constructor(private errorMessage: string = 'Summarizer failed') {}
+
+  async summarize(): Promise<SummaryResult> {
+    throw new Error(this.errorMessage);
+  }
+}
+
+/**
+ * Summarizer that delays response for timeout/race condition testing.
+ */
+export class SlowSummarizer implements Summarizer {
+  private delegate: Summarizer;
+
+  constructor(
+    private delayMs: number,
+    delegate?: Summarizer
+  ) {
+    this.delegate = delegate ?? new MockSummarizer();
+  }
+
+  async summarize(messages: Message[]): Promise<SummaryResult> {
+    await new Promise(resolve => setTimeout(resolve, this.delayMs));
+    return this.delegate.summarize(messages);
+  }
+}

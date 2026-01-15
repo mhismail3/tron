@@ -593,14 +593,21 @@ export class ContextManager {
 
     // Calculate how many messages to preserve
     const preserveCount = this.compactionConfig.preserveRecentTurns * 2;
-    const messagesToSummarize =
-      this.messages.length > preserveCount
-        ? this.messages.slice(0, -preserveCount)
-        : [];
-    const preservedMessages =
-      this.messages.length > preserveCount
-        ? this.messages.slice(-preserveCount)
-        : this.messages;
+
+    // Handle preserveCount=0 specially since slice(-0) returns all items
+    let messagesToSummarize: Message[];
+    let preservedMessages: Message[];
+
+    if (preserveCount === 0) {
+      messagesToSummarize = [...this.messages];
+      preservedMessages = [];
+    } else if (this.messages.length > preserveCount) {
+      messagesToSummarize = this.messages.slice(0, -preserveCount);
+      preservedMessages = this.messages.slice(-preserveCount);
+    } else {
+      messagesToSummarize = [];
+      preservedMessages = [...this.messages];
+    }
 
     // Generate summary
     const { narrative, extractedData } =
@@ -646,14 +653,21 @@ export class ContextManager {
 
     // Calculate how many messages to preserve
     const preserveCount = this.compactionConfig.preserveRecentTurns * 2;
-    const messagesToSummarize =
-      this.messages.length > preserveCount
-        ? this.messages.slice(0, -preserveCount)
-        : [];
-    const preserved =
-      this.messages.length > preserveCount
-        ? this.messages.slice(-preserveCount)
-        : this.messages;
+
+    // Handle preserveCount=0 specially since slice(-0) returns all items
+    let messagesToSummarize: Message[];
+    let preserved: Message[];
+
+    if (preserveCount === 0) {
+      messagesToSummarize = [...this.messages];
+      preserved = [];
+    } else if (this.messages.length > preserveCount) {
+      messagesToSummarize = this.messages.slice(0, -preserveCount);
+      preserved = this.messages.slice(-preserveCount);
+    } else {
+      messagesToSummarize = [];
+      preserved = [...this.messages];
+    }
 
     // Generate or use edited summary
     let summary: string;
