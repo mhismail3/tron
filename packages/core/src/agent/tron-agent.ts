@@ -10,8 +10,6 @@
  */
 
 import { randomUUID } from 'crypto';
-import { appendFileSync, mkdirSync, existsSync } from 'fs';
-import { join } from 'path';
 import type {
   Message,
   AssistantMessage,
@@ -36,7 +34,6 @@ import { ContextManager, createContextManager } from '../context/context-manager
 import type { Summarizer } from '../context/summarizer.js';
 import type { HookDefinition, PreToolHookContext, PostToolHookContext } from '../hooks/types.js';
 import { createLogger } from '../logging/logger.js';
-import { getTronDataDir } from '../settings/loader.js';
 import { calculateCost } from '../usage/index.js';
 import type {
   AgentConfig,
@@ -74,8 +71,6 @@ export class TronAgent {
   private summarizer: Summarizer | null = null;
   /** Skill context to inject into system prompt for current run */
   private currentSkillContext: string | undefined;
-  /** JSONL log file path for turn metadata */
-  private turnLogPath: string;
   /** Whether auto-compaction is enabled */
   private autoCompactionEnabled: boolean = true;
 
@@ -124,14 +119,6 @@ export class TronAgent {
     this.isRunning = false;
     this.abortController = null;
     this.eventListeners = [];
-
-    // Initialize turn log path for JSONL debugging
-    const tronDataDir = getTronDataDir();
-    const logsDir = join(tronDataDir, 'logs');
-    if (!existsSync(logsDir)) {
-      mkdirSync(logsDir, { recursive: true });
-    }
-    this.turnLogPath = join(logsDir, `turns-${this.sessionId}.jsonl`);
 
     logger.info('TronAgent initialized', {
       sessionId: this.sessionId,
@@ -212,13 +199,6 @@ export class TronAgent {
    */
   canAutoCompact(): boolean {
     return this.autoCompactionEnabled && this.summarizer !== null;
-  }
-
-  /**
-   * Get the path to the turn metadata JSONL log
-   */
-  getTurnLogPath(): string {
-    return this.turnLogPath;
   }
 
   /**
@@ -741,16 +721,30 @@ export class TronAgent {
         contextLimit: this.contextManager.getContextLimit(),
       });
 
-      // ==========================================================================
-      // POST-RESPONSE HOOK: Log turn metadata to JSONL for debugging
-      // ==========================================================================
-      this.logTurnMetadata({
+      // Log turn context breakdown at trace level for diagnostics
+      const snapshot = this.contextManager.getSnapshot();
+      logger.trace('Turn completed', {
+        sessionId: this.sessionId,
         turn: this.currentTurn,
         duration: turnDuration,
         success: true,
         toolCallsExecuted,
-        tokenUsage: assistantMessage.usage,
         stopReason: assistantMessage.stopReason,
+        tokenUsage: assistantMessage.usage,
+        context: {
+          model: this.contextManager.getModel(),
+          provider: this.contextManager.getProviderType(),
+          currentTokens: snapshot.currentTokens,
+          contextLimit: snapshot.contextLimit,
+          usagePercent: snapshot.usagePercent,
+          thresholdLevel: snapshot.thresholdLevel,
+          messageCount: this.contextManager.getMessages().length,
+          breakdown: snapshot.breakdown,
+        },
+        session: {
+          cumulativeInputTokens: this.tokenUsage.inputTokens,
+          cumulativeOutputTokens: this.tokenUsage.outputTokens,
+        },
       });
 
       this.isRunning = false;
@@ -778,13 +772,28 @@ export class TronAgent {
           hasPartialContent: !!this.streamingContent,
         });
 
-        // Log interrupted turn metadata
-        this.logTurnMetadata({
+        // Log interrupted turn context at trace level
+        const interruptSnapshot = this.contextManager.getSnapshot();
+        logger.trace('Turn interrupted', {
+          sessionId: this.sessionId,
           turn: this.currentTurn,
           duration: Date.now() - turnStartTime,
           success: false,
-          toolCallsExecuted: 0,
           error: 'Interrupted by user',
+          context: {
+            model: this.contextManager.getModel(),
+            provider: this.contextManager.getProviderType(),
+            currentTokens: interruptSnapshot.currentTokens,
+            contextLimit: interruptSnapshot.contextLimit,
+            usagePercent: interruptSnapshot.usagePercent,
+            thresholdLevel: interruptSnapshot.thresholdLevel,
+            messageCount: this.contextManager.getMessages().length,
+            breakdown: interruptSnapshot.breakdown,
+          },
+          session: {
+            cumulativeInputTokens: this.tokenUsage.inputTokens,
+            cumulativeOutputTokens: this.tokenUsage.outputTokens,
+          },
         });
 
         return {
@@ -798,13 +807,28 @@ export class TronAgent {
 
       logger.error('Turn failed', { error: errorMessage, sessionId: this.sessionId });
 
-      // Log failed turn metadata
-      this.logTurnMetadata({
+      // Log failed turn context at trace level
+      const failSnapshot = this.contextManager.getSnapshot();
+      logger.trace('Turn failed', {
+        sessionId: this.sessionId,
         turn: this.currentTurn,
         duration: Date.now() - turnStartTime,
         success: false,
-        toolCallsExecuted: 0,
         error: errorMessage,
+        context: {
+          model: this.contextManager.getModel(),
+          provider: this.contextManager.getProviderType(),
+          currentTokens: failSnapshot.currentTokens,
+          contextLimit: failSnapshot.contextLimit,
+          usagePercent: failSnapshot.usagePercent,
+          thresholdLevel: failSnapshot.thresholdLevel,
+          messageCount: this.contextManager.getMessages().length,
+          breakdown: failSnapshot.breakdown,
+        },
+        session: {
+          cumulativeInputTokens: this.tokenUsage.inputTokens,
+          cumulativeOutputTokens: this.tokenUsage.outputTokens,
+        },
       });
 
       return {
@@ -1072,69 +1096,5 @@ export class TronAgent {
       },
       duration,
     };
-  }
-
-  /**
-   * Log turn metadata to JSONL file for debugging.
-   * This is the post-response hook - runs after EVERY response.
-   */
-  private logTurnMetadata(data: {
-    turn: number;
-    duration: number;
-    success: boolean;
-    toolCallsExecuted: number;
-    tokenUsage?: { inputTokens: number; outputTokens: number };
-    stopReason?: string;
-    error?: string;
-  }): void {
-    try {
-      const snapshot = this.contextManager.getSnapshot();
-
-      const record = {
-        _meta: {
-          sessionId: this.sessionId,
-          turn: data.turn,
-          timestamp: new Date().toISOString(),
-        },
-        turn: {
-          duration: data.duration,
-          success: data.success,
-          toolCallsExecuted: data.toolCallsExecuted,
-          tokenUsage: data.tokenUsage,
-          stopReason: data.stopReason,
-          error: data.error,
-        },
-        context: {
-          model: this.contextManager.getModel(),
-          provider: this.contextManager.getProviderType(),
-          currentTokens: snapshot.currentTokens,
-          contextLimit: snapshot.contextLimit,
-          usagePercent: snapshot.usagePercent,
-          thresholdLevel: snapshot.thresholdLevel,
-          messageCount: this.contextManager.getMessages().length,
-          breakdown: snapshot.breakdown,
-        },
-        session: {
-          cumulativeInputTokens: this.tokenUsage.inputTokens,
-          cumulativeOutputTokens: this.tokenUsage.outputTokens,
-        },
-      };
-
-      // Append to JSONL file
-      const line = JSON.stringify(record) + '\n';
-      appendFileSync(this.turnLogPath, line, 'utf-8');
-
-      logger.debug('Turn metadata logged', {
-        sessionId: this.sessionId,
-        turn: data.turn,
-        logPath: this.turnLogPath,
-      });
-    } catch (error) {
-      // Don't fail the turn if logging fails
-      logger.error('Failed to log turn metadata', {
-        error: error instanceof Error ? error.message : String(error),
-        sessionId: this.sessionId,
-      });
-    }
   }
 }
