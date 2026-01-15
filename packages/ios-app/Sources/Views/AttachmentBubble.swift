@@ -1,41 +1,42 @@
 import SwiftUI
 
 /// Compact bubble for displaying attachment previews above the input bar
+/// Sized to fit 2 attachments per row
 struct AttachmentBubble: View {
     let attachment: Attachment
     let onRemove: () -> Void
 
     var body: some View {
-        HStack(spacing: 6) {
+        HStack(spacing: 5) {
             // Thumbnail or icon
             thumbnailView
 
             // File info
-            VStack(alignment: .leading, spacing: 2) {
+            VStack(alignment: .leading, spacing: 1) {
                 Text(attachment.displayName)
-                    .font(.caption)
-                    .fontWeight(.medium)
+                    .font(.system(size: 10, weight: .medium, design: .monospaced))
                     .lineLimit(1)
                     .foregroundStyle(.primary)
 
                 Text(attachment.formattedSize)
-                    .font(.caption2)
+                    .font(.system(size: 9, weight: .regular, design: .monospaced))
                     .foregroundStyle(.secondary)
             }
+            .frame(maxWidth: 60, alignment: .leading)
 
             // Remove button
             Button(action: onRemove) {
                 Image(systemName: "xmark.circle.fill")
-                    .font(.system(size: 16))
+                    .font(.system(size: 14))
                     .foregroundStyle(.secondary)
             }
             .buttonStyle(.plain)
         }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 8)
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))
+        .padding(.horizontal, 6)
+        .padding(.vertical, 5)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 10))
         .overlay(
-            RoundedRectangle(cornerRadius: 12)
+            RoundedRectangle(cornerRadius: 10)
                 .strokeBorder(.white.opacity(0.1), lineWidth: 0.5)
         )
     }
@@ -47,8 +48,8 @@ struct AttachmentBubble: View {
                 Image(uiImage: uiImage)
                     .resizable()
                     .scaledToFill()
-                    .frame(width: 36, height: 36)
-                    .clipShape(RoundedRectangle(cornerRadius: 6))
+                    .frame(width: 28, height: 28)
+                    .clipShape(RoundedRectangle(cornerRadius: 5))
             } else {
                 // Icon for non-image attachments
                 iconView
@@ -58,12 +59,12 @@ struct AttachmentBubble: View {
 
     private var iconView: some View {
         ZStack {
-            RoundedRectangle(cornerRadius: 6)
+            RoundedRectangle(cornerRadius: 5)
                 .fill(iconBackgroundColor)
-                .frame(width: 36, height: 36)
+                .frame(width: 28, height: 28)
 
             Image(systemName: iconName)
-                .font(.system(size: 16, weight: .medium))
+                .font(.system(size: 12, weight: .medium))
                 .foregroundStyle(iconForegroundColor)
         }
     }
