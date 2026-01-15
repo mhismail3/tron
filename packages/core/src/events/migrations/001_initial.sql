@@ -158,6 +158,43 @@ CREATE VIRTUAL TABLE IF NOT EXISTS events_fts USING fts5(
 );
 
 -- =============================================================================
+-- LOGS TABLE FOR STRUCTURED LOGGING
+-- Queryable log history with full-text search
+-- =============================================================================
+CREATE TABLE IF NOT EXISTS logs (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  timestamp TEXT NOT NULL,                -- ISO 8601 timestamp
+  level TEXT NOT NULL,                    -- trace/debug/info/warn/error/fatal
+  level_num INTEGER NOT NULL,             -- Numeric level (10-60) for filtering
+  component TEXT NOT NULL,                -- Logger name/component
+  message TEXT NOT NULL,                  -- Log message
+  session_id TEXT,                        -- FK to sessions (nullable)
+  workspace_id TEXT,                      -- FK to workspaces (nullable)
+  event_id TEXT,                          -- Nearest event for "around" queries
+  turn INTEGER,                           -- Turn number if applicable
+  data TEXT,                              -- JSON additional fields
+  error_message TEXT,                     -- Error message if applicable
+  error_stack TEXT                        -- Error stack trace
+);
+
+CREATE INDEX IF NOT EXISTS idx_logs_timestamp ON logs(timestamp DESC);
+CREATE INDEX IF NOT EXISTS idx_logs_session_time ON logs(session_id, timestamp DESC);
+CREATE INDEX IF NOT EXISTS idx_logs_level_time ON logs(level_num, timestamp DESC);
+CREATE INDEX IF NOT EXISTS idx_logs_component_time ON logs(component, timestamp DESC);
+CREATE INDEX IF NOT EXISTS idx_logs_event ON logs(event_id, timestamp);
+CREATE INDEX IF NOT EXISTS idx_logs_workspace_time ON logs(workspace_id, timestamp DESC);
+
+-- FTS5 for log message search
+CREATE VIRTUAL TABLE IF NOT EXISTS logs_fts USING fts5(
+  log_id UNINDEXED,                       -- Reference to logs.id
+  session_id UNINDEXED,
+  component,
+  message,
+  error_message,
+  tokenize='porter unicode61'
+);
+
+-- =============================================================================
 -- SCHEMA VERSION TRACKING
 -- =============================================================================
 CREATE TABLE IF NOT EXISTS schema_version (
@@ -167,4 +204,4 @@ CREATE TABLE IF NOT EXISTS schema_version (
 );
 
 INSERT OR IGNORE INTO schema_version (version, applied_at, description)
-VALUES (2, datetime('now'), 'Initial schema (v2: no status/provider, uses latest_model)');
+VALUES (3, datetime('now'), 'Initial schema with logging tables');

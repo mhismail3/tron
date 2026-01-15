@@ -4,7 +4,7 @@
  * Main entry point for the Tron WebSocket server.
  * Uses event-sourced session management via EventStoreOrchestrator.
  */
-import { createLogger, getSettings, resolveTronPath, getTronDataDir, SkillRegistry, type RpcContext, type EventStoreManager, type WorktreeRpcManager, type ContextRpcManager, type BrowserRpcManager, type SkillRpcManager, type SkillListParams, type SkillListResult, type SkillGetParams, type SkillGetResult, type SkillRefreshParams, type SkillRefreshResult, type SkillRemoveParams, type SkillRemoveResult, type RpcSkillInfo, type RpcSkillMetadata, type SessionId } from '@tron/core';
+import { createLogger, getSettings, resolveTronPath, getTronDataDir, SkillRegistry, initializeLogTransport, closeLogTransport, flushLogs, type RpcContext, type EventStoreManager, type WorktreeRpcManager, type ContextRpcManager, type BrowserRpcManager, type SkillRpcManager, type SkillListParams, type SkillListResult, type SkillGetParams, type SkillGetResult, type SkillRefreshParams, type SkillRefreshResult, type SkillRemoveParams, type SkillRemoveResult, type RpcSkillInfo, type RpcSkillMetadata, type SessionId } from '@tron/core';
 import { TronWebSocketServer, type WebSocketServerConfig } from './websocket.js';
 import { EventStoreOrchestrator, type EventStoreOrchestratorConfig } from './event-store-orchestrator.js';
 import { HealthServer, type HealthServerConfig } from './health.js';
@@ -853,6 +853,16 @@ export class TronServer {
     this.orchestrator = new EventStoreOrchestrator(orchestratorConfig);
     await this.orchestrator.initialize();
 
+    // Initialize SQLite log transport for database-backed logging
+    // This enables queryable log history in the same events.db
+    const db = this.orchestrator.getEventStore().getDatabase();
+    initializeLogTransport(db, {
+      minLevel: 30, // info and above
+      batchSize: 100,
+      flushIntervalMs: 1000,
+    });
+    logger.info('SQLite log transport initialized');
+
     // Create RpcContext adapter
     // Note: toolCallTracker removed - AskUserQuestion now uses async mode
     // where answers are submitted as new prompts, not tool results
@@ -1038,6 +1048,10 @@ export class TronServer {
       await this.wsServer.stop();
       this.wsServer = null;
     }
+
+    // Flush and close log transport before shutting down orchestrator
+    await flushLogs();
+    closeLogTransport();
 
     if (this.orchestrator) {
       await this.orchestrator.shutdown();

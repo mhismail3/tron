@@ -106,6 +106,14 @@ export class EventStore {
     return this.initialized;
   }
 
+  /**
+   * Get the underlying database instance.
+   * Used for initializing shared resources like the log transport.
+   */
+  getDatabase(): import('better-sqlite3').Database {
+    return this.backend.getDatabase();
+  }
+
   // ===========================================================================
   // Session Creation
   // ===========================================================================

@@ -189,6 +189,14 @@ export class SQLiteBackend {
     return this.initialized;
   }
 
+  /**
+   * Get the underlying database instance.
+   * Used for initializing shared resources like the log transport.
+   */
+  getDatabase(): Database.Database {
+    return this.getDb();
+  }
+
   private getDb(): Database.Database {
     if (!this.db) {
       throw new Error('Database not initialized. Call initialize() first.');
@@ -413,6 +421,39 @@ export class SQLiteBackend {
         tokenize='porter unicode61'
       );
 
+      -- Logs table for structured logging
+      CREATE TABLE IF NOT EXISTS logs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        timestamp TEXT NOT NULL,
+        level TEXT NOT NULL,
+        level_num INTEGER NOT NULL,
+        component TEXT NOT NULL,
+        message TEXT NOT NULL,
+        session_id TEXT,
+        workspace_id TEXT,
+        event_id TEXT,
+        turn INTEGER,
+        data TEXT,
+        error_message TEXT,
+        error_stack TEXT
+      );
+      CREATE INDEX IF NOT EXISTS idx_logs_timestamp ON logs(timestamp DESC);
+      CREATE INDEX IF NOT EXISTS idx_logs_session_time ON logs(session_id, timestamp DESC);
+      CREATE INDEX IF NOT EXISTS idx_logs_level_time ON logs(level_num, timestamp DESC);
+      CREATE INDEX IF NOT EXISTS idx_logs_component_time ON logs(component, timestamp DESC);
+      CREATE INDEX IF NOT EXISTS idx_logs_event ON logs(event_id, timestamp);
+      CREATE INDEX IF NOT EXISTS idx_logs_workspace_time ON logs(workspace_id, timestamp DESC);
+
+      -- FTS5 for log message search
+      CREATE VIRTUAL TABLE IF NOT EXISTS logs_fts USING fts5(
+        log_id UNINDEXED,
+        session_id UNINDEXED,
+        component,
+        message,
+        error_message,
+        tokenize='porter unicode61'
+      );
+
       -- Schema version
       CREATE TABLE IF NOT EXISTS schema_version (
         version INTEGER PRIMARY KEY,
@@ -420,7 +461,7 @@ export class SQLiteBackend {
         description TEXT
       );
       INSERT OR IGNORE INTO schema_version (version, applied_at, description)
-      VALUES (2, datetime('now'), 'Initial schema (v2: no status/provider, uses latest_model)');
+      VALUES (3, datetime('now'), 'Initial schema with logging tables');
     `;
   }
 

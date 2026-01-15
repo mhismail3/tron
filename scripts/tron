@@ -219,31 +219,234 @@ cmd_restart() {
 }
 
 cmd_logs() {
-    local tier="${1:-prod}"
-    local log_dir="$PROD_LOG_DIR"
+    local tier="prod"
+    local level=""
+    local output=""
+    local limit=50
+    local tail_mode=false
+    local session=""
+    local search=""
 
+    # Parse arguments
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            -l|--level)
+                level="$2"
+                shift 2
+                ;;
+            -o|--output)
+                output="$2"
+                shift 2
+                ;;
+            -n|--limit)
+                limit="$2"
+                shift 2
+                ;;
+            -t|--tail)
+                tail_mode=true
+                shift
+                ;;
+            -s|--session)
+                session="$2"
+                shift 2
+                ;;
+            -q|--search)
+                search="$2"
+                shift 2
+                ;;
+            beta|prod)
+                tier="$1"
+                shift
+                ;;
+            -h|--help)
+                echo ""
+                echo -e "${CYAN}tron logs${NC} - Query database logs"
+                echo ""
+                echo "Usage: tron logs [options] [prod|beta]"
+                echo ""
+                echo "Options:"
+                echo "  -l, --level LEVEL    Filter by level (trace/debug/info/warn/error/fatal)"
+                echo "  -n, --limit N        Number of logs to show (default: 50)"
+                echo "  -o, --output FILE    Write output to file"
+                echo "  -s, --session ID     Filter by session ID"
+                echo "  -q, --search TEXT    Search log messages (FTS)"
+                echo "  -t, --tail           Tail file logs instead of querying database"
+                echo "  -h, --help           Show this help"
+                echo ""
+                echo "Examples:"
+                echo "  tron logs                     # Latest 50 logs"
+                echo "  tron logs -l error            # Only errors"
+                echo "  tron logs -l warn -n 100      # Last 100 warnings+"
+                echo "  tron logs -o errors.txt -l error"
+                echo "  tron logs -t                  # Tail file logs"
+                echo "  tron logs beta -l info        # Beta database logs"
+                echo ""
+                return 0
+                ;;
+            *)
+                shift
+                ;;
+        esac
+    done
+
+    # Tail mode - use file logs
+    if [ "$tail_mode" = true ]; then
+        local log_dir="$PROD_LOG_DIR"
+        if [ "$tier" = "beta" ]; then
+            log_dir="$BETA_LOG_DIR"
+        fi
+
+        if [ ! -d "$log_dir" ]; then
+            print_error "Log directory not found: $log_dir"
+            return 1
+        fi
+
+        local latest_log
+        latest_log=$(ls -t "$log_dir"/*.log 2>/dev/null | head -1)
+
+        if [ -z "$latest_log" ]; then
+            print_error "No log files found in $log_dir"
+            return 1
+        fi
+
+        echo -e "${BLUE}Tailing $tier logs: $(basename "$latest_log")${NC}"
+        echo -e "${DIM}Log directory: $log_dir${NC}"
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        tail -f "$latest_log"
+        return 0
+    fi
+
+    # Database mode - query SQLite
+    local db_path="$TRON_HOME/events.db"
     if [ "$tier" = "beta" ]; then
-        log_dir="$BETA_LOG_DIR"
+        db_path="$TRON_HOME/beta/events.db"
     fi
 
-    if [ ! -d "$log_dir" ]; then
-        print_error "Log directory not found: $log_dir"
+    if [ ! -f "$db_path" ]; then
+        print_error "Database not found: $db_path"
+        echo "The server may not have been started yet, or no logs have been written."
         return 1
     fi
 
-    # Find the most recent log file
-    local latest_log
-    latest_log=$(ls -t "$log_dir"/*.log 2>/dev/null | head -1)
-
-    if [ -z "$latest_log" ]; then
-        print_error "No log files found in $log_dir"
+    # Check if logs table exists
+    local table_exists
+    table_exists=$(sqlite3 "$db_path" "SELECT name FROM sqlite_master WHERE type='table' AND name='logs';" 2>/dev/null)
+    if [ -z "$table_exists" ]; then
+        print_error "Logs table not found in database"
+        echo "The server may need to be restarted with the updated schema."
         return 1
     fi
 
-    echo -e "${BLUE}Tailing $tier logs: $(basename "$latest_log")${NC}"
-    echo -e "${DIM}Log directory: $log_dir${NC}"
-    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-    tail -f "$latest_log"
+    # Build SQL query
+    local where_clause=""
+    local conditions=()
+
+    if [ -n "$level" ]; then
+        local level_num
+        case "$level" in
+            trace) level_num=10 ;;
+            debug) level_num=20 ;;
+            info)  level_num=30 ;;
+            warn)  level_num=40 ;;
+            error) level_num=50 ;;
+            fatal) level_num=60 ;;
+            *)
+                print_error "Invalid level: $level"
+                echo "Valid levels: trace, debug, info, warn, error, fatal"
+                return 1
+                ;;
+        esac
+        conditions+=("level_num >= $level_num")
+    fi
+
+    if [ -n "$session" ]; then
+        conditions+=("session_id LIKE '%$session%'")
+    fi
+
+    if [ ${#conditions[@]} -gt 0 ]; then
+        where_clause="WHERE $(IFS=' AND '; echo "${conditions[*]}")"
+    fi
+
+    local sql
+    if [ -n "$search" ]; then
+        # Use FTS search
+        sql="SELECT l.timestamp, l.level, l.component, l.message, l.session_id, l.error_message
+             FROM logs l
+             JOIN logs_fts f ON l.id = f.log_id
+             WHERE logs_fts MATCH '${search//\'/\'\'}'
+             ${where_clause:+AND ${where_clause#WHERE }}
+             ORDER BY l.timestamp DESC
+             LIMIT $limit"
+    else
+        sql="SELECT timestamp, level, component, message, session_id, error_message
+             FROM logs
+             $where_clause
+             ORDER BY timestamp DESC
+             LIMIT $limit"
+    fi
+
+    # Execute query
+    local result
+    result=$(sqlite3 -separator '|' "$db_path" "$sql" 2>&1)
+
+    if [ $? -ne 0 ]; then
+        print_error "Database query failed: $result"
+        return 1
+    fi
+
+    if [ -z "$result" ]; then
+        echo -e "${DIM}No logs found matching criteria${NC}"
+        return 0
+    fi
+
+    # Output
+    if [ -n "$output" ]; then
+        # Write to file (plain text, no colors)
+        echo "$result" | while IFS='|' read -r ts lvl comp msg sess err; do
+            local line="${ts} ${lvl} [${comp}] ${msg}"
+            if [ -n "$sess" ]; then
+                line="$line (${sess})"
+            fi
+            if [ -n "$err" ]; then
+                line="$line | Error: $err"
+            fi
+            echo "$line"
+        done > "$output"
+        print_success "Wrote $(wc -l < "$output" | tr -d ' ') logs to $output"
+    else
+        # Display to terminal with colors
+        echo -e "${CYAN}Database Logs ($tier)${NC}"
+        echo -e "${DIM}Database: $db_path${NC}"
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        echo "$result" | while IFS='|' read -r ts lvl comp msg sess err; do
+            local color=""
+            case "$lvl" in
+                trace) color="$DIM" ;;
+                debug) color="$DIM" ;;
+                info)  color="$GREEN" ;;
+                warn)  color="$YELLOW" ;;
+                error) color="$RED" ;;
+                fatal) color="$RED$BOLD" ;;
+            esac
+
+            # Format timestamp (show time only)
+            local time_part="${ts:11:8}"
+
+            # Build output line
+            local line="${time_part} ${color}${lvl}${NC} [${comp}] ${msg}"
+            if [ -n "$sess" ]; then
+                line="$line ${DIM}(${sess:0:12}...)${NC}"
+            fi
+            if [ -n "$err" ]; then
+                line="$line\n  ${RED}Error: $err${NC}"
+            fi
+
+            echo -e "$line"
+        done
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        local count=$(echo "$result" | wc -l | tr -d ' ')
+        echo -e "${DIM}Showing $count logs (limit: $limit)${NC}"
+    fi
 }
 
 cmd_errors() {
@@ -669,8 +872,8 @@ cmd_help() {
     echo "  start       Start production service"
     echo "  stop        Stop production service"
     echo "  restart     Restart production service"
-    echo "  logs [tier] Tail logs (prod or beta, default: prod)"
-    echo "  errors      Show recent errors from logs"
+    echo "  logs        Query database logs (use -h for options)"
+    echo "  errors      Show recent errors from file logs"
     echo ""
     echo "Development:"
     echo "  beta        Run beta server (port $BETA_WS_PORT, separate database)"
@@ -680,6 +883,13 @@ cmd_help() {
     echo "Setup:"
     echo "  install     Install launchd service and CLI"
     echo "  uninstall   Remove service (preserves data)"
+    echo ""
+    echo "Log Examples:"
+    echo "  tron logs                  # Latest 50 database logs"
+    echo "  tron logs -l error         # Errors and fatals only"
+    echo "  tron logs -l warn -n 100   # Last 100 warnings+"
+    echo "  tron logs -t               # Tail file logs (live)"
+    echo "  tron logs -o out.txt       # Write to file"
     echo ""
     echo "Ports:"
     echo "  Production: WS $PROD_WS_PORT, Health $PROD_HEALTH_PORT"
@@ -693,7 +903,7 @@ case "${1:-}" in
     start)      cmd_start ;;
     stop)       cmd_stop ;;
     restart)    cmd_restart ;;
-    logs)       cmd_logs "${2:-}" ;;
+    logs)       shift; cmd_logs "$@" ;;
     errors)     cmd_errors "${2:-}" ;;
     beta)       cmd_beta ;;
     deploy)     cmd_deploy ;;

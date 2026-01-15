@@ -115,6 +115,7 @@ import {
   type RulesTrackingEvent,
   isPlanModeEnteredEvent,
   isPlanModeExitedEvent,
+  withLoggingContext,
 } from '@tron/core';
 import { BrowserService } from './browser/index.js';
 import {
@@ -958,6 +959,10 @@ export class EventStoreOrchestrator extends EventEmitter {
     active.isProcessing = true;
     active.lastActivity = new Date();
 
+    // Wrap entire agent run with logging context for session correlation
+    return withLoggingContext(
+      { sessionId: options.sessionId },
+      async () => {
     try {
       // CRITICAL: Wait for any pending stream events to complete before appending message events
       // This prevents race conditions where stream events (turn_start, etc.) capture wrong parentId
@@ -1316,6 +1321,7 @@ export class EventStoreOrchestrator extends EventEmitter {
     } finally {
       active.isProcessing = false;
     }
+      }); // End withLoggingContext
   }
 
   async cancelAgent(sessionId: string): Promise<boolean> {

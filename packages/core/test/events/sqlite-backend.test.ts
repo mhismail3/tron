@@ -55,7 +55,7 @@ describe('SQLiteBackend', () => {
 
     it('should record schema version', async () => {
       const version = backend.getSchemaVersion();
-      expect(version).toBe(2);  // Updated: migration 002 for schema cleanup
+      expect(version).toBe(3);  // Base v2 + migration 005 (logs tables)
     });
   });
 
