@@ -18,10 +18,11 @@ PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 PLIST_NAME="com.tron.server"
 PLIST_PATH="$HOME/Library/LaunchAgents/$PLIST_NAME.plist"
 TRON_HOME="${TRON_DATA_DIR:-$HOME/.tron}"
+INSTALL_DIR="$TRON_HOME/app"
 BIN_DIR="$HOME/.local/bin"
 PROD_LOG_DIR="$TRON_HOME/logs/prod"
 BETA_LOG_DIR="$TRON_HOME/logs/beta"
-DEPLOYED_COMMIT_FILE="$TRON_HOME/deployed-commit"
+DEPLOYED_COMMIT_FILE="$INSTALL_DIR/deployed-commit"
 
 # Port configuration
 PROD_WS_PORT=8080
@@ -110,6 +111,11 @@ cmd_status() {
             local commit_msg=$(cd "$PROJECT_DIR" && git log -1 --format="%s" "$deployed_commit" 2>/dev/null | head -c 50)
             echo "  Deployed:  ${deployed_commit:0:7} - $commit_msg"
         fi
+
+        # Show install location
+        if [ -d "$INSTALL_DIR" ]; then
+            echo "  Install:   $INSTALL_DIR"
+        fi
     else
         print_warning "Production: ${YELLOW}STOPPED${NC}"
 
@@ -117,6 +123,11 @@ cmd_status() {
         if [ -f "$DEPLOYED_COMMIT_FILE" ]; then
             local deployed_commit=$(cat "$DEPLOYED_COMMIT_FILE")
             echo "  Last deployed: ${deployed_commit:0:7}"
+        fi
+
+        # Show install location if exists
+        if [ -d "$INSTALL_DIR" ]; then
+            echo "  Install:   $INSTALL_DIR"
         fi
     fi
 
@@ -316,6 +327,12 @@ cmd_deploy() {
 
     cd "$PROJECT_DIR"
 
+    # Check if installed
+    if [ ! -f "$PLIST_PATH" ]; then
+        print_error "Tron not installed. Run: tron install"
+        return 1
+    fi
+
     # Check for uncommitted changes
     if ! git diff-index --quiet HEAD -- 2>/dev/null; then
         print_warning "You have uncommitted changes!"
@@ -330,21 +347,21 @@ cmd_deploy() {
         fi
     fi
 
-    # Build first (includes type checking)
-    print_status "Building..."
-    if ! npm run build 2>&1; then
-        print_error "Build failed! Aborting deploy."
-        return 1
-    fi
-    print_success "Build complete"
-
-    # Run tests
+    # Run tests first
     print_status "Running tests..."
-    if ! npm test 2>&1; then
+    if ! bun run test 2>&1; then
         print_error "Tests failed! Aborting deploy."
         return 1
     fi
     print_success "Tests passed"
+
+    # Build production bundle (includes TypeScript compilation)
+    print_status "Building production bundle..."
+    if ! "$SCRIPT_DIR/build-prod.sh" 2>&1; then
+        print_error "Build failed! Aborting deploy."
+        return 1
+    fi
+    print_success "Build complete"
 
     # Stop service if running
     if is_running; then
@@ -353,7 +370,11 @@ cmd_deploy() {
         sleep 1
     fi
 
-    print_success "Build ready in project directory"
+    # Copy production bundle to install directory
+    print_status "Installing to $INSTALL_DIR..."
+    rm -rf "$INSTALL_DIR"/*
+    cp -r "$PROJECT_DIR/dist/prod/"* "$INSTALL_DIR/"
+    print_success "Installed to: $INSTALL_DIR"
 
     # Record deployed commit
     local current_commit=$(git rev-parse HEAD)
@@ -364,12 +385,13 @@ cmd_deploy() {
     if [ -f "$PLIST_PATH" ]; then
         print_status "Starting production service..."
         launchctl load "$PLIST_PATH"
-        sleep 2
+        sleep 3
 
         if is_running; then
-            print_success "Production service started"
+            local pid=$(get_pid)
+            print_success "Production service started (PID: ${pid:-unknown})"
         else
-            print_error "Failed to start service. Check: tron errors"
+            print_error "Failed to start service. Check: tron logs"
             return 1
         fi
     else
@@ -436,13 +458,13 @@ cmd_rollback() {
     git reset HEAD
     print_success "Working directory restored"
 
-    # Rebuild
-    print_status "Rebuilding..."
-    npm run build
+    # Build production bundle
+    print_status "Building production bundle..."
+    "$SCRIPT_DIR/build-prod.sh"
     print_success "Build complete"
 
     # Redeploy
-    print_status "Redeploying..."
+    print_status "Redeploying to $INSTALL_DIR..."
 
     # Stop service if running
     if is_running; then
@@ -450,19 +472,17 @@ cmd_rollback() {
         sleep 1
     fi
 
-    # Copy to install directory
-    mkdir -p "$INSTALL_DIR/packages"
-    for pkg in core server tui; do
-        rm -rf "$INSTALL_DIR/packages/$pkg"
-        cp -r "packages/$pkg/dist" "$INSTALL_DIR/packages/$pkg"
-        cp "packages/$pkg/package.json" "$INSTALL_DIR/packages/$pkg/"
-    done
-    cp package.json "$INSTALL_DIR/"
+    # Copy production bundle to install directory
+    rm -rf "$INSTALL_DIR"/*
+    cp -r "$PROJECT_DIR/dist/prod/"* "$INSTALL_DIR/"
+
+    # Restore deployed commit file
+    echo "$deployed_commit" > "$DEPLOYED_COMMIT_FILE"
 
     # Start service
     if [ -f "$PLIST_PATH" ]; then
         launchctl load "$PLIST_PATH"
-        sleep 2
+        sleep 3
         if is_running; then
             print_success "Production service restarted"
         else
@@ -483,21 +503,29 @@ cmd_install() {
     # Ensure directories exist
     mkdir -p "$BIN_DIR"
     mkdir -p "$TRON_HOME"
+    mkdir -p "$INSTALL_DIR"
     mkdir -p "$PROD_LOG_DIR"
     mkdir -p "$BETA_LOG_DIR"
     mkdir -p "$HOME/Library/LaunchAgents"
 
-    # Check if we need to build first
-    if [ ! -d "$PROJECT_DIR/packages/tui/dist" ]; then
-        print_warning "Production build not found. Running deploy first..."
-        cmd_deploy
+    # Build production bundle if needed
+    if [ ! -f "$PROJECT_DIR/dist/prod/index.js" ]; then
+        print_status "Building production bundle..."
+        cd "$PROJECT_DIR"
+        "$SCRIPT_DIR/build-prod.sh"
     fi
 
-    # Get node path for PATH env
+    # Copy production bundle to install directory
+    print_status "Installing to $INSTALL_DIR..."
+    rm -rf "$INSTALL_DIR"/*
+    cp -r "$PROJECT_DIR/dist/prod/"* "$INSTALL_DIR/"
+    print_success "Installed to: $INSTALL_DIR"
+
+    # Get node path
     local node_path
     node_path=$(which node)
 
-    # Create launchd plist (uses wrapper script for timestamped logging)
+    # Create launchd plist - runs the bundled server
     print_status "Creating launchd service..."
     cat > "$PLIST_PATH" << EOF
 <?xml version="1.0" encoding="UTF-8"?>
@@ -509,12 +537,13 @@ cmd_install() {
 
     <key>ProgramArguments</key>
     <array>
-        <string>/bin/bash</string>
-        <string>$SCRIPT_DIR/tron-server</string>
+        <string>/bin/sh</string>
+        <string>-c</string>
+        <string>exec "$node_path" "$INSTALL_DIR/index.js" >> "$PROD_LOG_DIR/server.log" 2>&1</string>
     </array>
 
     <key>WorkingDirectory</key>
-    <string>$PROJECT_DIR</string>
+    <string>$INSTALL_DIR</string>
 
     <key>RunAtLoad</key>
     <true/>
@@ -529,12 +558,6 @@ cmd_install() {
 
     <key>ThrottleInterval</key>
     <integer>10</integer>
-
-    <key>StartCalendarInterval</key>
-    <dict>
-        <key>Minute</key>
-        <integer>0</integer>
-    </dict>
 
     <key>EnvironmentVariables</key>
     <dict>
@@ -552,6 +575,8 @@ cmd_install() {
         <string>$PROD_WS_PORT</string>
         <key>TRON_HEALTH_PORT</key>
         <string>$PROD_HEALTH_PORT</string>
+        <key>LOG_LEVEL</key>
+        <string>info</string>
     </dict>
 
     <key>SoftResourceLimits</key>
@@ -574,42 +599,63 @@ EOF
         print_warning "Add to your shell profile: export PATH=\"\$HOME/.local/bin:\$PATH\""
     fi
 
+    # Record initial deploy
+    local current_commit=$(cd "$PROJECT_DIR" && git rev-parse HEAD 2>/dev/null || echo "unknown")
+    echo "$current_commit" > "$DEPLOYED_COMMIT_FILE"
+
     # Start the service
     print_status "Starting service..."
     launchctl load "$PLIST_PATH"
-    sleep 2
+    sleep 3
 
     if is_running; then
-        print_success "Service started!"
+        local pid=$(get_pid)
+        print_success "Service started! (PID: ${pid:-unknown})"
     else
-        print_error "Service failed to start. Check: tron errors"
+        print_error "Service failed to start. Check: tron logs"
     fi
 
     echo ""
     print_success "Installation complete!"
+    echo ""
+    echo "Locations:"
+    echo "  Install:   $INSTALL_DIR"
+    echo "  Logs:      $PROD_LOG_DIR"
+    echo "  Data:      $TRON_HOME"
     echo ""
     echo "Commands:"
     echo "  tron status    - Check service status"
     echo "  tron logs      - View production logs"
     echo "  tron beta      - Run beta server (port $BETA_WS_PORT)"
     echo "  tron deploy    - Build and deploy to production"
-    echo "  tron rollback  - Restore to last deployed commit"
     echo ""
 }
 
 cmd_uninstall() {
-    print_status "Uninstalling Tron service..."
+    echo ""
+    echo -e "${CYAN}Uninstalling Tron Service${NC}"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
     if is_running; then
+        print_status "Stopping service..."
         launchctl unload "$PLIST_PATH" 2>/dev/null || true
+        sleep 1
     fi
 
+    print_status "Removing launchd service..."
     rm -f "$PLIST_PATH"
+
+    print_status "Removing CLI..."
     rm -f "$BIN_DIR/tron"
 
+    print_status "Removing installed app..."
+    rm -rf "$INSTALL_DIR"
+
+    echo ""
     print_success "Service uninstalled"
     print_warning "Data preserved in: $TRON_HOME"
     print_warning "Logs preserved in: $TRON_HOME/logs/"
+    echo ""
 }
 
 cmd_help() {
