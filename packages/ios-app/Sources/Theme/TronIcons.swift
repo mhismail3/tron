@@ -141,25 +141,42 @@ struct WaveformIcon: View {
     var size: CGFloat = 20
     var color: Color = .tronEmerald
 
-    @State private var animating = false
-
     var body: some View {
-        HStack(spacing: 2) {
+        HStack(alignment: .center, spacing: 2) {
             ForEach(0..<3, id: \.self) { index in
-                RoundedRectangle(cornerRadius: 1)
-                    .fill(color)
-                    .frame(width: size / 6, height: size * 0.3)
-                    .scaleEffect(y: animating ? 1.0 : 0.3, anchor: .center)
-                    .animation(
-                        .easeInOut(duration: 0.4)
-                            .repeatForever(autoreverses: true)
-                            .delay(Double(index) * 0.15),
-                        value: animating
-                    )
+                PulsingBar(
+                    color: color,
+                    minHeight: size * 0.15,
+                    maxHeight: size * 0.65,
+                    width: max(2, size / 7),
+                    delay: Double(index) * 0.12
+                )
             }
         }
         .frame(width: size, height: size)
-        .onAppear { animating = true }
+    }
+}
+
+private struct PulsingBar: View {
+    let color: Color
+    let minHeight: CGFloat
+    let maxHeight: CGFloat
+    let width: CGFloat
+    let delay: Double
+
+    @State private var expanded = false
+
+    var body: some View {
+        Capsule()
+            .fill(color)
+            .frame(width: width, height: expanded ? maxHeight : minHeight)
+            .animation(
+                .easeInOut(duration: 0.35)
+                    .repeatForever(autoreverses: true)
+                    .delay(delay),
+                value: expanded
+            )
+            .onAppear { expanded = true }
     }
 }
 
