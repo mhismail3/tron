@@ -42,8 +42,43 @@ extension ChatViewModel {
         logger.debug("Session resumed, using local EventDatabase for message history", category: .session)
     }
 
+    /// Reconnect to server and resume streaming state after app returns to foreground
+    func reconnectAndResume() async {
+        logger.info("reconnectAndResume() - checking connection state", category: .session)
+
+        // Check if we're already connected
+        if rpcClient.isConnected {
+            logger.debug("Already connected, checking agent state", category: .session)
+        } else {
+            logger.info("Not connected, reconnecting...", category: .session)
+            await rpcClient.connect()
+
+            // Wait briefly for connection
+            if !rpcClient.isConnected {
+                try? await Task.sleep(for: .milliseconds(100))
+            }
+
+            guard rpcClient.isConnected else {
+                logger.warning("Failed to reconnect", category: .session)
+                return
+            }
+
+            // Re-resume the session after reconnection
+            do {
+                try await rpcClient.resumeSession(sessionId: sessionId)
+                logger.info("Session re-resumed after reconnection", category: .session)
+            } catch {
+                logger.error("Failed to re-resume session: \(error)", category: .session)
+                return
+            }
+        }
+
+        // Check if agent is running and catch up on any missed content
+        await checkAndResumeAgentState()
+    }
+
     /// Check agent state and set up streaming if agent is currently running
-    private func checkAndResumeAgentState() async {
+    func checkAndResumeAgentState() async {
         do {
             let agentState = try await rpcClient.getAgentStateForSession(sessionId: sessionId)
             if agentState.isRunning {

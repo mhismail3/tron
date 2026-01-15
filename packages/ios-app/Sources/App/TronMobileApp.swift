@@ -4,6 +4,7 @@ import SwiftUI
 struct TronMobileApp: App {
     @StateObject private var appState = AppState()
     @StateObject private var eventDatabase = EventDatabase()
+    @Environment(\.scenePhase) private var scenePhase
 
     // EventStoreManager is created lazily since it needs appState.rpcClient
     @State private var eventStoreManager: EventStoreManager?
@@ -55,6 +56,12 @@ struct TronMobileApp: App {
                 } catch {
                     logger.error("Failed to initialize event store: \(error)", category: .session)
                 }
+            }
+            .onChange(of: scenePhase) { oldPhase, newPhase in
+                let isBackground = newPhase != .active
+                appState.rpcClient.setBackgroundState(isBackground)
+                eventStoreManager?.setBackgroundState(isBackground)
+                logger.info("Scene phase changed: \(oldPhase) -> \(newPhase), background=\(isBackground)", category: .session)
             }
         }
     }

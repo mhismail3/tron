@@ -39,6 +39,7 @@ private struct ScrollOffsetPreferenceKey: PreferenceKey {
 @available(iOS 26.0, *)
 struct ChatView: View {
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.scenePhase) private var scenePhase
     @EnvironmentObject var eventStoreManager: EventStoreManager
     @StateObject private var viewModel: ChatViewModel
     @StateObject private var inputHistory = InputHistoryStore()
@@ -398,6 +399,14 @@ struct ChatView: View {
 
             // Load messages after connection is established
             await viewModel.syncAndLoadMessagesForResume()
+        }
+        .onChange(of: scenePhase) { oldPhase, newPhase in
+            // Reconnect and resume when returning to foreground
+            if oldPhase != .active && newPhase == .active {
+                Task {
+                    await viewModel.reconnectAndResume()
+                }
+            }
         }
     }
 
