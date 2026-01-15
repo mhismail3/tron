@@ -537,6 +537,12 @@ export class AnthropicProvider {
                   cacheWrite: cacheCreationTokens > 0,
                 });
               }
+              // Trace log for stream debugging
+              logger.trace('Stream: message_start', {
+                messageId: ('message' in event && event.message?.id) || undefined,
+                model: ('message' in event && event.message?.model) || undefined,
+                inputTokens,
+              });
               break;
 
             case 'message_delta':
@@ -544,9 +550,20 @@ export class AnthropicProvider {
               if ('usage' in event && event.usage) {
                 outputTokens = (event.usage as { output_tokens?: number }).output_tokens ?? 0;
               }
+              // Trace log for stream debugging
+              logger.trace('Stream: message_delta', {
+                outputTokens,
+                stopReason: ('delta' in event && (event.delta as { stop_reason?: string })?.stop_reason) || undefined,
+              });
               break;
 
             case 'content_block_start':
+              // Trace log for stream debugging
+              logger.trace('Stream: content_block_start', {
+                index: event.index,
+                type: event.content_block.type,
+                toolName: event.content_block.type === 'tool_use' ? event.content_block.name : undefined,
+              });
               if (event.content_block.type === 'text') {
                 currentBlockType = 'text';
                 yield { type: 'text_start' };
@@ -659,6 +676,26 @@ export class AnthropicProvider {
       } catch (error) {
         attempt++;
         const parsed = parseError(error);
+
+        // Trace log full error details for debugging
+        logger.trace('Anthropic stream error - full details', {
+          errorCategory: parsed.category,
+          errorMessage: parsed.message,
+          isRetryable: parsed.isRetryable,
+          attempt,
+          hasYieldedData,
+          fullError: error instanceof Error ? {
+            name: error.name,
+            message: error.message,
+            stack: error.stack,
+            cause: error.cause,
+          } : error,
+          requestContext: {
+            model: this.config.model,
+            messageCount: context.messages.length,
+            hasTools: !!context.tools?.length,
+          },
+        });
 
         // If we've already yielded data, we can't retry (partial stream)
         // The consumer has already received some events

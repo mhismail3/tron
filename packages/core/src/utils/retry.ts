@@ -172,6 +172,16 @@ export async function withRetry<T>(
       }
 
       const value = await operation();
+
+      // Log successful retry when there were previous failures
+      if (attempts > 0) {
+        logger.trace('Retry succeeded', {
+          attempts: attempts + 1,
+          totalDelayMs,
+          lastErrorCategory: lastError?.category,
+        });
+      }
+
       return {
         success: true,
         value,
@@ -330,6 +340,13 @@ export async function* withStreamRetry<T>(
         }
         hasYieldedData = true;
         yield item;
+      }
+
+      // Log successful retry when there were previous failures
+      if (attempts > 0) {
+        logger.trace('Stream retry succeeded', {
+          attempts: attempts + 1,
+        });
       }
 
       // Successfully completed

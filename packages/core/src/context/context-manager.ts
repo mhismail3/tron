@@ -21,6 +21,9 @@ import {
   TRON_CORE_PROMPT,
   loadSystemPromptFromFileSync,
 } from './system-prompts.js';
+import { createLogger } from '../logging/logger.js';
+
+const logger = createLogger('context-manager');
 
 // =============================================================================
 // Types
@@ -669,6 +672,16 @@ export class ContextManager {
       preserved = [...this.messages];
     }
 
+    // Log before summarizer call
+    logger.trace('Compaction: calling summarizer', {
+      totalMessages: this.messages.length,
+      messagesToSummarize: messagesToSummarize.length,
+      messagesToPreserve: preserved.length,
+      tokensBefore,
+      summarizerId: opts.summarizer?.constructor?.name ?? 'unknown',
+      usingEditedSummary: !!opts.editedSummary,
+    });
+
     // Generate or use edited summary
     let summary: string;
     let extractedData: ExtractedData | undefined;
@@ -680,6 +693,14 @@ export class ContextManager {
       summary = result.narrative;
       extractedData = result.extractedData;
     }
+
+    // Log summary generated
+    const summaryTokens = Math.ceil(summary.length / 4);
+    logger.trace('Compaction: summary generated', {
+      summaryLength: summary.length,
+      summaryTokens,
+      hasExtractedData: !!extractedData,
+    });
 
     // Build new message list
     const newMessages: Message[] = [
@@ -699,15 +720,32 @@ export class ContextManager {
       ...preserved,
     ];
 
+    // Log message rebuild
+    logger.trace('Compaction: rebuilding message list', {
+      newMessageCount: newMessages.length,
+      preservedMessages: preserved.length,
+      summarizedMessages: messagesToSummarize.length,
+    });
+
     // Update state
     this.setMessages(newMessages);
     const tokensAfter = this.getCurrentTokens();
+    const compressionRatio = tokensAfter / tokensBefore;
+
+    // Log completion with full context breakdown
+    logger.trace('Compaction: complete', {
+      tokensBefore,
+      tokensAfter,
+      tokensSaved: tokensBefore - tokensAfter,
+      compressionRatio,
+      breakdown: this.getSnapshot().breakdown,
+    });
 
     return {
       success: true,
       tokensBefore,
       tokensAfter,
-      compressionRatio: tokensAfter / tokensBefore,
+      compressionRatio,
       summary,
       extractedData,
     };

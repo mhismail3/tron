@@ -1,0 +1,53 @@
+#!/bin/bash
+# Run beta server from this workspace
+# Usage: ./beta
+
+set -e
+
+# Get project root (where this script lives)
+PROJECT_DIR="$(cd "$(dirname "$0")" && pwd)"
+cd "$PROJECT_DIR"
+
+# Config
+BETA_WS_PORT=8082
+BETA_HEALTH_PORT=8083
+TRON_HOME="${TRON_DATA_DIR:-$HOME/.tron}"
+
+# Colors
+CYAN='\033[0;36m'
+YELLOW='\033[1;33m'
+NC='\033[0m'
+
+# Check if beta port is already in use
+if lsof -i :$BETA_WS_PORT -sTCP:LISTEN >/dev/null 2>&1; then
+    echo -e "${YELLOW}Beta server already running on port $BETA_WS_PORT${NC}"
+    echo "  Kill it first: kill \$(lsof -t -i :$BETA_WS_PORT)"
+    exit 1
+fi
+
+# Build if needed
+if [ ! -d "packages/server/dist" ]; then
+    echo "Building..."
+    bun run build
+fi
+
+echo ""
+echo -e "${CYAN}Starting Beta Server${NC}"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "  WebSocket: ws://localhost:$BETA_WS_PORT/ws"
+echo "  Health:    http://localhost:$BETA_HEALTH_PORT/health"
+echo "  Database:  $TRON_HOME/events-beta.db"
+echo "  Workspace: $PROJECT_DIR"
+echo ""
+echo -e "${YELLOW}Press Ctrl+C to stop${NC}"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+# Run with beta environment
+export TRON_WS_PORT=$BETA_WS_PORT
+export TRON_HEALTH_PORT=$BETA_HEALTH_PORT
+export TRON_BUILD_TIER=beta
+export TRON_EVENT_STORE_DB="$TRON_HOME/events-beta.db"
+export LOG_LEVEL="${LOG_LEVEL:-trace}"
+export NODE_ENV=development
+
+exec node packages/server/dist/index.js

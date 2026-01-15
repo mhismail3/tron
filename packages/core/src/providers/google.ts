@@ -257,8 +257,19 @@ export class GoogleProvider {
       });
 
       if (!response.ok) {
-        const error = await response.text();
-        throw new Error(`Gemini API error: ${response.status} - ${error}`);
+        const errorText = await response.text();
+        // Trace log full error response for debugging
+        logger.trace('Gemini API error response - full details', {
+          statusCode: response.status,
+          statusText: response.statusText,
+          errorBody: errorText,
+          requestContext: {
+            model: this.config.model,
+            messageCount: context.messages.length,
+            hasTools: !!context.tools?.length,
+          },
+        });
+        throw new Error(`Gemini API error: ${response.status} - ${errorText}`);
       }
 
       // Process SSE stream
@@ -396,6 +407,20 @@ export class GoogleProvider {
         }
       }
     } catch (error) {
+      // Trace log full error details for debugging
+      logger.trace('Gemini stream error - full details', {
+        fullError: error instanceof Error ? {
+          name: error.name,
+          message: error.message,
+          stack: error.stack,
+          cause: error.cause,
+        } : error,
+        requestContext: {
+          model: this.config.model,
+          messageCount: context.messages.length,
+          hasTools: !!context.tools?.length,
+        },
+      });
       logger.error('Stream error', error instanceof Error ? error : new Error(String(error)));
       yield { type: 'error', error: error instanceof Error ? error : new Error(String(error)) };
     }
