@@ -48,9 +48,10 @@ struct ContextAuditView: View {
         }
     }
 
-    /// Paginated messages - only show the first N messages for performance
+    /// Paginated messages - show latest messages first (reverse chronological)
     private var paginatedMessages: [DetailedMessageInfo] {
-        Array(displayedMessages.prefix(messagesLoadedCount))
+        let reversed = displayedMessages.reversed()
+        return Array(reversed.prefix(messagesLoadedCount))
     }
 
     /// Whether there are more messages to load
