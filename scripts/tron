@@ -282,13 +282,13 @@ cmd_deploy() {
         fi
     fi
 
-    # Type check
-    print_status "Running type check..."
-    if ! npm run typecheck 2>&1; then
-        print_error "Type check failed! Aborting deploy."
+    # Build first (includes type checking)
+    print_status "Building..."
+    if ! npm run build 2>&1; then
+        print_error "Build failed! Aborting deploy."
         return 1
     fi
-    print_success "Type check passed"
+    print_success "Build complete"
 
     # Run tests
     print_status "Running tests..."
@@ -297,11 +297,6 @@ cmd_deploy() {
         return 1
     fi
     print_success "Tests passed"
-
-    # Build
-    print_status "Building production..."
-    npm run build
-    print_success "Build complete"
 
     # Stop service if running
     if is_running; then
