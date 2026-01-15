@@ -1,0 +1,9 @@
+// Base.xcconfig - Shared settings for all configurations
+
+// Deployment
+IPHONEOS_DEPLOYMENT_TARGET = 18.0
+SWIFT_VERSION = 6.0
+
+// App info
+MARKETING_VERSION = 1.0.0
+CURRENT_PROJECT_VERSION = 1

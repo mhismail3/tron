@@ -8,15 +8,25 @@ options:
   generateEmptyDirectories: true
   createIntermediateGroups: true
 
+configFiles:
+  Debug-Beta: Configuration/Debug-Beta.xcconfig
+  Release-Beta: Configuration/Release-Beta.xcconfig
+  Debug-Prod: Configuration/Debug-Prod.xcconfig
+  Release-Prod: Configuration/Release-Prod.xcconfig
+
+configs:
+  Debug-Beta: debug
+  Release-Beta: release
+  Debug-Prod: debug
+  Release-Prod: release
+
 settings:
   base:
     SWIFT_VERSION: "6.0"
     ENABLE_USER_SCRIPT_SANDBOXING: false
-    IPHONEOS_DEPLOYMENT_TARGET: "18.0"
     DEVELOPMENT_TEAM: ""
     CODE_SIGN_IDENTITY: "-"
     CODE_SIGN_STYLE: Automatic
-    PRODUCT_BUNDLE_IDENTIFIER: com.tron.mobile
     INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES
     INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents: YES
     INFOPLIST_KEY_UILaunchScreen_Generation: YES
@@ -33,7 +43,6 @@ targets:
     settings:
       base:
         INFOPLIST_FILE: Sources/Info.plist
-        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
         GENERATE_INFOPLIST_FILE: NO
         MARKETING_VERSION: "1.0.0"
@@ -61,14 +70,32 @@ schemes:
         TronMobile: all
         TronMobileTests: [test]
     run:
-      config: Debug
+      config: Debug-Prod
     test:
-      config: Debug
+      config: Debug-Prod
       targets:
         - TronMobileTests
     profile:
-      config: Release
+      config: Release-Prod
     analyze:
-      config: Debug
+      config: Debug-Prod
     archive:
-      config: Release
+      config: Release-Prod
+
+  TronMobile-Beta:
+    build:
+      targets:
+        TronMobile: all
+        TronMobileTests: [test]
+    run:
+      config: Debug-Beta
+    test:
+      config: Debug-Beta
+      targets:
+        - TronMobileTests
+    profile:
+      config: Release-Beta
+    analyze:
+      config: Debug-Beta
+    archive:
+      config: Release-Beta

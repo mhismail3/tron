@@ -1,0 +1,10 @@
+// Beta.xcconfig - Beta variant settings
+
+// Bundle ID for side-by-side install
+PRODUCT_BUNDLE_IDENTIFIER = com.tron.mobile.beta
+
+// App icon
+ASSETCATALOG_COMPILER_APPICON_NAME = AppIconBeta
+
+// Compile-time flag for server defaults
+SWIFT_ACTIVE_COMPILATION_CONDITIONS = $(inherited) BETA

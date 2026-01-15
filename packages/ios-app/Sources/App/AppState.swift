@@ -4,8 +4,14 @@ import SwiftUI
 
 @MainActor
 class AppState: ObservableObject {
+    #if BETA
+    private static let defaultPort = "8082"
+    #else
+    private static let defaultPort = "8080"
+    #endif
+
     @AppStorage("serverHost") private var serverHost = "localhost"
-    @AppStorage("serverPort") private var serverPort = "8080"
+    @AppStorage("serverPort") private var serverPort = AppState.defaultPort
     @AppStorage("useTLS") private var useTLS = false
     @AppStorage("workingDirectory") var workingDirectory = ""
     @AppStorage("defaultModel") var defaultModel = "claude-opus-4-5-20251101"

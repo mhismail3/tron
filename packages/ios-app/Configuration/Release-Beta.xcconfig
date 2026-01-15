@@ -1,0 +1,3 @@
+// Release-Beta.xcconfig
+#include "Release.xcconfig"
+#include "Beta.xcconfig"

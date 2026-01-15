@@ -1,0 +1,10 @@
+// Prod.xcconfig - Production variant settings
+
+// Standard bundle ID
+PRODUCT_BUNDLE_IDENTIFIER = com.tron.mobile
+
+// Standard app icon
+ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon
+
+// Compile-time flag
+SWIFT_ACTIVE_COMPILATION_CONDITIONS = $(inherited) PRODUCTION

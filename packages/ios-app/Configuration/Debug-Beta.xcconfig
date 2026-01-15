@@ -1,0 +1,3 @@
+// Debug-Beta.xcconfig
+#include "Debug.xcconfig"
+#include "Beta.xcconfig"

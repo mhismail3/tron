@@ -3,10 +3,16 @@ import SwiftUI
 // MARK: - Settings View
 
 struct SettingsView: View {
+    #if BETA
+    private static let defaultPort = "8082"
+    #else
+    private static let defaultPort = "8080"
+    #endif
+
     @Environment(\.dismiss) private var dismiss
     let rpcClient: RPCClient
     @AppStorage("serverHost") private var serverHost = "localhost"
-    @AppStorage("serverPort") private var serverPort = "8080"
+    @AppStorage("serverPort") private var serverPort = SettingsView.defaultPort
     @AppStorage("useTLS") private var useTLS = false
     @AppStorage("confirmArchive") private var confirmArchive = true
     @AppStorage("transcriptionModelId") private var transcriptionModelId = ""
@@ -38,7 +44,7 @@ struct SettingsView: View {
                     Text("Server")
                         .font(.caption)
                 } footer: {
-                    Text("Connect to your Tron server. Default is localhost:8080.")
+                    Text("Connect to your Tron server. Default is localhost:\(SettingsView.defaultPort).")
                         .font(.caption2)
                 }
 
@@ -182,7 +188,7 @@ struct SettingsView: View {
 
     private func resetToDefaults() {
         serverHost = "localhost"
-        serverPort = "8080"
+        serverPort = SettingsView.defaultPort
         useTLS = false
         confirmArchive = true
         transcriptionModelId = ""
