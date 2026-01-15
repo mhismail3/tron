@@ -96,22 +96,11 @@ struct InputBar: View {
                 .transition(.move(edge: .bottom).combined(with: .opacity))
             }
 
-            // Selected skills row (rendered as chips above attachments)
-            if !selectedSkills.isEmpty {
-                skillChipsRow
-            }
-
-            // Unified attachments preview (new model)
-            if !attachments.isEmpty {
-                attachmentsRow
-            }
-
-            // Status pills row - floating liquid glass elements
-            if shouldShowStatusPills {
-                statusPillsRow
-                    .padding(.horizontal, 16)
-                    .transition(.opacity)
-            }
+            // Content area: attachments, skills (wrapping), and status pills
+            // All positioned close together, anchored above the input bar
+            contentArea
+                .padding(.horizontal, 16)
+                .transition(.opacity)
 
             // Input row - floating liquid glass elements
             HStack(alignment: .bottom, spacing: 12) {
@@ -339,13 +328,236 @@ struct InputBar: View {
         currentModelInfo?.reasoningLevels ?? ["low", "medium", "high", "xhigh"]
     }
 
-    // MARK: - Status Pills Row (iOS 26 Liquid Glass)
+    // MARK: - Content Area (Attachments + Skills + Status Pills)
+
+    /// Main content area showing skills, attachments (with wrapping), and status pills
+    /// All items in one wrapping container - skills at bottom, attachments wrap above
+    @ViewBuilder
+    private var contentArea: some View {
+        HStack(alignment: .bottom, spacing: 12) {
+            // Skills + Attachments in single wrapping container
+            // Skills first (bottom), attachments after (wrap above)
+            if !selectedSkills.isEmpty || !attachments.isEmpty {
+                wrappingSkillsAndAttachments
+            }
+
+            Spacer(minLength: 0)
+
+            // Status pills column (always on right)
+            if shouldShowStatusPills {
+                statusPillsColumn
+            }
+        }
+    }
+
+    /// Combined wrapping container for skills and attachments
+    /// Skills appear at bottom rows, attachments wrap to rows above
+    private var wrappingSkillsAndAttachments: some View {
+        WrappingHStack(spacing: 8, lineSpacing: 8) {
+            // Skills first (will appear on bottom rows)
+            ForEach(selectedSkills, id: \.name) { skill in
+                SkillChip(
+                    skill: skill,
+                    showRemoveButton: true,
+                    onRemove: { removeSelectedSkill(skill) },
+                    onTap: { onSkillDetailTap?(skill) }
+                )
+            }
+
+            // Line break to ensure attachments always start on new row above skills
+            if !selectedSkills.isEmpty && !attachments.isEmpty {
+                LineBreak()
+            }
+
+            // Attachments after (will wrap to rows above skills)
+            ForEach(attachments) { attachment in
+                AttachmentBubble(attachment: attachment) {
+                    onRemoveAttachment(attachment)
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    // MARK: - Legacy Combined Status Row (kept for reference)
+
+    /// Combined row that shows:
+    /// - Left side: skills (if present) OR attachments (if only attachments, no skills)
+    /// - Right side: model and context pills
+    /// Aligned to bottom so skills/attachments align with context pill
+    private var combinedStatusRow: some View {
+        HStack(alignment: .bottom, spacing: 12) {
+            // Left side content
+            if !selectedSkills.isEmpty {
+                // Skills on left (when skills are present)
+                skillChipsRowInline
+            } else if !attachments.isEmpty {
+                // Attachments on left (only when no skills, but attachments present)
+                attachmentsRowInline
+            }
+
+            Spacer(minLength: 0)
+
+            // Right side: status pills (always shown if available)
+            if shouldShowStatusPills {
+                statusPillsColumn
+            }
+        }
+    }
+
+    /// Skills chips displayed inline (for combined row)
+    private var skillChipsRowInline: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 6) {
+                ForEach(selectedSkills, id: \.name) { skill in
+                    SkillChip(
+                        skill: skill,
+                        showRemoveButton: true,
+                        onRemove: { removeSelectedSkill(skill) },
+                        onTap: { onSkillDetailTap?(skill) }
+                    )
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// Attachments displayed inline (for combined row)
+    private var attachmentsRowInline: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                ForEach(attachments) { attachment in
+                    AttachmentBubble(attachment: attachment) {
+                        onRemoveAttachment(attachment)
+                    }
+                }
+            }
+        }
+        .frame(height: 60)
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// Status pills column (model + context pills stacked vertically, right-aligned)
+    private var statusPillsColumn: some View {
+        VStack(alignment: .trailing, spacing: 8) {
+            // Reasoning level picker (for OpenAI Codex models) - appears above model picker
+            if currentModelInfo?.supportsReasoning == true, showReasoningPill {
+                reasoningLevelMenu
+            }
+
+            // Model picker
+            if !modelName.isEmpty && showModelPill {
+                modelPickerMenu
+            }
+
+            // Token stats pill with chevrons
+            if showTokenPill {
+                tokenStatsPillWithChevrons
+                    .matchedGeometryEffect(id: "tokenPillMorph", in: tokenPillNamespace)
+            }
+        }
+    }
+
+    /// Model picker menu (iOS 26 liquid glass)
+    private var modelPickerMenu: some View {
+        Menu {
+            // Anthropic 4.5 models at top (closest to thumb when menu opens upward)
+            ForEach(latestAnthropicModels) { model in
+                Button { NotificationCenter.default.post(name: .modelPickerAction, object: model) } label: {
+                    Label(model.formattedModelName, systemImage: "sparkles")
+                }
+            }
+            Divider()
+
+            // OpenAI Codex models in middle
+            if !codexModels.isEmpty {
+                ForEach(codexModels) { model in
+                    Button { NotificationCenter.default.post(name: .modelPickerAction, object: model) } label: {
+                        Label(model.formattedModelName, systemImage: "bolt")
+                    }
+                }
+                Divider()
+            }
+
+            // Legacy models at bottom (furthest from thumb)
+            if !legacyModels.isEmpty {
+                ForEach(legacyModels) { model in
+                    Button { NotificationCenter.default.post(name: .modelPickerAction, object: model) } label: {
+                        Label(model.formattedModelName, systemImage: "clock")
+                    }
+                }
+            }
+        } label: {
+            HStack(spacing: 4) {
+                Image(systemName: "cpu")
+                    .font(.system(size: 9, weight: .medium))
+                Text(modelName.shortModelName)
+                    .font(.system(size: 10, weight: .medium, design: .monospaced))
+                Image(systemName: "chevron.up.chevron.down")
+                    .font(.system(size: 8, weight: .medium))
+            }
+            .foregroundStyle(.tronEmerald)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 5)
+            .background {
+                Capsule()
+                    .fill(.clear)
+                    .glassEffect(.regular.tint(Color.tronPhthaloGreen.opacity(0.35)), in: .capsule)
+            }
+            .contentShape(Capsule())
+        }
+    }
+
+    /// Reasoning level picker menu (iOS 26 liquid glass)
+    private var reasoningLevelMenu: some View {
+        Menu {
+            Button { NotificationCenter.default.post(name: .reasoningLevelAction, object: "low") } label: {
+                Label("Low", systemImage: "hare")
+            }
+            Button { NotificationCenter.default.post(name: .reasoningLevelAction, object: "medium") } label: {
+                Label("Medium", systemImage: "brain")
+            }
+            Button { NotificationCenter.default.post(name: .reasoningLevelAction, object: "high") } label: {
+                Label("High", systemImage: "brain.head.profile")
+            }
+            Button { NotificationCenter.default.post(name: .reasoningLevelAction, object: "xhigh") } label: {
+                Label("Max", systemImage: "sparkles")
+            }
+        } label: {
+            HStack(spacing: 4) {
+                Image(systemName: reasoningLevelIcon(reasoningLevel))
+                    .font(.system(size: 9, weight: .medium))
+                Text(reasoningLevelLabel(reasoningLevel))
+                    .font(.system(size: 10, weight: .medium, design: .monospaced))
+                Image(systemName: "chevron.up.chevron.down")
+                    .font(.system(size: 8, weight: .medium))
+            }
+            .foregroundStyle(reasoningLevelColor(reasoningLevel))
+            .padding(.horizontal, 10)
+            .padding(.vertical, 5)
+            .background {
+                Capsule()
+                    .fill(.clear)
+                    .glassEffect(.regular.tint(reasoningLevelColor(reasoningLevel).opacity(0.35)), in: .capsule)
+            }
+            .contentShape(Capsule())
+        }
+        .matchedGeometryEffect(id: "reasoningPillMorph", in: reasoningPillNamespace)
+        .transition(.asymmetric(
+            insertion: .scale(scale: 0.6, anchor: .leading).combined(with: .opacity),
+            removal: .scale(scale: 0.8).combined(with: .opacity)
+        ))
+    }
+
+    // MARK: - Status Pills Row (iOS 26 Liquid Glass) - Legacy
 
     private var statusPillsRow: some View {
         HStack {
-            // Model picker - iOS 26 fix: Use NotificationCenter to decouple from state
-            // Order: Legacy (top) → Codex → Anthropic 4.5 (bottom, closest to thumb)
-            if !modelName.isEmpty && showModelPill {
+            Spacer()
+            VStack(alignment: .trailing, spacing: 8) {
+                // Model picker - iOS 26 fix: Use NotificationCenter to decouple from state
+                // Order: Legacy (top) → Codex → Anthropic 4.5 (bottom, closest to thumb)
+                if !modelName.isEmpty && showModelPill {
                 Menu {
                     // Anthropic 4.5 models at top (closest to thumb when menu opens upward)
                     ForEach(latestAnthropicModels) { model in
@@ -436,12 +648,11 @@ struct InputBar: View {
                 ))
             }
 
-            Spacer()
-
-            // Token stats pill with liquid glass
-            if showTokenPill {
-                tokenStatsPill
-                    .matchedGeometryEffect(id: "tokenPillMorph", in: tokenPillNamespace)
+                // Token stats pill with liquid glass and chevrons
+                if showTokenPill {
+                    tokenStatsPillWithChevrons
+                        .matchedGeometryEffect(id: "tokenPillMorph", in: tokenPillNamespace)
+                }
             }
         }
     }
@@ -491,6 +702,42 @@ struct InputBar: View {
                 // Tokens remaining
                 Text("\(formattedTokensRemaining) left")
                     .foregroundStyle(contextPercentageColor)
+            }
+            .font(.system(size: 10, weight: .medium, design: .monospaced))
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .glassEffect(.regular.tint(Color.tronPhthaloGreen.opacity(0.35)).interactive(), in: .capsule)
+    }
+
+    private var tokenStatsPillWithChevrons: some View {
+        Button {
+            onContextTap?()
+        } label: {
+            HStack(spacing: 8) {
+                // Context usage bar - use overlay + clipShape to prevent overflow
+                Capsule()
+                    .fill(Color.white.opacity(0.2))
+                    .frame(width: 40, height: 6)
+                    .overlay(alignment: .leading) {
+                        // Fill rectangle that gets clipped by parent Capsule shape
+                        Rectangle()
+                            .fill(contextPercentageColor)
+                            .frame(width: 40 * min(CGFloat(contextPercentage) / 100.0, 1.0))
+                    }
+                    .clipShape(Capsule())
+
+                // Tokens remaining + Chevrons (spacing: 4 to match model pill)
+                HStack(spacing: 4) {
+                    Text("\(formattedTokensRemaining) left")
+                        .foregroundStyle(contextPercentageColor)
+
+                    Image(systemName: "chevron.up.chevron.down")
+                        .font(.system(size: 8, weight: .medium))
+                        .foregroundStyle(contextPercentageColor)
+                }
             }
             .font(.system(size: 10, weight: .medium, design: .monospaced))
             .padding(.horizontal, 10)
@@ -1315,4 +1562,89 @@ extension Notification.Name {
     static let modelPickerAction = Notification.Name("modelPickerAction")
     static let attachmentMenuAction = Notification.Name("attachmentMenuAction")
     static let reasoningLevelAction = Notification.Name("reasoningLevelAction")
+}
+
+// MARK: - Wrapping HStack Layout
+
+/// A horizontal stack that wraps items to new rows when they exceed available width
+/// Items wrap from bottom to top (newest rows appear at top)
+@available(iOS 16.0, *)
+struct WrappingHStack: Layout {
+    var spacing: CGFloat = 8
+    var lineSpacing: CGFloat = 8
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let rows = computeRows(proposal: proposal, subviews: subviews)
+        let height = rows.reduce(0) { $0 + $1.height } + CGFloat(max(0, rows.count - 1)) * lineSpacing
+        let width = rows.map { $0.width }.max() ?? 0
+        return CGSize(width: width, height: height)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        let rows = computeRows(proposal: proposal, subviews: subviews)
+
+        // Place rows from bottom to top (so overflow rows appear above)
+        var y = bounds.maxY
+        for row in rows.reversed() {
+            y -= row.height
+            var x = bounds.minX
+
+            for index in row.indices {
+                let size = subviews[index].sizeThatFits(.unspecified)
+                subviews[index].place(
+                    at: CGPoint(x: x, y: y),
+                    proposal: ProposedViewSize(size)
+                )
+                x += size.width + spacing
+            }
+            y -= lineSpacing
+        }
+    }
+
+    private func computeRows(proposal: ProposedViewSize, subviews: Subviews) -> [Row] {
+        var rows: [Row] = []
+        var currentRow = Row()
+        let maxWidth = proposal.width ?? .infinity
+
+        for (index, subview) in subviews.enumerated() {
+            let size = subview.sizeThatFits(.unspecified)
+
+            // Check if item fits in current row
+            let newWidth = currentRow.width + (currentRow.indices.isEmpty ? 0 : spacing) + size.width
+            if newWidth > maxWidth && !currentRow.indices.isEmpty {
+                // Start new row
+                rows.append(currentRow)
+                currentRow = Row()
+            }
+
+            // Add item to current row
+            currentRow.indices.append(index)
+            currentRow.width += (currentRow.indices.count > 1 ? spacing : 0) + size.width
+            currentRow.height = max(currentRow.height, size.height)
+        }
+
+        // Add final row
+        if !currentRow.indices.isEmpty {
+            rows.append(currentRow)
+        }
+
+        return rows
+    }
+
+    private struct Row {
+        var indices: [Int] = []
+        var width: CGFloat = 0
+        var height: CGFloat = 0
+    }
+}
+
+// MARK: - Line Break for WrappingHStack
+
+/// Invisible full-width element that forces a line break in WrappingHStack
+struct LineBreak: View {
+    var body: some View {
+        Color.clear
+            .frame(maxWidth: .infinity)
+            .frame(height: 0)
+    }
 }

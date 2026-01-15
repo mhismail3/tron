@@ -12,56 +12,56 @@ struct SkillChip: View {
     var onTap: (() -> Void)?
 
     var body: some View {
-        Button {
-            onTap?()
-        } label: {
-            HStack(spacing: 5) {
-                // Skill icon
-                Image(systemName: skill.autoInject ? "bolt.fill" : "sparkles")
-                    .font(.system(size: 9, weight: .semibold))
-                    .foregroundStyle(skill.autoInject ? .tronAmber : .tronCyan)
+        HStack(spacing: 5) {
+            // Skill icon
+            Image(systemName: skill.autoInject ? "bolt.fill" : "sparkles")
+                .font(.system(size: 9, weight: .semibold))
+                .foregroundStyle(skill.autoInject ? .tronAmber : .tronCyan)
 
-                // Skill name
-                Text(skill.name)
-                    .font(.system(size: 11, weight: .medium, design: .monospaced))
-                    .foregroundStyle(.white.opacity(0.9))
-                    .lineLimit(1)
+            // Skill name
+            Text(skill.name)
+                .font(.system(size: 11, weight: .medium, design: .monospaced))
+                .foregroundStyle(.white.opacity(0.9))
+                .lineLimit(1)
 
-                // Source indicator (subtle)
-                if skill.source == .project {
-                    Image(systemName: "folder.fill")
-                        .font(.system(size: 7))
-                        .foregroundStyle(.tronEmerald.opacity(0.6))
-                }
-
-                // Remove button (only in input bar mode)
-                if showRemoveButton {
-                    Button {
-                        onRemove?()
-                    } label: {
-                        Image(systemName: "xmark.circle.fill")
-                            .font(.system(size: 12))
-                            .foregroundStyle(.white.opacity(0.5))
-                    }
-                    .buttonStyle(.plain)
-                }
+            // Source indicator (subtle)
+            if skill.source == .project {
+                Image(systemName: "folder.fill")
+                    .font(.system(size: 7))
+                    .foregroundStyle(.tronEmerald.opacity(0.6))
             }
-            .padding(.horizontal, 8)
-            .padding(.vertical, 5)
-            .background {
-                Capsule()
-                    .fill(.clear)
-                    .glassEffect(
-                        .regular.tint(chipTintColor.opacity(0.4)),
-                        in: .capsule
-                    )
+
+            // Remove button (only in input bar mode)
+            if showRemoveButton {
+                Button {
+                    onRemove?()
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 14))
+                        .foregroundStyle(.white.opacity(0.6))
+                }
+                .buttonStyle(.plain)
+                .contentShape(Circle())
             }
-            .overlay(
-                Capsule()
-                    .strokeBorder(chipBorderColor.opacity(0.3), lineWidth: 0.5)
-            )
         }
-        .buttonStyle(.plain)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 5)
+        .background {
+            Capsule()
+                .fill(.clear)
+                .glassEffect(
+                    .regular.tint(chipTintColor.opacity(0.4)),
+                    in: .capsule
+                )
+        }
+        .overlay(
+            Capsule()
+                .strokeBorder(chipBorderColor.opacity(0.3), lineWidth: 0.5)
+        )
+        .contentShape(Capsule())
+        .onTapGesture {
+            onTap?()
+        }
     }
 
     private var chipTintColor: Color {
