@@ -1,14 +1,13 @@
 /**
  * @fileoverview Tests for TronAgent compaction integration
  *
- * Verifies the two-tier compaction system:
- * 1. Pre-turn guardrail: Auto-compact when context would exceed limit
- * 2. Post-response hook: Log turn metadata to JSONL after every response
+ * Verifies the compaction system:
+ * - Pre-turn guardrail: Auto-compact when context would exceed limit
+ * - Turn logging moved to database at trace level (see agent-turn-logging.test.ts)
  */
 
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
 import { existsSync, mkdirSync, rmSync } from 'fs';
-import { join } from 'path';
 import { TronAgent } from '../../src/agent/tron-agent.js';
 import { createMockSummarizer } from '../context/mock-summarizer.js';
 import { createContextSimulator } from '../context/context-simulator.js';
@@ -85,17 +84,6 @@ describe('TronAgent Compaction Integration', () => {
     });
   });
 
-  describe('Turn Log Path', () => {
-    it('creates turn log path in tron data directory', () => {
-      const agent = new TronAgent(createTestConfig());
-      const logPath = agent.getTurnLogPath();
-
-      expect(logPath).toContain('turns-');
-      expect(logPath).toContain(agent.sessionId);
-      expect(logPath).toMatch(/\.jsonl$/);
-    });
-  });
-
   describe('Pre-Turn Guardrail', () => {
     it('blocks turn when context exceeds limit and no summarizer', async () => {
       const agent = new TronAgent(createTestConfig());
@@ -148,17 +136,6 @@ describe('TronAgent Compaction Integration', () => {
 
       // Tokens should be reduced
       expect(cm.getCurrentTokens()).toBeLessThan(tokensBefore);
-    });
-  });
-
-  describe('Post-Response Hook', () => {
-    it('creates JSONL log file in logs directory', () => {
-      const agent = new TronAgent(createTestConfig());
-      const logPath = agent.getTurnLogPath();
-
-      // Logs directory should be created
-      const logsDir = join(tempDir, 'logs');
-      expect(existsSync(logsDir)).toBe(true);
     });
   });
 
