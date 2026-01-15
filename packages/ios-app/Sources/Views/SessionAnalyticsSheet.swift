@@ -255,7 +255,14 @@ struct SessionAnalytics {
 
         self.toolUsage = toolData.map {
             ToolData(name: $0.key, count: $0.value.count, totalDuration: $0.value.duration, errorCount: $0.value.errors)
-        }.sorted { $0.count > $1.count }
+        }.sorted { a, b in
+            // Primary: sort by count (descending)
+            if a.count != b.count {
+                return a.count > b.count
+            }
+            // Secondary: sort by name (ascending) for stable ordering when counts are equal
+            return a.name < b.name
+        }
 
         self.modelUsage = modelData.map {
             ModelData(model: $0.key, tokenCount: $0.value)
@@ -344,7 +351,7 @@ struct TurnBreakdownSection: View {
                         Text("Turn \(turn.turn)")
                             .font(.system(size: 12, design: .monospaced))
                             .foregroundStyle(.tronTextSecondary)
-                            .frame(width: 50, alignment: .leading)
+                            .frame(width: 70, alignment: .leading)
 
                         GeometryReader { geo in
                             HStack(spacing: 0) {
