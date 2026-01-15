@@ -51,8 +51,8 @@ struct SkillMentionPopup: View {
                         .foregroundStyle(.tronCyan)
 
                     Text("Skills")
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(.primary)
+                        .font(.system(size: 16, weight: .semibold, design: .monospaced))
+                        .foregroundStyle(.tronCyan)
 
                     if !query.isEmpty {
                         Text("· \"\(query)\"")

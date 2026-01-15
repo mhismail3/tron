@@ -593,56 +593,78 @@ struct InputBar: View {
     // MARK: - Simplified Text Field (without history navigation)
 
     private var textFieldSimplified: some View {
-        TextField("Message...", text: $text, axis: .vertical)
-            .textFieldStyle(.plain)
-            .font(.subheadline)
-            .foregroundStyle(.tronTextPrimary)
-            .padding(.horizontal, 14)
-            .padding(.vertical, 10)
-            .background(Color.tronSurfaceElevated)
-            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-            .lineLimit(1...8)
-            .focused($isFocused)
-            .disabled(isProcessing)
-            .onSubmit {
-                if !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    onSend()
-                }
+        ZStack(alignment: .leading) {
+            // Placeholder overlay - only show when empty AND not focused
+            if text.isEmpty && !isFocused {
+                Text("Type here")
+                    .font(.system(.subheadline, design: .monospaced))
+                    .foregroundStyle(.tronEmerald.opacity(0.5))
+                    .padding(.leading, 14)
+                    .padding(.vertical, 10)
             }
+
+            TextField("", text: $text, axis: .vertical)
+                .textFieldStyle(.plain)
+                .font(.system(.subheadline, design: .monospaced))
+                .foregroundStyle(.tronEmerald)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 10)
+                .lineLimit(1...8)
+                .focused($isFocused)
+                .disabled(isProcessing)
+                .onSubmit {
+                    if !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        onSend()
+                    }
+                }
+        }
+        .background(Color.tronSurfaceElevated)
+        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
     }
 
     // MARK: - Glass Text Field (iOS 26 Liquid Glass)
 
     private var textFieldGlass: some View {
-        TextField("Message...", text: $text, axis: .vertical)
-            .textFieldStyle(.plain)
-            .font(.subheadline)
-            .foregroundStyle(.white.opacity(0.9))
-            .padding(.leading, 14)
-            .padding(.trailing, textFieldTrailingPadding)
-            .padding(.vertical, 10)
-            .frame(minHeight: 40)
-            .glassEffect(.regular.tint(Color.tronPhthaloGreen.opacity(0.35)), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
-            .lineLimit(1...8)
-            .focused($isFocused)
-            .disabled(isProcessing)
-            .onSubmit {
-                if !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    onSend()
-                }
+        ZStack(alignment: .leading) {
+            // Placeholder overlay - only show when empty AND not focused
+            if text.isEmpty && !isFocused {
+                Text("Type here")
+                    .font(.system(.subheadline, design: .monospaced))
+                    .foregroundStyle(.tronEmerald.opacity(0.5))
+                    .padding(.leading, 14)
+                    .padding(.vertical, 10)
             }
-            .overlay(alignment: .leading) {
-                if shouldShowModelPillDock {
-                    modelPillDock
+
+            TextField("", text: $text, axis: .vertical)
+                .textFieldStyle(.plain)
+                .font(.system(.subheadline, design: .monospaced))
+                .foregroundStyle(.tronEmerald)
+                .padding(.leading, 14)
+                .padding(.trailing, textFieldTrailingPadding)
+                .padding(.vertical, 10)
+                .lineLimit(1...8)
+                .focused($isFocused)
+                .disabled(isProcessing)
+                .onSubmit {
+                    if !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        onSend()
+                    }
                 }
+        }
+        .frame(minHeight: 40)
+        .glassEffect(.regular.tint(Color.tronPhthaloGreen.opacity(0.35)), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .overlay(alignment: .leading) {
+            if shouldShowModelPillDock {
+                modelPillDock
             }
-            .overlay(alignment: .trailing) {
-                if shouldShowTrailingDock {
-                    trailingDock
-                }
+        }
+        .overlay(alignment: .trailing) {
+            if shouldShowTrailingDock {
+                trailingDock
             }
-            .animation(.tronStandard, value: shouldShowActionButton)
-            .animation(micButtonAnimation, value: shouldShowMicButton)
+        }
+        .animation(.tronStandard, value: shouldShowActionButton)
+        .animation(micButtonAnimation, value: shouldShowMicButton)
     }
 
     // MARK: - Text Field (preserved implementation with history)
@@ -667,22 +689,33 @@ struct InputBar: View {
                     historyNavigationButtons
                 }
 
-                TextField("Message...", text: $text, axis: .vertical)
-                    .textFieldStyle(.plain)
-                    .font(.subheadline)
-                    .foregroundStyle(.tronTextPrimary)
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 10)
-                    .background(Color.tronSurfaceElevated)
-                    .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-                    .lineLimit(1...8)
-                    .focused($isFocused)
-                    .disabled(isProcessing)
-                    .onSubmit {
-                        if !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                            onSend()
-                        }
+                ZStack(alignment: .leading) {
+                    // Placeholder overlay - only show when empty AND not focused
+                    if text.isEmpty && !isFocused {
+                        Text("Type here")
+                            .font(.system(.subheadline, design: .monospaced))
+                            .foregroundStyle(.tronEmerald.opacity(0.5))
+                            .padding(.leading, 14)
+                            .padding(.vertical, 10)
                     }
+
+                    TextField("", text: $text, axis: .vertical)
+                        .textFieldStyle(.plain)
+                        .font(.system(.subheadline, design: .monospaced))
+                        .foregroundStyle(.tronEmerald)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 10)
+                        .lineLimit(1...8)
+                        .focused($isFocused)
+                        .disabled(isProcessing)
+                        .onSubmit {
+                            if !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                                onSend()
+                            }
+                        }
+                }
+                .background(Color.tronSurfaceElevated)
+                .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
             }
         }
     }
