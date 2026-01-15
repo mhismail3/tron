@@ -304,9 +304,9 @@ cmd_beta() {
     export LOG_LEVEL="${TRON_LOG_LEVEL:-debug}"
     export NODE_ENV=development
 
-    # Log startup and run with output to both terminal and file
+    # Log startup and run server directly (not through TUI)
     echo "[$(date -Iseconds)] Starting Tron beta server" >> "$log_file"
-    exec node packages/tui/dist/cli.js --server 2>&1 | tee -a "$log_file"
+    exec node packages/server/dist/index.js 2>&1 | tee -a "$log_file"
 }
 
 cmd_deploy() {

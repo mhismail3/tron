@@ -51,6 +51,6 @@ fi
 # Log startup
 echo "[$(date -Iseconds)] Starting Tron server (tier=$TIER, log=$LOG_FILE)" >> "$LOG_FILE"
 
-# Execute the server with output redirected to log file
+# Execute the server directly (not through TUI)
 cd "$PROJECT_DIR"
-exec node packages/tui/dist/cli.js --server >> "$LOG_FILE" 2>&1
+exec node packages/server/dist/index.js >> "$LOG_FILE" 2>&1
