@@ -73,6 +73,73 @@ bun run dev:server
 
 **Note:** This project uses Bun exclusively. The `preinstall` hook prevents accidental use of npm or yarn.
 
+## Production Deployment
+
+Install Tron as a persistent service that starts automatically on boot:
+
+```bash
+./scripts/tron install
+```
+
+This will:
+- Build and deploy the production version
+- Create a launchd service for auto-start
+- Install the `tron` CLI to `~/.local/bin/`
+- Start the server on ports 8080/8081
+
+### Service Management
+
+```bash
+tron status      # Show service status, health, deployed commit
+tron start       # Start production service
+tron stop        # Stop production service
+tron restart     # Restart production service
+tron logs        # Tail production logs
+tron errors      # Show error log
+```
+
+### Deploying Updates
+
+```bash
+tron deploy      # Test → build → deploy with commit tracking
+tron rollback    # Restore to last deployed commit
+```
+
+The deploy command:
+1. Checks for uncommitted changes
+2. Builds the project (includes type checking)
+3. Runs all tests
+4. Stops the service, installs the new build, restarts
+
+### Dual Environment (Beta + Production)
+
+Run beta and production simultaneously on different ports:
+
+| Environment | WebSocket | Health | Database |
+|-------------|-----------|--------|----------|
+| Production  | 8080      | 8081   | `~/.tron/events.db` |
+| Beta        | 8082      | 8083   | `~/.tron/events-beta.db` |
+
+```bash
+tron beta        # Run beta server in terminal (Ctrl+C to stop)
+```
+
+Beta uses a separate database so you can test changes without affecting production data.
+
+### Development Workflow
+
+```bash
+# Run tests
+npm test              # Run all tests once
+npm run test:watch    # Watch mode
+
+# Run beta server to test changes
+tron beta             # Starts on 8082/8083
+
+# Deploy when ready
+tron deploy
+```
+
 ## Memory Architecture
 
 Tron uses a four-level memory hierarchy:
