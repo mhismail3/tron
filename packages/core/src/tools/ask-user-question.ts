@@ -161,6 +161,9 @@ add any explanatory text, summaries, or follow-up comments after the tool call.`
     return {
       content: formattedSummary,
       isError: false,
+      // Stop the turn immediately - don't loop back to the API
+      // User answers will come as a new prompt in the next turn
+      stopTurn: true,
       details: {
         async: true,
         questionCount: params.questions.length,

@@ -75,6 +75,8 @@ export interface TurnResult {
   interrupted?: boolean;
   /** Partial streaming content captured before interruption */
   partialContent?: string;
+  /** True if a tool requested to stop the turn (e.g., AskUserQuestion) */
+  stopTurnRequested?: boolean;
 }
 
 /**
@@ -127,6 +129,8 @@ export interface ToolExecutionResponse {
     content: string;
     isError: boolean;
     details?: Record<string, unknown>;
+    /** If true, stops the agent turn loop immediately after this tool executes */
+    stopTurn?: boolean;
   };
   duration: number;
 }

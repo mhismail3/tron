@@ -771,13 +771,14 @@ describe('Event Store Enhancements', () => {
         payload: { turn: 1, tokenUsage: { inputTokens: 100, outputTokens: 50 } },
       });
 
-      // Reconstruct messages - should include user, toolResult, and assistant messages
-      // Tool results are now reconstructed for cross-provider compatibility
+      // Reconstruct messages - tool.result events are NOT reconstructed as separate messages
+      // Tool results are stored in message.user events (at turn end) for proper sequencing
+      // This test only has tool.result events without corresponding message.user events,
+      // so we expect just user + assistant messages
       const messages = await eventStore.getMessagesAtHead(sessionId);
-      expect(messages.length).toBe(3);
+      expect(messages.length).toBe(2);
       expect(messages[0].role).toBe('user');
-      expect(messages[1].role).toBe('toolResult');
-      expect(messages[2].role).toBe('assistant');
+      expect(messages[1].role).toBe('assistant');
     });
 
     it('should not affect existing session queries with new event types', async () => {
@@ -943,9 +944,10 @@ describe('Event Store Enhancements', () => {
       expect(eventCounts['tool.result']).toBe(1);
 
       // Verify messages reconstruction
-      // Tool results are now reconstructed for cross-provider compatibility
+      // Tool results are NOT reconstructed from tool.result events (they're for streaming only)
+      // Tool results should be stored in message.user events at turn end for proper sequencing
       const messages = await eventStore.getMessagesAtHead(sessionId);
-      expect(messages.length).toBe(4); // 1 user + 1 toolResult + 2 assistant
+      expect(messages.length).toBe(3); // 1 user + 2 assistant (no toolResult from tool.result events)
 
       // Verify state includes correct token totals
       const state = await eventStore.getStateAtHead(sessionId);

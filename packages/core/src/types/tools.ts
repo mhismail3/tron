@@ -68,6 +68,12 @@ export interface TronToolResult<TDetails = unknown> {
   content: string | ToolResultContentType[];
   details?: TDetails;
   isError?: boolean;
+  /**
+   * If true, stops the agent turn loop immediately after this tool executes.
+   * Used by async tools like AskUserQuestion that need user input before continuing.
+   * The tool result is still added to context, but no further API call is made this turn.
+   */
+  stopTurn?: boolean;
 }
 
 /**

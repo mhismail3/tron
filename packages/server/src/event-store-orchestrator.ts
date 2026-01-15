@@ -2371,33 +2371,13 @@ The user has explicitly removed these skills and expects you to respond WITHOUT 
             });
           }
 
-          // Store tool results as message.user AFTER message.assistant, BEFORE next turn
-          // This ensures proper sequencing: user → assistant(tool_use) → user(tool_result) → assistant(response)
-          const completedToolCalls = Array.from(active.thisTurnToolCalls.values())
-            .filter(tc => tc.status === 'completed' || tc.status === 'error');
-
-          if (completedToolCalls.length > 0) {
-            const toolResultBlocks = completedToolCalls.map(tc => ({
-              type: 'tool_result' as const,
-              tool_use_id: tc.toolCallId,
-              content: tc.result ?? (tc.isError ? 'Error' : '(no output)'),
-              is_error: tc.isError ?? false,
-            }));
-
-            // Normalize with truncation for large content
-            const normalizedToolResults = normalizeContentBlocks(toolResultBlocks);
-
-            logger.debug('Storing tool results for turn', {
-              sessionId,
-              turn: event.turn,
-              resultCount: normalizedToolResults.length,
-            });
-
-            // Store tool results as message.user (linearized)
-            this.appendEventLinearized(sessionId, 'message.user', {
-              content: normalizedToolResults,
-            });
-          }
+          // NOTE: Tool results are NOT persisted as message.user at turn end.
+          // Reasons:
+          // 1. In-memory context manager handles tool results during the turn
+          // 2. For tools like AskUserQuestion with stopTurn, storing tool_result
+          //    would create consecutive user messages (invalid for API)
+          // 3. The assistant's response already incorporates tool results
+          // 4. Tool results are stored as tool.result events for streaming/display
 
           // Clear THIS TURN's content (but keep accumulated content for catch-up)
           active.thisTurnContent = [];

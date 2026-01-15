@@ -819,6 +819,18 @@ export class AnthropicProvider {
                     },
                   };
                 }
+                // Handle tool_result content blocks stored in message.user events
+                // (created at turn end for proper sequencing after message.assistant)
+                // Note: These come from event store reconstruction, not the TypeScript type system
+                const maybeToolResult = c as { type: string; tool_use_id?: string; content?: string; is_error?: boolean };
+                if (maybeToolResult.type === 'tool_result') {
+                  return {
+                    type: 'tool_result' as const,
+                    tool_use_id: maybeToolResult.tool_use_id!,
+                    content: maybeToolResult.content,
+                    is_error: maybeToolResult.is_error,
+                  };
+                }
                 return { type: 'text' as const, text: '' };
               });
           return { role: 'user' as const, content };
@@ -828,11 +840,13 @@ export class AnthropicProvider {
           const content = msg.content.map((c) => {
             if (c.type === 'text') return { type: 'text' as const, text: c.text };
             if (c.type === 'tool_use') {
+              // Handle both 'arguments' (in-memory ToolCall type) and 'input' (persisted event format)
+              const input = c.arguments ?? (c as any).input ?? {};
               return {
                 type: 'tool_use' as const,
                 id: c.id,
                 name: c.name,
-                input: c.arguments,
+                input,
               };
             }
             return { type: 'text' as const, text: '' };

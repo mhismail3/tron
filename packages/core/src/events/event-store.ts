@@ -343,17 +343,14 @@ export class EventStore {
           role: 'assistant',
           content: payload.content,
         });
-      } else if (event.type === 'tool.result') {
-        // Reconstruct tool result messages for cross-provider compatibility
-        // This is critical for mid-session model switching (e.g., Anthropic -> OpenAI Codex)
-        const payload = event.payload as { toolCallId: string; content: string; isError?: boolean };
-        messages.push({
-          role: 'toolResult',
-          toolCallId: payload.toolCallId,
-          content: payload.content,
-          isError: payload.isError,
-        });
       }
+      // NOTE: tool.result events are NOT reconstructed here as separate messages.
+      // Tool results are stored in two places:
+      // 1. tool.result events (for real-time streaming/display)
+      // 2. message.user events with tool_result content (for proper sequencing)
+      // The message.user approach (stored at turn end, AFTER message.assistant) ensures
+      // correct ordering: assistant(tool_use) -> user(tool_result)
+      // Reconstructing tool.result events would create duplicate/misordered messages.
     }
 
     return messages;
@@ -493,17 +490,10 @@ export class EventStore {
           currentTurn = payload.turn;
           turnCount = payload.turn;
         }
-      } else if (evt.type === 'tool.result') {
-        // Reconstruct tool result messages for cross-provider compatibility
-        const payload = evt.payload as { toolCallId: string; content: string; isError?: boolean };
-        messages.push({
-          role: 'toolResult',
-          toolCallId: payload.toolCallId,
-          content: payload.content,
-          isError: payload.isError,
-        });
-        messageEventIds.push(evt.id); // Tool results have their own eventId and can be deleted
       }
+      // NOTE: tool.result events are NOT reconstructed here.
+      // Tool results are stored in message.user events (at turn end) for proper sequencing.
+      // See comment in getMessagesAt() for details.
     }
 
     // Get session for context

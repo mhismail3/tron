@@ -637,6 +637,7 @@ export class TronAgent {
       // Execute tool calls if any
       let toolCallsExecuted = 0;
       let wasInterruptedDuringTools = false;
+      let stopTurnRequested = false;
       if (toolCalls.length > 0) {
         for (const toolCall of toolCalls) {
           // Check for abort BEFORE executing each tool
@@ -664,6 +665,16 @@ export class TronAgent {
           };
           this.contextManager.addMessage(toolResultMessage);
           toolCallsExecuted++;
+
+          // Check if tool requested to stop the turn (e.g., AskUserQuestion needs user input)
+          if (result.result.stopTurn) {
+            stopTurnRequested = true;
+            logger.info('Tool requested turn stop', {
+              sessionId: this.sessionId,
+              toolName: toolCall.name,
+            });
+            // Don't break - execute remaining tool calls, but don't loop back to API
+          }
 
           // Check for abort AFTER tool execution (tool may have been interrupted)
           if (this.abortController?.signal.aborted) {
@@ -750,6 +761,7 @@ export class TronAgent {
         toolCallsExecuted,
         tokenUsage: assistantMessage.usage,
         stopReason: assistantMessage.stopReason,
+        stopTurnRequested,
       };
     } catch (error) {
       this.isRunning = false;
@@ -855,8 +867,10 @@ export class TronAgent {
       }
 
       // Continue to next turn if we executed tools (LLM needs to see results)
-      // Stop if no tools were called (either pure text response or final answer)
-      if (lastResult.toolCallsExecuted === 0) {
+      // Stop if:
+      // - No tools were called (pure text response or final answer)
+      // - A tool requested stop (e.g., AskUserQuestion needs user input)
+      if (lastResult.toolCallsExecuted === 0 || lastResult.stopTurnRequested) {
         break;
       }
     }
@@ -1054,6 +1068,7 @@ export class TronAgent {
         content: contentString,
         isError: result.isError ?? false,
         details: result.details as Record<string, unknown> | undefined,
+        stopTurn: result.stopTurn,
       },
       duration,
     };
