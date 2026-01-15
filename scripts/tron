@@ -204,14 +204,14 @@ cmd_restart() {
 }
 
 cmd_logs() {
-    if [ ! -f "$LOG_FILE" ]; then
-        print_error "Log file not found: $LOG_FILE"
+    if [ ! -f "$ERR_FILE" ]; then
+        print_error "Log file not found: $ERR_FILE"
         return 1
     fi
 
     echo -e "${BLUE}Tailing production logs (Ctrl+C to stop)${NC}"
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-    tail -f "$LOG_FILE"
+    tail -f "$ERR_FILE"
 }
 
 cmd_errors() {
