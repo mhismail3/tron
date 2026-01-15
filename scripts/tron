@@ -432,28 +432,28 @@ cmd_logs() {
 
 cmd_errors() {
     local tier="${1:-prod}"
-    local log_dir="$PROD_LOG_DIR"
-
+    # Query database for errors
+    local db_path="$TRON_HOME/events.db"
     if [ "$tier" = "beta" ]; then
-        log_dir="$BETA_LOG_DIR"
+        db_path="$TRON_HOME/events-beta.db"
     fi
 
-    if [ ! -d "$log_dir" ]; then
-        print_error "Log directory not found: $log_dir"
-        return 1
+    if [ -f "$db_path" ]; then
+        echo -e "${RED}Recent errors from database:${NC}"
+        sqlite3 -header -column "$db_path" \
+            "SELECT datetime(timestamp/1000, 'unixepoch', 'localtime') as time, level, msg
+             FROM logs
+             WHERE level_num >= 50
+             ORDER BY timestamp DESC
+             LIMIT 20;" 2>/dev/null || echo "  No logs table found"
     fi
 
-    # Find the most recent log file
-    local latest_log
-    latest_log=$(ls -t "$log_dir"/*.log 2>/dev/null | head -1)
-
-    if [ -z "$latest_log" ]; then
-        print_error "No log files found in $log_dir"
-        return 1
+    # Also check prod file log
+    if [ "$tier" = "prod" ] && [ -f "$PROD_LOG_FILE" ]; then
+        echo ""
+        echo -e "${RED}Recent errors from file log:${NC}"
+        grep -i "error\|fatal\|exception" "$PROD_LOG_FILE" 2>/dev/null | tail -10 || echo "  No errors found"
     fi
-
-    echo -e "${RED}Errors from: $(basename "$latest_log")${NC}"
-    grep -i "error\|fatal\|exception" "$latest_log" | tail -50
 }
 
 cmd_beta() {
@@ -468,15 +468,8 @@ cmd_beta() {
     if [ ! -d "$PROJECT_DIR/packages/server/dist" ]; then
         print_status "Building project..."
         cd "$PROJECT_DIR"
-        npm run build
+        bun run build
     fi
-
-    # Create log directory
-    mkdir -p "$BETA_LOG_DIR"
-
-    # Generate timestamped log filename
-    local timestamp=$(date +"%Y-%m-%d-%H")
-    local log_file="$BETA_LOG_DIR/${timestamp}-beta-server.log"
 
     echo ""
     echo -e "${CYAN}Starting Beta Server${NC}"
@@ -484,7 +477,7 @@ cmd_beta() {
     echo "  WebSocket: ws://localhost:$BETA_WS_PORT/ws"
     echo "  Health:    http://localhost:$BETA_HEALTH_PORT/health"
     echo "  Database:  ~/.tron/events-beta.db"
-    echo "  Log:       $log_file"
+    echo "  Logs:      tron logs beta"
     echo ""
     echo -e "${YELLOW}Press Ctrl+C to stop${NC}"
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
@@ -499,9 +492,8 @@ cmd_beta() {
     export LOG_LEVEL="${TRON_LOG_LEVEL:-debug}"
     export NODE_ENV=development
 
-    # Log startup and run server directly (not through TUI)
-    echo "[$(date -Iseconds)] Starting Tron beta server" >> "$log_file"
-    exec node packages/server/dist/index.js 2>&1 | tee -a "$log_file"
+    # Run server directly - logs go to terminal and database
+    exec node packages/server/dist/index.js
 }
 
 cmd_deploy() {
@@ -688,8 +680,6 @@ cmd_install() {
     mkdir -p "$BIN_DIR"
     mkdir -p "$TRON_HOME"
     mkdir -p "$INSTALL_DIR"
-    mkdir -p "$PROD_LOG_DIR"
-    mkdir -p "$BETA_LOG_DIR"
     mkdir -p "$HOME/Library/LaunchAgents"
 
     # Build production bundle if needed
@@ -723,7 +713,7 @@ cmd_install() {
     <array>
         <string>/bin/sh</string>
         <string>-c</string>
-        <string>exec "$node_path" "$INSTALL_DIR/index.js" >> "$PROD_LOG_DIR/server.log" 2>&1</string>
+        <string>exec "$node_path" "$INSTALL_DIR/index.js" >> "$PROD_LOG_FILE" 2>&1</string>
     </array>
 
     <key>WorkingDirectory</key>
@@ -803,13 +793,13 @@ EOF
     print_success "Installation complete!"
     echo ""
     echo "Locations:"
-    echo "  Install:   $INSTALL_DIR"
-    echo "  Logs:      $PROD_LOG_DIR"
-    echo "  Data:      $TRON_HOME"
+    echo "  App:   $INSTALL_DIR"
+    echo "  Data:  $TRON_HOME"
     echo ""
     echo "Commands:"
     echo "  tron status    - Check service status"
-    echo "  tron logs      - View production logs"
+    echo "  tron logs      - Query logs from database"
+    echo "  tron logs -t   - Tail prod file log"
     echo "  tron beta      - Run beta server (port $BETA_WS_PORT)"
     echo "  tron deploy    - Build and deploy to production"
     echo ""
@@ -838,7 +828,6 @@ cmd_uninstall() {
     echo ""
     print_success "Service uninstalled"
     print_warning "Data preserved in: $TRON_HOME"
-    print_warning "Logs preserved in: $TRON_HOME/logs/"
     echo ""
 }
 
