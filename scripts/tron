@@ -18,11 +18,9 @@ PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 PLIST_NAME="com.tron.server"
 PLIST_PATH="$HOME/Library/LaunchAgents/$PLIST_NAME.plist"
 TRON_HOME="${TRON_DATA_DIR:-$HOME/.tron}"
-INSTALL_DIR="$TRON_HOME/install/prod"
 BIN_DIR="$HOME/.local/bin"
-LOG_DIR="$TRON_HOME/logs"
-LOG_FILE="$LOG_DIR/server-stdout.log"
-ERR_FILE="$LOG_DIR/server-stderr.log"
+PROD_LOG_DIR="$TRON_HOME/logs/prod"
+BETA_LOG_DIR="$TRON_HOME/logs/beta"
 DEPLOYED_COMMIT_FILE="$TRON_HOME/deployed-commit"
 
 # Port configuration
@@ -62,19 +60,19 @@ is_running() {
     launchctl list 2>/dev/null | grep -q "$PLIST_NAME"
 }
 
-# Get PID of running service
+# Get PID of running service (from port listener)
 get_pid() {
-    launchctl list 2>/dev/null | grep "$PLIST_NAME" | awk '{print $1}' | grep -v '^-$'
+    lsof -t -i :$PROD_WS_PORT -sTCP:LISTEN 2>/dev/null || true
 }
 
-# Check if beta is running
+# Check if beta is running (by checking if port is in use)
 is_beta_running() {
-    pgrep -f "TRON_WS_PORT=$BETA_WS_PORT" >/dev/null 2>&1
+    lsof -i :$BETA_WS_PORT -sTCP:LISTEN >/dev/null 2>&1
 }
 
-# Get beta PID
+# Get beta PID (from port listener)
 get_beta_pid() {
-    pgrep -f "TRON_WS_PORT=$BETA_WS_PORT" 2>/dev/null || true
+    lsof -t -i :$BETA_WS_PORT -sTCP:LISTEN 2>/dev/null || true
 }
 
 cmd_status() {
@@ -145,10 +143,16 @@ cmd_status() {
 
     echo ""
 
-    # Show last few log lines
-    if [ -f "$LOG_FILE" ]; then
-        echo -e "${DIM}Recent logs:${NC}"
-        tail -3 "$LOG_FILE" 2>/dev/null | sed 's/^/  /'
+    # Show current log files
+    local prod_log=$(ls -t "$PROD_LOG_DIR"/*.log 2>/dev/null | head -1)
+    local beta_log=$(ls -t "$BETA_LOG_DIR"/*.log 2>/dev/null | head -1)
+
+    echo -e "${DIM}Logs:${NC}"
+    if [ -n "$prod_log" ]; then
+        echo -e "  ${DIM}Prod: $(basename "$prod_log")${NC}"
+    fi
+    if [ -n "$beta_log" ]; then
+        echo -e "  ${DIM}Beta: $(basename "$beta_log")${NC}"
     fi
     echo ""
 }
@@ -204,24 +208,57 @@ cmd_restart() {
 }
 
 cmd_logs() {
-    if [ ! -f "$ERR_FILE" ]; then
-        print_error "Log file not found: $ERR_FILE"
+    local tier="${1:-prod}"
+    local log_dir="$PROD_LOG_DIR"
+
+    if [ "$tier" = "beta" ]; then
+        log_dir="$BETA_LOG_DIR"
+    fi
+
+    if [ ! -d "$log_dir" ]; then
+        print_error "Log directory not found: $log_dir"
         return 1
     fi
 
-    echo -e "${BLUE}Tailing production logs (Ctrl+C to stop)${NC}"
+    # Find the most recent log file
+    local latest_log
+    latest_log=$(ls -t "$log_dir"/*.log 2>/dev/null | head -1)
+
+    if [ -z "$latest_log" ]; then
+        print_error "No log files found in $log_dir"
+        return 1
+    fi
+
+    echo -e "${BLUE}Tailing $tier logs: $(basename "$latest_log")${NC}"
+    echo -e "${DIM}Log directory: $log_dir${NC}"
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-    tail -f "$ERR_FILE"
+    tail -f "$latest_log"
 }
 
 cmd_errors() {
-    if [ ! -f "$ERR_FILE" ]; then
-        print_warning "No error log file found"
-        return 0
+    local tier="${1:-prod}"
+    local log_dir="$PROD_LOG_DIR"
+
+    if [ "$tier" = "beta" ]; then
+        log_dir="$BETA_LOG_DIR"
     fi
 
-    echo -e "${RED}Error log:${NC}"
-    cat "$ERR_FILE"
+    if [ ! -d "$log_dir" ]; then
+        print_error "Log directory not found: $log_dir"
+        return 1
+    fi
+
+    # Find the most recent log file
+    local latest_log
+    latest_log=$(ls -t "$log_dir"/*.log 2>/dev/null | head -1)
+
+    if [ -z "$latest_log" ]; then
+        print_error "No log files found in $log_dir"
+        return 1
+    fi
+
+    echo -e "${RED}Errors from: $(basename "$latest_log")${NC}"
+    grep -i "error\|fatal\|exception" "$latest_log" | tail -50
 }
 
 cmd_beta() {
@@ -239,12 +276,20 @@ cmd_beta() {
         npm run build
     fi
 
+    # Create log directory
+    mkdir -p "$BETA_LOG_DIR"
+
+    # Generate timestamped log filename
+    local timestamp=$(date +"%Y-%m-%d-%H")
+    local log_file="$BETA_LOG_DIR/${timestamp}-beta-server.log"
+
     echo ""
     echo -e "${CYAN}Starting Beta Server${NC}"
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     echo "  WebSocket: ws://localhost:$BETA_WS_PORT/ws"
     echo "  Health:    http://localhost:$BETA_HEALTH_PORT/health"
     echo "  Database:  ~/.tron/events-beta.db"
+    echo "  Log:       $log_file"
     echo ""
     echo -e "${YELLOW}Press Ctrl+C to stop${NC}"
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
@@ -256,9 +301,12 @@ cmd_beta() {
     export TRON_HEALTH_PORT=$BETA_HEALTH_PORT
     export TRON_BUILD_TIER=beta
     export TRON_EVENT_STORE_DB="$TRON_HOME/events-beta.db"
+    export LOG_LEVEL="${TRON_LOG_LEVEL:-debug}"
     export NODE_ENV=development
 
-    exec node packages/tui/dist/cli.js --server
+    # Log startup and run with output to both terminal and file
+    echo "[$(date -Iseconds)] Starting Tron beta server" >> "$log_file"
+    exec node packages/tui/dist/cli.js --server 2>&1 | tee -a "$log_file"
 }
 
 cmd_deploy() {
@@ -435,7 +483,8 @@ cmd_install() {
     # Ensure directories exist
     mkdir -p "$BIN_DIR"
     mkdir -p "$TRON_HOME"
-    mkdir -p "$LOG_DIR"
+    mkdir -p "$PROD_LOG_DIR"
+    mkdir -p "$BETA_LOG_DIR"
     mkdir -p "$HOME/Library/LaunchAgents"
 
     # Check if we need to build first
@@ -444,11 +493,11 @@ cmd_install() {
         cmd_deploy
     fi
 
-    # Get node path
+    # Get node path for PATH env
     local node_path
     node_path=$(which node)
 
-    # Create launchd plist (runs from project directory)
+    # Create launchd plist (uses wrapper script for timestamped logging)
     print_status "Creating launchd service..."
     cat > "$PLIST_PATH" << EOF
 <?xml version="1.0" encoding="UTF-8"?>
@@ -460,9 +509,8 @@ cmd_install() {
 
     <key>ProgramArguments</key>
     <array>
-        <string>$node_path</string>
-        <string>$PROJECT_DIR/packages/tui/dist/cli.js</string>
-        <string>--server</string>
+        <string>/bin/bash</string>
+        <string>$SCRIPT_DIR/tron-server</string>
     </array>
 
     <key>WorkingDirectory</key>
@@ -482,6 +530,12 @@ cmd_install() {
     <key>ThrottleInterval</key>
     <integer>10</integer>
 
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Minute</key>
+        <integer>0</integer>
+    </dict>
+
     <key>EnvironmentVariables</key>
     <dict>
         <key>NODE_ENV</key>
@@ -499,12 +553,6 @@ cmd_install() {
         <key>TRON_HEALTH_PORT</key>
         <string>$PROD_HEALTH_PORT</string>
     </dict>
-
-    <key>StandardOutPath</key>
-    <string>$LOG_FILE</string>
-
-    <key>StandardErrorPath</key>
-    <string>$ERR_FILE</string>
 
     <key>SoftResourceLimits</key>
     <dict>
@@ -561,7 +609,7 @@ cmd_uninstall() {
 
     print_success "Service uninstalled"
     print_warning "Data preserved in: $TRON_HOME"
-    print_warning "Install directory preserved: $INSTALL_DIR"
+    print_warning "Logs preserved in: $TRON_HOME/logs/"
 }
 
 cmd_help() {
@@ -575,8 +623,8 @@ cmd_help() {
     echo "  start       Start production service"
     echo "  stop        Stop production service"
     echo "  restart     Restart production service"
-    echo "  logs        Tail production logs"
-    echo "  errors      Show error log"
+    echo "  logs [tier] Tail logs (prod or beta, default: prod)"
+    echo "  errors      Show recent errors from logs"
     echo ""
     echo "Development:"
     echo "  beta        Run beta server (port $BETA_WS_PORT, separate database)"
@@ -599,8 +647,8 @@ case "${1:-}" in
     start)      cmd_start ;;
     stop)       cmd_stop ;;
     restart)    cmd_restart ;;
-    logs)       cmd_logs ;;
-    errors)     cmd_errors ;;
+    logs)       cmd_logs "${2:-}" ;;
+    errors)     cmd_errors "${2:-}" ;;
     beta)       cmd_beta ;;
     deploy)     cmd_deploy ;;
     rollback)   cmd_rollback ;;

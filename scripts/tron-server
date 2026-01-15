@@ -1,0 +1,56 @@
+#!/bin/bash
+#
+# Tron Server Wrapper
+#
+# Starts the tron server with proper logging configuration.
+# Creates timestamped log files in the appropriate directory.
+#
+# Usage:
+#   tron-server [--beta]
+#
+# Environment variables:
+#   TRON_DATA_DIR   - Base data directory (default: ~/.tron)
+#   TRON_LOG_LEVEL  - Log level (default: info)
+#
+
+set -e
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
+TRON_HOME="${TRON_DATA_DIR:-$HOME/.tron}"
+
+# Determine if this is beta or prod
+TIER="prod"
+if [[ "$1" == "--beta" ]] || [[ "$TRON_BUILD_TIER" == "beta" ]]; then
+    TIER="beta"
+fi
+
+# Create log directory
+LOG_DIR="$TRON_HOME/logs/$TIER"
+mkdir -p "$LOG_DIR"
+
+# Generate timestamped log filename (YYYY-MM-DD-HH format for hourly granularity)
+TIMESTAMP=$(date +"%Y-%m-%d-%H")
+LOG_FILE="$LOG_DIR/${TIMESTAMP}-${TIER}-server.log"
+
+# Log rotation: keep only last 90 days of logs
+cleanup_old_logs() {
+    find "$LOG_DIR" -name "*.log" -type f -mtime +90 -delete 2>/dev/null || true
+}
+
+# Run cleanup in background
+cleanup_old_logs &
+
+# Set log level (debug for beta, info for prod)
+if [ "$TIER" = "beta" ]; then
+    export LOG_LEVEL="${TRON_LOG_LEVEL:-debug}"
+else
+    export LOG_LEVEL="${TRON_LOG_LEVEL:-info}"
+fi
+
+# Log startup
+echo "[$(date -Iseconds)] Starting Tron server (tier=$TIER, log=$LOG_FILE)" >> "$LOG_FILE"
+
+# Execute the server with output redirected to log file
+cd "$PROJECT_DIR"
+exec node packages/tui/dist/cli.js --server >> "$LOG_FILE" 2>&1

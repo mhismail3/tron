@@ -386,9 +386,17 @@ async function runServerMode(config: CliConfig): Promise<void> {
   // Dynamic import to avoid loading server in interactive mode
   const { TronServer } = await import('@tron/server');
 
+  // Respect env vars for ports and DB path (used by tron beta/prod scripts)
+  const wsPort = config.wsPort
+    ?? (process.env.TRON_WS_PORT ? parseInt(process.env.TRON_WS_PORT, 10) : 8080);
+  const healthPort = config.healthPort
+    ?? (process.env.TRON_HEALTH_PORT ? parseInt(process.env.TRON_HEALTH_PORT, 10) : 8081);
+  const eventStoreDbPath = process.env.TRON_EVENT_STORE_DB;
+
   const server = new TronServer({
-    wsPort: config.wsPort ?? 8080,
-    healthPort: config.healthPort ?? 8081,
+    wsPort,
+    healthPort,
+    eventStoreDbPath,
     defaultModel: config.model,
     defaultProvider: config.provider,
   });
@@ -408,8 +416,8 @@ async function runServerMode(config: CliConfig): Promise<void> {
   console.log(`
 Tron Server Started
 
-WebSocket: ws://localhost:${config.wsPort ?? 8080}/ws
-Health:    http://localhost:${config.healthPort ?? 8081}/health
+WebSocket: ws://localhost:${wsPort}/ws
+Health:    http://localhost:${healthPort}/health
 
 Press Ctrl+C to stop.
 `);

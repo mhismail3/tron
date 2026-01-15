@@ -129,16 +129,36 @@ Beta uses a separate database so you can test changes without affecting producti
 ### Development Workflow
 
 ```bash
-# Run tests
-npm test              # Run all tests once
-npm run test:watch    # Watch mode
+# 1. Make changes
 
-# Run beta server to test changes
-tron beta             # Starts on 8082/8083
+# 2. Run tests (uses Vitest, not Bun's test runner)
+bun run test          # Run all tests once
+bun run test:watch    # Watch mode
 
-# Deploy when ready
+# 3. Test live with beta server
+tron beta             # Starts on 8082/8083, Ctrl+C to stop
+
+# 4. Deploy when ready
 tron deploy
 ```
+
+**Note:** Always use `bun run test`, not `bun test`. This project uses Vitest.
+
+### Logs
+
+Server logs are stored with hourly timestamps:
+
+```
+~/.tron/logs/
+├── prod/    # Production logs
+│   └── 2024-01-15-09-prod-server.log
+└── beta/    # Beta logs
+    └── 2024-01-15-10-beta-server.log
+```
+
+- Format: `YYYY-MM-DD-HH-<tier>-server.log`
+- Retention: 90 days (auto-cleanup)
+- View logs: `tron logs` (prod) or `tron logs beta`
 
 ## Memory Architecture
 
@@ -224,23 +244,18 @@ Guidelines:
 
 ## Development
 
-This project uses **Bun** and follows strict Test-Driven Development:
+This project uses **Bun** with **Vitest** for testing:
 
 ```bash
-# Run tests in watch mode
-bun run test:watch
+# Run tests (always use "bun run test", not "bun test")
+bun run test          # Run all tests once
+bun run test:watch    # Watch mode
+bun run test:coverage # With coverage
 
-# Check types
-bun run typecheck
-
-# Check coverage
-bun run test:coverage
-
-# Lint code
-bun run lint
-
-# Clean build artifacts
-bun run clean
+# Other commands
+bun run typecheck     # Check types
+bun run lint          # Lint code
+bun run clean         # Clean build artifacts
 ```
 
 ### Working with workspace packages
