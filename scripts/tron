@@ -305,31 +305,7 @@ cmd_deploy() {
         sleep 1
     fi
 
-    # Create install directory
-    print_status "Installing to $INSTALL_DIR..."
-    mkdir -p "$INSTALL_DIR/packages"
-
-    # Copy built packages
-    for pkg in core server tui; do
-        rm -rf "$INSTALL_DIR/packages/$pkg"
-        cp -r "packages/$pkg/dist" "$INSTALL_DIR/packages/$pkg"
-        cp "packages/$pkg/package.json" "$INSTALL_DIR/packages/$pkg/"
-    done
-
-    # Copy root files
-    cp package.json "$INSTALL_DIR/"
-    cp package-lock.json "$INSTALL_DIR/" 2>/dev/null || true
-
-    # Install production dependencies
-    print_status "Installing dependencies..."
-    cd "$INSTALL_DIR"
-    npm install --production --ignore-scripts 2>/dev/null || {
-        print_status "Copying node_modules from project..."
-        cp -r "$PROJECT_DIR/node_modules" "$INSTALL_DIR/"
-    }
-    cd "$PROJECT_DIR"
-
-    print_success "Installation complete"
+    print_success "Build ready in project directory"
 
     # Record deployed commit
     local current_commit=$(git rev-parse HEAD)
@@ -462,8 +438,8 @@ cmd_install() {
     mkdir -p "$LOG_DIR"
     mkdir -p "$HOME/Library/LaunchAgents"
 
-    # Check if we need to build/deploy first
-    if [ ! -d "$INSTALL_DIR/packages" ]; then
+    # Check if we need to build first
+    if [ ! -d "$PROJECT_DIR/packages/tui/dist" ]; then
         print_warning "Production build not found. Running deploy first..."
         cmd_deploy
     fi
@@ -472,7 +448,7 @@ cmd_install() {
     local node_path
     node_path=$(which node)
 
-    # Create launchd plist
+    # Create launchd plist (runs from project directory)
     print_status "Creating launchd service..."
     cat > "$PLIST_PATH" << EOF
 <?xml version="1.0" encoding="UTF-8"?>
@@ -485,12 +461,12 @@ cmd_install() {
     <key>ProgramArguments</key>
     <array>
         <string>$node_path</string>
-        <string>$INSTALL_DIR/packages/tui/dist/cli.js</string>
+        <string>$PROJECT_DIR/packages/tui/dist/cli.js</string>
         <string>--server</string>
     </array>
 
     <key>WorkingDirectory</key>
-    <string>$INSTALL_DIR</string>
+    <string>$PROJECT_DIR</string>
 
     <key>RunAtLoad</key>
     <true/>
