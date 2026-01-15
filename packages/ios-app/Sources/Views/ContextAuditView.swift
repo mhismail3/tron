@@ -24,6 +24,9 @@ struct ContextAuditView: View {
     // Cached token usage to avoid recomputation on every body evaluation
     @State private var cachedTokenUsage: (input: Int, output: Int, cacheRead: Int, cacheCreation: Int) = (0, 0, 0, 0)
 
+    // Message pagination state
+    @State private var messagesLoadedCount: Int = 20  // Initial batch size
+
     /// Whether there are messages in context that can be cleared/compacted
     private var hasMessages: Bool {
         guard let snapshot = detailedSnapshot else { return false }
@@ -43,6 +46,16 @@ struct ContextAuditView: View {
             guard let eventId = message.eventId else { return true }
             return !pendingMessageDeletions.contains(eventId)
         }
+    }
+
+    /// Paginated messages - only show the first N messages for performance
+    private var paginatedMessages: [DetailedMessageInfo] {
+        Array(displayedMessages.prefix(messagesLoadedCount))
+    }
+
+    /// Whether there are more messages to load
+    private var hasMoreMessages: Bool {
+        messagesLoadedCount < displayedMessages.count
     }
 
     var body: some View {
@@ -233,9 +246,14 @@ struct ContextAuditView: View {
                         .padding(.horizontal)
 
                         // Messages breakdown (granular expandable) - using server data
-                        // Uses displayedMessages for optimistic deletion animations
+                        // Uses paginatedMessages for optimistic deletion animations + pagination
                         DetailedMessagesSection(
-                            messages: displayedMessages,
+                            messages: paginatedMessages,
+                            totalMessages: displayedMessages.count,
+                            hasMoreMessages: hasMoreMessages,
+                            onLoadMore: {
+                                messagesLoadedCount += 20  // Load 20 more at a time
+                            },
                             onDelete: { eventId in
                                 Task { await deleteMessage(eventId: eventId) }
                             }
@@ -291,6 +309,9 @@ struct ContextAuditView: View {
             // Clear any pending deletions since we now have fresh data
             pendingSkillDeletions.removeAll()
             pendingMessageDeletions.removeAll()
+
+            // Reset message pagination when reloading
+            messagesLoadedCount = 20
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -1492,6 +1513,9 @@ struct RulesFileRow: View {
 @available(iOS 26.0, *)
 struct DetailedMessagesSection: View {
     let messages: [DetailedMessageInfo]
+    let totalMessages: Int
+    let hasMoreMessages: Bool
+    var onLoadMore: (() -> Void)?
     var onDelete: ((String) -> Void)?
 
     private func formatTokens(_ count: Int) -> String {
@@ -1503,12 +1527,26 @@ struct DetailedMessagesSection: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            // Section header
-            Text("Messages (\(messages.count))")
-                .font(.system(size: 12, weight: .medium, design: .monospaced))
-                .foregroundStyle(.white.opacity(0.6))
+            // Section header with total count
+            HStack {
+                Text("Messages")
+                    .font(.system(size: 12, weight: .medium, design: .monospaced))
+                    .foregroundStyle(.white.opacity(0.6))
 
-            if messages.isEmpty {
+                Text("(\(messages.count)/\(totalMessages))")
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundStyle(.white.opacity(0.4))
+
+                Spacer()
+
+                if hasMoreMessages {
+                    Text("\(totalMessages - messages.count) more")
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundStyle(.white.opacity(0.3))
+                }
+            }
+
+            if totalMessages == 0 {
                 HStack {
                     Spacer()
                     Text("No messages in context")
@@ -1532,6 +1570,31 @@ struct DetailedMessagesSection: View {
                             isLast: message.index == messages.last?.index,
                             onDelete: message.eventId != nil ? { onDelete?(message.eventId!) } : nil
                         )
+                    }
+
+                    // Load more button
+                    if hasMoreMessages {
+                        Button {
+                            onLoadMore?()
+                        } label: {
+                            HStack {
+                                Spacer()
+                                HStack(spacing: 6) {
+                                    Image(systemName: "chevron.down")
+                                        .font(.system(size: 11, weight: .medium))
+                                    Text("Load \(min(20, totalMessages - messages.count)) more messages")
+                                        .font(.system(size: 11, design: .monospaced))
+                                }
+                                .foregroundStyle(.tronCyan)
+                                Spacer()
+                            }
+                            .padding(12)
+                            .background {
+                                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                    .fill(Color.tronCyan.opacity(0.1))
+                            }
+                        }
+                        .buttonStyle(.plain)
                     }
                 }
             }
