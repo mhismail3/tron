@@ -1,0 +1,646 @@
+#!/bin/bash
+# Tron service manager
+# Manages production (launchd) and beta (terminal) environments
+
+set -e
+
+# Resolve symlinks to get the real script path
+SOURCE="${BASH_SOURCE[0]}"
+while [ -L "$SOURCE" ]; do
+    DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
+    SOURCE="$(readlink "$SOURCE")"
+    [[ $SOURCE != /* ]] && SOURCE="$DIR/$SOURCE"
+done
+SCRIPT_DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
+PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
+
+# Service configuration
+PLIST_NAME="com.tron.server"
+PLIST_PATH="$HOME/Library/LaunchAgents/$PLIST_NAME.plist"
+TRON_HOME="${TRON_DATA_DIR:-$HOME/.tron}"
+INSTALL_DIR="$TRON_HOME/install/prod"
+BIN_DIR="$HOME/.local/bin"
+LOG_DIR="$TRON_HOME/logs"
+LOG_FILE="$LOG_DIR/server-stdout.log"
+ERR_FILE="$LOG_DIR/server-stderr.log"
+DEPLOYED_COMMIT_FILE="$TRON_HOME/deployed-commit"
+
+# Port configuration
+PROD_WS_PORT=8080
+PROD_HEALTH_PORT=8081
+BETA_WS_PORT=8082
+BETA_HEALTH_PORT=8083
+
+# Colors
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+CYAN='\033[0;36m'
+BOLD='\033[1m'
+DIM='\033[2m'
+NC='\033[0m'
+
+print_status() {
+    echo -e "${BLUE}▸${NC} $1"
+}
+
+print_success() {
+    echo -e "${GREEN}✓${NC} $1"
+}
+
+print_error() {
+    echo -e "${RED}✗${NC} $1"
+}
+
+print_warning() {
+    echo -e "${YELLOW}!${NC} $1"
+}
+
+# Check if production service is running
+is_running() {
+    launchctl list 2>/dev/null | grep -q "$PLIST_NAME"
+}
+
+# Get PID of running service
+get_pid() {
+    launchctl list 2>/dev/null | grep "$PLIST_NAME" | awk '{print $1}' | grep -v '^-$'
+}
+
+# Check if beta is running
+is_beta_running() {
+    pgrep -f "TRON_WS_PORT=$BETA_WS_PORT" >/dev/null 2>&1
+}
+
+# Get beta PID
+get_beta_pid() {
+    pgrep -f "TRON_WS_PORT=$BETA_WS_PORT" 2>/dev/null || true
+}
+
+cmd_status() {
+    echo ""
+    echo -e "${CYAN}Tron Service Status${NC}"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+    # Production status
+    if is_running; then
+        local pid=$(get_pid)
+        print_success "Production: ${GREEN}RUNNING${NC} (PID: ${pid:-unknown})"
+        echo "  WebSocket: ws://localhost:$PROD_WS_PORT/ws"
+        echo "  Health:    http://localhost:$PROD_HEALTH_PORT/health"
+
+        # Show uptime if we can find the process
+        if [ -n "$pid" ] && [ "$pid" != "-" ]; then
+            local uptime=$(ps -o etime= -p "$pid" 2>/dev/null | tr -d ' ')
+            if [ -n "$uptime" ]; then
+                echo "  Uptime:    $uptime"
+            fi
+        fi
+
+        # Check health endpoint
+        local health_response
+        health_response=$(curl -s -o /dev/null -w "%{http_code}" "http://localhost:$PROD_HEALTH_PORT/health" 2>/dev/null || echo "000")
+        if [ "$health_response" = "200" ]; then
+            echo -e "  Status:    ${GREEN}Healthy${NC}"
+        else
+            echo -e "  Status:    ${YELLOW}Not responding (HTTP $health_response)${NC}"
+        fi
+
+        # Show deployed commit
+        if [ -f "$DEPLOYED_COMMIT_FILE" ]; then
+            local deployed_commit=$(cat "$DEPLOYED_COMMIT_FILE")
+            local commit_msg=$(cd "$PROJECT_DIR" && git log -1 --format="%s" "$deployed_commit" 2>/dev/null | head -c 50)
+            echo "  Deployed:  ${deployed_commit:0:7} - $commit_msg"
+        fi
+    else
+        print_warning "Production: ${YELLOW}STOPPED${NC}"
+
+        # Still show deployed commit if available
+        if [ -f "$DEPLOYED_COMMIT_FILE" ]; then
+            local deployed_commit=$(cat "$DEPLOYED_COMMIT_FILE")
+            echo "  Last deployed: ${deployed_commit:0:7}"
+        fi
+    fi
+
+    echo ""
+
+    # Beta status
+    local beta_pid=$(get_beta_pid)
+    if [ -n "$beta_pid" ]; then
+        print_success "Beta: ${GREEN}RUNNING${NC} (PID: $beta_pid)"
+        echo "  WebSocket: ws://localhost:$BETA_WS_PORT/ws"
+        echo "  Health:    http://localhost:$BETA_HEALTH_PORT/health"
+
+        # Check beta health
+        local beta_health
+        beta_health=$(curl -s -o /dev/null -w "%{http_code}" "http://localhost:$BETA_HEALTH_PORT/health" 2>/dev/null || echo "000")
+        if [ "$beta_health" = "200" ]; then
+            echo -e "  Status:    ${GREEN}Healthy${NC}"
+        else
+            echo -e "  Status:    ${YELLOW}Not responding (HTTP $beta_health)${NC}"
+        fi
+    else
+        echo -e "  Beta: not running"
+    fi
+
+    echo ""
+
+    # Show last few log lines
+    if [ -f "$LOG_FILE" ]; then
+        echo -e "${DIM}Recent logs:${NC}"
+        tail -3 "$LOG_FILE" 2>/dev/null | sed 's/^/  /'
+    fi
+    echo ""
+}
+
+cmd_start() {
+    if is_running; then
+        print_warning "Production service is already running"
+        return 0
+    fi
+
+    if [ ! -f "$PLIST_PATH" ]; then
+        print_error "Service not installed. Run: tron install"
+        return 1
+    fi
+
+    print_status "Starting production service..."
+    launchctl load "$PLIST_PATH"
+    sleep 2
+
+    if is_running; then
+        print_success "Production service started"
+        echo "  WebSocket: ws://localhost:$PROD_WS_PORT/ws"
+        echo "  Health:    http://localhost:$PROD_HEALTH_PORT/health"
+    else
+        print_error "Failed to start service. Check: tron errors"
+        return 1
+    fi
+}
+
+cmd_stop() {
+    if ! is_running; then
+        print_warning "Production service is not running"
+        return 0
+    fi
+
+    print_status "Stopping production service..."
+    launchctl unload "$PLIST_PATH"
+    sleep 1
+
+    if ! is_running; then
+        print_success "Production service stopped"
+    else
+        print_error "Failed to stop service"
+        return 1
+    fi
+}
+
+cmd_restart() {
+    print_status "Restarting production service..."
+    cmd_stop 2>/dev/null || true
+    sleep 1
+    cmd_start
+}
+
+cmd_logs() {
+    if [ ! -f "$LOG_FILE" ]; then
+        print_error "Log file not found: $LOG_FILE"
+        return 1
+    fi
+
+    echo -e "${BLUE}Tailing production logs (Ctrl+C to stop)${NC}"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    tail -f "$LOG_FILE"
+}
+
+cmd_errors() {
+    if [ ! -f "$ERR_FILE" ]; then
+        print_warning "No error log file found"
+        return 0
+    fi
+
+    echo -e "${RED}Error log:${NC}"
+    cat "$ERR_FILE"
+}
+
+cmd_beta() {
+    # Check if beta is already running
+    if is_beta_running; then
+        print_warning "Beta server is already running on port $BETA_WS_PORT"
+        echo "  Kill it first: kill $(get_beta_pid)"
+        return 1
+    fi
+
+    # Build if needed
+    if [ ! -d "$PROJECT_DIR/packages/server/dist" ]; then
+        print_status "Building project..."
+        cd "$PROJECT_DIR"
+        npm run build
+    fi
+
+    echo ""
+    echo -e "${CYAN}Starting Beta Server${NC}"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo "  WebSocket: ws://localhost:$BETA_WS_PORT/ws"
+    echo "  Health:    http://localhost:$BETA_HEALTH_PORT/health"
+    echo "  Database:  ~/.tron/events-beta.db"
+    echo ""
+    echo -e "${YELLOW}Press Ctrl+C to stop${NC}"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+    cd "$PROJECT_DIR"
+
+    # Run with beta environment variables
+    export TRON_WS_PORT=$BETA_WS_PORT
+    export TRON_HEALTH_PORT=$BETA_HEALTH_PORT
+    export TRON_BUILD_TIER=beta
+    export TRON_EVENT_STORE_DB="$TRON_HOME/events-beta.db"
+    export NODE_ENV=development
+
+    exec node packages/tui/dist/cli.js --server
+}
+
+cmd_deploy() {
+    echo ""
+    echo -e "${CYAN}Deploying to Production${NC}"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+    cd "$PROJECT_DIR"
+
+    # Check for uncommitted changes
+    if ! git diff-index --quiet HEAD -- 2>/dev/null; then
+        print_warning "You have uncommitted changes!"
+        echo ""
+        git status --short
+        echo ""
+        read -p "Deploy anyway? (y/N) " -n 1 -r
+        echo
+        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+            print_error "Aborted. Commit your changes first."
+            return 1
+        fi
+    fi
+
+    # Type check
+    print_status "Running type check..."
+    if ! npm run typecheck 2>&1; then
+        print_error "Type check failed! Aborting deploy."
+        return 1
+    fi
+    print_success "Type check passed"
+
+    # Run tests
+    print_status "Running tests..."
+    if ! npm test 2>&1; then
+        print_error "Tests failed! Aborting deploy."
+        return 1
+    fi
+    print_success "Tests passed"
+
+    # Build
+    print_status "Building production..."
+    npm run build
+    print_success "Build complete"
+
+    # Stop service if running
+    if is_running; then
+        print_status "Stopping production service..."
+        launchctl unload "$PLIST_PATH" 2>/dev/null || true
+        sleep 1
+    fi
+
+    # Create install directory
+    print_status "Installing to $INSTALL_DIR..."
+    mkdir -p "$INSTALL_DIR/packages"
+
+    # Copy built packages
+    for pkg in core server tui; do
+        rm -rf "$INSTALL_DIR/packages/$pkg"
+        cp -r "packages/$pkg/dist" "$INSTALL_DIR/packages/$pkg"
+        cp "packages/$pkg/package.json" "$INSTALL_DIR/packages/$pkg/"
+    done
+
+    # Copy root files
+    cp package.json "$INSTALL_DIR/"
+    cp package-lock.json "$INSTALL_DIR/" 2>/dev/null || true
+
+    # Install production dependencies
+    print_status "Installing dependencies..."
+    cd "$INSTALL_DIR"
+    npm install --production --ignore-scripts 2>/dev/null || {
+        print_status "Copying node_modules from project..."
+        cp -r "$PROJECT_DIR/node_modules" "$INSTALL_DIR/"
+    }
+    cd "$PROJECT_DIR"
+
+    print_success "Installation complete"
+
+    # Record deployed commit
+    local current_commit=$(git rev-parse HEAD)
+    echo "$current_commit" > "$DEPLOYED_COMMIT_FILE"
+    print_success "Recorded deploy: ${current_commit:0:7}"
+
+    # Start service
+    if [ -f "$PLIST_PATH" ]; then
+        print_status "Starting production service..."
+        launchctl load "$PLIST_PATH"
+        sleep 2
+
+        if is_running; then
+            print_success "Production service started"
+        else
+            print_error "Failed to start service. Check: tron errors"
+            return 1
+        fi
+    else
+        print_warning "Service not installed. Run: tron install"
+    fi
+
+    echo ""
+    print_success "Deploy complete!"
+    echo ""
+}
+
+cmd_rollback() {
+    echo ""
+    echo -e "${CYAN}Rolling Back to Last Deployed State${NC}"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+    cd "$PROJECT_DIR"
+
+    # Check if we have a deployed commit recorded
+    if [ ! -f "$DEPLOYED_COMMIT_FILE" ]; then
+        print_error "No deployed commit found. Cannot rollback."
+        echo "  Run 'tron deploy' first to record a deployment."
+        return 1
+    fi
+
+    local deployed_commit=$(cat "$DEPLOYED_COMMIT_FILE")
+    local deployed_msg=$(git log -1 --format="%s" "$deployed_commit" 2>/dev/null | head -c 60)
+    local current_commit=$(git rev-parse HEAD)
+
+    # Check if we're already at the deployed commit
+    if [ "$current_commit" = "$deployed_commit" ]; then
+        print_success "Already at deployed commit: ${deployed_commit:0:7}"
+        return 0
+    fi
+
+    echo "  Current:  ${current_commit:0:7} - $(git log -1 --format='%s' HEAD | head -c 50)"
+    echo "  Deployed: ${deployed_commit:0:7} - $deployed_msg"
+    echo ""
+
+    # Check for uncommitted changes
+    if ! git diff-index --quiet HEAD -- 2>/dev/null; then
+        print_warning "You have uncommitted changes that will be stashed!"
+        echo ""
+        git status --short
+        echo ""
+    fi
+
+    read -p "Reset working directory to deployed commit? (y/N) " -n 1 -r
+    echo
+    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+        print_error "Aborted."
+        return 1
+    fi
+
+    # Stash any changes just in case
+    if ! git diff-index --quiet HEAD -- 2>/dev/null; then
+        print_status "Stashing uncommitted changes (retrievable with 'git stash pop')..."
+        git stash push -m "Auto-stash before rollback to $deployed_commit"
+    fi
+
+    # Reset to deployed commit
+    print_status "Resetting to ${deployed_commit:0:7}..."
+    git checkout "$deployed_commit" -- .
+    git reset HEAD
+    print_success "Working directory restored"
+
+    # Rebuild
+    print_status "Rebuilding..."
+    npm run build
+    print_success "Build complete"
+
+    # Redeploy
+    print_status "Redeploying..."
+
+    # Stop service if running
+    if is_running; then
+        launchctl unload "$PLIST_PATH" 2>/dev/null || true
+        sleep 1
+    fi
+
+    # Copy to install directory
+    mkdir -p "$INSTALL_DIR/packages"
+    for pkg in core server tui; do
+        rm -rf "$INSTALL_DIR/packages/$pkg"
+        cp -r "packages/$pkg/dist" "$INSTALL_DIR/packages/$pkg"
+        cp "packages/$pkg/package.json" "$INSTALL_DIR/packages/$pkg/"
+    done
+    cp package.json "$INSTALL_DIR/"
+
+    # Start service
+    if [ -f "$PLIST_PATH" ]; then
+        launchctl load "$PLIST_PATH"
+        sleep 2
+        if is_running; then
+            print_success "Production service restarted"
+        else
+            print_error "Failed to restart service"
+        fi
+    fi
+
+    echo ""
+    print_success "Rollback complete! Now at: ${deployed_commit:0:7}"
+    echo ""
+}
+
+cmd_install() {
+    echo ""
+    echo -e "${CYAN}Installing Tron Service${NC}"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+    # Ensure directories exist
+    mkdir -p "$BIN_DIR"
+    mkdir -p "$TRON_HOME"
+    mkdir -p "$LOG_DIR"
+    mkdir -p "$HOME/Library/LaunchAgents"
+
+    # Check if we need to build/deploy first
+    if [ ! -d "$INSTALL_DIR/packages" ]; then
+        print_warning "Production build not found. Running deploy first..."
+        cmd_deploy
+    fi
+
+    # Get node path
+    local node_path
+    node_path=$(which node)
+
+    # Create launchd plist
+    print_status "Creating launchd service..."
+    cat > "$PLIST_PATH" << EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>$PLIST_NAME</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>$node_path</string>
+        <string>$INSTALL_DIR/packages/tui/dist/cli.js</string>
+        <string>--server</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>$INSTALL_DIR</string>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <key>KeepAlive</key>
+    <dict>
+        <key>SuccessfulExit</key>
+        <false/>
+        <key>Crashed</key>
+        <true/>
+    </dict>
+
+    <key>ThrottleInterval</key>
+    <integer>10</integer>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>NODE_ENV</key>
+        <string>production</string>
+        <key>TRON_BUILD_TIER</key>
+        <string>prod</string>
+        <key>HOME</key>
+        <string>$HOME</string>
+        <key>PATH</key>
+        <string>$(dirname "$node_path"):/usr/local/bin:/usr/bin:/bin</string>
+        <key>TRON_DATA_DIR</key>
+        <string>$TRON_HOME</string>
+        <key>TRON_WS_PORT</key>
+        <string>$PROD_WS_PORT</string>
+        <key>TRON_HEALTH_PORT</key>
+        <string>$PROD_HEALTH_PORT</string>
+    </dict>
+
+    <key>StandardOutPath</key>
+    <string>$LOG_FILE</string>
+
+    <key>StandardErrorPath</key>
+    <string>$ERR_FILE</string>
+
+    <key>SoftResourceLimits</key>
+    <dict>
+        <key>NumberOfFiles</key>
+        <integer>4096</integer>
+    </dict>
+</dict>
+</plist>
+EOF
+    print_success "Created: $PLIST_PATH"
+
+    # Install CLI symlink
+    print_status "Installing tron CLI..."
+    ln -sf "$SCRIPT_DIR/tron" "$BIN_DIR/tron"
+    print_success "Installed: $BIN_DIR/tron"
+
+    # Check if ~/.local/bin is in PATH
+    if [[ ":$PATH:" != *":$BIN_DIR:"* ]]; then
+        print_warning "Add to your shell profile: export PATH=\"\$HOME/.local/bin:\$PATH\""
+    fi
+
+    # Start the service
+    print_status "Starting service..."
+    launchctl load "$PLIST_PATH"
+    sleep 2
+
+    if is_running; then
+        print_success "Service started!"
+    else
+        print_error "Service failed to start. Check: tron errors"
+    fi
+
+    echo ""
+    print_success "Installation complete!"
+    echo ""
+    echo "Commands:"
+    echo "  tron status    - Check service status"
+    echo "  tron logs      - View production logs"
+    echo "  tron beta      - Run beta server (port $BETA_WS_PORT)"
+    echo "  tron deploy    - Build and deploy to production"
+    echo "  tron rollback  - Restore to last deployed commit"
+    echo ""
+}
+
+cmd_uninstall() {
+    print_status "Uninstalling Tron service..."
+
+    if is_running; then
+        launchctl unload "$PLIST_PATH" 2>/dev/null || true
+    fi
+
+    rm -f "$PLIST_PATH"
+    rm -f "$BIN_DIR/tron"
+
+    print_success "Service uninstalled"
+    print_warning "Data preserved in: $TRON_HOME"
+    print_warning "Install directory preserved: $INSTALL_DIR"
+}
+
+cmd_help() {
+    echo ""
+    echo -e "${CYAN}Tron - Persistent Coding Agent${NC}"
+    echo ""
+    echo "Usage: tron <command>"
+    echo ""
+    echo "Service Commands:"
+    echo "  status      Show service status and health"
+    echo "  start       Start production service"
+    echo "  stop        Stop production service"
+    echo "  restart     Restart production service"
+    echo "  logs        Tail production logs"
+    echo "  errors      Show error log"
+    echo ""
+    echo "Development:"
+    echo "  beta        Run beta server (port $BETA_WS_PORT, separate database)"
+    echo "  deploy      Test, build, and deploy to production"
+    echo "  rollback    Restore working directory to last deployed commit"
+    echo ""
+    echo "Setup:"
+    echo "  install     Install launchd service and CLI"
+    echo "  uninstall   Remove service (preserves data)"
+    echo ""
+    echo "Ports:"
+    echo "  Production: WS $PROD_WS_PORT, Health $PROD_HEALTH_PORT"
+    echo "  Beta:       WS $BETA_WS_PORT, Health $BETA_HEALTH_PORT"
+    echo ""
+}
+
+# Main
+case "${1:-}" in
+    status)     cmd_status ;;
+    start)      cmd_start ;;
+    stop)       cmd_stop ;;
+    restart)    cmd_restart ;;
+    logs)       cmd_logs ;;
+    errors)     cmd_errors ;;
+    beta)       cmd_beta ;;
+    deploy)     cmd_deploy ;;
+    rollback)   cmd_rollback ;;
+    install)    cmd_install ;;
+    uninstall)  cmd_uninstall ;;
+    help|--help|-h|"")
+        cmd_help
+        ;;
+    *)
+        print_error "Unknown command: $1"
+        cmd_help
+        exit 1
+        ;;
+esac
