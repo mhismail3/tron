@@ -261,7 +261,7 @@ describe('SQLiteTransport', () => {
       expect(getLogCount()).toBe(1);
     });
 
-    it('flushes immediately on error/fatal', async () => {
+    it('flushes immediately on warn/error/fatal for reliability', async () => {
       transport = new SQLiteTransport(db, { batchSize: 100, flushIntervalMs: 10000 });
 
       // Write an info log - should not flush
@@ -274,7 +274,21 @@ describe('SQLiteTransport', () => {
 
       expect(getLogCount()).toBe(0);
 
-      // Write an error log - should flush immediately
+      // Write a warn log - should flush immediately (level >= 40)
+      await transport.write({
+        level: 40, // warn
+        time: Date.now(),
+        msg: 'Warning message',
+        component: 'test',
+      });
+
+      // Small delay for async
+      await new Promise(resolve => setTimeout(resolve, 10));
+
+      // Both should be flushed (warn triggers immediate flush)
+      expect(getLogCount()).toBe(2);
+
+      // Write an error log - should also flush immediately
       await transport.write({
         level: 50, // error
         time: Date.now(),
@@ -282,11 +296,8 @@ describe('SQLiteTransport', () => {
         component: 'test',
       });
 
-      // Small delay for async
       await new Promise(resolve => setTimeout(resolve, 10));
-
-      // Both should be flushed
-      expect(getLogCount()).toBe(2);
+      expect(getLogCount()).toBe(3);
     });
 
     it('flushes on close', async () => {

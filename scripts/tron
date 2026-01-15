@@ -20,8 +20,7 @@ PLIST_PATH="$HOME/Library/LaunchAgents/$PLIST_NAME.plist"
 TRON_HOME="${TRON_DATA_DIR:-$HOME/.tron}"
 INSTALL_DIR="$TRON_HOME/app"
 BIN_DIR="$HOME/.local/bin"
-PROD_LOG_DIR="$TRON_HOME/logs/prod"
-BETA_LOG_DIR="$TRON_HOME/logs/beta"
+PROD_LOG_FILE="$INSTALL_DIR/server.log"
 DEPLOYED_COMMIT_FILE="$INSTALL_DIR/deployed-commit"
 
 # Port configuration
@@ -154,16 +153,11 @@ cmd_status() {
 
     echo ""
 
-    # Show current log files
-    local prod_log=$(ls -t "$PROD_LOG_DIR"/*.log 2>/dev/null | head -1)
-    local beta_log=$(ls -t "$BETA_LOG_DIR"/*.log 2>/dev/null | head -1)
-
+    # Show log info
     echo -e "${DIM}Logs:${NC}"
-    if [ -n "$prod_log" ]; then
-        echo -e "  ${DIM}Prod: $(basename "$prod_log")${NC}"
-    fi
-    if [ -n "$beta_log" ]; then
-        echo -e "  ${DIM}Beta: $(basename "$beta_log")${NC}"
+    echo -e "  ${DIM}Query: tron logs [-l level] [-q search] [-s session]${NC}"
+    if [ -f "$PROD_LOG_FILE" ]; then
+        echo -e "  ${DIM}File:  $PROD_LOG_FILE${NC}"
     fi
     echo ""
 }
@@ -289,30 +283,17 @@ cmd_logs() {
         esac
     done
 
-    # Tail mode - use file logs
+    # Tail mode - use prod file log
     if [ "$tail_mode" = true ]; then
-        local log_dir="$PROD_LOG_DIR"
-        if [ "$tier" = "beta" ]; then
-            log_dir="$BETA_LOG_DIR"
-        fi
-
-        if [ ! -d "$log_dir" ]; then
-            print_error "Log directory not found: $log_dir"
+        if [ ! -f "$PROD_LOG_FILE" ]; then
+            print_error "Log file not found: $PROD_LOG_FILE"
             return 1
         fi
 
-        local latest_log
-        latest_log=$(ls -t "$log_dir"/*.log 2>/dev/null | head -1)
-
-        if [ -z "$latest_log" ]; then
-            print_error "No log files found in $log_dir"
-            return 1
-        fi
-
-        echo -e "${BLUE}Tailing $tier logs: $(basename "$latest_log")${NC}"
-        echo -e "${DIM}Log directory: $log_dir${NC}"
+        echo -e "${BLUE}Tailing prod log${NC}"
+        echo -e "${DIM}$PROD_LOG_FILE${NC}"
         echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-        tail -f "$latest_log"
+        tail -f "$PROD_LOG_FILE"
         return 0
     fi
 

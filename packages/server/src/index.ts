@@ -855,11 +855,13 @@ export class TronServer {
 
     // Initialize SQLite log transport for database-backed logging
     // This enables queryable log history in the same events.db
+    // Settings optimized for reliability:
+    // - minLevel 30 (info+) to avoid verbose debug logs
+    // - batchSize 50, flushInterval 500ms for quick persistence
+    // - warn/error/fatal flush immediately (built into transport)
     const db = this.orchestrator.getEventStore().getDatabase();
     initializeLogTransport(db, {
       minLevel: 30, // info and above
-      batchSize: 100,
-      flushIntervalMs: 1000,
     });
     logger.info('SQLite log transport initialized');
 

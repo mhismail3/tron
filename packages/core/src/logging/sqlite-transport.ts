@@ -16,9 +16,9 @@ import { getLoggingContext } from './log-context.js';
 // =============================================================================
 
 export interface SQLiteTransportOptions {
-  /** Number of logs to batch before flushing (default: 100) */
+  /** Number of logs to batch before flushing (default: 50) */
   batchSize?: number;
-  /** Milliseconds between flushes (default: 1000) */
+  /** Milliseconds between flushes (default: 500) */
   flushIntervalMs?: number;
   /** Minimum log level to store (10=trace, 20=debug, 30=info, 40=warn, 50=error, 60=fatal). Default: 10 */
   minLevel?: number;
@@ -88,8 +88,8 @@ export class SQLiteTransport {
 
   constructor(db: Database.Database, options: SQLiteTransportOptions = {}) {
     this.db = db;
-    this.batchSize = options.batchSize ?? 100;
-    this.flushIntervalMs = options.flushIntervalMs ?? 1000;
+    this.batchSize = options.batchSize ?? 50;
+    this.flushIntervalMs = options.flushIntervalMs ?? 500;
     this.minLevel = options.minLevel ?? 10;
 
     this.prepareStatements();
@@ -140,8 +140,9 @@ export class SQLiteTransport {
       const entry = this.transformLog(logObj);
       this.batch.push(entry);
 
-      // Flush immediately on error/fatal
-      if (logObj.level >= 50) {
+      // Flush immediately on warn/error/fatal for reliability
+      // This ensures important logs are persisted immediately
+      if (logObj.level >= 40) {
         await this.flush();
       } else if (this.batch.length >= this.batchSize) {
         await this.flush();
