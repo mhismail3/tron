@@ -538,7 +538,7 @@ struct InputBar: View {
             .background {
                 Capsule()
                     .fill(.clear)
-                    .glassEffect(.regular.tint(reasoningLevelColor(reasoningLevel).opacity(0.35)), in: .capsule)
+                    .glassEffect(.regular.tint(Color.tronPhthaloGreen.opacity(0.35)), in: .capsule)
             }
             .contentShape(Capsule())
         }
@@ -637,7 +637,7 @@ struct InputBar: View {
                     .background {
                         Capsule()
                             .fill(.clear)
-                            .glassEffect(.regular.tint(reasoningLevelColor(reasoningLevel).opacity(0.35)), in: .capsule)
+                            .glassEffect(.regular.tint(Color.tronPhthaloGreen.opacity(0.35)), in: .capsule)
                     }
                     .contentShape(Capsule())
                 }
