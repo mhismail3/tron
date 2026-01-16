@@ -252,8 +252,13 @@ function createRpcContext(orchestrator: EventStoreOrchestrator): RpcContext {
           model: session?.model ?? 'unknown',
           tools: [],
           // Include current turn content for resume support (only when agent is running)
-          currentTurnText: active?.isProcessing ? active.currentTurnAccumulatedText : undefined,
-          currentTurnToolCalls: active?.isProcessing ? active.currentTurnToolCalls : undefined,
+          // Phase 8 migration: Use SessionContext with fallback to legacy fields
+          currentTurnText: active?.isProcessing
+            ? (active.sessionContext?.getAccumulatedContent().text ?? active.currentTurnAccumulatedText)
+            : undefined,
+          currentTurnToolCalls: active?.isProcessing
+            ? (active.sessionContext?.getAccumulatedContent().toolCalls ?? active.currentTurnToolCalls)
+            : undefined,
           // Flag indicating session was interrupted
           wasInterrupted,
         };

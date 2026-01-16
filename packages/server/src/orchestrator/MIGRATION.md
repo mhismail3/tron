@@ -37,14 +37,43 @@ are migrated. Phase 8 cleanup will remove legacy fields.
   - Uses `sessionContext.addMessageEventId()` for user message tracking
   - Legacy `messageEventIds` array still used in some places
 
-### Deferred (Phase 8 - Part 2: Complex, Streaming-Critical)
+### Completed (Phase 8 - Part 2)
 
-- [ ] **Turn Management** - `currentTurn`, `turnTracker`, content tracking fields
-  - 30+ usages in streaming event handlers
-  - Both `turnTracker` and individual fields are updated (dual-write pattern)
-  - Risk: Breaking turn tracking affects session resume and client catch-up
-  - Current state: SessionContext's TurnManager receives updates alongside legacy fields
-  - Target: Remove legacy field updates, use only SessionContext methods
+- [x] **Turn Management** - `currentTurn`, `turnTracker`, content tracking fields
+  - Migrated 30+ usages in streaming event handlers (`forwardAgentEvent`)
+  - All calls now go through SessionContext:
+    - `sessionContext.startTurn()` for turn start (replaces `turnTracker.onTurnStart()`)
+    - `sessionContext.endTurn()` for turn end (builds content blocks)
+    - `sessionContext.addTextDelta()` for text streaming
+    - `sessionContext.startToolCall()` / `endToolCall()` for tool tracking
+    - `sessionContext.onAgentStart()` / `onAgentEnd()` for agent lifecycle
+    - `sessionContext.getTurnStartTime()` for latency calculation
+    - `sessionContext.getAccumulatedContent()` for client catch-up
+    - `sessionContext.buildInterruptedContent()` for interrupted session persistence
+  - RPC getState() uses SessionContext with fallback to legacy
+  - Legacy fields still updated (dual-write) for backward compatibility
+  - Next: Remove legacy field updates to complete cleanup
+
+### Pending (Phase 8 - Part 3: Cleanup)
+
+- [ ] **Remove Legacy Field Updates** - Remove LEGACY: marked sections in streaming handlers
+  - Turn start: Remove `active.currentTurn`, `currentTurnStartTime`, `thisTurnContent`, `thisTurnToolCalls` updates
+  - Message update: Remove `currentTurnAccumulatedText`, `currentTurnContentSequence`, `thisTurnContent` updates
+  - Tool start/end: Remove `currentTurnToolCalls`, `currentTurnContentSequence`, `thisTurnToolCalls` updates
+  - Turn end: Remove `lastTurnTokenUsage`, `thisTurnContent`, `thisTurnToolCalls` updates
+  - Agent start/end: Remove accumulated content clearing
+  - **Risk**: May break clients that read legacy fields directly
+
+- [ ] **Remove Legacy Field Initializations** - Remove from session create/resume
+  - Remove `currentTurnAccumulatedText`, `currentTurnToolCalls`, `currentTurnContentSequence`
+  - Remove `thisTurnContent`, `thisTurnToolCalls`
+  - Remove `currentTurn`, `currentTurnStartTime`, `lastTurnTokenUsage`
+  - Remove `turnTracker` initialization (use sessionContext.startTurn() etc.)
+
+- [ ] **Make sessionContext Required** - Change type from `sessionContext?: SessionContext`
+  - Update ActiveSession interface
+  - Remove all `?.` and `!.` optional chaining for sessionContext access
+  - Remove fallback code paths in getState() and other methods
 
 ### Not Migrated (Stay in ActiveSession)
 

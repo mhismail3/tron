@@ -1125,12 +1125,14 @@ export class EventStoreOrchestrator extends EventEmitter {
 
       // Handle interrupted runs - PERSIST partial content so it survives session resume
       if (runResult.interrupted) {
+        // Phase 8 migration: Use SessionContext for accumulated content info
+        const accumulated = active.sessionContext!.getAccumulatedContent();
         logger.info('Agent run interrupted', {
           sessionId: options.sessionId,
           turn: runResult.turns,
           hasPartialContent: !!runResult.partialContent,
-          accumulatedTextLength: active.currentTurnAccumulatedText?.length ?? 0,
-          toolCallsCount: active.currentTurnToolCalls?.length ?? 0,
+          accumulatedTextLength: accumulated.text?.length ?? 0,
+          toolCallsCount: accumulated.toolCalls?.length ?? 0,
         });
 
         // Notify the RPC caller (if any) about the interruption
@@ -1147,9 +1149,9 @@ export class EventStoreOrchestrator extends EventEmitter {
         }
 
         // CRITICAL: Persist partial content so it survives session resume
-        // Use TurnContentTracker to build content blocks from accumulated state
+        // Use SessionContext to build content blocks from accumulated state (Phase 8 migration)
         // This preserves exact interleaving order of text and tool calls
-        const { assistantContent, toolResultContent } = active.turnTracker.buildInterruptedContent();
+        const { assistantContent, toolResultContent } = active.sessionContext!.buildInterruptedContent();
 
         // Only persist if there's actual content
         if (assistantContent.length > 0 || toolResultContent.length > 0) {
@@ -2228,14 +2230,12 @@ The user has explicitly removed these skills and expects you to respond WITHOUT 
       case 'turn_start':
         // Update current turn for tool event tracking
         if (active) {
-          active.currentTurn = event.turn;
-          // Record turn start time for latency calculation
-          active.currentTurnStartTime = Date.now();
-
-          // Use TurnContentTracker for turn lifecycle
-          active.turnTracker.onTurnStart(event.turn);
+          // Use SessionContext for turn lifecycle (Phase 8 migration)
+          active.sessionContext!.startTurn(event.turn);
 
           // LEGACY: Keep old fields synchronized for backward compatibility during transition
+          active.currentTurn = event.turn;
+          active.currentTurnStartTime = Date.now();
           active.thisTurnContent = [];
           active.thisTurnToolCalls = new Map();
           if (event.turn > 1 && active.currentTurnAccumulatedText.length > 0) {
@@ -2260,78 +2260,55 @@ The user has explicitly removed these skills and expects you to respond WITHOUT 
         // they get ALL content from Turn 1, Turn 2, etc.
         // Accumulation is cleared at agent_start/agent_end instead.
 
-        // Store per-turn token usage
-        // This is the ACTUAL per-turn value from the LLM, not cumulative
-        // Includes cache token breakdown for accurate cost calculation
-        if (active && event.tokenUsage) {
-          active.lastTurnTokenUsage = {
-            inputTokens: event.tokenUsage.inputTokens,
-            outputTokens: event.tokenUsage.outputTokens,
-            cacheReadTokens: event.tokenUsage.cacheReadTokens,
-            cacheCreationTokens: event.tokenUsage.cacheCreationTokens,
-          };
-        }
-
         // CREATE MESSAGE.ASSISTANT FOR THIS TURN - THIS IS WHAT GETS PERSISTED
         // Consolidates all streaming deltas (text_delta) into a single durable event.
         // This is the source of truth for session reconstruction.
         // Each turn gets its own message.assistant event with per-turn token data.
-        if (active && active.thisTurnContent.length > 0) {
-          // Build content blocks from this turn's content
-          const contentBlocks: any[] = [];
-          for (const item of active.thisTurnContent) {
-            if (item.type === 'text' && item.text) {
-              contentBlocks.push({ type: 'text', text: item.text });
-            } else if (item.type === 'tool_ref') {
-              const tc = active.thisTurnToolCalls.get(item.toolCallId);
-              if (tc) {
-                contentBlocks.push({
-                  type: 'tool_use',
-                  id: tc.toolCallId,
-                  name: tc.toolName,
-                  input: tc.arguments,
-                });
-              }
+        if (active) {
+          // Use SessionContext for turn end (Phase 8 migration)
+          // This returns built content blocks and clears per-turn tracking
+          const turnStartTime = active.sessionContext!.getTurnStartTime();
+          const turnResult = active.sessionContext!.endTurn(event.tokenUsage);
+
+          if (turnResult.content.length > 0) {
+            // Calculate latency for this turn
+            const turnLatency = turnStartTime
+              ? Date.now() - turnStartTime
+              : event.duration ?? 0;
+
+            // Detect if content has thinking blocks
+            const hasThinking = turnResult.content.some((b) => (b as any).type === 'thinking');
+
+            // Normalize content blocks
+            const normalizedContent = normalizeContentBlocks(turnResult.content);
+
+            // Create message.assistant event for this turn
+            if (normalizedContent.length > 0) {
+              this.appendEventLinearized(sessionId, 'message.assistant', {
+                content: normalizedContent,
+                tokenUsage: turnResult.tokenUsage,
+                turn: turnResult.turn,
+                model: active.model,
+                stopReason: 'end_turn',
+                latency: turnLatency,
+                hasThinking,
+              }, (evt) => {
+                // Track eventId for context manager message
+                // Re-fetch active session since callback is async
+                const currentActive = this.activeSessions.get(sessionId);
+                if (currentActive) {
+                  currentActive.messageEventIds.push(evt.id);
+                }
+              });
+
+              logger.debug('Created message.assistant for turn', {
+                sessionId,
+                turn: turnResult.turn,
+                contentBlocks: normalizedContent.length,
+                tokenUsage: turnResult.tokenUsage,
+                latency: turnLatency,
+              });
             }
-          }
-
-          // Calculate latency for this turn
-          const turnLatency = active.currentTurnStartTime
-            ? Date.now() - active.currentTurnStartTime
-            : event.duration ?? 0;
-
-          // Detect if content has thinking blocks
-          const hasThinking = contentBlocks.some((b: any) => b.type === 'thinking');
-
-          // Normalize content blocks
-          const normalizedContent = normalizeContentBlocks(contentBlocks);
-
-          // Create message.assistant event for this turn
-          if (normalizedContent.length > 0) {
-            this.appendEventLinearized(sessionId, 'message.assistant', {
-              content: normalizedContent,
-              tokenUsage: active.lastTurnTokenUsage,
-              turn: event.turn,
-              model: active.model,
-              stopReason: 'end_turn',
-              latency: turnLatency,
-              hasThinking,
-            }, (evt) => {
-              // Track eventId for context manager message
-              // Re-fetch active session since callback is async
-              const currentActive = this.activeSessions.get(sessionId);
-              if (currentActive) {
-                currentActive.messageEventIds.push(evt.id);
-              }
-            });
-
-            logger.debug('Created message.assistant for turn', {
-              sessionId,
-              turn: event.turn,
-              contentBlocks: normalizedContent.length,
-              tokenUsage: active.lastTurnTokenUsage,
-              latency: turnLatency,
-            });
           }
 
           // NOTE: Tool results are NOT persisted as message.user at turn end.
@@ -2342,7 +2319,15 @@ The user has explicitly removed these skills and expects you to respond WITHOUT 
           // 3. The assistant's response already incorporates tool results
           // 4. Tool results are stored as tool.result events for streaming/display
 
-          // Clear THIS TURN's content (but keep accumulated content for catch-up)
+          // LEGACY: Keep old fields synchronized for backward compatibility during transition
+          if (event.tokenUsage) {
+            active.lastTurnTokenUsage = {
+              inputTokens: event.tokenUsage.inputTokens,
+              outputTokens: event.tokenUsage.outputTokens,
+              cacheReadTokens: event.tokenUsage.cacheReadTokens,
+              cacheCreationTokens: event.tokenUsage.cacheCreationTokens,
+            };
+          }
           active.thisTurnContent = [];
           active.thisTurnToolCalls = new Map();
         }
@@ -2377,8 +2362,8 @@ The user has explicitly removed these skills and expects you to respond WITHOUT 
         // Individual deltas are ephemeral by design - high frequency, low reconstruction value.
         // The source of truth is the message.assistant event created at turn_end.
         if (active && typeof event.content === 'string') {
-          // Use TurnContentTracker for text delta (updates both accumulated and per-turn)
-          active.turnTracker.addTextDelta(event.content);
+          // Use SessionContext for text delta (Phase 8 migration)
+          active.sessionContext!.addTextDelta(event.content);
 
           // LEGACY: Keep old fields synchronized for backward compatibility during transition
           active.currentTurnAccumulatedText += event.content;
@@ -2407,12 +2392,11 @@ The user has explicitly removed these skills and expects you to respond WITHOUT 
       case 'tool_execution_start':
         // Track tool call for resume support (across ALL turns)
         if (active) {
-          // Use TurnContentTracker for tool start (updates both accumulated and per-turn)
-          active.turnTracker.startToolCall(
+          // Use SessionContext for tool start (Phase 8 migration)
+          active.sessionContext!.startToolCall(
             event.toolCallId,
             event.toolName,
-            event.arguments ?? {},
-            timestamp
+            event.arguments ?? {}
           );
 
           // LEGACY: Keep old fields synchronized for backward compatibility during transition
@@ -2480,12 +2464,11 @@ The user has explicitly removed these skills and expects you to respond WITHOUT 
 
         // Update tool call tracking for resume support (across ALL turns)
         if (active) {
-          // Use TurnContentTracker for tool end (updates both accumulated and per-turn)
-          active.turnTracker.endToolCall(
+          // Use SessionContext for tool end (Phase 8 migration)
+          active.sessionContext!.endToolCall(
             event.toolCallId,
             resultContent,
-            event.isError ?? false,
-            timestamp
+            event.isError ?? false
           );
 
           // LEGACY: Keep old fields synchronized for backward compatibility during transition
@@ -2562,8 +2545,8 @@ The user has explicitly removed these skills and expects you to respond WITHOUT 
         // Clear accumulation at the start of a new agent run
         // This ensures fresh tracking for the new runAgent call
         if (active) {
-          // Use TurnContentTracker for agent lifecycle
-          active.turnTracker.onAgentStart();
+          // Use SessionContext for agent lifecycle (Phase 8 migration)
+          active.sessionContext!.onAgentStart();
 
           // LEGACY: Keep old fields synchronized for backward compatibility during transition
           active.currentTurnAccumulatedText = '';
@@ -2584,8 +2567,8 @@ The user has explicitly removed these skills and expects you to respond WITHOUT 
         // Clear accumulation when agent run completes
         // Content is now persisted in EventStore, no need for catch-up tracking
         if (active) {
-          // Use TurnContentTracker for agent lifecycle
-          active.turnTracker.onAgentEnd();
+          // Use SessionContext for agent lifecycle (Phase 8 migration)
+          active.sessionContext!.onAgentEnd();
 
           // LEGACY: Keep old fields synchronized for backward compatibility during transition
           active.currentTurnAccumulatedText = '';
