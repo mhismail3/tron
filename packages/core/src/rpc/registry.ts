@@ -1,0 +1,302 @@
+/**
+ * @fileoverview RPC Method Registry
+ *
+ * Provides a registration system for RPC method handlers with:
+ * - Method registration with options (required params, required managers)
+ * - Validation before dispatch
+ * - Response helpers for consistent formatting
+ * - Namespace-based organization
+ *
+ * This module is designed to gradually replace the monolithic switch
+ * statement in RpcHandler.dispatch() with a more maintainable registry.
+ */
+
+import type { RpcRequest, RpcResponse, RpcError } from './types.js';
+import type { RpcContext } from './handler.js';
+
+// =============================================================================
+// Types
+// =============================================================================
+
+/**
+ * Handler context is the RpcContext with potential optional managers
+ */
+export type HandlerContext = RpcContext;
+
+/**
+ * Method handler function signature
+ *
+ * @param request - The incoming RPC request
+ * @param context - The handler context with managers
+ * @returns The result to be wrapped in a success response
+ */
+export type MethodHandler<TParams = unknown, TResult = unknown> = (
+  request: RpcRequest & { params?: TParams },
+  context: HandlerContext
+) => Promise<TResult>;
+
+/**
+ * Options for method registration
+ */
+export interface MethodOptions {
+  /** Required parameter names that must be present in request.params */
+  requiredParams?: string[];
+  /** Required manager names that must be present in context */
+  requiredManagers?: (keyof RpcContext)[];
+  /** Allow overwriting existing registration */
+  force?: boolean;
+  /** Optional description for documentation */
+  description?: string;
+}
+
+/**
+ * Full registration record for a method
+ */
+export interface MethodRegistration {
+  method: string;
+  handler: MethodHandler;
+  options?: MethodOptions;
+}
+
+/**
+ * Internal storage format
+ */
+interface RegistrationEntry {
+  handler: MethodHandler;
+  options?: MethodOptions;
+}
+
+// =============================================================================
+// Registry Implementation
+// =============================================================================
+
+/**
+ * Registry for RPC method handlers
+ *
+ * Manages method registration, validation, and dispatch. Designed to work
+ * alongside the existing RpcHandler during the migration period.
+ *
+ * @example
+ * ```typescript
+ * const registry = new MethodRegistry();
+ *
+ * // Register a simple handler
+ * registry.register('system.ping', async () => ({ pong: true }));
+ *
+ * // Register with validation options
+ * registry.register('session.create', handleSessionCreate, {
+ *   requiredParams: ['workingDirectory'],
+ *   requiredManagers: ['sessionManager'],
+ * });
+ *
+ * // Dispatch a request
+ * const response = await registry.dispatch(request, context);
+ * ```
+ */
+export class MethodRegistry {
+  private readonly handlers: Map<string, RegistrationEntry> = new Map();
+
+  // ===========================================================================
+  // Registration
+  // ===========================================================================
+
+  /**
+   * Register a method handler
+   *
+   * @param method - The method name (e.g., 'system.ping')
+   * @param handler - The handler function
+   * @param options - Optional registration options
+   * @throws If method is already registered (unless force: true)
+   */
+  register(method: string, handler: MethodHandler, options?: MethodOptions): void {
+    if (this.handlers.has(method) && !options?.force) {
+      throw new Error(`Method "${method}" is already registered`);
+    }
+
+    this.handlers.set(method, { handler, options });
+  }
+
+  /**
+   * Register multiple methods at once
+   *
+   * @param registrations - Array of method registrations
+   */
+  registerAll(registrations: MethodRegistration[]): void {
+    for (const { method, handler, options } of registrations) {
+      this.register(method, handler, options);
+    }
+  }
+
+  /**
+   * Unregister a method
+   *
+   * @param method - The method name to unregister
+   * @returns true if the method was registered, false otherwise
+   */
+  unregister(method: string): boolean {
+    return this.handlers.delete(method);
+  }
+
+  /**
+   * Clear all registrations
+   */
+  clear(): void {
+    this.handlers.clear();
+  }
+
+  // ===========================================================================
+  // Lookup
+  // ===========================================================================
+
+  /**
+   * Check if a method is registered
+   */
+  has(method: string): boolean {
+    return this.handlers.has(method);
+  }
+
+  /**
+   * Get registration details for a method
+   */
+  get(method: string): RegistrationEntry | undefined {
+    return this.handlers.get(method);
+  }
+
+  /**
+   * List all registered methods
+   */
+  list(): string[] {
+    return Array.from(this.handlers.keys());
+  }
+
+  /**
+   * List methods by namespace prefix
+   *
+   * @param namespace - The namespace prefix (e.g., 'system', 'session')
+   */
+  listByNamespace(namespace: string): string[] {
+    const prefix = `${namespace}.`;
+    return Array.from(this.handlers.keys()).filter((m) => m.startsWith(prefix));
+  }
+
+  /**
+   * Get all unique namespaces
+   */
+  get namespaces(): string[] {
+    const ns = new Set<string>();
+    for (const method of this.handlers.keys()) {
+      const dot = method.indexOf('.');
+      if (dot > 0) {
+        ns.add(method.slice(0, dot));
+      }
+    }
+    return Array.from(ns);
+  }
+
+  /**
+   * Get the number of registered methods
+   */
+  get size(): number {
+    return this.handlers.size;
+  }
+
+  // ===========================================================================
+  // Dispatch
+  // ===========================================================================
+
+  /**
+   * Dispatch a request to the appropriate handler
+   *
+   * @param request - The incoming RPC request
+   * @param context - The handler context
+   * @returns The RPC response
+   */
+  async dispatch(request: RpcRequest, context: HandlerContext): Promise<RpcResponse> {
+    const entry = this.handlers.get(request.method);
+
+    // Method not found
+    if (!entry) {
+      return MethodRegistry.errorResponse(
+        request.id,
+        'METHOD_NOT_FOUND',
+        `Unknown method: ${request.method}`
+      );
+    }
+
+    const { handler, options } = entry;
+
+    // Validate required params
+    if (options?.requiredParams?.length) {
+      const params = request.params as Record<string, unknown> | undefined;
+      for (const param of options.requiredParams) {
+        if (!params || params[param] === undefined) {
+          return MethodRegistry.errorResponse(
+            request.id,
+            'INVALID_PARAMS',
+            `${param} is required`
+          );
+        }
+      }
+    }
+
+    // Validate required managers
+    if (options?.requiredManagers?.length) {
+      for (const manager of options.requiredManagers) {
+        if (!context[manager]) {
+          return MethodRegistry.errorResponse(
+            request.id,
+            'NOT_AVAILABLE',
+            `${manager} is not available`
+          );
+        }
+      }
+    }
+
+    // Execute handler
+    try {
+      const result = await handler(request, context);
+      return MethodRegistry.successResponse(request.id, result);
+    } catch (error) {
+      return MethodRegistry.errorResponse(
+        request.id,
+        'INTERNAL_ERROR',
+        error instanceof Error ? error.message : 'Unknown error'
+      );
+    }
+  }
+
+  // ===========================================================================
+  // Response Helpers (static for use without registry instance)
+  // ===========================================================================
+
+  /**
+   * Create a success response
+   */
+  static successResponse(id: string | number, result: unknown): RpcResponse {
+    return {
+      jsonrpc: '2.0',
+      id,
+      result,
+    };
+  }
+
+  /**
+   * Create an error response
+   */
+  static errorResponse(
+    id: string | number,
+    code: RpcError['code'],
+    message: string,
+    data?: unknown
+  ): RpcResponse {
+    const error: RpcError = { code, message };
+    if (data !== undefined) {
+      error.data = data;
+    }
+    return {
+      jsonrpc: '2.0',
+      id,
+      error,
+    };
+  }
+}
