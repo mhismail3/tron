@@ -1241,8 +1241,8 @@ struct AddedSkillRow: View {
                     onDelete?()
                 } label: {
                     Label("Remove from Context", systemImage: "trash")
-                        .foregroundStyle(.red)
                 }
+                .tint(.red)
             }
         }
     }
@@ -1768,6 +1768,7 @@ struct DetailedMessageRow: View {
                 } label: {
                     Label("Delete from Context", systemImage: "trash")
                 }
+                .tint(.red)
             }
         }
         // Removed duplicate .animation() - withAnimation in button action handles this

@@ -104,6 +104,7 @@ struct SettingsView: View {
                     } label: {
                         Label("Reset All Settings", systemImage: "arrow.counterclockwise")
                             .font(.subheadline)
+                            .foregroundStyle(.red)
                     }
                 } header: {
                     Text("Advanced")
