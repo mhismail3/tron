@@ -293,6 +293,10 @@ export interface SessionInfo {
   worktree?: WorktreeInfo;
   /** Parent session ID if this is a forked session */
   parentSessionId?: string;
+  /** Last user prompt text (for preview display) */
+  lastUserPrompt?: string;
+  /** Last assistant response text (for preview display) */
+  lastAssistantResponse?: string;
 }
 
 // =============================================================================

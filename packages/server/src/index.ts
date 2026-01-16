@@ -113,6 +113,8 @@ function createRpcContext(orchestrator: EventStoreOrchestrator): RpcContext {
           lastActivity: s.lastActivity,
           isActive: s.isActive,
           messages: [],
+          lastUserPrompt: s.lastUserPrompt,
+          lastAssistantResponse: s.lastAssistantResponse,
         }));
       },
       async deleteSession(sessionId) {

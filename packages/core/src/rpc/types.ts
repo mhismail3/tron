@@ -216,6 +216,10 @@ export interface SessionListResult {
     createdAt: string;
     lastActivity: string;
     isActive: boolean;
+    /** Last user prompt text (for preview display) */
+    lastUserPrompt?: string;
+    /** Last assistant response text (for preview display) */
+    lastAssistantResponse?: string;
   }>;
 }
 

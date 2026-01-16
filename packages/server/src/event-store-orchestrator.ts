@@ -687,11 +687,14 @@ export class EventStoreOrchestrator extends EventEmitter {
       const sessionIds = active.map(a => a.sessionId);
       const sessionsMap = await this.eventStore.getSessionsByIds(sessionIds);
 
+      // Fetch message previews for all sessions
+      const previews = await this.eventStore.getSessionMessagePreviews(sessionIds);
+
       const sessions: SessionInfo[] = [];
       for (const a of active) {
         const session = sessionsMap.get(a.sessionId);
         if (session) {
-          sessions.push(this.sessionRowToInfo(session, true, a.workingDir));
+          sessions.push(this.sessionRowToInfo(session, true, a.workingDir, previews.get(a.sessionId)));
         }
       }
       return sessions;
@@ -708,9 +711,13 @@ export class EventStoreOrchestrator extends EventEmitter {
       ? sessionRows.filter(row => row.workingDirectory === options.workingDirectory)
       : sessionRows;
 
+    // Fetch message previews for all sessions
+    const sessionIds = filtered.map(row => row.id);
+    const previews = await this.eventStore.getSessionMessagePreviews(sessionIds);
+
     return filtered.map(row => {
       const active = this.activeSessions.get(row.id);
-      return this.sessionRowToInfo(row, !!active, active?.workingDir);
+      return this.sessionRowToInfo(row, !!active, active?.workingDir, previews.get(row.id));
     });
   }
 
@@ -2684,7 +2691,8 @@ The user has explicitly removed these skills and expects you to respond WITHOUT 
   private sessionRowToInfo(
     row: any,
     isActive: boolean,
-    workingDir?: WorkingDirectory
+    workingDir?: WorkingDirectory,
+    preview?: { lastUserPrompt?: string; lastAssistantResponse?: string }
   ): SessionInfo {
     const cacheReadTokens = row.totalCacheReadTokens ?? 0;
     const cacheCreationTokens = row.totalCacheCreationTokens ?? 0;
@@ -2709,6 +2717,8 @@ The user has explicitly removed these skills and expects you to respond WITHOUT 
       isActive,
       worktree: workingDir ? buildWorktreeInfo(workingDir) : undefined,
       parentSessionId: row.parentSessionId ?? undefined,
+      lastUserPrompt: preview?.lastUserPrompt,
+      lastAssistantResponse: preview?.lastAssistantResponse,
     };
   }
 

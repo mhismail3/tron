@@ -78,17 +78,19 @@ struct SessionInfo: Decodable, Identifiable, Hashable {
     let isActive: Bool
     let workingDirectory: String?
     let parentSessionId: String?
+    /// Last user prompt text (for preview display)
+    let lastUserPrompt: String?
+    /// Last assistant response text (for preview display)
+    let lastAssistantResponse: String?
 
     var id: String { sessionId }
 
     /// Whether this session is a fork (has a parent session)
     var isFork: Bool { parentSessionId != nil }
 
+    /// Display session ID prefix (first 20 characters)
     var displayName: String {
-        if let dir = workingDirectory {
-            return URL(fileURLWithPath: dir).lastPathComponent
-        }
-        return sessionId.prefix(8).description
+        String(sessionId.prefix(20))
     }
 
     var formattedDate: String {

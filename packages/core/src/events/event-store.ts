@@ -610,6 +610,13 @@ export class EventStore {
     return this.backend.listSessions(options ?? {});
   }
 
+  /**
+   * Get message previews (last user prompt and assistant response) for a list of sessions.
+   */
+  async getSessionMessagePreviews(sessionIds: SessionId[]): Promise<Map<SessionId, { lastUserPrompt?: string; lastAssistantResponse?: string }>> {
+    return this.backend.getSessionMessagePreviews(sessionIds);
+  }
+
   async endSession(sessionId: SessionId): Promise<void> {
     await this.backend.markSessionEnded(sessionId);
   }

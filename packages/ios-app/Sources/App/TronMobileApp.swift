@@ -880,36 +880,76 @@ struct RecentSessionRow: View {
 
     var body: some View {
         Button(action: onTap) {
-            HStack {
-                VStack(alignment: .leading, spacing: 2) {
-                    HStack {
-                        Text(session.displayName)
-                            .font(.system(size: 13, weight: .medium, design: .monospaced))
-                            .foregroundStyle(.tronEmerald)
-                            .lineLimit(1)
-                        Spacer()
-                        Text(session.formattedDate)
-                            .font(.system(size: 9, design: .monospaced))
-                            .foregroundStyle(.white.opacity(0.9))
-                    }
+            VStack(alignment: .leading, spacing: 6) {
+                // Header: Session ID + Date
+                HStack {
+                    Text(session.displayName)
+                        .font(.system(size: 13, weight: .medium, design: .monospaced))
+                        .foregroundStyle(.tronEmerald)
+                        .lineLimit(1)
+                    Spacer()
+                    Text(session.formattedDate)
+                        .font(.system(size: 9, design: .monospaced))
+                        .foregroundStyle(.white.opacity(0.9))
+                }
 
-                    // Model + tokens/cost on same row
-                    HStack(spacing: 6) {
-                        Text(session.model.shortModelName)
-                            .font(.system(size: 10, weight: .medium, design: .monospaced))
+                // Last user prompt
+                if let prompt = session.lastUserPrompt, !prompt.isEmpty {
+                    HStack(alignment: .top, spacing: 6) {
+                        Image(systemName: "person.fill")
+                            .font(.system(size: 8))
                             .foregroundStyle(.tronEmerald.opacity(0.6))
+                            .frame(width: 12)
+                            .offset(y: 2)
 
-                        Spacer()
-
-                        // Tokens and cost
-                        Text(session.formattedTokens)
-                            .font(.system(size: 9, design: .monospaced))
-                            .foregroundStyle(.white.opacity(0.45))
-
-                        Text(session.formattedCost)
-                            .font(.system(size: 9, weight: .medium, design: .monospaced))
-                            .foregroundStyle(.tronEmerald.opacity(0.5))
+                        Text(prompt)
+                            .font(.system(size: 11, design: .monospaced))
+                            .foregroundStyle(.white.opacity(0.7))
+                            .lineLimit(2)
+                            .truncationMode(.tail)
                     }
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 6)
+                    .background(Color.white.opacity(0.03))
+                    .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+                }
+
+                // Last assistant response
+                if let response = session.lastAssistantResponse, !response.isEmpty {
+                    HStack(alignment: .top, spacing: 6) {
+                        Image(systemName: "cpu")
+                            .font(.system(size: 8))
+                            .foregroundStyle(.tronEmerald.opacity(0.8))
+                            .frame(width: 12)
+                            .offset(y: 2)
+
+                        Text(response)
+                            .font(.system(size: 11, design: .monospaced))
+                            .foregroundStyle(.white.opacity(0.6))
+                            .lineLimit(2)
+                            .truncationMode(.tail)
+                    }
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 6)
+                    .background(Color.white.opacity(0.03))
+                    .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+                }
+
+                // Footer: Model + tokens/cost
+                HStack(spacing: 6) {
+                    Text(session.model.shortModelName)
+                        .font(.system(size: 10, weight: .medium, design: .monospaced))
+                        .foregroundStyle(.tronEmerald.opacity(0.6))
+
+                    Spacer()
+
+                    Text(session.formattedTokens)
+                        .font(.system(size: 9, design: .monospaced))
+                        .foregroundStyle(.white.opacity(0.45))
+
+                    Text(session.formattedCost)
+                        .font(.system(size: 9, weight: .medium, design: .monospaced))
+                        .foregroundStyle(.tronEmerald.opacity(0.5))
                 }
             }
             .padding(.horizontal, 14)

@@ -668,6 +668,89 @@ export class SQLiteBackend {
     return rows.map(row => this.rowToSession(row));
   }
 
+  /**
+   * Get message previews (last user prompt and assistant response) for a list of sessions.
+   * Used for displaying session summaries in UI.
+   */
+  async getSessionMessagePreviews(sessionIds: SessionId[]): Promise<Map<SessionId, { lastUserPrompt?: string; lastAssistantResponse?: string }>> {
+    const result = new Map<SessionId, { lastUserPrompt?: string; lastAssistantResponse?: string }>();
+    if (sessionIds.length === 0) return result;
+
+    const db = this.getDb();
+
+    // Use window function to get the last message of each type per session
+    const placeholders = sessionIds.map(() => '?').join(',');
+    const sql = `
+      WITH ranked AS (
+        SELECT
+          session_id,
+          type,
+          payload,
+          ROW_NUMBER() OVER (PARTITION BY session_id, type ORDER BY sequence DESC) as rn
+        FROM events
+        WHERE session_id IN (${placeholders})
+          AND type IN ('message.user', 'message.assistant')
+      )
+      SELECT session_id, type, payload
+      FROM ranked
+      WHERE rn = 1
+    `;
+
+    const rows = db.prepare(sql).all(...sessionIds) as Array<{ session_id: string; type: string; payload: string }>;
+
+    // Initialize result map for all session IDs
+    for (const sessionId of sessionIds) {
+      result.set(sessionId as SessionId, {});
+    }
+
+    // Process each row and extract text from payload
+    for (const row of rows) {
+      const sessionId = row.session_id as SessionId;
+      const entry = result.get(sessionId) || {};
+
+      try {
+        const payload = JSON.parse(row.payload);
+        const text = this.extractTextFromContent(payload.content);
+
+        if (row.type === 'message.user') {
+          entry.lastUserPrompt = text;
+        } else if (row.type === 'message.assistant') {
+          entry.lastAssistantResponse = text;
+        }
+
+        result.set(sessionId, entry);
+      } catch {
+        // Skip malformed payloads
+      }
+    }
+
+    return result;
+  }
+
+  /**
+   * Extract plain text from message content (can be string or block array).
+   */
+  private extractTextFromContent(content: unknown): string {
+    if (typeof content === 'string') {
+      return content;
+    }
+
+    if (Array.isArray(content)) {
+      const texts: string[] = [];
+      for (const block of content) {
+        if (typeof block === 'object' && block !== null) {
+          const b = block as Record<string, unknown>;
+          if (b.type === 'text' && typeof b.text === 'string') {
+            texts.push(b.text);
+          }
+        }
+      }
+      return texts.join('');
+    }
+
+    return '';
+  }
+
   async updateSessionHead(sessionId: SessionId, headEventId: EventId): Promise<void> {
     const db = this.getDb();
     db.prepare(`

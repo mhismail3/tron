@@ -224,6 +224,8 @@ interface SessionInfo {
   lastActivity: string;
   isActive: boolean;
   messages: unknown[];
+  lastUserPrompt?: string;
+  lastAssistantResponse?: string;
 }
 
 interface AgentManager {
@@ -572,6 +574,8 @@ export class RpcHandler extends EventEmitter {
         createdAt: s.createdAt,
         lastActivity: s.lastActivity,
         isActive: s.isActive,
+        lastUserPrompt: s.lastUserPrompt,
+        lastAssistantResponse: s.lastAssistantResponse,
       })),
     };
 
