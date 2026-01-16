@@ -8,7 +8,7 @@
  * while maintaining type safety.
  */
 
-import type { RpcRequest, RpcResponse, RpcError } from '../types.js';
+import type { RpcRequest, RpcResponse } from '../types.js';
 import type { RpcContext } from '../handler.js';
 import { MethodRegistry } from '../registry.js';
 

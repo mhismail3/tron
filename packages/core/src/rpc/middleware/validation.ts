@@ -110,7 +110,7 @@ export function createValidationMiddleware(
   schemas: SchemaRegistry,
   options: ValidationMiddlewareOptions = {}
 ): Middleware {
-  const { stripUnknown = false, formatError = defaultFormatError } = options;
+  const { formatError = defaultFormatError } = options;
 
   return async (request: RpcRequest, next: MiddlewareNext): Promise<RpcResponse> => {
     const schema = schemas.get(request.method);
@@ -122,10 +122,9 @@ export function createValidationMiddleware(
 
     // Validate params
     const params = request.params ?? {};
-    const parseOptions = stripUnknown ? { strict: false } : undefined;
 
     try {
-      const result = schema.safeParse(params, parseOptions);
+      const result = schema.safeParse(params);
 
       if (!result.success) {
         const errors = zodErrorToValidationErrors(result.error);

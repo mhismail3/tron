@@ -12,7 +12,7 @@
  * statement in RpcHandler.dispatch() with a more maintainable registry.
  */
 
-import type { RpcRequest, RpcResponse, RpcError } from './types.js';
+import type { RpcRequest, RpcResponse } from './types.js';
 import type { RpcContext } from './handler.js';
 import { buildMiddlewareChain, type Middleware, type MiddlewareNext } from './middleware/index.js';
 
