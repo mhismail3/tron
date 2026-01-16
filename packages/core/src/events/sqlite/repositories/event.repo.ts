@@ -19,9 +19,9 @@ import type { EventDbRow } from '../types.js';
 /**
  * Extended event with computed depth field
  */
-export interface EventWithDepth extends SessionEvent {
+export type EventWithDepth = SessionEvent & {
   depth: number;
-}
+};
 
 /**
  * Options for listing events

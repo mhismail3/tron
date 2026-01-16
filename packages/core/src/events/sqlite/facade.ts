@@ -1,0 +1,416 @@
+/**
+ * @fileoverview SQLite Event Store Facade
+ *
+ * Provides a unified interface to the modular SQLite repositories.
+ * This is the main entry point for SQLite-based event storage.
+ *
+ * MIGRATION NOTE: This facade maintains the same interface as the legacy
+ * sqlite-backend.ts for backward compatibility. New code should use the
+ * individual repositories directly when possible.
+ */
+
+import type Database from 'better-sqlite3';
+import { DatabaseConnection, DEFAULT_CONFIG } from './database.js';
+import { runMigrations, runIncrementalMigrations } from './migrations/index.js';
+import {
+  BlobRepository,
+  WorkspaceRepository,
+  BranchRepository,
+  EventRepository,
+  SessionRepository,
+  SearchRepository,
+  type SessionRow,
+  type BranchRow,
+  type CreateSessionOptions,
+  type ListSessionsOptions,
+  type IncrementCountersOptions,
+  type CreateBranchOptions,
+} from './repositories/index.js';
+import {
+  EventId,
+  SessionId,
+  WorkspaceId,
+  BranchId,
+  type SessionEvent,
+  type EventType,
+  type Workspace,
+  type SearchResult,
+} from '../types.js';
+
+// =============================================================================
+// Types (re-exported for backward compatibility)
+// =============================================================================
+
+export interface SQLiteBackendConfig {
+  dbPath: string;
+  enableWAL?: boolean;
+  busyTimeout?: number;
+}
+
+export interface CreateWorkspaceOptions {
+  path: string;
+  name?: string;
+}
+
+export interface SearchOptions {
+  workspaceId?: WorkspaceId;
+  sessionId?: SessionId;
+  types?: EventType[];
+  limit?: number;
+  offset?: number;
+}
+
+// Re-export types from repositories
+export type {
+  SessionRow,
+  BranchRow,
+  CreateSessionOptions,
+  ListSessionsOptions,
+  IncrementCountersOptions,
+  CreateBranchOptions,
+};
+
+// =============================================================================
+// Facade Implementation
+// =============================================================================
+
+/**
+ * SQLite Event Store - Unified facade for all repositories
+ *
+ * Provides the same interface as the legacy SQLiteBackend while
+ * delegating to modular repositories internally.
+ */
+export class SQLiteEventStore {
+  private connection: DatabaseConnection;
+  private initialized = false;
+
+  // Repositories
+  private blobRepo!: BlobRepository;
+  private workspaceRepo!: WorkspaceRepository;
+  private branchRepo!: BranchRepository;
+  private eventRepo!: EventRepository;
+  private sessionRepo!: SessionRepository;
+  private searchRepo!: SearchRepository;
+
+  constructor(dbPath: string, config?: Partial<SQLiteBackendConfig>) {
+    this.connection = new DatabaseConnection(dbPath, {
+      enableWAL: config?.enableWAL ?? DEFAULT_CONFIG.enableWAL,
+      busyTimeout: config?.busyTimeout ?? DEFAULT_CONFIG.busyTimeout,
+    });
+  }
+
+  // ===========================================================================
+  // Lifecycle
+  // ===========================================================================
+
+  async initialize(): Promise<void> {
+    if (this.initialized) return;
+
+    const db = this.connection.open();
+    runMigrations(db);
+    this.connection.markInitialized();
+
+    // Initialize repositories
+    this.blobRepo = new BlobRepository(this.connection);
+    this.workspaceRepo = new WorkspaceRepository(this.connection);
+    this.branchRepo = new BranchRepository(this.connection);
+    this.eventRepo = new EventRepository(this.connection);
+    this.sessionRepo = new SessionRepository(this.connection);
+    this.searchRepo = new SearchRepository(this.connection);
+
+    this.initialized = true;
+  }
+
+  async close(): Promise<void> {
+    this.connection.close();
+    this.initialized = false;
+  }
+
+  /**
+   * Run incremental migrations (for upgrading existing databases)
+   */
+  runIncrementalMigrations(): void {
+    runIncrementalMigrations(this.connection.getDatabase());
+  }
+
+  /**
+   * Get the underlying database instance
+   * @deprecated Use repositories directly when possible
+   */
+  getDb(): Database.Database {
+    return this.connection.getDatabase();
+  }
+
+  // ===========================================================================
+  // Workspace Operations
+  // ===========================================================================
+
+  async createWorkspace(options: CreateWorkspaceOptions): Promise<Workspace> {
+    return this.workspaceRepo.create(options);
+  }
+
+  async getWorkspaceByPath(path: string): Promise<Workspace | null> {
+    return this.workspaceRepo.getByPath(path);
+  }
+
+  async getOrCreateWorkspace(path: string, name?: string): Promise<Workspace> {
+    const existing = await this.getWorkspaceByPath(path);
+    if (existing) return existing;
+    return this.createWorkspace({ path, name });
+  }
+
+  async listWorkspaces(): Promise<Workspace[]> {
+    return this.workspaceRepo.list();
+  }
+
+  // ===========================================================================
+  // Session Operations
+  // ===========================================================================
+
+  async createSession(options: CreateSessionOptions): Promise<SessionRow> {
+    return this.sessionRepo.create(options);
+  }
+
+  async getSession(sessionId: SessionId): Promise<SessionRow | null> {
+    return this.sessionRepo.getById(sessionId);
+  }
+
+  async getSessionsByIds(sessionIds: SessionId[]): Promise<Map<SessionId, SessionRow>> {
+    return this.sessionRepo.getByIds(sessionIds);
+  }
+
+  async listSessions(options: ListSessionsOptions): Promise<SessionRow[]> {
+    return this.sessionRepo.list(options);
+  }
+
+  async getSessionMessagePreviews(
+    sessionIds: SessionId[]
+  ): Promise<Map<SessionId, { lastUserPrompt?: string; lastAssistantResponse?: string }>> {
+    return this.sessionRepo.getMessagePreviews(sessionIds);
+  }
+
+  async updateSessionHead(sessionId: SessionId, headEventId: EventId): Promise<void> {
+    this.sessionRepo.updateHead(sessionId, headEventId);
+  }
+
+  async updateSessionRoot(sessionId: SessionId, rootEventId: EventId): Promise<void> {
+    this.sessionRepo.updateRoot(sessionId, rootEventId);
+  }
+
+  async markSessionEnded(sessionId: SessionId): Promise<void> {
+    this.sessionRepo.markEnded(sessionId);
+  }
+
+  async clearSessionEnded(sessionId: SessionId): Promise<void> {
+    this.sessionRepo.clearEnded(sessionId);
+  }
+
+  async updateLatestModel(sessionId: SessionId, model: string): Promise<void> {
+    this.sessionRepo.updateLatestModel(sessionId, model);
+  }
+
+  async incrementSessionCounters(
+    sessionId: SessionId,
+    counters: IncrementCountersOptions
+  ): Promise<void> {
+    this.sessionRepo.incrementCounters(sessionId, counters);
+  }
+
+  // ===========================================================================
+  // Event Operations
+  // ===========================================================================
+
+  async insertEvent(event: SessionEvent): Promise<void> {
+    await this.eventRepo.insert(event);
+  }
+
+  async getEvent(eventId: EventId): Promise<SessionEvent | null> {
+    const event = this.eventRepo.getById(eventId);
+    if (!event) return null;
+    // Remove depth field to match legacy interface
+    const { depth, ...sessionEvent } = event;
+    return sessionEvent as SessionEvent;
+  }
+
+  async getEvents(eventIds: EventId[]): Promise<Map<EventId, SessionEvent>> {
+    const events = this.eventRepo.getByIds(eventIds);
+    // Convert to legacy format (without depth)
+    const result = new Map<EventId, SessionEvent>();
+    events.forEach((event, id) => {
+      const { depth, ...sessionEvent } = event;
+      result.set(id, sessionEvent as SessionEvent);
+    });
+    return result;
+  }
+
+  async getEventsBySession(
+    sessionId: SessionId,
+    options?: { limit?: number; offset?: number }
+  ): Promise<SessionEvent[]> {
+    const events = this.eventRepo.getBySession(sessionId, options);
+    return events.map(({ depth, ...event }) => event as SessionEvent);
+  }
+
+  async getEventsByType(
+    sessionId: SessionId,
+    types: EventType[],
+    options?: { limit?: number }
+  ): Promise<SessionEvent[]> {
+    const events = this.eventRepo.getByTypes(sessionId, types, options);
+    return events.map(({ depth, ...event }) => event as SessionEvent);
+  }
+
+  async getNextSequence(sessionId: SessionId): Promise<number> {
+    return this.eventRepo.getNextSequence(sessionId);
+  }
+
+  async getAncestors(eventId: EventId): Promise<SessionEvent[]> {
+    const events = this.eventRepo.getAncestors(eventId);
+    return events.map(({ depth, ...event }) => event as SessionEvent);
+  }
+
+  async getChildren(eventId: EventId): Promise<SessionEvent[]> {
+    const events = this.eventRepo.getChildren(eventId);
+    return events.map(({ depth, ...event }) => event as SessionEvent);
+  }
+
+  async countEvents(sessionId: SessionId): Promise<number> {
+    return this.eventRepo.countBySession(sessionId);
+  }
+
+  // ===========================================================================
+  // Blob Operations
+  // ===========================================================================
+
+  async storeBlob(content: string | Buffer, mimeType = 'text/plain'): Promise<string> {
+    return this.blobRepo.store(content, mimeType);
+  }
+
+  async getBlob(blobId: string): Promise<string | null> {
+    return this.blobRepo.getContent(blobId);
+  }
+
+  async getBlobRefCount(blobId: string): Promise<number> {
+    return this.blobRepo.getRefCount(blobId);
+  }
+
+  // ===========================================================================
+  // FTS5 Search
+  // ===========================================================================
+
+  async indexEventForSearch(event: SessionEvent): Promise<void> {
+    this.searchRepo.index(event);
+  }
+
+  async searchEvents(query: string, options?: SearchOptions): Promise<SearchResult[]> {
+    return this.searchRepo.search(query, options);
+  }
+
+  // ===========================================================================
+  // Branch Operations
+  // ===========================================================================
+
+  async createBranch(options: CreateBranchOptions): Promise<BranchRow> {
+    return this.branchRepo.create(options);
+  }
+
+  async getBranch(branchId: BranchId): Promise<BranchRow | null> {
+    return this.branchRepo.getById(branchId);
+  }
+
+  async getBranchesBySession(sessionId: SessionId): Promise<BranchRow[]> {
+    return this.branchRepo.getBySession(sessionId);
+  }
+
+  async updateBranchHead(branchId: BranchId, headEventId: EventId): Promise<void> {
+    this.branchRepo.updateHead(branchId, headEventId);
+  }
+
+  // ===========================================================================
+  // Transaction Support
+  // ===========================================================================
+
+  /**
+   * Execute an async function within a transaction
+   */
+  async transactionAsync<T>(fn: () => Promise<T>): Promise<T> {
+    return this.connection.transactionAsync(fn);
+  }
+
+  // ===========================================================================
+  // Stats
+  // ===========================================================================
+
+  async getStats(): Promise<{
+    workspaceCount: number;
+    sessionCount: number;
+    eventCount: number;
+    blobCount: number;
+    totalBlobSize: number;
+  }> {
+    const db = this.connection.getDatabase();
+
+    const workspaceRow = db.prepare('SELECT COUNT(*) as count FROM workspaces').get() as
+      | { count: number }
+      | undefined;
+    const sessionRow = db.prepare('SELECT COUNT(*) as count FROM sessions').get() as
+      | { count: number }
+      | undefined;
+    const eventCount = this.eventRepo.count();
+
+    const blobStats = db
+      .prepare(
+        'SELECT COUNT(*) as count, COALESCE(SUM(size_original), 0) as total_size FROM blobs'
+      )
+      .get() as { count: number; total_size: number } | undefined;
+
+    return {
+      workspaceCount: workspaceRow?.count ?? 0,
+      sessionCount: sessionRow?.count ?? 0,
+      eventCount,
+      blobCount: blobStats?.count ?? 0,
+      totalBlobSize: blobStats?.total_size ?? 0,
+    };
+  }
+
+  // ===========================================================================
+  // Direct Repository Access (for advanced use cases)
+  // ===========================================================================
+
+  /**
+   * Get direct access to repositories for advanced operations
+   */
+  getRepositories() {
+    this.ensureInitialized();
+    return {
+      blob: this.blobRepo,
+      workspace: this.workspaceRepo,
+      branch: this.branchRepo,
+      event: this.eventRepo,
+      session: this.sessionRepo,
+      search: this.searchRepo,
+    };
+  }
+
+  private ensureInitialized(): void {
+    if (!this.initialized) {
+      throw new Error('SQLiteEventStore not initialized. Call initialize() first.');
+    }
+  }
+}
+
+// =============================================================================
+// Factory Function
+// =============================================================================
+
+/**
+ * Create and initialize a SQLite event store
+ */
+export async function createSQLiteEventStore(
+  dbPath: string,
+  config?: Partial<SQLiteBackendConfig>
+): Promise<SQLiteEventStore> {
+  const store = new SQLiteEventStore(dbPath, config);
+  await store.initialize();
+  return store;
+}

@@ -4,7 +4,7 @@
  * Handles workspace (project/directory context) operations.
  */
 
-import { BaseRepository, rowUtils } from './base.js';
+import { BaseRepository } from './base.js';
 import { WorkspaceId, type Workspace } from '../../types.js';
 import type { WorkspaceDbRow } from '../types.js';
 
