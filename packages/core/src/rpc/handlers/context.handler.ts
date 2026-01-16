@@ -394,5 +394,15 @@ export function createContextHandlers(): MethodRegistration[] {
         description: 'Clear session context',
       },
     },
+    // Legacy alias for context.confirmCompaction
+    {
+      method: 'context.compact',
+      handler: confirmCompactionHandler,
+      options: {
+        requiredParams: ['sessionId'],
+        requiredManagers: ['contextManager'],
+        description: 'Confirm and execute compaction (legacy alias)',
+      },
+    },
   ];
 }

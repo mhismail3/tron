@@ -384,7 +384,7 @@ describe('Context Handlers', () => {
     it('should create handlers for registration', () => {
       const handlers = createContextHandlers();
 
-      expect(handlers).toHaveLength(7);
+      expect(handlers).toHaveLength(8);
       const methods = handlers.map(h => h.method);
       expect(methods).toContain('context.getSnapshot');
       expect(methods).toContain('context.getDetailedSnapshot');
@@ -393,6 +393,7 @@ describe('Context Handlers', () => {
       expect(methods).toContain('context.confirmCompaction');
       expect(methods).toContain('context.canAcceptTurn');
       expect(methods).toContain('context.clear');
+      expect(methods).toContain('context.compact'); // Legacy alias
     });
 
     it('should have contextManager as required for all handlers', () => {
