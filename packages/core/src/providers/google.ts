@@ -16,6 +16,7 @@ import type {
   ToolCall,
 } from '../types/index.js';
 import { createLogger } from '../logging/logger.js';
+import { withProviderRetry, type StreamRetryConfig } from './base/index.js';
 
 const logger = createLogger('google');
 
@@ -32,6 +33,8 @@ export interface GoogleConfig {
   maxTokens?: number;
   temperature?: number;
   baseURL?: string;
+  /** Retry configuration for transient failures (default: enabled with 3 retries) */
+  retry?: StreamRetryConfig | false;
 }
 
 /**
@@ -161,10 +164,13 @@ export class GoogleProvider {
   readonly id = 'google';
   private config: GoogleConfig;
   private baseURL: string;
+  private retryConfig: StreamRetryConfig | false;
 
   constructor(config: GoogleConfig) {
     this.config = config;
     this.baseURL = config.baseURL || 'https://generativelanguage.googleapis.com/v1beta';
+    // Default to enabled retry with 3 attempts
+    this.retryConfig = config.retry ?? { maxRetries: 3 };
 
     logger.info('Google provider initialized', { model: config.model });
   }
@@ -199,9 +205,29 @@ export class GoogleProvider {
   }
 
   /**
-   * Stream a response from Gemini
+   * Stream a response from Gemini with automatic retry on transient failures
    */
   async *stream(
+    context: Context,
+    options: GoogleStreamOptions = {}
+  ): AsyncGenerator<StreamEvent> {
+    // If retry is disabled, stream directly
+    if (this.retryConfig === false) {
+      yield* this.streamInternal(context, options);
+      return;
+    }
+
+    // Wrap with retry for transient failures
+    yield* withProviderRetry(
+      () => this.streamInternal(context, options),
+      this.retryConfig
+    );
+  }
+
+  /**
+   * Internal stream implementation (called by retry wrapper)
+   */
+  private async *streamInternal(
     context: Context,
     options: GoogleStreamOptions = {}
   ): AsyncGenerator<StreamEvent> {

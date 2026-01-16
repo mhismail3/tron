@@ -16,6 +16,7 @@ import type {
   ToolCall,
 } from '../types/index.js';
 import { createLogger } from '../logging/logger.js';
+import { withProviderRetry, type StreamRetryConfig } from './base/index.js';
 
 const logger = createLogger('openai');
 
@@ -33,6 +34,8 @@ export interface OpenAIConfig {
   temperature?: number;
   baseURL?: string;
   organization?: string;
+  /** Retry configuration for transient failures (default: enabled with 3 retries) */
+  retry?: StreamRetryConfig | false;
 }
 
 /**
@@ -201,10 +204,13 @@ export class OpenAIProvider {
   readonly id = 'openai';
   private config: OpenAIConfig;
   private baseURL: string;
+  private retryConfig: StreamRetryConfig | false;
 
   constructor(config: OpenAIConfig) {
     this.config = config;
     this.baseURL = config.baseURL || 'https://api.openai.com/v1';
+    // Default to enabled retry with 3 attempts
+    this.retryConfig = config.retry ?? { maxRetries: 3 };
 
     logger.info('OpenAI provider initialized', { model: config.model });
   }
@@ -239,9 +245,29 @@ export class OpenAIProvider {
   }
 
   /**
-   * Stream a response from OpenAI
+   * Stream a response from OpenAI with automatic retry on transient failures
    */
   async *stream(
+    context: Context,
+    options: OpenAIStreamOptions = {}
+  ): AsyncGenerator<StreamEvent> {
+    // If retry is disabled, stream directly
+    if (this.retryConfig === false) {
+      yield* this.streamInternal(context, options);
+      return;
+    }
+
+    // Wrap with retry for transient failures
+    yield* withProviderRetry(
+      () => this.streamInternal(context, options),
+      this.retryConfig
+    );
+  }
+
+  /**
+   * Internal stream implementation (called by retry wrapper)
+   */
+  private async *streamInternal(
     context: Context,
     options: OpenAIStreamOptions = {}
   ): AsyncGenerator<StreamEvent> {
