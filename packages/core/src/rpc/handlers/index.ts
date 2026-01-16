@@ -18,3 +18,10 @@ export {
   type ParamsOf,
   type CreateHandlerOptions,
 } from './base.js';
+
+// Handler implementations
+export {
+  handleSystemPing,
+  handleSystemGetInfo,
+  createSystemHandlers,
+} from './system.handler.js';

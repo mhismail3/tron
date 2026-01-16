@@ -277,16 +277,34 @@ export type RpcMiddleware = (
 // Handler Implementation
 // =============================================================================
 
+import { MethodRegistry } from './registry.js';
+import { createSystemHandlers } from './handlers/system.handler.js';
+
 export class RpcHandler extends EventEmitter {
   private context: RpcContext;
   private middleware: RpcMiddleware[] = [];
   private startTime: number;
+  private registry: MethodRegistry;
 
   constructor(context: RpcContext) {
     super();
     this.context = context;
     this.startTime = Date.now();
-    logger.debug('RPC handler initialized');
+
+    // Initialize method registry with extracted handlers
+    this.registry = new MethodRegistry();
+    this.registry.registerAll(createSystemHandlers());
+
+    logger.debug('RPC handler initialized', {
+      registeredMethods: this.registry.list(),
+    });
+  }
+
+  /**
+   * Get the method registry (for testing or advanced usage)
+   */
+  getRegistry(): MethodRegistry {
+    return this.registry;
   }
 
   /**
@@ -359,6 +377,11 @@ export class RpcHandler extends EventEmitter {
 
   private async dispatch(request: RpcRequest): Promise<RpcResponse> {
     try {
+      // Dual-path: Try registry first, fall back to switch for non-migrated methods
+      if (this.registry.has(request.method)) {
+        return this.registry.dispatch(request, this.context);
+      }
+
       switch (request.method as RpcMethod) {
         // Session methods
         case 'session.create':

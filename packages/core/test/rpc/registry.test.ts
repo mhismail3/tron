@@ -270,8 +270,8 @@ describe('MethodRegistry', () => {
       const response = MethodRegistry.successResponse('req-1', { foo: 'bar' });
 
       expect(response).toEqual({
-        jsonrpc: '2.0',
         id: 'req-1',
+        success: true,
         result: { foo: 'bar' },
       });
     });
@@ -280,8 +280,8 @@ describe('MethodRegistry', () => {
       const response = MethodRegistry.errorResponse('req-1', 'INVALID_PARAMS', 'Missing field');
 
       expect(response).toEqual({
-        jsonrpc: '2.0',
         id: 'req-1',
+        success: false,
         error: {
           code: 'INVALID_PARAMS',
           message: 'Missing field',
@@ -289,19 +289,19 @@ describe('MethodRegistry', () => {
       });
     });
 
-    it('should create error response with data', () => {
+    it('should create error response with details', () => {
       const response = MethodRegistry.errorResponse('req-1', 'VALIDATION_ERROR', 'Invalid input', {
         field: 'email',
         reason: 'format',
       });
 
       expect(response).toEqual({
-        jsonrpc: '2.0',
         id: 'req-1',
+        success: false,
         error: {
           code: 'VALIDATION_ERROR',
           message: 'Invalid input',
-          data: { field: 'email', reason: 'format' },
+          details: { field: 'email', reason: 'format' },
         },
       });
     });

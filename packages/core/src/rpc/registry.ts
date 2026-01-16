@@ -274,8 +274,8 @@ export class MethodRegistry {
    */
   static successResponse(id: string | number, result: unknown): RpcResponse {
     return {
-      jsonrpc: '2.0',
-      id,
+      id: String(id),
+      success: true,
       result,
     };
   }
@@ -285,18 +285,18 @@ export class MethodRegistry {
    */
   static errorResponse(
     id: string | number,
-    code: RpcError['code'],
+    code: string,
     message: string,
-    data?: unknown
+    details?: unknown
   ): RpcResponse {
-    const error: RpcError = { code, message };
-    if (data !== undefined) {
-      error.data = data;
-    }
     return {
-      jsonrpc: '2.0',
-      id,
-      error,
+      id: String(id),
+      success: false,
+      error: {
+        code,
+        message,
+        ...(details !== undefined ? { details } : {}),
+      },
     };
   }
 }

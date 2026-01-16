@@ -18,8 +18,8 @@ describe('Middleware Utilities', () => {
   describe('buildMiddlewareChain', () => {
     it('should execute handler when no middleware', async () => {
       const handler = vi.fn().mockResolvedValue({
-        jsonrpc: '2.0',
         id: '1',
+        success: true,
         result: { ok: true },
       } as RpcResponse);
 
@@ -51,7 +51,7 @@ describe('Middleware Utilities', () => {
 
       const handler = vi.fn().mockImplementation(async () => {
         order.push('handler');
-        return { jsonrpc: '2.0', id: '1', result: {} } as RpcResponse;
+        return { id: '1', success: true, result: {} } as RpcResponse;
       });
 
       const chain = buildMiddlewareChain([mw1, mw2], handler);
@@ -70,7 +70,7 @@ describe('Middleware Utilities', () => {
 
     it('should allow middleware to short-circuit', async () => {
       const shortCircuit: Middleware = async () => {
-        return { jsonrpc: '2.0', id: '1', error: { code: 'AUTH_FAILED', message: 'Unauthorized' } };
+        return { id: '1', success: false, error: { code: 'AUTH_FAILED', message: 'Unauthorized' } };
       };
 
       const handler = vi.fn();
