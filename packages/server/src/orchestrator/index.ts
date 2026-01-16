@@ -14,6 +14,12 @@
  *   - Builds message.assistant content blocks
  *   - Handles interrupted content for persistence
  *
+ * - **Handlers** (Phase 3): Encapsulated special case handling
+ *   - PlanModeHandler: Plan mode state management
+ *   - InterruptHandler: Interrupted session content
+ *   - CompactionHandler: Context compaction events
+ *   - ContextClearHandler: Context clearing events
+ *
  * ## Existing Components
  *
  * - **event-linearizer**: Legacy functions (will be deprecated)
@@ -51,6 +57,28 @@ export {
   type ToolResultBlock,
   type EndTurnResult,
 } from './turn-manager.js';
+
+// Handlers (Phase 3)
+export {
+  // Plan Mode
+  PlanModeHandler,
+  createPlanModeHandler,
+  type PlanModeState,
+  // Interrupt
+  InterruptHandler,
+  createInterruptHandler,
+  type InterruptContext,
+  type InterruptResult,
+  // Compaction
+  CompactionHandler,
+  createCompactionHandler,
+  type CompactionContext,
+  // Context Clear
+  ContextClearHandler,
+  createContextClearHandler,
+  type ContextClearContext,
+  type ClearReason,
+} from './handlers/index.js';
 
 // =============================================================================
 // Existing Components
