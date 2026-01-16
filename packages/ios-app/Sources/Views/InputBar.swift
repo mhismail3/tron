@@ -908,7 +908,7 @@ struct InputBar: View {
                     }
                 }
         }
-        .frame(minHeight: 40)
+        .frame(minHeight: actionButtonSize)
         .glassEffect(.regular.tint(Color.tronPhthaloGreen.opacity(0.35)), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
         .overlay(alignment: .leading) {
             if shouldShowModelPillDock {

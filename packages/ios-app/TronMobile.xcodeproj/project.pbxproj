@@ -14,6 +14,7 @@
 		136A2E352353C637D95DB9B2 /* SessionAnalyticsSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = A98EEAD5A6421EB34B269C1A /* SessionAnalyticsSheet.swift */; };
 		1401327824254E4B259C40C7 /* SessionPayloads.swift in Sources */ = {isa = PBXBuildFile; fileRef = D55558B6BDA1C107C3E0BA83 /* SessionPayloads.swift */; };
 		14260190901BA8299D13DC43 /* InputBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3EF2CB735CA19344DB30086D /* InputBar.swift */; };
+		A1B2C3D4E5F6A7B8C9D0E1F3 /* MultiLineTextView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F6A7B8C9D0E1F2 /* MultiLineTextView.swift */; };
 		15D5C1CDEE971D2D3264B4A7 /* EventTypeRegistry.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4C46C2D9874A2C1C807D43A0 /* EventTypeRegistry.swift */; };
 		19A006C0CD4378E9955854F8 /* VoiceNotesRecordingSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7906E8A2A558AE0B39C7AE12 /* VoiceNotesRecordingSheet.swift */; };
 		1F0AB8F273C1C38CCA7D1924 /* SkillStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6D63E93FC060C98B2C377CAB /* SkillStoreTests.swift */; };
@@ -127,6 +128,7 @@
 		3750A1FE06AAADB19DC21194 /* Attachment.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Attachment.swift; sourceTree = "<group>"; };
 		376F75BF9CDB0F0D3096611C /* SkillChip.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SkillChip.swift; sourceTree = "<group>"; };
 		3EF2CB735CA19344DB30086D /* InputBar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InputBar.swift; sourceTree = "<group>"; };
+		A1B2C3D4E5F6A7B8C9D0E1F2 /* MultiLineTextView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MultiLineTextView.swift; sourceTree = "<group>"; };
 		42E47B6EAD030227C54F0028 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		4C46C2D9874A2C1C807D43A0 /* EventTypeRegistry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EventTypeRegistry.swift; sourceTree = "<group>"; };
 		4C99FDB162C904C6A622BA61 /* AttachmentTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AttachmentTests.swift; sourceTree = "<group>"; };
@@ -326,6 +328,7 @@
 				1BDC8358FC12ECFA6C4A2526 /* FloatingBrowserView.swift */,
 				D1589F6AC3B0E2F18B08EE21 /* FloatingVoiceNotesButton.swift */,
 				3EF2CB735CA19344DB30086D /* InputBar.swift */,
+				A1B2C3D4E5F6A7B8C9D0E1F2 /* MultiLineTextView.swift */,
 				AD61CD33CD78B1F23CDBABD7 /* LogViewer.swift */,
 				C37E248C562712A416669C61 /* MessageBubble.swift */,
 				7F6BD19519452787421FD54D /* ModelSwitcher.swift */,
@@ -545,6 +548,7 @@
 				940DB8344C725AB4A208846A /* FolderNameValidator.swift in Sources */,
 				60F22FB87D2B5928A33384DB /* ImageCompressor.swift in Sources */,
 				14260190901BA8299D13DC43 /* InputBar.swift in Sources */,
+				A1B2C3D4E5F6A7B8C9D0E1F3 /* MultiLineTextView.swift in Sources */,
 				2701DC74D1DBFB4C90AC84AA /* InputHistoryStore.swift in Sources */,
 				7E5E03B3D452DA98E4B6F768 /* LogViewer.swift in Sources */,
 				35E00DB7B38895FF3C3A473E /* Message.swift in Sources */,
