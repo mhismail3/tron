@@ -7,15 +7,12 @@
 import {
   EventStore,
   TronAgent,
-  type EventId,
   type SessionId,
   type WorkingDirectory,
   type WorktreeCoordinatorConfig,
-  type CurrentTurnToolCall,
   type SkillTracker,
   type RulesTracker,
 } from '@tron/core';
-import type { TurnContentTracker } from './turn-content-tracker.js';
 import type { SessionContext } from './session-context.js';
 
 // =============================================================================
@@ -86,83 +83,11 @@ export interface ActiveSession {
   model: string;
   /** WorkingDirectory abstraction (if worktree coordination is enabled) */
   workingDir?: WorkingDirectory;
-  /** Current turn number (tracked for discrete event storage) */
-  currentTurn: number;
-  /**
-   * Encapsulated content tracker for both accumulated and per-turn tracking.
-   * Replaces the individual tracking fields below.
-   */
-  turnTracker: TurnContentTracker;
-  /**
-   * In-memory head event ID for linearizing event appends.
-   * Updated synchronously BEFORE async DB writes to prevent race conditions
-   * where multiple rapid events all read the same headEventId from DB.
-   */
-  pendingHeadEventId: EventId | null;
-  /**
-   * Promise chain that serializes event appends for this session.
-   * Each append chains to the previous one, ensuring ordered persistence.
-   */
-  appendPromiseChain: Promise<void>;
-  /**
-   * P0 FIX: Track append errors to prevent malformed event trees.
-   * If an append fails, subsequent appends are skipped to preserve chain integrity.
-   */
-  lastAppendError?: Error;
-  /**
-   * Accumulated text content from ALL turns in the current agent run.
-   * Used to provide catch-up content when client resumes into running session.
-   * Cleared at agent_start, accumulated on message_update across all turns,
-   * cleared at agent_end. NOT reset at turn boundaries so resuming during
-   * Turn N shows content from Turn 1, 2, ..., N.
-   */
-  currentTurnAccumulatedText: string;
-  /**
-   * Tool calls from ALL turns in the current agent run.
-   * Used to provide catch-up content when client resumes into running session.
-   * Cleared at agent_start, updated on tool_start/tool_end across all turns,
-   * cleared at agent_end. NOT reset at turn boundaries so resuming during
-   * Turn N shows tools from Turn 1, 2, ..., N.
-   */
-  currentTurnToolCalls: CurrentTurnToolCall[];
-  /**
-   * Content sequence tracking the order of text and tool calls.
-   * Each entry is either {type: 'text', text: string} or {type: 'tool_ref', toolCallId: string}.
-   * This preserves the interleaving order for proper reconstruction on interrupt.
-   */
-  currentTurnContentSequence: Array<{type: 'text', text: string} | {type: 'tool_ref', toolCallId: string}>;
   /**
    * Flag indicating if this session was interrupted by user.
    * Used to inform clients that the session ended due to interruption.
    */
   wasInterrupted?: boolean;
-  /**
-   * Token usage from the most recent turn_end event.
-   * Contains PER-TURN values (not cumulative) directly from the LLM response.
-   * Used to populate message.assistant.tokenUsage with accurate per-message tokens.
-   * Includes cache token breakdown for accurate cost calculation.
-   */
-  lastTurnTokenUsage?: {
-    inputTokens: number;
-    outputTokens: number;
-    cacheReadTokens?: number;
-    cacheCreationTokens?: number;
-  };
-  /**
-   * Start time of the current turn (set at turn_start).
-   * Used to calculate latency for this turn's message.assistant event.
-   */
-  currentTurnStartTime?: number;
-  /**
-   * Content for THIS TURN ONLY (cleared after each message.assistant is created).
-   * Separate from currentTurnAccumulatedText which accumulates across ALL turns for catch-up.
-   */
-  thisTurnContent: Array<{type: 'text', text: string} | {type: 'tool_ref', toolCallId: string}>;
-  /**
-   * Tool calls for THIS TURN ONLY (cleared after each message.assistant is created).
-   * Maps toolCallId to full tool call data for this turn.
-   */
-  thisTurnToolCalls: Map<string, CurrentTurnToolCall>;
   /**
    * Current reasoning level for extended thinking models.
    * Tracked in-memory to detect changes and persist events.
@@ -188,25 +113,11 @@ export interface ActiveSession {
    */
   rulesTracker: RulesTracker;
   /**
-   * Plan mode state - tracks whether the session is in read-only plan mode.
-   * Reconstructed from events on session resume/fork.
-   * @deprecated Use sessionContext.getPlanModeState() instead (Phase 6 migration)
-   */
-  planMode: {
-    /** Whether plan mode is currently active */
-    isActive: boolean;
-    /** Skill that triggered plan mode */
-    skillName?: string;
-    /** Tools blocked during plan mode (e.g., Write, Edit, Bash) */
-    blockedTools: string[];
-  };
-  /**
-   * SessionContext for modular state management (Phase 6 migration).
+   * SessionContext for modular state management.
    * Encapsulates EventPersister, TurnManager, PlanModeHandler.
-   * During migration, both old fields and sessionContext coexist.
-   * Eventually old fields will be removed and sessionContext will be required.
+   * All turn tracking, event persistence, and plan mode state are managed here.
    */
-  sessionContext?: SessionContext;
+  sessionContext: SessionContext;
 }
 
 // =============================================================================

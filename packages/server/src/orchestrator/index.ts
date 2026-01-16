@@ -3,44 +3,37 @@
  *
  * This module provides components for event orchestration:
  *
- * ## New Modular Components (Phase 1+)
+ * ## Core Components
  *
  * - **EventPersister**: Encapsulated linearized event persistence
- *   - Replaces direct use of appendPromiseChain/pendingHeadEventId
+ *   - Handles promise chaining for linearized writes
  *   - Each session gets its own EventPersister instance
  *
- * - **TurnManager**: Turn lifecycle management (Phase 2)
+ * - **TurnManager**: Turn lifecycle management
  *   - Wraps TurnContentTracker
  *   - Builds message.assistant content blocks
  *   - Handles interrupted content for persistence
  *
- * - **Handlers** (Phase 3): Encapsulated special case handling
+ * - **Handlers**: Encapsulated special case handling
  *   - PlanModeHandler: Plan mode state management
  *   - InterruptHandler: Interrupted session content
  *   - CompactionHandler: Context compaction events
  *   - ContextClearHandler: Context clearing events
  *
- * - **SessionReconstructor** (Phase 4): Session state reconstruction
+ * - **SessionReconstructor**: Session state reconstruction
  *   - Reconstructs plan mode, turn count, interrupt status from events
  *   - Handles reset points (compaction, context clear)
  *
- * - **SessionContext** (Phase 5): Per-session state encapsulation
+ * - **SessionContext**: Per-session state encapsulation
  *   - Wraps EventPersister, TurnManager, PlanModeHandler
  *   - Clean interface for orchestrator operations
  *   - State restoration via SessionReconstructor
  *
- * ## Existing Components
+ * ## Supporting Components
  *
- * - **event-linearizer**: Legacy functions (will be deprecated)
  * - **turn-content-tracker**: Turn content accumulation
  * - **types**: Type definitions
  * - **worktree-ops**: Worktree operations
- *
- * ## Migration Path
- *
- * The existing event-store-orchestrator.ts uses the legacy event-linearizer
- * functions directly. As we extract more modules (TurnManager, Handlers, etc.),
- * the orchestrator will migrate to using these encapsulated components.
  */
 
 // =============================================================================
@@ -132,11 +125,3 @@ export {
   buildWorktreeInfoWithStatus,
   commitWorkingDirectory,
 } from './worktree-ops.js';
-
-// Legacy linearizer (for backward compatibility during migration)
-export {
-  appendEventLinearized,
-  appendEventLinearizedAsync,
-  flushPendingEvents,
-  flushAllPendingEvents,
-} from './event-linearizer.js';

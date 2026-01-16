@@ -252,12 +252,11 @@ function createRpcContext(orchestrator: EventStoreOrchestrator): RpcContext {
           model: session?.model ?? 'unknown',
           tools: [],
           // Include current turn content for resume support (only when agent is running)
-          // Phase 8 migration: Use SessionContext with fallback to legacy fields
           currentTurnText: active?.isProcessing
-            ? (active.sessionContext?.getAccumulatedContent().text ?? active.currentTurnAccumulatedText)
+            ? active.sessionContext.getAccumulatedContent().text
             : undefined,
           currentTurnToolCalls: active?.isProcessing
-            ? (active.sessionContext?.getAccumulatedContent().toolCalls ?? active.currentTurnToolCalls)
+            ? active.sessionContext.getAccumulatedContent().toolCalls
             : undefined,
           // Flag indicating session was interrupted
           wasInterrupted,
@@ -728,9 +727,7 @@ function createSkillManager(orchestrator: EventStoreOrchestrator): SkillRpcManag
       // Remove from skill tracker
       active.skillTracker.removeSkill(skillName);
 
-      // Emit skill.removed event
-      // NOTE: orchestrator.appendEvent() automatically uses linearized append for active
-      // sessions, ensuring this event chains correctly and pendingHeadEventId is updated
+      // Emit skill.removed event (linearized via SessionContext's EventPersister)
       await orchestrator.appendEvent({
         sessionId: sessionId as SessionId,
         type: 'skill.removed',

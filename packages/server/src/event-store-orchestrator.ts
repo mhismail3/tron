@@ -39,21 +39,22 @@
  * session reconstruction. The ancestor chain (getAncestors) walks from head
  * to root - any event not in this chain will NOT be reconstructed.
  *
- * For active sessions, we maintain `pendingHeadEventId` in memory. This MUST
- * be updated after EVERY event append. The linearization system ensures:
+ * Each active session has a SessionContext that encapsulates:
+ * - EventPersister: Handles promise chaining to prevent race conditions
+ * - TurnManager: Tracks turn lifecycle and content accumulation
+ * - PlanModeHandler: Manages plan mode state
  *
- * 1. Events are chained via appendPromiseChain (prevents race conditions)
- * 2. parentId is captured INSIDE the .then() callback (after previous event)
- * 3. pendingHeadEventId is updated after successful append
+ * The EventPersister ensures linearization by:
+ * 1. Chaining events via an internal promise chain (prevents race conditions)
+ * 2. Capturing parentId inside the chain (after previous event completes)
+ * 3. Updating the pending head after successful append
  *
  * The public `appendEvent()` method automatically handles linearization for
- * active sessions. Internal methods use `appendEventLinearized()` directly.
+ * active sessions via SessionContext. Internal methods use `appendEventLinearized()`.
  *
  * WITHOUT LINEARIZATION: Out-of-band events (skill.removed, context.cleared,
  * model switches via RPC) would become orphaned branches because subsequent
- * agent messages would chain from the stale pendingHeadEventId.
- *
- * See orchestrator/event-linearizer.ts for the core implementation.
+ * agent messages would chain from a stale head.
  */
 import { EventEmitter } from 'events';
 import * as path from 'path';
@@ -123,17 +124,10 @@ import {
   MAX_TOOL_RESULT_SIZE,
 } from './utils/content-normalizer.js';
 import {
-  appendEventLinearized as appendEventLinearizedImpl,
-  appendEventLinearizedAsync as appendEventLinearizedAsyncImpl,
-  flushPendingEvents as flushPendingEventsImpl,
-  flushAllPendingEvents as flushAllPendingEventsImpl,
-} from './orchestrator/event-linearizer.js';
-import {
   buildWorktreeInfo,
   buildWorktreeInfoWithStatus,
   commitWorkingDirectory,
 } from './orchestrator/worktree-ops.js';
-import { TurnContentTracker } from './orchestrator/turn-content-tracker.js';
 import { createSessionContext } from './orchestrator/session-context.js';
 import {
   type EventStoreOrchestratorConfig,
@@ -359,7 +353,7 @@ export class EventStoreOrchestrator extends EventEmitter {
       logger.warn('Failed to load rules files', { sessionId, error });
     }
 
-    // Create SessionContext for modular state management (Phase 6 migration)
+    // Create SessionContext for modular state management
     const sessionContext = createSessionContext({
       sessionId,
       eventStore: this.eventStore,
@@ -377,31 +371,13 @@ export class EventStoreOrchestrator extends EventEmitter {
       workingDirectory: workingDir.path,
       model,
       workingDir,
-      currentTurn: 0,
-      // Encapsulated content tracker for accumulated and per-turn tracking
-      turnTracker: new TurnContentTracker(),
-      // Initialize linearization tracking with rules event (or root) as head
-      pendingHeadEventId: rulesHeadEventId,
-      appendPromiseChain: Promise.resolve(),
-      // Initialize current turn tracking for resume support (accumulated across all turns)
-      currentTurnAccumulatedText: '',
-      currentTurnToolCalls: [],
-      currentTurnContentSequence: [],
-      // Initialize per-turn tracking (cleared after each message.assistant)
-      thisTurnContent: [],
-      thisTurnToolCalls: new Map(),
       // Initialize parallel event ID tracking for context manager messages
       messageEventIds: [],
       // Initialize empty skill tracker (new sessions have no skills)
       skillTracker: createSkillTracker(),
       // Initialize rules tracker with loaded rules
       rulesTracker,
-      // Initialize plan mode as inactive
-      planMode: {
-        isActive: false,
-        blockedTools: [],
-      },
-      // Phase 6 migration: SessionContext for modular state management
+      // SessionContext for modular state management
       sessionContext,
     });
 
@@ -528,7 +504,7 @@ export class EventStoreOrchestrator extends EventEmitter {
       }
     }
 
-    // Create SessionContext for modular state management (Phase 6 migration)
+    // Create SessionContext for modular state management
     const sessionContext = createSessionContext({
       sessionId: session.id,
       eventStore: this.eventStore,
@@ -551,19 +527,6 @@ export class EventStoreOrchestrator extends EventEmitter {
       workingDirectory: workingDir.path,
       model: session.latestModel,
       workingDir,
-      currentTurn: session.turnCount ?? 0,
-      // Encapsulated content tracker for accumulated and per-turn tracking
-      turnTracker: new TurnContentTracker(),
-      // Initialize linearization tracking from session's current head
-      pendingHeadEventId: session.headEventId ?? null,
-      appendPromiseChain: Promise.resolve(),
-      // Initialize current turn tracking for resume support (accumulated across all turns)
-      currentTurnAccumulatedText: '',
-      currentTurnToolCalls: [],
-      currentTurnContentSequence: [],
-      // Initialize per-turn tracking (cleared after each message.assistant)
-      thisTurnContent: [],
-      thisTurnToolCalls: new Map(),
       // Restore reasoning level from events
       reasoningLevel,
       // Restore parallel event ID tracking from persisted state
@@ -572,9 +535,7 @@ export class EventStoreOrchestrator extends EventEmitter {
       skillTracker,
       // Restore rules tracker from events
       rulesTracker,
-      // Restore plan mode state from events
-      planMode,
-      // Phase 6 migration: SessionContext for modular state management
+      // SessionContext for modular state management
       sessionContext,
     });
 
@@ -869,18 +830,15 @@ export class EventStoreOrchestrator extends EventEmitter {
     let event: TronSessionEvent;
 
     if (active) {
-      // CRITICAL: For active sessions, use linearized append to:
+      // CRITICAL: For active sessions, use SessionContext for linearized append:
       // 1. Wait for any pending appends to complete
-      // 2. Chain from the correct parent (pendingHeadEventId)
-      // 3. Update pendingHeadEventId so subsequent events chain correctly
+      // 2. Chain from the correct parent
+      // 3. Update pending head so subsequent events chain correctly
       //
       // Without this, events appended via RPC (skill.removed, etc.) would
       // use the database head instead of the in-memory pending head, causing
       // subsequent agent messages to skip over the RPC-appended event.
-      const linearizedEvent = await appendEventLinearizedAsyncImpl(
-        this.eventStore,
-        options.sessionId,
-        active,
+      const linearizedEvent = await active.sessionContext!.appendEvent(
         options.type,
         options.payload
       );
@@ -909,7 +867,7 @@ export class EventStoreOrchestrator extends EventEmitter {
    * This appends a message.deleted event to the event log. The original message
    * is preserved but will be filtered out during reconstruction (two-pass).
    *
-   * CRITICAL: Uses linearized append via appendPromiseChain for active sessions
+   * CRITICAL: Uses SessionContext's linearized append for active sessions
    * to prevent race conditions with concurrent agent events.
    */
   async deleteMessage(
@@ -962,20 +920,15 @@ export class EventStoreOrchestrator extends EventEmitter {
       throw new Error(`Session not active: ${options.sessionId}`);
     }
 
-    // Phase 7 migration: Check processing state via SessionContext when available
-    const isProcessing = active.sessionContext
-      ? active.sessionContext.isProcessing()
-      : active.isProcessing;
-    if (isProcessing) {
+    // Check processing state
+    if (active.sessionContext.isProcessing()) {
       throw new Error('Session is already processing');
     }
 
-    // Update both legacy and SessionContext (Phase 7 migration)
+    // Update processing state (sync both for backward compatibility)
     active.isProcessing = true;
     active.lastActivity = new Date();
-    if (active.sessionContext) {
-      active.sessionContext.setProcessing(true);
-    }
+    active.sessionContext.setProcessing(true);
 
     // Wrap entire agent run with logging context for session correlation
     return withLoggingContext(
@@ -1117,16 +1070,13 @@ export class EventStoreOrchestrator extends EventEmitter {
 
       // Run agent with transformed content
       const runResult = await active.agent.run(llmContent);
-      // Update activity timestamp (Phase 7 migration: sync both)
+      // Update activity timestamp
       active.lastActivity = new Date();
-      if (active.sessionContext) {
-        active.sessionContext.touch();
-      }
+      active.sessionContext.touch();
 
       // Handle interrupted runs - PERSIST partial content so it survives session resume
       if (runResult.interrupted) {
-        // Phase 8 migration: Use SessionContext for accumulated content info
-        const accumulated = active.sessionContext!.getAccumulatedContent();
+        const accumulated = active.sessionContext.getAccumulatedContent();
         logger.info('Agent run interrupted', {
           sessionId: options.sessionId,
           turn: runResult.turns,
@@ -1149,7 +1099,7 @@ export class EventStoreOrchestrator extends EventEmitter {
         }
 
         // CRITICAL: Persist partial content so it survives session resume
-        // Use SessionContext to build content blocks from accumulated state (Phase 8 migration)
+        // Use SessionContext to build content blocks from accumulated state
         // This preserves exact interleaving order of text and tool calls
         const { assistantContent, toolResultContent } = active.sessionContext!.buildInterruptedContent();
 
@@ -1249,9 +1199,9 @@ export class EventStoreOrchestrator extends EventEmitter {
         });
       }
 
-      // Emit agent.complete AFTER appendPromiseChain completes
-      // This ensures all linearized events (message.assistant, tool.call, tool.result)
-      // are persisted to the database before iOS receives this and syncs
+      // Emit agent.complete AFTER all linearized events are persisted
+      // This ensures events (message.assistant, tool.call, tool.result)
+      // are in the database before iOS receives this and syncs
       this.emit('agent_event', {
         type: 'agent.complete',
         sessionId: options.sessionId,
@@ -1266,7 +1216,7 @@ export class EventStoreOrchestrator extends EventEmitter {
     } catch (error) {
       logger.error('Agent run error', { sessionId: options.sessionId, error });
 
-      // Phase 3: Store error.agent event for agent-level errors (linearized)
+      // Store error.agent event for agent-level errors (linearized)
       try {
         // CRITICAL: Wait for any pending events before appending
         await active.sessionContext!.flushEvents();
@@ -1294,7 +1244,7 @@ export class EventStoreOrchestrator extends EventEmitter {
         });
       }
 
-      // Emit agent.complete for error case (after appendPromiseChain has been awaited above)
+      // Emit agent.complete for error case (after pending events have been flushed)
       this.emit('agent_event', {
         type: 'agent.complete',
         sessionId: options.sessionId,
@@ -1307,11 +1257,9 @@ export class EventStoreOrchestrator extends EventEmitter {
 
       throw error;
     } finally {
-      // Phase 7 migration: sync both legacy and SessionContext
+      // Clear processing state (sync both for backward compatibility)
       active.isProcessing = false;
-      if (active.sessionContext) {
-        active.sessionContext.setProcessing(false);
-      }
+      active.sessionContext.setProcessing(false);
     }
       }); // End withLoggingContext
   }
@@ -1322,23 +1270,17 @@ export class EventStoreOrchestrator extends EventEmitter {
       return false;
     }
 
-    // Phase 7 migration: Check processing state via SessionContext when available
-    const isProcessing = active.sessionContext
-      ? active.sessionContext.isProcessing()
-      : active.isProcessing;
-    if (!isProcessing) {
+    if (!active.sessionContext.isProcessing()) {
       return false;
     }
 
     // Actually abort the agent - triggers AbortController and interrupts execution
     active.agent.abort();
 
-    // Phase 7 migration: sync both legacy and SessionContext
+    // Clear processing state (sync both for backward compatibility)
     active.isProcessing = false;
     active.lastActivity = new Date();
-    if (active.sessionContext) {
-      active.sessionContext.setProcessing(false);
-    }
+    active.sessionContext.setProcessing(false);
     logger.info('Agent cancelled', { sessionId });
     return true;
   }
@@ -1355,7 +1297,7 @@ export class EventStoreOrchestrator extends EventEmitter {
 
     const previousModel = session.latestModel;
 
-    // Get active session first to access pendingHeadEventId for linearization
+    // Get active session for linearized append (if session is active)
     const active = this.activeSessions.get(sessionId);
 
     // P0 FIX: Prevent model switch during active agent processing
@@ -2187,8 +2129,8 @@ The user has explicitly removed these skills and expects you to respond WITHOUT 
   // ===========================================================================
 
   /**
-   * Append an event with linearized ordering per session.
-   * Delegates to event-linearizer module for the core logic.
+   * Append an event with linearized ordering per session (fire-and-forget).
+   * Uses SessionContext's EventPersister for linearization.
    */
   private appendEventLinearized(
     sessionId: SessionId,
@@ -2201,7 +2143,8 @@ The user has explicitly removed these skills and expects you to respond WITHOUT 
       logger.error('Cannot append event: session not active', { sessionId, type });
       return;
     }
-    appendEventLinearizedImpl(this.eventStore, sessionId, active, type, payload, onCreated);
+    // Use SessionContext for linearized append
+    active.sessionContext!.appendEventFireAndForget(type, payload, onCreated);
   }
 
   /**
@@ -2210,8 +2153,8 @@ The user has explicitly removed these skills and expects you to respond WITHOUT 
    */
   async flushPendingEvents(sessionId: SessionId): Promise<void> {
     const active = this.activeSessions.get(sessionId);
-    if (active) {
-      await flushPendingEventsImpl(active);
+    if (active?.sessionContext) {
+      await active.sessionContext.flushEvents();
     }
   }
 
@@ -2219,7 +2162,13 @@ The user has explicitly removed these skills and expects you to respond WITHOUT 
    * Flush all active sessions' pending events.
    */
   async flushAllPendingEvents(): Promise<void> {
-    await flushAllPendingEventsImpl(this.activeSessions.values());
+    const promises: Promise<void>[] = [];
+    for (const active of this.activeSessions.values()) {
+      if (active.sessionContext) {
+        promises.push(active.sessionContext.flushEvents());
+      }
+    }
+    await Promise.all(promises);
   }
 
   private forwardAgentEvent(sessionId: SessionId, event: TronEvent): void {
@@ -2230,17 +2179,8 @@ The user has explicitly removed these skills and expects you to respond WITHOUT 
       case 'turn_start':
         // Update current turn for tool event tracking
         if (active) {
-          // Use SessionContext for turn lifecycle (Phase 8 migration)
+          // Use SessionContext for turn lifecycle
           active.sessionContext!.startTurn(event.turn);
-
-          // LEGACY: Keep old fields synchronized for backward compatibility during transition
-          active.currentTurn = event.turn;
-          active.currentTurnStartTime = Date.now();
-          active.thisTurnContent = [];
-          active.thisTurnToolCalls = new Map();
-          if (event.turn > 1 && active.currentTurnAccumulatedText.length > 0) {
-            active.currentTurnAccumulatedText += '\n';
-          }
         }
 
         this.emit('agent_event', {
@@ -2265,7 +2205,7 @@ The user has explicitly removed these skills and expects you to respond WITHOUT 
         // This is the source of truth for session reconstruction.
         // Each turn gets its own message.assistant event with per-turn token data.
         if (active) {
-          // Use SessionContext for turn end (Phase 8 migration)
+          // Use SessionContext for turn end
           // This returns built content blocks and clears per-turn tracking
           const turnStartTime = active.sessionContext!.getTurnStartTime();
           const turnResult = active.sessionContext!.endTurn(event.tokenUsage);
@@ -2318,18 +2258,6 @@ The user has explicitly removed these skills and expects you to respond WITHOUT 
           //    would create consecutive user messages (invalid for API)
           // 3. The assistant's response already incorporates tool results
           // 4. Tool results are stored as tool.result events for streaming/display
-
-          // LEGACY: Keep old fields synchronized for backward compatibility during transition
-          if (event.tokenUsage) {
-            active.lastTurnTokenUsage = {
-              inputTokens: event.tokenUsage.inputTokens,
-              outputTokens: event.tokenUsage.outputTokens,
-              cacheReadTokens: event.tokenUsage.cacheReadTokens,
-              cacheCreationTokens: event.tokenUsage.cacheCreationTokens,
-            };
-          }
-          active.thisTurnContent = [];
-          active.thisTurnToolCalls = new Map();
         }
 
         this.emit('agent_event', {
@@ -2344,7 +2272,7 @@ The user has explicitly removed these skills and expects you to respond WITHOUT 
           },
         });
 
-        // Phase 4: Store turn end event with token usage and cost (linearized)
+        // Store turn end event with token usage and cost (linearized)
         this.appendEventLinearized(sessionId, 'stream.turn_end', {
           turn: event.turn,
           tokenUsage: event.tokenUsage ?? { inputTokens: 0, outputTokens: 0 },
@@ -2362,23 +2290,8 @@ The user has explicitly removed these skills and expects you to respond WITHOUT 
         // Individual deltas are ephemeral by design - high frequency, low reconstruction value.
         // The source of truth is the message.assistant event created at turn_end.
         if (active && typeof event.content === 'string') {
-          // Use SessionContext for text delta (Phase 8 migration)
+          // Use SessionContext for text delta
           active.sessionContext!.addTextDelta(event.content);
-
-          // LEGACY: Keep old fields synchronized for backward compatibility during transition
-          active.currentTurnAccumulatedText += event.content;
-          const lastItem = active.currentTurnContentSequence[active.currentTurnContentSequence.length - 1];
-          if (lastItem && lastItem.type === 'text') {
-            lastItem.text += event.content;
-          } else {
-            active.currentTurnContentSequence.push({ type: 'text', text: event.content });
-          }
-          const lastThisTurnItem = active.thisTurnContent[active.thisTurnContent.length - 1];
-          if (lastThisTurnItem && lastThisTurnItem.type === 'text') {
-            lastThisTurnItem.text += event.content;
-          } else {
-            active.thisTurnContent.push({ type: 'text', text: event.content });
-          }
         }
 
         this.emit('agent_event', {
@@ -2392,31 +2305,12 @@ The user has explicitly removed these skills and expects you to respond WITHOUT 
       case 'tool_execution_start':
         // Track tool call for resume support (across ALL turns)
         if (active) {
-          // Use SessionContext for tool start (Phase 8 migration)
+          // Use SessionContext for tool start
           active.sessionContext!.startToolCall(
             event.toolCallId,
             event.toolName,
             event.arguments ?? {}
           );
-
-          // LEGACY: Keep old fields synchronized for backward compatibility during transition
-          const toolCallData = {
-            toolCallId: event.toolCallId,
-            toolName: event.toolName,
-            arguments: event.arguments ?? {},
-            status: 'running' as const,
-            startedAt: timestamp,
-          };
-          active.currentTurnToolCalls.push(toolCallData);
-          active.currentTurnContentSequence.push({
-            type: 'tool_ref',
-            toolCallId: event.toolCallId,
-          });
-          active.thisTurnToolCalls.set(event.toolCallId, { ...toolCallData });
-          active.thisTurnContent.push({
-            type: 'tool_ref',
-            toolCallId: event.toolCallId,
-          });
         }
 
         this.emit('agent_event', {
@@ -2430,12 +2324,12 @@ The user has explicitly removed these skills and expects you to respond WITHOUT 
           },
         });
 
-        // Phase 2: Store discrete tool.call event (linearized)
+        // Store discrete tool.call event (linearized)
         this.appendEventLinearized(sessionId, 'tool.call', {
           toolCallId: event.toolCallId,
           name: event.toolName,
           arguments: event.arguments ?? {},
-          turn: active?.currentTurn ?? 0,
+          turn: active?.sessionContext.getCurrentTurn() ?? 0,
         });
         break;
 
@@ -2464,30 +2358,12 @@ The user has explicitly removed these skills and expects you to respond WITHOUT 
 
         // Update tool call tracking for resume support (across ALL turns)
         if (active) {
-          // Use SessionContext for tool end (Phase 8 migration)
+          // Use SessionContext for tool end
           active.sessionContext!.endToolCall(
             event.toolCallId,
             resultContent,
             event.isError ?? false
           );
-
-          // LEGACY: Keep old fields synchronized for backward compatibility during transition
-          const toolCall = active.currentTurnToolCalls.find(
-            tc => tc.toolCallId === event.toolCallId
-          );
-          if (toolCall) {
-            toolCall.status = event.isError ? 'error' : 'completed';
-            toolCall.result = resultContent;
-            toolCall.isError = event.isError ?? false;
-            toolCall.completedAt = timestamp;
-          }
-          const thisTurnToolCall = active.thisTurnToolCalls.get(event.toolCallId);
-          if (thisTurnToolCall) {
-            thisTurnToolCall.status = event.isError ? 'error' : 'completed';
-            thisTurnToolCall.result = resultContent;
-            thisTurnToolCall.isError = event.isError ?? false;
-            thisTurnToolCall.completedAt = timestamp;
-          }
         }
 
         // Extract details from tool result (e.g., full screenshot data for iOS)
@@ -2512,7 +2388,7 @@ The user has explicitly removed these skills and expects you to respond WITHOUT 
           },
         });
 
-        // Phase 2: Store discrete tool.result event (linearized)
+        // Store discrete tool.result event (linearized)
         this.appendEventLinearized(sessionId, 'tool.result', {
           toolCallId: event.toolCallId,
           content: truncateString(resultContent, MAX_TOOL_RESULT_SIZE),
@@ -2531,7 +2407,7 @@ The user has explicitly removed these skills and expects you to respond WITHOUT 
       }
 
       case 'api_retry':
-        // Phase 3: Store provider error event for API retries (linearized)
+        // Store provider error event for API retries (linearized)
         this.appendEventLinearized(sessionId, 'error.provider', {
           provider: this.config.defaultProvider,
           error: event.errorMessage,
@@ -2545,14 +2421,8 @@ The user has explicitly removed these skills and expects you to respond WITHOUT 
         // Clear accumulation at the start of a new agent run
         // This ensures fresh tracking for the new runAgent call
         if (active) {
-          // Use SessionContext for agent lifecycle (Phase 8 migration)
+          // Use SessionContext for agent lifecycle
           active.sessionContext!.onAgentStart();
-
-          // LEGACY: Keep old fields synchronized for backward compatibility during transition
-          active.currentTurnAccumulatedText = '';
-          active.currentTurnToolCalls = [];
-          active.currentTurnContentSequence = [];
-          active.lastTurnTokenUsage = undefined;
         }
 
         this.emit('agent_event', {
@@ -2567,19 +2437,13 @@ The user has explicitly removed these skills and expects you to respond WITHOUT 
         // Clear accumulation when agent run completes
         // Content is now persisted in EventStore, no need for catch-up tracking
         if (active) {
-          // Use SessionContext for agent lifecycle (Phase 8 migration)
+          // Use SessionContext for agent lifecycle
           active.sessionContext!.onAgentEnd();
-
-          // LEGACY: Keep old fields synchronized for backward compatibility during transition
-          active.currentTurnAccumulatedText = '';
-          active.currentTurnToolCalls = [];
-          active.currentTurnContentSequence = [];
         }
 
-        // NOTE: agent.complete is now emitted in runAgent() AFTER appendPromiseChain completes
-        // This ensures all linearized events (message.assistant, tool.call, tool.result)
-        // are persisted before iOS syncs on receiving agent.complete
-        // See runAgent() line ~908 for the emit
+        // NOTE: agent.complete is now emitted in runAgent() AFTER all events are persisted
+        // This ensures linearized events (message.assistant, tool.call, tool.result)
+        // are in the database before iOS syncs on receiving agent.complete
         break;
 
       case 'agent_interrupted':
@@ -2674,15 +2538,10 @@ The user has explicitly removed these skills and expects you to respond WITHOUT 
     const entries = Array.from(this.activeSessions.entries());
 
     for (const [sessionId, active] of entries) {
-      // Phase 7 migration: Check via SessionContext when available
-      const isProcessing = active.sessionContext
-        ? active.sessionContext.isProcessing()
-        : active.isProcessing;
-      if (isProcessing) continue;
+      // Skip sessions that are currently processing
+      if (active.sessionContext.isProcessing()) continue;
 
-      const lastActivity = active.sessionContext
-        ? active.sessionContext.getLastActivity()
-        : active.lastActivity;
+      const lastActivity = active.sessionContext.getLastActivity();
       const inactiveTime = now - lastActivity.getTime();
       if (inactiveTime > inactiveThreshold) {
         logger.info('Cleaning up inactive session', {
@@ -2765,48 +2624,29 @@ The user has explicitly removed these skills and expects you to respond WITHOUT 
 
   /**
    * Check if a session is in plan mode
-   * Phase 6 migration: Uses SessionContext when available, falls back to legacy field
    */
   isInPlanMode(sessionId: string): boolean {
     const active = this.activeSessions.get(sessionId);
     if (!active) return false;
-    // Use SessionContext if available (Phase 6 migration)
-    if (active.sessionContext) {
-      return active.sessionContext.isInPlanMode();
-    }
-    // Fallback to legacy field
-    return active.planMode.isActive;
+    return active.sessionContext.isInPlanMode();
   }
 
   /**
    * Get the list of blocked tools for a session
-   * Phase 6 migration: Uses SessionContext when available, falls back to legacy field
    */
   getBlockedTools(sessionId: string): string[] {
     const active = this.activeSessions.get(sessionId);
     if (!active) return [];
-    // Use SessionContext if available (Phase 6 migration)
-    if (active.sessionContext) {
-      return active.sessionContext.getBlockedTools();
-    }
-    // Fallback to legacy field
-    return active.planMode.blockedTools;
+    return active.sessionContext.getBlockedTools();
   }
 
   /**
    * Check if a specific tool is blocked for a session
-   * Phase 6 migration: Uses SessionContext when available, falls back to legacy field
    */
   isToolBlocked(sessionId: string, toolName: string): boolean {
     const active = this.activeSessions.get(sessionId);
     if (!active) return false;
-    // Use SessionContext if available (Phase 6 migration)
-    if (active.sessionContext) {
-      return active.sessionContext.isToolBlocked(toolName);
-    }
-    // Fallback to legacy field
-    if (!active.planMode.isActive) return false;
-    return active.planMode.blockedTools.includes(toolName);
+    return active.sessionContext.isToolBlocked(toolName);
   }
 
   /**
@@ -2822,7 +2662,6 @@ The user has explicitly removed these skills and expects you to respond WITHOUT 
    * Enter plan mode for a session
    * @param sessionId - Session ID
    * @param options - Plan mode options (skill name and blocked tools)
-   * Phase 6 migration: Updates both legacy fields and SessionContext
    */
   async enterPlanMode(
     sessionId: string,
@@ -2833,22 +2672,18 @@ The user has explicitly removed these skills and expects you to respond WITHOUT 
       throw new Error(`Session not found: ${sessionId}`);
     }
 
-    // Check via SessionContext if available, otherwise legacy field
-    const isActive = active.sessionContext
-      ? active.sessionContext.isInPlanMode()
-      : active.planMode.isActive;
-    if (isActive) {
+    if (active.sessionContext.isInPlanMode()) {
       throw new Error(`Session ${sessionId} is already in plan mode`);
     }
 
-    // Append plan.mode_entered event (linearized via SessionContext)
-    const event = await active.sessionContext!.appendEvent('plan.mode_entered', {
+    // Append plan.mode_entered event
+    const event = await active.sessionContext.appendEvent('plan.mode_entered', {
       skillName: options.skillName,
       blockedTools: options.blockedTools,
     });
 
-    // Update plan mode state via SessionContext
-    active.sessionContext!.enterPlanMode(options.skillName, options.blockedTools);
+    // Update plan mode state
+    active.sessionContext.enterPlanMode(options.skillName, options.blockedTools);
 
     logger.info('Plan mode entered', {
       sessionId,
@@ -2868,7 +2703,6 @@ The user has explicitly removed these skills and expects you to respond WITHOUT 
    * Exit plan mode for a session
    * @param sessionId - Session ID
    * @param options - Exit options (reason and optional plan path)
-   * Phase 6 migration: Updates both legacy fields and SessionContext
    */
   async exitPlanMode(
     sessionId: string,
@@ -2879,11 +2713,7 @@ The user has explicitly removed these skills and expects you to respond WITHOUT 
       throw new Error(`Session not found: ${sessionId}`);
     }
 
-    // Check via SessionContext if available, otherwise legacy field
-    const isActive = active.sessionContext
-      ? active.sessionContext.isInPlanMode()
-      : active.planMode.isActive;
-    if (!isActive) {
+    if (!active.sessionContext.isInPlanMode()) {
       throw new Error(`Session ${sessionId} is not in plan mode`);
     }
 
@@ -2893,11 +2723,11 @@ The user has explicitly removed these skills and expects you to respond WITHOUT 
       payload.planPath = options.planPath;
     }
 
-    // Append plan.mode_exited event (linearized via SessionContext)
-    const event = await active.sessionContext!.appendEvent('plan.mode_exited', payload);
+    // Append plan.mode_exited event
+    const event = await active.sessionContext.appendEvent('plan.mode_exited', payload);
 
-    // Update plan mode state via SessionContext
-    active.sessionContext!.exitPlanMode();
+    // Update plan mode state
+    active.sessionContext.exitPlanMode();
 
     logger.info('Plan mode exited', {
       sessionId,
