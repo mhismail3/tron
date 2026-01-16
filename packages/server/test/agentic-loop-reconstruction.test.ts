@@ -1,0 +1,666 @@
+/**
+ * @fileoverview Tests for agentic loop message reconstruction
+ *
+ * These tests verify that message reconstruction properly handles agentic loops
+ * where the assistant makes multiple tool calls across turns. The key scenarios:
+ *
+ * 1. Agentic loop: assistant(tool_use) -> tool.result -> assistant(continuation)
+ *    - Must inject tool_result as user message between consecutive assistant messages
+ *
+ * 2. User response flow: assistant(tool_use) -> tool.result -> user(response)
+ *    - Must NOT inject tool_result - user's message is the response
+ *
+ * 3. Session resume: When resuming a session with agentic history
+ *    - Must reconstruct proper message alternation for API
+ *
+ * The Anthropic API requires:
+ * - Messages must alternate between user and assistant roles
+ * - tool_use blocks in assistant messages MUST be followed by user messages with tool_result
+ */
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { EventStore, SessionId } from '@tron/core';
+import path from 'path';
+import os from 'os';
+import fs from 'fs';
+
+describe('Agentic Loop Message Reconstruction', () => {
+  let eventStore: EventStore;
+  let testDir: string;
+  let sessionId: SessionId;
+
+  beforeEach(async () => {
+    testDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tron-agentic-loop-test-'));
+    const dbPath = path.join(testDir, 'events.db');
+    eventStore = new EventStore(dbPath);
+    await eventStore.initialize();
+
+    const result = await eventStore.createSession({
+      workspacePath: '/test/project',
+      workingDirectory: '/test/project',
+      model: 'claude-sonnet-4-20250514',
+    });
+    sessionId = result.session.id;
+  });
+
+  afterEach(async () => {
+    await eventStore.close();
+    fs.rmSync(testDir, { recursive: true, force: true });
+  });
+
+  describe('Agentic loops (consecutive assistant messages)', () => {
+    it('should inject tool_result user message between consecutive assistant messages', async () => {
+      // User prompt
+      await eventStore.append({
+        sessionId,
+        type: 'message.user',
+        payload: { content: 'Read two files for me' },
+      });
+
+      // Turn 1: Assistant with tool_use
+      await eventStore.append({
+        sessionId,
+        type: 'message.assistant',
+        payload: {
+          content: [
+            { type: 'text', text: 'I\'ll read the first file.' },
+            { type: 'tool_use', id: 'tc_1', name: 'Read', input: { file_path: 'file1.txt' } },
+          ],
+          turn: 1,
+        },
+      });
+
+      // Tool result for turn 1
+      await eventStore.append({
+        sessionId,
+        type: 'tool.result',
+        payload: {
+          toolCallId: 'tc_1',
+          content: 'Contents of file1',
+          isError: false,
+        },
+      });
+
+      // Turn 2: Assistant continues (this would cause consecutive assistants without fix)
+      await eventStore.append({
+        sessionId,
+        type: 'message.assistant',
+        payload: {
+          content: [
+            { type: 'text', text: 'Now let me read the second file.' },
+            { type: 'tool_use', id: 'tc_2', name: 'Read', input: { file_path: 'file2.txt' } },
+          ],
+          turn: 2,
+        },
+      });
+
+      // Tool result for turn 2
+      await eventStore.append({
+        sessionId,
+        type: 'tool.result',
+        payload: {
+          toolCallId: 'tc_2',
+          content: 'Contents of file2',
+          isError: false,
+        },
+      });
+
+      // Turn 3: Assistant finishes
+      await eventStore.append({
+        sessionId,
+        type: 'message.assistant',
+        payload: {
+          content: [{ type: 'text', text: 'I\'ve read both files for you.' }],
+          turn: 3,
+        },
+      });
+
+      // Reconstruct messages
+      const messages = await eventStore.getMessagesAtHead(sessionId);
+
+      // Expected: 6 messages with proper alternation
+      // user -> assistant -> user(tool_result) -> assistant -> user(tool_result) -> assistant
+      expect(messages.length).toBe(6);
+
+      expect(messages[0].role).toBe('user');
+      expect(messages[0].content).toBe('Read two files for me');
+
+      expect(messages[1].role).toBe('assistant');
+      expect((messages[1].content as any[])[0].type).toBe('text');
+      expect((messages[1].content as any[])[1].type).toBe('tool_use');
+
+      expect(messages[2].role).toBe('user');
+      expect(Array.isArray(messages[2].content)).toBe(true);
+      expect((messages[2].content as any[])[0].type).toBe('tool_result');
+      expect((messages[2].content as any[])[0].toolUseId).toBe('tc_1');
+
+      expect(messages[3].role).toBe('assistant');
+      expect((messages[3].content as any[])[1].type).toBe('tool_use');
+
+      expect(messages[4].role).toBe('user');
+      expect((messages[4].content as any[])[0].type).toBe('tool_result');
+      expect((messages[4].content as any[])[0].toolUseId).toBe('tc_2');
+
+      expect(messages[5].role).toBe('assistant');
+      expect((messages[5].content as any[])[0].text).toContain('both files');
+    });
+
+    it('should handle multiple tool calls in single turn followed by continuation', async () => {
+      // User prompt
+      await eventStore.append({
+        sessionId,
+        type: 'message.user',
+        payload: { content: 'Check the project files' },
+      });
+
+      // Turn 1: Assistant calls multiple tools
+      await eventStore.append({
+        sessionId,
+        type: 'message.assistant',
+        payload: {
+          content: [
+            { type: 'tool_use', id: 'tc_ls', name: 'Ls', input: { path: '.' } },
+            { type: 'tool_use', id: 'tc_read', name: 'Read', input: { file_path: 'README.md' } },
+          ],
+          turn: 1,
+        },
+      });
+
+      // Tool results
+      await eventStore.append({
+        sessionId,
+        type: 'tool.result',
+        payload: { toolCallId: 'tc_ls', content: 'file1.txt\nfile2.txt', isError: false },
+      });
+      await eventStore.append({
+        sessionId,
+        type: 'tool.result',
+        payload: { toolCallId: 'tc_read', content: '# README', isError: false },
+      });
+
+      // Turn 2: Assistant continues
+      await eventStore.append({
+        sessionId,
+        type: 'message.assistant',
+        payload: {
+          content: [{ type: 'text', text: 'The project has two files and a README.' }],
+          turn: 2,
+        },
+      });
+
+      const messages = await eventStore.getMessagesAtHead(sessionId);
+
+      // Expected: 4 messages
+      // user -> assistant(tool_use x2) -> user(tool_result x2) -> assistant
+      expect(messages.length).toBe(4);
+
+      expect(messages[0].role).toBe('user');
+      expect(messages[1].role).toBe('assistant');
+      expect(messages[2].role).toBe('user');
+      expect(messages[3].role).toBe('assistant');
+
+      // Tool results should be combined in one user message
+      const toolResultMsg = messages[2].content as any[];
+      expect(toolResultMsg.length).toBe(2);
+      expect(toolResultMsg[0].toolUseId).toBe('tc_ls');
+      expect(toolResultMsg[1].toolUseId).toBe('tc_read');
+    });
+  });
+
+  describe('User response flows (no injection needed)', () => {
+    it('should NOT inject tool_result when user message follows', async () => {
+      // User prompt
+      await eventStore.append({
+        sessionId,
+        type: 'message.user',
+        payload: { content: 'Ask me something' },
+      });
+
+      // Assistant asks a question via tool
+      await eventStore.append({
+        sessionId,
+        type: 'message.assistant',
+        payload: {
+          content: [
+            { type: 'tool_use', id: 'tc_ask', name: 'AskUserQuestion', input: { question: 'Yes or no?' } },
+          ],
+          turn: 1,
+        },
+      });
+
+      // Tool result (immediate return)
+      await eventStore.append({
+        sessionId,
+        type: 'tool.result',
+        payload: { toolCallId: 'tc_ask', content: 'Question presented', isError: false },
+      });
+
+      // User responds directly
+      await eventStore.append({
+        sessionId,
+        type: 'message.user',
+        payload: { content: 'Yes, proceed' },
+      });
+
+      const messages = await eventStore.getMessagesAtHead(sessionId);
+
+      // Expected: 3 messages (no injected tool_result)
+      // user -> assistant -> user
+      expect(messages.length).toBe(3);
+      expect(messages[0].role).toBe('user');
+      expect(messages[1].role).toBe('assistant');
+      expect(messages[2].role).toBe('user');
+      expect(messages[2].content).toBe('Yes, proceed');
+    });
+
+    it('should NOT inject tool_result when message.user with tool_result content follows', async () => {
+      // User prompt
+      await eventStore.append({
+        sessionId,
+        type: 'message.user',
+        payload: { content: 'Read a file' },
+      });
+
+      // Assistant with tool
+      await eventStore.append({
+        sessionId,
+        type: 'message.assistant',
+        payload: {
+          content: [
+            { type: 'tool_use', id: 'tc_1', name: 'Read', input: { file_path: 'test.txt' } },
+          ],
+          turn: 1,
+        },
+      });
+
+      // Discrete tool.result event (for streaming)
+      await eventStore.append({
+        sessionId,
+        type: 'tool.result',
+        payload: { toolCallId: 'tc_1', content: 'File contents', isError: false },
+      });
+
+      // Proper message.user with tool_result (as stored by event-store-orchestrator for interrupts)
+      await eventStore.append({
+        sessionId,
+        type: 'message.user',
+        payload: {
+          content: [
+            { type: 'tool_result', tool_use_id: 'tc_1', content: 'File contents' },
+          ],
+        },
+      });
+
+      const messages = await eventStore.getMessagesAtHead(sessionId);
+
+      // Expected: 3 messages (discrete tool.result discarded, message.user preserved)
+      expect(messages.length).toBe(3);
+      expect(messages[0].role).toBe('user');
+      expect(messages[1].role).toBe('assistant');
+      expect(messages[2].role).toBe('user');
+      expect(Array.isArray(messages[2].content)).toBe(true);
+    });
+  });
+
+  describe('Session resume scenarios', () => {
+    it('should reconstruct valid message sequence for resumed agentic session', async () => {
+      // Simulate events from a previous session with agentic loop
+
+      // Initial conversation
+      await eventStore.append({
+        sessionId,
+        type: 'message.user',
+        payload: { content: 'Help me debug this' },
+      });
+
+      await eventStore.append({
+        sessionId,
+        type: 'message.assistant',
+        payload: {
+          content: [
+            { type: 'text', text: 'Let me check the logs.' },
+            { type: 'tool_use', id: 'tc_grep', name: 'Grep', input: { pattern: 'ERROR' } },
+          ],
+          turn: 1,
+        },
+      });
+
+      await eventStore.append({
+        sessionId,
+        type: 'tool.result',
+        payload: { toolCallId: 'tc_grep', content: 'ERROR: Connection failed', isError: false },
+      });
+
+      await eventStore.append({
+        sessionId,
+        type: 'message.assistant',
+        payload: {
+          content: [
+            { type: 'text', text: 'Found an error. Let me check the config.' },
+            { type: 'tool_use', id: 'tc_read', name: 'Read', input: { file_path: 'config.yml' } },
+          ],
+          turn: 2,
+        },
+      });
+
+      await eventStore.append({
+        sessionId,
+        type: 'tool.result',
+        payload: { toolCallId: 'tc_read', content: 'host: localhost', isError: false },
+      });
+
+      await eventStore.append({
+        sessionId,
+        type: 'message.assistant',
+        payload: {
+          content: [{ type: 'text', text: 'The config looks correct. The issue is...' }],
+          turn: 3,
+        },
+      });
+
+      // User sends new message (simulating resume)
+      await eventStore.append({
+        sessionId,
+        type: 'message.user',
+        payload: { content: 'What did you find?' },
+      });
+
+      const messages = await eventStore.getMessagesAtHead(sessionId);
+
+      // Verify alternation is correct
+      const roles = messages.map(m => m.role);
+      for (let i = 0; i < roles.length - 1; i++) {
+        expect(roles[i]).not.toBe(roles[i + 1]);
+      }
+
+      // Verify structure: user, assistant, user(tool_result), assistant, user(tool_result), assistant, user
+      // Note: The final user message doesn't need tool_result injection because no assistant follows
+      expect(messages.length).toBe(7);
+      expect(roles).toEqual(['user', 'assistant', 'user', 'assistant', 'user', 'assistant', 'user']);
+    });
+
+    it('should handle session with multiple agentic turns properly', async () => {
+      // Create session with multiple agentic turns (simulating what would happen with forked session)
+      await eventStore.append({
+        sessionId,
+        type: 'message.user',
+        payload: { content: 'Start task' },
+      });
+
+      await eventStore.append({
+        sessionId,
+        type: 'message.assistant',
+        payload: {
+          content: [
+            { type: 'tool_use', id: 'tc_1', name: 'Bash', input: { command: 'ls' } },
+          ],
+          turn: 1,
+        },
+      });
+
+      await eventStore.append({
+        sessionId,
+        type: 'tool.result',
+        payload: { toolCallId: 'tc_1', content: 'file.txt', isError: false },
+      });
+
+      await eventStore.append({
+        sessionId,
+        type: 'message.assistant',
+        payload: {
+          content: [{ type: 'text', text: 'Found files.' }],
+          turn: 2,
+        },
+      });
+
+      // Continue with more conversation
+      await eventStore.append({
+        sessionId,
+        type: 'message.user',
+        payload: { content: 'Continue the task' },
+      });
+
+      await eventStore.append({
+        sessionId,
+        type: 'message.assistant',
+        payload: {
+          content: [{ type: 'text', text: 'Continuing...' }],
+          turn: 3,
+        },
+      });
+
+      const messages = await eventStore.getMessagesAtHead(sessionId);
+
+      // Verify proper alternation
+      const roles = messages.map(m => m.role);
+      for (let i = 0; i < roles.length - 1; i++) {
+        expect(roles[i]).not.toBe(roles[i + 1]);
+      }
+
+      // Expected: user, assistant, user(tool_result), assistant, user, assistant
+      expect(messages.length).toBe(6);
+      expect(roles).toEqual(['user', 'assistant', 'user', 'assistant', 'user', 'assistant']);
+    });
+  });
+
+  describe('Edge cases', () => {
+    it('should handle tool error results in agentic loop', async () => {
+      await eventStore.append({
+        sessionId,
+        type: 'message.user',
+        payload: { content: 'Run command' },
+      });
+
+      await eventStore.append({
+        sessionId,
+        type: 'message.assistant',
+        payload: {
+          content: [
+            { type: 'tool_use', id: 'tc_1', name: 'Bash', input: { command: 'fail' } },
+          ],
+          turn: 1,
+        },
+      });
+
+      await eventStore.append({
+        sessionId,
+        type: 'tool.result',
+        payload: {
+          toolCallId: 'tc_1',
+          content: 'Command not found: fail',
+          isError: true,
+        },
+      });
+
+      await eventStore.append({
+        sessionId,
+        type: 'message.assistant',
+        payload: {
+          content: [{ type: 'text', text: 'The command failed. Let me try another approach.' }],
+          turn: 2,
+        },
+      });
+
+      const messages = await eventStore.getMessagesAtHead(sessionId);
+
+      expect(messages.length).toBe(4);
+
+      // Verify error flag is preserved
+      const toolResultContent = messages[2].content as any[];
+      expect(toolResultContent[0].isError).toBe(true);
+    });
+
+    it('should handle compaction boundary in agentic session', async () => {
+      // Pre-compaction messages
+      await eventStore.append({
+        sessionId,
+        type: 'message.user',
+        payload: { content: 'Old message 1' },
+      });
+
+      await eventStore.append({
+        sessionId,
+        type: 'message.assistant',
+        payload: {
+          content: [{ type: 'text', text: 'Old response 1' }],
+          turn: 1,
+        },
+      });
+
+      // Compaction events
+      await eventStore.append({
+        sessionId,
+        type: 'compact.boundary',
+        payload: { reason: 'context_limit' },
+      });
+
+      await eventStore.append({
+        sessionId,
+        type: 'compact.summary',
+        payload: { summary: 'Previous conversation discussed old topics.' },
+      });
+
+      // Post-compaction agentic loop
+      await eventStore.append({
+        sessionId,
+        type: 'message.user',
+        payload: { content: 'New task' },
+      });
+
+      await eventStore.append({
+        sessionId,
+        type: 'message.assistant',
+        payload: {
+          content: [
+            { type: 'tool_use', id: 'tc_1', name: 'Read', input: { file_path: 'new.txt' } },
+          ],
+          turn: 2,
+        },
+      });
+
+      await eventStore.append({
+        sessionId,
+        type: 'tool.result',
+        payload: { toolCallId: 'tc_1', content: 'New file contents', isError: false },
+      });
+
+      await eventStore.append({
+        sessionId,
+        type: 'message.assistant',
+        payload: {
+          content: [{ type: 'text', text: 'Here is the new file.' }],
+          turn: 3,
+        },
+      });
+
+      const messages = await eventStore.getMessagesAtHead(sessionId);
+
+      // Should have: compaction pair + user + assistant + user(tool_result) + assistant
+      expect(messages.length).toBe(6);
+
+      // First two are compaction summary pair
+      expect(messages[0].content).toContain('Previous conversation');
+      expect((messages[1].content as any[])[0].text).toContain('understand');
+
+      // Verify proper alternation after compaction
+      const roles = messages.map(m => m.role);
+      expect(roles).toEqual(['user', 'assistant', 'user', 'assistant', 'user', 'assistant']);
+    });
+
+    it('should handle context.cleared in agentic session', async () => {
+      // Pre-clear messages with tool loop
+      await eventStore.append({
+        sessionId,
+        type: 'message.user',
+        payload: { content: 'Clear me' },
+      });
+
+      await eventStore.append({
+        sessionId,
+        type: 'message.assistant',
+        payload: {
+          content: [
+            { type: 'tool_use', id: 'tc_1', name: 'Read', input: { file_path: 'old.txt' } },
+          ],
+          turn: 1,
+        },
+      });
+
+      await eventStore.append({
+        sessionId,
+        type: 'tool.result',
+        payload: { toolCallId: 'tc_1', content: 'Old contents', isError: false },
+      });
+
+      // Clear context
+      await eventStore.append({
+        sessionId,
+        type: 'context.cleared',
+        payload: { reason: 'user_requested' },
+      });
+
+      // New conversation
+      await eventStore.append({
+        sessionId,
+        type: 'message.user',
+        payload: { content: 'Fresh start' },
+      });
+
+      await eventStore.append({
+        sessionId,
+        type: 'message.assistant',
+        payload: {
+          content: [{ type: 'text', text: 'Hello! How can I help?' }],
+          turn: 2,
+        },
+      });
+
+      const messages = await eventStore.getMessagesAtHead(sessionId);
+
+      // Only post-clear messages should remain
+      expect(messages.length).toBe(2);
+      expect(messages[0].content).toBe('Fresh start');
+    });
+
+    it('should handle empty tool result content', async () => {
+      await eventStore.append({
+        sessionId,
+        type: 'message.user',
+        payload: { content: 'Test empty' },
+      });
+
+      await eventStore.append({
+        sessionId,
+        type: 'message.assistant',
+        payload: {
+          content: [
+            { type: 'tool_use', id: 'tc_1', name: 'Write', input: { file_path: 'test.txt', content: 'x' } },
+          ],
+          turn: 1,
+        },
+      });
+
+      await eventStore.append({
+        sessionId,
+        type: 'tool.result',
+        payload: { toolCallId: 'tc_1', content: '', isError: false },
+      });
+
+      await eventStore.append({
+        sessionId,
+        type: 'message.assistant',
+        payload: {
+          content: [{ type: 'text', text: 'File written successfully.' }],
+          turn: 2,
+        },
+      });
+
+      const messages = await eventStore.getMessagesAtHead(sessionId);
+
+      expect(messages.length).toBe(4);
+
+      // Empty content should still be included
+      const toolResultContent = messages[2].content as any[];
+      expect(toolResultContent[0].content).toBe('');
+    });
+  });
+});

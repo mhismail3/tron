@@ -148,6 +148,7 @@ export type RpcMethod =
   | 'context.confirmCompaction'
   | 'context.canAcceptTurn'
   | 'context.clear'
+  | 'context.compact'
   // Voice Notes
   | 'voiceNotes.save'
   | 'voiceNotes.list'

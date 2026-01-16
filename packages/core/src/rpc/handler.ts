@@ -461,6 +461,8 @@ export class RpcHandler extends EventEmitter {
           return this.handleContextCanAcceptTurn(request);
         case 'context.clear':
           return this.handleContextClear(request);
+        case 'context.compact':
+          return this.handleContextConfirmCompaction(request);
 
         // Voice Notes methods
         case 'voiceNotes.save':

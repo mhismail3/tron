@@ -343,6 +343,27 @@ export class EventStore {
     }
 
     const messages: Message[] = [];
+    // Accumulate tool results to inject as user messages when needed for agentic loops
+    // This ensures proper: assistant(tool_use) -> user(tool_result) -> assistant(continuation)
+    // But we DON'T inject when a real user message follows (e.g., AskUserQuestion flow)
+    let pendingToolResults: Array<{ toolCallId: string; content: string; isError?: boolean }> = [];
+
+    // Helper to flush pending tool results as a user message
+    const flushToolResults = () => {
+      if (pendingToolResults.length > 0) {
+        const toolResultContent = pendingToolResults.map((tr) => ({
+          type: 'tool_result' as const,
+          toolUseId: tr.toolCallId,
+          content: tr.content,
+          isError: tr.isError,
+        }));
+        messages.push({
+          role: 'user',
+          content: toolResultContent,
+        });
+        pendingToolResults = [];
+      }
+    };
 
     for (const event of ancestors) {
       // Skip deleted messages
@@ -357,6 +378,7 @@ export class EventStore {
         const payload = event.payload as { summary: string };
         // Clear any messages we've collected (they were summarized)
         messages.length = 0;
+        pendingToolResults = []; // Also clear pending tool results
         // Inject the compaction summary as a context message pair
         // This mirrors how ContextManager.executeCompaction() formats the summary
         messages.push({
@@ -379,10 +401,29 @@ export class EventStore {
       // Unlike compaction, no summary is preserved - messages just get cleared
       if (event.type === 'context.cleared') {
         messages.length = 0;
+        pendingToolResults = [];
+        continue;
+      }
+
+      // Accumulate tool.result events to potentially create user messages
+      // These are ONLY flushed before assistant messages (agentic loops)
+      // NOT before user messages (user provides the response, e.g., AskUserQuestion)
+      if (event.type === 'tool.result') {
+        const payload = event.payload as { toolCallId: string; content: string; isError?: boolean };
+        pendingToolResults.push({
+          toolCallId: payload.toolCallId,
+          content: payload.content,
+          isError: payload.isError,
+        });
         continue;
       }
 
       if (event.type === 'message.user') {
+        // When a real user message follows tool results, discard the pending tool results
+        // The user's message IS the response (e.g., AskUserQuestion answers)
+        // This prevents creating consecutive user messages
+        pendingToolResults = [];
+
         const payload = event.payload as { content: Message['content'] };
         const lastMessage = messages[messages.length - 1];
 
@@ -397,12 +438,26 @@ export class EventStore {
           });
         }
       } else if (event.type === 'message.assistant') {
+        // Only flush pending tool results if the last message was an assistant
+        // This handles agentic loops: assistant(tool_use) -> user(tool_result) -> assistant(continuation)
+        // If last message was user (or no messages), don't inject - there's no tool_use to match
+        const lastMessageBeforeFlush = messages[messages.length - 1];
+        if (lastMessageBeforeFlush && lastMessageBeforeFlush.role === 'assistant') {
+          flushToolResults();
+        } else {
+          // Discard tool results if last message wasn't assistant - they're orphaned
+          pendingToolResults = [];
+        }
+
         const payload = event.payload as { content: Message['content'] };
-        const lastMessage = messages[messages.length - 1];
+
+        // Re-check last message AFTER flush (it may have changed from assistant to user)
+        const lastMessageAfterFlush = messages[messages.length - 1];
 
         // Merge consecutive assistant messages for robustness
-        if (lastMessage && lastMessage.role === 'assistant') {
-          lastMessage.content = mergeMessageContent(lastMessage.content, payload.content, 'assistant');
+        // Note: With proper tool_result flushing, consecutive assistants should be rare
+        if (lastMessageAfterFlush && lastMessageAfterFlush.role === 'assistant') {
+          lastMessageAfterFlush.content = mergeMessageContent(lastMessageAfterFlush.content, payload.content, 'assistant');
         } else {
           messages.push({
             role: 'assistant',
@@ -410,14 +465,11 @@ export class EventStore {
           });
         }
       }
-      // NOTE: tool.result events are NOT reconstructed here as separate messages.
-      // Tool results are stored in two places:
-      // 1. tool.result events (for real-time streaming/display)
-      // 2. message.user events with tool_result content (for proper sequencing)
-      // The message.user approach (stored at turn end, AFTER message.assistant) ensures
-      // correct ordering: assistant(tool_use) -> user(tool_result)
-      // Reconstructing tool.result events would create duplicate/misordered messages.
     }
+
+    // Don't flush remaining tool results at the end - if there's no following assistant message,
+    // the session is waiting for user input and tool results aren't needed in the history
+    // (they were for display/streaming purposes only)
 
     return messages;
   }
