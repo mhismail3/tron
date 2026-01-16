@@ -988,12 +988,20 @@ export class EventStoreOrchestrator extends EventEmitter {
       throw new Error(`Session not active: ${options.sessionId}`);
     }
 
-    if (active.isProcessing) {
+    // Phase 7 migration: Check processing state via SessionContext when available
+    const isProcessing = active.sessionContext
+      ? active.sessionContext.isProcessing()
+      : active.isProcessing;
+    if (isProcessing) {
       throw new Error('Session is already processing');
     }
 
+    // Update both legacy and SessionContext (Phase 7 migration)
     active.isProcessing = true;
     active.lastActivity = new Date();
+    if (active.sessionContext) {
+      active.sessionContext.setProcessing(true);
+    }
 
     // Wrap entire agent run with logging context for session correlation
     return withLoggingContext(
@@ -1149,7 +1157,11 @@ export class EventStoreOrchestrator extends EventEmitter {
 
       // Run agent with transformed content
       const runResult = await active.agent.run(llmContent);
+      // Update activity timestamp (Phase 7 migration: sync both)
       active.lastActivity = new Date();
+      if (active.sessionContext) {
+        active.sessionContext.touch();
+      }
 
       // Handle interrupted runs - PERSIST partial content so it survives session resume
       if (runResult.interrupted) {
@@ -1355,22 +1367,38 @@ export class EventStoreOrchestrator extends EventEmitter {
 
       throw error;
     } finally {
+      // Phase 7 migration: sync both legacy and SessionContext
       active.isProcessing = false;
+      if (active.sessionContext) {
+        active.sessionContext.setProcessing(false);
+      }
     }
       }); // End withLoggingContext
   }
 
   async cancelAgent(sessionId: string): Promise<boolean> {
     const active = this.activeSessions.get(sessionId);
-    if (!active || !active.isProcessing) {
+    if (!active) {
+      return false;
+    }
+
+    // Phase 7 migration: Check processing state via SessionContext when available
+    const isProcessing = active.sessionContext
+      ? active.sessionContext.isProcessing()
+      : active.isProcessing;
+    if (!isProcessing) {
       return false;
     }
 
     // Actually abort the agent - triggers AbortController and interrupts execution
     active.agent.abort();
 
+    // Phase 7 migration: sync both legacy and SessionContext
     active.isProcessing = false;
     active.lastActivity = new Date();
+    if (active.sessionContext) {
+      active.sessionContext.setProcessing(false);
+    }
     logger.info('Agent cancelled', { sessionId });
     return true;
   }
@@ -2773,9 +2801,16 @@ The user has explicitly removed these skills and expects you to respond WITHOUT 
     const entries = Array.from(this.activeSessions.entries());
 
     for (const [sessionId, active] of entries) {
-      if (active.isProcessing) continue;
+      // Phase 7 migration: Check via SessionContext when available
+      const isProcessing = active.sessionContext
+        ? active.sessionContext.isProcessing()
+        : active.isProcessing;
+      if (isProcessing) continue;
 
-      const inactiveTime = now - active.lastActivity.getTime();
+      const lastActivity = active.sessionContext
+        ? active.sessionContext.getLastActivity()
+        : active.lastActivity;
+      const inactiveTime = now - lastActivity.getTime();
       if (inactiveTime > inactiveThreshold) {
         logger.info('Cleaning up inactive session', {
           sessionId,
