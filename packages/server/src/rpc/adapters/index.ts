@@ -11,10 +11,9 @@ export { createMemoryAdapter } from './memory.adapter.js';
 // Orchestrator-dependent adapters
 export { createBrowserAdapter } from './browser.adapter.js';
 export { createWorktreeAdapter } from './worktree.adapter.js';
+export { createContextAdapter } from './context.adapter.js';
+export { createEventStoreAdapter, getEventSummary, getEventDepth } from './event-store.adapter.js';
 
-// TODO: Add as they are created
-// export { createContextAdapter } from './context.adapter.js';
-// export { createEventStoreAdapter } from './event-store.adapter.js';
-// export { createSessionAdapter } from './session.adapter.js';
-// export { createSkillAdapter } from './skill.adapter.js';
-// export { createAgentAdapter } from './agent.adapter.js';
+export { createSessionAdapter } from './session.adapter.js';
+export { createSkillAdapter } from './skill.adapter.js';
+export { createAgentAdapter } from './agent.adapter.js';
