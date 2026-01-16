@@ -111,9 +111,10 @@ export interface OrchestratorSessionInfo {
 
 /**
  * Message format from orchestrator
+ * Includes all possible roles from the core Message type
  */
 export interface OrchestratorMessage {
-  role: 'user' | 'assistant';
+  role: 'user' | 'assistant' | 'system' | 'toolResult';
   content: unknown;
 }
 

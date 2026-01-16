@@ -6,8 +6,10 @@
  * and state retrieval.
  */
 
-import { SkillRegistry, logger } from '@tron/core';
+import { SkillRegistry, createLogger } from '@tron/core';
 import type { AdapterDependencies, AgentManagerAdapter } from '../types.js';
+
+const logger = createLogger('agent-adapter');
 
 // =============================================================================
 // Agent Adapter Factory
