@@ -24,6 +24,11 @@
  *   - Reconstructs plan mode, turn count, interrupt status from events
  *   - Handles reset points (compaction, context clear)
  *
+ * - **SessionContext** (Phase 5): Per-session state encapsulation
+ *   - Wraps EventPersister, TurnManager, PlanModeHandler
+ *   - Clean interface for orchestrator operations
+ *   - State restoration via SessionReconstructor
+ *
  * ## Existing Components
  *
  * - **event-linearizer**: Legacy functions (will be deprecated)
@@ -90,6 +95,13 @@ export {
   createSessionReconstructor,
   type ReconstructedState,
 } from './session-reconstructor.js';
+
+// Session context (Phase 5)
+export {
+  SessionContext,
+  createSessionContext,
+  type SessionContextConfig,
+} from './session-context.js';
 
 // =============================================================================
 // Existing Components
