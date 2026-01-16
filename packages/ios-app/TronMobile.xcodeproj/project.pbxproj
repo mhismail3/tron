@@ -14,7 +14,6 @@
 		136A2E352353C637D95DB9B2 /* SessionAnalyticsSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = A98EEAD5A6421EB34B269C1A /* SessionAnalyticsSheet.swift */; };
 		1401327824254E4B259C40C7 /* SessionPayloads.swift in Sources */ = {isa = PBXBuildFile; fileRef = D55558B6BDA1C107C3E0BA83 /* SessionPayloads.swift */; };
 		14260190901BA8299D13DC43 /* InputBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3EF2CB735CA19344DB30086D /* InputBar.swift */; };
-		A1B2C3D4E5F6A7B8C9D0E1F3 /* MultiLineTextView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F6A7B8C9D0E1F2 /* MultiLineTextView.swift */; };
 		15D5C1CDEE971D2D3264B4A7 /* EventTypeRegistry.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4C46C2D9874A2C1C807D43A0 /* EventTypeRegistry.swift */; };
 		19A006C0CD4378E9955854F8 /* VoiceNotesRecordingSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7906E8A2A558AE0B39C7AE12 /* VoiceNotesRecordingSheet.swift */; };
 		1F0AB8F273C1C38CCA7D1924 /* SkillStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6D63E93FC060C98B2C377CAB /* SkillStoreTests.swift */; };
@@ -61,6 +60,7 @@
 		98FC4E3E2ABC2E1C8C369CC4 /* Skill.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7420CAC58E7D403E0BEDEBC5 /* Skill.swift */; };
 		9966D82BDAC66D1604946F29 /* ReasoningLevelPicker.swift in Sources */ = {isa = PBXBuildFile; fileRef = 71C51BCF67DD848C42B8F720 /* ReasoningLevelPicker.swift */; };
 		A02BD858F0923DD456A1FF2E /* AskUserQuestionSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = A6844DC337DEDE3BD35A0B61 /* AskUserQuestionSheet.swift */; };
+		A1B2C3D4E5F6A7B8C9D0E1F3 /* MultiLineTextView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F6A7B8C9D0E1F2 /* MultiLineTextView.swift */; };
 		A30DB8557BB5D3E5CFD61ADD /* RecentSessionsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A113B9D98B4711E36919F2A /* RecentSessionsTests.swift */; };
 		A3BCE182EB003CB62D1D96E6 /* RPCClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = B9DD45A3974192F927E1B73A /* RPCClient.swift */; };
 		A76EDEC5EBA3FD648E2E2774 /* SkillDetailSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 609B55B9CB51C37B8C9ED63E /* SkillDetailSheet.swift */; };
@@ -128,7 +128,6 @@
 		3750A1FE06AAADB19DC21194 /* Attachment.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Attachment.swift; sourceTree = "<group>"; };
 		376F75BF9CDB0F0D3096611C /* SkillChip.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SkillChip.swift; sourceTree = "<group>"; };
 		3EF2CB735CA19344DB30086D /* InputBar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InputBar.swift; sourceTree = "<group>"; };
-		A1B2C3D4E5F6A7B8C9D0E1F2 /* MultiLineTextView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MultiLineTextView.swift; sourceTree = "<group>"; };
 		42E47B6EAD030227C54F0028 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		4C46C2D9874A2C1C807D43A0 /* EventTypeRegistry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EventTypeRegistry.swift; sourceTree = "<group>"; };
 		4C99FDB162C904C6A622BA61 /* AttachmentTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AttachmentTests.swift; sourceTree = "<group>"; };
@@ -161,6 +160,7 @@
 		9DBEB00828E849CF83958D98 /* ImageCompressorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImageCompressorTests.swift; sourceTree = "<group>"; };
 		9EC65CD838F5540EC3B1AA02 /* SessionTreeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionTreeView.swift; sourceTree = "<group>"; };
 		A013DFE849DA84E8EA5F545C /* EventDatabaseTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EventDatabaseTests.swift; sourceTree = "<group>"; };
+		A1B2C3D4E5F6A7B8C9D0E1F2 /* MultiLineTextView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MultiLineTextView.swift; sourceTree = "<group>"; };
 		A51CB66FF27D47E989DF0839 /* EventStoreManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EventStoreManager.swift; sourceTree = "<group>"; };
 		A5AD094851A0EDC87E49A537 /* SafariView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SafariView.swift; sourceTree = "<group>"; };
 		A6844DC337DEDE3BD35A0B61 /* AskUserQuestionSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AskUserQuestionSheet.swift; sourceTree = "<group>"; };
@@ -471,9 +471,6 @@
 						DevelopmentTeam = "";
 						ProvisioningStyle = Automatic;
 					};
-					5CE10CFB51EA2F88B755A197 = {
-						ProvisioningStyle = Automatic;
-					};
 				};
 			};
 			buildConfigurationList = AA8EC1DB96ADBAE46DED02A0 /* Build configuration list for PBXProject "TronMobile" */;
@@ -682,8 +679,10 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
-				CODE_SIGN_IDENTITY = "iPhone Developer";
+				CODE_SIGN_IDENTITY = "Apple Development";
+				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = MYGKXH6TY4;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = Sources/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -691,6 +690,7 @@
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 1.0.0;
+				PROVISIONING_PROFILE_SPECIFIER = "";
 				SDKROOT = iphoneos;
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				TARGETED_DEVICE_FAMILY = "1,2";
@@ -736,8 +736,10 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
-				CODE_SIGN_IDENTITY = "iPhone Developer";
+				CODE_SIGN_IDENTITY = "Apple Development";
+				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = MYGKXH6TY4;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = Sources/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -745,6 +747,7 @@
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 1.0.0;
+				PROVISIONING_PROFILE_SPECIFIER = "";
 				SDKROOT = iphoneos;
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				TARGETED_DEVICE_FAMILY = "1,2";
