@@ -21,3 +21,13 @@ export type {
 
 // Repositories
 export { BaseRepository, idUtils, rowUtils } from './repositories/base.js';
+
+// Migrations
+export {
+  migrations,
+  runMigrations,
+  runIncrementalMigrations,
+  MigrationRunner,
+  createMigrationRunner,
+} from './migrations/index.js';
+export type { Migration, MigrationResult, SchemaVersionRow } from './migrations/types.js';
