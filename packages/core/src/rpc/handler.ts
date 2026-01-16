@@ -279,6 +279,23 @@ export type RpcMiddleware = (
 
 import { MethodRegistry } from './registry.js';
 import { createSystemHandlers } from './handlers/system.handler.js';
+import { createFilesystemHandlers } from './handlers/filesystem.handler.js';
+import { createModelHandlers } from './handlers/model.handler.js';
+import { createMemoryHandlers } from './handlers/memory.handler.js';
+import { createTranscribeHandlers } from './handlers/transcribe.handler.js';
+import { createSessionHandlers } from './handlers/session.handler.js';
+import { createAgentHandlers } from './handlers/agent.handler.js';
+import { createEventsHandlers } from './handlers/events.handler.js';
+import { createTreeHandlers } from './handlers/tree.handler.js';
+import { createSearchHandlers } from './handlers/search.handler.js';
+import { createWorktreeHandlers } from './handlers/worktree.handler.js';
+import { createContextHandlers } from './handlers/context.handler.js';
+import { createMessageHandlers } from './handlers/message.handler.js';
+import { createBrowserHandlers } from './handlers/browser.handler.js';
+import { createSkillHandlers } from './handlers/skill.handler.js';
+import { createFileHandlers } from './handlers/file.handler.js';
+import { createToolHandlers } from './handlers/tool.handler.js';
+import { createVoiceNotesHandlers } from './handlers/voiceNotes.handler.js';
 
 export class RpcHandler extends EventEmitter {
   private context: RpcContext;
@@ -294,6 +311,23 @@ export class RpcHandler extends EventEmitter {
     // Initialize method registry with extracted handlers
     this.registry = new MethodRegistry();
     this.registry.registerAll(createSystemHandlers());
+    this.registry.registerAll(createFilesystemHandlers());
+    this.registry.registerAll(createModelHandlers());
+    this.registry.registerAll(createMemoryHandlers());
+    this.registry.registerAll(createTranscribeHandlers());
+    this.registry.registerAll(createSessionHandlers());
+    this.registry.registerAll(createAgentHandlers());
+    this.registry.registerAll(createEventsHandlers());
+    this.registry.registerAll(createTreeHandlers());
+    this.registry.registerAll(createSearchHandlers());
+    this.registry.registerAll(createWorktreeHandlers());
+    this.registry.registerAll(createContextHandlers());
+    this.registry.registerAll(createMessageHandlers());
+    this.registry.registerAll(createBrowserHandlers());
+    this.registry.registerAll(createSkillHandlers());
+    this.registry.registerAll(createFileHandlers());
+    this.registry.registerAll(createToolHandlers());
+    this.registry.registerAll(createVoiceNotesHandlers());
 
     logger.debug('RPC handler initialized', {
       registeredMethods: this.registry.list(),

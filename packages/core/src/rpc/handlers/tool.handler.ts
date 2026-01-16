@@ -1,0 +1,102 @@
+/**
+ * @fileoverview Tool RPC Handlers
+ *
+ * Handlers for tool.* RPC methods:
+ * - tool.result: Submit a result for a pending tool call
+ */
+
+import type {
+  RpcRequest,
+  RpcResponse,
+  ToolResultParams,
+} from '../types.js';
+import type { RpcContext } from '../handler.js';
+import { MethodRegistry, type MethodRegistration, type MethodHandler } from '../registry.js';
+
+// =============================================================================
+// Handler Implementations
+// =============================================================================
+
+/**
+ * Handle tool.result request
+ *
+ * Submits a result for a pending tool call.
+ */
+export async function handleToolResult(
+  request: RpcRequest,
+  context: RpcContext
+): Promise<RpcResponse> {
+  if (!context.toolCallTracker) {
+    return MethodRegistry.errorResponse(request.id, 'NOT_SUPPORTED', 'Tool call tracker not available');
+  }
+
+  const params = request.params as ToolResultParams | undefined;
+
+  if (!params?.sessionId) {
+    return MethodRegistry.errorResponse(request.id, 'INVALID_PARAMS', 'sessionId is required');
+  }
+  if (!params?.toolCallId) {
+    return MethodRegistry.errorResponse(request.id, 'INVALID_PARAMS', 'toolCallId is required');
+  }
+  if (params.result === undefined) {
+    return MethodRegistry.errorResponse(request.id, 'INVALID_PARAMS', 'result is required');
+  }
+
+  // Check if the tool call is pending
+  if (!context.toolCallTracker.hasPending(params.toolCallId)) {
+    return MethodRegistry.errorResponse(
+      request.id,
+      'NOT_FOUND',
+      `No pending tool call found with ID: ${params.toolCallId}`
+    );
+  }
+
+  // Resolve the pending tool call
+  const resolved = context.toolCallTracker.resolve(params.toolCallId, params.result);
+
+  if (!resolved) {
+    return MethodRegistry.errorResponse(
+      request.id,
+      'TOOL_RESULT_FAILED',
+      'Failed to resolve tool call'
+    );
+  }
+
+  return MethodRegistry.successResponse(request.id, {
+    success: true,
+    toolCallId: params.toolCallId,
+  });
+}
+
+// =============================================================================
+// Handler Factory
+// =============================================================================
+
+/**
+ * Create tool handler registrations
+ *
+ * @returns Array of method registrations for bulk registration
+ */
+export function createToolHandlers(): MethodRegistration[] {
+  const resultHandler: MethodHandler = async (request, context) => {
+    const response = await handleToolResult(request, context);
+    if (response.success && response.result) {
+      return response.result;
+    }
+    const err = new Error(response.error?.message || 'Unknown error');
+    (err as any).code = response.error?.code;
+    throw err;
+  };
+
+  return [
+    {
+      method: 'tool.result',
+      handler: resultHandler,
+      options: {
+        requiredParams: ['sessionId', 'toolCallId', 'result'],
+        requiredManagers: ['toolCallTracker'],
+        description: 'Submit a result for a pending tool call',
+      },
+    },
+  ];
+}

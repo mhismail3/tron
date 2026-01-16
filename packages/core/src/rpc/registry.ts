@@ -257,9 +257,11 @@ export class MethodRegistry {
       const result = await handler(request, context);
       return MethodRegistry.successResponse(request.id, result);
     } catch (error) {
+      // Preserve error code if provided by handler, otherwise use INTERNAL_ERROR
+      const errorCode = (error as { code?: string })?.code || 'INTERNAL_ERROR';
       return MethodRegistry.errorResponse(
         request.id,
-        'INTERNAL_ERROR',
+        errorCode,
         error instanceof Error ? error.message : 'Unknown error'
       );
     }
