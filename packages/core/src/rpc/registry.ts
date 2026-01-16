@@ -4,6 +4,7 @@
  * Provides a registration system for RPC method handlers with:
  * - Method registration with options (required params, required managers)
  * - Validation before dispatch
+ * - Middleware support for cross-cutting concerns
  * - Response helpers for consistent formatting
  * - Namespace-based organization
  *
@@ -13,6 +14,7 @@
 
 import type { RpcRequest, RpcResponse, RpcError } from './types.js';
 import type { RpcContext } from './handler.js';
+import { buildMiddlewareChain, type Middleware, type MiddlewareNext } from './middleware/index.js';
 
 // =============================================================================
 // Types
@@ -95,6 +97,7 @@ interface RegistrationEntry {
  */
 export class MethodRegistry {
   private readonly handlers: Map<string, RegistrationEntry> = new Map();
+  private readonly middleware: Middleware[] = [];
 
   // ===========================================================================
   // Registration
@@ -142,6 +145,33 @@ export class MethodRegistry {
    */
   clear(): void {
     this.handlers.clear();
+  }
+
+  // ===========================================================================
+  // Middleware
+  // ===========================================================================
+
+  /**
+   * Register middleware to be executed on every request
+   *
+   * Middleware are executed in the order they are registered.
+   * Each middleware can:
+   * - Modify the request before passing to the next middleware
+   * - Short-circuit and return a response without calling next
+   * - Modify the response after next completes
+   * - Handle errors from subsequent middleware/handlers
+   *
+   * @param mw - The middleware function
+   */
+  use(mw: Middleware): void {
+    this.middleware.push(mw);
+  }
+
+  /**
+   * Get the number of registered middleware
+   */
+  get middlewareCount(): number {
+    return this.middleware.length;
   }
 
   // ===========================================================================
@@ -207,11 +237,33 @@ export class MethodRegistry {
   /**
    * Dispatch a request to the appropriate handler
    *
+   * If middleware are registered, they are executed in order before the handler.
+   * The middleware chain wraps the core dispatch logic.
+   *
    * @param request - The incoming RPC request
    * @param context - The handler context
    * @returns The RPC response
    */
   async dispatch(request: RpcRequest, context: HandlerContext): Promise<RpcResponse> {
+    // Core handler logic
+    const coreHandler: MiddlewareNext = (req) => this.dispatchCore(req, context);
+
+    // If no middleware, dispatch directly
+    if (this.middleware.length === 0) {
+      return coreHandler(request);
+    }
+
+    // Build middleware chain and execute
+    const chain = buildMiddlewareChain(this.middleware, coreHandler);
+    return chain(request);
+  }
+
+  /**
+   * Core dispatch logic without middleware
+   *
+   * @internal
+   */
+  private async dispatchCore(request: RpcRequest, context: HandlerContext): Promise<RpcResponse> {
     const entry = this.handlers.get(request.method);
 
     // Method not found

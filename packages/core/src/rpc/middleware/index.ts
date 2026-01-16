@@ -170,3 +170,20 @@ export function createErrorBoundaryMiddleware(
     }
   };
 }
+
+// =============================================================================
+// Re-exports
+// =============================================================================
+
+export {
+  createValidationMiddleware,
+  createSchemaRegistry,
+  mergeSchemaRegistries,
+  zodErrorToValidationErrors,
+  formatValidationMessage,
+  commonSchemas,
+  type SchemaRegistry,
+  type ValidationResult,
+  type ValidationError,
+  type ValidationMiddlewareOptions,
+} from './validation.js';
