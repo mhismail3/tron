@@ -915,9 +915,21 @@ export class EventStoreOrchestrator extends EventEmitter {
   // ===========================================================================
 
   async runAgent(options: AgentRunOptions): Promise<TurnResult[]> {
-    const active = this.activeSessions.get(options.sessionId);
+    let active = this.activeSessions.get(options.sessionId);
+
+    // Auto-resume session if not active (handles app reopen, server restart, etc.)
     if (!active) {
-      throw new Error(`Session not active: ${options.sessionId}`);
+      logger.info('[AGENT] Auto-resuming inactive session', { sessionId: options.sessionId });
+      try {
+        await this.resumeSession(options.sessionId);
+        active = this.activeSessions.get(options.sessionId);
+      } catch (err) {
+        // Session doesn't exist or can't be resumed
+        throw new Error(`Session not found: ${options.sessionId}`);
+      }
+      if (!active) {
+        throw new Error(`Failed to resume session: ${options.sessionId}`);
+      }
     }
 
     // Check processing state
