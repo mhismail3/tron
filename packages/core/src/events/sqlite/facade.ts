@@ -127,6 +127,13 @@ export class SQLiteEventStore {
   }
 
   /**
+   * Check if the store is initialized
+   */
+  isInitialized(): boolean {
+    return this.initialized;
+  }
+
+  /**
    * Run incremental migrations (for upgrading existing databases)
    */
   runIncrementalMigrations(): void {
@@ -135,7 +142,14 @@ export class SQLiteEventStore {
 
   /**
    * Get the underlying database instance
-   * @deprecated Use repositories directly when possible
+   */
+  getDatabase(): Database.Database {
+    return this.connection.getDatabase();
+  }
+
+  /**
+   * Get the underlying database instance
+   * @deprecated Use getDatabase() instead
    */
   getDb(): Database.Database {
     return this.connection.getDatabase();
@@ -338,15 +352,44 @@ export class SQLiteEventStore {
   }
 
   // ===========================================================================
+  // Schema Inspection
+  // ===========================================================================
+
+  /**
+   * Get the current schema version
+   */
+  getSchemaVersion(): number {
+    const db = this.connection.getDatabase();
+    const row = db.prepare('SELECT MAX(version) as version FROM schema_version').get() as
+      | { version: number }
+      | undefined;
+    return row?.version ?? 0;
+  }
+
+  /**
+   * List all tables in the database
+   */
+  listTables(): string[] {
+    const db = this.connection.getDatabase();
+    const rows = db
+      .prepare(
+        `SELECT name FROM sqlite_master
+         WHERE type='table' OR type='virtual table'
+         ORDER BY name`
+      )
+      .all() as { name: string }[];
+    return rows.map((r) => r.name);
+  }
+
+  // ===========================================================================
   // Stats
   // ===========================================================================
 
   async getStats(): Promise<{
-    workspaceCount: number;
-    sessionCount: number;
-    eventCount: number;
-    blobCount: number;
-    totalBlobSize: number;
+    totalEvents: number;
+    totalSessions: number;
+    totalWorkspaces: number;
+    totalBlobs: number;
   }> {
     const db = this.connection.getDatabase();
 
@@ -359,17 +402,14 @@ export class SQLiteEventStore {
     const eventCount = this.eventRepo.count();
 
     const blobStats = db
-      .prepare(
-        'SELECT COUNT(*) as count, COALESCE(SUM(size_original), 0) as total_size FROM blobs'
-      )
-      .get() as { count: number; total_size: number } | undefined;
+      .prepare('SELECT COUNT(*) as count FROM blobs')
+      .get() as { count: number } | undefined;
 
     return {
-      workspaceCount: workspaceRow?.count ?? 0,
-      sessionCount: sessionRow?.count ?? 0,
-      eventCount,
-      blobCount: blobStats?.count ?? 0,
-      totalBlobSize: blobStats?.total_size ?? 0,
+      totalWorkspaces: workspaceRow?.count ?? 0,
+      totalSessions: sessionRow?.count ?? 0,
+      totalEvents: eventCount,
+      totalBlobs: blobStats?.count ?? 0,
     };
   }
 
@@ -414,3 +454,14 @@ export async function createSQLiteEventStore(
   await store.initialize();
   return store;
 }
+
+// =============================================================================
+// Backward Compatibility Alias
+// =============================================================================
+
+/**
+ * Alias for SQLiteEventStore - maintains backward compatibility with legacy code
+ * @deprecated Use SQLiteEventStore instead
+ */
+export const SQLiteBackend = SQLiteEventStore;
+export type SQLiteBackend = SQLiteEventStore;

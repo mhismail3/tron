@@ -101,8 +101,10 @@ export {
 } from './event-store.js';
 
 // SQLite Backend (for advanced use cases)
+// Now using modular facade instead of legacy monolithic backend
 export {
   SQLiteBackend,
+  SQLiteEventStore,
   type SQLiteBackendConfig,
   type CreateWorkspaceOptions,
   type SessionRow,
@@ -111,4 +113,4 @@ export {
   // Rename to avoid conflict with session ListSessionsOptions
   type ListSessionsOptions as EventListSessionsOptions,
   type IncrementCountersOptions,
-} from './sqlite-backend.js';
+} from './sqlite/facade.js';

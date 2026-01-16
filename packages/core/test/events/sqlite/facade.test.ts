@@ -381,11 +381,25 @@ describe('SQLiteEventStore Facade', () => {
     it('should return database stats', async () => {
       const stats = await store.getStats();
 
-      expect(stats).toHaveProperty('workspaceCount');
-      expect(stats).toHaveProperty('sessionCount');
-      expect(stats).toHaveProperty('eventCount');
-      expect(stats).toHaveProperty('blobCount');
-      expect(stats).toHaveProperty('totalBlobSize');
+      expect(stats).toHaveProperty('totalWorkspaces');
+      expect(stats).toHaveProperty('totalSessions');
+      expect(stats).toHaveProperty('totalEvents');
+      expect(stats).toHaveProperty('totalBlobs');
+    });
+  });
+
+  describe('schema inspection', () => {
+    it('should return schema version', () => {
+      const version = store.getSchemaVersion();
+      expect(version).toBeGreaterThan(0);
+    });
+
+    it('should list tables', () => {
+      const tables = store.listTables();
+      expect(tables).toContain('workspaces');
+      expect(tables).toContain('sessions');
+      expect(tables).toContain('events');
+      expect(tables).toContain('blobs');
     });
   });
 

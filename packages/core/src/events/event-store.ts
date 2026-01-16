@@ -6,7 +6,7 @@
  */
 
 import * as crypto from 'crypto';
-import { SQLiteBackend, type SessionRow, type ListSessionsOptions } from './sqlite-backend.js';
+import { SQLiteBackend, type SessionRow, type ListSessionsOptions } from './sqlite/facade.js';
 import {
   EventId,
   SessionId,
