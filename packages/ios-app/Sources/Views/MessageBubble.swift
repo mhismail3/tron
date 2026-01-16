@@ -622,10 +622,10 @@ struct StyledSkillMentionText: View {
     let text: String
 
     /// Regex pattern for @skillname (alphanumeric and hyphens, followed by space/newline/end)
-    private static let skillMentionPattern = try! NSRegularExpression(
-        pattern: "@([a-zA-Z0-9][a-zA-Z0-9-]*)",
-        options: []
-    )
+    /// Uses static closure to safely handle (impossible) regex compilation failure
+    private static let skillMentionPattern: NSRegularExpression? = {
+        try? NSRegularExpression(pattern: "@([a-zA-Z0-9][a-zA-Z0-9-]*)", options: [])
+    }()
 
     var body: some View {
         buildStyledText()
@@ -633,9 +633,14 @@ struct StyledSkillMentionText: View {
 
     /// Build a Text view with @mentions styled differently
     private func buildStyledText() -> Text {
+        // If regex failed to compile (should never happen), return plain text
+        guard let pattern = Self.skillMentionPattern else {
+            return Text(text)
+        }
+
         let nsText = text as NSString
         let range = NSRange(location: 0, length: nsText.length)
-        let matches = Self.skillMentionPattern.matches(in: text, options: [], range: range)
+        let matches = pattern.matches(in: text, options: [], range: range)
 
         if matches.isEmpty {
             return Text(text)

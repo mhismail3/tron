@@ -21,7 +21,10 @@ class EventDatabase: ObservableObject {
     init() {
         // Store in app's documents directory
         let fileManager = FileManager.default
-        let documentsURL = fileManager.urls(for: .documentDirectory, in: .userDomainMask).first!
+        guard let documentsURL = fileManager.urls(for: .documentDirectory, in: .userDomainMask).first else {
+            // This should never happen on iOS, but provide clear diagnostics if it does
+            fatalError("EventDatabase: Unable to access Documents directory - app cannot function")
+        }
         let tronDir = documentsURL.appendingPathComponent(".tron", isDirectory: true)
 
         // Create directory if needed
@@ -339,8 +342,11 @@ class EventDatabase: ObservableObject {
 
         var events: [SessionEvent] = []
         while sqlite3_step(stmt) == SQLITE_ROW {
-            if let event = try? parseEventRow(stmt) {
+            do {
+                let event = try parseEventRow(stmt)
                 events.append(event)
+            } catch {
+                logger.warning("Failed to parse event row in getEventsBySession: \(error.localizedDescription)", category: .session)
             }
         }
 
@@ -379,8 +385,11 @@ class EventDatabase: ObservableObject {
 
         var children: [SessionEvent] = []
         while sqlite3_step(stmt) == SQLITE_ROW {
-            if let event = try? parseEventRow(stmt) {
+            do {
+                let event = try parseEventRow(stmt)
                 children.append(event)
+            } catch {
+                logger.warning("Failed to parse event row in getChildren: \(error.localizedDescription)", category: .session)
             }
         }
 
@@ -404,12 +413,15 @@ class EventDatabase: ObservableObject {
 
         var forkedSessionIds: [String] = []
         while sqlite3_step(stmt) == SQLITE_ROW {
-            if let event = try? parseEventRow(stmt) {
+            do {
+                let event = try parseEventRow(stmt)
                 // Parse the fork payload to check sourceEventId
                 let payload = SessionForkPayload(from: event.payload)
                 if payload?.sourceEventId == eventId {
                     forkedSessionIds.append(event.sessionId)
                 }
+            } catch {
+                logger.warning("Failed to parse event row in getForkedSessions: \(error.localizedDescription)", category: .session)
             }
         }
 
@@ -720,7 +732,14 @@ class EventDatabase: ObservableObject {
         let lastSyncTimestamp = getOptionalText(stmt, 2)
         let pendingIdsJson = getOptionalText(stmt, 3) ?? "[]"
 
-        let pendingEventIds = (try? JSONDecoder().decode([String].self, from: pendingIdsJson.data(using: .utf8)!)) ?? []
+        var pendingEventIds: [String] = []
+        if let jsonData = pendingIdsJson.data(using: .utf8) {
+            do {
+                pendingEventIds = try JSONDecoder().decode([String].self, from: jsonData)
+            } catch {
+                logger.warning("Failed to decode sync state pendingEventIds: \(error.localizedDescription)", category: .session)
+            }
+        }
 
         return SyncState(
             key: key,
@@ -747,7 +766,12 @@ class EventDatabase: ObservableObject {
         bindOptionalText(stmt, 2, state.lastSyncedEventId)
         bindOptionalText(stmt, 3, state.lastSyncTimestamp)
 
-        let pendingIdsJson = (try? JSONEncoder().encode(state.pendingEventIds)) ?? Data()
+        var pendingIdsJson = Data()
+        do {
+            pendingIdsJson = try JSONEncoder().encode(state.pendingEventIds)
+        } catch {
+            logger.warning("Failed to encode sync state pendingEventIds: \(error.localizedDescription)", category: .session)
+        }
         sqlite3_bind_text(stmt, 4, String(data: pendingIdsJson, encoding: .utf8), -1, SQLITE_TRANSIENT)
 
         guard sqlite3_step(stmt) == SQLITE_DONE else {
@@ -1002,7 +1026,12 @@ class EventDatabase: ObservableObject {
 
         let payload: [String: AnyCodable]
         if let data = payloadJson.data(using: .utf8) {
-            payload = (try? JSONDecoder().decode([String: AnyCodable].self, from: data)) ?? [:]
+            do {
+                payload = try JSONDecoder().decode([String: AnyCodable].self, from: data)
+            } catch {
+                logger.warning("Failed to decode event payload for id=\(id): \(error.localizedDescription)", category: .session)
+                payload = [:]
+            }
         } else {
             payload = [:]
         }

@@ -68,6 +68,9 @@ final class WebSocketService: ObservableObject {
     private var pendingRequests: [String: CheckedContinuation<Data, Error>] = [:]
     private var timeoutTasks: [String: Task<Void, Never>] = [:]
 
+    /// Prevents concurrent connection attempts (race condition guard)
+    private var isConnectionInProgress = false
+
     @Published private(set) var connectionState: ConnectionState = .disconnected
 
     var onEvent: ((Data) -> Void)?
@@ -85,10 +88,20 @@ final class WebSocketService: ObservableObject {
     // MARK: - Connection Management
 
     func connect() async {
+        // Prevent concurrent connection attempts (race condition guard)
+        guard !isConnectionInProgress else {
+            logger.debug("Connection already in progress, skipping", category: .websocket)
+            return
+        }
+
         guard !isConnectedFlag else {
             logger.debug("Already connected, skipping connect request", category: .websocket)
             return
         }
+
+        // Set lock immediately before any async work
+        isConnectionInProgress = true
+        defer { isConnectionInProgress = false }
 
         connectionState = .connecting
         logger.logWebSocketState("Connecting", details: serverURL.absoluteString)

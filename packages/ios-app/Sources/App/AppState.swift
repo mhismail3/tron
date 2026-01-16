@@ -2,6 +2,8 @@ import SwiftUI
 
 // MARK: - App State
 
+// NOTE: Uses global `logger` from TronLogger.swift (TronLogger.shared)
+
 @MainActor
 class AppState: ObservableObject {
     #if BETA
@@ -38,9 +40,17 @@ class AppState: ObservableObject {
         return store
     }
 
+    /// Default fallback URL when user-provided settings are invalid
+    private static let fallbackURL = URL(string: "ws://localhost:8080/ws")!
+
     var serverURL: URL {
         let scheme = useTLS ? "wss" : "ws"
-        return URL(string: "\(scheme)://\(serverHost):\(serverPort)/ws")!
+        let urlString = "\(scheme)://\(serverHost):\(serverPort)/ws"
+        guard let url = URL(string: urlString) else {
+            logger.error("Invalid server URL '\(urlString)', falling back to localhost", category: .general)
+            return Self.fallbackURL
+        }
+        return url
     }
 
     var effectiveWorkingDirectory: String {

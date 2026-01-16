@@ -86,7 +86,7 @@ extension ChatViewModel {
                 logger.info("Prompt sent successfully", category: .chat)
             } catch {
                 logger.error("Failed to send prompt: \(error.localizedDescription)", category: .chat)
-                handleError(error.localizedDescription)
+                handleAgentError("Failed to send message: \(error.localizedDescription)")
             }
         }
     }

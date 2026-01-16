@@ -13,6 +13,12 @@ extension ChatViewModel {
             return
         }
 
+        // Enforce backpressure limit to prevent memory exhaustion
+        guard streamingText.count + delta.count < Self.maxStreamingTextSize else {
+            logger.warning("Streaming text limit (\(Self.maxStreamingTextSize) bytes) reached, dropping delta", category: .events)
+            return
+        }
+
         // If there's no active streaming message, create a new one
         if streamingMessageId == nil {
             let newStreamingMessage = ChatMessage.streaming()
@@ -181,10 +187,9 @@ extension ChatViewModel {
             }
             return false
         }) {
-            if case .askUserQuestion(var data) = messages[index].content {
+            if case .askUserQuestion(let data) = messages[index].content {
                 // In async mode, tool.end means questions are ready for user
                 // Status is already .pending, now auto-open the sheet
-                messages[index].content = .askUserQuestion(data)
                 logger.info("AskUserQuestion tool.end - opening sheet for user input", category: .events)
                 openAskUserQuestionSheet(for: data)
             }
@@ -617,7 +622,8 @@ extension ChatViewModel {
         exitPlanMode(reason: event.reason, planPath: event.planPath)
     }
 
-    func handleError(_ message: String) {
+    /// Handle errors from the agent streaming (shows error in chat)
+    func handleAgentError(_ message: String) {
         logger.error("Agent error: \(message)", category: .events)
         isProcessing = false
         eventStoreManager?.setSessionProcessing(sessionId, isProcessing: false)

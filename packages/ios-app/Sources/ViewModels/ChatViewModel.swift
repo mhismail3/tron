@@ -104,6 +104,8 @@ class ChatViewModel: ObservableObject {
     var pendingTextDelta = ""
     var textUpdateTask: Task<Void, Never>?
     let textUpdateInterval: UInt64 = 100_000_000 // 100ms in nanoseconds - balances smooth UI with reduced updates
+    /// Maximum streaming text size to prevent memory exhaustion (10MB)
+    static let maxStreamingTextSize = 10_000_000
 
     // MARK: - Event Store Reference
 
@@ -227,7 +229,7 @@ class ChatViewModel: ObservableObject {
         }
 
         rpcClient.onError = { [weak self] message in
-            self?.handleError(message)
+            self?.handleAgentError(message)
         }
 
         rpcClient.onBrowserFrame = { [weak self] event in
@@ -278,10 +280,37 @@ class ChatViewModel: ObservableObject {
 
     // MARK: - Error Handling
 
-    /// Show error alert (accessible from external callers like ChatView)
+    /// Error severity levels for centralized handling
+    enum ErrorSeverity {
+        /// Fatal errors - show alert to user, log as error
+        case fatal
+        /// Warnings - log only, continue operation
+        case warning
+        /// Info - log for debugging, no user impact
+        case info
+    }
+
+    /// Centralized error handling with severity levels
+    /// - Parameters:
+    ///   - message: Error description
+    ///   - severity: How serious the error is (fatal shows alert, warning/info just log)
+    ///   - category: Log category for filtering
+    func handleError(_ message: String, severity: ErrorSeverity = .fatal, category: LogCategory = .session) {
+        switch severity {
+        case .fatal:
+            logger.error(message, category: category)
+            errorMessage = message
+            showError = true
+        case .warning:
+            logger.warning(message, category: category)
+        case .info:
+            logger.info(message, category: category)
+        }
+    }
+
+    /// Show error alert (legacy, prefer handleError with severity)
     func showErrorAlert(_ message: String) {
-        errorMessage = message
-        showError = true
+        handleError(message, severity: .fatal)
     }
 
     func clearError() {
