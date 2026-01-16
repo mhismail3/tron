@@ -22,6 +22,7 @@ import type {
 } from '../types/index.js';
 import { createLogger } from '../logging/logger.js';
 import { getSettings } from '../settings/index.js';
+import { withProviderRetry, type StreamRetryConfig } from './base/index.js';
 
 const logger = createLogger('openai-codex');
 
@@ -54,6 +55,8 @@ export interface OpenAICodexConfig {
   temperature?: number;
   baseURL?: string;
   reasoningEffort?: ReasoningEffort;
+  /** Retry configuration for transient failures (default: enabled with 3 retries) */
+  retry?: StreamRetryConfig | false;
 }
 
 /**
@@ -263,11 +266,14 @@ export class OpenAICodexProvider {
   readonly id = 'openai-codex';
   private config: OpenAICodexConfig;
   private baseURL: string;
+  private retryConfig: StreamRetryConfig | false;
 
   constructor(config: OpenAICodexConfig) {
     this.config = config;
     const codexSettings = getCodexSettings();
     this.baseURL = config.baseURL || codexSettings?.baseUrl || 'https://chatgpt.com/backend-api';
+    // Default to enabled retry with standard config
+    this.retryConfig = config.retry === false ? false : (config.retry ?? {});
 
     logger.info('OpenAI Codex provider initialized', { model: config.model });
   }
@@ -373,13 +379,35 @@ export class OpenAICodexProvider {
   }
 
   /**
-   * Stream a response from OpenAI Codex using Responses API
+   * Stream a response from OpenAI Codex with automatic retry on transient failures
    */
   async *stream(
     context: Context,
     options: OpenAICodexStreamOptions = {}
   ): AsyncGenerator<StreamEvent> {
+    // Ensure tokens are valid before starting (and before each retry)
     await this.ensureValidTokens();
+
+    // If retry is disabled, stream directly
+    if (this.retryConfig === false) {
+      yield* this.streamInternal(context, options);
+      return;
+    }
+
+    // Wrap with retry for transient failures
+    yield* withProviderRetry(
+      () => this.streamInternal(context, options),
+      this.retryConfig
+    );
+  }
+
+  /**
+   * Internal stream implementation (called by retry wrapper)
+   */
+  private async *streamInternal(
+    context: Context,
+    options: OpenAICodexStreamOptions = {}
+  ): AsyncGenerator<StreamEvent> {
 
     const model = this.config.model;
     const maxTokens = options.maxTokens ?? this.config.maxTokens ?? 16384;
