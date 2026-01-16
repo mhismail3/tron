@@ -481,10 +481,11 @@ describe('EventStoreTuiSession', () => {
       await tuiSession.initialize();
 
       await tuiSession.addMessage({ role: 'user', content: 'Common base' });
+      await tuiSession.addMessage({ role: 'assistant', content: [{ type: 'text', text: 'Acknowledged' }] });
 
       const forkResult = await tuiSession.fork();
 
-      // Add different messages to each session
+      // Add different messages to each session (with proper alternation)
       await tuiSession.addMessage({ role: 'user', content: 'Original path' });
 
       const forkedSession = new EventStoreTuiSession({
@@ -498,8 +499,9 @@ describe('EventStoreTuiSession', () => {
       const originalMessages = await tuiSession.getMessages();
       const forkedMessages = await forkedSession.getMessages();
 
-      expect(originalMessages[1].content).toBe('Original path');
-      expect(forkedMessages[1].content).toBe('Forked path');
+      // Both sessions have: Common base, Acknowledged, then divergent paths
+      expect(originalMessages[2].content).toBe('Original path');
+      expect(forkedMessages[2].content).toBe('Forked path');
     });
   });
 

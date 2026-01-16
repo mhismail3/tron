@@ -431,11 +431,32 @@ describe('EventStore Integration', () => {
       expect(forkResult.session.id).not.toBe(sessionId);
       expect(forkResult.rootEvent.parentId).toBe(forkPointEventId);
 
+      // Add assistant response to original session (to keep proper alternation)
+      await eventStore.append({
+        sessionId,
+        type: 'message.assistant',
+        payload: { content: 'Continuing...' },
+      });
+
       // Add to original session
       const originalAppend = await eventStore.append({
         sessionId,
         type: 'message.user',
         payload: { content: 'Original path' },
+      });
+
+      // Add user message to forked session (to keep proper alternation after fork point)
+      await eventStore.append({
+        sessionId: forkResult.session.id,
+        type: 'message.user',
+        payload: { content: 'Starting fork' },
+      });
+
+      // Add assistant response to forked session
+      await eventStore.append({
+        sessionId: forkResult.session.id,
+        type: 'message.assistant',
+        payload: { content: 'Forking...' },
       });
 
       // Add to forked session
@@ -455,16 +476,16 @@ describe('EventStore Integration', () => {
       const originalMessages = await eventStore.getMessagesAtHead(sessionId);
       const forkedMessages = await eventStore.getMessagesAtHead(forkResult.session.id);
 
-      // Original: Hello, Hi, Continue, Original = 4
-      expect(originalMessages.length).toBe(4);
+      // Original: Hello, Hi, Continue, Continuing..., Original = 5
+      expect(originalMessages.length).toBe(5);
       expect(originalMessages.map(m => m.content)).toEqual([
-        'Hello', 'Hi there!', 'Continue this way', 'Original path'
+        'Hello', 'Hi there!', 'Continue this way', 'Continuing...', 'Original path'
       ]);
 
-      // Forked: Hello, Hi, Forked = 3 (skips Continue, which was after fork point)
-      expect(forkedMessages.length).toBe(3);
+      // Forked: Hello, Hi, Starting fork, Forking..., Forked = 5
+      expect(forkedMessages.length).toBe(5);
       expect(forkedMessages.map(m => m.content)).toEqual([
-        'Hello', 'Hi there!', 'Forked path'
+        'Hello', 'Hi there!', 'Starting fork', 'Forking...', 'Forked path'
       ]);
     });
   });

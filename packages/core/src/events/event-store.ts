@@ -76,6 +76,49 @@ export interface SearchOptions {
 }
 
 // =============================================================================
+// Message Merging Helpers
+// =============================================================================
+
+/**
+ * Normalize user message content to array format for consistent merging.
+ * User content can be string or UserContent[].
+ */
+function normalizeUserContent(content: Message['content']): Array<{ type: string; text?: string; [key: string]: unknown }> {
+  if (typeof content === 'string') {
+    return [{ type: 'text', text: content }];
+  }
+  return content as Array<{ type: string; text?: string; [key: string]: unknown }>;
+}
+
+/**
+ * Merge content from a new message into an existing message.
+ * Handles both user (string | content[]) and assistant (content[]) formats.
+ */
+function mergeMessageContent(
+  existing: Message['content'],
+  incoming: Message['content'],
+  role: 'user' | 'assistant'
+): Message['content'] {
+  if (role === 'user') {
+    // User content can be string or array - normalize to array, merge, then simplify if possible
+    const existingBlocks = normalizeUserContent(existing);
+    const incomingBlocks = normalizeUserContent(incoming);
+    const merged = [...existingBlocks, ...incomingBlocks];
+
+    // If all blocks are text, we could keep as array or convert to string
+    // Keep as array for consistency with how Anthropic API expects it
+    // Cast needed because we're building a generic array that satisfies UserContent[]
+    return merged as Message['content'];
+  } else {
+    // Assistant content is always an array of content blocks
+    // Cast needed because we're spreading and rebuilding the array
+    const existingArr = existing as unknown[];
+    const incomingArr = incoming as unknown[];
+    return [...existingArr, ...incomingArr] as Message['content'];
+  }
+}
+
+// =============================================================================
 // EventStore Implementation
 // =============================================================================
 
@@ -341,16 +384,31 @@ export class EventStore {
 
       if (event.type === 'message.user') {
         const payload = event.payload as { content: Message['content'] };
-        messages.push({
-          role: 'user',
-          content: payload.content,
-        });
+        const lastMessage = messages[messages.length - 1];
+
+        // Merge consecutive user messages to ensure valid alternating structure
+        // This handles cases where a turn was interrupted (user message sent, no assistant response)
+        if (lastMessage && lastMessage.role === 'user') {
+          lastMessage.content = mergeMessageContent(lastMessage.content, payload.content, 'user');
+        } else {
+          messages.push({
+            role: 'user',
+            content: payload.content,
+          });
+        }
       } else if (event.type === 'message.assistant') {
         const payload = event.payload as { content: Message['content'] };
-        messages.push({
-          role: 'assistant',
-          content: payload.content,
-        });
+        const lastMessage = messages[messages.length - 1];
+
+        // Merge consecutive assistant messages for robustness
+        if (lastMessage && lastMessage.role === 'assistant') {
+          lastMessage.content = mergeMessageContent(lastMessage.content, payload.content, 'assistant');
+        } else {
+          messages.push({
+            role: 'assistant',
+            content: payload.content,
+          });
+        }
       }
       // NOTE: tool.result events are NOT reconstructed here as separate messages.
       // Tool results are stored in two places:
@@ -465,11 +523,20 @@ export class EventStore {
 
       if (evt.type === 'message.user') {
         const payload = evt.payload as { content: Message['content']; tokenUsage?: TokenUsage };
-        messages.push({
-          role: 'user',
-          content: payload.content,
-        });
-        messageEventIds.push(evt.id); // Track eventId for deletion
+        const lastMessage = messages[messages.length - 1];
+
+        // Merge consecutive user messages to ensure valid alternating structure
+        if (lastMessage && lastMessage.role === 'user') {
+          lastMessage.content = mergeMessageContent(lastMessage.content, payload.content, 'user');
+          // Still track the event ID even when merging (all source events should be tracked)
+          messageEventIds.push(evt.id);
+        } else {
+          messages.push({
+            role: 'user',
+            content: payload.content,
+          });
+          messageEventIds.push(evt.id); // Track eventId for deletion
+        }
         // Token usage can be on user messages too
         if (payload.tokenUsage) {
           inputTokens += payload.tokenUsage.inputTokens;
@@ -483,11 +550,20 @@ export class EventStore {
           turn?: number;
           tokenUsage?: TokenUsage;
         };
-        messages.push({
-          role: 'assistant',
-          content: payload.content,
-        });
-        messageEventIds.push(evt.id); // Track eventId for deletion
+        const lastMessage = messages[messages.length - 1];
+
+        // Merge consecutive assistant messages for robustness
+        if (lastMessage && lastMessage.role === 'assistant') {
+          lastMessage.content = mergeMessageContent(lastMessage.content, payload.content, 'assistant');
+          // Still track the event ID even when merging
+          messageEventIds.push(evt.id);
+        } else {
+          messages.push({
+            role: 'assistant',
+            content: payload.content,
+          });
+          messageEventIds.push(evt.id); // Track eventId for deletion
+        }
         if (payload.tokenUsage) {
           inputTokens += payload.tokenUsage.inputTokens;
           outputTokens += payload.tokenUsage.outputTokens;

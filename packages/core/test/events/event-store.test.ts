@@ -1106,4 +1106,424 @@ describe('EventStore', () => {
       expect(stateAtResponse.messages.length).toBe(2);
     });
   });
+
+  describe('consecutive message merging', () => {
+    let sessionId: SessionId;
+
+    beforeEach(async () => {
+      const result = await store.createSession({
+        workspacePath: '/test',
+        workingDirectory: '/test',
+        model: 'test',
+      });
+      sessionId = result.session.id;
+    });
+
+    it('should merge consecutive user messages in getMessagesAtHead', async () => {
+      // Simulate: user sends message, turn starts but no assistant response, user sends another message
+      await store.append({
+        sessionId,
+        type: 'message.user',
+        payload: { content: 'First message', turn: 1 },
+      });
+
+      await store.append({
+        sessionId,
+        type: 'message.user',
+        payload: { content: 'Second message', turn: 2 },
+      });
+
+      const messages = await store.getMessagesAtHead(sessionId);
+
+      // Should be merged into single user message
+      expect(messages.length).toBe(1);
+      expect(messages[0]!.role).toBe('user');
+      // Content should contain both messages (as array of text blocks)
+      const content = messages[0]!.content;
+      expect(Array.isArray(content)).toBe(true);
+      const textBlocks = (content as Array<{ type: string; text: string }>);
+      expect(textBlocks.length).toBe(2);
+      expect(textBlocks[0]!.text).toBe('First message');
+      expect(textBlocks[1]!.text).toBe('Second message');
+    });
+
+    it('should merge consecutive user messages in getStateAtHead', async () => {
+      await store.append({
+        sessionId,
+        type: 'message.user',
+        payload: { content: 'Hello', turn: 1 },
+      });
+
+      await store.append({
+        sessionId,
+        type: 'message.user',
+        payload: { content: 'Are you there?', turn: 2 },
+      });
+
+      const state = await store.getStateAtHead(sessionId);
+
+      expect(state.messages.length).toBe(1);
+      expect(state.messages[0]!.role).toBe('user');
+      const content = state.messages[0]!.content;
+      expect(Array.isArray(content)).toBe(true);
+      const textBlocks = (content as Array<{ type: string; text: string }>);
+      expect(textBlocks.length).toBe(2);
+      expect(textBlocks[0]!.text).toBe('Hello');
+      expect(textBlocks[1]!.text).toBe('Are you there?');
+    });
+
+    it('should merge consecutive assistant messages', async () => {
+      await store.append({
+        sessionId,
+        type: 'message.user',
+        payload: { content: 'Hello', turn: 1 },
+      });
+
+      await store.append({
+        sessionId,
+        type: 'message.assistant',
+        payload: {
+          content: [{ type: 'text', text: 'Part 1' }],
+          turn: 1,
+          tokenUsage: { inputTokens: 10, outputTokens: 5 },
+          stopReason: 'end_turn',
+          model: 'test',
+        },
+      });
+
+      await store.append({
+        sessionId,
+        type: 'message.assistant',
+        payload: {
+          content: [{ type: 'text', text: 'Part 2' }],
+          turn: 1,
+          tokenUsage: { inputTokens: 10, outputTokens: 5 },
+          stopReason: 'end_turn',
+          model: 'test',
+        },
+      });
+
+      const messages = await store.getMessagesAtHead(sessionId);
+
+      expect(messages.length).toBe(2);
+      expect(messages[0]!.role).toBe('user');
+      expect(messages[1]!.role).toBe('assistant');
+      // Assistant content blocks should be merged
+      const assistantContent = messages[1]!.content;
+      expect(Array.isArray(assistantContent)).toBe(true);
+      expect((assistantContent as Array<{ type: string; text: string }>).length).toBe(2);
+    });
+
+    it('should handle mixed string and array content when merging user messages', async () => {
+      await store.append({
+        sessionId,
+        type: 'message.user',
+        payload: { content: 'String content', turn: 1 },
+      });
+
+      await store.append({
+        sessionId,
+        type: 'message.user',
+        payload: { content: [{ type: 'text', text: 'Array content' }], turn: 2 },
+      });
+
+      const messages = await store.getMessagesAtHead(sessionId);
+
+      expect(messages.length).toBe(1);
+      expect(messages[0]!.role).toBe('user');
+      // Should handle both formats
+      const content = messages[0]!.content;
+      if (typeof content === 'string') {
+        expect(content).toContain('String content');
+        expect(content).toContain('Array content');
+      } else {
+        const textBlocks = content.filter((c): c is { type: 'text'; text: string } => c.type === 'text');
+        const allText = textBlocks.map(b => b.text).join(' ');
+        expect(allText).toContain('String content');
+        expect(allText).toContain('Array content');
+      }
+    });
+
+    it('should not merge when messages properly alternate', async () => {
+      await store.append({
+        sessionId,
+        type: 'message.user',
+        payload: { content: 'User 1', turn: 1 },
+      });
+
+      await store.append({
+        sessionId,
+        type: 'message.assistant',
+        payload: {
+          content: [{ type: 'text', text: 'Assistant 1' }],
+          turn: 1,
+          tokenUsage: { inputTokens: 10, outputTokens: 5 },
+          stopReason: 'end_turn',
+          model: 'test',
+        },
+      });
+
+      await store.append({
+        sessionId,
+        type: 'message.user',
+        payload: { content: 'User 2', turn: 2 },
+      });
+
+      await store.append({
+        sessionId,
+        type: 'message.assistant',
+        payload: {
+          content: [{ type: 'text', text: 'Assistant 2' }],
+          turn: 2,
+          tokenUsage: { inputTokens: 10, outputTokens: 5 },
+          stopReason: 'end_turn',
+          model: 'test',
+        },
+      });
+
+      const messages = await store.getMessagesAtHead(sessionId);
+
+      expect(messages.length).toBe(4);
+      expect(messages[0]!.role).toBe('user');
+      expect(messages[1]!.role).toBe('assistant');
+      expect(messages[2]!.role).toBe('user');
+      expect(messages[3]!.role).toBe('assistant');
+    });
+
+    it('should merge three or more consecutive user messages', async () => {
+      await store.append({
+        sessionId,
+        type: 'message.user',
+        payload: { content: 'First', turn: 1 },
+      });
+
+      await store.append({
+        sessionId,
+        type: 'message.user',
+        payload: { content: 'Second', turn: 2 },
+      });
+
+      await store.append({
+        sessionId,
+        type: 'message.user',
+        payload: { content: 'Third', turn: 3 },
+      });
+
+      const messages = await store.getMessagesAtHead(sessionId);
+
+      expect(messages.length).toBe(1);
+      expect(messages[0]!.role).toBe('user');
+      const content = messages[0]!.content;
+      expect(Array.isArray(content)).toBe(true);
+      const textBlocks = (content as Array<{ type: string; text: string }>);
+      expect(textBlocks.length).toBe(3);
+      expect(textBlocks[0]!.text).toBe('First');
+      expect(textBlocks[1]!.text).toBe('Second');
+      expect(textBlocks[2]!.text).toBe('Third');
+    });
+
+    it('should track all event IDs when merging in getStateAtHead', async () => {
+      const msg1 = await store.append({
+        sessionId,
+        type: 'message.user',
+        payload: { content: 'First', turn: 1 },
+      });
+
+      const msg2 = await store.append({
+        sessionId,
+        type: 'message.user',
+        payload: { content: 'Second', turn: 2 },
+      });
+
+      const state = await store.getStateAtHead(sessionId);
+
+      expect(state.messages.length).toBe(1);
+      // Both event IDs should be tracked for potential deletion
+      expect(state.messageEventIds).toContain(msg1.id);
+      expect(state.messageEventIds).toContain(msg2.id);
+    });
+
+    describe('fork scenarios', () => {
+      it('should merge consecutive messages inherited from parent session', async () => {
+        // Parent session has consecutive user messages
+        await store.append({
+          sessionId,
+          type: 'message.user',
+          payload: { content: 'Parent message 1', turn: 1 },
+        });
+
+        const lastUserMsg = await store.append({
+          sessionId,
+          type: 'message.user',
+          payload: { content: 'Parent message 2', turn: 2 },
+        });
+
+        // Fork from the last user message
+        const forkResult = await store.fork(lastUserMsg.id);
+
+        // Forked session should see merged messages from parent
+        const forkedMessages = await store.getMessagesAtHead(forkResult.session.id);
+        expect(forkedMessages.length).toBe(1);
+        expect(forkedMessages[0]!.role).toBe('user');
+        const content = forkedMessages[0]!.content as Array<{ type: string; text: string }>;
+        expect(content.length).toBe(2);
+        expect(content[0]!.text).toBe('Parent message 1');
+        expect(content[1]!.text).toBe('Parent message 2');
+      });
+
+      it('should merge when fork adds same-role message after fork point', async () => {
+        // Create proper alternating conversation
+        await store.append({
+          sessionId,
+          type: 'message.user',
+          payload: { content: 'Hello', turn: 1 },
+        });
+
+        const assistantMsg = await store.append({
+          sessionId,
+          type: 'message.assistant',
+          payload: { content: [{ type: 'text', text: 'Hi there!' }], turn: 1 },
+        });
+
+        // Fork from assistant message
+        const forkResult = await store.fork(assistantMsg.id);
+
+        // Add another assistant message to fork (consecutive with fork point)
+        await store.append({
+          sessionId: forkResult.session.id,
+          type: 'message.assistant',
+          payload: { content: [{ type: 'text', text: 'Continuing in fork...' }], turn: 2 },
+        });
+
+        const forkedMessages = await store.getMessagesAtHead(forkResult.session.id);
+
+        // Should have: user, merged assistant (Hi there! + Continuing)
+        expect(forkedMessages.length).toBe(2);
+        expect(forkedMessages[0]!.role).toBe('user');
+        expect(forkedMessages[1]!.role).toBe('assistant');
+
+        const assistantContent = forkedMessages[1]!.content as Array<{ type: string; text: string }>;
+        expect(assistantContent.length).toBe(2);
+        expect(assistantContent[0]!.text).toBe('Hi there!');
+        expect(assistantContent[1]!.text).toBe('Continuing in fork...');
+      });
+
+      it('should handle multi-level forks with consecutive messages', async () => {
+        // Session A: user message
+        await store.append({
+          sessionId,
+          type: 'message.user',
+          payload: { content: 'Level 0', turn: 1 },
+        });
+
+        const assistantA = await store.append({
+          sessionId,
+          type: 'message.assistant',
+          payload: { content: [{ type: 'text', text: 'Response A' }], turn: 1 },
+        });
+
+        // Fork to session B
+        const forkB = await store.fork(assistantA.id);
+
+        // Add to B
+        await store.append({
+          sessionId: forkB.session.id,
+          type: 'message.user',
+          payload: { content: 'Level B', turn: 2 },
+        });
+
+        const assistantB = await store.append({
+          sessionId: forkB.session.id,
+          type: 'message.assistant',
+          payload: { content: [{ type: 'text', text: 'Response B' }], turn: 2 },
+        });
+
+        // Fork B to session C
+        const forkC = await store.fork(assistantB.id);
+
+        // Add consecutive assistant message to C
+        await store.append({
+          sessionId: forkC.session.id,
+          type: 'message.assistant',
+          payload: { content: [{ type: 'text', text: 'Response C' }], turn: 3 },
+        });
+
+        const messagesC = await store.getMessagesAtHead(forkC.session.id);
+
+        // Should have: user(Level 0), assistant(Response A), user(Level B), merged assistant(Response B + Response C)
+        expect(messagesC.length).toBe(4);
+        expect(messagesC[0]!.role).toBe('user');
+        expect(messagesC[1]!.role).toBe('assistant');
+        expect(messagesC[2]!.role).toBe('user');
+        expect(messagesC[3]!.role).toBe('assistant');
+
+        // Last assistant should be merged
+        const lastAssistant = messagesC[3]!.content as Array<{ type: string; text: string }>;
+        expect(lastAssistant.length).toBe(2);
+        expect(lastAssistant[0]!.text).toBe('Response B');
+        expect(lastAssistant[1]!.text).toBe('Response C');
+      });
+
+      it('should correctly merge across compaction boundary in forked session', async () => {
+        // Create some messages
+        await store.append({
+          sessionId,
+          type: 'message.user',
+          payload: { content: 'Pre-compaction', turn: 1 },
+        });
+
+        await store.append({
+          sessionId,
+          type: 'message.assistant',
+          payload: { content: [{ type: 'text', text: 'Response' }], turn: 1 },
+        });
+
+        // Compaction boundary
+        await store.append({
+          sessionId,
+          type: 'compact.boundary',
+          payload: { messagesRemoved: 2, tokensRemoved: 100 },
+        });
+
+        // Compaction summary
+        await store.append({
+          sessionId,
+          type: 'compact.summary',
+          payload: { summary: 'Summary of previous conversation' },
+        });
+
+        // Post-compaction user message
+        const postCompaction = await store.append({
+          sessionId,
+          type: 'message.user',
+          payload: { content: 'Post-compaction', turn: 2 },
+        });
+
+        // Fork from post-compaction
+        const forkResult = await store.fork(postCompaction.id);
+
+        // Add another user message to fork (consecutive)
+        await store.append({
+          sessionId: forkResult.session.id,
+          type: 'message.user',
+          payload: { content: 'Fork message', turn: 3 },
+        });
+
+        const forkedMessages = await store.getMessagesAtHead(forkResult.session.id);
+
+        // Should have: compaction summary pair (user + assistant) + merged user (Post-compaction + Fork message)
+        expect(forkedMessages.length).toBe(3);
+        expect(forkedMessages[0]!.role).toBe('user');
+        expect((forkedMessages[0]!.content as string)).toContain('Context from earlier');
+        expect(forkedMessages[1]!.role).toBe('assistant');
+        expect(forkedMessages[2]!.role).toBe('user');
+
+        // Last user should be merged
+        const lastUser = forkedMessages[2]!.content as Array<{ type: string; text: string }>;
+        expect(lastUser.length).toBe(2);
+        expect(lastUser[0]!.text).toBe('Post-compaction');
+        expect(lastUser[1]!.text).toBe('Fork message');
+      });
+    });
+  });
 });

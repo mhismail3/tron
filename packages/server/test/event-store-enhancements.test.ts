@@ -894,6 +894,21 @@ describe('Event Store Enhancements', () => {
         payload: { turn: 1, tokenUsage: { inputTokens: 100, outputTokens: 60 } },
       });
 
+      // 6b. Tool result as user message (for proper API sequencing)
+      await eventStore.append({
+        sessionId,
+        type: 'message.user',
+        payload: {
+          content: [
+            {
+              type: 'tool_result',
+              tool_use_id: 'tc_read_1',
+              content: '# Project\n\nThis is a test project.',
+            },
+          ],
+        },
+      });
+
       // 7. Turn 2 starts (after tool execution)
       await eventStore.append({
         sessionId,
@@ -936,7 +951,7 @@ describe('Event Store Enhancements', () => {
       }, {} as Record<string, number>);
 
       expect(eventCounts['session.start']).toBe(1);
-      expect(eventCounts['message.user']).toBe(1);
+      expect(eventCounts['message.user']).toBe(2); // Original + tool result
       expect(eventCounts['message.assistant']).toBe(2);
       expect(eventCounts['stream.turn_start']).toBe(2);
       expect(eventCounts['stream.turn_end']).toBe(2);
@@ -944,10 +959,9 @@ describe('Event Store Enhancements', () => {
       expect(eventCounts['tool.result']).toBe(1);
 
       // Verify messages reconstruction
-      // Tool results are NOT reconstructed from tool.result events (they're for streaming only)
-      // Tool results should be stored in message.user events at turn end for proper sequencing
+      // Tool results are stored in message.user events for proper API sequencing
       const messages = await eventStore.getMessagesAtHead(sessionId);
-      expect(messages.length).toBe(3); // 1 user + 2 assistant (no toolResult from tool.result events)
+      expect(messages.length).toBe(4); // 1 user + 1 assistant + 1 user (tool_result) + 1 assistant
 
       // Verify state includes correct token totals
       const state = await eventStore.getStateAtHead(sessionId);

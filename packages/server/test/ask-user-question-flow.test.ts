@@ -134,7 +134,7 @@ describe('AskUserQuestion Flow', () => {
         payload: { content: 'Read a file and ask me a question' },
       });
 
-      // Assistant with multiple tool calls
+      // Assistant with Read tool call
       await eventStore.append({
         sessionId,
         type: 'message.assistant',
@@ -151,14 +151,18 @@ describe('AskUserQuestion Flow', () => {
         },
       });
 
-      // Tool results for Read (these are for streaming display only)
+      // Tool results for Read (stored as user message for proper sequencing)
       await eventStore.append({
         sessionId,
-        type: 'tool.result',
+        type: 'message.user',
         payload: {
-          toolCallId: 'tc_read_1',
-          content: 'File contents here',
-          isError: false,
+          content: [
+            {
+              type: 'tool_result',
+              tool_use_id: 'tc_read_1',
+              content: 'File contents here',
+            },
+          ],
         },
       });
 
@@ -193,18 +197,22 @@ describe('AskUserQuestion Flow', () => {
         },
       });
 
-      // Tool result for AskUserQuestion
+      // Tool result for AskUserQuestion (stored as user message)
       await eventStore.append({
         sessionId,
-        type: 'tool.result',
+        type: 'message.user',
         payload: {
-          toolCallId: 'tc_ask_2',
-          content: 'Questions presented to user:\n1. Do you want to proceed?',
-          isError: false,
+          content: [
+            {
+              type: 'tool_result',
+              tool_use_id: 'tc_ask_2',
+              content: 'Questions presented to user:\n1. Do you want to proceed?',
+            },
+          ],
         },
       });
 
-      // User answers
+      // User answers (this will merge with the tool_result message above)
       await eventStore.append({
         sessionId,
         type: 'message.user',
@@ -216,13 +224,14 @@ describe('AskUserQuestion Flow', () => {
       // Reconstruct messages
       const messages = await eventStore.getMessagesAtHead(sessionId);
 
-      // Expected: 4 messages (user, assistant1, assistant2, user answer)
-      // tool.result events should NOT be reconstructed as separate messages
-      expect(messages.length).toBe(4);
+      // Expected: 5 messages with proper alternation:
+      // user prompt, assistant (Read), user (tool_result), assistant (AskUserQuestion), user (tool_result + answer merged)
+      expect(messages.length).toBe(5);
       expect(messages[0].role).toBe('user');
       expect(messages[1].role).toBe('assistant');
-      expect(messages[2].role).toBe('assistant');
-      expect(messages[3].role).toBe('user');
+      expect(messages[2].role).toBe('user');
+      expect(messages[3].role).toBe('assistant');
+      expect(messages[4].role).toBe('user');
     });
   });
 
