@@ -57,7 +57,6 @@
  */
 import { EventEmitter } from 'events';
 import * as path from 'path';
-import * as fs from 'fs';
 import * as os from 'os';
 import {
   createLogger,
@@ -77,7 +76,7 @@ import {
   OpenBrowserTool,
   AstGrepTool,
   loadServerAuth,
-  getTronDataDir,
+  getProviderAuthSync,
   detectProviderFromModel,
   KeywordSummarizer,
   SkillTracker,
@@ -2173,14 +2172,17 @@ The user has explicitly removed these skills and expects you to respond WITHOUT 
   }
 
   /**
-   * Load Codex OAuth tokens from file storage
+   * Load Codex OAuth tokens from unified auth storage
    */
   private loadCodexTokens(): { accessToken: string; refreshToken: string; expiresAt: number } | null {
     try {
-      const tokensPath = path.join(getTronDataDir(), 'codex-tokens.json');
-      if (fs.existsSync(tokensPath)) {
-        const data = fs.readFileSync(tokensPath, 'utf8');
-        return JSON.parse(data);
+      const codexAuth = getProviderAuthSync('openai-codex');
+      if (codexAuth?.oauth) {
+        return {
+          accessToken: codexAuth.oauth.accessToken,
+          refreshToken: codexAuth.oauth.refreshToken,
+          expiresAt: codexAuth.oauth.expiresAt,
+        };
       }
     } catch (error) {
       logger.warn('Failed to load Codex tokens', { error });

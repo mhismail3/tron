@@ -4,27 +4,16 @@
  * Provides OAuth authentication flow for the CLI.
  * Handles token storage, refresh, and login flow.
  */
-import * as fs from 'fs/promises';
-import * as path from 'path';
-import * as os from 'os';
 import { randomBytes } from 'crypto';
+import * as readline from 'readline';
 import type { AnthropicAuth } from '@tron/core';
-
-// =============================================================================
-// Types
-// =============================================================================
-
-interface OAuthTokens {
-  accessToken: string;
-  refreshToken: string;
-  expiresAt: number;
-}
-
-interface StoredAuth {
-  tokens?: OAuthTokens;
-  apiKey?: string;
-  lastUpdated: string;
-}
+import {
+  getProviderAuth,
+  saveProviderAuth,
+  clearProviderAuth,
+  type OAuthTokens,
+  type ProviderAuth,
+} from '@tron/core';
 
 // =============================================================================
 // Configuration
@@ -42,47 +31,44 @@ const OAUTH_CONFIG = {
   scopes: 'org:create_api_key user:profile user:inference',
 };
 
-const AUTH_FILE_PATH = path.join(os.homedir(), '.tron', 'auth.json');
-
-// Import readline for prompting user
-import * as readline from 'readline';
-
 // =============================================================================
-// Token Storage
+// Token Storage (using unified auth)
 // =============================================================================
 
 /**
- * Load stored authentication
+ * Load stored Anthropic authentication from unified auth.json
  */
-async function loadStoredAuth(): Promise<StoredAuth | null> {
-  try {
-    const data = await fs.readFile(AUTH_FILE_PATH, 'utf-8');
-    return JSON.parse(data) as StoredAuth;
-  } catch {
-    return null;
-  }
+async function loadStoredAuth(): Promise<ProviderAuth | null> {
+  return getProviderAuth('anthropic');
 }
 
 /**
- * Save authentication to disk
+ * Save OAuth tokens for Anthropic
  */
-async function saveAuth(auth: StoredAuth): Promise<void> {
-  const dir = path.dirname(AUTH_FILE_PATH);
-  await fs.mkdir(dir, { recursive: true });
-  await fs.writeFile(AUTH_FILE_PATH, JSON.stringify(auth, null, 2), {
-    mode: 0o600, // Owner read/write only
+async function saveOAuthTokens(tokens: OAuthTokens): Promise<void> {
+  const existing = await getProviderAuth('anthropic');
+  await saveProviderAuth('anthropic', {
+    ...existing,
+    oauth: tokens,
   });
 }
 
 /**
- * Clear stored authentication
+ * Save API key for Anthropic
+ */
+async function saveApiKeyAuth(apiKey: string): Promise<void> {
+  const existing = await getProviderAuth('anthropic');
+  await saveProviderAuth('anthropic', {
+    ...existing,
+    apiKey,
+  });
+}
+
+/**
+ * Clear Anthropic authentication
  */
 async function clearAuth(): Promise<void> {
-  try {
-    await fs.unlink(AUTH_FILE_PATH);
-  } catch {
-    // Ignore if file doesn't exist
-  }
+  await clearProviderAuth('anthropic');
 }
 
 // =============================================================================
@@ -229,28 +215,25 @@ async function refreshTokens(refreshToken: string): Promise<OAuthTokens> {
  * ANTHROPIC_API_KEY to prevent it from being used instead of OAuth tokens.
  *
  * Priority:
- * 1. OAuth tokens from ~/.tron/auth.json (refreshed if needed)
- * 2. API key from ~/.tron/auth.json
+ * 1. OAuth tokens from ~/.tron/auth.json providers.anthropic (refreshed if needed)
+ * 2. API key from ~/.tron/auth.json providers.anthropic
  * 3. null if no auth configured
  */
 export async function getAuth(): Promise<AnthropicAuth | null> {
-  // Load stored auth from ~/.tron/auth.json
+  // Load stored auth from unified auth.json
   const stored = await loadStoredAuth();
   if (!stored) {
     return null;
   }
 
   // OAuth tokens take precedence (for Claude Max users)
-  if (stored.tokens) {
+  if (stored.oauth) {
     // Check if access token is expired (with 5 min buffer)
-    if (stored.tokens.expiresAt - 5 * 60 * 1000 < Date.now()) {
+    if (stored.oauth.expiresAt - 5 * 60 * 1000 < Date.now()) {
       try {
         // Try to refresh
-        const newTokens = await refreshTokens(stored.tokens.refreshToken);
-        await saveAuth({
-          tokens: newTokens,
-          lastUpdated: new Date().toISOString(),
-        });
+        const newTokens = await refreshTokens(stored.oauth.refreshToken);
+        await saveOAuthTokens(newTokens);
         return {
           type: 'oauth',
           accessToken: newTokens.accessToken,
@@ -265,9 +248,9 @@ export async function getAuth(): Promise<AnthropicAuth | null> {
 
     return {
       type: 'oauth',
-      accessToken: stored.tokens.accessToken,
-      refreshToken: stored.tokens.refreshToken,
-      expiresAt: stored.tokens.expiresAt,
+      accessToken: stored.oauth.accessToken,
+      refreshToken: stored.oauth.refreshToken,
+      expiresAt: stored.oauth.expiresAt,
     };
   }
 
@@ -325,11 +308,8 @@ export async function login(): Promise<AnthropicAuth> {
   console.log('\nExchanging authorization code...');
   const tokens = await exchangeCodeForTokens(authCode, codeVerifier);
 
-  // Save tokens
-  await saveAuth({
-    tokens,
-    lastUpdated: new Date().toISOString(),
-  });
+  // Save tokens to unified auth
+  await saveOAuthTokens(tokens);
 
   console.log('Authentication successful!\n');
 
@@ -345,10 +325,7 @@ export async function login(): Promise<AnthropicAuth> {
  * Set API key directly (for users without Claude Max)
  */
 export async function setApiKey(apiKey: string): Promise<void> {
-  await saveAuth({
-    apiKey,
-    lastUpdated: new Date().toISOString(),
-  });
+  await saveApiKeyAuth(apiKey);
 }
 
 /**

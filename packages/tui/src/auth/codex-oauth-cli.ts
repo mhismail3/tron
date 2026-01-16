@@ -4,11 +4,13 @@
  * Provides OAuth authentication for OpenAI Codex (ChatGPT Plus/Pro subscription).
  * Run with: npx tsx packages/tui/src/auth/codex-oauth-cli.ts
  */
-import * as fs from 'fs/promises';
-import * as path from 'path';
-import * as os from 'os';
 import * as readline from 'readline';
 import { randomBytes, createHash } from 'crypto';
+import {
+  getProviderAuth,
+  saveProviderAuth,
+  clearProviderAuth,
+} from '@tron/core';
 
 // =============================================================================
 // Types
@@ -34,8 +36,6 @@ const CODEX_CONFIG = {
   scopes: 'openid profile email offline_access',
 };
 
-const CODEX_TOKENS_PATH = path.join(os.homedir(), '.tron', 'codex-tokens.json');
-
 // =============================================================================
 // PKCE Helper Functions
 // =============================================================================
@@ -55,32 +55,35 @@ async function generatePkce(): Promise<{ codeVerifier: string; codeChallenge: st
 }
 
 // =============================================================================
-// Token Storage
+// Token Storage (using unified auth)
 // =============================================================================
 
 async function saveTokens(tokens: CodexTokens): Promise<void> {
-  const dir = path.dirname(CODEX_TOKENS_PATH);
-  await fs.mkdir(dir, { recursive: true });
-  await fs.writeFile(CODEX_TOKENS_PATH, JSON.stringify(tokens, null, 2), {
-    mode: 0o600,
+  const existing = await getProviderAuth('openai-codex');
+  await saveProviderAuth('openai-codex', {
+    ...existing,
+    oauth: {
+      accessToken: tokens.accessToken,
+      refreshToken: tokens.refreshToken,
+      expiresAt: tokens.expiresAt,
+    },
   });
 }
 
 async function loadTokens(): Promise<CodexTokens | null> {
-  try {
-    const data = await fs.readFile(CODEX_TOKENS_PATH, 'utf-8');
-    return JSON.parse(data) as CodexTokens;
-  } catch {
+  const auth = await getProviderAuth('openai-codex');
+  if (!auth?.oauth) {
     return null;
   }
+  return {
+    accessToken: auth.oauth.accessToken,
+    refreshToken: auth.oauth.refreshToken,
+    expiresAt: auth.oauth.expiresAt,
+  };
 }
 
 async function deleteTokens(): Promise<void> {
-  try {
-    await fs.unlink(CODEX_TOKENS_PATH);
-  } catch {
-    // Ignore if doesn't exist
-  }
+  await clearProviderAuth('openai-codex');
 }
 
 // =============================================================================
@@ -264,7 +267,7 @@ async function login(): Promise<void> {
     await saveTokens(tokens);
 
     console.log('\n✅ Authentication successful!');
-    console.log(`Tokens saved to: ${CODEX_TOKENS_PATH}`);
+    console.log('Tokens saved to: ~/.tron/auth.json (providers.openai-codex)');
     console.log(`Token expires: ${new Date(tokens.expiresAt).toLocaleString()}`);
     console.log('\nYou can now use OpenAI Codex models in Tron.');
   } catch (error) {
@@ -383,7 +386,7 @@ Commands:
   refresh   Refresh access token
   help      Show this help message
 
-The tokens are stored at: ~/.tron/codex-tokens.json
+The tokens are stored at: ~/.tron/auth.json (providers.openai-codex)
 `);
       break;
     default:

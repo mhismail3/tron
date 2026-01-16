@@ -4,9 +4,13 @@
  * Simple HTTP server for health checks, metrics, and API endpoints.
  */
 import * as http from 'http';
-import * as fs from 'fs';
-import * as path from 'path';
-import { createLogger, getTronDataDir } from '@tron/core';
+import {
+  createLogger,
+  getProviderAuthSync,
+  saveProviderAuthSync,
+  loadAuthStorageSync,
+  saveAuthStorageSync,
+} from '@tron/core';
 import type { EventStoreOrchestrator } from './event-store-orchestrator.js';
 
 const logger = createLogger('health');
@@ -55,12 +59,9 @@ export class HealthServer {
   private server: http.Server | null = null;
   private orchestrator: EventStoreOrchestrator | null = null;
   private wsClientCount: () => number = () => 0;
-  private codexTokensPath: string;
 
   constructor(config: HealthServerConfig) {
     this.config = config;
-    // Store Codex tokens in tron data directory
-    this.codexTokensPath = path.join(getTronDataDir(), 'codex-tokens.json');
   }
 
   /**
@@ -308,13 +309,17 @@ export class HealthServer {
   }
 
   /**
-   * Get stored Codex tokens
+   * Get stored Codex tokens from unified auth
    */
   getCodexTokens(): CodexTokens | null {
     try {
-      if (fs.existsSync(this.codexTokensPath)) {
-        const data = fs.readFileSync(this.codexTokensPath, 'utf8');
-        return JSON.parse(data) as CodexTokens;
+      const codexAuth = getProviderAuthSync('openai-codex');
+      if (codexAuth?.oauth) {
+        return {
+          accessToken: codexAuth.oauth.accessToken,
+          refreshToken: codexAuth.oauth.refreshToken,
+          expiresAt: codexAuth.oauth.expiresAt,
+        };
       }
     } catch (error) {
       logger.warn('Failed to read Codex tokens', { error });
@@ -323,25 +328,31 @@ export class HealthServer {
   }
 
   /**
-   * Save Codex tokens
+   * Save Codex tokens to unified auth
    */
   saveCodexTokens(tokens: CodexTokens): void {
-    const dir = path.dirname(this.codexTokensPath);
-    if (!fs.existsSync(dir)) {
-      fs.mkdirSync(dir, { recursive: true });
+    try {
+      saveProviderAuthSync('openai-codex', {
+        oauth: {
+          accessToken: tokens.accessToken,
+          refreshToken: tokens.refreshToken,
+          expiresAt: tokens.expiresAt,
+        },
+      });
+    } catch (error) {
+      logger.warn('Failed to save Codex tokens', { error });
     }
-    fs.writeFileSync(this.codexTokensPath, JSON.stringify(tokens, null, 2), {
-      mode: 0o600, // Owner read/write only for security
-    });
   }
 
   /**
-   * Delete Codex tokens
+   * Delete Codex tokens from unified auth
    */
   deleteCodexTokens(): void {
     try {
-      if (fs.existsSync(this.codexTokensPath)) {
-        fs.unlinkSync(this.codexTokensPath);
+      const auth = loadAuthStorageSync();
+      if (auth && auth.providers['openai-codex']) {
+        delete auth.providers['openai-codex'];
+        saveAuthStorageSync(auth);
       }
     } catch (error) {
       logger.warn('Failed to delete Codex tokens', { error });

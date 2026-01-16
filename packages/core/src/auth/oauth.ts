@@ -317,8 +317,12 @@ export function isOAuthToken(token: string): boolean {
 // Server-side Auth Loading
 // =============================================================================
 
+import { loadAuthStorage, saveProviderOAuthTokens } from './unified.js';
+import type { ServerAuth } from './types.js';
+
 /**
  * Stored auth format in ~/.tron/auth.json
+ * @deprecated Use UnifiedAuth from types.ts instead
  */
 export interface StoredAuth {
   tokens?: OAuthTokens;
@@ -326,13 +330,8 @@ export interface StoredAuth {
   lastUpdated: string;
 }
 
-/**
- * Server-side authentication result
- * Uses a discriminated union for type safety
- */
-export type ServerAuth =
-  | { type: 'oauth'; accessToken: string; refreshToken: string; expiresAt: number }
-  | { type: 'api_key'; apiKey: string };
+// Re-export ServerAuth for backward compatibility
+export type { ServerAuth };
 
 /**
  * Load authentication for server use (Claude Max subscription)
@@ -343,8 +342,8 @@ export type ServerAuth =
  *
  * Priority:
  * 1. CLAUDE_CODE_OAUTH_TOKEN env var (long-lived 1-year token from `claude setup-token`)
- * 2. OAuth tokens from ~/.tron/auth.json (refreshed if needed)
- * 3. API key from ~/.tron/auth.json (fallback)
+ * 2. OAuth tokens from ~/.tron/auth.json providers.anthropic (refreshed if needed)
+ * 3. API key from ~/.tron/auth.json providers.anthropic (fallback)
  * 4. null if no auth configured
  *
  * @returns ServerAuth if authenticated, null if login needed
@@ -363,39 +362,32 @@ export async function loadServerAuth(): Promise<ServerAuth | null> {
     };
   }
 
-  const fs = await import('fs/promises');
-  const path = await import('path');
-  const os = await import('os');
-
-  const authFilePath = path.join(os.homedir(), '.tron', 'auth.json');
-
-  let stored: StoredAuth | null = null;
-  try {
-    const data = await fs.readFile(authFilePath, 'utf-8');
-    stored = JSON.parse(data) as StoredAuth;
-  } catch {
-    logger.warn('No auth.json found at', { path: authFilePath });
+  // Load from unified auth.json
+  const auth = await loadAuthStorage();
+  if (!auth) {
+    logger.warn('No unified auth.json found');
     return null;
   }
 
-  if (!stored) {
+  // Get Anthropic-specific auth
+  const anthropicAuth = auth.providers.anthropic;
+  if (!anthropicAuth) {
+    logger.warn('No Anthropic auth configured in auth.json');
     return null;
   }
 
   // Check OAuth tokens first (preferred for Claude Max)
-  if (stored.tokens) {
+  if (anthropicAuth.oauth) {
+    const tokens = anthropicAuth.oauth;
     // Check if tokens need refresh (with 5 min buffer)
     const expiryBuffer = getExpiryBuffer() * 1000; // Convert to ms
-    if (stored.tokens.expiresAt - expiryBuffer < Date.now()) {
+    if (tokens.expiresAt - expiryBuffer < Date.now()) {
       logger.info('OAuth tokens expired, refreshing...');
       try {
-        const newTokens = await refreshOAuthToken(stored.tokens.refreshToken);
+        const newTokens = await refreshOAuthToken(tokens.refreshToken);
 
-        // Save refreshed tokens back to file
-        await saveServerAuth({
-          tokens: newTokens,
-          lastUpdated: new Date().toISOString(),
-        }, authFilePath);
+        // Save refreshed tokens back to unified auth
+        await saveProviderOAuthTokens('anthropic', newTokens);
 
         return {
           type: 'oauth',
@@ -412,33 +404,17 @@ export async function loadServerAuth(): Promise<ServerAuth | null> {
 
     return {
       type: 'oauth',
-      accessToken: stored.tokens.accessToken,
-      refreshToken: stored.tokens.refreshToken,
-      expiresAt: stored.tokens.expiresAt,
+      accessToken: tokens.accessToken,
+      refreshToken: tokens.refreshToken,
+      expiresAt: tokens.expiresAt,
     };
   }
 
   // Fallback to API key in auth.json
-  if (stored.apiKey) {
+  if (anthropicAuth.apiKey) {
     logger.info('Using API key from auth.json');
-    return { type: 'api_key', apiKey: stored.apiKey };
+    return { type: 'api_key', apiKey: anthropicAuth.apiKey };
   }
 
   return null;
-}
-
-/**
- * Save server auth to file
- */
-async function saveServerAuth(auth: StoredAuth, filePath: string): Promise<void> {
-  const fs = await import('fs/promises');
-  const path = await import('path');
-
-  const dir = path.dirname(filePath);
-  await fs.mkdir(dir, { recursive: true });
-  await fs.writeFile(filePath, JSON.stringify(auth, null, 2), {
-    mode: 0o600, // Owner read/write only
-  });
-
-  logger.info('Saved refreshed auth tokens');
 }
