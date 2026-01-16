@@ -9,6 +9,11 @@
  *   - Replaces direct use of appendPromiseChain/pendingHeadEventId
  *   - Each session gets its own EventPersister instance
  *
+ * - **TurnManager**: Turn lifecycle management (Phase 2)
+ *   - Wraps TurnContentTracker
+ *   - Builds message.assistant content blocks
+ *   - Handles interrupted content for persistence
+ *
  * ## Existing Components
  *
  * - **event-linearizer**: Legacy functions (will be deprecated)
@@ -34,6 +39,18 @@ export {
   type EventPersisterConfig,
   type AppendRequest,
 } from './event-persister.js';
+
+// Turn lifecycle management (Phase 2)
+export {
+  TurnManager,
+  createTurnManager,
+  type TokenUsage,
+  type TextContentBlock,
+  type ToolUseContentBlock,
+  type AssistantContentBlock,
+  type ToolResultBlock,
+  type EndTurnResult,
+} from './turn-manager.js';
 
 // =============================================================================
 // Existing Components
