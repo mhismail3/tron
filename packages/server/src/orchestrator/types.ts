@@ -16,6 +16,7 @@ import {
   type RulesTracker,
 } from '@tron/core';
 import type { TurnContentTracker } from './turn-content-tracker.js';
+import type { SessionContext } from './session-context.js';
 
 // =============================================================================
 // Configuration
@@ -189,6 +190,7 @@ export interface ActiveSession {
   /**
    * Plan mode state - tracks whether the session is in read-only plan mode.
    * Reconstructed from events on session resume/fork.
+   * @deprecated Use sessionContext.getPlanModeState() instead (Phase 6 migration)
    */
   planMode: {
     /** Whether plan mode is currently active */
@@ -198,6 +200,13 @@ export interface ActiveSession {
     /** Tools blocked during plan mode (e.g., Write, Edit, Bash) */
     blockedTools: string[];
   };
+  /**
+   * SessionContext for modular state management (Phase 6 migration).
+   * Encapsulates EventPersister, TurnManager, PlanModeHandler.
+   * During migration, both old fields and sessionContext coexist.
+   * Eventually old fields will be removed and sessionContext will be required.
+   */
+  sessionContext?: SessionContext;
 }
 
 // =============================================================================

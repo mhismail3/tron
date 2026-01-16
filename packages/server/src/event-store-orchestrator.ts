@@ -134,6 +134,7 @@ import {
   commitWorkingDirectory,
 } from './orchestrator/worktree-ops.js';
 import { TurnContentTracker } from './orchestrator/turn-content-tracker.js';
+import { createSessionContext } from './orchestrator/session-context.js';
 import {
   type EventStoreOrchestratorConfig,
   type ActiveSession,
@@ -358,6 +359,16 @@ export class EventStoreOrchestrator extends EventEmitter {
       logger.warn('Failed to load rules files', { sessionId, error });
     }
 
+    // Create SessionContext for modular state management (Phase 6 migration)
+    const sessionContext = createSessionContext({
+      sessionId,
+      eventStore: this.eventStore,
+      initialHeadEventId: rulesHeadEventId,
+      model,
+      workingDirectory: workingDir.path,
+      workingDir,
+    });
+
     this.activeSessions.set(sessionId, {
       sessionId,
       agent,
@@ -390,6 +401,8 @@ export class EventStoreOrchestrator extends EventEmitter {
         isActive: false,
         blockedTools: [],
       },
+      // Phase 6 migration: SessionContext for modular state management
+      sessionContext,
     });
 
     this.emit('session_created', {
@@ -515,6 +528,21 @@ export class EventStoreOrchestrator extends EventEmitter {
       }
     }
 
+    // Create SessionContext for modular state management (Phase 6 migration)
+    const sessionContext = createSessionContext({
+      sessionId: session.id,
+      eventStore: this.eventStore,
+      initialHeadEventId: session.headEventId!,
+      model: session.latestModel,
+      workingDirectory: workingDir.path,
+      workingDir,
+      reasoningLevel,
+    });
+    // Restore state from events for SessionContext (plan mode, etc.)
+    sessionContext.restoreFromEvents(events as TronSessionEvent[]);
+    // Sync message event IDs for context audit
+    sessionContext.setMessageEventIds(sessionState.messageEventIds);
+
     this.activeSessions.set(sessionId, {
       sessionId: session.id,
       agent,
@@ -546,6 +574,8 @@ export class EventStoreOrchestrator extends EventEmitter {
       rulesTracker,
       // Restore plan mode state from events
       planMode,
+      // Phase 6 migration: SessionContext for modular state management
+      sessionContext,
     });
 
     logger.info('Session resumed', {
@@ -2827,26 +2857,47 @@ The user has explicitly removed these skills and expects you to respond WITHOUT 
 
   /**
    * Check if a session is in plan mode
+   * Phase 6 migration: Uses SessionContext when available, falls back to legacy field
    */
   isInPlanMode(sessionId: string): boolean {
     const active = this.activeSessions.get(sessionId);
-    return active?.planMode.isActive ?? false;
+    if (!active) return false;
+    // Use SessionContext if available (Phase 6 migration)
+    if (active.sessionContext) {
+      return active.sessionContext.isInPlanMode();
+    }
+    // Fallback to legacy field
+    return active.planMode.isActive;
   }
 
   /**
    * Get the list of blocked tools for a session
+   * Phase 6 migration: Uses SessionContext when available, falls back to legacy field
    */
   getBlockedTools(sessionId: string): string[] {
     const active = this.activeSessions.get(sessionId);
-    return active?.planMode.blockedTools ?? [];
+    if (!active) return [];
+    // Use SessionContext if available (Phase 6 migration)
+    if (active.sessionContext) {
+      return active.sessionContext.getBlockedTools();
+    }
+    // Fallback to legacy field
+    return active.planMode.blockedTools;
   }
 
   /**
    * Check if a specific tool is blocked for a session
+   * Phase 6 migration: Uses SessionContext when available, falls back to legacy field
    */
   isToolBlocked(sessionId: string, toolName: string): boolean {
     const active = this.activeSessions.get(sessionId);
-    if (!active?.planMode.isActive) return false;
+    if (!active) return false;
+    // Use SessionContext if available (Phase 6 migration)
+    if (active.sessionContext) {
+      return active.sessionContext.isToolBlocked(toolName);
+    }
+    // Fallback to legacy field
+    if (!active.planMode.isActive) return false;
     return active.planMode.blockedTools.includes(toolName);
   }
 
@@ -2863,6 +2914,7 @@ The user has explicitly removed these skills and expects you to respond WITHOUT 
    * Enter plan mode for a session
    * @param sessionId - Session ID
    * @param options - Plan mode options (skill name and blocked tools)
+   * Phase 6 migration: Updates both legacy fields and SessionContext
    */
   async enterPlanMode(
     sessionId: string,
@@ -2873,7 +2925,11 @@ The user has explicitly removed these skills and expects you to respond WITHOUT 
       throw new Error(`Session not found: ${sessionId}`);
     }
 
-    if (active.planMode.isActive) {
+    // Check via SessionContext if available, otherwise legacy field
+    const isActive = active.sessionContext
+      ? active.sessionContext.isInPlanMode()
+      : active.planMode.isActive;
+    if (isActive) {
       throw new Error(`Session ${sessionId} is already in plan mode`);
     }
 
@@ -2891,12 +2947,17 @@ The user has explicitly removed these skills and expects you to respond WITHOUT 
 
     active.pendingHeadEventId = event.id;
 
-    // Update in-memory state
+    // Update in-memory state (legacy field)
     active.planMode = {
       isActive: true,
       skillName: options.skillName,
       blockedTools: options.blockedTools,
     };
+
+    // Phase 6 migration: Also update SessionContext
+    if (active.sessionContext) {
+      active.sessionContext.enterPlanMode(options.skillName, options.blockedTools);
+    }
 
     logger.info('Plan mode entered', {
       sessionId,
@@ -2916,6 +2977,7 @@ The user has explicitly removed these skills and expects you to respond WITHOUT 
    * Exit plan mode for a session
    * @param sessionId - Session ID
    * @param options - Exit options (reason and optional plan path)
+   * Phase 6 migration: Updates both legacy fields and SessionContext
    */
   async exitPlanMode(
     sessionId: string,
@@ -2926,7 +2988,11 @@ The user has explicitly removed these skills and expects you to respond WITHOUT 
       throw new Error(`Session not found: ${sessionId}`);
     }
 
-    if (!active.planMode.isActive) {
+    // Check via SessionContext if available, otherwise legacy field
+    const isActive = active.sessionContext
+      ? active.sessionContext.isInPlanMode()
+      : active.planMode.isActive;
+    if (!isActive) {
       throw new Error(`Session ${sessionId} is not in plan mode`);
     }
 
@@ -2947,11 +3013,16 @@ The user has explicitly removed these skills and expects you to respond WITHOUT 
 
     active.pendingHeadEventId = event.id;
 
-    // Update in-memory state
+    // Update in-memory state (legacy field)
     active.planMode = {
       isActive: false,
       blockedTools: [],
     };
+
+    // Phase 6 migration: Also update SessionContext
+    if (active.sessionContext) {
+      active.sessionContext.exitPlanMode();
+    }
 
     logger.info('Plan mode exited', {
       sessionId,
