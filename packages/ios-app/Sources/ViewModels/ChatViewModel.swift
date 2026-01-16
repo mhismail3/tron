@@ -442,8 +442,11 @@ class ChatViewModel: ObservableObject {
                 await MainActor.run {
                     self.currentContextWindow = snapshot.contextLimit
                     self.lastTurnInputTokens = snapshot.currentTokens
-                    // Also update previousTurnFinalInputTokens to fix delta calculations after session resume
-                    self.previousTurnFinalInputTokens = snapshot.currentTokens
+                    // Note: Do NOT set previousTurnFinalInputTokens here.
+                    // That value is used for incremental token delta calculations and should only be
+                    // updated by handleTurnEnd() after a turn completes, or by restoreTokenStateFromMessages()
+                    // when loading historical data. Setting it here from the server's current context
+                    // causes the delta to incorrectly show 0 for the first turn of a session.
                 }
                 logger.debug("Context refreshed from server: \(snapshot.currentTokens)/\(snapshot.contextLimit)", category: .session)
                 return  // Success, exit retry loop
