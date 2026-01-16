@@ -149,25 +149,30 @@ struct CachedSessionSidebarRow: View {
                     .foregroundStyle(.white.opacity(0.5))
             }
 
-            // Recent prompt (user's last message)
+            // Recent prompt (user's last message, right-aligned)
             if let prompt = session.lastUserPrompt, !prompt.isEmpty {
-                HStack(alignment: .top, spacing: 6) {
-                    Image(systemName: "person.fill")
-                        .font(.system(size: 8))
-                        .foregroundStyle(.tronEmerald.opacity(0.6))
-                        .frame(width: 12)
-                        .offset(y: 2)
+                HStack {
+                    Spacer(minLength: 0)
 
-                    Text(prompt)
-                        .font(.system(size: 11, design: .monospaced))
-                        .foregroundStyle(.white.opacity(0.7))
-                        .lineLimit(2)
-                        .truncationMode(.tail)
+                    HStack(alignment: .top, spacing: 6) {
+                        Text(prompt)
+                            .font(.system(size: 11, design: .monospaced))
+                            .foregroundStyle(.white.opacity(0.7))
+                            .lineLimit(2)
+                            .truncationMode(.tail)
+                            .multilineTextAlignment(.trailing)
+
+                        Image(systemName: "person.fill")
+                            .font(.system(size: 8))
+                            .foregroundStyle(.tronEmerald.opacity(0.6))
+                            .frame(width: 12)
+                            .offset(y: 2)
+                    }
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 6)
+                    .background(Color.white.opacity(0.03))
+                    .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
                 }
-                .padding(.horizontal, 8)
-                .padding(.vertical, 6)
-                .background(Color.white.opacity(0.03))
-                .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
             }
 
             // Latest action/response or processing state
