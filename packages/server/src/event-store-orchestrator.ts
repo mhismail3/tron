@@ -629,35 +629,18 @@ export class EventStoreOrchestrator extends EventEmitter {
       return;
     }
 
-    // Chain the session.end event append to ensure proper linearization
-    // CRITICAL: Previous code had the same race condition as switchModel() where
-    // concurrent calls could capture the same pendingHeadEventId
-    if (active) {
-      const appendPromise = active.appendPromiseChain.then(async () => {
-        // Capture parent ID INSIDE the chain callback - after previous events complete
-        const parentId = active.pendingHeadEventId ?? undefined;
-
-        const event = await this.eventStore.append({
-          sessionId: sessionId as SessionId,
-          type: 'session.end',
-          payload: {
-            reason: 'completed',
-            timestamp: new Date().toISOString(),
-          },
-          parentId,
-        });
-
-        active.pendingHeadEventId = event.id;
+    // Append session.end event (linearized via SessionContext for active sessions)
+    if (active?.sessionContext) {
+      const event = await active.sessionContext.appendEvent('session.end', {
+        reason: 'completed',
+        timestamp: new Date().toISOString(),
+      });
+      if (event) {
         logger.debug('[LINEARIZE] session.end appended', {
           sessionId,
           eventId: event.id,
-          parentId,
         });
-      });
-
-      // Update the chain and wait for this specific event
-      active.appendPromiseChain = appendPromise;
-      await appendPromise;
+      }
     } else {
       // Session not active - direct append is safe (no concurrent events)
       const event = await this.eventStore.append({
@@ -938,27 +921,18 @@ export class EventStoreOrchestrator extends EventEmitter {
 
     let deletionEvent: TronSessionEvent;
 
-    if (active) {
-      // CRITICAL: For active sessions, use linearized append to prevent race conditions
-      // where concurrent events could capture stale parentId
-      const appendPromise = active.appendPromiseChain.then(async () => {
-        // Wait for any pending events, then validate and append deletion
-        // Note: We use EventStore.deleteMessage which handles validation
-        const event = await this.eventStore.deleteMessage(
+    if (active?.sessionContext) {
+      // CRITICAL: For active sessions, use SessionContext's linearization chain
+      // deleteMessage handles validation internally, we just need proper chaining
+      deletionEvent = await active.sessionContext.runInChain(async () => {
+        return this.eventStore.deleteMessage(
           sessionId as SessionId,
           targetEventId as EventId,
           reason
         );
-        // Update pending head INSIDE the chain callback
-        active.pendingHeadEventId = event.id;
-        return event;
       });
-
-      // Update the chain and wait for this specific event
-      active.appendPromiseChain = appendPromise.then(() => {});
-      deletionEvent = await appendPromise;
     } else {
-      // Session not active - direct append is safe (no concurrent events)
+      // Session not active - direct call is safe (no concurrent events)
       deletionEvent = await this.eventStore.deleteMessage(
         sessionId as SessionId,
         targetEventId as EventId,
@@ -1010,7 +984,7 @@ export class EventStoreOrchestrator extends EventEmitter {
     try {
       // CRITICAL: Wait for any pending stream events to complete before appending message events
       // This prevents race conditions where stream events (turn_start, etc.) capture wrong parentId
-      await active.appendPromiseChain;
+      await active.sessionContext!.flushEvents();
 
       // Track skills and load content BEFORE building user content
       // Skill context is now injected as a system block (not user message)
@@ -1096,10 +1070,7 @@ export class EventStoreOrchestrator extends EventEmitter {
       const isSimpleTextOnly = userContent.length === 1 && firstContent?.type === 'text';
       const messageContent = isSimpleTextOnly ? options.prompt : userContent;
 
-      // Record user message event (linearized to prevent spurious branches)
-      // CRITICAL: Pass parentId from in-memory state, then update it after append
-      const userMsgParentId = active.pendingHeadEventId ?? undefined;
-
+      // Record user message event (linearized via SessionContext)
       // Build payload with optional skills for chat history display
       const userMsgPayload: { content: unknown; skills?: { name: string; source: string }[] } = {
         content: messageContent,
@@ -1108,47 +1079,36 @@ export class EventStoreOrchestrator extends EventEmitter {
         userMsgPayload.skills = options.skills.map(s => ({ name: s.name, source: s.source }));
       }
 
-      const userMsgEvent = await this.eventStore.append({
-        sessionId: active.sessionId,
-        type: 'message.user',
-        payload: userMsgPayload,
-        parentId: userMsgParentId,
-      });
-      active.pendingHeadEventId = userMsgEvent.id;
+      const userMsgEvent = await active.sessionContext!.appendEvent('message.user', userMsgPayload);
       // Track eventId for context manager message (user message will be added to context by agent.run)
-      active.messageEventIds.push(userMsgEvent.id);
-      logger.debug('[LINEARIZE] message.user appended', {
-        sessionId: active.sessionId,
-        eventId: userMsgEvent.id,
-        parentId: userMsgParentId,
-      });
+      if (userMsgEvent) {
+        active.sessionContext!.addMessageEventId(userMsgEvent.id);
+        logger.debug('[LINEARIZE] message.user appended', {
+          sessionId: active.sessionId,
+          eventId: userMsgEvent.id,
+        });
+      }
 
       // Set reasoning level if provided (for OpenAI Codex models)
       // Persist event only when level actually changes
-      if (options.reasoningLevel && options.reasoningLevel !== active.reasoningLevel) {
-        const previousLevel = active.reasoningLevel;
+      if (options.reasoningLevel && options.reasoningLevel !== active.sessionContext!.getReasoningLevel()) {
+        const previousLevel = active.sessionContext!.getReasoningLevel();
         active.agent.setReasoningLevel(options.reasoningLevel);
-        active.reasoningLevel = options.reasoningLevel;
+        active.sessionContext!.setReasoningLevel(options.reasoningLevel);
 
         // Persist reasoning level change as linearized event
-        const reasoningParentId = active.pendingHeadEventId ?? undefined;
-        const reasoningEvent = await this.eventStore.append({
-          sessionId: active.sessionId,
-          type: 'config.reasoning_level',
-          payload: {
-            previousLevel,
-            newLevel: options.reasoningLevel,
-          },
-          parentId: reasoningParentId,
-        });
-        active.pendingHeadEventId = reasoningEvent.id;
-        logger.debug('[LINEARIZE] config.reasoning_level appended', {
-          sessionId: active.sessionId,
-          eventId: reasoningEvent.id,
-          parentId: reasoningParentId,
+        const reasoningEvent = await active.sessionContext!.appendEvent('config.reasoning_level', {
           previousLevel,
           newLevel: options.reasoningLevel,
         });
+        if (reasoningEvent) {
+          logger.debug('[LINEARIZE] config.reasoning_level appended', {
+            sessionId: active.sessionId,
+            eventId: reasoningEvent.id,
+            previousLevel,
+            newLevel: options.reasoningLevel,
+          });
+        }
       }
 
       // Transform content for LLM: convert text file documents to inline text
@@ -1194,91 +1154,75 @@ export class EventStoreOrchestrator extends EventEmitter {
         // Only persist if there's actual content
         if (assistantContent.length > 0 || toolResultContent.length > 0) {
           // Wait for any pending stream events
-          await active.appendPromiseChain;
+          await active.sessionContext!.flushEvents();
 
           // 1. Persist assistant message with tool_use blocks
           if (assistantContent.length > 0) {
             const normalizedAssistantContent = normalizeContentBlocks(assistantContent);
-            const assistantParentId = active.pendingHeadEventId;
 
-            const assistantMsgEvent = await this.eventStore.append({
-              sessionId: active.sessionId,
-              type: 'message.assistant',
-              payload: {
-                content: normalizedAssistantContent,
-                tokenUsage: runResult.totalTokenUsage,
-                turn: runResult.turns || 1,
-                model: active.model,
-                stopReason: 'interrupted',
-                interrupted: true,
-              },
-              parentId: assistantParentId,
+            const assistantMsgEvent = await active.sessionContext!.appendEvent('message.assistant', {
+              content: normalizedAssistantContent,
+              tokenUsage: runResult.totalTokenUsage,
+              turn: runResult.turns || 1,
+              model: active.sessionContext!.getModel(),
+              stopReason: 'interrupted',
+              interrupted: true,
             });
-            active.pendingHeadEventId = assistantMsgEvent.id;
 
-            logger.info('Persisted interrupted assistant message', {
-              sessionId: active.sessionId,
-              eventId: assistantMsgEvent.id,
-              contentBlocks: normalizedAssistantContent.length,
-              hasAccumulatedContent: active.turnTracker.hasAccumulatedContent(),
-            });
+            if (assistantMsgEvent) {
+              logger.info('Persisted interrupted assistant message', {
+                sessionId: active.sessionId,
+                eventId: assistantMsgEvent.id,
+                contentBlocks: normalizedAssistantContent.length,
+                hasAccumulatedContent: active.sessionContext!.hasAccumulatedContent(),
+              });
+            }
           }
 
           // 2. Persist tool results as user message (like normal flow)
           // This ensures tool results appear in the session history
           if (toolResultContent.length > 0) {
             const normalizedToolResults = normalizeContentBlocks(toolResultContent);
-            const toolResultParentId = active.pendingHeadEventId;
 
-            const toolResultEvent = await this.eventStore.append({
-              sessionId: active.sessionId,
-              type: 'message.user',
-              payload: { content: normalizedToolResults },
-              parentId: toolResultParentId,
+            const toolResultEvent = await active.sessionContext!.appendEvent('message.user', {
+              content: normalizedToolResults,
             });
-            active.pendingHeadEventId = toolResultEvent.id;
 
-            logger.info('Persisted tool results for interrupted session', {
-              sessionId: active.sessionId,
-              eventId: toolResultEvent.id,
-              resultCount: normalizedToolResults.length,
-            });
+            if (toolResultEvent) {
+              logger.info('Persisted tool results for interrupted session', {
+                sessionId: active.sessionId,
+                eventId: toolResultEvent.id,
+                resultCount: normalizedToolResults.length,
+              });
+            }
           }
         }
 
         // Persist notification.interrupted event as first-class ledger entry
-        const interruptedNotificationParentId = active.pendingHeadEventId;
-        const interruptNotificationEvent = await this.eventStore.append({
-          sessionId: active.sessionId,
-          type: 'notification.interrupted',
-          payload: {
-            timestamp: new Date().toISOString(),
-            turn: runResult.turns || 1,
-          },
-          parentId: interruptedNotificationParentId,
+        const interruptNotificationEvent = await active.sessionContext!.appendEvent('notification.interrupted', {
+          timestamp: new Date().toISOString(),
+          turn: runResult.turns || 1,
         });
-        active.pendingHeadEventId = interruptNotificationEvent.id;
 
-        logger.info('Persisted notification.interrupted event', {
-          sessionId: active.sessionId,
-          eventId: interruptNotificationEvent.id,
-        });
+        if (interruptNotificationEvent) {
+          logger.info('Persisted notification.interrupted event', {
+            sessionId: active.sessionId,
+            eventId: interruptNotificationEvent.id,
+          });
+        }
 
         // Mark session as interrupted in metadata
         active.wasInterrupted = true;
 
-        // Clear turn tracking state (both tracker and legacy fields for backward compatibility)
-        active.turnTracker.onAgentEnd();
-        active.currentTurnAccumulatedText = '';
-        active.currentTurnToolCalls = [];
-        active.currentTurnContentSequence = [];
+        // Clear turn tracking state via SessionContext
+        active.sessionContext!.onAgentEnd();
 
         return [runResult] as unknown as TurnResult[];
       }
 
       // Wait for all linearized events (turn_end creates message.assistant and tool_results per-turn)
       // to complete before returning
-      await active.appendPromiseChain;
+      await active.sessionContext!.flushEvents();
 
       logger.debug('Agent run completed', {
         sessionId: active.sessionId,
@@ -1323,24 +1267,18 @@ export class EventStoreOrchestrator extends EventEmitter {
       // Phase 3: Store error.agent event for agent-level errors (linearized)
       try {
         // CRITICAL: Wait for any pending events before appending
-        await active.appendPromiseChain;
-        const errorParentId = active.pendingHeadEventId ?? undefined;
-        const errorEvent = await this.eventStore.append({
-          sessionId: active.sessionId,
-          type: 'error.agent',
-          payload: {
-            error: error instanceof Error ? error.message : String(error),
-            code: error instanceof Error ? error.name : undefined,
-            recoverable: false,
-          },
-          parentId: errorParentId,
+        await active.sessionContext!.flushEvents();
+        const errorEvent = await active.sessionContext!.appendEvent('error.agent', {
+          error: error instanceof Error ? error.message : String(error),
+          code: error instanceof Error ? error.name : undefined,
+          recoverable: false,
         });
-        active.pendingHeadEventId = errorEvent.id;
-        logger.debug('[LINEARIZE] error.agent appended', {
-          sessionId: active.sessionId,
-          eventId: errorEvent.id,
-          parentId: errorParentId,
-        });
+        if (errorEvent) {
+          logger.debug('[LINEARIZE] error.agent appended', {
+            sessionId: active.sessionId,
+            eventId: errorEvent.id,
+          });
+        }
       } catch (storeErr) {
         logger.error('Failed to store error.agent event', { storeErr, sessionId: options.sessionId });
       }
@@ -1424,39 +1362,17 @@ export class EventStoreOrchestrator extends EventEmitter {
       throw new Error('Cannot switch model while agent is processing');
     }
 
-    // Chain the model switch event append to the existing promise chain
-    // This ensures it waits for pending events and captures the correct parentId
-    // CRITICAL: Previous code had a race condition where concurrent switchModel() calls
-    // would both capture the same pendingHeadEventId, creating spurious branches
-    let modelSwitchEventId: EventId | null = null;
-    let modelSwitchParentId: EventId | undefined;
+    // Append model switch event (linearized via SessionContext for active sessions)
+    let modelSwitchEvent: TronSessionEvent | null = null;
 
-    if (active) {
-      const appendPromise = active.appendPromiseChain.then(async () => {
-        // Capture parent ID INSIDE the chain callback - after previous events complete
-        modelSwitchParentId = active.pendingHeadEventId ?? undefined;
-
-        const event = await this.eventStore.append({
-          sessionId: sessionId as SessionId,
-          type: 'config.model_switch',
-          payload: {
-            previousModel,
-            newModel: model,
-          },
-          parentId: modelSwitchParentId,
-        });
-
-        // Update in-memory head for next event
-        active.pendingHeadEventId = event.id;
-        modelSwitchEventId = event.id;
+    if (active?.sessionContext) {
+      modelSwitchEvent = await active.sessionContext.appendEvent('config.model_switch', {
+        previousModel,
+        newModel: model,
       });
-
-      // Update the chain and wait for this specific event
-      active.appendPromiseChain = appendPromise;
-      await appendPromise;
     } else {
       // Session not active - direct append is safe (no concurrent events)
-      const event = await this.eventStore.append({
+      modelSwitchEvent = await this.eventStore.append({
         sessionId: sessionId as SessionId,
         type: 'config.model_switch',
         payload: {
@@ -1464,15 +1380,14 @@ export class EventStoreOrchestrator extends EventEmitter {
           newModel: model,
         },
       });
-      modelSwitchEventId = event.id;
-      modelSwitchParentId = event.parentId ?? undefined;
     }
 
-    logger.debug('[LINEARIZE] config.model_switch appended', {
-      sessionId,
-      eventId: modelSwitchEventId,
-      parentId: modelSwitchParentId,
-    });
+    if (modelSwitchEvent) {
+      logger.debug('[LINEARIZE] config.model_switch appended', {
+        sessionId,
+        eventId: modelSwitchEvent.id,
+      });
+    }
 
     // CRITICAL: Persist model change to session in database
     // Without this, the model reverts when session is reloaded
@@ -1645,36 +1560,25 @@ export class EventStoreOrchestrator extends EventEmitter {
     // Clear skill tracker (skills don't survive compaction)
     active.skillTracker.clear();
 
-    // Store compaction events in EventStore (linearized)
-    await active.appendPromiseChain;
-
-    // Store compact.boundary event
-    const boundaryParentId = active.pendingHeadEventId ?? undefined;
-    const boundaryEvent = await this.eventStore.append({
-      sessionId: sessionId as SessionId,
-      type: 'compact.boundary',
-      payload: {
-        originalTokens: tokensBefore,
-        compactedTokens: result.tokensAfter,
-        compressionRatio: result.compressionRatio,
+    // Store compaction events in EventStore (linearized via SessionContext)
+    await active.sessionContext!.appendMultipleEvents([
+      {
+        type: 'compact.boundary',
+        payload: {
+          originalTokens: tokensBefore,
+          compactedTokens: result.tokensAfter,
+          compressionRatio: result.compressionRatio,
+        },
       },
-      parentId: boundaryParentId,
-    });
-    active.pendingHeadEventId = boundaryEvent.id;
-
-    // Store compact.summary event
-    const summaryParentId = active.pendingHeadEventId;
-    const summaryEvent = await this.eventStore.append({
-      sessionId: sessionId as SessionId,
-      type: 'compact.summary',
-      payload: {
-        summary: result.summary,
-        keyDecisions: result.extractedData?.keyDecisions?.map(d => d.decision),
-        filesModified: result.extractedData?.filesModified,
+      {
+        type: 'compact.summary',
+        payload: {
+          summary: result.summary,
+          keyDecisions: result.extractedData?.keyDecisions?.map(d => d.decision),
+          filesModified: result.extractedData?.filesModified,
+        },
       },
-      parentId: summaryParentId,
-    });
-    active.pendingHeadEventId = summaryEvent.id;
+    ]);
 
     logger.info('Compaction completed', {
       sessionId,
@@ -1745,21 +1649,12 @@ export class EventStoreOrchestrator extends EventEmitter {
 
     const tokensAfter = cm.getCurrentTokens();
 
-    // Store context.cleared event in EventStore (linearized)
-    await active.appendPromiseChain;
-
-    const parentId = active.pendingHeadEventId ?? undefined;
-    const clearedEvent = await this.eventStore.append({
-      sessionId: sessionId as SessionId,
-      type: 'context.cleared',
-      payload: {
-        tokensBefore,
-        tokensAfter,
-        reason: 'manual',
-      },
-      parentId,
+    // Store context.cleared event in EventStore (linearized via SessionContext)
+    await active.sessionContext!.appendEvent('context.cleared', {
+      tokensBefore,
+      tokensAfter,
+      reason: 'manual',
     });
-    active.pendingHeadEventId = clearedEvent.id;
 
     logger.info('Context cleared', {
       sessionId,
@@ -2081,35 +1976,30 @@ The user has explicitly removed these skills and expects you to respond WITHOUT 
     // Track each skill that's not already in the session's context
     for (const skill of skillsToTrack) {
       if (!active.skillTracker.hasSkill(skill.name)) {
-        // Create skill.added event (linearized)
-        const parentId = active.pendingHeadEventId ?? undefined;
-        const skillEvent = await this.eventStore.append({
-          sessionId: active.sessionId,
-          type: 'skill.added',
-          payload: {
-            skillName: skill.name,
-            source: skill.source,
-            addedVia: skill.addedVia,
-          },
-          parentId,
-        });
-        active.pendingHeadEventId = skillEvent.id;
-
-        // Update in-memory tracker
-        active.skillTracker.addSkill(
-          skill.name,
-          skill.source,
-          skill.addedVia,
-          skillEvent.id
-        );
-
-        logger.debug('[SKILL] skill.added event created', {
-          sessionId: active.sessionId,
+        // Create skill.added event (linearized via SessionContext)
+        const skillEvent = await active.sessionContext!.appendEvent('skill.added', {
           skillName: skill.name,
           source: skill.source,
           addedVia: skill.addedVia,
-          eventId: skillEvent.id,
         });
+
+        // Update in-memory tracker
+        if (skillEvent) {
+          active.skillTracker.addSkill(
+            skill.name,
+            skill.source,
+            skill.addedVia,
+            skillEvent.id
+          );
+
+          logger.debug('[SKILL] skill.added event created', {
+            sessionId: active.sessionId,
+            skillName: skill.name,
+            source: skill.source,
+            addedVia: skill.addedVia,
+            eventId: skillEvent.id,
+          });
+        }
       }
     }
   }
@@ -2968,37 +2858,20 @@ The user has explicitly removed these skills and expects you to respond WITHOUT 
       throw new Error(`Session ${sessionId} is already in plan mode`);
     }
 
-    // Append plan.mode_entered event
-    const parentId = active.pendingHeadEventId ?? undefined;
-    const event = await this.eventStore.append({
-      sessionId: sessionId as SessionId,
-      type: 'plan.mode_entered' as EventType,
-      payload: {
-        skillName: options.skillName,
-        blockedTools: options.blockedTools,
-      },
-      parentId,
-    });
-
-    active.pendingHeadEventId = event.id;
-
-    // Update in-memory state (legacy field)
-    active.planMode = {
-      isActive: true,
+    // Append plan.mode_entered event (linearized via SessionContext)
+    const event = await active.sessionContext!.appendEvent('plan.mode_entered', {
       skillName: options.skillName,
       blockedTools: options.blockedTools,
-    };
+    });
 
-    // Phase 6 migration: Also update SessionContext
-    if (active.sessionContext) {
-      active.sessionContext.enterPlanMode(options.skillName, options.blockedTools);
-    }
+    // Update plan mode state via SessionContext
+    active.sessionContext!.enterPlanMode(options.skillName, options.blockedTools);
 
     logger.info('Plan mode entered', {
       sessionId,
       skillName: options.skillName,
       blockedTools: options.blockedTools,
-      eventId: event.id,
+      eventId: event?.id,
     });
 
     this.emit('plan.mode_entered', {
@@ -3037,33 +2910,17 @@ The user has explicitly removed these skills and expects you to respond WITHOUT 
       payload.planPath = options.planPath;
     }
 
-    // Append plan.mode_exited event
-    const parentId = active.pendingHeadEventId ?? undefined;
-    const event = await this.eventStore.append({
-      sessionId: sessionId as SessionId,
-      type: 'plan.mode_exited' as EventType,
-      payload,
-      parentId,
-    });
+    // Append plan.mode_exited event (linearized via SessionContext)
+    const event = await active.sessionContext!.appendEvent('plan.mode_exited', payload);
 
-    active.pendingHeadEventId = event.id;
-
-    // Update in-memory state (legacy field)
-    active.planMode = {
-      isActive: false,
-      blockedTools: [],
-    };
-
-    // Phase 6 migration: Also update SessionContext
-    if (active.sessionContext) {
-      active.sessionContext.exitPlanMode();
-    }
+    // Update plan mode state via SessionContext
+    active.sessionContext!.exitPlanMode();
 
     logger.info('Plan mode exited', {
       sessionId,
       reason: options.reason,
       planPath: options.planPath,
-      eventId: event.id,
+      eventId: event?.id,
     });
 
     this.emit('plan.mode_exited', {

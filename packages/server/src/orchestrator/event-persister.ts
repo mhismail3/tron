@@ -201,6 +201,50 @@ export class EventPersister {
   }
 
   /**
+   * Run an operation within the linearization chain.
+   *
+   * Use this for operations that need to use EventStore methods directly
+   * (like deleteMessage) but still need to be properly linearized.
+   *
+   * The operation receives the current pending head event ID and must return
+   * the new head event ID (from the event it created).
+   *
+   * @param operation - Async function that receives parentId and returns new event
+   * @returns The event returned by the operation
+   */
+  async runInChain<T extends TronSessionEvent>(
+    operation: (parentId: EventId) => Promise<T>
+  ): Promise<T> {
+    // Wait for any pending appends
+    await this.chain;
+
+    // Check for prior error
+    if (this.lastError) {
+      throw new Error(`Cannot run operation: prior error - ${this.lastError.message}`);
+    }
+
+    try {
+      const parentId = this.pendingHead;
+      const event = await operation(parentId);
+
+      // Update head for next event
+      this.pendingHead = event.id;
+
+      return event;
+    } catch (err) {
+      logger.error('Failed to run linearized operation', {
+        err,
+        sessionId: this.sessionId,
+      });
+
+      // Track error to prevent subsequent appends
+      this.lastError = err instanceof Error ? err : new Error(String(err));
+
+      throw err;
+    }
+  }
+
+  /**
    * Get the current pending head event ID.
    *
    * This is the event that the next append will chain to.

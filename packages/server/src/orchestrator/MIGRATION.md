@@ -23,24 +23,28 @@ are migrated. Phase 8 cleanup will remove legacy fields.
   - `cleanupInactiveSessions()` - check processing and activity time
   - All operations sync both legacy and SessionContext
 
-### Deferred (Complex, High Risk)
+### Completed (Phase 8 - Part 1)
 
-- [ ] **Event Persistence** - `pendingHeadEventId`, `appendPromiseChain`, `lastAppendError`
-  - 40+ usages throughout orchestrator
-  - Tightly coupled with streaming event handlers
-  - Risk: Breaking event linearization could cause orphaned branches
-  - Target: Use `sessionContext.appendEvent()`, `sessionContext.flushEvents()`
+- [x] **Event Persistence** - `pendingHeadEventId`, `appendPromiseChain`, `lastAppendError`
+  - Migrated 40+ usages to SessionContext methods
+  - Uses `sessionContext.appendEvent()`, `appendEventFireAndForget()`, `appendMultipleEvents()`
+  - Uses `sessionContext.flushEvents()` to wait for pending events
+  - Uses `sessionContext.runInChain()` for special operations (deleteMessage)
+  - Legacy fields still initialized but NOT used for active event linearization
+  - Event chaining now handled entirely by SessionContext's EventPersister
+
+- [x] **Message Event IDs** (partial)
+  - Uses `sessionContext.addMessageEventId()` for user message tracking
+  - Legacy `messageEventIds` array still used in some places
+
+### Deferred (Phase 8 - Part 2: Complex, Streaming-Critical)
 
 - [ ] **Turn Management** - `currentTurn`, `turnTracker`, content tracking fields
   - 30+ usages in streaming event handlers
-  - Direct field access for accumulated content
-  - Risk: Breaking turn tracking affects session resume
-  - Target: Use `sessionContext.startTurn()`, `endTurn()`, `addTextDelta()`, etc.
-
-- [ ] **Message Event IDs** - `messageEventIds`
-  - Used for context audit
-  - Lower risk but depends on event persistence
-  - Target: Use `sessionContext.getMessageEventIds()`, `addMessageEventId()`
+  - Both `turnTracker` and individual fields are updated (dual-write pattern)
+  - Risk: Breaking turn tracking affects session resume and client catch-up
+  - Current state: SessionContext's TurnManager receives updates alongside legacy fields
+  - Target: Remove legacy field updates, use only SessionContext methods
 
 ### Not Migrated (Stay in ActiveSession)
 

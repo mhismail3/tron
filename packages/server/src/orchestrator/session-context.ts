@@ -246,6 +246,21 @@ export class SessionContext {
     return this.persister.getError();
   }
 
+  /**
+   * Run an operation within the linearization chain.
+   *
+   * Use for operations that need to use EventStore methods directly
+   * (like deleteMessage) but still need proper linearization.
+   *
+   * @param operation - Async function that receives parentId and returns new event
+   * @returns The event returned by the operation
+   */
+  async runInChain<T extends TronSessionEvent>(
+    operation: (parentId: EventId) => Promise<T>
+  ): Promise<T> {
+    return this.persister.runInChain(operation);
+  }
+
   // ===========================================================================
   // Turn Management (delegated to TurnManager)
   // ===========================================================================
