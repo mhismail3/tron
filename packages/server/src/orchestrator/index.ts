@@ -20,6 +20,10 @@
  *   - CompactionHandler: Context compaction events
  *   - ContextClearHandler: Context clearing events
  *
+ * - **SessionReconstructor** (Phase 4): Session state reconstruction
+ *   - Reconstructs plan mode, turn count, interrupt status from events
+ *   - Handles reset points (compaction, context clear)
+ *
  * ## Existing Components
  *
  * - **event-linearizer**: Legacy functions (will be deprecated)
@@ -79,6 +83,13 @@ export {
   type ContextClearContext,
   type ClearReason,
 } from './handlers/index.js';
+
+// Session state reconstruction (Phase 4)
+export {
+  SessionReconstructor,
+  createSessionReconstructor,
+  type ReconstructedState,
+} from './session-reconstructor.js';
 
 // =============================================================================
 // Existing Components
