@@ -46,7 +46,6 @@ struct ChatView: View {
     @State private var scrollProxy: ScrollViewProxy?
     @State private var showContextAudit = false
     @State private var showSessionHistory = false
-    @State private var showSessionAnalytics = false
     /// Cached models for model picker menu
     @State private var cachedModels: [ModelInfo] = []
     @State private var isLoadingModels = false
@@ -227,9 +226,6 @@ struct ChatView: View {
 
                     // iOS 26 fix: Use NotificationCenter to decouple button action from state mutation
                     Menu {
-                        Button { NotificationCenter.default.post(name: .chatMenuAction, object: "analytics") } label: {
-                            Label("Analytics", systemImage: "chart.bar.xaxis")
-                        }
                         Button { NotificationCenter.default.post(name: .chatMenuAction, object: "history") } label: {
                             Label("Session History", systemImage: "clock.arrow.circlepath")
                         }
@@ -287,10 +283,6 @@ struct ChatView: View {
                 eventStoreManager: eventStoreManager
             )
         }
-        .sheet(isPresented: $showSessionAnalytics) {
-            SessionAnalyticsSheet(sessionId: sessionId)
-                .environmentObject(eventStoreManager)
-        }
         .sheet(isPresented: $showSkillDetailSheet) {
             if let skill = skillForDetailSheet, let store = skillStore {
                 SkillDetailSheet(skill: skill, skillStore: store)
@@ -321,7 +313,6 @@ struct ChatView: View {
         .onReceive(NotificationCenter.default.publisher(for: .chatMenuAction)) { notification in
             guard let action = notification.object as? String else { return }
             switch action {
-            case "analytics": showSessionAnalytics = true
             case "history": showSessionHistory = true
             case "context": showContextAudit = true
             case "settings": viewModel.showSettings = true
@@ -480,7 +471,6 @@ struct ChatView: View {
         // NOTE: iOS 26 Menu requires simple Button("text") { } syntax
         // Label views and Divider break gesture handling
         Menu {
-            Button("Analytics") { showSessionAnalytics = true }
             Button("Session History") { showSessionHistory = true }
             Button("Context Manager") { showContextAudit = true }
             Button("Settings") { viewModel.showSettings = true }

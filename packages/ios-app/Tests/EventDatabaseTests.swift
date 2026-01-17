@@ -531,9 +531,9 @@ final class EventDatabaseTests: XCTestCase {
         XCTAssertTrue(switchEvent.summary.contains("→"))
     }
 
-    // MARK: - Phase 4: Session Analytics Tests
+    // MARK: - Phase 4: Consolidated Analytics Tests
 
-    func testSessionAnalyticsComputation() {
+    func testConsolidatedAnalyticsComputation() {
         let events = [
             SessionEvent(id: "e1", parentId: nil, sessionId: "s1", workspaceId: "/test", type: "session.start", timestamp: "2024-01-01T00:00:00Z", sequence: 1, payload: [
                 "model": AnyCodable("claude-sonnet-4")
@@ -550,6 +550,7 @@ final class EventDatabaseTests: XCTestCase {
             ]),
             SessionEvent(id: "e4", parentId: "e3", sessionId: "s1", workspaceId: "/test", type: "tool.call", timestamp: "2024-01-01T00:03:00Z", sequence: 4, payload: [
                 "name": AnyCodable("Read"),
+                "turn": AnyCodable(1),
                 "toolCallId": AnyCodable("tc1")
             ]),
             SessionEvent(id: "e5", parentId: "e4", sessionId: "s1", workspaceId: "/test", type: "tool.result", timestamp: "2024-01-01T00:03:01Z", sequence: 5, payload: [
@@ -566,15 +567,17 @@ final class EventDatabaseTests: XCTestCase {
             ])
         ]
 
-        let analytics = SessionAnalytics(from: events)
+        let analytics = ConsolidatedAnalytics(from: events)
 
         // Verify turn count
         XCTAssertEqual(analytics.totalTurns, 2)
 
-        // Verify tool usage
-        XCTAssertEqual(analytics.toolUsage.count, 1)
-        XCTAssertEqual(analytics.toolUsage.first?.name, "Read")
-        XCTAssertEqual(analytics.toolUsage.first?.count, 1)
+        // Verify tool calls total
+        XCTAssertEqual(analytics.totalToolCalls, 1)
+
+        // Verify tools are tracked per-turn
+        XCTAssertEqual(analytics.turns.first?.tools.count, 1)
+        XCTAssertEqual(analytics.turns.first?.tools.first, "Read")
 
         // Verify average latency (500 + 300) / 2 = 400
         XCTAssertEqual(analytics.avgLatency, 400)
@@ -583,24 +586,27 @@ final class EventDatabaseTests: XCTestCase {
         XCTAssertEqual(analytics.totalErrors, 0)
     }
 
-    func testSessionAnalyticsErrorTracking() {
+    func testConsolidatedAnalyticsErrorTracking() {
         let events = [
             SessionEvent(id: "e1", parentId: nil, sessionId: "s1", workspaceId: "/test", type: "session.start", timestamp: "2024-01-01T00:00:00Z", sequence: 1, payload: [:]),
             SessionEvent(id: "e2", parentId: "e1", sessionId: "s1", workspaceId: "/test", type: "error.agent", timestamp: "2024-01-01T00:01:00Z", sequence: 2, payload: [
                 "error": AnyCodable("Something went wrong"),
-                "recoverable": AnyCodable(true)
+                "recoverable": AnyCodable(true),
+                "turn": AnyCodable(1)
             ]),
             SessionEvent(id: "e3", parentId: "e2", sessionId: "s1", workspaceId: "/test", type: "error.provider", timestamp: "2024-01-01T00:02:00Z", sequence: 3, payload: [
                 "error": AnyCodable("Rate limit exceeded"),
-                "retryable": AnyCodable(true)
+                "retryable": AnyCodable(true),
+                "turn": AnyCodable(1)
             ])
         ]
 
-        let analytics = SessionAnalytics(from: events)
+        let analytics = ConsolidatedAnalytics(from: events)
 
         XCTAssertEqual(analytics.totalErrors, 2)
-        XCTAssertEqual(analytics.errors[0].type, "agent")
-        XCTAssertEqual(analytics.errors[0].isRecoverable, true)
-        XCTAssertEqual(analytics.errors[1].type, "provider")
+        // Errors are now tracked per-turn
+        XCTAssertEqual(analytics.turns.first?.errorCount, 2)
+        XCTAssertTrue(analytics.turns.first?.errors.contains("Something went wrong") ?? false)
+        XCTAssertTrue(analytics.turns.first?.errors.contains("Rate limit exceeded") ?? false)
     }
 }

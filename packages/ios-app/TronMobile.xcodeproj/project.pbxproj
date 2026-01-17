@@ -11,7 +11,6 @@
 		029590450DF8FB55EBB86C23 /* ModelNameFormatter.swift in Sources */ = {isa = PBXBuildFile; fileRef = D03A2E1D488FAFF8C0088D61 /* ModelNameFormatter.swift */; };
 		0586FDB3434B135163CEE2D4 /* ChatViewModel+Events.swift in Sources */ = {isa = PBXBuildFile; fileRef = 85AB906ED58C2A5018AA8055 /* ChatViewModel+Events.swift */; };
 		124F4A264C4FD40DD17C0710 /* SineWaveView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9AD9A8A0AC52BC869FA6B150 /* SineWaveView.swift */; };
-		136A2E352353C637D95DB9B2 /* SessionAnalyticsSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = A98EEAD5A6421EB34B269C1A /* SessionAnalyticsSheet.swift */; };
 		1401327824254E4B259C40C7 /* SessionPayloads.swift in Sources */ = {isa = PBXBuildFile; fileRef = D55558B6BDA1C107C3E0BA83 /* SessionPayloads.swift */; };
 		14260190901BA8299D13DC43 /* InputBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3EF2CB735CA19344DB30086D /* InputBar.swift */; };
 		15D5C1CDEE971D2D3264B4A7 /* EventTypeRegistry.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4C46C2D9874A2C1C807D43A0 /* EventTypeRegistry.swift */; };
@@ -168,7 +167,6 @@
 		A51CB66FF27D47E989DF0839 /* EventStoreManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EventStoreManager.swift; sourceTree = "<group>"; };
 		A5AD094851A0EDC87E49A537 /* SafariView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SafariView.swift; sourceTree = "<group>"; };
 		A6844DC337DEDE3BD35A0B61 /* AskUserQuestionSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AskUserQuestionSheet.swift; sourceTree = "<group>"; };
-		A98EEAD5A6421EB34B269C1A /* SessionAnalyticsSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionAnalyticsSheet.swift; sourceTree = "<group>"; };
 		AAEEEEEE88ECEF3A528F968F /* CameraCaptureSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraCaptureSheet.swift; sourceTree = "<group>"; };
 		AB4071D0B8C943D30748238A /* Date+Extensions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Date+Extensions.swift"; sourceTree = "<group>"; };
 		AD61CD33CD78B1F23CDBABD7 /* LogViewer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LogViewer.swift; sourceTree = "<group>"; };
@@ -343,7 +341,6 @@
 				1D6B10645E88BC75D2BD7308 /* PlanModeViews.swift */,
 				71C51BCF67DD848C42B8F720 /* ReasoningLevelPicker.swift */,
 				A5AD094851A0EDC87E49A537 /* SafariView.swift */,
-				A98EEAD5A6421EB34B269C1A /* SessionAnalyticsSheet.swift */,
 				766753AA2F765B13E1B4676A /* SessionSidebar.swift */,
 				9EC65CD838F5540EC3B1AA02 /* SessionTreeView.swift */,
 				42E47B6EAD030227C54F0028 /* SettingsView.swift */,
@@ -583,7 +580,6 @@
 				9966D82BDAC66D1604946F29 /* ReasoningLevelPicker.swift in Sources */,
 				427D3AB3F85743E57CBA9E6E /* Rules.swift in Sources */,
 				621DDABC4787FCAB22C6201B /* SafariView.swift in Sources */,
-				136A2E352353C637D95DB9B2 /* SessionAnalyticsSheet.swift in Sources */,
 				1401327824254E4B259C40C7 /* SessionPayloads.swift in Sources */,
 				834644A22FBBDC1872C1DE2A /* SessionSidebar.swift in Sources */,
 				A8AD0FB128F1F5AABAA2191F /* SessionTreeView.swift in Sources */,

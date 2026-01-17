@@ -3,7 +3,7 @@ import Foundation
 // MARK: - Token Formatter
 
 /// Unified token count formatting.
-/// Consolidates duplicate formatting logic from SessionAnalyticsSheet, EventTypes, and RPCTypes.
+/// Consolidates duplicate formatting logic from ContextAuditView, EventTypes, and RPCTypes.
 enum TokenFormatter {
 
     /// Output format for token counts

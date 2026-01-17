@@ -27,7 +27,7 @@ struct ContextAuditView: View {
     @State private var cachedTokenUsage: (input: Int, output: Int, cacheRead: Int, cacheCreation: Int) = (0, 0, 0, 0)
 
     // Message pagination state
-    @State private var messagesLoadedCount: Int = 20  // Initial batch size
+    @State private var messagesLoadedCount: Int = 10  // Initial batch size
 
     /// Whether there are messages in context that can be cleared/compacted
     private var hasMessages: Bool {
@@ -234,10 +234,6 @@ struct ContextAuditView: View {
                         TokenBreakdownHeader()
                             .padding(.horizontal)
 
-                        // System header (non-expandable)
-                        SystemHeader()
-                            .padding(.horizontal)
-
                         // System section containers with tighter spacing
                         VStack(spacing: 10) {
                             // System Prompt (standalone container)
@@ -267,40 +263,44 @@ struct ContextAuditView: View {
                             if let skills = skillStore?.skills, !skills.isEmpty {
                                 SkillReferencesSection(skills: skills)
                             }
+
+                            // Added Skills section (explicitly added via @skillname or skill sheet, deletable)
+                            if !displayedSkills.isEmpty {
+                                AddedSkillsContainer(
+                                    skills: displayedSkills,
+                                    onDelete: { skillName in
+                                        Task { await removeSkillFromContext(skillName: skillName) }
+                                    },
+                                    onFetchContent: { skillName in
+                                        guard let store = skillStore else { return nil }
+                                        let metadata = await store.getSkill(name: skillName, sessionId: sessionId)
+                                        return metadata?.content
+                                    }
+                                )
+                            }
+
+                            // Messages (collapsible container with count badge and token total)
+                            MessagesContainer(
+                                messages: paginatedMessages,
+                                totalMessages: displayedMessages.count,
+                                totalTokens: snapshot.breakdown.messages,
+                                hasMoreMessages: hasMoreMessages,
+                                onLoadMore: {
+                                    messagesLoadedCount += 10  // Load 10 at a time
+                                },
+                                onDelete: { eventId in
+                                    Task { await deleteMessage(eventId: eventId) }
+                                }
+                            )
                         }
                         .padding(.horizontal)
 
-                        // Added Skills section (explicitly added via @skillname or skill sheet, deletable)
-                        // These are skills the user explicitly added to the conversation context
-                        // Uses displayedSkills for optimistic deletion animations
-                        AddedSkillsSection(
-                            skills: displayedSkills,
-                            onDelete: { skillName in
-                                Task { await removeSkillFromContext(skillName: skillName) }
-                            },
-                            onFetchContent: { skillName in
-                                // Fetch full SKILL.md content from server
-                                guard let store = skillStore else { return nil }
-                                let metadata = await store.getSkill(name: skillName, sessionId: sessionId)
-                                return metadata?.content
-                            }
+                        // Analytics Section
+                        AnalyticsSection(
+                            sessionId: sessionId,
+                            events: sessionEvents
                         )
                         .padding(.horizontal)
-
-                        // Messages breakdown (granular expandable) - using server data
-                        // Uses paginatedMessages for optimistic deletion animations + pagination
-                        DetailedMessagesSection(
-                            messages: paginatedMessages,
-                            totalMessages: displayedMessages.count,
-                            hasMoreMessages: hasMoreMessages,
-                            onLoadMore: {
-                                messagesLoadedCount += 20  // Load 20 more at a time
-                            },
-                            onDelete: { eventId in
-                                Task { await deleteMessage(eventId: eventId) }
-                            }
-                        )
-                            .padding(.horizontal)
                     }
                     .padding(.vertical)
                 }
@@ -353,7 +353,7 @@ struct ContextAuditView: View {
             pendingMessageDeletions.removeAll()
 
             // Reset message pagination when reloading
-            messagesLoadedCount = 20
+            messagesLoadedCount = 10
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -731,23 +731,6 @@ struct TokenBreakdownHeader: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.top, 8)
-    }
-}
-
-// MARK: - System Header
-
-@available(iOS 26.0, *)
-struct SystemHeader: View {
-    var body: some View {
-        HStack(spacing: 8) {
-            Image(systemName: "gearshape.2.fill")
-                .font(.system(size: 12))
-                .foregroundStyle(.tronGray)
-            Text("System")
-                .font(.system(size: 12, weight: .medium, design: .monospaced))
-                .foregroundStyle(.white.opacity(0.6))
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 
@@ -1301,46 +1284,6 @@ struct AddedSkillRow: View {
     }
 }
 
-// MARK: - Added Skills Section (explicitly added skills with full content, deletable)
-
-@available(iOS 26.0, *)
-struct AddedSkillsSection: View {
-    let skills: [AddedSkillInfo]
-    var onDelete: ((String) -> Void)?
-    var onFetchContent: ((String) async -> String?)?
-
-    var body: some View {
-        // Only show if there are added skills
-        if !skills.isEmpty {
-            VStack(alignment: .leading, spacing: 12) {
-                // Section header
-                HStack {
-                    Text("Added Skills (\(skills.count))")
-                        .font(.system(size: 12, weight: .medium, design: .monospaced))
-                        .foregroundStyle(.white.opacity(0.6))
-
-                    Spacer()
-
-                    Text("tap to expand")
-                        .font(.system(size: 9, design: .monospaced))
-                        .foregroundStyle(.white.opacity(0.3))
-                }
-
-                // Skills list (lazy for performance with many skills)
-                LazyVStack(spacing: 4) {
-                    ForEach(skills) { skill in
-                        AddedSkillRow(
-                            skill: skill,
-                            onDelete: { onDelete?(skill.name) },
-                            onFetchContent: onFetchContent
-                        )
-                    }
-                }
-            }
-        }
-    }
-}
-
 // MARK: - Rules Section (immutable, cannot be removed)
 
 @available(iOS 26.0, *)
@@ -1554,100 +1497,6 @@ struct RulesFileRow: View {
     }
 }
 
-// MARK: - Detailed Messages Section (using server data)
-
-@available(iOS 26.0, *)
-struct DetailedMessagesSection: View {
-    let messages: [DetailedMessageInfo]
-    let totalMessages: Int
-    let hasMoreMessages: Bool
-    var onLoadMore: (() -> Void)?
-    var onDelete: ((String) -> Void)?
-
-    private func formatTokens(_ count: Int) -> String {
-        if count >= 1000 {
-            return String(format: "%.1fk", Double(count) / 1000)
-        }
-        return "\(count)"
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            // Section header with total count
-            HStack {
-                Text("Messages")
-                    .font(.system(size: 12, weight: .medium, design: .monospaced))
-                    .foregroundStyle(.white.opacity(0.6))
-
-                Text("(\(messages.count)/\(totalMessages))")
-                    .font(.system(size: 11, design: .monospaced))
-                    .foregroundStyle(.white.opacity(0.4))
-
-                Spacer()
-
-                if hasMoreMessages {
-                    Text("\(totalMessages - messages.count) more")
-                        .font(.system(size: 10, design: .monospaced))
-                        .foregroundStyle(.white.opacity(0.3))
-                }
-            }
-
-            if totalMessages == 0 {
-                HStack {
-                    Spacer()
-                    Text("No messages in context")
-                        .font(.system(size: 12, design: .monospaced))
-                        .foregroundStyle(.white.opacity(0.4))
-                    Spacer()
-                }
-                .padding(14)
-                .background {
-                    RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .fill(.clear)
-                        .glassEffect(.regular.tint(Color.tronPhthaloGreen.opacity(0.35)), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-                }
-            } else {
-                // Lazy for performance with many messages
-                // Uses message.id (from Identifiable) for stable identity during updates
-                LazyVStack(spacing: 4) {
-                    ForEach(messages) { message in
-                        DetailedMessageRow(
-                            message: message,
-                            isLast: message.index == messages.last?.index,
-                            onDelete: message.eventId != nil ? { onDelete?(message.eventId!) } : nil
-                        )
-                    }
-
-                    // Load more button
-                    if hasMoreMessages {
-                        Button {
-                            onLoadMore?()
-                        } label: {
-                            HStack {
-                                Spacer()
-                                HStack(spacing: 6) {
-                                    Image(systemName: "chevron.down")
-                                        .font(.system(size: 11, weight: .medium))
-                                    Text("Load \(min(20, totalMessages - messages.count)) more messages")
-                                        .font(.system(size: 11, design: .monospaced))
-                                }
-                                .foregroundStyle(.tronCyan)
-                                Spacer()
-                            }
-                            .padding(12)
-                            .background {
-                                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                                    .fill(Color.tronCyan.opacity(0.1))
-                            }
-                        }
-                        .buttonStyle(.plain)
-                    }
-                }
-            }
-        }
-    }
-}
-
 // MARK: - Detailed Message Row
 
 @available(iOS 26.0, *)
@@ -1817,6 +1666,819 @@ struct DetailedMessageRow: View {
             }
         }
         // Removed duplicate .animation() - withAnimation in button action handles this
+    }
+}
+
+// MARK: - Messages Container (Collapsible, matching Rules/Skills pattern)
+
+@available(iOS 26.0, *)
+struct MessagesContainer: View {
+    let messages: [DetailedMessageInfo]
+    let totalMessages: Int
+    let totalTokens: Int
+    let hasMoreMessages: Bool
+    var onLoadMore: (() -> Void)?
+    var onDelete: ((String) -> Void)?
+
+    @State private var isExpanded = false
+
+    private func formatTokens(_ count: Int) -> String {
+        if count >= 1000 {
+            return String(format: "%.1fk", Double(count) / 1000)
+        }
+        return "\(count)"
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            // Header row (tappable)
+            HStack {
+                Image(systemName: "message.fill")
+                    .font(.system(size: 14))
+                    .foregroundStyle(.tronBlue)
+
+                Text("Messages")
+                    .font(.system(size: 14, weight: .medium, design: .monospaced))
+                    .foregroundStyle(.tronBlue)
+
+                // Count badge
+                Text("\(totalMessages)")
+                    .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(Color.tronBlue.opacity(0.7))
+                    .clipShape(Capsule())
+
+                Spacer()
+
+                Text(formatTokens(totalTokens))
+                    .font(.system(size: 12, weight: .medium, design: .monospaced))
+                    .foregroundStyle(.white.opacity(0.6))
+
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.4))
+                    .rotationEffect(.degrees(isExpanded ? -180 : 0))
+                    .animation(.spring(response: 0.35, dampingFraction: 0.8), value: isExpanded)
+            }
+            .padding(12)
+            .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .onTapGesture {
+                withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
+                    isExpanded.toggle()
+                }
+            }
+
+            // Expandable content
+            if isExpanded {
+                VStack(spacing: 4) {
+                    if totalMessages == 0 {
+                        Text("No messages in context")
+                            .font(.system(size: 11, design: .monospaced))
+                            .foregroundStyle(.white.opacity(0.4))
+                            .frame(maxWidth: .infinity)
+                            .padding(12)
+                    } else {
+                        LazyVStack(spacing: 4) {
+                            ForEach(messages) { message in
+                                DetailedMessageRow(
+                                    message: message,
+                                    isLast: message.index == messages.last?.index,
+                                    onDelete: message.eventId != nil ? { onDelete?(message.eventId!) } : nil
+                                )
+                            }
+
+                            // Load more button
+                            if hasMoreMessages {
+                                Button {
+                                    onLoadMore?()
+                                } label: {
+                                    HStack {
+                                        Spacer()
+                                        HStack(spacing: 6) {
+                                            Image(systemName: "chevron.down")
+                                                .font(.system(size: 11, weight: .medium))
+                                            Text("Load \(min(10, totalMessages - messages.count)) more")
+                                                .font(.system(size: 11, design: .monospaced))
+                                        }
+                                        .foregroundStyle(.tronBlue)
+                                        Spacer()
+                                    }
+                                    .padding(10)
+                                    .background {
+                                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                            .fill(Color.tronBlue.opacity(0.1))
+                                    }
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                    }
+                }
+                .padding(.horizontal, 10)
+                .padding(.bottom, 10)
+            }
+        }
+        .background {
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(Color.tronBlue.opacity(0.15))
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+    }
+}
+
+// MARK: - Added Skills Container (Collapsible, matching Rules/Skills pattern)
+
+@available(iOS 26.0, *)
+struct AddedSkillsContainer: View {
+    let skills: [AddedSkillInfo]
+    var onDelete: ((String) -> Void)?
+    var onFetchContent: ((String) async -> String?)?
+
+    @State private var isExpanded = false
+
+    /// Estimated tokens for added skills (full SKILL.md content)
+    /// More substantial than skill references since full content is included
+    private var estimatedTokens: Int {
+        // Rough estimate: ~200 tokens per skill for full SKILL.md
+        skills.count * 200
+    }
+
+    private func formatTokens(_ count: Int) -> String {
+        if count >= 1000 {
+            return String(format: "%.1fk", Double(count) / 1000)
+        }
+        return "\(count)"
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            // Header
+            HStack {
+                Image(systemName: "sparkles")
+                    .font(.system(size: 14))
+                    .foregroundStyle(.tronCyan)
+
+                Text("Added Skills")
+                    .font(.system(size: 14, weight: .medium, design: .monospaced))
+                    .foregroundStyle(.tronCyan)
+
+                // Count badge
+                Text("\(skills.count)")
+                    .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(Color.tronCyan.opacity(0.7))
+                    .clipShape(Capsule())
+
+                Spacer()
+
+                Text("~\(formatTokens(estimatedTokens))")
+                    .font(.system(size: 12, weight: .medium, design: .monospaced))
+                    .foregroundStyle(.white.opacity(0.6))
+
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.4))
+                    .rotationEffect(.degrees(isExpanded ? -180 : 0))
+                    .animation(.spring(response: 0.35, dampingFraction: 0.8), value: isExpanded)
+            }
+            .padding(12)
+            .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .onTapGesture {
+                withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
+                    isExpanded.toggle()
+                }
+            }
+
+            // Content
+            if isExpanded {
+                LazyVStack(spacing: 4) {
+                    ForEach(skills) { skill in
+                        AddedSkillRow(
+                            skill: skill,
+                            onDelete: { onDelete?(skill.name) },
+                            onFetchContent: onFetchContent
+                        )
+                    }
+                }
+                .padding(.horizontal, 10)
+                .padding(.bottom, 10)
+            }
+        }
+        .background {
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(Color.tronCyan.opacity(0.15))
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+    }
+}
+
+// MARK: - Analytics Section
+
+@available(iOS 26.0, *)
+struct AnalyticsSection: View {
+    let sessionId: String
+    let events: [SessionEvent]
+
+    @State private var showCopied = false
+
+    private var analytics: ConsolidatedAnalytics {
+        ConsolidatedAnalytics(from: events)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            // Section header
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Analytics")
+                    .font(.system(size: 14, weight: .medium, design: .monospaced))
+                    .foregroundStyle(.white.opacity(0.6))
+                Text("Session performance and cost breakdown")
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundStyle(.white.opacity(0.35))
+            }
+
+            // Session ID (tappable to copy)
+            SessionIdRow(sessionId: sessionId)
+
+            // Cost Summary
+            CostSummaryCard(analytics: analytics)
+
+            // Turn Breakdown
+            TurnBreakdownContainer(turns: analytics.turns)
+        }
+        .padding(.top, 8)
+    }
+}
+
+// MARK: - Session ID Row
+
+@available(iOS 26.0, *)
+struct SessionIdRow: View {
+    let sessionId: String
+    @State private var showCopied = false
+
+    var body: some View {
+        HStack {
+            Image(systemName: "number.circle")
+                .font(.system(size: 12))
+                .foregroundStyle(.tronTextMuted)
+
+            Text(showCopied ? "Copied!" : sessionId)
+                .font(.system(size: 11, design: .monospaced))
+                .foregroundStyle(showCopied ? .tronEmerald : .tronTextSecondary)
+                .lineLimit(1)
+                .truncationMode(.middle)
+                .animation(.easeInOut(duration: 0.15), value: showCopied)
+
+            Spacer()
+
+            Image(systemName: "doc.on.doc")
+                .font(.system(size: 10))
+                .foregroundStyle(.tronTextMuted)
+        }
+        .padding(12)
+        .background {
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(Color.white.opacity(0.05))
+        }
+        .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .onTapGesture {
+            UIPasteboard.general.string = sessionId
+            showCopied = true
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                showCopied = false
+            }
+        }
+    }
+}
+
+// MARK: - Cost Summary Card
+
+@available(iOS 26.0, *)
+struct CostSummaryCard: View {
+    let analytics: ConsolidatedAnalytics
+
+    private func formatCost(_ cost: Double) -> String {
+        if cost < 0.001 { return "$0.00" }
+        if cost < 0.01 { return String(format: "$%.3f", cost) }
+        return String(format: "$%.2f", cost)
+    }
+
+    var body: some View {
+        VStack(spacing: 12) {
+            // Header
+            HStack {
+                Image(systemName: "dollarsign.circle.fill")
+                    .font(.system(size: 14))
+                    .foregroundStyle(.tronAmber)
+
+                Text("Session Cost")
+                    .font(.system(size: 14, weight: .medium, design: .monospaced))
+                    .foregroundStyle(.tronAmber)
+
+                Spacer()
+
+                Text(formatCost(analytics.totalCost))
+                    .font(.system(size: 20, weight: .bold, design: .monospaced))
+                    .foregroundStyle(.tronAmber)
+            }
+
+            // Stats row
+            HStack(spacing: 0) {
+                CostStatItem(value: "\(analytics.totalTurns)", label: "turns")
+                CostStatItem(value: formatLatency(analytics.avgLatency), label: "avg latency")
+                CostStatItem(value: "\(analytics.totalToolCalls)", label: "tool calls")
+                CostStatItem(value: "\(analytics.totalErrors)", label: "errors", isError: analytics.totalErrors > 0)
+            }
+        }
+        .padding(14)
+        .background {
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(Color.tronAmber.opacity(0.15))
+        }
+    }
+
+    private func formatLatency(_ ms: Int) -> String {
+        if ms == 0 { return "-" }
+        if ms < 1000 {
+            return "\(ms)ms"
+        } else {
+            return String(format: "%.1fs", Double(ms) / 1000.0)
+        }
+    }
+}
+
+@available(iOS 26.0, *)
+struct CostStatItem: View {
+    let value: String
+    let label: String
+    var isError: Bool = false
+
+    var body: some View {
+        VStack(spacing: 2) {
+            Text(value)
+                .font(.system(size: 14, weight: .semibold, design: .monospaced))
+                .foregroundStyle(isError ? .tronError : .white.opacity(0.8))
+            Text(label)
+                .font(.system(size: 9, design: .monospaced))
+                .foregroundStyle(.white.opacity(0.5))
+        }
+        .frame(maxWidth: .infinity)
+    }
+}
+
+// MARK: - Turn Breakdown Container
+
+@available(iOS 26.0, *)
+struct TurnBreakdownContainer: View {
+    let turns: [ConsolidatedAnalytics.TurnData]
+    @State private var isExpanded = false
+
+    private func formatTokens(_ count: Int) -> String {
+        if count >= 1000 {
+            return String(format: "%.1fk", Double(count) / 1000)
+        }
+        return "\(count)"
+    }
+
+    private var totalTokens: Int {
+        turns.reduce(0) { $0 + $1.totalTokens }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            // Header
+            HStack {
+                Image(systemName: "list.number")
+                    .font(.system(size: 14))
+                    .foregroundStyle(.tronEmerald)
+
+                Text("Turn Breakdown")
+                    .font(.system(size: 14, weight: .medium, design: .monospaced))
+                    .foregroundStyle(.tronEmerald)
+
+                // Count badge
+                Text("\(turns.count)")
+                    .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(Color.tronEmerald.opacity(0.7))
+                    .clipShape(Capsule())
+
+                Spacer()
+
+                Text(formatTokens(totalTokens))
+                    .font(.system(size: 12, weight: .medium, design: .monospaced))
+                    .foregroundStyle(.white.opacity(0.6))
+
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.4))
+                    .rotationEffect(.degrees(isExpanded ? -180 : 0))
+                    .animation(.spring(response: 0.35, dampingFraction: 0.8), value: isExpanded)
+            }
+            .padding(12)
+            .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .onTapGesture {
+                withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
+                    isExpanded.toggle()
+                }
+            }
+
+            // Content
+            if isExpanded {
+                if turns.isEmpty {
+                    Text("No turns recorded")
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundStyle(.white.opacity(0.4))
+                        .frame(maxWidth: .infinity)
+                        .padding(12)
+                } else {
+                    LazyVStack(spacing: 4) {
+                        ForEach(turns) { turn in
+                            TurnRow(turn: turn)
+                        }
+                    }
+                    .padding(.horizontal, 10)
+                    .padding(.bottom, 10)
+                }
+            }
+        }
+        .background {
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(Color.tronEmerald.opacity(0.15))
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+    }
+}
+
+// MARK: - Turn Row (Expandable)
+
+@available(iOS 26.0, *)
+struct TurnRow: View {
+    let turn: ConsolidatedAnalytics.TurnData
+    @State private var isExpanded = false
+
+    private func formatTokens(_ count: Int) -> String {
+        if count >= 1000 {
+            return String(format: "%.1fk", Double(count) / 1000)
+        }
+        return "\(count)"
+    }
+
+    private func formatCost(_ cost: Double) -> String {
+        if cost < 0.001 { return "$0.00" }
+        if cost < 0.01 { return String(format: "$%.3f", cost) }
+        return String(format: "$%.2f", cost)
+    }
+
+    private func formatLatency(_ ms: Int) -> String {
+        if ms == 0 { return "-" }
+        if ms < 1000 {
+            return "\(ms)ms"
+        } else {
+            return String(format: "%.1fs", Double(ms) / 1000.0)
+        }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            // Header row
+            HStack(spacing: 10) {
+                // Turn number badge
+                Text("\(turn.turn)")
+                    .font(.system(size: 11, weight: .bold, design: .monospaced))
+                    .foregroundStyle(.tronEmerald)
+                    .frame(width: 24, height: 24)
+                    .background(Color.tronEmerald.opacity(0.2))
+                    .clipShape(Circle())
+
+                // Summary info
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack(spacing: 8) {
+                        // Tokens
+                        HStack(spacing: 3) {
+                            Image(systemName: "number")
+                                .font(.system(size: 9))
+                            Text(formatTokens(turn.totalTokens))
+                                .font(.system(size: 11, weight: .medium, design: .monospaced))
+                        }
+                        .foregroundStyle(.white.opacity(0.7))
+
+                        // Cost
+                        Text(formatCost(turn.cost))
+                            .font(.system(size: 11, weight: .medium, design: .monospaced))
+                            .foregroundStyle(.tronAmber)
+
+                        // Latency
+                        if turn.latency > 0 {
+                            Text(formatLatency(turn.latency))
+                                .font(.system(size: 10, design: .monospaced))
+                                .foregroundStyle(.white.opacity(0.5))
+                        }
+                    }
+
+                    // Tools and errors indicators
+                    HStack(spacing: 8) {
+                        if turn.toolCount > 0 {
+                            HStack(spacing: 3) {
+                                Image(systemName: "hammer.fill")
+                                    .font(.system(size: 8))
+                                Text("\(turn.toolCount)")
+                                    .font(.system(size: 10, design: .monospaced))
+                            }
+                            .foregroundStyle(.tronCyan)
+                        }
+
+                        if turn.errorCount > 0 {
+                            HStack(spacing: 3) {
+                                Image(systemName: "exclamationmark.triangle.fill")
+                                    .font(.system(size: 8))
+                                Text("\(turn.errorCount)")
+                                    .font(.system(size: 10, design: .monospaced))
+                            }
+                            .foregroundStyle(.tronError)
+                        }
+
+                        if let model = turn.model {
+                            Text(model)
+                                .font(.system(size: 9, design: .monospaced))
+                                .foregroundStyle(.white.opacity(0.4))
+                        }
+                    }
+                }
+
+                Spacer()
+
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 8, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.3))
+                    .rotationEffect(.degrees(isExpanded ? -180 : 0))
+                    .animation(.spring(response: 0.35, dampingFraction: 0.8), value: isExpanded)
+            }
+            .padding(10)
+            .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .onTapGesture {
+                withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
+                    isExpanded.toggle()
+                }
+            }
+
+            // Expanded details
+            if isExpanded {
+                VStack(alignment: .leading, spacing: 8) {
+                    // Token breakdown
+                    HStack(spacing: 16) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Input")
+                                .font(.system(size: 9, design: .monospaced))
+                                .foregroundStyle(.white.opacity(0.4))
+                            Text(formatTokens(turn.inputTokens))
+                                .font(.system(size: 12, weight: .medium, design: .monospaced))
+                                .foregroundStyle(.tronOrange)
+                        }
+
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Output")
+                                .font(.system(size: 9, design: .monospaced))
+                                .foregroundStyle(.white.opacity(0.4))
+                            Text(formatTokens(turn.outputTokens))
+                                .font(.system(size: 12, weight: .medium, design: .monospaced))
+                                .foregroundStyle(.tronRed)
+                        }
+
+                        Spacer()
+                    }
+
+                    // Tools used
+                    if !turn.tools.isEmpty {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Tools")
+                                .font(.system(size: 9, design: .monospaced))
+                                .foregroundStyle(.white.opacity(0.4))
+
+                            FlowLayout(spacing: 4) {
+                                ForEach(turn.tools, id: \.self) { tool in
+                                    Text(tool)
+                                        .font(.system(size: 9, design: .monospaced))
+                                        .foregroundStyle(.tronCyan)
+                                        .padding(.horizontal, 6)
+                                        .padding(.vertical, 3)
+                                        .background(Color.tronCyan.opacity(0.15))
+                                        .clipShape(Capsule())
+                                }
+                            }
+                        }
+                    }
+
+                    // Errors
+                    if !turn.errors.isEmpty {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Errors")
+                                .font(.system(size: 9, design: .monospaced))
+                                .foregroundStyle(.white.opacity(0.4))
+
+                            ForEach(turn.errors, id: \.self) { error in
+                                Text(error)
+                                    .font(.system(size: 10, design: .monospaced))
+                                    .foregroundStyle(.tronError)
+                                    .lineLimit(2)
+                            }
+                        }
+                    }
+                }
+                .padding(.horizontal, 10)
+                .padding(.bottom, 10)
+            }
+        }
+        .background {
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(Color.tronEmerald.opacity(0.08))
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+    }
+}
+
+// MARK: - Flow Layout (for tool tags)
+
+@available(iOS 26.0, *)
+struct FlowLayout: Layout {
+    var spacing: CGFloat = 4
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let result = arrangeSubviews(proposal: proposal, subviews: subviews)
+        return result.size
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        let result = arrangeSubviews(proposal: proposal, subviews: subviews)
+        for (index, position) in result.positions.enumerated() {
+            subviews[index].place(at: CGPoint(x: bounds.minX + position.x, y: bounds.minY + position.y), proposal: .unspecified)
+        }
+    }
+
+    private func arrangeSubviews(proposal: ProposedViewSize, subviews: Subviews) -> (size: CGSize, positions: [CGPoint]) {
+        let maxWidth = proposal.width ?? .infinity
+        var positions: [CGPoint] = []
+        var currentX: CGFloat = 0
+        var currentY: CGFloat = 0
+        var lineHeight: CGFloat = 0
+        var totalHeight: CGFloat = 0
+
+        for subview in subviews {
+            let size = subview.sizeThatFits(.unspecified)
+
+            if currentX + size.width > maxWidth && currentX > 0 {
+                currentX = 0
+                currentY += lineHeight + spacing
+                lineHeight = 0
+            }
+
+            positions.append(CGPoint(x: currentX, y: currentY))
+            currentX += size.width + spacing
+            lineHeight = max(lineHeight, size.height)
+            totalHeight = currentY + lineHeight
+        }
+
+        return (CGSize(width: maxWidth, height: totalHeight), positions)
+    }
+}
+
+// MARK: - Consolidated Analytics Data Model
+
+struct ConsolidatedAnalytics {
+    struct TurnData: Identifiable {
+        let id = UUID()
+        let turn: Int
+        let inputTokens: Int
+        let outputTokens: Int
+        let cost: Double
+        let latency: Int
+        let toolCount: Int
+        let tools: [String]
+        let errorCount: Int
+        let errors: [String]
+        let model: String?
+
+        var totalTokens: Int { inputTokens + outputTokens }
+    }
+
+    let turns: [TurnData]
+    let totalCost: Double
+    let totalTurns: Int
+    let totalToolCalls: Int
+    let totalErrors: Int
+    let avgLatency: Int
+
+    init(from events: [SessionEvent]) {
+        var turnData: [Int: (input: Int, output: Int, cost: Double, latency: Int, tools: [String], errors: [String], model: String?)] = [:]
+        var latencySum = 0
+        var latencyCount = 0
+        var totalTools = 0
+        var totalErrs = 0
+
+        for event in events {
+            switch event.eventType {
+            case .messageAssistant:
+                if let turn = event.payload["turn"]?.value as? Int {
+                    var existing = turnData[turn] ?? (input: 0, output: 0, cost: 0, latency: 0, tools: [], errors: [], model: nil)
+
+                    // Token usage
+                    if let tokenUsage = event.payload["tokenUsage"]?.value as? [String: Any],
+                       let input = tokenUsage["inputTokens"] as? Int,
+                       let output = tokenUsage["outputTokens"] as? Int {
+                        existing.input += input
+                        existing.output += output
+                    }
+
+                    // Latency
+                    if let latency = event.payload["latency"]?.value as? Int {
+                        existing.latency = max(existing.latency, latency)
+                        latencySum += latency
+                        latencyCount += 1
+                    }
+
+                    // Model
+                    if let model = event.payload["model"]?.value as? String {
+                        existing.model = model.shortModelName
+                    }
+
+                    turnData[turn] = existing
+                }
+
+            case .streamTurnEnd:
+                if let turn = event.payload["turn"]?.value as? Int {
+                    var existing = turnData[turn] ?? (input: 0, output: 0, cost: 0, latency: 0, tools: [], errors: [], model: nil)
+
+                    // Token usage (fallback)
+                    if let tokenUsage = event.payload["tokenUsage"]?.value as? [String: Any] {
+                        if let input = tokenUsage["inputTokens"] as? Int, existing.input == 0 {
+                            existing.input = input
+                        }
+                        if let output = tokenUsage["outputTokens"] as? Int, existing.output == 0 {
+                            existing.output = output
+                        }
+                    }
+
+                    // Cost
+                    if let cost = event.payload["cost"]?.value as? Double {
+                        existing.cost = cost
+                    }
+
+                    turnData[turn] = existing
+                }
+
+            case .toolCall:
+                if let turn = event.payload["turn"]?.value as? Int,
+                   let toolName = event.payload["name"]?.value as? String {
+                    var existing = turnData[turn] ?? (input: 0, output: 0, cost: 0, latency: 0, tools: [], errors: [], model: nil)
+                    if !existing.tools.contains(toolName) {
+                        existing.tools.append(toolName)
+                    }
+                    turnData[turn] = existing
+                    totalTools += 1
+                }
+
+            case .errorAgent, .errorProvider, .errorTool:
+                let errorMsg = (event.payload["error"]?.value as? String) ?? "Unknown error"
+                if let turn = event.payload["turn"]?.value as? Int {
+                    var existing = turnData[turn] ?? (input: 0, output: 0, cost: 0, latency: 0, tools: [], errors: [], model: nil)
+                    existing.errors.append(errorMsg)
+                    turnData[turn] = existing
+                }
+                totalErrs += 1
+
+            default:
+                break
+            }
+        }
+
+        // Convert to array
+        self.turns = turnData.sorted { $0.key < $1.key }.map { key, value in
+            TurnData(
+                turn: key,
+                inputTokens: value.input,
+                outputTokens: value.output,
+                cost: value.cost,
+                latency: value.latency,
+                toolCount: value.tools.count,
+                tools: value.tools,
+                errorCount: value.errors.count,
+                errors: value.errors,
+                model: value.model
+            )
+        }
+
+        self.totalCost = self.turns.reduce(0) { $0 + $1.cost }
+        self.totalTurns = self.turns.count
+        self.totalToolCalls = totalTools
+        self.totalErrors = totalErrs
+        self.avgLatency = latencyCount > 0 ? latencySum / latencyCount : 0
     }
 }
 
