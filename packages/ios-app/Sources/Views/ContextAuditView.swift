@@ -16,6 +16,8 @@ struct ContextAuditView: View {
     @State private var sessionEvents: [SessionEvent] = []
     @State private var isClearing = false
     @State private var isCompacting = false
+    @State private var showClearPopover = false
+    @State private var showCompactPopover = false
 
     // Optimistic deletion state - items being deleted animate out immediately
     @State private var pendingSkillDeletions: Set<String> = []
@@ -73,15 +75,8 @@ struct ContextAuditView: View {
             .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
-                    // Clear button with confirmation menu
-                    Menu {
-                        Text("Remove all messages from context.\nSystem prompt and tools preserved.")
-                            .font(.caption)
-                        Button("Clear Context", role: .destructive) {
-                            logger.info("🧹 CLEAR BUTTON ACTION FIRED", category: .general)
-                            Task { await clearContext() }
-                        }
-                        Button("Cancel", role: .cancel) { }
+                    Button {
+                        showClearPopover = true
                     } label: {
                         HStack(spacing: 4) {
                             if isClearing {
@@ -98,6 +93,30 @@ struct ContextAuditView: View {
                         .foregroundStyle(hasMessages ? .tronError : .tronTextMuted)
                     }
                     .disabled(isClearing || !hasMessages)
+                    .popover(isPresented: $showClearPopover, arrowEdge: .top) {
+                        GlassActionSheet(
+                            actions: [
+                                GlassAction(
+                                    title: "Clear Context",
+                                    icon: "trash",
+                                    color: .tronError,
+                                    role: .destructive
+                                ) {
+                                    showClearPopover = false
+                                    Task { await clearContext() }
+                                },
+                                GlassAction(
+                                    title: "Cancel",
+                                    icon: nil,
+                                    color: .tronError,
+                                    role: .cancel
+                                ) {
+                                    showClearPopover = false
+                                }
+                            ]
+                        )
+                        .presentationCompactAdaptation(.popover)
+                    }
                 }
                 ToolbarItem(placement: .principal) {
                     Text("Context")
@@ -105,18 +124,8 @@ struct ContextAuditView: View {
                         .foregroundStyle(.tronEmerald)
                 }
                 ToolbarItem(placement: .topBarTrailing) {
-                    // Compact button with confirmation menu
-                    Menu {
-                        Text("Summarize older messages\nto free up context space.")
-                            .font(.caption)
-                        Button("Compact Context") {
-                            logger.info("🔧 COMPACT BUTTON ACTION FIRED", category: .general)
-                            Task {
-                                logger.info("🔧 COMPACT TASK STARTED", category: .general)
-                                await compactContext()
-                            }
-                        }
-                        Button("Cancel", role: .cancel) { }
+                    Button {
+                        showCompactPopover = true
                     } label: {
                         HStack(spacing: 4) {
                             if isCompacting {
@@ -133,6 +142,30 @@ struct ContextAuditView: View {
                         .foregroundStyle(hasMessages ? .tronSlate : .tronTextMuted)
                     }
                     .disabled(isCompacting || !hasMessages)
+                    .popover(isPresented: $showCompactPopover, arrowEdge: .top) {
+                        GlassActionSheet(
+                            actions: [
+                                GlassAction(
+                                    title: "Compact Context",
+                                    icon: "arrow.down.right.and.arrow.up.left",
+                                    color: .tronSlate,
+                                    role: .default
+                                ) {
+                                    showCompactPopover = false
+                                    Task { await compactContext() }
+                                },
+                                GlassAction(
+                                    title: "Cancel",
+                                    icon: nil,
+                                    color: .tronSlate,
+                                    role: .cancel
+                                ) {
+                                    showCompactPopover = false
+                                }
+                            ]
+                        )
+                        .presentationCompactAdaptation(.popover)
+                    }
                 }
             }
             .alert("Error", isPresented: Binding(
@@ -1784,6 +1817,67 @@ struct DetailedMessageRow: View {
             }
         }
         // Removed duplicate .animation() - withAnimation in button action handles this
+    }
+}
+
+// MARK: - Glass Action Sheet (Custom iOS 26 Liquid Glass Style)
+
+/// Role for glass action buttons
+enum GlassActionRole {
+    case `default`
+    case destructive
+    case cancel
+}
+
+/// A single action in a glass action sheet
+struct GlassAction {
+    let title: String
+    let icon: String?
+    let color: Color
+    let role: GlassActionRole
+    let action: () -> Void
+}
+
+/// Custom action sheet with iOS 26 liquid glass styling
+/// Supports custom colors and icons (unlike native confirmationDialog)
+@available(iOS 26.0, *)
+struct GlassActionSheet: View {
+    let actions: [GlassAction]
+
+    var body: some View {
+        VStack(spacing: 8) {
+            ForEach(Array(actions.enumerated()), id: \.offset) { index, action in
+                Button {
+                    action.action()
+                } label: {
+                    HStack(spacing: 8) {
+                        if let icon = action.icon {
+                            Image(systemName: icon)
+                                .font(.system(size: 14, weight: .medium))
+                        }
+                        Text(action.title)
+                            .font(.system(size: 15, weight: action.role == .cancel ? .regular : .medium))
+                    }
+                    .foregroundStyle(action.color)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 12)
+                    .padding(.horizontal, 20)
+                    .background {
+                        Capsule()
+                            .fill(.clear)
+                            .glassEffect(.regular.tint(action.color.opacity(0.15)), in: Capsule())
+                    }
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(12)
+        .background {
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .fill(.clear)
+                .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+        }
+        .frame(minWidth: 200)
     }
 }
 

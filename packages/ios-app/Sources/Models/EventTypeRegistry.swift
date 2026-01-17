@@ -84,7 +84,7 @@ enum PersistedEventType: String, CaseIterable {
         case .messageUser, .messageAssistant, .messageSystem,
              .toolCall, .toolResult,
              .notificationInterrupted, .configModelSwitch, .configReasoningLevel,
-             .contextCleared, .skillRemoved, .rulesLoaded,
+             .contextCleared, .compactBoundary, .skillRemoved, .rulesLoaded,
              .errorAgent, .errorTool, .errorProvider:
             return true
         default:
