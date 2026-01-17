@@ -169,6 +169,16 @@ export class TurnManager {
   }
 
   /**
+   * Register ALL tool intents from tool_use_batch event.
+   * Called BEFORE any tool execution starts to enable linear event ordering.
+   */
+  registerToolIntents(
+    toolCalls: Array<{ id: string; name: string; arguments: Record<string, unknown> }>
+  ): void {
+    this.tracker.registerToolIntents(toolCalls);
+  }
+
+  /**
    * Start tracking a tool call.
    */
   startToolCall(
@@ -206,6 +216,45 @@ export class TurnManager {
    */
   buildInterruptedContent(): InterruptedContent {
     return this.tracker.buildInterruptedContent();
+  }
+
+  // ===========================================================================
+  // Pre-Tool Content Flush (for Linear Event Ordering)
+  // ===========================================================================
+
+  /**
+   * Check if pre-tool content has been flushed this turn.
+   * Used to determine if turn_end should create message.assistant.
+   */
+  hasPreToolContentFlushed(): boolean {
+    return this.tracker.hasPreToolContentFlushed();
+  }
+
+  /**
+   * Flush accumulated content BEFORE first tool execution.
+   * Called at first tool_execution_start to emit message.assistant before tool.call.
+   *
+   * Returns content blocks (text + tool_use) or null if nothing to flush.
+   */
+  flushPreToolContent(): AssistantContentBlock[] | null {
+    const content = this.tracker.flushPreToolContent();
+    if (!content) {
+      return null;
+    }
+
+    // Convert to AssistantContentBlock type
+    return content.map((block) => {
+      if (block.type === 'text') {
+        return { type: 'text' as const, text: block.text! };
+      } else {
+        return {
+          type: 'tool_use' as const,
+          id: block.id!,
+          name: block.name!,
+          input: block.input!,
+        };
+      }
+    });
   }
 
   // ===========================================================================

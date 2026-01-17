@@ -301,6 +301,16 @@ export class SessionContext {
   }
 
   /**
+   * Register ALL tool intents from tool_use_batch event.
+   * Called BEFORE any tool execution starts to enable linear event ordering.
+   */
+  registerToolIntents(
+    toolCalls: Array<{ id: string; name: string; arguments: Record<string, unknown> }>
+  ): void {
+    this.turnManager.registerToolIntents(toolCalls);
+  }
+
+  /**
    * Start tracking a tool call.
    */
   startToolCall(
@@ -338,6 +348,29 @@ export class SessionContext {
   buildInterruptedContent(): InterruptedContent {
     return this.turnManager.buildInterruptedContent();
   }
+
+  // ===========================================================================
+  // Pre-Tool Content Flush (for Linear Event Ordering)
+  // ===========================================================================
+
+  /**
+   * Check if pre-tool content has been flushed this turn.
+   */
+  hasPreToolContentFlushed(): boolean {
+    return this.turnManager.hasPreToolContentFlushed();
+  }
+
+  /**
+   * Flush accumulated content BEFORE first tool execution.
+   * Returns content blocks or null if nothing to flush.
+   */
+  flushPreToolContent(): Array<{ type: 'text'; text: string } | { type: 'tool_use'; id: string; name: string; input: Record<string, unknown> }> | null {
+    return this.turnManager.flushPreToolContent();
+  }
+
+  // ===========================================================================
+  // Agent Lifecycle
+  // ===========================================================================
 
   /**
    * Called when agent run starts.

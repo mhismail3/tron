@@ -351,12 +351,16 @@ export class EventStore {
     // Helper to flush pending tool results as a user message
     const flushToolResults = () => {
       if (pendingToolResults.length > 0) {
+        // Use snake_case field names to match Anthropic API format
+        // Provider's convertMessages expects tool_use_id and is_error
+        // Type assertion needed because ContentBlock type uses camelCase (toolUseId)
+        // but the provider's conversion code looks for snake_case (tool_use_id)
         const toolResultContent = pendingToolResults.map((tr) => ({
           type: 'tool_result' as const,
-          toolUseId: tr.toolCallId,
+          tool_use_id: tr.toolCallId,
           content: tr.content,
-          isError: tr.isError,
-        }));
+          is_error: tr.isError,
+        })) as unknown as Message['content'];
         messages.push({
           role: 'user',
           content: toolResultContent,
@@ -438,24 +442,29 @@ export class EventStore {
           });
         }
       } else if (event.type === 'message.assistant') {
-        // Only flush pending tool results if the last message was an assistant
-        // This handles agentic loops: assistant(tool_use) -> user(tool_result) -> assistant(continuation)
-        // If last message was user (or no messages), don't inject - there's no tool_use to match
-        const lastMessageBeforeFlush = messages[messages.length - 1];
-        if (lastMessageBeforeFlush && lastMessageBeforeFlush.role === 'assistant') {
+        const payload = event.payload as { content: Message['content'] };
+        const contentArray = Array.isArray(payload.content) ? payload.content : [];
+
+        // Check if this assistant message contains tool_use blocks
+        const hasToolUse = contentArray.some(
+          (block: { type: string }) => block.type === 'tool_use'
+        );
+
+        // Check if the last message was an assistant (for agentic continuation)
+        const lastMessage = messages[messages.length - 1];
+        const lastWasAssistant = lastMessage && lastMessage.role === 'assistant';
+
+        // CASE 1: Last message was assistant with tool_use, we have pending results
+        // This is an agentic continuation: assistant(tool_use) -> user(tool_result) -> assistant(continuation)
+        // Flush tool results BEFORE adding this assistant message
+        if (lastWasAssistant && pendingToolResults.length > 0) {
           flushToolResults();
-        } else {
-          // Discard tool results if last message wasn't assistant - they're orphaned
-          pendingToolResults = [];
         }
 
-        const payload = event.payload as { content: Message['content'] };
-
-        // Re-check last message AFTER flush (it may have changed from assistant to user)
+        // Re-check last message after potential flush
         const lastMessageAfterFlush = messages[messages.length - 1];
 
         // Merge consecutive assistant messages for robustness
-        // Note: With proper tool_result flushing, consecutive assistants should be rare
         if (lastMessageAfterFlush && lastMessageAfterFlush.role === 'assistant') {
           lastMessageAfterFlush.content = mergeMessageContent(lastMessageAfterFlush.content, payload.content, 'assistant');
         } else {
@@ -464,12 +473,32 @@ export class EventStore {
             content: payload.content,
           });
         }
+
+        // CASE 2: This assistant message has tool_use, and we have pending tool results
+        // Due to event recording order (tool.result before message.assistant), the pending
+        // results belong to the tool_use blocks in THIS message. Flush them AFTER adding.
+        // This produces: assistant(tool_use) -> user(tool_result)
+        if (hasToolUse && pendingToolResults.length > 0) {
+          flushToolResults();
+        }
       }
     }
 
-    // Don't flush remaining tool results at the end - if there's no following assistant message,
-    // the session is waiting for user input and tool results aren't needed in the history
-    // (they were for display/streaming purposes only)
+    // Flush remaining tool results at the end IF the last message is an assistant with tool_use
+    // This is required for the Anthropic API: assistant(tool_use) MUST be followed by user(tool_result)
+    // For forks and sessions that end after tool execution, we need the tool results for API compliance
+    if (pendingToolResults.length > 0) {
+      const lastMessage = messages[messages.length - 1];
+      if (lastMessage && lastMessage.role === 'assistant') {
+        const contentArray = Array.isArray(lastMessage.content) ? lastMessage.content : [];
+        const hasToolUse = contentArray.some(
+          (block: { type: string }) => block.type === 'tool_use'
+        );
+        if (hasToolUse) {
+          flushToolResults();
+        }
+      }
+    }
 
     return messages;
   }
@@ -531,6 +560,28 @@ export class EventStore {
     let turnCount = 0;
     let currentTurn = 0;
 
+    // Accumulate tool results to inject as user messages when needed for agentic loops
+    // This mirrors getMessagesAt() for consistency - critical for fork/resume scenarios
+    let pendingToolResults: Array<{ toolCallId: string; content: string; isError?: boolean }> = [];
+
+    // Helper to flush pending tool results as a user message
+    const flushToolResults = () => {
+      if (pendingToolResults.length > 0) {
+        const toolResultContent = pendingToolResults.map((tr) => ({
+          type: 'tool_result' as const,
+          tool_use_id: tr.toolCallId,
+          content: tr.content,
+          is_error: tr.isError,
+        })) as unknown as Message['content'];
+        messages.push({
+          role: 'user',
+          content: toolResultContent,
+        });
+        messageEventIds.push(undefined); // Synthetic message from tool results
+        pendingToolResults = [];
+      }
+    };
+
     for (const evt of ancestors) {
       // Skip deleted messages
       if (deletedEventIds.has(evt.id)) {
@@ -544,6 +595,7 @@ export class EventStore {
         // Clear messages before compaction (but preserve token accounting for session totals)
         messages.length = 0;
         messageEventIds.length = 0;
+        pendingToolResults = []; // Also clear pending tool results
         // Inject the compaction summary as a context message pair
         // These synthetic messages don't have eventIds (undefined)
         messages.push({
@@ -570,10 +622,26 @@ export class EventStore {
       if (evt.type === 'context.cleared') {
         messages.length = 0;
         messageEventIds.length = 0;
+        pendingToolResults = [];
+        continue;
+      }
+
+      // Accumulate tool.result events to create user messages
+      if (evt.type === 'tool.result') {
+        const payload = evt.payload as { toolCallId: string; content: string; isError?: boolean };
+        pendingToolResults.push({
+          toolCallId: payload.toolCallId,
+          content: payload.content,
+          isError: payload.isError,
+        });
         continue;
       }
 
       if (evt.type === 'message.user') {
+        // When a real user message follows tool results, discard the pending tool results
+        // The user's message IS the response (e.g., AskUserQuestion answers)
+        pendingToolResults = [];
+
         const payload = evt.payload as { content: Message['content']; tokenUsage?: TokenUsage };
         const lastMessage = messages[messages.length - 1];
 
@@ -602,11 +670,30 @@ export class EventStore {
           turn?: number;
           tokenUsage?: TokenUsage;
         };
+        const contentArray = Array.isArray(payload.content) ? payload.content : [];
+
+        // Check if this assistant message contains tool_use blocks
+        const hasToolUse = contentArray.some(
+          (block: { type: string }) => block.type === 'tool_use'
+        );
+
+        // Check if the last message was an assistant (for agentic continuation)
         const lastMessage = messages[messages.length - 1];
+        const lastWasAssistant = lastMessage && lastMessage.role === 'assistant';
+
+        // CASE 1: Last message was assistant with tool_use, we have pending results
+        // This is an agentic continuation: assistant(tool_use) -> user(tool_result) -> assistant
+        // Flush tool results BEFORE adding this assistant message
+        if (lastWasAssistant && pendingToolResults.length > 0) {
+          flushToolResults();
+        }
+
+        // Re-check last message after potential flush
+        const lastMessageAfterFlush = messages[messages.length - 1];
 
         // Merge consecutive assistant messages for robustness
-        if (lastMessage && lastMessage.role === 'assistant') {
-          lastMessage.content = mergeMessageContent(lastMessage.content, payload.content, 'assistant');
+        if (lastMessageAfterFlush && lastMessageAfterFlush.role === 'assistant') {
+          lastMessageAfterFlush.content = mergeMessageContent(lastMessageAfterFlush.content, payload.content, 'assistant');
           // Still track the event ID even when merging
           messageEventIds.push(evt.id);
         } else {
@@ -616,6 +703,14 @@ export class EventStore {
           });
           messageEventIds.push(evt.id); // Track eventId for deletion
         }
+
+        // CASE 2: This assistant message has tool_use, and we have pending tool results
+        // Due to event recording order, the pending results belong to THIS message
+        // Flush them AFTER adding: assistant(tool_use) -> user(tool_result)
+        if (hasToolUse && pendingToolResults.length > 0) {
+          flushToolResults();
+        }
+
         if (payload.tokenUsage) {
           inputTokens += payload.tokenUsage.inputTokens;
           outputTokens += payload.tokenUsage.outputTokens;
@@ -627,9 +722,21 @@ export class EventStore {
           turnCount = payload.turn;
         }
       }
-      // NOTE: tool.result events are NOT reconstructed here.
-      // Tool results are stored in message.user events (at turn end) for proper sequencing.
-      // See comment in getMessagesAt() for details.
+    }
+
+    // Flush remaining tool results at the end IF the last message is an assistant with tool_use
+    // This ensures: assistant(tool_use) MUST be followed by user(tool_result) for API compliance
+    if (pendingToolResults.length > 0) {
+      const lastMessage = messages[messages.length - 1];
+      if (lastMessage && lastMessage.role === 'assistant') {
+        const contentArray = Array.isArray(lastMessage.content) ? lastMessage.content : [];
+        const hasToolUse = contentArray.some(
+          (block: { type: string }) => block.type === 'tool_use'
+        );
+        if (hasToolUse) {
+          flushToolResults();
+        }
+      }
     }
 
     // Get session for context

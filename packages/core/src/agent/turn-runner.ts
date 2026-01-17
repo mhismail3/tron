@@ -292,6 +292,19 @@ export class AgentTurnRunner implements ITurnRunner {
       return { toolCallsExecuted: 0, interrupted: false, stopTurnRequested: false };
     }
 
+    // Emit tool_use_batch event with ALL tool_use blocks BEFORE any execution
+    // This allows the orchestrator to track all tool intents for linear event ordering
+    this.eventEmitter.emit({
+      type: 'tool_use_batch',
+      sessionId: this.sessionId,
+      timestamp: new Date().toISOString(),
+      toolCalls: toolCalls.map(tc => ({
+        id: tc.id,
+        name: tc.name,
+        arguments: tc.arguments,
+      })),
+    });
+
     for (const toolCall of toolCalls) {
       // Check for abort BEFORE executing each tool
       const signal = this.getAbortSignal();

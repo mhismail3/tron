@@ -131,14 +131,14 @@ describe('Agentic Loop Message Reconstruction', () => {
       expect(messages[2].role).toBe('user');
       expect(Array.isArray(messages[2].content)).toBe(true);
       expect((messages[2].content as any[])[0].type).toBe('tool_result');
-      expect((messages[2].content as any[])[0].toolUseId).toBe('tc_1');
+      expect((messages[2].content as any[])[0].tool_use_id).toBe('tc_1');
 
       expect(messages[3].role).toBe('assistant');
       expect((messages[3].content as any[])[1].type).toBe('tool_use');
 
       expect(messages[4].role).toBe('user');
       expect((messages[4].content as any[])[0].type).toBe('tool_result');
-      expect((messages[4].content as any[])[0].toolUseId).toBe('tc_2');
+      expect((messages[4].content as any[])[0].tool_use_id).toBe('tc_2');
 
       expect(messages[5].role).toBe('assistant');
       expect((messages[5].content as any[])[0].text).toContain('both files');
@@ -201,8 +201,8 @@ describe('Agentic Loop Message Reconstruction', () => {
       // Tool results should be combined in one user message
       const toolResultMsg = messages[2].content as any[];
       expect(toolResultMsg.length).toBe(2);
-      expect(toolResultMsg[0].toolUseId).toBe('tc_ls');
-      expect(toolResultMsg[1].toolUseId).toBe('tc_read');
+      expect(toolResultMsg[0].tool_use_id).toBe('tc_ls');
+      expect(toolResultMsg[1].tool_use_id).toBe('tc_read');
     });
   });
 
@@ -486,7 +486,7 @@ describe('Agentic Loop Message Reconstruction', () => {
 
       // Verify error flag is preserved
       const toolResultContent = messages[2].content as any[];
-      expect(toolResultContent[0].isError).toBe(true);
+      expect(toolResultContent[0].is_error).toBe(true);
     });
 
     it('should handle compaction boundary in agentic session', async () => {

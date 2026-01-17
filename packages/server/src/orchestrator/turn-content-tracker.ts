@@ -121,6 +121,11 @@ export class TurnContentTracker {
   private thisTurnToolCalls: Map<string, ToolCallData> = new Map();
 
   // =========================================================================
+  // Pre-tool flush tracking (for linear event ordering)
+  // =========================================================================
+  private preToolContentFlushed: boolean = false;
+
+  // =========================================================================
   // Metadata
   // =========================================================================
   private currentTurn: number = 0;
@@ -162,8 +167,51 @@ export class TurnContentTracker {
   }
 
   /**
+   * Register ALL tool intents from tool_use_batch event.
+   * This registers tool_use blocks to tracking BEFORE any execution starts,
+   * enabling linear event ordering: message.assistant → tool.call → tool.result.
+   *
+   * Called when tool_use_batch event arrives (before any tool_execution_start).
+   */
+  registerToolIntents(
+    toolCalls: Array<{ id: string; name: string; arguments: Record<string, unknown> }>
+  ): void {
+    for (const tc of toolCalls) {
+      // Skip if already registered (shouldn't happen, but be safe)
+      if (this.thisTurnToolCalls.has(tc.id)) {
+        continue;
+      }
+
+      const toolCallData: ToolCallData = {
+        toolCallId: tc.id,
+        toolName: tc.name,
+        arguments: tc.arguments,
+        status: 'pending', // Not yet running
+        startedAt: undefined, // Will be set when execution actually starts
+      };
+
+      // Add to accumulated tracking
+      this.accumulatedToolCalls.push(toolCallData);
+      this.accumulatedSequence.push({ type: 'tool_ref', toolCallId: tc.id });
+
+      // Add to per-turn tracking (clone to avoid shared mutations)
+      this.thisTurnToolCalls.set(tc.id, { ...toolCallData });
+      this.thisTurnSequence.push({ type: 'tool_ref', toolCallId: tc.id });
+    }
+
+    logger.debug('Registered tool intents', {
+      turn: this.currentTurn,
+      toolCount: toolCalls.length,
+      toolNames: toolCalls.map(tc => tc.name),
+    });
+  }
+
+  /**
    * Record a tool call starting.
    * Updates both accumulated and per-turn tracking.
+   *
+   * If tool was already registered via registerToolIntents(), just update status.
+   * Otherwise, add to tracking (backward compatibility).
    */
   startToolCall(
     toolCallId: string,
@@ -171,6 +219,29 @@ export class TurnContentTracker {
     args: Record<string, unknown>,
     timestamp: string
   ): void {
+    // Check if tool was already registered via tool_use_batch
+    const existingTurnTool = this.thisTurnToolCalls.get(toolCallId);
+    if (existingTurnTool) {
+      // Tool already registered - just update status and start time
+      existingTurnTool.status = 'running';
+      existingTurnTool.startedAt = timestamp;
+
+      // Also update in accumulated tracking
+      const existingAccTool = this.accumulatedToolCalls.find(tc => tc.toolCallId === toolCallId);
+      if (existingAccTool) {
+        existingAccTool.status = 'running';
+        existingAccTool.startedAt = timestamp;
+      }
+
+      logger.debug('Tool execution started (pre-registered)', {
+        toolCallId,
+        toolName,
+        turn: this.currentTurn,
+      });
+      return;
+    }
+
+    // Tool not pre-registered - add it now (backward compatibility)
     const toolCallData: ToolCallData = {
       toolCallId,
       toolName,
@@ -186,6 +257,12 @@ export class TurnContentTracker {
     // Add to per-turn tracking (clone to avoid shared mutations)
     this.thisTurnToolCalls.set(toolCallId, { ...toolCallData });
     this.thisTurnSequence.push({ type: 'tool_ref', toolCallId });
+
+    logger.debug('Tool execution started (not pre-registered)', {
+      toolCallId,
+      toolName,
+      turn: this.currentTurn,
+    });
   }
 
   /**
@@ -232,6 +309,9 @@ export class TurnContentTracker {
     // Clear per-turn tracking for the new turn
     this.thisTurnSequence = [];
     this.thisTurnToolCalls = new Map();
+
+    // Reset pre-tool flush flag for new turn
+    this.preToolContentFlushed = false;
 
     // Add separator between turns in accumulated text (if not first turn)
     // This ensures text from different turns doesn't run together
@@ -290,6 +370,9 @@ export class TurnContentTracker {
     // Clear per-turn state
     this.thisTurnSequence = [];
     this.thisTurnToolCalls = new Map();
+
+    // Reset pre-tool flush flag
+    this.preToolContentFlushed = false;
 
     // Reset metadata
     this.currentTurn = 0;
@@ -383,6 +466,85 @@ export class TurnContentTracker {
    */
   hasThisTurnContent(): boolean {
     return this.thisTurnSequence.length > 0;
+  }
+
+  // =========================================================================
+  // Pre-Tool Content Flush (for Linear Event Ordering)
+  // =========================================================================
+
+  /**
+   * Check if pre-tool content has been flushed this turn.
+   * Used to determine if turn_end should create message.assistant.
+   */
+  hasPreToolContentFlushed(): boolean {
+    return this.preToolContentFlushed;
+  }
+
+  /**
+   * Get content accumulated BEFORE first tool execution for flushing.
+   * Called at first tool_execution_start to emit message.assistant BEFORE tool.call.
+   *
+   * This ensures linear event order:
+   * message.assistant (with tool_use) → tool.call → tool.result
+   *
+   * Returns content blocks (text + tool_use) or null if nothing to flush.
+   * Marks content as flushed to avoid duplicate emission at turn_end.
+   */
+  flushPreToolContent(): Array<{
+    type: 'text' | 'tool_use';
+    text?: string;
+    id?: string;
+    name?: string;
+    input?: Record<string, unknown>;
+  }> | null {
+    // Already flushed this turn - nothing to do
+    if (this.preToolContentFlushed) {
+      return null;
+    }
+
+    // Check if we have any content to flush
+    if (this.thisTurnSequence.length === 0) {
+      return null;
+    }
+
+    // Build content blocks from current turn sequence
+    const content: Array<{
+      type: 'text' | 'tool_use';
+      text?: string;
+      id?: string;
+      name?: string;
+      input?: Record<string, unknown>;
+    }> = [];
+
+    for (const item of this.thisTurnSequence) {
+      if (item.type === 'text' && item.text) {
+        content.push({ type: 'text', text: item.text });
+      } else if (item.type === 'tool_ref') {
+        const toolCall = this.thisTurnToolCalls.get(item.toolCallId);
+        if (toolCall) {
+          content.push({
+            type: 'tool_use',
+            id: toolCall.toolCallId,
+            name: toolCall.toolName,
+            input: toolCall.arguments,
+          });
+        }
+      }
+    }
+
+    // Mark as flushed even if no content (prevents multiple flush attempts)
+    this.preToolContentFlushed = true;
+
+    if (content.length === 0) {
+      return null;
+    }
+
+    logger.debug('Flushed pre-tool content', {
+      turn: this.currentTurn,
+      contentBlocks: content.length,
+    });
+
+    return content;
   }
 
   // =========================================================================

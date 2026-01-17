@@ -2212,17 +2212,23 @@ The user has explicitly removed these skills and expects you to respond WITHOUT 
         // they get ALL content from Turn 1, Turn 2, etc.
         // Accumulation is cleared at agent_start/agent_end instead.
 
-        // CREATE MESSAGE.ASSISTANT FOR THIS TURN - THIS IS WHAT GETS PERSISTED
-        // Consolidates all streaming deltas (text_delta) into a single durable event.
-        // This is the source of truth for session reconstruction.
-        // Each turn gets its own message.assistant event with per-turn token data.
+        // CREATE MESSAGE.ASSISTANT FOR THIS TURN - BUT ONLY IF NOT ALREADY FLUSHED
+        // Linear event ordering means content with tool_use is flushed at first tool_execution_start.
+        // Only create message.assistant here if:
+        // 1. No pre-tool content was flushed (no tools in this turn), OR
+        // 2. This is a simple text-only response (no tools)
         if (active) {
+          // Check if pre-tool content was already flushed (tools were called this turn)
+          const wasPreToolFlushed = active.sessionContext!.hasPreToolContentFlushed();
+
           // Use SessionContext for turn end
           // This returns built content blocks and clears per-turn tracking
           const turnStartTime = active.sessionContext!.getTurnStartTime();
           const turnResult = active.sessionContext!.endTurn(event.tokenUsage);
 
-          if (turnResult.content.length > 0) {
+          // Only create message.assistant if we didn't already flush content for tools
+          // If wasPreToolFlushed is true, the content was already emitted at tool_execution_start
+          if (!wasPreToolFlushed && turnResult.content.length > 0) {
             // Calculate latency for this turn
             const turnLatency = turnStartTime
               ? Date.now() - turnStartTime
@@ -2234,7 +2240,7 @@ The user has explicitly removed these skills and expects you to respond WITHOUT 
             // Normalize content blocks
             const normalizedContent = normalizeContentBlocks(turnResult.content);
 
-            // Create message.assistant event for this turn
+            // Create message.assistant event for this turn (no tools case)
             if (normalizedContent.length > 0) {
               this.appendEventLinearized(sessionId, 'message.assistant', {
                 content: normalizedContent,
@@ -2253,7 +2259,7 @@ The user has explicitly removed these skills and expects you to respond WITHOUT 
                 }
               });
 
-              logger.debug('Created message.assistant for turn', {
+              logger.debug('Created message.assistant for turn (no tools)', {
                 sessionId,
                 turn: turnResult.turn,
                 contentBlocks: normalizedContent.length,
@@ -2261,6 +2267,11 @@ The user has explicitly removed these skills and expects you to respond WITHOUT 
                 latency: turnLatency,
               });
             }
+          } else if (wasPreToolFlushed) {
+            logger.debug('Skipped message.assistant at turn_end (content already flushed for tools)', {
+              sessionId,
+              turn: turnResult.turn,
+            });
           }
 
           // NOTE: Tool results are NOT persisted as message.user at turn end.
@@ -2314,6 +2325,20 @@ The user has explicitly removed these skills and expects you to respond WITHOUT 
         });
         break;
 
+      case 'tool_use_batch':
+        // Register ALL tool_use intents BEFORE any execution starts
+        // This enables linear event ordering by knowing all tools upfront
+        if (active && event.toolCalls && Array.isArray(event.toolCalls)) {
+          active.sessionContext!.registerToolIntents(event.toolCalls);
+
+          logger.debug('Registered tool_use batch', {
+            sessionId,
+            toolCount: event.toolCalls.length,
+            toolNames: event.toolCalls.map((tc: { name: string }) => tc.name),
+          });
+        }
+        break;
+
       case 'tool_execution_start':
         // Track tool call for resume support (across ALL turns)
         if (active) {
@@ -2323,6 +2348,42 @@ The user has explicitly removed these skills and expects you to respond WITHOUT 
             event.toolName,
             event.arguments ?? {}
           );
+
+          // LINEAR EVENT ORDERING: Flush accumulated content as message.assistant BEFORE tool.call
+          // This ensures correct order: message.assistant (with tool_use) → tool.call → tool.result
+          // The flush only happens once per turn (first tool_execution_start)
+          const preToolContent = active.sessionContext!.flushPreToolContent();
+          if (preToolContent && preToolContent.length > 0) {
+            const normalizedContent = normalizeContentBlocks(preToolContent);
+            if (normalizedContent.length > 0) {
+              const turnStartTime = active.sessionContext!.getTurnStartTime();
+              const turnLatency = turnStartTime ? Date.now() - turnStartTime : 0;
+
+              // Detect if content has thinking blocks
+              const hasThinking = normalizedContent.some((b) => (b as any).type === 'thinking');
+
+              this.appendEventLinearized(sessionId, 'message.assistant', {
+                content: normalizedContent,
+                turn: active.sessionContext!.getCurrentTurn(),
+                model: active.model,
+                stopReason: 'tool_use', // Indicates tools are being called
+                latency: turnLatency,
+                hasThinking,
+              }, (evt) => {
+                // Track eventId for context manager message
+                const currentActive = this.activeSessions.get(sessionId);
+                if (currentActive) {
+                  currentActive.messageEventIds.push(evt.id);
+                }
+              });
+
+              logger.debug('Created pre-tool message.assistant for linear ordering', {
+                sessionId,
+                turn: active.sessionContext!.getCurrentTurn(),
+                contentBlocks: normalizedContent.length,
+              });
+            }
+          }
         }
 
         this.emit('agent_event', {

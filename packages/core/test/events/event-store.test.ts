@@ -1524,6 +1524,146 @@ describe('EventStore', () => {
         expect(lastUser[0]!.text).toBe('Post-compaction');
         expect(lastUser[1]!.text).toBe('Fork message');
       });
+
+      it('should include tool.result as user message in getStateAtHead for forked session', async () => {
+        // Create a session with tool calls (simulating agentic loop)
+        await store.append({
+          sessionId,
+          type: 'message.user',
+          payload: { content: 'Run some tools for me', turn: 1 },
+        });
+
+        // Assistant with tool_use blocks
+        await store.append({
+          sessionId,
+          type: 'message.assistant',
+          payload: {
+            content: [
+              { type: 'text', text: 'I will run two tools.' },
+              { type: 'tool_use', id: 'tc_1', name: 'Read', input: { file_path: 'a.ts' } },
+              { type: 'tool_use', id: 'tc_2', name: 'Read', input: { file_path: 'b.ts' } },
+            ],
+            turn: 1,
+          },
+        });
+
+        // Tool results (these should become a user message)
+        await store.append({
+          sessionId,
+          type: 'tool.result',
+          payload: { toolCallId: 'tc_1', content: 'Content of a.ts' },
+        });
+
+        const lastToolResult = await store.append({
+          sessionId,
+          type: 'tool.result',
+          payload: { toolCallId: 'tc_2', content: 'Content of b.ts' },
+        });
+
+        // Fork from the last tool result (before any continuation)
+        const forkResult = await store.fork(lastToolResult.id);
+
+        // Get state at head of forked session (this is what resumeSession uses)
+        const state = await store.getStateAtHead(forkResult.session.id);
+
+        // Should have: user -> assistant(tool_use) -> user(tool_result)
+        expect(state.messages.length).toBe(3);
+        expect(state.messages[0]!.role).toBe('user');
+        expect(state.messages[1]!.role).toBe('assistant');
+        expect(state.messages[2]!.role).toBe('user'); // Tool results as user message
+
+        // Verify the tool results are properly formatted
+        const toolResultMsg = state.messages[2]!.content as Array<{
+          type: string;
+          tool_use_id: string;
+          content: string;
+        }>;
+        expect(toolResultMsg.length).toBe(2);
+        expect(toolResultMsg[0]!.type).toBe('tool_result');
+        expect(toolResultMsg[0]!.tool_use_id).toBe('tc_1');
+        expect(toolResultMsg[1]!.type).toBe('tool_result');
+        expect(toolResultMsg[1]!.tool_use_id).toBe('tc_2');
+      });
+
+      it('should handle fork after multi-turn agentic loop with tool calls', async () => {
+        // Turn 1: User asks, assistant uses tools
+        await store.append({
+          sessionId,
+          type: 'message.user',
+          payload: { content: 'What is in these files?', turn: 1 },
+        });
+
+        await store.append({
+          sessionId,
+          type: 'message.assistant',
+          payload: {
+            content: [
+              { type: 'text', text: 'Let me check.' },
+              { type: 'tool_use', id: 'tc_1', name: 'Read', input: { file_path: 'x.ts' } },
+            ],
+            turn: 1,
+          },
+        });
+
+        await store.append({
+          sessionId,
+          type: 'tool.result',
+          payload: { toolCallId: 'tc_1', content: 'File X content' },
+        });
+
+        // Turn 2: Assistant continues, uses more tools
+        await store.append({
+          sessionId,
+          type: 'message.assistant',
+          payload: {
+            content: [
+              { type: 'text', text: 'X is interesting, let me check Y.' },
+              { type: 'tool_use', id: 'tc_2', name: 'Read', input: { file_path: 'y.ts' } },
+            ],
+            turn: 2,
+          },
+        });
+
+        await store.append({
+          sessionId,
+          type: 'tool.result',
+          payload: { toolCallId: 'tc_2', content: 'File Y content' },
+        });
+
+        // Turn 3: Final response
+        const finalResponse = await store.append({
+          sessionId,
+          type: 'message.assistant',
+          payload: {
+            content: [{ type: 'text', text: 'Here is what I found in both files...' }],
+            turn: 3,
+          },
+        });
+
+        // Fork from final response
+        const forkResult = await store.fork(finalResponse.id);
+
+        const state = await store.getStateAtHead(forkResult.session.id);
+
+        // Should have proper alternating structure:
+        // user -> assistant(tool_use) -> user(tool_result) -> assistant(tool_use) -> user(tool_result) -> assistant(final)
+        expect(state.messages.length).toBe(6);
+        expect(state.messages[0]!.role).toBe('user');
+        expect(state.messages[1]!.role).toBe('assistant'); // tool_use tc_1
+        expect(state.messages[2]!.role).toBe('user'); // tool_result tc_1
+        expect(state.messages[3]!.role).toBe('assistant'); // tool_use tc_2
+        expect(state.messages[4]!.role).toBe('user'); // tool_result tc_2
+        expect(state.messages[5]!.role).toBe('assistant'); // final response
+
+        // Verify tool results are properly included
+        const toolResult1 = state.messages[2]!.content as Array<{ type: string; tool_use_id: string }>;
+        expect(toolResult1[0]!.type).toBe('tool_result');
+        expect(toolResult1[0]!.tool_use_id).toBe('tc_1');
+
+        const toolResult2 = state.messages[4]!.content as Array<{ type: string; tool_use_id: string }>;
+        expect(toolResult2[0]!.type).toBe('tool_result');
+        expect(toolResult2[0]!.tool_use_id).toBe('tc_2');
+      });
     });
   });
 });

@@ -212,6 +212,20 @@ export interface MessageUpdateEvent extends BaseTronEvent {
 /**
  * Tool execution events
  */
+/**
+ * Tool use batch event - emitted BEFORE tool execution with ALL tool_use blocks
+ * from the model's response. This allows tracking all tool intents before execution starts.
+ */
+export interface ToolUseBatchEvent extends BaseTronEvent {
+  type: 'tool_use_batch';
+  /** All tool_use blocks from the model's response */
+  toolCalls: Array<{
+    id: string;
+    name: string;
+    arguments: Record<string, unknown>;
+  }>;
+}
+
 export interface ToolExecutionStartEvent extends BaseTronEvent {
   type: 'tool_execution_start';
   toolCallId: string;
@@ -443,6 +457,7 @@ export type TronEvent =
   | TurnStartEvent
   | TurnEndEvent
   | MessageUpdateEvent
+  | ToolUseBatchEvent
   | ToolExecutionStartEvent
   | ToolExecutionUpdateEvent
   | ToolExecutionEndEvent
