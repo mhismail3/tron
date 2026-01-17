@@ -65,9 +65,14 @@ struct InputBar: View {
     @State private var skillMentionQuery = ""
     @State private var isMicPulsing = false
     /// Controls entrance morph animation - starts false, animates to true after view appears
-    /// When false: docks visible, buttons invisible (morphed into text field)
-    /// When true: docks invisible, buttons visible (morphed out from text field)
+    /// When false: docks visible (inside text field), buttons hidden
+    /// When true: buttons visible (morphed out), docks hidden
+    /// matchedGeometryEffect creates smooth morph between dock and button positions
     @State private var hasAppeared = false
+    /// Tracks if attachment button should be visible (for morph animation)
+    @State private var showAttachmentButton = false
+    /// Tracks if mic button should be visible (for morph animation)
+    @State private var showMicButton = false
     @Namespace private var actionButtonNamespace
     @Namespace private var modelPillNamespace
     @Namespace private var tokenPillNamespace
@@ -104,34 +109,35 @@ struct InputBar: View {
                 .transition(.opacity)
 
             // Input row - floating liquid glass elements with morph animations
-            // Buttons morph OUT from text field edges when hasAppeared becomes true
-            // Docks (inside text field) and buttons both always in layout for smooth morphing
+            // Buttons morph OUT from text field edges via matchedGeometryEffect
+            // Conditional rendering triggers the morph: when button appears, dock disappears
             HStack(alignment: .bottom, spacing: 12) {
                 // Attachment button - morphs out from left edge of text field
-                attachmentButtonGlass
-                    .matchedGeometryEffect(id: "attachmentMorph", in: attachmentButtonNamespace, isSource: hasAppeared)
-                    .opacity(hasAppeared ? 1 : 0)
-                    .allowsHitTesting(hasAppeared)
+                if showAttachmentButton {
+                    attachmentButtonGlass
+                        .matchedGeometryEffect(id: "attachmentMorph", in: attachmentButtonNamespace)
+                        .transition(.scale(scale: 0.8).combined(with: .opacity))
+                }
 
-                // Text field with glass background and morph dock points
+                // Text field with glass background
                 textFieldGlass
-                    .opacity(hasAppeared ? 1 : 0.3)
                     .overlay(alignment: .leading) {
-                        // Attachment dock - morph origin point inside text field
-                        attachmentButtonDock
-                            .matchedGeometryEffect(id: "attachmentMorph", in: attachmentButtonNamespace, isSource: !hasAppeared)
-                            .opacity(hasAppeared ? 0 : 1)
+                        // Attachment dock - morph origin inside text field (when button hidden)
+                        if !showAttachmentButton {
+                            attachmentButtonDock
+                                .matchedGeometryEffect(id: "attachmentMorph", in: attachmentButtonNamespace)
+                        }
                     }
                     .overlay(alignment: .trailing) {
-                        // Mic dock - morph origin point inside text field
+                        // Mic dock - morph origin inside text field (when button hidden)
                         HStack(spacing: 8) {
-                            // Action button dock (when not showing action button)
                             if !shouldShowActionButton {
                                 actionButtonDock
                             }
-                            micButtonDock
-                                .matchedGeometryEffect(id: "micMorph", in: micButtonNamespace, isSource: !hasAppeared)
-                                .opacity(hasAppeared ? 0 : 1)
+                            if !showMicButton {
+                                micButtonDock
+                                    .matchedGeometryEffect(id: "micMorph", in: micButtonNamespace)
+                            }
                         }
                         .padding(.trailing, 8)
                     }
@@ -139,17 +145,18 @@ struct InputBar: View {
                 // Send/Abort button - liquid glass (standard show/hide, not morph)
                 if shouldShowActionButton {
                     actionButtonGlass
-                        .opacity(hasAppeared ? 1 : 0)
                         .transition(.scale(scale: 0.6).combined(with: .opacity))
                 }
 
                 // Mic button - morphs out from right edge of text field
-                micButtonGlass
-                    .matchedGeometryEffect(id: "micMorph", in: micButtonNamespace, isSource: hasAppeared)
-                    .opacity(hasAppeared ? 1 : 0)
-                    .allowsHitTesting(hasAppeared)
+                if showMicButton {
+                    micButtonGlass
+                        .matchedGeometryEffect(id: "micMorph", in: micButtonNamespace)
+                        .transition(.scale(scale: 0.8).combined(with: .opacity))
+                }
             }
-            .animation(.spring(response: 0.4, dampingFraction: 0.8), value: hasAppeared)
+            .animation(.spring(response: 0.4, dampingFraction: 0.8), value: showAttachmentButton)
+            .animation(.spring(response: 0.4, dampingFraction: 0.8), value: showMicButton)
             .animation(.tronStandard, value: shouldShowActionButton)
             .padding(.horizontal, 16)
             .padding(.bottom, 8)
@@ -222,11 +229,31 @@ struct InputBar: View {
             maxSelectionCount: 5,
             matching: .images
         )
-        // Entrance animation - animate in after view appears
+        // Entrance morph animation - buttons morph out from text field
         .onAppear {
-            // Small delay to ensure navigation animation completes first
+            // Reset state for fresh animation
+            showAttachmentButton = false
+            showMicButton = false
+            hasAppeared = false
+
+            // Staggered morph sequence after navigation completes
             Task { @MainActor in
+                // Wait for navigation to complete
                 try? await Task.sleep(nanoseconds: 150_000_000) // 150ms
+
+                // 1. Attachment button morphs out from left
+                withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) {
+                    showAttachmentButton = true
+                }
+
+                // 2. Short delay then mic button morphs out from right
+                try? await Task.sleep(nanoseconds: 80_000_000) // 80ms
+                withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) {
+                    showMicButton = true
+                }
+
+                // 3. Mark hasAppeared for pills
+                try? await Task.sleep(nanoseconds: 50_000_000) // 50ms
                 withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
                     hasAppeared = true
                 }
@@ -234,6 +261,8 @@ struct InputBar: View {
         }
         .onDisappear {
             // Reset for next entrance
+            showAttachmentButton = false
+            showMicButton = false
             hasAppeared = false
         }
     }
@@ -1312,7 +1341,7 @@ struct InputBar: View {
     }
 
     private var shouldShowMicButton: Bool {
-        true // Always show mic button - morph animation handles entrance
+        showMicButton // Controlled by entrance animation
     }
 
     private var shouldShowTrailingDock: Bool {
