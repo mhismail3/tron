@@ -67,7 +67,6 @@ struct InputBar: View {
     // Buttons always visible - no intro animation to avoid layout shifts
     @State private var showMicButton = true
     @State private var showAttachmentButton = true
-    @State private var reasoningPillTask: Task<Void, Never>?
     @Namespace private var actionButtonNamespace
     @Namespace private var modelPillNamespace
     @Namespace private var tokenPillNamespace
@@ -143,10 +142,6 @@ struct InputBar: View {
             .animation(.tronStandard, value: shouldShowActionButton)
             .animation(micButtonAnimation, value: shouldShowMicButton)
         }
-        .onDisappear {
-            reasoningPillTask?.cancel()
-            reasoningPillTask = nil
-        }
         // Block any focus attempts immediately after agent finishes
         .onChange(of: isFocused) { _, newValue in
             if newValue && Date() < blockFocusUntil {
@@ -163,30 +158,9 @@ struct InputBar: View {
                 blockFocusUntil = Date().addingTimeInterval(0.5)
             }
         }
-        // Animate reasoning pill when model changes or first loads
-        .onChange(of: currentModelInfo?.id) { oldModelId, newModelId in
-            if currentModelInfo?.supportsReasoning == true {
-                // Model supports reasoning - trigger animation
-                // Works for both initial load and model switches
-                triggerReasoningPillAnimation()
-            } else if oldModelId != nil {
-                // Only hide if we're switching away from a model (not initial nil state)
-                hideReasoningPill()
-            }
-        }
-        // Also check reasoning pill when model pill appears (handles initial load timing)
-        .onChange(of: showModelPill) { _, isShowing in
-            if isShowing && currentModelInfo?.supportsReasoning == true && !showReasoningPill {
-                triggerReasoningPillAnimation()
-            }
-        }
-        // Handle case where model info arrives after model pill is already shown
+        // Update animation coordinator when model changes (for legacy animation support)
         .onChange(of: currentModelInfo?.supportsReasoning) { _, supportsReasoning in
-            if supportsReasoning == true && showModelPill && !showReasoningPill {
-                triggerReasoningPillAnimation()
-            } else if supportsReasoning != true && showReasoningPill {
-                hideReasoningPill()
-            }
+            animationCoordinator?.updateReasoningSupport(supportsReasoning == true)
         }
         // Detect @ mentions for skill popup
         .onChange(of: text) { _, newText in
@@ -551,110 +525,13 @@ struct InputBar: View {
     }
 
     // MARK: - Status Pills Row (iOS 26 Liquid Glass) - Legacy
+    // NOTE: This view is deprecated - use statusPillsColumn instead
+    // Kept for reference but not used in the main layout
 
     private var statusPillsRow: some View {
         HStack {
             Spacer()
-            VStack(alignment: .trailing, spacing: 8) {
-                // Model picker - iOS 26 fix: Use NotificationCenter to decouple from state
-                // Order: Legacy (top) → Codex → Anthropic 4.5 (bottom, closest to thumb)
-                if !modelName.isEmpty && showModelPill {
-                Menu {
-                    // Anthropic 4.5 models at top (closest to thumb when menu opens upward)
-                    ForEach(latestAnthropicModels) { model in
-                        Button { NotificationCenter.default.post(name: .modelPickerAction, object: model) } label: {
-                            Label(model.formattedModelName, systemImage: "sparkles")
-                        }
-                    }
-                    Divider()
-
-                    // OpenAI Codex models in middle
-                    if !codexModels.isEmpty {
-                        ForEach(codexModels) { model in
-                            Button { NotificationCenter.default.post(name: .modelPickerAction, object: model) } label: {
-                                Label(model.formattedModelName, systemImage: "bolt")
-                            }
-                        }
-                        Divider()
-                    }
-
-                    // Legacy models at bottom (furthest from thumb)
-                    if !legacyModels.isEmpty {
-                        ForEach(legacyModels) { model in
-                            Button { NotificationCenter.default.post(name: .modelPickerAction, object: model) } label: {
-                                Label(model.formattedModelName, systemImage: "clock")
-                            }
-                        }
-                    }
-                } label: {
-                    HStack(spacing: 4) {
-                        Image(systemName: "cpu")
-                            .font(.system(size: 9, weight: .medium))
-                        Text(modelName.shortModelName)
-                            .font(.system(size: 10, weight: .medium, design: .monospaced))
-                        Image(systemName: "chevron.up.chevron.down")
-                            .font(.system(size: 8, weight: .medium))
-                    }
-                    .foregroundStyle(.tronEmerald)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 5)
-                    .background {
-                        Capsule()
-                            .fill(.clear)
-                            .glassEffect(.regular.tint(Color.tronPhthaloGreen.opacity(0.35)), in: .capsule)
-                    }
-                    .contentShape(Capsule())
-                }
-            }
-
-            // Reasoning level picker (for OpenAI Codex models)
-            // iOS 26 fix: Inline Menu with NotificationCenter (same pattern as model picker)
-            if currentModelInfo?.supportsReasoning == true, showReasoningPill {
-                Menu {
-                    Button { NotificationCenter.default.post(name: .reasoningLevelAction, object: "low") } label: {
-                        Label("Low", systemImage: "hare")
-                    }
-                    Button { NotificationCenter.default.post(name: .reasoningLevelAction, object: "medium") } label: {
-                        Label("Medium", systemImage: "brain")
-                    }
-                    Button { NotificationCenter.default.post(name: .reasoningLevelAction, object: "high") } label: {
-                        Label("High", systemImage: "brain.head.profile")
-                    }
-                    Button { NotificationCenter.default.post(name: .reasoningLevelAction, object: "xhigh") } label: {
-                        Label("Max", systemImage: "sparkles")
-                    }
-                } label: {
-                    HStack(spacing: 4) {
-                        Image(systemName: reasoningLevelIcon(reasoningLevel))
-                            .font(.system(size: 9, weight: .medium))
-                        Text(reasoningLevelLabel(reasoningLevel))
-                            .font(.system(size: 10, weight: .medium, design: .monospaced))
-                        Image(systemName: "chevron.up.chevron.down")
-                            .font(.system(size: 8, weight: .medium))
-                    }
-                    .foregroundStyle(reasoningLevelColor(reasoningLevel))
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 5)
-                    .background {
-                        Capsule()
-                            .fill(.clear)
-                            .glassEffect(.regular.tint(Color.tronPhthaloGreen.opacity(0.35)), in: .capsule)
-                    }
-                    .contentShape(Capsule())
-                }
-                .matchedGeometryEffect(id: "reasoningPillMorph", in: reasoningPillNamespace)
-                .transition(.asymmetric(
-                    insertion: .scale(scale: 0.6, anchor: .leading).combined(with: .opacity),
-                    removal: .scale(scale: 0.8).combined(with: .opacity)
-                ))
-            }
-
-                // Token stats pill with liquid glass and chevrons
-                if showTokenPill {
-                    tokenStatsPillWithChevrons
-                        .matchedGeometryEffect(id: "tokenPillMorph", in: tokenPillNamespace)
-                }
-            }
+            statusPillsColumn
         }
     }
 
@@ -1453,49 +1330,15 @@ struct InputBar: View {
     }
 
     /// Trigger reasoning pill animation when switching to a model that supports reasoning
+    /// NOTE: Now just delegates to coordinator - pills are data-driven via effectiveShowReasoningPill
     func triggerReasoningPillAnimation() {
-        // Use coordinator if available
-        if let coordinator = animationCoordinator {
-            coordinator.updateReasoningSupport(true)
-            return
-        }
-
-        // Legacy local animation
-        reasoningPillTask?.cancel()
-        reasoningPillTask = Task { @MainActor in
-            // Hide first if already showing
-            if showReasoningPill {
-                withAnimation(reasoningPillAnimation) {
-                    showReasoningPill = false
-                }
-                try? await Task.sleep(nanoseconds: 100_000_000)
-            }
-
-            // Wait a beat then show
-            try? await Task.sleep(nanoseconds: 250_000_000) // 250ms delay after model change
-            guard !Task.isCancelled else { return }
-
-            if currentModelInfo?.supportsReasoning == true {
-                withAnimation(reasoningPillAnimation) {
-                    showReasoningPill = true
-                }
-            }
-        }
+        animationCoordinator?.updateReasoningSupport(true)
     }
 
     /// Hide reasoning pill when switching away from a reasoning model
+    /// NOTE: Now just delegates to coordinator - pills are data-driven via effectiveShowReasoningPill
     func hideReasoningPill() {
-        // Use coordinator if available
-        if let coordinator = animationCoordinator {
-            coordinator.updateReasoningSupport(false)
-            return
-        }
-
-        // Legacy local animation
-        reasoningPillTask?.cancel()
-        withAnimation(reasoningPillAnimation) {
-            showReasoningPill = false
-        }
+        animationCoordinator?.updateReasoningSupport(false)
     }
 }
 
