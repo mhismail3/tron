@@ -609,4 +609,108 @@ final class EventDatabaseTests: XCTestCase {
         XCTAssertTrue(analytics.turns.first?.errors.contains("Something went wrong") ?? false)
         XCTAssertTrue(analytics.turns.first?.errors.contains("Rate limit exceeded") ?? false)
     }
+
+    func testConsolidatedAnalyticsCostExtraction() {
+        // Test that cost is properly extracted from stream.turn_end events
+        // including handling of Int vs Double type (JSON may serialize 0.0 as 0)
+        let events = [
+            SessionEvent(id: "e1", parentId: nil, sessionId: "s1", workspaceId: "/test", type: "message.assistant", timestamp: "2024-01-01T00:01:00Z", sequence: 1, payload: [
+                "turn": AnyCodable(1),
+                "model": AnyCodable("claude-sonnet-4"),
+                "tokenUsage": AnyCodable(["inputTokens": 1000, "outputTokens": 500])
+            ]),
+            // Cost as Double (normal case)
+            SessionEvent(id: "e2", parentId: "e1", sessionId: "s1", workspaceId: "/test", type: "stream.turn_end", timestamp: "2024-01-01T00:02:00Z", sequence: 2, payload: [
+                "turn": AnyCodable(1),
+                "cost": AnyCodable(0.0105),  // Double
+                "tokenUsage": AnyCodable(["inputTokens": 1000, "outputTokens": 500])
+            ]),
+            SessionEvent(id: "e3", parentId: "e2", sessionId: "s1", workspaceId: "/test", type: "message.assistant", timestamp: "2024-01-01T00:03:00Z", sequence: 3, payload: [
+                "turn": AnyCodable(2),
+                "model": AnyCodable("claude-sonnet-4"),
+                "tokenUsage": AnyCodable(["inputTokens": 2000, "outputTokens": 1000])
+            ]),
+            // Cost as Int (edge case when cost is 0)
+            SessionEvent(id: "e4", parentId: "e3", sessionId: "s1", workspaceId: "/test", type: "stream.turn_end", timestamp: "2024-01-01T00:04:00Z", sequence: 4, payload: [
+                "turn": AnyCodable(2),
+                "cost": AnyCodable(0),  // Int (JSON serializes 0.0 as 0)
+                "tokenUsage": AnyCodable(["inputTokens": 2000, "outputTokens": 1000])
+            ])
+        ]
+
+        let analytics = ConsolidatedAnalytics(from: events)
+
+        XCTAssertEqual(analytics.totalTurns, 2)
+        // First turn should have the Double cost
+        XCTAssertEqual(analytics.turns[0].cost, 0.0105, accuracy: 0.0001)
+        // Second turn should have 0 cost (extracted from Int)
+        XCTAssertEqual(analytics.turns[1].cost, 0.0, accuracy: 0.0001)
+    }
+
+    func testConsolidatedAnalyticsCacheTokens() {
+        // Test that cache tokens are properly tracked and affect cost calculation
+        let events = [
+            SessionEvent(id: "e1", parentId: nil, sessionId: "s1", workspaceId: "/test", type: "message.assistant", timestamp: "2024-01-01T00:01:00Z", sequence: 1, payload: [
+                "turn": AnyCodable(1),
+                "model": AnyCodable("claude-sonnet-4"),
+                "tokenUsage": AnyCodable([
+                    "inputTokens": 10000,
+                    "outputTokens": 500,
+                    "cacheReadTokens": 8000,
+                    "cacheCreationTokens": 1000
+                ])
+            ]),
+            SessionEvent(id: "e2", parentId: "e1", sessionId: "s1", workspaceId: "/test", type: "stream.turn_end", timestamp: "2024-01-01T00:02:00Z", sequence: 2, payload: [
+                "turn": AnyCodable(1),
+                // No cost provided - should be calculated from tokens
+                "tokenUsage": AnyCodable([
+                    "inputTokens": 10000,
+                    "outputTokens": 500,
+                    "cacheReadTokens": 8000,
+                    "cacheCreationTokens": 1000
+                ])
+            ])
+        ]
+
+        let analytics = ConsolidatedAnalytics(from: events)
+
+        XCTAssertEqual(analytics.totalTurns, 1)
+        let turn = analytics.turns[0]
+
+        // Verify cache tokens are tracked
+        XCTAssertEqual(turn.cacheReadTokens, 8000)
+        XCTAssertEqual(turn.cacheCreationTokens, 1000)
+
+        // Cost should be calculated with cache pricing:
+        // Base input: (10000 - 8000 - 1000) = 1000 tokens @ $3/M = $0.003
+        // Cache creation: 1000 tokens @ $3/M * 1.25 = $0.00375
+        // Cache read: 8000 tokens @ $3/M * 0.1 = $0.0024
+        // Output: 500 tokens @ $15/M = $0.0075
+        // Total: $0.003 + $0.00375 + $0.0024 + $0.0075 = $0.01665
+        XCTAssertEqual(turn.cost, 0.01665, accuracy: 0.001)
+    }
+
+    func testConsolidatedAnalyticsCostFallback() {
+        // Test that cost is calculated from tokens when not provided in event
+        let events = [
+            SessionEvent(id: "e1", parentId: nil, sessionId: "s1", workspaceId: "/test", type: "message.assistant", timestamp: "2024-01-01T00:01:00Z", sequence: 1, payload: [
+                "turn": AnyCodable(1),
+                "model": AnyCodable("claude-sonnet-4"),
+                "tokenUsage": AnyCodable(["inputTokens": 1000000, "outputTokens": 100000])
+            ]),
+            // No cost in stream.turn_end - should calculate from tokens
+            SessionEvent(id: "e2", parentId: "e1", sessionId: "s1", workspaceId: "/test", type: "stream.turn_end", timestamp: "2024-01-01T00:02:00Z", sequence: 2, payload: [
+                "turn": AnyCodable(1),
+                "tokenUsage": AnyCodable(["inputTokens": 1000000, "outputTokens": 100000])
+            ])
+        ]
+
+        let analytics = ConsolidatedAnalytics(from: events)
+
+        // Cost should be calculated:
+        // Input: 1M tokens @ $3/M = $3.00
+        // Output: 100K tokens @ $15/M = $1.50
+        // Total: $4.50
+        XCTAssertEqual(analytics.totalCost, 4.50, accuracy: 0.01)
+    }
 }
