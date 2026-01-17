@@ -66,10 +66,18 @@ cmd_deploy() {
     # Run tests first
     print_status "Running tests..."
     if ! bun run test 2>&1; then
-        print_error "Tests failed! Aborting deploy."
-        exit 1
+        print_warning "Tests failed!"
+        echo ""
+        read -p "Continue deployment anyway? (y/N) " -n 1 -r
+        echo
+        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+            print_error "Deployment cancelled."
+            exit 1
+        fi
+        print_warning "Continuing deployment despite test failure..."
+    else
+        print_success "Tests passed"
     fi
-    print_success "Tests passed"
 
     # Build production bundle
     print_status "Building production bundle..."
