@@ -525,8 +525,11 @@ struct ChatView: View {
                                     }
                                 )
                                 .id(message.id)
+                                // Entrance animation - fade in when view appears
+                                .opacity(showEntryContent ? 1 : 0)
                                 .transition(.opacity.combined(with: .scale(scale: 0.98, anchor: .bottom)))
                             }
+                            .animation(.easeOut(duration: 0.3), value: showEntryContent)
                             .animation(.easeOut(duration: 0.25), value: viewModel.messages.count)
 
                             if viewModel.isProcessing && viewModel.messages.last?.isStreaming != true {

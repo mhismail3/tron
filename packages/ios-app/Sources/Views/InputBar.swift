@@ -64,9 +64,12 @@ struct InputBar: View {
     @State private var showSkillMentionPopup = false
     @State private var skillMentionQuery = ""
     @State private var isMicPulsing = false
-    // Buttons always visible - no intro animation to avoid layout shifts
+    // Buttons always visible in layout - no conditional rendering to avoid layout shifts
+    // Entrance animation controlled by hasAppeared state
     @State private var showMicButton = true
     @State private var showAttachmentButton = true
+    /// Controls entrance animation - starts false, animates to true after view appears
+    @State private var hasAppeared = false
     @Namespace private var actionButtonNamespace
     @Namespace private var modelPillNamespace
     @Namespace private var tokenPillNamespace
@@ -103,28 +106,38 @@ struct InputBar: View {
                 .transition(.opacity)
 
             // Input row - floating liquid glass elements
+            // Entrance animation controlled by hasAppeared
             HStack(alignment: .bottom, spacing: 12) {
                 // Attachment button - liquid glass (morphs in from left)
                 if showAttachmentButton {
                     attachmentButtonGlass
+                        .opacity(hasAppeared ? 1 : 0)
+                        .scaleEffect(hasAppeared ? 1 : 0.6)
                         .transition(.scale(scale: 0.6).combined(with: .opacity))
                 }
 
                 // Text field with glass background
                 textFieldGlass
+                    .opacity(hasAppeared ? 1 : 0)
+                    .scaleEffect(hasAppeared ? 1 : 0.95)
 
                 // Send/Abort button - liquid glass
                 if shouldShowActionButton {
                     actionButtonGlass
+                        .opacity(hasAppeared ? 1 : 0)
+                        .scaleEffect(hasAppeared ? 1 : 0.6)
                         .transition(.scale(scale: 0.6).combined(with: .opacity))
                 }
 
                 // Mic button - liquid glass
                 if shouldShowMicButton {
                     micButtonGlass
+                        .opacity(hasAppeared ? 1 : 0)
+                        .scaleEffect(hasAppeared ? 1 : 0.6)
                         .transition(.scale(scale: 0.6).combined(with: .opacity))
                 }
             }
+            .animation(.spring(response: 0.35, dampingFraction: 0.85), value: hasAppeared)
             .padding(.horizontal, 16)
             .padding(.bottom, 8)
             .overlay(alignment: .topLeading) {
@@ -210,6 +223,20 @@ struct InputBar: View {
             maxSelectionCount: 5,
             matching: .images
         )
+        // Entrance animation - animate in after view appears
+        .onAppear {
+            // Small delay to ensure navigation animation completes first
+            Task { @MainActor in
+                try? await Task.sleep(nanoseconds: 150_000_000) // 150ms
+                withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
+                    hasAppeared = true
+                }
+            }
+        }
+        .onDisappear {
+            // Reset for next entrance
+            hasAppeared = false
+        }
     }
 
     // MARK: - Model Categorization
@@ -414,21 +441,24 @@ struct InputBar: View {
     /// Pill order from top to bottom: reasoning → model → token (context)
     /// IMPORTANT: All pills are ALWAYS in layout to maintain stable height
     /// Visibility is controlled via opacity to prevent safeAreaInset changes
+    /// Entrance animation controlled by hasAppeared state
     private var statusPillsColumn: some View {
         VStack(alignment: .trailing, spacing: 8) {
             // Reasoning level picker - always in layout, opacity-controlled
             reasoningLevelMenu
-                .opacity(effectiveShowReasoningPill ? 1 : 0)
-                .allowsHitTesting(effectiveShowReasoningPill)
+                .opacity(hasAppeared && effectiveShowReasoningPill ? 1 : 0)
+                .allowsHitTesting(hasAppeared && effectiveShowReasoningPill)
 
             // Model picker - always in layout, opacity-controlled
             modelPickerMenu
-                .opacity(effectiveShowModelPill ? 1 : 0)
-                .allowsHitTesting(effectiveShowModelPill)
+                .opacity(hasAppeared && effectiveShowModelPill ? 1 : 0)
+                .allowsHitTesting(hasAppeared && effectiveShowModelPill)
 
-            // Token stats pill - always visible
+            // Token stats pill - always in layout, opacity-controlled for entrance
             tokenStatsPillWithChevrons
+                .opacity(hasAppeared ? 1 : 0)
         }
+        .animation(.easeOut(duration: 0.2), value: hasAppeared)
         .animation(.easeOut(duration: 0.2), value: effectiveShowModelPill)
         .animation(.easeOut(duration: 0.2), value: effectiveShowReasoningPill)
     }
