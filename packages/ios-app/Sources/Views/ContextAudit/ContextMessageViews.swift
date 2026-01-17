@@ -1,0 +1,382 @@
+import SwiftUI
+
+// MARK: - Detailed Message Row
+
+@available(iOS 26.0, *)
+struct DetailedMessageRow: View {
+    let message: DetailedMessageInfo
+    let isLast: Bool
+    var onDelete: (() -> Void)?
+
+    @State private var isExpanded = false
+
+    private var icon: String {
+        switch message.role {
+        case "user": return "person.fill"
+        case "assistant": return "sparkles"
+        case "toolResult": return message.isError == true ? "xmark.circle.fill" : "checkmark.circle.fill"
+        default: return "questionmark.circle"
+        }
+    }
+
+    private var iconColor: Color {
+        switch message.role {
+        case "user": return .tronBlue
+        case "assistant": return .tronEmerald
+        case "toolResult": return message.isError == true ? .tronError : .tronCyan
+        default: return .gray
+        }
+    }
+
+    private var title: String {
+        switch message.role {
+        case "user": return "User"
+        case "assistant":
+            if let toolCalls = message.toolCalls, !toolCalls.isEmpty {
+                let names = toolCalls.prefix(2).map { $0.name }
+                let suffix = toolCalls.count > 2 ? " +\(toolCalls.count - 2)" : ""
+                return names.joined(separator: ", ") + suffix
+            }
+            return "Assistant"
+        case "toolResult": return message.isError == true ? "Error" : "Result"
+        default: return "Message"
+        }
+    }
+
+    private func formatTokens(_ count: Int) -> String {
+        if count >= 1000 {
+            return String(format: "%.1fk", Double(count) / 1000)
+        }
+        return "\(count)"
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            // Header row (tappable)
+            HStack(alignment: .top, spacing: 10) {
+                Image(systemName: icon)
+                    .font(.system(size: 12))
+                    .foregroundStyle(iconColor)
+                    .frame(width: 18)
+                    .padding(.top, 2)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title)
+                        .font(.system(size: 12, weight: .medium, design: .monospaced))
+                        .foregroundStyle(iconColor)
+
+                    // Summary fades out when expanded
+                    Text(message.summary)
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundStyle(.white.opacity(0.5))
+                        .lineLimit(1)
+                        .opacity(isExpanded ? 0 : 1)
+                        .frame(height: isExpanded ? 0 : nil, alignment: .top)
+                        .clipped()
+                }
+
+                Spacer()
+
+                Text(formatTokens(message.tokens))
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundStyle(.white.opacity(0.5))
+                    .padding(.top, 2)
+
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.4))
+                    .rotationEffect(.degrees(isExpanded ? -180 : 0))
+                    .animation(.spring(response: 0.35, dampingFraction: 0.8), value: isExpanded)
+                    .padding(.top, 4)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
+            .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .onTapGesture {
+                withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
+                    isExpanded.toggle()
+                }
+            }
+
+            // Expandable content
+            if isExpanded {
+                VStack(alignment: .leading, spacing: 8) {
+                    // Show tool calls if present
+                    if let toolCalls = message.toolCalls, !toolCalls.isEmpty {
+                        ForEach(toolCalls) { toolCall in
+                            VStack(alignment: .leading, spacing: 4) {
+                                HStack {
+                                    Image(systemName: "hammer.fill")
+                                        .font(.system(size: 10))
+                                        .foregroundStyle(.tronAmber)
+                                    Text(toolCall.name)
+                                        .font(.system(size: 11, weight: .medium, design: .monospaced))
+                                        .foregroundStyle(.tronAmber)
+                                    Spacer()
+                                    Text(formatTokens(toolCall.tokens))
+                                        .font(.system(size: 9, design: .monospaced))
+                                        .foregroundStyle(.white.opacity(0.4))
+                                }
+
+                                Text(toolCall.arguments)
+                                    .font(.system(size: 10, design: .monospaced))
+                                    .foregroundStyle(.white.opacity(0.6))
+                                    .lineLimit(5)
+                            }
+                            .padding(8)
+                            .background {
+                                // Lightweight fill instead of glassEffect
+                                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                    .fill(Color.tronAmber.opacity(0.15))
+                            }
+                        }
+                    }
+
+                    // Show text content if present
+                    if !message.content.isEmpty {
+                        ScrollView {
+                            Text(message.content)
+                                .font(.system(size: 10, design: .monospaced))
+                                .foregroundStyle(.white.opacity(0.6))
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(10)
+                                .textSelection(.enabled)
+                        }
+                        .frame(maxHeight: 200)
+                        .background(Color.black.opacity(0.2))
+                        .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+                    }
+                }
+                .padding(.horizontal, 12)
+                .padding(.bottom, 12)
+                            }
+        }
+        .background {
+            // Lightweight fill instead of glassEffect for better animation performance
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(iconColor.opacity(0.15))
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .contextMenu {
+            // Only show delete option if eventId is available (deletable)
+            if onDelete != nil {
+                Button(role: .destructive) {
+                    onDelete?()
+                } label: {
+                    Label("Delete from Context", systemImage: "trash")
+                }
+                .tint(.red)
+            }
+        }
+        // Removed duplicate .animation() - withAnimation in button action handles this
+    }
+}
+
+// MARK: - Messages Container (Collapsible, matching Rules/Skills pattern)
+
+@available(iOS 26.0, *)
+struct MessagesContainer: View {
+    let messages: [DetailedMessageInfo]
+    let totalMessages: Int
+    let totalTokens: Int
+    let hasMoreMessages: Bool
+    var onLoadMore: (() -> Void)?
+    var onDelete: ((String) -> Void)?
+
+    @State private var isExpanded = false
+
+    private func formatTokens(_ count: Int) -> String {
+        if count >= 1000 {
+            return String(format: "%.1fk", Double(count) / 1000)
+        }
+        return "\(count)"
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            // Header row (tappable)
+            HStack {
+                Image(systemName: "message.fill")
+                    .font(.system(size: 14))
+                    .foregroundStyle(.tronBlue)
+
+                Text("Messages")
+                    .font(.system(size: 14, weight: .medium, design: .monospaced))
+                    .foregroundStyle(.tronBlue)
+
+                // Count badge
+                Text("\(totalMessages)")
+                    .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(Color.tronBlue.opacity(0.7))
+                    .clipShape(Capsule())
+
+                Spacer()
+
+                Text(formatTokens(totalTokens))
+                    .font(.system(size: 12, weight: .medium, design: .monospaced))
+                    .foregroundStyle(.white.opacity(0.6))
+
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.4))
+                    .rotationEffect(.degrees(isExpanded ? -180 : 0))
+                    .animation(.spring(response: 0.35, dampingFraction: 0.8), value: isExpanded)
+            }
+            .padding(12)
+            .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .onTapGesture {
+                withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
+                    isExpanded.toggle()
+                }
+            }
+
+            // Expandable content
+            if isExpanded {
+                VStack(spacing: 4) {
+                    if totalMessages == 0 {
+                        Text("No messages in context")
+                            .font(.system(size: 11, design: .monospaced))
+                            .foregroundStyle(.white.opacity(0.4))
+                            .frame(maxWidth: .infinity)
+                            .padding(12)
+                    } else {
+                        LazyVStack(spacing: 4) {
+                            ForEach(messages) { message in
+                                DetailedMessageRow(
+                                    message: message,
+                                    isLast: message.index == messages.last?.index,
+                                    onDelete: message.eventId != nil ? { onDelete?(message.eventId!) } : nil
+                                )
+                            }
+
+                            // Load more button
+                            if hasMoreMessages {
+                                Button {
+                                    onLoadMore?()
+                                } label: {
+                                    HStack {
+                                        Spacer()
+                                        HStack(spacing: 6) {
+                                            Image(systemName: "chevron.down")
+                                                .font(.system(size: 11, weight: .medium))
+                                            Text("Load \(min(10, totalMessages - messages.count)) more")
+                                                .font(.system(size: 11, design: .monospaced))
+                                        }
+                                        .foregroundStyle(.tronBlue)
+                                        Spacer()
+                                    }
+                                    .padding(10)
+                                    .background {
+                                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                            .fill(Color.tronBlue.opacity(0.1))
+                                    }
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                    }
+                }
+                .padding(.horizontal, 10)
+                .padding(.bottom, 10)
+            }
+        }
+        .background {
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(Color.tronBlue.opacity(0.15))
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+    }
+}
+
+// MARK: - Added Skills Container (Collapsible, matching Rules/Skills pattern)
+
+@available(iOS 26.0, *)
+struct AddedSkillsContainer: View {
+    let skills: [AddedSkillInfo]
+    var onDelete: ((String) -> Void)?
+    var onFetchContent: ((String) async -> String?)?
+
+    @State private var isExpanded = false
+
+    /// Estimated tokens for added skills (full SKILL.md content)
+    /// More substantial than skill references since full content is included
+    private var estimatedTokens: Int {
+        // Rough estimate: ~200 tokens per skill for full SKILL.md
+        skills.count * 200
+    }
+
+    private func formatTokens(_ count: Int) -> String {
+        if count >= 1000 {
+            return String(format: "%.1fk", Double(count) / 1000)
+        }
+        return "\(count)"
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            // Header
+            HStack {
+                Image(systemName: "sparkles")
+                    .font(.system(size: 14))
+                    .foregroundStyle(.tronCyan)
+
+                Text("Added Skills")
+                    .font(.system(size: 14, weight: .medium, design: .monospaced))
+                    .foregroundStyle(.tronCyan)
+
+                // Count badge
+                Text("\(skills.count)")
+                    .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(Color.tronCyan.opacity(0.7))
+                    .clipShape(Capsule())
+
+                Spacer()
+
+                Text("~\(formatTokens(estimatedTokens))")
+                    .font(.system(size: 12, weight: .medium, design: .monospaced))
+                    .foregroundStyle(.white.opacity(0.6))
+
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.4))
+                    .rotationEffect(.degrees(isExpanded ? -180 : 0))
+                    .animation(.spring(response: 0.35, dampingFraction: 0.8), value: isExpanded)
+            }
+            .padding(12)
+            .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .onTapGesture {
+                withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
+                    isExpanded.toggle()
+                }
+            }
+
+            // Content
+            if isExpanded {
+                LazyVStack(spacing: 4) {
+                    ForEach(skills) { skill in
+                        AddedSkillRow(
+                            skill: skill,
+                            onDelete: { onDelete?(skill.name) },
+                            onFetchContent: onFetchContent
+                        )
+                    }
+                }
+                .padding(.horizontal, 10)
+                .padding(.bottom, 10)
+            }
+        }
+        .background {
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(Color.tronCyan.opacity(0.15))
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+    }
+}
+
+// MARK: - Analytics Section

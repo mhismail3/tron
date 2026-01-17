@@ -23,7 +23,6 @@ class ChatViewModel: ObservableObject {
     @Published var attachments: [Attachment] = []
     @Published var thinkingText = ""
     @Published var isThinkingExpanded = false
-    @Published var totalTokenUsage: TokenUsage?
     @Published var isRecording = false
     @Published var isTranscribing = false
     @AppStorage("transcriptionModelId") var transcriptionModelId = ""
@@ -31,42 +30,97 @@ class ChatViewModel: ObservableObject {
     @Published var hasMoreMessages = false
     /// Whether currently loading more messages
     @Published var isLoadingMoreMessages = false
-    /// Current model's context window size (from server's model.list)
-    @Published var currentContextWindow: Int = 200_000
 
-    // MARK: - Browser State
+    // MARK: - Context Window (Proxy for backward compatibility)
+
+    /// Total token usage for the session
+    var totalTokenUsage: TokenUsage? {
+        get { contextState.totalTokenUsage }
+        set { contextState.totalTokenUsage = newValue }
+    }
+    /// Current model's context window size (from server's model.list)
+    var currentContextWindow: Int {
+        get { contextState.currentContextWindow }
+        set { contextState.currentContextWindow = newValue }
+    }
+
+    // MARK: - Extracted State Objects
+
+    /// Browser state (frame, status, sheet visibility)
+    let browserState = BrowserState()
+    /// AskUserQuestion state (sheet, current data, answers)
+    let askUserQuestionState = AskUserQuestionState()
+    /// Plan mode state (active, skill name)
+    let planModeState = PlanModeState()
+    /// Context tracking state (tokens, cost, context window)
+    let contextState = ContextTrackingState()
+
+    // MARK: - Browser State (Proxies for backward compatibility)
 
     /// Current browser frame image
-    @Published var browserFrame: UIImage?
+    var browserFrame: UIImage? {
+        get { browserState.browserFrame }
+        set { browserState.browserFrame = newValue }
+    }
     /// Whether to show the browser sheet
-    @Published var showBrowserWindow = false
+    var showBrowserWindow: Bool {
+        get { browserState.showBrowserWindow }
+        set { browserState.showBrowserWindow = newValue }
+    }
     /// Current browser status
-    @Published var browserStatus: BrowserGetStatusResult?
+    var browserStatus: BrowserGetStatusResult? {
+        get { browserState.browserStatus }
+        set { browserState.browserStatus = newValue }
+    }
     /// Whether user manually dismissed browser sheet this turn (prevents auto-reopen)
-    var userDismissedBrowserThisTurn = false
+    var userDismissedBrowserThisTurn: Bool {
+        get { browserState.userDismissedBrowserThisTurn }
+        set { browserState.userDismissedBrowserThisTurn = newValue }
+    }
 
     // MARK: - Safari State (OpenBrowser Tool)
 
     /// URL to open in native Safari (set by OpenBrowser tool)
-    @Published var safariURL: URL?
+    var safariURL: URL? {
+        get { browserState.safariURL }
+        set { browserState.safariURL = newValue }
+    }
 
-    // MARK: - AskUserQuestion State
+    // MARK: - AskUserQuestion State (Proxies for backward compatibility)
 
     /// Whether to show the AskUserQuestion sheet
-    @Published var showAskUserQuestionSheet = false
+    var showAskUserQuestionSheet: Bool {
+        get { askUserQuestionState.showSheet }
+        set { askUserQuestionState.showSheet = newValue }
+    }
     /// Current AskUserQuestion tool data (when sheet is open)
-    @Published var currentAskUserQuestionData: AskUserQuestionToolData?
+    var currentAskUserQuestionData: AskUserQuestionToolData? {
+        get { askUserQuestionState.currentData }
+        set { askUserQuestionState.currentData = newValue }
+    }
     /// Pending answers keyed by question ID
-    @Published var askUserQuestionAnswers: [String: AskUserQuestionAnswer] = [:]
+    var askUserQuestionAnswers: [String: AskUserQuestionAnswer] {
+        get { askUserQuestionState.answers }
+        set { askUserQuestionState.answers = newValue }
+    }
     /// Whether AskUserQuestion was called in the current turn (to suppress subsequent text)
-    var askUserQuestionCalledInTurn = false
+    var askUserQuestionCalledInTurn: Bool {
+        get { askUserQuestionState.calledInTurn }
+        set { askUserQuestionState.calledInTurn = newValue }
+    }
 
-    // MARK: - Plan Mode State
+    // MARK: - Plan Mode State (Proxies for backward compatibility)
 
     /// Whether plan mode is currently active
-    @Published var isPlanModeActive = false
+    var isPlanModeActive: Bool {
+        get { planModeState.isActive }
+        set { if newValue { planModeState.enter(skillName: planModeSkillName ?? "") } else { planModeState.exit() } }
+    }
     /// Name of the skill that activated plan mode
-    @Published var planModeSkillName: String?
+    var planModeSkillName: String? {
+        get { planModeState.skillName }
+        set { if let name = newValue { planModeState.enter(skillName: name) } }
+    }
 
     // MARK: - Internal State (accessible to extensions)
 
@@ -89,15 +143,39 @@ class ChatViewModel: ObservableObject {
     /// Manages text delta batching, thinking content, and backpressure
     let streamingManager = StreamingManager()
     var currentToolMessages: [UUID: ChatMessage] = [:]
-    var accumulatedInputTokens = 0
-    var accumulatedOutputTokens = 0
-    var accumulatedCacheReadTokens = 0
-    var accumulatedCacheCreationTokens = 0
-    var accumulatedCost: Double = 0
+
+    // MARK: - Context Tracking (Proxies for backward compatibility)
+
+    var accumulatedInputTokens: Int {
+        get { contextState.accumulatedInputTokens }
+        set { contextState.accumulatedInputTokens = newValue }
+    }
+    var accumulatedOutputTokens: Int {
+        get { contextState.accumulatedOutputTokens }
+        set { contextState.accumulatedOutputTokens = newValue }
+    }
+    var accumulatedCacheReadTokens: Int {
+        get { contextState.accumulatedCacheReadTokens }
+        set { contextState.accumulatedCacheReadTokens = newValue }
+    }
+    var accumulatedCacheCreationTokens: Int {
+        get { contextState.accumulatedCacheCreationTokens }
+        set { contextState.accumulatedCacheCreationTokens = newValue }
+    }
+    var accumulatedCost: Double {
+        get { contextState.accumulatedCost }
+        set { contextState.accumulatedCost = newValue }
+    }
     /// Last turn's input tokens (represents actual current context size)
-    var lastTurnInputTokens = 0
+    var lastTurnInputTokens: Int {
+        get { contextState.lastTurnInputTokens }
+        set { contextState.lastTurnInputTokens = newValue }
+    }
     /// Previous turn's final input tokens (for computing incremental delta)
-    var previousTurnFinalInputTokens = 0
+    var previousTurnFinalInputTokens: Int {
+        get { contextState.previousTurnFinalInputTokens }
+        set { contextState.previousTurnFinalInputTokens = newValue }
+    }
 
     /// Track tool calls for the current turn (for display purposes)
     var currentTurnToolCalls: [ToolCallRecord] = []

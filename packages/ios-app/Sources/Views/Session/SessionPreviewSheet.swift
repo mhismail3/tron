@@ -1,0 +1,230 @@
+import SwiftUI
+
+// MARK: - Session Preview Sheet
+
+/// Preview a session's history before forking. Shows read-only chat history with Fork/Back options.
+@available(iOS 26.0, *)
+struct SessionPreviewSheet: View {
+    let session: SessionInfo
+    let rpcClient: RPCClient
+    let eventStoreManager: EventStoreManager
+    let onFork: (String) -> Void
+    let onDismiss: () -> Void
+
+    @State private var events: [RawEvent] = []
+    @State private var isLoading = true
+    @State private var loadError: String? = nil
+    @State private var isForking = false
+    @State private var forkError: String? = nil
+
+    var body: some View {
+        NavigationStack {
+            ZStack {
+                if isLoading {
+                    VStack(spacing: 16) {
+                        ProgressView()
+                            .tint(.tronEmerald)
+                        Text("Loading session history...")
+                            .font(.subheadline)
+                            .foregroundStyle(.white.opacity(0.6))
+                    }
+                } else if let error = loadError {
+                    VStack(spacing: 16) {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .font(.largeTitle)
+                            .foregroundStyle(.tronError)
+                        Text("Failed to load history")
+                            .font(.headline)
+                            .foregroundStyle(.white.opacity(0.9))
+                        Text(error)
+                            .font(.subheadline)
+                            .foregroundStyle(.white.opacity(0.6))
+                            .multilineTextAlignment(.center)
+                        Button("Retry") {
+                            Task { await loadHistory() }
+                        }
+                        .foregroundStyle(.tronEmerald)
+                    }
+                    .padding()
+                } else {
+                    historyContent
+                }
+            }
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button { onDismiss() } label: {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 14, weight: .medium))
+                            .foregroundStyle(.tronEmerald)
+                    }
+                }
+                ToolbarItem(placement: .principal) {
+                    VStack(spacing: 2) {
+                        Text(session.displayName)
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundStyle(.tronEmerald)
+                        Text("\(session.messageCount) messages")
+                            .font(.system(size: 10))
+                            .foregroundStyle(.white.opacity(0.5))
+                    }
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    if isForking {
+                        ProgressView()
+                            .tint(.tronEmerald)
+                    } else {
+                        Button {
+                            forkSession()
+                        } label: {
+                            Image(systemName: "arrow.branch")
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundStyle(.tronEmerald)
+                        }
+                    }
+                }
+            }
+        }
+        .task {
+            await loadHistory()
+        }
+        .presentationDetents([.large])
+        .presentationDragIndicator(.hidden)
+        .preferredColorScheme(.dark)
+    }
+
+    // MARK: - History Content
+
+    private var historyContent: some View {
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 8) {
+                // Session info header
+                sessionInfoHeader
+
+                // Messages rendered with MessageBubble for visual parity with ChatView
+                ForEach(displayMessages) { message in
+                    MessageBubble(message: message)
+                }
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+        }
+    }
+
+    private var sessionInfoHeader: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if let dir = session.workingDirectory {
+                HStack(spacing: 6) {
+                    Image(systemName: "folder.fill")
+                        .font(.system(size: 12))
+                        .foregroundStyle(.tronEmerald.opacity(0.7))
+                    Text(dir.replacingOccurrences(of: "/Users/[^/]+/", with: "~/", options: .regularExpression))
+                        .font(.system(size: 12, design: .monospaced))
+                        .foregroundStyle(.white.opacity(0.6))
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
+            }
+
+            HStack(spacing: 12) {
+                HStack(spacing: 4) {
+                    Image(systemName: "cpu")
+                        .font(.system(size: 10))
+                    Text(session.model.shortModelName)
+                        .font(.system(size: 11, weight: .medium, design: .monospaced))
+                }
+                .foregroundStyle(.tronEmerald.opacity(0.8))
+
+                Text(session.formattedDate)
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundStyle(.white.opacity(0.4))
+
+                if session.isActive {
+                    Text("ACTIVE")
+                        .font(.system(size: 9, weight: .bold, design: .monospaced))
+                        .foregroundStyle(.tronEmerald)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(Color.tronEmerald.opacity(0.2))
+                        .clipShape(Capsule())
+                } else {
+                    Text("ENDED")
+                        .font(.system(size: 9, weight: .bold, design: .monospaced))
+                        .foregroundStyle(.white.opacity(0.5))
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(Color.white.opacity(0.1))
+                        .clipShape(Capsule())
+                }
+            }
+        }
+        .padding()
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .glassEffect(.regular.tint(Color.tronPhthaloGreen.opacity(0.35)), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+    }
+
+    // MARK: - Display Messages
+
+    /// Convert raw events to ChatMessage objects using the unified transformer.
+    ///
+    /// This uses UnifiedEventTransformer which provides 1:1 mapping with server events
+    /// and ensures consistent rendering across all views (preview, chat, history).
+    ///
+    /// Key principle: Tool calls come from tool.call events, NOT from tool_use
+    /// blocks embedded in message.assistant events. This eliminates duplication.
+    private var displayMessages: [ChatMessage] {
+        UnifiedEventTransformer.transformPersistedEvents(events)
+    }
+
+    // MARK: - Actions
+
+    private func loadHistory() async {
+        isLoading = true
+        loadError = nil
+
+        do {
+            // Fetch ALL events from server (no type filter) to show complete history
+            let result = try await rpcClient.getEventHistory(
+                sessionId: session.sessionId,
+                types: nil,  // No filter - get everything
+                limit: 1000
+            )
+
+            await MainActor.run {
+                // Store raw events - UnifiedEventTransformer handles sorting and filtering
+                events = result.events
+                isLoading = false
+                logger.debug("Loaded \(result.events.count) events for session \(session.sessionId.prefix(8))", category: .session)
+            }
+        } catch {
+            await MainActor.run {
+                loadError = error.localizedDescription
+                isLoading = false
+            }
+        }
+    }
+
+    private func forkSession() {
+        guard !isForking else { return }
+
+        isForking = true
+        forkError = nil
+
+        Task {
+            do {
+                let newSessionId = try await eventStoreManager.forkSession(session.sessionId, fromEventId: nil)
+
+                await MainActor.run {
+                    isForking = false
+                    onFork(newSessionId)
+                }
+            } catch {
+                await MainActor.run {
+                    isForking = false
+                    forkError = error.localizedDescription
+                }
+            }
+        }
+    }
+}
