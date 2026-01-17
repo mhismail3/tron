@@ -148,7 +148,7 @@ struct ContextAuditView: View {
                                 GlassAction(
                                     title: "Compact Context",
                                     icon: "arrow.down.right.and.arrow.up.left",
-                                    color: .tronSlate,
+                                    color: Color(red: 0.55, green: 0.7, blue: 0.8),
                                     role: .default
                                 ) {
                                     showCompactPopover = false
@@ -1862,22 +1862,23 @@ struct GlassActionSheet: View {
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 12)
                     .padding(.horizontal, 20)
+                    .contentShape(Capsule())
                     .background {
                         Capsule()
                             .fill(.clear)
-                            .glassEffect(.regular.tint(action.color.opacity(0.15)), in: Capsule())
+                            .glassEffect(
+                                .regular.tint(action.color.opacity(action.role == .cancel ? 0.1 : 0.25)),
+                                in: Capsule()
+                            )
                     }
                 }
                 .buttonStyle(.plain)
             }
         }
         .padding(12)
-        .background {
-            RoundedRectangle(cornerRadius: 20, style: .continuous)
-                .fill(.clear)
-                .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
-        }
         .frame(minWidth: 200)
+        .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .presentationBackground(.clear)
     }
 }
 
