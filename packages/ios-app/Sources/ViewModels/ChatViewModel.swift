@@ -189,6 +189,8 @@ class ChatViewModel: ObservableObject {
             // Find and update the streaming message
             if let index = self.messages.firstIndex(where: { $0.id == messageId }) {
                 self.messages[index].content = .streaming(text)
+                // Sync to MessageWindowManager
+                self.messageWindowManager.updateMessage(self.messages[index])
             }
         }
 
@@ -196,6 +198,8 @@ class ChatViewModel: ObservableObject {
             guard let self = self else { return UUID() }
             let message = ChatMessage.streaming()
             self.messages.append(message)
+            // Sync to MessageWindowManager
+            self.messageWindowManager.appendMessage(message)
             return message.id
         }
 
@@ -204,9 +208,13 @@ class ChatViewModel: ObservableObject {
             if let index = self.messages.firstIndex(where: { $0.id == messageId }) {
                 if finalText.isEmpty {
                     self.messages.remove(at: index)
+                    // Sync removal to MessageWindowManager
+                    self.messageWindowManager.removeMessage(id: messageId)
                 } else {
                     self.messages[index].content = .text(finalText)
                     self.messages[index].isStreaming = false
+                    // Sync to MessageWindowManager
+                    self.messageWindowManager.updateMessage(self.messages[index])
                 }
             }
         }
@@ -263,6 +271,9 @@ class ChatViewModel: ObservableObject {
                 tool.result = data.result
                 tool.durationMs = data.durationMs
                 messages[index].content = .toolUse(tool)
+
+                // Sync to MessageWindowManager
+                messageWindowManager.updateMessage(messages[index])
             }
         }
     }
@@ -341,6 +352,25 @@ class ChatViewModel: ObservableObject {
         }
     }
 
+    // MARK: - Windowed Messages (for virtual scrolling)
+
+    /// Use windowed messages for large sessions (150 message memory cap)
+    /// Falls back to regular messages array if window manager not initialized
+    var windowedMessages: [ChatMessage] {
+        let windowed = messageWindowManager.windowedMessages
+        return windowed.isEmpty ? messages : windowed
+    }
+
+    /// Whether more older messages are available (from MessageWindowManager)
+    var hasMoreOlderMessages: Bool {
+        messageWindowManager.hasMoreOlder
+    }
+
+    /// Load older messages through MessageWindowManager
+    func loadOlderMessages() async {
+        await messageWindowManager.loadOlder()
+    }
+
     // MARK: - Message Updates
 
     func updateStreamingMessage(with content: MessageContent) {
@@ -349,33 +379,35 @@ class ChatViewModel: ObservableObject {
             return
         }
         messages[index].content = content
+
+        // Sync to MessageWindowManager
+        messageWindowManager.updateMessage(messages[index])
     }
 
     func finalizeStreamingMessage() {
-        guard let id = streamingMessageId,
-              let index = messages.firstIndex(where: { $0.id == id }) else {
-            return
-        }
+        // Use StreamingManager for finalization
+        let finalText = streamingManager.finalizeStreamingMessage()
 
-        if streamingText.isEmpty {
-            messages.remove(at: index)
-        } else {
-            messages[index].content = .text(streamingText)
-            messages[index].isStreaming = false
-        }
-
+        // Clear legacy state
         streamingMessageId = nil
         streamingText = ""
+
+        // If StreamingManager didn't handle it (already finalized), try legacy cleanup
+        if finalText.isEmpty && streamingMessageId == nil {
+            // Nothing to do - already handled by StreamingManager callbacks
+            return
+        }
     }
 
     /// Force flush any pending text updates (called before completion)
     func flushPendingTextUpdates() {
+        // Use StreamingManager for flushing
+        streamingManager.flushPendingText()
+
+        // Legacy cleanup
         textUpdateTask?.cancel()
         textUpdateTask = nil
-        if !pendingTextDelta.isEmpty {
-            updateStreamingMessage(with: .streaming(streamingText))
-            pendingTextDelta = ""
-        }
+        pendingTextDelta = ""
     }
 
     // MARK: - Error Handling

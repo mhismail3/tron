@@ -579,9 +579,24 @@ struct ChatView: View {
                             ForEach(Array(viewModel.messages.enumerated()), id: \.element.id) { index, message in
                                 // Cascade animation: only show messages up to cascadeVisibleCount
                                 // Messages added after initial load (not in initialMessageIds) show immediately
-                                let shouldShow = cascadeComplete ||
-                                    !initialMessageIds.contains(message.id) ||
+                                let isHistoricalMessage = initialMessageIds.contains(message.id)
+                                let cascadeVisible = cascadeComplete ||
+                                    !isHistoricalMessage ||
                                     index < cascadeVisibleCount
+
+                                // Tool stagger: check if tool is visible via AnimationCoordinator
+                                // Historical tools (from session load) are always visible
+                                let toolStaggerVisible: Bool = {
+                                    // Historical messages bypass tool stagger
+                                    if isHistoricalMessage { return true }
+
+                                    if case .toolUse(let tool) = message.content {
+                                        return viewModel.animationCoordinator.isToolVisible(tool.toolCallId)
+                                    }
+                                    return true // Non-tool messages are always visible
+                                }()
+
+                                let shouldShow = cascadeVisible && toolStaggerVisible
 
                                 if shouldShow {
                                     MessageBubble(

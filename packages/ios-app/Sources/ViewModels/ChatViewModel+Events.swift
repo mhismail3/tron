@@ -13,45 +13,26 @@ extension ChatViewModel {
             return
         }
 
-        // Enforce backpressure limit to prevent memory exhaustion
-        guard streamingText.count + delta.count < Self.maxStreamingTextSize else {
-            logger.warning("Streaming text limit (\(Self.maxStreamingTextSize) bytes) reached, dropping delta", category: .events)
+        // Delegate to StreamingManager for batched processing
+        let accepted = streamingManager.handleTextDelta(delta)
+
+        if !accepted {
+            logger.warning("Streaming text limit reached, dropping delta", category: .events)
             return
         }
 
-        // If there's no active streaming message, create a new one
+        // Keep legacy state in sync for compatibility
+        // (used by handleComplete dashboard update, turn metadata, etc.)
         if streamingMessageId == nil {
-            let newStreamingMessage = ChatMessage.streaming()
-            messages.append(newStreamingMessage)
-            streamingMessageId = newStreamingMessage.id
-            streamingText = ""
-            logger.verbose("Created new streaming message after tool calls id=\(newStreamingMessage.id)", category: .events)
+            streamingMessageId = streamingManager.streamingMessageId
 
             // Track as first text message of this turn if not already set
-            if firstTextMessageIdForTurn == nil {
-                firstTextMessageIdForTurn = newStreamingMessage.id
-                logger.debug("Tracked first text message for turn: \(newStreamingMessage.id)", category: .events)
+            if let id = streamingMessageId, firstTextMessageIdForTurn == nil {
+                firstTextMessageIdForTurn = id
+                logger.debug("Tracked first text message for turn: \(id)", category: .events)
             }
         }
-
-        // Batch text deltas for better performance
-        pendingTextDelta += delta
-        streamingText += delta
-
-        // Cancel any pending update task
-        textUpdateTask?.cancel()
-
-        // Schedule batched update (coalesce rapid updates)
-        textUpdateTask = Task { [weak self] in
-            try? await Task.sleep(nanoseconds: self?.textUpdateInterval ?? 50_000_000)
-            guard !Task.isCancelled else { return }
-
-            await MainActor.run { [weak self] in
-                guard let self = self else { return }
-                self.updateStreamingMessage(with: .streaming(self.streamingText))
-                self.pendingTextDelta = ""
-            }
-        }
+        streamingText = streamingManager.streamingText
 
         logger.verbose("Text delta received: +\(delta.count) chars, total: \(streamingText.count)", category: .events)
     }
@@ -91,6 +72,9 @@ extension ChatViewModel {
         let message = ChatMessage(role: .assistant, content: .toolUse(tool))
         messages.append(message)
         currentToolMessages[message.id] = message
+
+        // Sync to MessageWindowManager for virtual scrolling
+        messageWindowManager.appendMessage(message)
 
         // Track tool call for persistence
         let record = ToolCallRecord(

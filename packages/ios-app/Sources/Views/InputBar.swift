@@ -455,26 +455,53 @@ struct InputBar: View {
 
     /// Status pills column (model + context pills stacked vertically, right-aligned)
     /// Pill order from top to bottom: reasoning → model → token (context)
-    /// This enables chained morph animation where each pill anchors to the one below
+    /// Chained morph animation: each pill grows upward from the one below it
     private var statusPillsColumn: some View {
         VStack(alignment: .trailing, spacing: 8) {
             // Reasoning level picker (for OpenAI Codex models) - appears above model picker
-            // Morphs from model pill anchor
+            // Morphs upward from model pill
             if currentModelInfo?.supportsReasoning == true, effectiveShowReasoningPill {
                 reasoningLevelMenu
+                    .matchedGeometryEffect(id: "reasoningPillMorph", in: reasoningPillNamespace)
+                    .transition(
+                        .asymmetric(
+                            insertion: .scale(scale: 0, anchor: .bottom)
+                                .combined(with: .opacity),
+                            removal: .opacity
+                        )
+                    )
             }
 
-            // Model picker - morphs from token pill anchor
+            // Model picker - morphs upward from token pill
             if !modelName.isEmpty && effectiveShowModelPill {
                 modelPickerMenu
+                    .matchedGeometryEffect(id: "modelPillMorph", in: modelPillNamespace)
+                    .transition(
+                        .asymmetric(
+                            insertion: .scale(scale: 0, anchor: .bottom)
+                                .combined(with: .opacity),
+                            removal: .opacity
+                        )
+                    )
             }
 
             // Token stats pill with chevrons - base anchor, appears first
+            // Grows upward from input bar area
             if effectiveShowTokenPill {
                 tokenStatsPillWithChevrons
                     .matchedGeometryEffect(id: "tokenPillMorph", in: tokenPillNamespace)
+                    .transition(
+                        .asymmetric(
+                            insertion: .scale(scale: 0, anchor: .bottom)
+                                .combined(with: .opacity),
+                            removal: .opacity
+                        )
+                    )
             }
         }
+        .animation(.spring(response: 0.35, dampingFraction: 0.82), value: effectiveShowTokenPill)
+        .animation(.spring(response: 0.38, dampingFraction: 0.8), value: effectiveShowModelPill)
+        .animation(.spring(response: 0.4, dampingFraction: 0.78), value: effectiveShowReasoningPill)
     }
 
     /// Model picker menu (iOS 26 liquid glass)
