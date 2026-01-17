@@ -181,7 +181,8 @@ struct ChatView: View {
                             skillForDetailSheet = skill
                             showSkillDetailSheet = true
                         },
-                        animationCoordinator: viewModel.animationCoordinator
+                        animationCoordinator: viewModel.animationCoordinator,
+                        skipIntroAnimation: initialLoadComplete
                     )
                     .id(sessionId)
                 }

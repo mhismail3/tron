@@ -103,6 +103,14 @@ final class AnimationCoordinator: ObservableObject {
         supportsReasoning = false
     }
 
+    /// Set pills visible immediately without animation (for resumed sessions with existing data)
+    /// Call this instead of startPillMorphSequence when loading a session that already has content
+    func setPillsVisibleImmediately(supportsReasoning: Bool) {
+        self.supportsReasoning = supportsReasoning
+        // Set to final state immediately - no animation needed for resumed sessions
+        currentPhase = supportsReasoning ? .reasoningPillVisible : .modelPillVisible
+    }
+
     /// Update reasoning support (e.g., when model changes)
     func updateReasoningSupport(_ supports: Bool) {
         let wasSupported = supportsReasoning

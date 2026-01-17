@@ -102,6 +102,16 @@ extension ChatViewModel {
             if batchSize > 0 {
                 let startIndex = loadedMessages.count - batchSize
                 messages = Array(loadedMessages[startIndex...])
+
+                // CRITICAL: Register all tool IDs as visible so they render immediately
+                // Without this, tools won't show until initialMessageIds is set in ChatView
+                for message in messages {
+                    if case .toolUse(let tool) = message.content {
+                        animationCoordinator.makeToolVisible(tool.toolCallId)
+                    } else if case .toolResult(let result) = message.content {
+                        animationCoordinator.makeToolVisible(result.toolCallId)
+                    }
+                }
             } else {
                 messages = []
             }
@@ -187,6 +197,15 @@ extension ChatViewModel {
             let endIndex = historicalCount - shownFromHistory
             let startIndex = max(0, endIndex - batchToLoad)
             let olderMessages = Array(allReconstructedMessages[startIndex..<endIndex])
+
+            // Register tool IDs as visible before inserting
+            for message in olderMessages {
+                if case .toolUse(let tool) = message.content {
+                    animationCoordinator.makeToolVisible(tool.toolCallId)
+                } else if case .toolResult(let result) = message.content {
+                    animationCoordinator.makeToolVisible(result.toolCallId)
+                }
+            }
 
             messages.insert(contentsOf: olderMessages, at: 0)
             displayedMessageCount += batchToLoad

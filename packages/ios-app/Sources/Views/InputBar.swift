@@ -54,6 +54,9 @@ struct InputBar: View {
     /// When provided, uses coordinator's phase state instead of local timing
     var animationCoordinator: AnimationCoordinator?
 
+    /// Skip intro animation and show all elements immediately (for resumed sessions with content)
+    var skipIntroAnimation: Bool = false
+
     @FocusState private var isFocused: Bool
     /// Prevents auto-focus immediately after agent finishes responding
     @State private var blockFocusUntil: Date = .distantPast
@@ -165,6 +168,24 @@ struct InputBar: View {
             resetIntroState()
             // Reset coordinator state if using coordinated animations
             animationCoordinator?.resetPillState()
+        }
+        // When skipIntroAnimation becomes true (messages loaded), instantly show all elements
+        .onChange(of: skipIntroAnimation) { _, newValue in
+            if newValue {
+                // Cancel any in-progress intro animation
+                introTask?.cancel()
+                introTask = nil
+                // Set all elements visible immediately without animation
+                showAttachmentButton = true
+                showMicButton = true
+                showModelPill = true
+                showTokenPill = true
+                if currentModelInfo?.supportsReasoning == true {
+                    showReasoningPill = true
+                }
+                // Also set coordinator to visible state
+                animationCoordinator?.setPillsVisibleImmediately(supportsReasoning: currentModelInfo?.supportsReasoning == true)
+            }
         }
         // Block any focus attempts immediately after agent finishes
         .onChange(of: isFocused) { _, newValue in
@@ -1488,6 +1509,22 @@ struct InputBar: View {
         introTask?.cancel()
         reasoningPillTask?.cancel()
         resetIntroState()
+
+        // Skip animation for resumed sessions - show everything immediately
+        if skipIntroAnimation {
+            showAttachmentButton = true
+            showMicButton = true
+            showModelPill = true
+            showTokenPill = true
+            if currentModelInfo?.supportsReasoning == true {
+                showReasoningPill = true
+            }
+            // Also set coordinator to visible state if using coordinated animations
+            if let coordinator = animationCoordinator {
+                coordinator.setPillsVisibleImmediately(supportsReasoning: currentModelInfo?.supportsReasoning == true)
+            }
+            return
+        }
 
         // If using AnimationCoordinator, delegate pill sequence to it
         if let coordinator = animationCoordinator {
