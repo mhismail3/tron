@@ -209,6 +209,62 @@ extension Animation {
 
     /// Slow Tron UI animation for emphasis
     static let tronSlow = Animation.spring(response: 0.5, dampingFraction: 0.75)
+
+    // MARK: - Specialized Animations
+
+    /// Pill morph animation (context → model → reasoning)
+    static let tronPillMorph = Animation.spring(response: 0.32, dampingFraction: 0.86)
+
+    /// Model pill appearance animation
+    static let tronModelPill = Animation.spring(response: 0.42, dampingFraction: 0.82)
+
+    /// Reasoning pill appearance animation
+    static let tronReasoningPill = Animation.spring(response: 0.4, dampingFraction: 0.8)
+
+    /// Tool call appearance animation
+    static let tronToolAppear = Animation.spring(response: 0.35, dampingFraction: 0.8)
+
+    /// Message cascade animation
+    static let tronCascade = Animation.spring(response: 0.3, dampingFraction: 0.85)
+
+    /// Token pill animation
+    static let tronTokenPill = Animation.spring(response: 0.3, dampingFraction: 0.9)
+}
+
+// MARK: - Animation Timing Constants
+
+enum TronAnimationTiming {
+    // MARK: - Pill Morph Sequence
+    /// Delay before context pill appears (immediate)
+    static let contextPillDelayNanos: UInt64 = 0
+    /// Delay between context and model pill (200ms)
+    static let modelPillDelayNanos: UInt64 = 200_000_000
+    /// Delay between model and reasoning pill (170ms)
+    static let reasoningPillDelayNanos: UInt64 = 170_000_000
+
+    // MARK: - Message Cascade
+    /// Stagger interval between messages (20ms)
+    static let cascadeStaggerNanos: UInt64 = 20_000_000
+    /// Maximum messages to cascade (cap at 1 second)
+    static let cascadeMaxMessages = 50
+
+    // MARK: - Tool Call Stagger
+    /// Interval between tool appearances (80ms)
+    static let toolStaggerNanos: UInt64 = 80_000_000
+    /// Maximum tool stagger delay (200ms)
+    static let toolStaggerCapNanos: UInt64 = 200_000_000
+
+    // MARK: - Text Streaming
+    /// Batch interval for text updates (100ms)
+    static let textBatchNanos: UInt64 = 100_000_000
+
+    // MARK: - Entry Animation
+    /// Delay for entry morph from left (180ms)
+    static let entryMorphDelayNanos: UInt64 = 180_000_000
+    /// Attachment button morph delay (350ms)
+    static let attachmentButtonDelayNanos: UInt64 = 350_000_000
+    /// Mic button morph delay after other elements (300ms)
+    static let micButtonDelayNanos: UInt64 = 300_000_000
 }
 
 // MARK: - ShapeStyle Extension for foregroundStyle compatibility

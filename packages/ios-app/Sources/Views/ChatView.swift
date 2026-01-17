@@ -81,6 +81,14 @@ struct ChatView: View {
     /// Delay for entry morph: 180ms (90% of mic button's 200ms delay)
     private let entryMorphDelay: UInt64 = 180_000_000
 
+    // MARK: - Message Cascade Animation
+    /// Number of messages that should be visible (for cascade animation on session load)
+    @State private var cascadeVisibleCount: Int = 0
+    /// Whether cascade animation has completed
+    @State private var cascadeComplete = false
+    /// Message IDs that were present at initial load (for cascade animation)
+    @State private var initialMessageIds: Set<UUID> = []
+
     private let sessionId: String
     private let rpcClient: RPCClient
     private let skillStore: SkillStore?
@@ -356,6 +364,10 @@ struct ChatView: View {
         .onDisappear {
             // Reset for next entry
             showEntryContent = false
+            // Reset cascade animation state
+            cascadeVisibleCount = 0
+            cascadeComplete = false
+            initialMessageIds = []
         }
         .task {
             // PERFORMANCE OPTIMIZATION: Parallelize independent operations
@@ -399,6 +411,9 @@ struct ChatView: View {
 
             // Load messages after connection is established
             await viewModel.syncAndLoadMessagesForResume()
+
+            // Start cascade animation for loaded messages
+            startMessageCascade()
         }
         .onChange(of: scenePhase) { oldPhase, newPhase in
             // Reconnect and resume when returning to foreground
@@ -462,6 +477,65 @@ struct ChatView: View {
         }
     }
 
+    // MARK: - Message Cascade Animation
+
+    /// Maximum messages to animate in cascade (cap total animation time)
+    private let cascadeMaxMessages = 50
+    /// Stagger interval between message appearances (20ms)
+    private let cascadeStaggerNanos: UInt64 = 20_000_000
+
+    /// Start cascade animation for initially loaded messages
+    private func startMessageCascade() {
+        let messageCount = viewModel.messages.count
+
+        // Skip cascade for empty sessions or new sessions
+        guard messageCount > 0 else {
+            cascadeComplete = true
+            return
+        }
+
+        // Capture initial message IDs for cascade tracking
+        initialMessageIds = Set(viewModel.messages.map { $0.id })
+
+        // For very few messages, show immediately
+        guard messageCount > 3 else {
+            cascadeVisibleCount = messageCount
+            cascadeComplete = true
+            return
+        }
+
+        // Start with no messages visible
+        cascadeVisibleCount = 0
+
+        // Animate messages appearing with stagger
+        Task { @MainActor in
+            let messagesToAnimate = min(messageCount, cascadeMaxMessages)
+
+            for i in 0..<messagesToAnimate {
+                guard !Task.isCancelled else { break }
+
+                try? await Task.sleep(nanoseconds: cascadeStaggerNanos)
+
+                withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) {
+                    cascadeVisibleCount = i + 1
+                }
+            }
+
+            // Show any remaining messages beyond the cap instantly
+            if messageCount > cascadeMaxMessages {
+                cascadeVisibleCount = messageCount
+            }
+
+            // Mark cascade as complete
+            cascadeComplete = true
+
+            // Scroll to bottom after cascade
+            withAnimation(.tronFast) {
+                scrollProxy?.scrollTo("bottom", anchor: .bottom)
+            }
+        }
+    }
+
     // MARK: - Commands Menu
 
     private var commandsMenu: some View {
@@ -501,22 +575,30 @@ struct ChatView: View {
                                     .id("loadMore")
                             }
 
-                            ForEach(viewModel.messages) { message in
-                                MessageBubble(
-                                    message: message,
-                                    onSkillTap: { skill in
-                                        skillForDetailSheet = skill
-                                        showSkillDetailSheet = true
-                                    },
-                                    onAskUserQuestionTap: { data in
-                                        viewModel.openAskUserQuestionSheet(for: data)
-                                    }
-                                )
+                            ForEach(Array(viewModel.messages.enumerated()), id: \.element.id) { index, message in
+                                // Cascade animation: only show messages up to cascadeVisibleCount
+                                // Messages added after initial load (not in initialMessageIds) show immediately
+                                let shouldShow = cascadeComplete ||
+                                    !initialMessageIds.contains(message.id) ||
+                                    index < cascadeVisibleCount
+
+                                if shouldShow {
+                                    MessageBubble(
+                                        message: message,
+                                        onSkillTap: { skill in
+                                            skillForDetailSheet = skill
+                                            showSkillDetailSheet = true
+                                        },
+                                        onAskUserQuestionTap: { data in
+                                            viewModel.openAskUserQuestionSheet(for: data)
+                                        }
+                                    )
                                     .id(message.id)
                                     .transition(.asymmetric(
                                         insertion: .opacity.combined(with: .move(edge: .bottom)),
                                         removal: .opacity
                                     ))
+                                }
                             }
 
                             if viewModel.isProcessing && viewModel.messages.last?.isStreaming != true {

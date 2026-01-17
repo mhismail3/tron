@@ -75,6 +75,17 @@ class ChatViewModel: ObservableObject {
     var cancellables = Set<AnyCancellable>()
     var streamingMessageId: UUID?
     var streamingText = ""
+
+    // MARK: - Sub-Managers (Phase 1: Foundation - initially unused)
+
+    /// Coordinates pill morph animations, message cascade timing, and tool staggering
+    let animationCoordinator = AnimationCoordinator()
+    /// Ensures tool calls appear in order and batches UI updates for 60fps
+    let uiUpdateQueue = UIUpdateQueue()
+    /// Manages virtual scrolling with lazy loading and memory-bounded message window
+    let messageWindowManager = MessageWindowManager()
+    /// Manages text delta batching, thinking content, and backpressure
+    let streamingManager = StreamingManager()
     var currentToolMessages: [UUID: ChatMessage] = [:]
     var accumulatedInputTokens = 0
     var accumulatedOutputTokens = 0

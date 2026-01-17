@@ -95,6 +95,10 @@
 		FACF3272EAAA614047FA83C8 /* EventDatabaseTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A013DFE849DA84E8EA5F545C /* EventDatabaseTests.swift */; };
 		FE3D89D152521876D2DDF464 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 8347F0B7D54B1F1EAA6C762C /* Assets.xcassets */; };
 		FF5C309C2498A33DA03B2729 /* BrowserSheetView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 775326BB52ED6318F8D57E4D /* BrowserSheetView.swift */; };
+		CA03DF6FE88A4A278F88EF88 /* AnimationCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5B957C4CA6FB4B62B1B3833B /* AnimationCoordinator.swift */; };
+		000927DC0F354756A0DC38F6 /* UIUpdateQueue.swift in Sources */ = {isa = PBXBuildFile; fileRef = E1544ADEDB4E4650897B91DC /* UIUpdateQueue.swift */; };
+		6B36C1A205174FFABB9AD168 /* MessageWindowManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A118679D7B1D40BB8B6E3BCD /* MessageWindowManager.swift */; };
+		34C0735E95284AC29FFA8E35 /* StreamingManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0DAD857B33D44835A7660674 /* StreamingManager.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -203,6 +207,10 @@
 		F691F683EB48D159D2665845 /* Debug-Prod.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = "Debug-Prod.xcconfig"; sourceTree = "<group>"; };
 		F764D3E3A92C04B23A01BC4C /* ChatViewModel+Transcription.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ChatViewModel+Transcription.swift"; sourceTree = "<group>"; };
 		FD89009575AAF815668A8370 /* EventStoreManager+Dashboard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "EventStoreManager+Dashboard.swift"; sourceTree = "<group>"; };
+		5B957C4CA6FB4B62B1B3833B /* AnimationCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnimationCoordinator.swift; sourceTree = "<group>"; };
+		E1544ADEDB4E4650897B91DC /* UIUpdateQueue.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UIUpdateQueue.swift; sourceTree = "<group>"; };
+		A118679D7B1D40BB8B6E3BCD /* MessageWindowManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MessageWindowManager.swift; sourceTree = "<group>"; };
+		0DAD857B33D44835A7660674 /* StreamingManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StreamingManager.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXGroup section */
@@ -355,6 +363,7 @@
 		92E678876BE6D4CFFD746FD7 /* ViewModels */ = {
 			isa = PBXGroup;
 			children = (
+				7659A73190CB4197850BAC11 /* Managers */,
 				25C6E368AD4411B086E35A61 /* ChatViewModel.swift */,
 				E7285B697CF31BB6986535D3 /* ChatViewModel+Connection.swift */,
 				85AB906ED58C2A5018AA8055 /* ChatViewModel+Events.swift */,
@@ -417,6 +426,17 @@
 				0C697B4D1B8F6C85A423EAF5 /* EventTypes.swift */,
 			);
 			path = Database;
+			sourceTree = "<group>";
+		};
+		7659A73190CB4197850BAC11 /* Managers */ = {
+			isa = PBXGroup;
+			children = (
+				5B957C4CA6FB4B62B1B3833B /* AnimationCoordinator.swift */,
+				E1544ADEDB4E4650897B91DC /* UIUpdateQueue.swift */,
+				A118679D7B1D40BB8B6E3BCD /* MessageWindowManager.swift */,
+				0DAD857B33D44835A7660674 /* StreamingManager.swift */,
+			);
+			path = Managers;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -508,6 +528,10 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				CA03DF6FE88A4A278F88EF88 /* AnimationCoordinator.swift in Sources */,
+				000927DC0F354756A0DC38F6 /* UIUpdateQueue.swift in Sources */,
+				6B36C1A205174FFABB9AD168 /* MessageWindowManager.swift in Sources */,
+				34C0735E95284AC29FFA8E35 /* StreamingManager.swift in Sources */,
 				E36A71E3DB6FC3116C36F11B /* AnyCodable.swift in Sources */,
 				A7F43CE8B687131A3F3D7011 /* AppState.swift in Sources */,
 				A02BD858F0923DD456A1FF2E /* AskUserQuestionSheet.swift in Sources */,
