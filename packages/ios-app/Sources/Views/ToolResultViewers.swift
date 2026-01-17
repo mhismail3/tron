@@ -1,7 +1,7 @@
 import SwiftUI
 
 // MARK: - Tool Result Router
-// Handles all 7 core Tron tools: Read, Write, Edit, Bash, Grep, Find, Ls
+// Handles core Tron tools: Read, Write, Edit, Bash, Grep, Find, Ls, Browser, AST Grep, Open Browser
 
 struct ToolResultRouter: View {
     let tool: ToolUseData
@@ -83,6 +83,10 @@ struct ToolResultRouter: View {
             return ("folder", .yellow)
         case "browser":
             return ("globe", .blue)
+        case "astgrep":
+            return ("wand.and.stars", .mint)
+        case "openbrowser":
+            return ("safari", .blue)
         case "askuserquestion":
             return ("questionmark.circle.fill", .tronAmber)
         default:
@@ -122,6 +126,8 @@ struct ToolResultRouter: View {
         case "glob": return "Glob"
         case "ls": return "Ls"
         case "browser": return "Browser"
+        case "astgrep": return "AST Grep"
+        case "openbrowser": return "Open Browser"
         default: return tool.toolName.capitalized
         }
     }
@@ -157,6 +163,15 @@ struct ToolResultRouter: View {
             return extractPath(from: args)
         case "browser":
             return extractBrowserAction(from: args)
+        case "astgrep":
+            let pattern = extractAstGrepPattern(from: args)
+            let path = extractPath(from: args)
+            if !path.isEmpty && path != "." {
+                return "\"\(pattern)\" in \(shortenPath(path))"
+            }
+            return "\"\(pattern)\""
+        case "openbrowser":
+            return extractOpenBrowserUrl(from: args)
         default:
             return ""
         }
@@ -212,6 +227,18 @@ struct ToolResultRouter: View {
         case "browser":
             BrowserResultViewer(
                 action: extractBrowserAction(from: tool.arguments),
+                result: result,
+                isExpanded: $isExpanded
+            )
+        case "astgrep":
+            AstGrepResultViewer(
+                pattern: extractAstGrepPattern(from: tool.arguments),
+                result: result,
+                isExpanded: $isExpanded
+            )
+        case "openbrowser":
+            OpenBrowserResultViewer(
+                url: extractOpenBrowserUrl(from: tool.arguments),
                 result: result,
                 isExpanded: $isExpanded
             )
@@ -291,7 +318,10 @@ struct ToolResultRouter: View {
             let action = String(match.1)
             // Also try to get URL for navigate action
             if action == "navigate", let urlMatch = args.firstMatch(of: /"url"\s*:\s*"([^"]+)"/) {
+                // Unescape JSON escape sequences in URL
                 let url = String(urlMatch.1)
+                    .replacingOccurrences(of: "\\/", with: "/")
+                    .replacingOccurrences(of: "\\\"", with: "\"")
                 return "\(action): \(url)"
             }
             // Get selector for click/fill/type actions
@@ -301,6 +331,35 @@ struct ToolResultRouter: View {
                 return "\(action): \(selector)"
             }
             return action
+        }
+        return ""
+    }
+
+    /// Extract AST Grep pattern from arguments
+    private func extractAstGrepPattern(from args: String) -> String {
+        // Try "pattern" field first
+        if let match = args.firstMatch(of: /"pattern"\s*:\s*"([^"]+)"/) {
+            return String(match.1)
+        }
+        // Try "rule" field (some AST grep implementations use this)
+        if let match = args.firstMatch(of: /"rule"\s*:\s*"([^"]+)"/) {
+            return String(match.1)
+        }
+        return ""
+    }
+
+    /// Extract Open Browser URL from arguments
+    private func extractOpenBrowserUrl(from args: String) -> String {
+        if let match = args.firstMatch(of: /"url"\s*:\s*"([^"]+)"/) {
+            // Unescape JSON escape sequences
+            let url = String(match.1)
+                .replacingOccurrences(of: "\\/", with: "/")
+                .replacingOccurrences(of: "\\\"", with: "\"")
+            // Shorten long URLs
+            if url.count > 50 {
+                return String(url.prefix(50)) + "..."
+            }
+            return url
         }
         return ""
     }
@@ -1295,6 +1354,337 @@ struct BrowserResultViewer: View {
     }
 }
 
+// MARK: - AST Grep Result Viewer
+// Shows AST pattern matching results with file locations and matched code
+
+struct AstGrepResultViewer: View {
+    let pattern: String
+    let result: String
+    @Binding var isExpanded: Bool
+
+    /// Parse AST grep result into structured matches
+    private var matches: [AstGrepMatch] {
+        parseAstGrepResult(result)
+    }
+
+    private var displayMatches: [AstGrepMatch] {
+        isExpanded ? matches : Array(matches.prefix(5))
+    }
+
+    /// Check if result indicates no matches found
+    private var isNoMatches: Bool {
+        result.lowercased().contains("found 0 matches") ||
+        result.lowercased().contains("no matches") ||
+        matches.isEmpty && !result.isEmpty
+    }
+
+    /// Parse AST grep output format
+    /// Example formats:
+    /// - "/path/to/file.js:\n  6:0: const user = \"Moose\";\n    captured: VALUE=\"Moose\", NAME=\"user\""
+    /// - "Found 0 matches in 0 files"
+    private func parseAstGrepResult(_ text: String) -> [AstGrepMatch] {
+        var results: [AstGrepMatch] = []
+        let lines = text.components(separatedBy: "\n")
+        var currentFile: String?
+        var currentMatch: (line: Int, col: Int, code: String, captured: String?)?
+
+        for line in lines {
+            // Skip empty lines
+            if line.trimmingCharacters(in: .whitespaces).isEmpty { continue }
+
+            // Check for file path line (ends with colon or has file extension pattern)
+            if line.hasSuffix(":") && (line.contains("/") || line.contains("\\")) {
+                // Save previous match if exists
+                if let file = currentFile, let match = currentMatch {
+                    results.append(AstGrepMatch(
+                        filePath: file,
+                        line: match.line,
+                        column: match.col,
+                        matchedCode: match.code,
+                        captured: match.captured
+                    ))
+                }
+                currentFile = String(line.dropLast())
+                currentMatch = nil
+            }
+            // Check for line:col: code pattern
+            else if let lineMatch = line.firstMatch(of: /^\s*(\d+):(\d+):\s*(.*)/) {
+                // Save previous match if exists
+                if let file = currentFile, let match = currentMatch {
+                    results.append(AstGrepMatch(
+                        filePath: file,
+                        line: match.line,
+                        column: match.col,
+                        matchedCode: match.code,
+                        captured: match.captured
+                    ))
+                }
+                currentMatch = (
+                    line: Int(lineMatch.1) ?? 0,
+                    col: Int(lineMatch.2) ?? 0,
+                    code: String(lineMatch.3),
+                    captured: nil
+                )
+            }
+            // Check for captured variables line
+            else if line.trimmingCharacters(in: .whitespaces).hasPrefix("captured:") {
+                if var match = currentMatch {
+                    match.captured = line.trimmingCharacters(in: .whitespaces)
+                    currentMatch = match
+                }
+            }
+        }
+
+        // Don't forget the last match
+        if let file = currentFile, let match = currentMatch {
+            results.append(AstGrepMatch(
+                filePath: file,
+                line: match.line,
+                column: match.col,
+                matchedCode: match.code,
+                captured: match.captured
+            ))
+        }
+
+        return results
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            // Header with match count
+            HStack {
+                Image(systemName: "wand.and.stars")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.mint)
+
+                if isNoMatches {
+                    Text("No matches found")
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundStyle(.tronTextMuted)
+                } else {
+                    Text("\(matches.count) match\(matches.count == 1 ? "" : "es")")
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundStyle(.tronTextMuted)
+                }
+
+                if !pattern.isEmpty {
+                    Text("for \"\(pattern)\"")
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundStyle(.tronTextMuted)
+                        .lineLimit(1)
+                }
+
+                Spacer()
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 6)
+            .background(Color.tronSurface)
+
+            if isNoMatches && matches.isEmpty {
+                // Show raw result for "no matches" messages
+                Text(result)
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundStyle(.tronTextMuted)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+            } else {
+                // Match list
+                VStack(alignment: .leading, spacing: 0) {
+                    ForEach(displayMatches) { match in
+                        AstGrepMatchRow(match: match)
+                    }
+                }
+
+                // Expand/collapse button
+                if matches.count > 5 {
+                    Button {
+                        withAnimation(.tronFast) {
+                            isExpanded.toggle()
+                        }
+                    } label: {
+                        HStack {
+                            Text(isExpanded ? "Show less" : "Show all \(matches.count) matches")
+                                .font(.system(size: 11, design: .monospaced))
+                            Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
+                                .font(.system(size: 10))
+                        }
+                        .foregroundStyle(.tronTextMuted)
+                        .padding(.vertical, 6)
+                        .frame(maxWidth: .infinity)
+                        .background(Color.tronSurface)
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// A single AST grep match
+private struct AstGrepMatch: Identifiable {
+    let id = UUID()
+    let filePath: String
+    let line: Int
+    let column: Int
+    let matchedCode: String
+    let captured: String?
+
+    var fileName: String {
+        URL(fileURLWithPath: filePath).lastPathComponent
+    }
+}
+
+/// Row view for a single AST grep match
+private struct AstGrepMatchRow: View {
+    let match: AstGrepMatch
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            // File and location
+            HStack(spacing: 4) {
+                Image(systemName: "doc.text")
+                    .font(.system(size: 9))
+                    .foregroundStyle(.tronTextMuted)
+
+                Text(match.fileName)
+                    .font(.system(size: 10, weight: .medium, design: .monospaced))
+                    .foregroundStyle(.tronTextSecondary)
+
+                Text(":\(match.line):\(match.column)")
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundStyle(.tronTextMuted)
+            }
+
+            // Matched code
+            Text(match.matchedCode)
+                .font(.system(size: 11, design: .monospaced))
+                .foregroundStyle(.mint)
+                .padding(.leading, 14)
+
+            // Captured variables if present
+            if let captured = match.captured {
+                Text(captured)
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundStyle(.tronTextMuted)
+                    .padding(.leading, 14)
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.tronSurface.opacity(0.3))
+    }
+}
+
+// MARK: - Open Browser Result Viewer
+// Shows browser open action results
+
+struct OpenBrowserResultViewer: View {
+    let url: String
+    let result: String
+    @Binding var isExpanded: Bool
+
+    /// Unescape JSON escape sequences in strings
+    private func unescape(_ str: String) -> String {
+        str.replacingOccurrences(of: "\\/", with: "/")
+           .replacingOccurrences(of: "\\\"", with: "\"")
+    }
+
+    /// Unescaped URL for display
+    private var displayUrl: String {
+        unescape(url)
+    }
+
+    /// Unescaped result for display
+    private var displayResult: String {
+        unescape(result)
+    }
+
+    /// Parse the result to extract meaningful info
+    private var displayInfo: (icon: String, message: String, detail: String?) {
+        let lowercased = displayResult.lowercased()
+
+        if lowercased.contains("opening") || lowercased.contains("opened") {
+            return ("checkmark.circle.fill", "Opened in browser", displayUrl.isEmpty ? nil : displayUrl)
+        } else if lowercased.contains("safari") {
+            return ("safari.fill", "Opening in Safari", displayUrl.isEmpty ? nil : displayUrl)
+        } else if lowercased.contains("chrome") {
+            return ("globe", "Opening in Chrome", displayUrl.isEmpty ? nil : displayUrl)
+        } else if lowercased.contains("error") || lowercased.contains("failed") {
+            return ("xmark.circle.fill", "Failed to open", displayResult)
+        } else {
+            // Default: show the result as-is
+            return ("safari", "Browser action", nil)
+        }
+    }
+
+    private var isSuccess: Bool {
+        let lowercased = displayResult.lowercased()
+        return !lowercased.contains("error") && !lowercased.contains("failed")
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 10) {
+                // Status icon
+                Image(systemName: displayInfo.icon)
+                    .font(.system(size: 14))
+                    .foregroundStyle(isSuccess ? .tronSuccess : .tronError)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    // Main message
+                    Text(displayInfo.message)
+                        .font(.system(size: 11, weight: .medium, design: .monospaced))
+                        .foregroundStyle(.tronTextSecondary)
+
+                    // URL or detail
+                    if let detail = displayInfo.detail {
+                        Text(detail)
+                            .font(.system(size: 10, design: .monospaced))
+                            .foregroundStyle(.blue)
+                            .lineLimit(isExpanded ? nil : 1)
+                    }
+                }
+
+                Spacer()
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
+
+            // Show full result if different from parsed display
+            if !displayResult.isEmpty && displayResult != displayInfo.message && displayResult != displayInfo.detail {
+                Rectangle()
+                    .fill(Color.tronBorder.opacity(0.3))
+                    .frame(height: 0.5)
+
+                Text(isExpanded ? displayResult : String(displayResult.prefix(200)) + (displayResult.count > 200 ? "..." : ""))
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundStyle(.tronTextMuted)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+
+                if displayResult.count > 200 {
+                    Button {
+                        withAnimation(.tronFast) {
+                            isExpanded.toggle()
+                        }
+                    } label: {
+                        HStack {
+                            Text(isExpanded ? "Show less" : "Show more")
+                                .font(.system(size: 10, design: .monospaced))
+                            Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
+                                .font(.system(size: 9))
+                        }
+                        .foregroundStyle(.tronTextMuted)
+                        .padding(.vertical, 5)
+                        .frame(maxWidth: .infinity)
+                        .background(Color.tronSurface)
+                    }
+                }
+            }
+        }
+    }
+}
+
 // MARK: - Generic Result Viewer
 
 struct GenericResultViewer: View {
@@ -1340,9 +1730,8 @@ struct GenericResultViewer: View {
 }
 
 // MARK: - Preview
-// Shows all 7 core tools: Read, Write, Edit, Bash, Grep, Find, Ls
 
-#Preview("All 7 Core Tools") {
+#Preview("Core Tools") {
     ScrollView {
         VStack(spacing: 16) {
             // 1. Read - Read file contents
@@ -1413,6 +1802,36 @@ struct GenericResultViewer: View {
                 status: .success,
                 result: "drwxr-xr-x  5 user staff  160 Jan  4 10:00 components\ndrwxr-xr-x  3 user staff   96 Jan  4 09:30 utils\n-rw-r--r--  1 user staff 1234 Jan  4 10:00 app.ts\n-rw-r--r--  1 user staff  567 Jan  4 09:00 index.ts",
                 durationMs: 12
+            ))
+
+            // 8. AST Grep - with matches
+            ToolResultRouter(tool: ToolUseData(
+                toolName: "Astgrep",
+                toolCallId: "astgrep-123",
+                arguments: "{\"pattern\": \"const $NAME = $VALUE\"}",
+                status: .success,
+                result: "/Users/moose/Downloads/test/test_code.js:\n  6:0: const user = \"Moose\";\n    captured: VALUE=\"Moose\", NAME=\"user\"",
+                durationMs: 21
+            ))
+
+            // 9. AST Grep - no matches
+            ToolResultRouter(tool: ToolUseData(
+                toolName: "Astgrep",
+                toolCallId: "astgrep-empty",
+                arguments: "{\"pattern\": \"async function $FN\"}",
+                status: .success,
+                result: "Found 0 matches in 0 files",
+                durationMs: 13
+            ))
+
+            // 10. Open Browser - success
+            ToolResultRouter(tool: ToolUseData(
+                toolName: "Openbrowser",
+                toolCallId: "browser-123",
+                arguments: "{\"url\": \"https://example.com\"}",
+                status: .success,
+                result: "Opening https://example.com in Safari",
+                durationMs: 0
             ))
 
             // Also show running and error states
