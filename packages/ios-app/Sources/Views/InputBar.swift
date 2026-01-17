@@ -54,9 +54,6 @@ struct InputBar: View {
     /// When provided, uses coordinator's phase state instead of local timing
     var animationCoordinator: AnimationCoordinator?
 
-    /// Skip intro animation and show all elements immediately (for resumed sessions with content)
-    var skipIntroAnimation: Bool = false
-
     @FocusState private var isFocused: Bool
     /// Prevents auto-focus immediately after agent finishes responding
     @State private var blockFocusUntil: Date = .distantPast
@@ -67,12 +64,12 @@ struct InputBar: View {
     @State private var showSkillMentionPopup = false
     @State private var skillMentionQuery = ""
     @State private var isMicPulsing = false
-    @State private var showMicButton = false
-    @State private var showAttachmentButton = false
-    @State private var showModelPill = false
-    @State private var showTokenPill = false
-    @State private var showReasoningPill = false
-    @State private var introTask: Task<Void, Never>?
+    // All UI elements visible immediately - no intro animation to avoid layout shifts
+    @State private var showMicButton = true
+    @State private var showAttachmentButton = true
+    @State private var showModelPill = true
+    @State private var showTokenPill = true
+    @State private var showReasoningPill = true
     @State private var reasoningPillTask: Task<Void, Never>?
     @Namespace private var actionButtonNamespace
     @Namespace private var modelPillNamespace
@@ -149,43 +146,15 @@ struct InputBar: View {
             .animation(.tronStandard, value: shouldShowActionButton)
             .animation(micButtonAnimation, value: shouldShowMicButton)
         }
-        // Sync focus state with parent control
         .onAppear {
-            // Reset state to ensure fresh animation on each appearance
-            resetIntroState()
-            // Small delay to ensure view is fully attached before animating
-            Task { @MainActor in
-                try? await Task.sleep(nanoseconds: 50_000_000) // 50ms
-                playIntroSequence()
-            }
+            // Set coordinator to visible state immediately (no animation)
+            animationCoordinator?.setPillsVisibleImmediately(supportsReasoning: currentModelInfo?.supportsReasoning == true)
         }
         .onDisappear {
-            introTask?.cancel()
-            introTask = nil
             reasoningPillTask?.cancel()
             reasoningPillTask = nil
-            // Reset state for clean re-entry on next appearance
-            resetIntroState()
-            // Reset coordinator state if using coordinated animations
+            // Reset coordinator state when leaving
             animationCoordinator?.resetPillState()
-        }
-        // When skipIntroAnimation becomes true (messages loaded), instantly show all elements
-        .onChange(of: skipIntroAnimation) { _, newValue in
-            if newValue {
-                // Cancel any in-progress intro animation
-                introTask?.cancel()
-                introTask = nil
-                // Set all elements visible immediately without animation
-                showAttachmentButton = true
-                showMicButton = true
-                showModelPill = true
-                showTokenPill = true
-                if currentModelInfo?.supportsReasoning == true {
-                    showReasoningPill = true
-                }
-                // Also set coordinator to visible state
-                animationCoordinator?.setPillsVisibleImmediately(supportsReasoning: currentModelInfo?.supportsReasoning == true)
-            }
         }
         // Block any focus attempts immediately after agent finishes
         .onChange(of: isFocused) { _, newValue in
@@ -1495,105 +1464,6 @@ struct InputBar: View {
     /// Animation for attachment button morph from left (same spring as mic button)
     private var attachmentButtonAnimation: Animation {
         .spring(response: 0.32, dampingFraction: 0.86)
-    }
-
-    private func resetIntroState() {
-        showAttachmentButton = false
-        showModelPill = false
-        showTokenPill = false
-        showReasoningPill = false
-        showMicButton = false
-    }
-
-    private func playIntroSequence() {
-        introTask?.cancel()
-        reasoningPillTask?.cancel()
-        resetIntroState()
-
-        // Skip animation for resumed sessions - show everything immediately
-        if skipIntroAnimation {
-            showAttachmentButton = true
-            showMicButton = true
-            showModelPill = true
-            showTokenPill = true
-            if currentModelInfo?.supportsReasoning == true {
-                showReasoningPill = true
-            }
-            // Also set coordinator to visible state if using coordinated animations
-            if let coordinator = animationCoordinator {
-                coordinator.setPillsVisibleImmediately(supportsReasoning: currentModelInfo?.supportsReasoning == true)
-            }
-            return
-        }
-
-        // If using AnimationCoordinator, delegate pill sequence to it
-        if let coordinator = animationCoordinator {
-            playCoordinatorIntroSequence(coordinator)
-            return
-        }
-
-        // Legacy local intro sequence (when no coordinator provided)
-        introTask = Task { @MainActor in
-            // Attachment button morphs in from left with 350ms delay
-            try? await Task.sleep(nanoseconds: 350_000_000)
-            guard !Task.isCancelled else { return }
-            withAnimation(attachmentButtonAnimation) {
-                showAttachmentButton = true
-            }
-
-            try? await Task.sleep(nanoseconds: 50_000_000)
-            guard !Task.isCancelled else { return }
-            withAnimation(modelPillAnimation) {
-                showModelPill = true
-            }
-
-            // Show reasoning pill after model pill if current model supports it
-            if currentModelInfo?.supportsReasoning == true {
-                try? await Task.sleep(nanoseconds: 150_000_000) // 150ms delay
-                guard !Task.isCancelled else { return }
-                withAnimation(reasoningPillAnimation) {
-                    showReasoningPill = true
-                }
-            }
-
-            try? await Task.sleep(nanoseconds: 60_000_000)
-            guard !Task.isCancelled else { return }
-            withAnimation(tokenPillAnimation) {
-                showTokenPill = true
-            }
-
-            try? await Task.sleep(nanoseconds: 300_000_000)
-            guard !Task.isCancelled else { return }
-            withAnimation(micButtonAnimation) {
-                showMicButton = true
-            }
-        }
-    }
-
-    /// Play intro sequence using AnimationCoordinator for chained pill morphs
-    /// Sequence: attachment button → (coordinator handles pills) → mic button
-    private func playCoordinatorIntroSequence(_ coordinator: AnimationCoordinator) {
-        introTask = Task { @MainActor in
-            // Attachment button morphs in from left with 350ms delay
-            try? await Task.sleep(nanoseconds: TronAnimationTiming.attachmentButtonDelayNanos)
-            guard !Task.isCancelled else { return }
-            withAnimation(attachmentButtonAnimation) {
-                showAttachmentButton = true
-            }
-
-            // Start the coordinator's chained pill morph sequence
-            // Pills appear: context (token) → model → reasoning (if supported)
-            let supportsReasoning = currentModelInfo?.supportsReasoning == true
-            coordinator.startPillMorphSequence(supportsReasoning: supportsReasoning)
-
-            // Mic button appears after pills complete
-            // Total pill sequence time: ~370ms (0 + 200 + 170)
-            try? await Task.sleep(nanoseconds: TronAnimationTiming.micButtonDelayNanos + 370_000_000)
-            guard !Task.isCancelled else { return }
-            withAnimation(micButtonAnimation) {
-                showMicButton = true
-            }
-        }
     }
 
     /// Animation for reasoning pill morph

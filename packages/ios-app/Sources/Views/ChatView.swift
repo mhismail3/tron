@@ -82,8 +82,6 @@ struct ChatView: View {
     private let entryMorphDelay: UInt64 = 180_000_000
 
     // MARK: - Message Loading State
-    /// Message IDs that were present at initial load (historical messages bypass tool stagger)
-    @State private var initialMessageIds: Set<UUID> = []
     /// Whether initial message load is complete (prevents auto-scroll during initial render)
     @State private var initialLoadComplete = false
 
@@ -181,8 +179,7 @@ struct ChatView: View {
                             skillForDetailSheet = skill
                             showSkillDetailSheet = true
                         },
-                        animationCoordinator: viewModel.animationCoordinator,
-                        skipIntroAnimation: initialLoadComplete
+                        animationCoordinator: viewModel.animationCoordinator
                     )
                     .id(sessionId)
                 }
@@ -364,7 +361,6 @@ struct ChatView: View {
         .onDisappear {
             // Reset for next entry
             showEntryContent = false
-            initialMessageIds = []
             initialLoadComplete = false
             // Full reset of animation state when leaving session
             viewModel.animationCoordinator.fullReset()
@@ -411,9 +407,6 @@ struct ChatView: View {
 
             // Load messages after connection is established
             await viewModel.syncAndLoadMessagesForResume()
-
-            // Capture initial message IDs for tool stagger (historical messages bypass stagger)
-            initialMessageIds = Set(viewModel.messages.map { $0.id })
 
             // Mark initial load complete - enables auto-scroll for subsequent updates
             // Note: NO explicit scroll needed here - defaultScrollAnchor(.bottom) handles it
@@ -520,37 +513,18 @@ struct ChatView: View {
                                     .id("loadMore")
                             }
 
-                            ForEach(Array(viewModel.messages.enumerated()), id: \.element.id) { index, message in
-                                // Tool stagger: check if tool is visible via AnimationCoordinator
-                                // Historical tools (from session load) bypass stagger - always visible
-                                let isHistoricalMessage = initialMessageIds.contains(message.id)
-                                let toolStaggerVisible: Bool = {
-                                    // Historical messages bypass tool stagger
-                                    if isHistoricalMessage { return true }
-
-                                    if case .toolUse(let tool) = message.content {
-                                        return viewModel.animationCoordinator.isToolVisible(tool.toolCallId)
+                            ForEach(viewModel.messages) { message in
+                                MessageBubble(
+                                    message: message,
+                                    onSkillTap: { skill in
+                                        skillForDetailSheet = skill
+                                        showSkillDetailSheet = true
+                                    },
+                                    onAskUserQuestionTap: { data in
+                                        viewModel.openAskUserQuestionSheet(for: data)
                                     }
-                                    return true // Non-tool messages are always visible
-                                }()
-
-                                if toolStaggerVisible {
-                                    MessageBubble(
-                                        message: message,
-                                        onSkillTap: { skill in
-                                            skillForDetailSheet = skill
-                                            showSkillDetailSheet = true
-                                        },
-                                        onAskUserQuestionTap: { data in
-                                            viewModel.openAskUserQuestionSheet(for: data)
-                                        }
-                                    )
-                                    .id(message.id)
-                                    .transition(.asymmetric(
-                                        insertion: .opacity.combined(with: .move(edge: .bottom)),
-                                        removal: .opacity
-                                    ))
-                                }
+                                )
+                                .id(message.id)
                             }
 
                             if viewModel.isProcessing && viewModel.messages.last?.isStreaming != true {
