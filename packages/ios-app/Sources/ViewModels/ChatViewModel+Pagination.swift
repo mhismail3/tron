@@ -4,11 +4,27 @@ import Foundation
 
 extension ChatViewModel {
 
+    // MARK: - MessageWindowManager Integration
+
+    /// Set up MessageWindowManager for virtual scrolling
+    /// Call this after eventStoreManager is set
+    func setupMessageWindowManager() {
+        messageWindowManager.dataSource = self
+    }
+
+    /// Load messages through MessageWindowManager (for virtual scrolling)
+    func loadMessagesViaWindow() async {
+        await messageWindowManager.loadInitial()
+    }
+
     /// Set the event store manager reference (used when injected via environment)
     /// Call this BEFORE connectAndResume() so agent state check can update processing state
     func setEventStoreManager(_ manager: EventStoreManager, workspaceId: String) {
         self.eventStoreManager = manager
         self.workspaceId = workspaceId
+
+        // Set up MessageWindowManager with self as data source for virtual scrolling
+        setupMessageWindowManager()
     }
 
     /// Sync events from server and load persisted messages
@@ -298,5 +314,92 @@ extension ChatViewModel {
         }
 
         logger.debug("Restored token state for \(messages.filter { $0.role == .assistant }.count) assistant messages", category: .session)
+    }
+}
+
+// MARK: - MessageWindowDataSource Conformance
+
+extension ChatViewModel: MessageWindowDataSource {
+
+    /// Load the most recent messages for initial display
+    func loadLatestMessages(count: Int) async -> [ChatMessage] {
+        guard let manager = eventStoreManager else { return [] }
+
+        do {
+            let state = try manager.getReconstructedState(sessionId: sessionId)
+            let allMessages = state.messages
+
+            // Store for reference
+            allReconstructedMessages = allMessages
+
+            // Return the latest 'count' messages
+            let startIndex = max(0, allMessages.count - count)
+            return Array(allMessages[startIndex...])
+        } catch {
+            logger.error("Failed to load latest messages: \(error.localizedDescription)", category: .session)
+            return []
+        }
+    }
+
+    /// Load messages before a given message ID (for scrolling up)
+    func loadMessages(before id: UUID?, count: Int) async -> [ChatMessage] {
+        guard let targetId = id else {
+            // No target ID, return earliest messages
+            let endIndex = min(count, allReconstructedMessages.count)
+            return Array(allReconstructedMessages[0..<endIndex])
+        }
+
+        guard let targetIndex = allReconstructedMessages.firstIndex(where: { $0.id == targetId }) else {
+            return []
+        }
+
+        let startIndex = max(0, targetIndex - count)
+        let endIndex = targetIndex
+        guard startIndex < endIndex else { return [] }
+
+        return Array(allReconstructedMessages[startIndex..<endIndex])
+    }
+
+    /// Load messages after a given message ID (for scrolling down through history)
+    func loadMessages(after id: UUID?, count: Int) async -> [ChatMessage] {
+        guard let targetId = id else {
+            return []
+        }
+
+        guard let targetIndex = allReconstructedMessages.firstIndex(where: { $0.id == targetId }) else {
+            return []
+        }
+
+        let startIndex = targetIndex + 1
+        let endIndex = min(allReconstructedMessages.count, startIndex + count)
+        guard startIndex < endIndex else { return [] }
+
+        return Array(allReconstructedMessages[startIndex..<endIndex])
+    }
+
+    /// Check if more messages exist before a given ID
+    func hasMoreMessages(before id: UUID?) async -> Bool {
+        guard let targetId = id else {
+            return !allReconstructedMessages.isEmpty
+        }
+
+        guard let targetIndex = allReconstructedMessages.firstIndex(where: { $0.id == targetId }) else {
+            return false
+        }
+
+        return targetIndex > 0
+    }
+
+    /// Check if more messages exist after a given ID
+    func hasMoreMessages(after id: UUID?) async -> Bool {
+        guard let targetId = id else {
+            return false
+        }
+
+        guard let targetIndex = allReconstructedMessages.firstIndex(where: { $0.id == targetId }) else {
+            return false
+        }
+
+        return targetIndex < allReconstructedMessages.count - 1
     }
 }
