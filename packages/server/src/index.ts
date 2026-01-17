@@ -206,6 +206,19 @@ export class TronServer {
       });
     });
 
+    this.orchestrator.on('compaction_completed', (data) => {
+      this.wsServer?.broadcastEvent({
+        type: 'agent.compaction',
+        sessionId: data.sessionId,
+        timestamp: new Date().toISOString(),
+        data: {
+          tokensBefore: data.tokensBefore,
+          tokensAfter: data.tokensAfter,
+          reason: 'manual',
+        },
+      });
+    });
+
     this.orchestrator.on('skill_removed', (data) => {
       this.wsServer?.broadcastEvent({
         type: 'agent.skill_removed',

@@ -78,6 +78,7 @@ struct ContextAuditView: View {
                         Text("Remove all messages from context.\nSystem prompt and tools preserved.")
                             .font(.caption)
                         Button("Clear Context", role: .destructive) {
+                            logger.info("🧹 CLEAR BUTTON ACTION FIRED", category: .general)
                             Task { await clearContext() }
                         }
                         Button("Cancel", role: .cancel) { }
@@ -109,7 +110,11 @@ struct ContextAuditView: View {
                         Text("Summarize older messages\nto free up context space.")
                             .font(.caption)
                         Button("Compact Context") {
-                            Task { await compactContext() }
+                            logger.info("🔧 COMPACT BUTTON ACTION FIRED", category: .general)
+                            Task {
+                                logger.info("🔧 COMPACT TASK STARTED", category: .general)
+                                await compactContext()
+                            }
                         }
                         Button("Cancel", role: .cancel) { }
                     } label: {
@@ -130,7 +135,10 @@ struct ContextAuditView: View {
                     .disabled(isCompacting || !hasMessages)
                 }
             }
-            .alert("Error", isPresented: .constant(errorMessage != nil)) {
+            .alert("Error", isPresented: Binding(
+                get: { errorMessage != nil },
+                set: { if !$0 { errorMessage = nil } }
+            )) {
                 Button("OK") { errorMessage = nil }
             } message: {
                 Text(errorMessage ?? "")
@@ -333,17 +341,21 @@ struct ContextAuditView: View {
     }
 
     private func compactContext() async {
+        logger.info("🔧 compactContext() called for session: \(sessionId)", category: .general)
         isCompacting = true
 
         do {
-            _ = try await rpcClient.compactContext(sessionId: sessionId)
-            // Reload context to show updated state
-            await loadContext()
+            logger.info("🔧 Calling rpcClient.compactContext...", category: .general)
+            let result = try await rpcClient.compactContext(sessionId: sessionId)
+            logger.info("🔧 Compaction succeeded: tokensBefore=\(result.tokensBefore), tokensAfter=\(result.tokensAfter)", category: .general)
+            // Dismiss the sheet - the ChatView will show the compaction notification pill
+            // when it receives the agent.compaction event from the server
+            dismiss()
         } catch {
+            logger.error("🔧 Compaction failed: \(error)", category: .general)
             errorMessage = "Failed to compact context: \(error.localizedDescription)"
+            isCompacting = false
         }
-
-        isCompacting = false
     }
 
     private func deleteMessage(eventId: String) async {
