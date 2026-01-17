@@ -84,6 +84,7 @@ extension ChatViewModel {
             if agentState.isRunning {
                 logger.info("Agent is currently running - setting up streaming state for in-progress session", category: .session)
                 isProcessing = true
+                isCatchingUp = true  // Show loading pill during catch-up
                 eventStoreManager?.setSessionProcessing(sessionId, isProcessing: true)
 
                 // Use accumulated content from server if available (catch-up content)
@@ -251,6 +252,11 @@ extension ChatViewModel {
         }
 
         messages.append(toolMessage)
+
+        // CRITICAL: Make tool visible in AnimationCoordinator so it renders
+        // Catch-up tools should be immediately visible (no stagger animation needed)
+        animationCoordinator.makeToolVisible(toolCall.toolCallId)
+
         logger.info("Resume catch-up: created UI message for tool \(toolCall.toolName)", category: .session)
     }
 

@@ -134,7 +134,14 @@ final class AnimationCoordinator: ObservableObject {
     }
 
     /// Queue a tool call to appear with staggered timing
+    /// Tools are immediately made visible (so they always render)
+    /// The stagger animation queue is just for the visual appearance timing
     func queueToolStart(toolCallId: String) {
+        // CRITICAL: Make tool immediately visible so it always renders
+        // This prevents tools from disappearing when visibility is checked
+        visibleToolCallIds.insert(toolCallId)
+
+        // Also queue for staggered animation effect (purely visual)
         pendingToolCalls.append(PendingToolCall(toolCallId: toolCallId, queuedAt: Date()))
         processToolQueue()
     }
@@ -149,8 +156,23 @@ final class AnimationCoordinator: ObservableObject {
         visibleToolCallIds.contains(toolCallId)
     }
 
-    /// Reset tool call state (e.g., at turn end)
+    /// Directly mark a tool as visible (for catch-up and historical tools)
+    func makeToolVisible(_ toolCallId: String) {
+        visibleToolCallIds.insert(toolCallId)
+    }
+
+    /// Reset tool animation state for new turn (preserves visibility of existing tools)
+    /// Called at turn boundaries to reset stagger queue for new tool calls
     func resetToolState() {
+        toolProcessingTask?.cancel()
+        toolProcessingTask = nil
+        pendingToolCalls.removeAll()
+        // NOTE: Do NOT clear visibleToolCallIds - tools already in messages should stay visible
+        // They will be naturally cleaned up when the session ends or view is dismissed
+    }
+
+    /// Full reset including visibility (called when leaving session)
+    func fullReset() {
         toolProcessingTask?.cancel()
         toolProcessingTask = nil
         pendingToolCalls.removeAll()

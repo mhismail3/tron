@@ -15,6 +15,7 @@ class ChatViewModel: ObservableObject {
     @Published var messages: [ChatMessage] = []
     @Published var inputText = ""
     @Published var isProcessing = false
+    @Published var isCatchingUp = false  // True when catching up to an in-progress session
     @Published var connectionState: ConnectionState = .disconnected
     @Published var showSettings = false
     @Published var errorMessage: String?

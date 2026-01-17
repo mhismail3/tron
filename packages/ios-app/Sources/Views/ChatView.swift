@@ -81,12 +81,8 @@ struct ChatView: View {
     /// Delay for entry morph: 180ms (90% of mic button's 200ms delay)
     private let entryMorphDelay: UInt64 = 180_000_000
 
-    // MARK: - Message Cascade Animation
-    /// Number of messages that should be visible (for cascade animation on session load)
-    @State private var cascadeVisibleCount: Int = 0
-    /// Whether cascade animation has completed
-    @State private var cascadeComplete = false
-    /// Message IDs that were present at initial load (for cascade animation)
+    // MARK: - Message Loading State
+    /// Message IDs that were present at initial load (historical messages bypass tool stagger)
     @State private var initialMessageIds: Set<UUID> = []
 
     private let sessionId: String
@@ -365,10 +361,9 @@ struct ChatView: View {
         .onDisappear {
             // Reset for next entry
             showEntryContent = false
-            // Reset cascade animation state
-            cascadeVisibleCount = 0
-            cascadeComplete = false
             initialMessageIds = []
+            // Full reset of animation state when leaving session
+            viewModel.animationCoordinator.fullReset()
         }
         .task {
             // PERFORMANCE OPTIMIZATION: Parallelize independent operations
@@ -413,8 +408,13 @@ struct ChatView: View {
             // Load messages after connection is established
             await viewModel.syncAndLoadMessagesForResume()
 
-            // Start cascade animation for loaded messages
-            startMessageCascade()
+            // Capture initial message IDs for tool stagger (historical messages bypass stagger)
+            initialMessageIds = Set(viewModel.messages.map { $0.id })
+
+            // Scroll to bottom after messages load
+            withAnimation(.tronFast) {
+                scrollProxy?.scrollTo("bottom", anchor: .bottom)
+            }
         }
         .onChange(of: scenePhase) { oldPhase, newPhase in
             // Reconnect and resume when returning to foreground
@@ -478,65 +478,6 @@ struct ChatView: View {
         }
     }
 
-    // MARK: - Message Cascade Animation
-
-    /// Maximum messages to animate in cascade (cap total animation time)
-    private let cascadeMaxMessages = 50
-    /// Stagger interval between message appearances (20ms)
-    private let cascadeStaggerNanos: UInt64 = 20_000_000
-
-    /// Start cascade animation for initially loaded messages
-    private func startMessageCascade() {
-        let messageCount = viewModel.messages.count
-
-        // Skip cascade for empty sessions or new sessions
-        guard messageCount > 0 else {
-            cascadeComplete = true
-            return
-        }
-
-        // Capture initial message IDs for cascade tracking
-        initialMessageIds = Set(viewModel.messages.map { $0.id })
-
-        // For very few messages, show immediately
-        guard messageCount > 3 else {
-            cascadeVisibleCount = messageCount
-            cascadeComplete = true
-            return
-        }
-
-        // Start with no messages visible
-        cascadeVisibleCount = 0
-
-        // Animate messages appearing with stagger
-        Task { @MainActor in
-            let messagesToAnimate = min(messageCount, cascadeMaxMessages)
-
-            for i in 0..<messagesToAnimate {
-                guard !Task.isCancelled else { break }
-
-                try? await Task.sleep(nanoseconds: cascadeStaggerNanos)
-
-                withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) {
-                    cascadeVisibleCount = i + 1
-                }
-            }
-
-            // Show any remaining messages beyond the cap instantly
-            if messageCount > cascadeMaxMessages {
-                cascadeVisibleCount = messageCount
-            }
-
-            // Mark cascade as complete
-            cascadeComplete = true
-
-            // Scroll to bottom after cascade
-            withAnimation(.tronFast) {
-                scrollProxy?.scrollTo("bottom", anchor: .bottom)
-            }
-        }
-    }
-
     // MARK: - Commands Menu
 
     private var commandsMenu: some View {
@@ -577,15 +518,9 @@ struct ChatView: View {
                             }
 
                             ForEach(Array(viewModel.messages.enumerated()), id: \.element.id) { index, message in
-                                // Cascade animation: only show messages up to cascadeVisibleCount
-                                // Messages added after initial load (not in initialMessageIds) show immediately
-                                let isHistoricalMessage = initialMessageIds.contains(message.id)
-                                let cascadeVisible = cascadeComplete ||
-                                    !isHistoricalMessage ||
-                                    index < cascadeVisibleCount
-
                                 // Tool stagger: check if tool is visible via AnimationCoordinator
-                                // Historical tools (from session load) are always visible
+                                // Historical tools (from session load) bypass stagger - always visible
+                                let isHistoricalMessage = initialMessageIds.contains(message.id)
                                 let toolStaggerVisible: Bool = {
                                     // Historical messages bypass tool stagger
                                     if isHistoricalMessage { return true }
@@ -596,9 +531,7 @@ struct ChatView: View {
                                     return true // Non-tool messages are always visible
                                 }()
 
-                                let shouldShow = cascadeVisible && toolStaggerVisible
-
-                                if shouldShow {
+                                if toolStaggerVisible {
                                     MessageBubble(
                                         message: message,
                                         onSkillTap: { skill in
@@ -698,8 +631,40 @@ struct ChatView: View {
                         .padding(.bottom, 16)
                         .animation(.tronStandard, value: hasUnreadContent)
                 }
+
+                // Floating "Catching up" pill - show when joining an in-progress session
+                if viewModel.isCatchingUp {
+                    VStack {
+                        catchingUpPill
+                            .padding(.top, 60)
+                        Spacer()
+                    }
+                    .transition(.asymmetric(
+                        insertion: .opacity.combined(with: .scale(scale: 0.8)).combined(with: .move(edge: .top)),
+                        removal: .opacity.combined(with: .scale(scale: 0.9))
+                    ))
+                    .animation(.spring(response: 0.3, dampingFraction: 0.8), value: viewModel.isCatchingUp)
+                }
             }
         }
+    }
+
+    // MARK: - Catching Up Pill
+
+    private var catchingUpPill: some View {
+        HStack(spacing: 8) {
+            ProgressView()
+                .scaleEffect(0.8)
+                .tint(.white.opacity(0.9))
+            Text("Loading latest messages...")
+                .font(.system(size: 13, weight: .medium))
+        }
+        .foregroundStyle(.white.opacity(0.9))
+        .padding(.vertical, 10)
+        .padding(.horizontal, 16)
+        .background(.tronEmerald.opacity(0.85))
+        .clipShape(Capsule())
+        .shadow(color: .black.opacity(0.3), radius: 8, y: 4)
     }
 
     // MARK: - Scroll to Bottom Button

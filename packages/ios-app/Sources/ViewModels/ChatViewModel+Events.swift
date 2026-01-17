@@ -1,5 +1,6 @@
 import Foundation
 import UIKit
+import SwiftUI
 
 // MARK: - Event Handlers
 
@@ -73,6 +74,9 @@ extension ChatViewModel {
         messages.append(message)
         currentToolMessages[message.id] = message
 
+        // CRITICAL: Make tool immediately visible so it renders without waiting for UIUpdateQueue batch
+        animationCoordinator.makeToolVisible(event.toolCallId)
+
         // Sync to MessageWindowManager for virtual scrolling
         messageWindowManager.appendMessage(message)
 
@@ -124,6 +128,8 @@ extension ChatViewModel {
             )
             let message = ChatMessage(role: .assistant, content: .toolUse(tool))
             messages.append(message)
+            // Make tool visible for rendering
+            animationCoordinator.makeToolVisible(event.toolCallId)
             return
         }
 
@@ -384,6 +390,14 @@ extension ChatViewModel {
         turnStartMessageIndex = nil
         firstTextMessageIdForTurn = nil
 
+        // Dismiss catch-up pill at natural breakpoint (turn end)
+        if isCatchingUp {
+            withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                isCatchingUp = false
+            }
+            logger.info("Catch-up complete - dismissed loading pill", category: .events)
+        }
+
         // Update context window if server provides it (ensures iOS stays in sync after model switch)
         if let contextLimit = event.contextLimit {
             currentContextWindow = contextLimit
@@ -515,6 +529,7 @@ extension ChatViewModel {
         flushPendingTextUpdates()
 
         isProcessing = false
+        isCatchingUp = false  // Ensure catch-up state is reset on completion
         finalizeStreamingMessage()
         thinkingText = ""
 

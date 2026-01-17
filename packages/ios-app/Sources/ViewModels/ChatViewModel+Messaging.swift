@@ -60,12 +60,10 @@ extension ChatViewModel {
         eventStoreManager?.setSessionProcessing(sessionId, isProcessing: true)
         eventStoreManager?.updateSessionDashboardInfo(sessionId: sessionId, lastUserPrompt: text)
 
-        // Create streaming placeholder
-        let streamingMessage = ChatMessage.streaming()
-        messages.append(streamingMessage)
-        streamingMessageId = streamingMessage.id
+        // Note: Streaming message is created by StreamingManager on first text delta
+        // This avoids duplicate messages (placeholder + actual streaming message)
+        streamingMessageId = nil
         streamingText = ""
-        logger.verbose("Created streaming placeholder message id=\(streamingMessage.id)", category: .chat)
 
         // Prepare file attachments for sending
         let fileAttachments = attachments.map { FileAttachment(attachment: $0) }
