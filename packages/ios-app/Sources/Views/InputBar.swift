@@ -50,6 +50,10 @@ struct InputBar: View {
     /// Callback when skill detail sheet should be shown
     var onSkillDetailTap: ((Skill) -> Void)?
 
+    /// Optional animation coordinator for chained pill morph animations
+    /// When provided, uses coordinator's phase state instead of local timing
+    var animationCoordinator: AnimationCoordinator?
+
     @FocusState private var isFocused: Bool
     /// Prevents auto-focus immediately after agent finishes responding
     @State private var blockFocusUntil: Date = .distantPast
@@ -159,6 +163,8 @@ struct InputBar: View {
             reasoningPillTask = nil
             // Reset state for clean re-entry on next appearance
             resetIntroState()
+            // Reset coordinator state if using coordinated animations
+            animationCoordinator?.resetPillState()
         }
         // Block any focus attempts immediately after agent finishes
         .onChange(of: isFocused) { _, newValue in
@@ -448,20 +454,23 @@ struct InputBar: View {
     }
 
     /// Status pills column (model + context pills stacked vertically, right-aligned)
+    /// Pill order from top to bottom: reasoning → model → token (context)
+    /// This enables chained morph animation where each pill anchors to the one below
     private var statusPillsColumn: some View {
         VStack(alignment: .trailing, spacing: 8) {
             // Reasoning level picker (for OpenAI Codex models) - appears above model picker
-            if currentModelInfo?.supportsReasoning == true, showReasoningPill {
+            // Morphs from model pill anchor
+            if currentModelInfo?.supportsReasoning == true, effectiveShowReasoningPill {
                 reasoningLevelMenu
             }
 
-            // Model picker
-            if !modelName.isEmpty && showModelPill {
+            // Model picker - morphs from token pill anchor
+            if !modelName.isEmpty && effectiveShowModelPill {
                 modelPickerMenu
             }
 
-            // Token stats pill with chevrons
-            if showTokenPill {
+            // Token stats pill with chevrons - base anchor, appears first
+            if effectiveShowTokenPill {
                 tokenStatsPillWithChevrons
                     .matchedGeometryEffect(id: "tokenPillMorph", in: tokenPillNamespace)
             }
@@ -1385,15 +1394,41 @@ struct InputBar: View {
     }
 
     private var shouldShowStatusPills: Bool {
-        showTokenPill || (showModelPill && !modelName.isEmpty)
+        effectiveShowTokenPill || (effectiveShowModelPill && !modelName.isEmpty)
+    }
+
+    // MARK: - Coordinator-Aware Pill Visibility
+
+    /// Whether model pill should be visible (uses coordinator if available)
+    private var effectiveShowModelPill: Bool {
+        if let coordinator = animationCoordinator {
+            return coordinator.showModelPill
+        }
+        return showModelPill
+    }
+
+    /// Whether token/context pill should be visible (uses coordinator if available)
+    private var effectiveShowTokenPill: Bool {
+        if let coordinator = animationCoordinator {
+            return coordinator.showContextPill
+        }
+        return showTokenPill
+    }
+
+    /// Whether reasoning pill should be visible (uses coordinator if available)
+    private var effectiveShowReasoningPill: Bool {
+        if let coordinator = animationCoordinator {
+            return coordinator.showReasoningPill
+        }
+        return showReasoningPill
     }
 
     private var shouldShowModelPillDock: Bool {
-        !showModelPill && !modelName.isEmpty
+        !effectiveShowModelPill && !modelName.isEmpty
     }
 
     private var shouldShowTokenPillDock: Bool {
-        !showTokenPill
+        !effectiveShowTokenPill
     }
 
     private var shouldShowMicButton: Bool {
@@ -1450,6 +1485,13 @@ struct InputBar: View {
         reasoningPillTask?.cancel()
         resetIntroState()
 
+        // If using AnimationCoordinator, delegate pill sequence to it
+        if let coordinator = animationCoordinator {
+            playCoordinatorIntroSequence(coordinator)
+            return
+        }
+
+        // Legacy local intro sequence (when no coordinator provided)
         introTask = Task { @MainActor in
             // Attachment button morphs in from left with 350ms delay
             try? await Task.sleep(nanoseconds: 350_000_000)
@@ -1487,6 +1529,32 @@ struct InputBar: View {
         }
     }
 
+    /// Play intro sequence using AnimationCoordinator for chained pill morphs
+    /// Sequence: attachment button → (coordinator handles pills) → mic button
+    private func playCoordinatorIntroSequence(_ coordinator: AnimationCoordinator) {
+        introTask = Task { @MainActor in
+            // Attachment button morphs in from left with 350ms delay
+            try? await Task.sleep(nanoseconds: TronAnimationTiming.attachmentButtonDelayNanos)
+            guard !Task.isCancelled else { return }
+            withAnimation(attachmentButtonAnimation) {
+                showAttachmentButton = true
+            }
+
+            // Start the coordinator's chained pill morph sequence
+            // Pills appear: context (token) → model → reasoning (if supported)
+            let supportsReasoning = currentModelInfo?.supportsReasoning == true
+            coordinator.startPillMorphSequence(supportsReasoning: supportsReasoning)
+
+            // Mic button appears after pills complete
+            // Total pill sequence time: ~370ms (0 + 200 + 170)
+            try? await Task.sleep(nanoseconds: TronAnimationTiming.micButtonDelayNanos + 370_000_000)
+            guard !Task.isCancelled else { return }
+            withAnimation(micButtonAnimation) {
+                showMicButton = true
+            }
+        }
+    }
+
     /// Animation for reasoning pill morph
     private var reasoningPillAnimation: Animation {
         .spring(response: 0.4, dampingFraction: 0.8)
@@ -1494,6 +1562,13 @@ struct InputBar: View {
 
     /// Trigger reasoning pill animation when switching to a model that supports reasoning
     func triggerReasoningPillAnimation() {
+        // Use coordinator if available
+        if let coordinator = animationCoordinator {
+            coordinator.updateReasoningSupport(true)
+            return
+        }
+
+        // Legacy local animation
         reasoningPillTask?.cancel()
         reasoningPillTask = Task { @MainActor in
             // Hide first if already showing
@@ -1518,6 +1593,13 @@ struct InputBar: View {
 
     /// Hide reasoning pill when switching away from a reasoning model
     func hideReasoningPill() {
+        // Use coordinator if available
+        if let coordinator = animationCoordinator {
+            coordinator.updateReasoningSupport(false)
+            return
+        }
+
+        // Legacy local animation
         reasoningPillTask?.cancel()
         withAnimation(reasoningPillAnimation) {
             showReasoningPill = false

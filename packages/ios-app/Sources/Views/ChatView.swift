@@ -182,7 +182,8 @@ struct ChatView: View {
                         onSkillDetailTap: { skill in
                             skillForDetailSheet = skill
                             showSkillDetailSheet = true
-                        }
+                        },
+                        animationCoordinator: viewModel.animationCoordinator
                     )
                     .id(sessionId)
                 }
