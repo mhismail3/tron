@@ -64,12 +64,9 @@ struct InputBar: View {
     @State private var showSkillMentionPopup = false
     @State private var skillMentionQuery = ""
     @State private var isMicPulsing = false
-    // All UI elements visible immediately - no intro animation to avoid layout shifts
+    // Buttons always visible - no intro animation to avoid layout shifts
     @State private var showMicButton = true
     @State private var showAttachmentButton = true
-    @State private var showModelPill = true
-    @State private var showTokenPill = true
-    @State private var showReasoningPill = true
     @State private var reasoningPillTask: Task<Void, Never>?
     @Namespace private var actionButtonNamespace
     @Namespace private var modelPillNamespace
@@ -146,15 +143,9 @@ struct InputBar: View {
             .animation(.tronStandard, value: shouldShowActionButton)
             .animation(micButtonAnimation, value: shouldShowMicButton)
         }
-        .onAppear {
-            // Set coordinator to visible state immediately (no animation)
-            animationCoordinator?.setPillsVisibleImmediately(supportsReasoning: currentModelInfo?.supportsReasoning == true)
-        }
         .onDisappear {
             reasoningPillTask?.cancel()
             reasoningPillTask = nil
-            // Reset coordinator state when leaving
-            animationCoordinator?.resetPillState()
         }
         // Block any focus attempts immediately after agent finishes
         .onChange(of: isFocused) { _, newValue in
@@ -328,6 +319,8 @@ struct InputBar: View {
 
     /// Main content area showing skills, attachments (with wrapping), and status pills
     /// All items in one wrapping container - skills at bottom, attachments wrap above
+    /// IMPORTANT: Status pills are always in layout (opacity-controlled) to prevent height changes
+    /// that would cause safeAreaInset to shift the ScrollView content
     @ViewBuilder
     private var contentArea: some View {
         HStack(alignment: .bottom, spacing: 12) {
@@ -339,10 +332,10 @@ struct InputBar: View {
 
             Spacer(minLength: 0)
 
-            // Status pills column (always on right)
-            if shouldShowStatusPills {
-                statusPillsColumn
-            }
+            // Status pills column - ALWAYS in layout to maintain stable height
+            // Uses opacity for visibility to prevent safeAreaInset changes
+            statusPillsColumn
+                .opacity(shouldShowStatusPills ? 1 : 0)
         }
     }
 
@@ -445,28 +438,23 @@ struct InputBar: View {
 
     /// Status pills column (model + context pills stacked vertically, right-aligned)
     /// Pill order from top to bottom: reasoning → model → token (context)
-    /// Uses opacity-only transitions to prevent layout shifts that cause scroll jitter
+    /// IMPORTANT: All pills are ALWAYS in layout to maintain stable height
+    /// Visibility is controlled via opacity to prevent safeAreaInset changes
     private var statusPillsColumn: some View {
         VStack(alignment: .trailing, spacing: 8) {
-            // Reasoning level picker (for OpenAI Codex models) - appears above model picker
-            if currentModelInfo?.supportsReasoning == true, effectiveShowReasoningPill {
-                reasoningLevelMenu
-                    .transition(.opacity)
-            }
+            // Reasoning level picker - always in layout, opacity-controlled
+            reasoningLevelMenu
+                .opacity(effectiveShowReasoningPill ? 1 : 0)
+                .allowsHitTesting(effectiveShowReasoningPill)
 
-            // Model picker
-            if !modelName.isEmpty && effectiveShowModelPill {
-                modelPickerMenu
-                    .transition(.opacity)
-            }
+            // Model picker - always in layout, opacity-controlled
+            modelPickerMenu
+                .opacity(effectiveShowModelPill ? 1 : 0)
+                .allowsHitTesting(effectiveShowModelPill)
 
-            // Token stats pill with chevrons - base anchor, appears first
-            if effectiveShowTokenPill {
-                tokenStatsPillWithChevrons
-                    .transition(.opacity)
-            }
+            // Token stats pill - always visible
+            tokenStatsPillWithChevrons
         }
-        .animation(.easeOut(duration: 0.2), value: effectiveShowTokenPill)
         .animation(.easeOut(duration: 0.2), value: effectiveShowModelPill)
         .animation(.easeOut(duration: 0.2), value: effectiveShowReasoningPill)
     }
@@ -1391,30 +1379,23 @@ struct InputBar: View {
         effectiveShowTokenPill || (effectiveShowModelPill && !modelName.isEmpty)
     }
 
-    // MARK: - Coordinator-Aware Pill Visibility
+    // MARK: - Pill Visibility
+    // Pills are always visible when there's data to show - no animation sequencing needed
+    // This ensures pills appear immediately on session load and re-entry
 
-    /// Whether model pill should be visible (uses coordinator if available)
+    /// Whether model pill should be visible
     private var effectiveShowModelPill: Bool {
-        if let coordinator = animationCoordinator {
-            return coordinator.showModelPill
-        }
-        return showModelPill
+        !modelName.isEmpty
     }
 
-    /// Whether token/context pill should be visible (uses coordinator if available)
+    /// Whether token/context pill should be visible
     private var effectiveShowTokenPill: Bool {
-        if let coordinator = animationCoordinator {
-            return coordinator.showContextPill
-        }
-        return showTokenPill
+        true // Always visible - shows context stats
     }
 
-    /// Whether reasoning pill should be visible (uses coordinator if available)
+    /// Whether reasoning pill should be visible
     private var effectiveShowReasoningPill: Bool {
-        if let coordinator = animationCoordinator {
-            return coordinator.showReasoningPill
-        }
-        return showReasoningPill
+        currentModelInfo?.supportsReasoning == true
     }
 
     private var shouldShowModelPillDock: Bool {

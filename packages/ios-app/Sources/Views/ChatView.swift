@@ -525,7 +525,9 @@ struct ChatView: View {
                                     }
                                 )
                                 .id(message.id)
+                                .transition(.opacity.combined(with: .scale(scale: 0.98, anchor: .bottom)))
                             }
+                            .animation(.easeOut(duration: 0.25), value: viewModel.messages.count)
 
                             if viewModel.isProcessing && viewModel.messages.last?.isStreaming != true {
                                 ProcessingIndicator()
