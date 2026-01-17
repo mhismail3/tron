@@ -182,6 +182,40 @@ class ChatViewModel: ObservableObject {
         audioRecorder.prewarmAudioSession()
     }
 
+    /// Set up StreamingManager callbacks for text delta batching
+    private func setupStreamingManagerCallbacks() {
+        streamingManager.onTextUpdate = { [weak self] messageId, text in
+            guard let self = self else { return }
+            // Find and update the streaming message
+            if let index = self.messages.firstIndex(where: { $0.id == messageId }) {
+                self.messages[index].content = .streaming(text)
+            }
+        }
+
+        streamingManager.onCreateStreamingMessage = { [weak self] in
+            guard let self = self else { return UUID() }
+            let message = ChatMessage.streaming()
+            self.messages.append(message)
+            return message.id
+        }
+
+        streamingManager.onFinalizeMessage = { [weak self] messageId, finalText in
+            guard let self = self else { return }
+            if let index = self.messages.firstIndex(where: { $0.id == messageId }) {
+                if finalText.isEmpty {
+                    self.messages.remove(at: index)
+                } else {
+                    self.messages[index].content = .text(finalText)
+                    self.messages[index].isStreaming = false
+                }
+            }
+        }
+
+        streamingManager.onThinkingUpdate = { [weak self] thinkingText in
+            self?.thinkingText = thinkingText
+        }
+    }
+
     /// Set up UIUpdateQueue callback for processing batched, ordered updates
     private func setupUIUpdateQueueCallback() {
         uiUpdateQueue.onProcessUpdates = { [weak self] updates in
@@ -234,8 +268,9 @@ class ChatViewModel: ObservableObject {
     }
 
     private func setupEventHandlers() {
-        // Set up UIUpdateQueue callback for processing batched updates
+        // Set up manager callbacks for batched/ordered processing
         setupUIUpdateQueueCallback()
+        setupStreamingManagerCallbacks()
 
         rpcClient.onTextDelta = { [weak self] delta in
             self?.handleTextDelta(delta)

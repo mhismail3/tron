@@ -548,9 +548,10 @@ extension ChatViewModel {
         currentToolMessages.removeAll()
         currentTurnToolCalls.removeAll()
 
-        // Reset UIUpdateQueue and AnimationCoordinator state
+        // Reset all manager states
         uiUpdateQueue.reset()
         animationCoordinator.resetToolState()
+        streamingManager.reset()
 
         // Close browser session when agent completes
         closeBrowserSession()
@@ -655,10 +656,11 @@ extension ChatViewModel {
     func handleAgentError(_ message: String) {
         logger.error("Agent error: \(message)", category: .events)
 
-        // Flush and reset queue state on error
+        // Flush and reset all manager states on error
         uiUpdateQueue.flush()
         uiUpdateQueue.reset()
         animationCoordinator.resetToolState()
+        streamingManager.reset()
 
         isProcessing = false
         eventStoreManager?.setSessionProcessing(sessionId, isProcessing: false)
