@@ -108,7 +108,7 @@ struct ContextAuditView: View {
                                 GlassAction(
                                     title: "Cancel",
                                     icon: nil,
-                                    color: .tronError,
+                                    color: .tronTextMuted,
                                     role: .cancel
                                 ) {
                                     showClearPopover = false
@@ -157,7 +157,7 @@ struct ContextAuditView: View {
                                 GlassAction(
                                     title: "Cancel",
                                     icon: nil,
-                                    color: .tronSlate,
+                                    color: .tronTextMuted,
                                     role: .cancel
                                 ) {
                                     showCompactPopover = false
