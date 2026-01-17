@@ -64,11 +64,9 @@ struct InputBar: View {
     @State private var showSkillMentionPopup = false
     @State private var skillMentionQuery = ""
     @State private var isMicPulsing = false
-    // Buttons always visible in layout - no conditional rendering to avoid layout shifts
-    // Entrance animation controlled by hasAppeared state
-    @State private var showMicButton = true
-    @State private var showAttachmentButton = true
-    /// Controls entrance animation - starts false, animates to true after view appears
+    /// Controls entrance morph animation - starts false, animates to true after view appears
+    /// When false: docks visible, buttons invisible (morphed into text field)
+    /// When true: docks invisible, buttons visible (morphed out from text field)
     @State private var hasAppeared = false
     @Namespace private var actionButtonNamespace
     @Namespace private var modelPillNamespace
@@ -105,55 +103,56 @@ struct InputBar: View {
                 .padding(.horizontal, 16)
                 .transition(.opacity)
 
-            // Input row - floating liquid glass elements
-            // Entrance animation controlled by hasAppeared
+            // Input row - floating liquid glass elements with morph animations
+            // Buttons morph OUT from text field edges when hasAppeared becomes true
+            // Docks (inside text field) and buttons both always in layout for smooth morphing
             HStack(alignment: .bottom, spacing: 12) {
-                // Attachment button - liquid glass (morphs in from left)
-                if showAttachmentButton {
-                    attachmentButtonGlass
-                        .opacity(hasAppeared ? 1 : 0)
-                        .scaleEffect(hasAppeared ? 1 : 0.6)
-                        .transition(.scale(scale: 0.6).combined(with: .opacity))
-                }
-
-                // Text field with glass background
-                textFieldGlass
+                // Attachment button - morphs out from left edge of text field
+                attachmentButtonGlass
+                    .matchedGeometryEffect(id: "attachmentMorph", in: attachmentButtonNamespace, isSource: hasAppeared)
                     .opacity(hasAppeared ? 1 : 0)
-                    .scaleEffect(hasAppeared ? 1 : 0.95)
+                    .allowsHitTesting(hasAppeared)
 
-                // Send/Abort button - liquid glass
+                // Text field with glass background and morph dock points
+                textFieldGlass
+                    .opacity(hasAppeared ? 1 : 0.3)
+                    .overlay(alignment: .leading) {
+                        // Attachment dock - morph origin point inside text field
+                        attachmentButtonDock
+                            .matchedGeometryEffect(id: "attachmentMorph", in: attachmentButtonNamespace, isSource: !hasAppeared)
+                            .opacity(hasAppeared ? 0 : 1)
+                    }
+                    .overlay(alignment: .trailing) {
+                        // Mic dock - morph origin point inside text field
+                        HStack(spacing: 8) {
+                            // Action button dock (when not showing action button)
+                            if !shouldShowActionButton {
+                                actionButtonDock
+                            }
+                            micButtonDock
+                                .matchedGeometryEffect(id: "micMorph", in: micButtonNamespace, isSource: !hasAppeared)
+                                .opacity(hasAppeared ? 0 : 1)
+                        }
+                        .padding(.trailing, 8)
+                    }
+
+                // Send/Abort button - liquid glass (standard show/hide, not morph)
                 if shouldShowActionButton {
                     actionButtonGlass
                         .opacity(hasAppeared ? 1 : 0)
-                        .scaleEffect(hasAppeared ? 1 : 0.6)
                         .transition(.scale(scale: 0.6).combined(with: .opacity))
                 }
 
-                // Mic button - liquid glass
-                if shouldShowMicButton {
-                    micButtonGlass
-                        .opacity(hasAppeared ? 1 : 0)
-                        .scaleEffect(hasAppeared ? 1 : 0.6)
-                        .transition(.scale(scale: 0.6).combined(with: .opacity))
-                }
+                // Mic button - morphs out from right edge of text field
+                micButtonGlass
+                    .matchedGeometryEffect(id: "micMorph", in: micButtonNamespace, isSource: hasAppeared)
+                    .opacity(hasAppeared ? 1 : 0)
+                    .allowsHitTesting(hasAppeared)
             }
-            .animation(.spring(response: 0.35, dampingFraction: 0.85), value: hasAppeared)
+            .animation(.spring(response: 0.4, dampingFraction: 0.8), value: hasAppeared)
+            .animation(.tronStandard, value: shouldShowActionButton)
             .padding(.horizontal, 16)
             .padding(.bottom, 8)
-            .overlay(alignment: .topLeading) {
-                // Attachment button dock (left side)
-                if !showAttachmentButton {
-                    attachmentButtonDock
-                }
-            }
-            .overlay(alignment: .topTrailing) {
-                if shouldShowTokenPillDock {
-                    tokenStatsPillDock
-                }
-            }
-            .animation(attachmentButtonAnimation, value: showAttachmentButton)
-            .animation(.tronStandard, value: shouldShowActionButton)
-            .animation(micButtonAnimation, value: shouldShowMicButton)
         }
         // Block any focus attempts immediately after agent finishes
         .onChange(of: isFocused) { _, newValue in
@@ -441,26 +440,29 @@ struct InputBar: View {
     /// Pill order from top to bottom: reasoning → model → token (context)
     /// IMPORTANT: All pills are ALWAYS in layout to maintain stable height
     /// Visibility is controlled via opacity to prevent safeAreaInset changes
-    /// Entrance animation controlled by hasAppeared state
+    /// Entrance animation: pills morph UP from collapsed state with staggered timing
     private var statusPillsColumn: some View {
         VStack(alignment: .trailing, spacing: 8) {
-            // Reasoning level picker - always in layout, opacity-controlled
+            // Reasoning level picker - morphs up from model pill area
             reasoningLevelMenu
+                .scaleEffect(hasAppeared && effectiveShowReasoningPill ? 1 : 0.3, anchor: .bottom)
                 .opacity(hasAppeared && effectiveShowReasoningPill ? 1 : 0)
                 .allowsHitTesting(hasAppeared && effectiveShowReasoningPill)
 
-            // Model picker - always in layout, opacity-controlled
+            // Model picker - morphs up from token pill area
             modelPickerMenu
+                .scaleEffect(hasAppeared && effectiveShowModelPill ? 1 : 0.3, anchor: .bottom)
                 .opacity(hasAppeared && effectiveShowModelPill ? 1 : 0)
                 .allowsHitTesting(hasAppeared && effectiveShowModelPill)
 
-            // Token stats pill - always in layout, opacity-controlled for entrance
+            // Token stats pill - morphs up from bottom (first to appear)
             tokenStatsPillWithChevrons
+                .scaleEffect(hasAppeared ? 1 : 0.3, anchor: .bottom)
                 .opacity(hasAppeared ? 1 : 0)
         }
-        .animation(.easeOut(duration: 0.2), value: hasAppeared)
-        .animation(.easeOut(duration: 0.2), value: effectiveShowModelPill)
-        .animation(.easeOut(duration: 0.2), value: effectiveShowReasoningPill)
+        .animation(.spring(response: 0.4, dampingFraction: 0.75), value: hasAppeared)
+        .animation(.spring(response: 0.35, dampingFraction: 0.8), value: effectiveShowModelPill)
+        .animation(.spring(response: 0.35, dampingFraction: 0.8), value: effectiveShowReasoningPill)
     }
 
     /// Model picker menu (iOS 26 liquid glass)
@@ -725,7 +727,6 @@ struct InputBar: View {
                 }
             }
         }
-        .matchedGeometryEffect(id: "attachmentButtonMorph", in: attachmentButtonNamespace)
         .disabled(isProcessing)
         // iOS 26 Menu workaround: Handle attachment actions via NotificationCenter
         .onReceive(NotificationCenter.default.publisher(for: .attachmentMenuAction)) { notification in
@@ -1167,22 +1168,20 @@ struct InputBar: View {
             .accessibilityHidden(true)
     }
 
+    /// Mic button dock - morph origin point (matchedGeometryEffect added at call site)
     private var micButtonDock: some View {
         Circle()
             .fill(Color.clear)
             .frame(width: actionButtonSize, height: actionButtonSize)
-            .matchedGeometryEffect(id: "micButtonMorph", in: micButtonNamespace)
-            .offset(x: -micDockInset)
             .allowsHitTesting(false)
             .accessibilityHidden(true)
     }
 
+    /// Attachment button dock - morph origin point (matchedGeometryEffect added at call site)
     private var attachmentButtonDock: some View {
         Circle()
             .fill(Color.clear)
             .frame(width: actionButtonSize, height: actionButtonSize)
-            .matchedGeometryEffect(id: "attachmentButtonMorph", in: attachmentButtonNamespace)
-            .offset(x: attachmentDockInset)
             .allowsHitTesting(false)
             .accessibilityHidden(true)
     }
@@ -1223,7 +1222,6 @@ struct InputBar: View {
             .frame(width: actionButtonSize, height: actionButtonSize)
             .contentShape(Circle())
         }
-        .matchedGeometryEffect(id: "micButtonMorph", in: micButtonNamespace)
         .glassEffect(
             .regular.tint(micGlassTint).interactive(),
             in: .circle
@@ -1314,7 +1312,7 @@ struct InputBar: View {
     }
 
     private var shouldShowMicButton: Bool {
-        showMicButton
+        true // Always show mic button - morph animation handles entrance
     }
 
     private var shouldShowTrailingDock: Bool {
