@@ -182,7 +182,61 @@ class ChatViewModel: ObservableObject {
         audioRecorder.prewarmAudioSession()
     }
 
+    /// Set up UIUpdateQueue callback for processing batched, ordered updates
+    private func setupUIUpdateQueueCallback() {
+        uiUpdateQueue.onProcessUpdates = { [weak self] updates in
+            guard let self = self else { return }
+
+            for update in updates {
+                switch update {
+                case .turnBoundary(let data):
+                    // Turn boundaries are handled directly in handleTurnStart/handleTurnEnd
+                    // This callback is for tool ordering confirmation
+                    logger.verbose("UIUpdateQueue: Turn boundary processed (turn=\(data.turnNumber), isStart=\(data.isStart))", category: .events)
+
+                case .toolStart(let data):
+                    // Tool start was already added to messages in handleToolStart
+                    // Here we trigger the staggered animation appearance
+                    animationCoordinator.queueToolStart(toolCallId: data.toolCallId)
+                    logger.verbose("UIUpdateQueue: Tool start queued for animation: \(data.toolName)", category: .events)
+
+                case .toolEnd(let data):
+                    // Tool end arrives here in guaranteed order (earlier tools first)
+                    // Find and update the tool message
+                    processOrderedToolEnd(data)
+                    animationCoordinator.markToolComplete(toolCallId: data.toolCallId)
+                    logger.verbose("UIUpdateQueue: Tool end processed in order: \(data.toolCallId)", category: .events)
+
+                case .messageAppend, .textDelta:
+                    // These are handled separately via direct streaming path
+                    break
+                }
+            }
+        }
+    }
+
+    /// Process a tool end update that has been ordered by UIUpdateQueue
+    private func processOrderedToolEnd(_ data: UIUpdateQueue.ToolEndData) {
+        // Find the tool message by toolCallId
+        if let index = messages.lastIndex(where: {
+            if case .toolUse(let tool) = $0.content {
+                return tool.toolCallId == data.toolCallId
+            }
+            return false
+        }) {
+            if case .toolUse(var tool) = messages[index].content {
+                tool.status = data.success ? .success : .error
+                tool.result = data.result
+                tool.durationMs = data.durationMs
+                messages[index].content = .toolUse(tool)
+            }
+        }
+    }
+
     private func setupEventHandlers() {
+        // Set up UIUpdateQueue callback for processing batched updates
+        setupUIUpdateQueueCallback()
+
         rpcClient.onTextDelta = { [weak self] delta in
             self?.handleTextDelta(delta)
         }

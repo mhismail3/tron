@@ -108,6 +108,15 @@ extension ChatViewModel {
                 browserStatus = BrowserGetStatusResult(hasBrowser: true, isStreaming: false, currentUrl: nil)
             }
         }
+
+        // Enqueue tool start for ordered processing and staggered animation
+        let toolStartData = UIUpdateQueue.ToolStartData(
+            toolCallId: event.toolCallId,
+            toolName: event.toolName,
+            arguments: event.formattedArguments,
+            timestamp: Date()
+        )
+        uiUpdateQueue.enqueueToolStart(toolStartData)
     }
 
     /// Handle AskUserQuestion tool start - creates special message (sheet opens on tool.end)
@@ -196,26 +205,19 @@ extension ChatViewModel {
             return
         }
 
-        // Find and update regular tool message
+        // Check if this is a browser tool result with screenshot data
+        // (Extract screenshot before queueing - this updates browserFrame, not the message)
         if let index = messages.lastIndex(where: {
             if case .toolUse(let tool) = $0.content {
                 return tool.toolCallId == event.toolCallId
             }
             return false
         }) {
-            if case .toolUse(var tool) = messages[index].content {
-                tool.status = event.success ? .success : .error
-                tool.result = event.displayResult
-                tool.durationMs = event.durationMs
-                messages[index].content = .toolUse(tool)
-
-                // Check if this is a browser tool result with screenshot data
+            if case .toolUse(let tool) = messages[index].content {
                 if tool.toolName.lowercased().contains("browser") {
                     extractAndDisplayBrowserScreenshot(from: event)
                 }
             }
-        } else {
-            logger.warning("Could not find tool message for toolCallId=\(event.toolCallId)", category: .events)
         }
 
         // Update tracked tool call with result
@@ -223,6 +225,16 @@ extension ChatViewModel {
             currentTurnToolCalls[idx].result = event.displayResult
             currentTurnToolCalls[idx].isError = !event.success
         }
+
+        // Enqueue tool end for ordered processing
+        // UIUpdateQueue ensures tool ends are processed in the order tools started
+        let toolEndData = UIUpdateQueue.ToolEndData(
+            toolCallId: event.toolCallId,
+            success: event.success,
+            result: event.displayResult,
+            durationMs: event.durationMs
+        )
+        uiUpdateQueue.enqueueToolEnd(toolEndData)
     }
 
     /// Extract screenshot from browser tool result and display it
@@ -309,6 +321,15 @@ extension ChatViewModel {
             logger.debug("Clearing \(currentToolMessages.count) tool message references from previous turn", category: .events)
             currentToolMessages.removeAll()
         }
+
+        // Notify UIUpdateQueue of turn boundary (resets tool ordering)
+        uiUpdateQueue.enqueueTurnBoundary(UIUpdateQueue.TurnBoundaryData(
+            turnNumber: event.turnNumber,
+            isStart: true
+        ))
+
+        // Reset AnimationCoordinator tool state for new turn
+        animationCoordinator.resetToolState()
 
         // Track turn boundary for multi-turn metadata assignment
         turnStartMessageIndex = messages.count
@@ -503,6 +524,10 @@ extension ChatViewModel {
 
     func handleComplete() {
         logger.info("Agent complete, finalizing message (streamingText: \(streamingText.count) chars, toolCalls: \(currentTurnToolCalls.count))", category: .events)
+
+        // Flush any pending UI updates to ensure all tool results are displayed
+        uiUpdateQueue.flush()
+
         flushPendingTextUpdates()
 
         isProcessing = false
@@ -522,6 +547,10 @@ extension ChatViewModel {
 
         currentToolMessages.removeAll()
         currentTurnToolCalls.removeAll()
+
+        // Reset UIUpdateQueue and AnimationCoordinator state
+        uiUpdateQueue.reset()
+        animationCoordinator.resetToolState()
 
         // Close browser session when agent completes
         closeBrowserSession()
@@ -625,6 +654,12 @@ extension ChatViewModel {
     /// Handle errors from the agent streaming (shows error in chat)
     func handleAgentError(_ message: String) {
         logger.error("Agent error: \(message)", category: .events)
+
+        // Flush and reset queue state on error
+        uiUpdateQueue.flush()
+        uiUpdateQueue.reset()
+        animationCoordinator.resetToolState()
+
         isProcessing = false
         eventStoreManager?.setSessionProcessing(sessionId, isProcessing: false)
         eventStoreManager?.updateSessionDashboardInfo(
