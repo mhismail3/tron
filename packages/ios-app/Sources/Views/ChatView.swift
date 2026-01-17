@@ -78,7 +78,7 @@ struct ChatView: View {
 
     // MARK: - Entry Morph Animation (from left)
     @State private var showEntryContent = false
-    /// Delay for entry morph: 180ms (90% of mic button's 200ms delay)
+    /// Delay for entry morph: 180ms
     private let entryMorphDelay: UInt64 = 180_000_000
 
     // MARK: - Message Loading State
@@ -525,8 +525,9 @@ struct ChatView: View {
                                     }
                                 )
                                 .id(message.id)
-                                // Entrance animation - fade in when view appears
+                                // Entrance animation - fade in with slight upward movement
                                 .opacity(showEntryContent ? 1 : 0)
+                                .offset(y: showEntryContent ? 0 : 6)
                                 .transition(.opacity.combined(with: .scale(scale: 0.98, anchor: .bottom)))
                             }
                             .animation(.easeOut(duration: 0.3), value: showEntryContent)

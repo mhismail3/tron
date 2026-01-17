@@ -239,7 +239,7 @@ struct InputBar: View {
             // Staggered morph sequence after navigation completes
             Task { @MainActor in
                 // Wait for navigation to complete
-                try? await Task.sleep(nanoseconds: 150_000_000) // 150ms
+                try? await Task.sleep(nanoseconds: 200_000_000) // 200ms
 
                 // 1. Attachment button morphs out from left
                 withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) {
@@ -247,13 +247,13 @@ struct InputBar: View {
                 }
 
                 // 2. Short delay then mic button morphs out from right
-                try? await Task.sleep(nanoseconds: 80_000_000) // 80ms
+                try? await Task.sleep(nanoseconds: 130_000_000) // 130ms
                 withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) {
                     showMicButton = true
                 }
 
                 // 3. Mark hasAppeared for pills
-                try? await Task.sleep(nanoseconds: 50_000_000) // 50ms
+                try? await Task.sleep(nanoseconds: 100_000_000) // 100ms
                 withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
                     hasAppeared = true
                 }
