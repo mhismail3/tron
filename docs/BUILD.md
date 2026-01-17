@@ -122,7 +122,7 @@ npm run deploy
 
 # Or manually
 ./scripts/build.sh prod --install
-./scripts/deploy.sh prod install
+./prod install
 ```
 
 **Features enabled**:
@@ -240,7 +240,7 @@ npm run server:status
 git pull
 
 # Rebuild and reinstall
-./scripts/deploy.sh prod upgrade
+./prod deploy
 
 # Or manually
 npm run deploy
@@ -250,9 +250,6 @@ npm run deploy
 
 ```bash
 npm run deploy:uninstall
-
-# Or
-./scripts/deploy.sh prod uninstall
 ```
 
 **Note**: This preserves `~/.tron` data. To fully remove:
@@ -310,7 +307,7 @@ npm run server:start
 npm run server:stop
 
 # Restart
-./scripts/deploy.sh prod restart
+tron restart
 ```
 
 ### Status
