@@ -243,6 +243,18 @@ stop_server() {
     fi
 }
 
+# Prompt for confirmation
+confirm() {
+    local prompt="$1"
+    local response
+    echo -e "${YELLOW}$prompt${NC}"
+    read -p "Continue? [y/N] " response
+    case "$response" in
+        [yY][eE][sS]|[yY]) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
 # Install
 do_install() {
     log "Installing Tron ($TIER tier)..."
@@ -250,7 +262,17 @@ do_install() {
     local install_dir
     install_dir=$(get_install_dir)
 
-    # Build first
+    # Run tests first (with option to continue on failure)
+    log "Running tests..."
+    if ! npm test; then
+        warn "Tests failed!"
+        if ! confirm "Do you want to continue deployment anyway?"; then
+            error "Deployment cancelled due to test failure"
+        fi
+        warn "Continuing deployment despite test failure..."
+    fi
+
+    # Build (skip tests since we already ran them)
     "$SCRIPT_DIR/build.sh" "$TIER" --install
 
     # Create bin wrapper
