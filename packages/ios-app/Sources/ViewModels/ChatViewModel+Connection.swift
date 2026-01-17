@@ -84,7 +84,12 @@ extension ChatViewModel {
             if agentState.isRunning {
                 logger.info("Agent is currently running - setting up streaming state for in-progress session", category: .session)
                 isProcessing = true
-                isCatchingUp = true  // Show loading pill during catch-up
+
+                // Add in-chat catching-up notification
+                let catchingUpMessage = ChatMessage.catchingUp()
+                messages.append(catchingUpMessage)
+                catchingUpMessageId = catchingUpMessage.id
+
                 eventStoreManager?.setSessionProcessing(sessionId, isProcessing: true)
 
                 // Use accumulated content from server if available (catch-up content)

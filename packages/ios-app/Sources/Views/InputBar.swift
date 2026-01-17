@@ -455,53 +455,30 @@ struct InputBar: View {
 
     /// Status pills column (model + context pills stacked vertically, right-aligned)
     /// Pill order from top to bottom: reasoning → model → token (context)
-    /// Chained morph animation: each pill grows upward from the one below it
+    /// Uses opacity-only transitions to prevent layout shifts that cause scroll jitter
     private var statusPillsColumn: some View {
         VStack(alignment: .trailing, spacing: 8) {
             // Reasoning level picker (for OpenAI Codex models) - appears above model picker
-            // Morphs upward from model pill
             if currentModelInfo?.supportsReasoning == true, effectiveShowReasoningPill {
                 reasoningLevelMenu
-                    .matchedGeometryEffect(id: "reasoningPillMorph", in: reasoningPillNamespace)
-                    .transition(
-                        .asymmetric(
-                            insertion: .scale(scale: 0, anchor: .bottom)
-                                .combined(with: .opacity),
-                            removal: .opacity
-                        )
-                    )
+                    .transition(.opacity)
             }
 
-            // Model picker - morphs upward from token pill
+            // Model picker
             if !modelName.isEmpty && effectiveShowModelPill {
                 modelPickerMenu
-                    .matchedGeometryEffect(id: "modelPillMorph", in: modelPillNamespace)
-                    .transition(
-                        .asymmetric(
-                            insertion: .scale(scale: 0, anchor: .bottom)
-                                .combined(with: .opacity),
-                            removal: .opacity
-                        )
-                    )
+                    .transition(.opacity)
             }
 
             // Token stats pill with chevrons - base anchor, appears first
-            // Grows upward from input bar area
             if effectiveShowTokenPill {
                 tokenStatsPillWithChevrons
-                    .matchedGeometryEffect(id: "tokenPillMorph", in: tokenPillNamespace)
-                    .transition(
-                        .asymmetric(
-                            insertion: .scale(scale: 0, anchor: .bottom)
-                                .combined(with: .opacity),
-                            removal: .opacity
-                        )
-                    )
+                    .transition(.opacity)
             }
         }
-        .animation(.spring(response: 0.35, dampingFraction: 0.82), value: effectiveShowTokenPill)
-        .animation(.spring(response: 0.38, dampingFraction: 0.8), value: effectiveShowModelPill)
-        .animation(.spring(response: 0.4, dampingFraction: 0.78), value: effectiveShowReasoningPill)
+        .animation(.easeOut(duration: 0.2), value: effectiveShowTokenPill)
+        .animation(.easeOut(duration: 0.2), value: effectiveShowModelPill)
+        .animation(.easeOut(duration: 0.2), value: effectiveShowReasoningPill)
     }
 
     /// Model picker menu (iOS 26 liquid glass)

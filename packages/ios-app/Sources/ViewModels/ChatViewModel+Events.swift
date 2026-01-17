@@ -390,12 +390,13 @@ extension ChatViewModel {
         turnStartMessageIndex = nil
         firstTextMessageIdForTurn = nil
 
-        // Dismiss catch-up pill at natural breakpoint (turn end)
-        if isCatchingUp {
+        // Remove catching-up notification at natural breakpoint (turn end)
+        if let catchUpId = catchingUpMessageId {
             withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
-                isCatchingUp = false
+                messages.removeAll { $0.id == catchUpId }
             }
-            logger.info("Catch-up complete - dismissed loading pill", category: .events)
+            catchingUpMessageId = nil
+            logger.info("Catch-up complete - removed notification", category: .events)
         }
 
         // Update context window if server provides it (ensures iOS stays in sync after model switch)
@@ -529,7 +530,13 @@ extension ChatViewModel {
         flushPendingTextUpdates()
 
         isProcessing = false
-        isCatchingUp = false  // Ensure catch-up state is reset on completion
+
+        // Remove catching-up notification if still present
+        if let catchUpId = catchingUpMessageId {
+            messages.removeAll { $0.id == catchUpId }
+            catchingUpMessageId = nil
+        }
+
         finalizeStreamingMessage()
         thinkingText = ""
 

@@ -139,6 +139,9 @@ struct MessageBubble: View {
                 PlanModeExitedFallbackView(reason: reason)
             }
 
+        case .catchingUp:
+            CatchingUpNotificationView()
+
         case .askUserQuestion(let data):
             if #available(iOS 26.0, *) {
                 AskUserQuestionToolViewer(data: data) {
@@ -278,6 +281,31 @@ struct InterruptedNotificationView: View {
         .overlay(
             Capsule()
                 .stroke(Color.red.opacity(0.3), lineWidth: 0.5)
+        )
+        .frame(maxWidth: .infinity, alignment: .center)
+    }
+}
+
+// MARK: - Catching Up Notification View (Gray pill-style in-chat notification)
+
+struct CatchingUpNotificationView: View {
+    var body: some View {
+        HStack(spacing: 8) {
+            ProgressView()
+                .scaleEffect(0.7)
+                .tint(.gray)
+
+            Text("Loading latest messages...")
+                .font(.system(size: 11, weight: .medium, design: .monospaced))
+                .foregroundStyle(.gray)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(Color.gray.opacity(0.1))
+        .clipShape(Capsule())
+        .overlay(
+            Capsule()
+                .stroke(Color.gray.opacity(0.3), lineWidth: 0.5)
         )
         .frame(maxWidth: .infinity, alignment: .center)
     }

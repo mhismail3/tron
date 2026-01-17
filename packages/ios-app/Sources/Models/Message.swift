@@ -206,6 +206,8 @@ enum MessageContent: Equatable {
     case planModeEntered(skillName: String, blockedTools: [String])
     /// In-chat notification for plan mode exited
     case planModeExited(reason: String, planPath: String?)
+    /// In-chat notification for catching up to in-progress session
+    case catchingUp
     /// AskUserQuestion tool call (rendered as interactive question sheet)
     case askUserQuestion(AskUserQuestionToolData)
     /// User answered agent's questions (rendered as a chip)
@@ -257,6 +259,8 @@ enum MessageContent: Equatable {
             return "Plan mode active (\(skillName))"
         case .planModeExited(let reason, _):
             return "Plan mode \(reason)"
+        case .catchingUp:
+            return "Loading latest messages..."
         case .askUserQuestion(let data):
             return "[\(data.params.questions.count) questions]"
         case .answeredQuestions(let count):
@@ -282,7 +286,7 @@ enum MessageContent: Equatable {
 
     var isNotification: Bool {
         switch self {
-        case .modelChange, .interrupted, .transcriptionFailed, .transcriptionNoSpeech, .compaction, .contextCleared, .messageDeleted, .skillRemoved, .rulesLoaded, .planModeEntered, .planModeExited:
+        case .modelChange, .interrupted, .transcriptionFailed, .transcriptionNoSpeech, .compaction, .contextCleared, .messageDeleted, .skillRemoved, .rulesLoaded, .planModeEntered, .planModeExited, .catchingUp:
             return true
         default:
             return false
@@ -478,6 +482,11 @@ extension ChatMessage {
     /// In-chat notification for plan mode exiting
     static func planModeExited(reason: String, planPath: String?) -> ChatMessage {
         ChatMessage(role: .system, content: .planModeExited(reason: reason, planPath: planPath))
+    }
+
+    /// In-chat notification for catching up to in-progress session
+    static func catchingUp() -> ChatMessage {
+        ChatMessage(role: .system, content: .catchingUp)
     }
 }
 

@@ -84,6 +84,8 @@ struct ChatView: View {
     // MARK: - Message Loading State
     /// Message IDs that were present at initial load (historical messages bypass tool stagger)
     @State private var initialMessageIds: Set<UUID> = []
+    /// Whether initial message load is complete (prevents auto-scroll during initial render)
+    @State private var initialLoadComplete = false
 
     private let sessionId: String
     private let rpcClient: RPCClient
@@ -362,6 +364,7 @@ struct ChatView: View {
             // Reset for next entry
             showEntryContent = false
             initialMessageIds = []
+            initialLoadComplete = false
             // Full reset of animation state when leaving session
             viewModel.animationCoordinator.fullReset()
         }
@@ -411,10 +414,9 @@ struct ChatView: View {
             // Capture initial message IDs for tool stagger (historical messages bypass stagger)
             initialMessageIds = Set(viewModel.messages.map { $0.id })
 
-            // Scroll to bottom after messages load
-            withAnimation(.tronFast) {
-                scrollProxy?.scrollTo("bottom", anchor: .bottom)
-            }
+            // Mark initial load complete - enables auto-scroll for subsequent updates
+            // Note: NO explicit scroll needed here - defaultScrollAnchor(.bottom) handles it
+            initialLoadComplete = true
         }
         .onChange(of: scenePhase) { oldPhase, newPhase in
             // Reconnect and resume when returning to foreground
@@ -568,10 +570,14 @@ struct ChatView: View {
                         }
                         .padding()
                     }
+                    .defaultScrollAnchor(.bottom)  // Start at bottom - no visible scroll on load
                     .coordinateSpace(name: "scrollContainer")
                     .scrollDismissesKeyboard(.interactively)
                     // Track distance from bottom to re-enable auto-scroll when user scrolls back
                     .onPreferenceChange(ScrollOffsetPreferenceKey.self) { distanceFromBottom in
+                        // Don't process scroll position during initial load
+                        guard initialLoadComplete else { return }
+
                         lastBottomDistance = distanceFromBottom
 
                         // Re-enable auto-scroll ONLY when:
@@ -588,6 +594,9 @@ struct ChatView: View {
                         scrollProxy = proxy
                     }
                     .onChange(of: viewModel.messages.count) { oldCount, newCount in
+                        // Don't auto-scroll during initial load - defaultScrollAnchor handles it
+                        guard initialLoadComplete else { return }
+
                         if autoScrollEnabled {
                             withAnimation(.tronFast) {
                                 proxy.scrollTo("bottom", anchor: .bottom)
@@ -597,6 +606,9 @@ struct ChatView: View {
                         }
                     }
                     .onChange(of: viewModel.messages.last?.content) { _, _ in
+                        // Don't auto-scroll during initial load - defaultScrollAnchor handles it
+                        guard initialLoadComplete else { return }
+
                         // Only auto-scroll during streaming if user hasn't scrolled up
                         if autoScrollEnabled {
                             proxy.scrollTo("bottom", anchor: .bottom)
@@ -606,6 +618,9 @@ struct ChatView: View {
                         }
                     }
                     .onChange(of: viewModel.isProcessing) { wasProcessing, isProcessing in
+                        // Don't auto-scroll during initial load - defaultScrollAnchor handles it
+                        guard initialLoadComplete else { return }
+
                         if wasProcessing && !isProcessing {
                             // Processing ended
                             if autoScrollEnabled {
@@ -632,39 +647,8 @@ struct ChatView: View {
                         .animation(.tronStandard, value: hasUnreadContent)
                 }
 
-                // Floating "Catching up" pill - show when joining an in-progress session
-                if viewModel.isCatchingUp {
-                    VStack {
-                        catchingUpPill
-                            .padding(.top, 60)
-                        Spacer()
-                    }
-                    .transition(.asymmetric(
-                        insertion: .opacity.combined(with: .scale(scale: 0.8)).combined(with: .move(edge: .top)),
-                        removal: .opacity.combined(with: .scale(scale: 0.9))
-                    ))
-                    .animation(.spring(response: 0.3, dampingFraction: 0.8), value: viewModel.isCatchingUp)
-                }
             }
         }
-    }
-
-    // MARK: - Catching Up Pill
-
-    private var catchingUpPill: some View {
-        HStack(spacing: 8) {
-            ProgressView()
-                .scaleEffect(0.8)
-                .tint(.white.opacity(0.9))
-            Text("Loading latest messages...")
-                .font(.system(size: 13, weight: .medium))
-        }
-        .foregroundStyle(.white.opacity(0.9))
-        .padding(.vertical, 10)
-        .padding(.horizontal, 16)
-        .background(.tronEmerald.opacity(0.85))
-        .clipShape(Capsule())
-        .shadow(color: .black.opacity(0.3), radius: 8, y: 4)
     }
 
     // MARK: - Scroll to Bottom Button
