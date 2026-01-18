@@ -123,7 +123,7 @@ struct ToolsSection: View {
 
             // Content
             if isExpanded {
-                ScrollView {
+                ScrollView(.vertical, showsIndicators: true) {
                     VStack(alignment: .leading, spacing: 0) {
                         ForEach(Array(toolsContent.enumerated()), id: \.offset) { index, tool in
                             ToolItemView(tool: tool)
@@ -134,6 +134,7 @@ struct ToolsSection: View {
                         }
                     }
                     .padding(.vertical, 4)
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 .frame(maxHeight: 300)
                 .background(Color.black.opacity(0.2))
@@ -176,6 +177,7 @@ struct ToolItemView: View {
             Text(toolName)
                 .font(.system(size: 11, weight: .semibold, design: .monospaced))
                 .foregroundStyle(.tronClay)
+                .lineLimit(2)
             if !toolDescription.isEmpty {
                 Text(toolDescription)
                     .font(.system(size: 10, design: .monospaced))
@@ -356,7 +358,7 @@ struct SkillReferenceRow: View {
     }
 
     private var sourceColor: Color {
-        skill.source == .project ? .tronEmerald : .tronPurple
+        skill.source == .project ? .tronEmerald : .tronCyan
     }
 
     private var autoInjectBadge: String? {
