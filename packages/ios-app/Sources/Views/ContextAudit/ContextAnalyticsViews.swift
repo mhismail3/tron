@@ -87,8 +87,10 @@ struct CostSummaryCard: View {
     let analytics: ConsolidatedAnalytics
 
     private func formatCost(_ cost: Double) -> String {
-        if cost < 0.001 { return "$0.00" }
-        if cost < 0.01 { return String(format: "$%.3f", cost) }
+        if cost < 0.00001 { return "$0.00" }      // Below $0.00001 (0.001 cent) - show as $0.00
+        if cost < 0.0001 { return String(format: "$%.5f", cost) }  // Show 5 decimal places
+        if cost < 0.001 { return String(format: "$%.4f", cost) }   // Show 4 decimal places
+        if cost < 0.01 { return String(format: "$%.3f", cost) }    // Show 3 decimal places
         return String(format: "$%.2f", cost)
     }
 
@@ -256,8 +258,10 @@ struct TurnRow: View {
     }
 
     private func formatCost(_ cost: Double) -> String {
-        if cost < 0.001 { return "$0.00" }
-        if cost < 0.01 { return String(format: "$%.3f", cost) }
+        if cost < 0.00001 { return "$0.00" }      // Below $0.00001 (0.001 cent) - show as $0.00
+        if cost < 0.0001 { return String(format: "$%.5f", cost) }  // Show 5 decimal places
+        if cost < 0.001 { return String(format: "$%.4f", cost) }   // Show 4 decimal places
+        if cost < 0.01 { return String(format: "$%.3f", cost) }    // Show 3 decimal places
         return String(format: "$%.2f", cost)
     }
 
@@ -532,11 +536,13 @@ struct ConsolidatedAnalytics {
         return nil
     }
 
-    /// Extract Double from Any (handles both Int and Double from JSON)
+    /// Extract Double from Any (handles Double, Int, NSNumber, and String from JSON)
     private static func extractDouble(_ value: Any?) -> Double? {
         if let doubleVal = value as? Double { return doubleVal }
         if let intVal = value as? Int { return Double(intVal) }
         if let nsNumber = value as? NSNumber { return nsNumber.doubleValue }
+        // Handle case where value comes as a String (e.g., from JSON serialization)
+        if let stringVal = value as? String, let parsed = Double(stringVal) { return parsed }
         return nil
     }
 
@@ -573,13 +579,24 @@ struct ConsolidatedAnalytics {
     private static func getPricing(for model: String?) -> ModelPricing {
         guard let model = model?.lowercased() else { return .defaultPricing }
 
-        // Claude models
+        // Claude models - check specific versions first, then fallback to general patterns
+        // Opus 4.5 ($5/$25)
+        if model.contains("opus-4-5") || model.contains("opus-4.5") || model.contains("opus 4.5") {
+            return ModelPricing(inputPerMillion: 5.0, outputPerMillion: 25.0, cacheWriteMultiplier: 1.25, cacheReadMultiplier: 0.1)
+        }
+        // Opus legacy ($15/$75)
         if model.contains("opus") {
             return ModelPricing(inputPerMillion: 15.0, outputPerMillion: 75.0, cacheWriteMultiplier: 1.25, cacheReadMultiplier: 0.1)
         }
+        // Sonnet 4.5 ($3/$15) - same as sonnet 4
         if model.contains("sonnet") {
             return ModelPricing(inputPerMillion: 3.0, outputPerMillion: 15.0, cacheWriteMultiplier: 1.25, cacheReadMultiplier: 0.1)
         }
+        // Haiku 4.5 ($1/$5)
+        if model.contains("haiku-4-5") || model.contains("haiku-4.5") || model.contains("haiku 4.5") {
+            return ModelPricing(inputPerMillion: 1.0, outputPerMillion: 5.0, cacheWriteMultiplier: 1.25, cacheReadMultiplier: 0.1)
+        }
+        // Haiku 3 legacy ($0.25/$1.25)
         if model.contains("haiku") {
             return ModelPricing(inputPerMillion: 0.25, outputPerMillion: 1.25, cacheWriteMultiplier: 1.25, cacheReadMultiplier: 0.1)
         }

@@ -116,6 +116,7 @@ import {
   isPlanModeEnteredEvent,
   isPlanModeExitedEvent,
   withLoggingContext,
+  calculateCost,
 } from '@tron/core';
 import { BrowserService } from './browser/index.js';
 import {
@@ -2283,6 +2284,22 @@ The user has explicitly removed these skills and expects you to respond WITHOUT 
           // 4. Tool results are stored as tool.result events for streaming/display
         }
 
+        // Calculate cost if not provided by agent (or is 0) but tokenUsage is available
+        // The agent may send cost: 0 if usage data was incomplete, so always recalculate
+        let turnCost = event.cost;
+        if (event.tokenUsage && active) {
+          const costResult = calculateCost(active.model, {
+            inputTokens: event.tokenUsage.inputTokens,
+            outputTokens: event.tokenUsage.outputTokens,
+            cacheReadTokens: event.tokenUsage.cacheReadTokens,
+            cacheCreationTokens: event.tokenUsage.cacheCreationTokens,
+          });
+          // Use calculated cost if agent didn't provide one or provided 0
+          if (turnCost === undefined || turnCost === 0) {
+            turnCost = costResult.total;
+          }
+        }
+
         this.emit('agent_event', {
           type: 'agent.turn_end',
           sessionId,
@@ -2291,7 +2308,7 @@ The user has explicitly removed these skills and expects you to respond WITHOUT 
             turn: event.turn,
             duration: event.duration,
             tokenUsage: event.tokenUsage,
-            cost: event.cost,
+            cost: turnCost,
           },
         });
 
@@ -2299,7 +2316,7 @@ The user has explicitly removed these skills and expects you to respond WITHOUT 
         this.appendEventLinearized(sessionId, 'stream.turn_end', {
           turn: event.turn,
           tokenUsage: event.tokenUsage ?? { inputTokens: 0, outputTokens: 0 },
-          cost: event.cost,
+          cost: turnCost,
         });
         break;
 

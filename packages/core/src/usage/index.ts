@@ -234,7 +234,8 @@ export function calculateCost(
 
   // Calculate input cost components
   // Base input tokens (excluding cache tokens which are billed separately)
-  const baseInputTokens = inputTokens - cacheReadTokens - cacheCreationTokens;
+  // Use max(0) to handle edge cases where cache tokens might exceed reported input
+  const baseInputTokens = Math.max(0, inputTokens - cacheReadTokens - cacheCreationTokens);
   const baseInputCost = (baseInputTokens / 1_000_000) * pricing.inputPerMillion;
 
   // Cache creation cost (higher rate)
