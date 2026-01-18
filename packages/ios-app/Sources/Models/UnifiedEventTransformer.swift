@@ -58,9 +58,10 @@ struct UnifiedEventTransformer {
         // Sort by turn number, then timestamp, then sequence
         let sorted = sortEventsByTurn(events)
 
-        // Build maps for tool calls and results
+        // Build maps for tool calls, results, and turn token usage
         var toolCalls: [String: ToolCallPayload] = [:]
         var toolResults: [String: ToolResultPayload] = [:]
+        var turnTokenUsage: [Int: TokenUsage] = [:]  // turn number -> token usage from turn.end
         for event in sorted {
             if event.type == PersistedEventType.toolCall.rawValue,
                let payload = ToolCallPayload(from: event.payload) {
@@ -69,6 +70,13 @@ struct UnifiedEventTransformer {
             if event.type == PersistedEventType.toolResult.rawValue,
                let payload = ToolResultPayload(from: event.payload) {
                 toolResults[payload.toolCallId] = payload
+            }
+            // Collect token usage from turn.end events for fallback
+            if event.type == PersistedEventType.streamTurnEnd.rawValue {
+                let payload = StreamTurnEndPayload(from: event.payload)
+                if let usage = payload.tokenUsage {
+                    turnTokenUsage[payload.turn] = usage
+                }
             }
         }
 
@@ -87,7 +95,8 @@ struct UnifiedEventTransformer {
                     event.payload,
                     timestamp: parseTimestamp(event.timestamp),
                     toolCalls: toolCalls,
-                    toolResults: toolResults
+                    toolResults: toolResults,
+                    turnTokenUsage: turnTokenUsage
                 )
                 messages.append(contentsOf: interleaved)
             } else {
@@ -116,9 +125,10 @@ struct UnifiedEventTransformer {
         // Sort by turn number, then timestamp, then sequence
         let sorted = sortEventsByTurn(events)
 
-        // Build maps for tool calls and results
+        // Build maps for tool calls, results, and turn token usage
         var toolCalls: [String: ToolCallPayload] = [:]
         var toolResults: [String: ToolResultPayload] = [:]
+        var turnTokenUsage: [Int: TokenUsage] = [:]  // turn number -> token usage from turn.end
         for event in sorted {
             if event.type == PersistedEventType.toolCall.rawValue,
                let payload = ToolCallPayload(from: event.payload) {
@@ -127,6 +137,13 @@ struct UnifiedEventTransformer {
             if event.type == PersistedEventType.toolResult.rawValue,
                let payload = ToolResultPayload(from: event.payload) {
                 toolResults[payload.toolCallId] = payload
+            }
+            // Collect token usage from turn.end events for fallback
+            if event.type == PersistedEventType.streamTurnEnd.rawValue {
+                let payload = StreamTurnEndPayload(from: event.payload)
+                if let usage = payload.tokenUsage {
+                    turnTokenUsage[payload.turn] = usage
+                }
             }
         }
 
@@ -145,7 +162,8 @@ struct UnifiedEventTransformer {
                     event.payload,
                     timestamp: parseTimestamp(event.timestamp),
                     toolCalls: toolCalls,
-                    toolResults: toolResults
+                    toolResults: toolResults,
+                    turnTokenUsage: turnTokenUsage
                 )
                 messages.append(contentsOf: interleaved)
             } else {
@@ -304,6 +322,7 @@ struct UnifiedEventTransformer {
     ///   - timestamp: Event timestamp
     ///   - toolCalls: Map of toolCallId -> ToolCallPayload for tool details
     ///   - toolResults: Map of toolCallId -> ToolResultPayload for results
+    ///   - turnTokenUsage: Map of turn number -> TokenUsage from turn.end events (fallback)
     ///   - allEvents: Optional array of all events for AskUserQuestion status detection
     /// - Returns: Array of ChatMessages in content block order
     private static func transformAssistantMessageInterleaved(
@@ -311,10 +330,14 @@ struct UnifiedEventTransformer {
         timestamp: Date,
         toolCalls: [String: ToolCallPayload],
         toolResults: [String: ToolResultPayload],
+        turnTokenUsage: [Int: TokenUsage] = [:],
         allEvents: [RawEvent]? = nil
     ) -> [ChatMessage] {
         let parsed = AssistantMessagePayload(from: payload)
         guard let blocks = parsed.contentBlocks else { return [] }
+
+        // Use token usage from message.assistant payload, or fall back to turn.end event
+        let effectiveTokenUsage = parsed.tokenUsage ?? turnTokenUsage[parsed.turn]
 
         var messages: [ChatMessage] = []
         var sawAskUserQuestion = false  // Track if AskUserQuestion was seen
@@ -328,13 +351,13 @@ struct UnifiedEventTransformer {
             }
 
             if blockType == "text", let text = block["text"] as? String, !text.isEmpty {
-                // Create text message - only first message gets metadata
+                // Create text message - only text responses show token stats
                 messages.append(ChatMessage(
                     role: .assistant,
                     content: .text(text),
                     timestamp: timestamp,
-                    tokenUsage: messages.isEmpty ? parsed.tokenUsage : nil,
-                    model: messages.isEmpty ? parsed.model : nil,
+                    tokenUsage: effectiveTokenUsage,
+                    model: parsed.model,
                     latencyMs: messages.isEmpty ? parsed.latencyMs : nil,
                     turnNumber: parsed.turn,
                     hasThinking: messages.isEmpty ? parsed.hasThinking : nil,
@@ -356,8 +379,8 @@ struct UnifiedEventTransformer {
                         toolCall: toolCall,
                         contentBlock: block,
                         timestamp: timestamp,
-                        tokenUsage: messages.isEmpty ? parsed.tokenUsage : nil,
-                        model: messages.isEmpty ? parsed.model : nil,
+                        tokenUsage: nil,  // Stats only shown on text messages
+                        model: nil,
                         turn: parsed.turn,
                         allEvents: allEvents
                     ) {
@@ -397,7 +420,7 @@ struct UnifiedEventTransformer {
                     arguments = "{}"
                 }
 
-                // First message of turn gets metadata (for token tracking on session restore)
+                // Tool messages don't show stats - only text responses do
                 messages.append(ChatMessage(
                     role: .assistant,
                     content: .toolUse(ToolUseData(
@@ -409,12 +432,12 @@ struct UnifiedEventTransformer {
                         durationMs: result?.durationMs
                     )),
                     timestamp: timestamp,
-                    tokenUsage: messages.isEmpty ? parsed.tokenUsage : nil,
-                    model: messages.isEmpty ? parsed.model : nil,
-                    latencyMs: messages.isEmpty ? parsed.latencyMs : nil,
+                    tokenUsage: nil,
+                    model: nil,
+                    latencyMs: nil,
                     turnNumber: turn,
-                    hasThinking: messages.isEmpty ? parsed.hasThinking : nil,
-                    stopReason: messages.isEmpty ? parsed.stopReason?.rawValue : nil
+                    hasThinking: nil,
+                    stopReason: nil
                 ))
             }
             // Skip thinking blocks and other types - they're handled elsewhere
@@ -1557,11 +1580,12 @@ extension UnifiedEventTransformer {
         // Sort by turn number, then timestamp, then sequence
         let sorted = sortEventsByTurn(events)
 
-        // PASS 1: Collect deleted event IDs, config state, and build tool maps
+        // PASS 1: Collect deleted event IDs, config state, tool maps, and turn token usage
         // Two-pass reconstruction ensures deletions that occur later are properly filtered
         var deletedEventIds = Set<String>()
         var toolCalls: [String: ToolCallPayload] = [:]
         var toolResults: [String: ToolResultPayload] = [:]
+        var turnTokenUsage: [Int: TokenUsage] = [:]  // turn number -> token usage from turn.end
 
         for event in sorted {
             if event.type == PersistedEventType.toolCall.rawValue,
@@ -1571,6 +1595,13 @@ extension UnifiedEventTransformer {
             if event.type == PersistedEventType.toolResult.rawValue,
                let payload = ToolResultPayload(from: event.payload) {
                 toolResults[payload.toolCallId] = payload
+            }
+            // Collect token usage from turn.end events for message reconstruction
+            if event.type == PersistedEventType.streamTurnEnd.rawValue {
+                let payload = StreamTurnEndPayload(from: event.payload)
+                if let usage = payload.tokenUsage {
+                    turnTokenUsage[payload.turn] = usage
+                }
             }
             // Collect deleted event IDs
             if event.type == PersistedEventType.messageDeleted.rawValue,
@@ -1611,6 +1642,7 @@ extension UnifiedEventTransformer {
                     timestamp: parseTimestamp(event.timestamp),
                     toolCalls: toolCalls,
                     toolResults: toolResults,
+                    turnTokenUsage: turnTokenUsage,
                     allEvents: sorted  // Pass events for AskUserQuestion status detection
                 )
                 // Set eventId on the first message for deletion tracking
@@ -1620,7 +1652,7 @@ extension UnifiedEventTransformer {
                 }
                 state.messages.append(contentsOf: interleaved)
 
-                // Track token usage from assistant messages
+                // Track token usage from assistant messages (use turn.end fallback)
                 // totalTokenUsage: ACCUMULATE all tokens (for billing/statistics)
                 // lastTurnInputTokens: LAST turn's value (for context bar display)
                 let payload = AssistantMessagePayload(from: event.payload)
@@ -1820,11 +1852,12 @@ extension UnifiedEventTransformer {
         // Sort by turn number, then timestamp, then sequence
         let sorted = sortEventsByTurn(events)
 
-        // PASS 1: Collect deleted event IDs, config state, and build tool maps
+        // PASS 1: Collect deleted event IDs, config state, tool maps, and turn token usage
         // Two-pass reconstruction ensures deletions that occur later are properly filtered
         var deletedEventIds = Set<String>()
         var toolCalls: [String: ToolCallPayload] = [:]
         var toolResults: [String: ToolResultPayload] = [:]
+        var turnTokenUsage: [Int: TokenUsage] = [:]  // turn number -> token usage from turn.end
 
         for event in sorted {
             if event.type == PersistedEventType.toolCall.rawValue,
@@ -1834,6 +1867,13 @@ extension UnifiedEventTransformer {
             if event.type == PersistedEventType.toolResult.rawValue,
                let payload = ToolResultPayload(from: event.payload) {
                 toolResults[payload.toolCallId] = payload
+            }
+            // Collect token usage from turn.end events for message reconstruction
+            if event.type == PersistedEventType.streamTurnEnd.rawValue {
+                let payload = StreamTurnEndPayload(from: event.payload)
+                if let usage = payload.tokenUsage {
+                    turnTokenUsage[payload.turn] = usage
+                }
             }
             // Collect deleted event IDs
             if event.type == PersistedEventType.messageDeleted.rawValue,
@@ -1869,12 +1909,13 @@ extension UnifiedEventTransformer {
 
             case .messageAssistant:
                 // Process content blocks in order (preserves interleaving)
+                // Note: allEvents not passed for SessionEvent version (type mismatch with RawEvent)
                 var interleaved = transformAssistantMessageInterleaved(
                     event.payload,
                     timestamp: parseTimestamp(event.timestamp),
                     toolCalls: toolCalls,
                     toolResults: toolResults,
-                    allEvents: sorted  // Pass events for AskUserQuestion status detection
+                    turnTokenUsage: turnTokenUsage
                 )
                 // Set eventId on the first message for deletion tracking
                 // (interleaved may produce multiple messages from one event)
@@ -1883,11 +1924,12 @@ extension UnifiedEventTransformer {
                 }
                 state.messages.append(contentsOf: interleaved)
 
-                // Track token usage from assistant messages
+                // Track token usage from assistant messages (use turn.end fallback)
                 // totalTokenUsage: ACCUMULATE all tokens (for billing/statistics)
                 // lastTurnInputTokens: LAST turn's value (for context bar display)
-                let payload = AssistantMessagePayload(from: event.payload)
-                if let usage = payload.tokenUsage {
+                let parsed = AssistantMessagePayload(from: event.payload)
+                let effectiveUsage = parsed.tokenUsage ?? turnTokenUsage[parsed.turn]
+                if let usage = effectiveUsage {
                     state.totalTokenUsage = TokenUsage(
                         inputTokens: state.totalTokenUsage.inputTokens + usage.inputTokens,
                         outputTokens: state.totalTokenUsage.outputTokens + usage.outputTokens,
@@ -1897,8 +1939,8 @@ extension UnifiedEventTransformer {
                     // Track last turn's input tokens for context bar (current context size)
                     state.lastTurnInputTokens = usage.inputTokens
                 }
-                if payload.turn > state.currentTurn {
-                    state.currentTurn = payload.turn
+                if parsed.turn > state.currentTurn {
+                    state.currentTurn = parsed.turn
                 }
 
             case .messageUser, .messageSystem,
