@@ -146,6 +146,7 @@
 		EE11FF22AA33BB44CC55DD02 /* NewSessionFlow.swift in Sources */ = {isa = PBXBuildFile; fileRef = EE11FF22AA33BB44CC55DE02 /* NewSessionFlow.swift */; };
 		EE11FF22AA33BB44CC55DD03 /* SessionPreviewSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = EE11FF22AA33BB44CC55DE03 /* SessionPreviewSheet.swift */; };
 		EE11FF22AA33BB44CC55DD04 /* WorkspaceSelector.swift in Sources */ = {isa = PBXBuildFile; fileRef = EE11FF22AA33BB44CC55DE04 /* WorkspaceSelector.swift */; };
+		MPKR0001BILD0001BUILD001 /* ModelPickerMenu.swift in Sources */ = {isa = PBXBuildFile; fileRef = MPKR0001FREF0001FILEREF1 /* ModelPickerMenu.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -305,6 +306,7 @@
 		EE11FF22AA33BB44CC55DE02 /* NewSessionFlow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NewSessionFlow.swift; sourceTree = "<group>"; };
 		EE11FF22AA33BB44CC55DE03 /* SessionPreviewSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionPreviewSheet.swift; sourceTree = "<group>"; };
 		EE11FF22AA33BB44CC55DE04 /* WorkspaceSelector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceSelector.swift; sourceTree = "<group>"; };
+		MPKR0001FREF0001FILEREF1 /* ModelPickerMenu.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelPickerMenu.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXGroup section */
@@ -559,6 +561,7 @@
 				A1B2C3D4E5F6A7B8C9D0E1F2 /* MultiLineTextView.swift */,
 				AD61CD33CD78B1F23CDBABD7 /* LogViewer.swift */,
 				7F6BD19519452787421FD54D /* ModelSwitcher.swift */,
+				MPKR0001FREF0001FILEREF1 /* ModelPickerMenu.swift */,
 				1D6B10645E88BC75D2BD7308 /* PlanModeViews.swift */,
 				71C51BCF67DD848C42B8F720 /* ReasoningLevelPicker.swift */,
 				A5AD094851A0EDC87E49A537 /* SafariView.swift */,
@@ -825,6 +828,7 @@
 				C9A8D67052B558444B2E56A3 /* MessagePayloads.swift in Sources */,
 				029590450DF8FB55EBB86C23 /* ModelNameFormatter.swift in Sources */,
 				B4AEC8956304E794BC187E01 /* ModelSwitcher.swift in Sources */,
+				MPKR0001BILD0001BUILD001 /* ModelPickerMenu.swift in Sources */,
 				9381AD56F800E4C521CBC7F1 /* PlanModeViews.swift in Sources */,
 				A3BCE182EB003CB62D1D96E6 /* RPCClient.swift in Sources */,
 				0186B0083110F291EA235935 /* RPCTypes.swift in Sources */,

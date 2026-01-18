@@ -28,42 +28,6 @@ struct StatusPillsColumn: View {
     // Actions
     var onContextTap: (() -> Void)?
 
-    // MARK: - Model Categorization
-
-    /// Anthropic 4.5 models (latest) - sorted: Haiku (top) → Sonnet → Opus (bottom, closest to thumb)
-    private var latestAnthropicModels: [ModelInfo] {
-        cachedModels.filter { $0.isAnthropic && $0.is45Model }
-            .sorted { tierPriority($0) > tierPriority($1) }
-    }
-
-    /// OpenAI Codex models - sorted: 5.1 (top) → 5.2 (bottom, closest to thumb)
-    private var codexModels: [ModelInfo] {
-        cachedModels.filter { $0.provider.lowercased() == "openai-codex" }
-            .sorted { codexVersionPriority($0) < codexVersionPriority($1) }
-    }
-
-    /// Legacy Anthropic models (non-4.5) - sorted: Sonnet (top) → Opus (bottom)
-    private var legacyModels: [ModelInfo] {
-        cachedModels.filter { $0.isAnthropic && !$0.is45Model }
-            .sorted { tierPriority($0) > tierPriority($1) }
-    }
-
-    private func tierPriority(_ model: ModelInfo) -> Int {
-        let id = model.id.lowercased()
-        if id.contains("opus") { return 0 }
-        if id.contains("sonnet") { return 1 }
-        if id.contains("haiku") { return 2 }
-        return 3
-    }
-
-    private func codexVersionPriority(_ model: ModelInfo) -> Int {
-        let id = model.id.lowercased()
-        if id.contains("5.2") { return 52 }
-        if id.contains("5.1") { return 51 }
-        if id.contains("5.0") || id.contains("-5-") { return 50 }
-        return 0
-    }
-
     // MARK: - Reasoning Level Helpers
 
     private func reasoningLevelLabel(_ level: String) -> String {
@@ -166,34 +130,10 @@ struct StatusPillsColumn: View {
     // MARK: - Model Picker Menu
 
     private var modelPickerMenu: some View {
-        Menu {
-            // Anthropic 4.5 models at top (closest to thumb when menu opens upward)
-            ForEach(latestAnthropicModels) { model in
-                Button { NotificationCenter.default.post(name: .modelPickerAction, object: model) } label: {
-                    Label(model.formattedModelName, systemImage: "sparkles")
-                }
-            }
-            Divider()
-
-            // OpenAI Codex models in middle
-            if !codexModels.isEmpty {
-                ForEach(codexModels) { model in
-                    Button { NotificationCenter.default.post(name: .modelPickerAction, object: model) } label: {
-                        Label(model.formattedModelName, systemImage: "bolt")
-                    }
-                }
-                Divider()
-            }
-
-            // Legacy models at bottom (furthest from thumb)
-            if !legacyModels.isEmpty {
-                ForEach(legacyModels) { model in
-                    Button { NotificationCenter.default.post(name: .modelPickerAction, object: model) } label: {
-                        Label(model.formattedModelName, systemImage: "clock")
-                    }
-                }
-            }
-        } label: {
+        ModelPickerMenuContent(
+            models: cachedModels,
+            notificationName: .modelPickerAction
+        ) {
             HStack(spacing: 4) {
                 Image(systemName: "cpu")
                     .font(.system(size: 9, weight: .medium))

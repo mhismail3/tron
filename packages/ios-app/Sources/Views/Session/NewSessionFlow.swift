@@ -98,28 +98,11 @@ struct NewSessionFlow: View {
                             .font(.system(size: 12, weight: .medium, design: .monospaced))
                             .foregroundStyle(.white.opacity(0.6))
 
-                        Menu {
-                            if isLoadingModels && availableModels.isEmpty {
-                                Text("Loading models...")
-                            } else {
-                                // All models in a flat list - Latest first, then Legacy
-                                ForEach(latestModels) { model in
-                                    Button(model.formattedModelName) {
-                                        selectedModel = model.id
-                                    }
-                                }
-
-                                if !legacyModels.isEmpty {
-                                    Divider()
-
-                                    ForEach(legacyModels) { model in
-                                        Button(model.formattedModelName) {
-                                            selectedModel = model.id
-                                        }
-                                    }
-                                }
-                            }
-                        } label: {
+                        ModelPickerMenuContent(
+                            models: availableModels,
+                            selectedModelId: $selectedModel,
+                            isLoading: isLoadingModels
+                        ) {
                             HStack {
                                 if isLoadingModels && selectedModel.isEmpty {
                                     Text("Loading...")
@@ -258,38 +241,6 @@ struct NewSessionFlow: View {
     }
 
     // MARK: - Computed Properties
-
-    /// Latest Anthropic (4.5) models sorted by tier: Opus, Sonnet, Haiku
-    private var latestAnthropicModels: [ModelInfo] {
-        availableModels
-            .filter { $0.isAnthropic && $0.is45Model }
-            .uniqueByFormattedName()
-            .sortedByTier()
-    }
-
-    /// OpenAI Codex models (ChatGPT subscription)
-    private var openAICodexModels: [ModelInfo] {
-        availableModels
-            .filter { $0.isCodex }
-    }
-
-    /// Legacy Anthropic models sorted by tier
-    private var legacyAnthropicModels: [ModelInfo] {
-        availableModels
-            .filter { $0.isAnthropic && !$0.is45Model }
-            .uniqueByFormattedName()
-            .sortedByTier()
-    }
-
-    /// All latest models (for backward compatibility)
-    private var latestModels: [ModelInfo] {
-        latestAnthropicModels + openAICodexModels
-    }
-
-    /// Legacy models sorted by tier (for backward compatibility)
-    private var legacyModels: [ModelInfo] {
-        legacyAnthropicModels
-    }
 
     /// Display name for the selected model - uses ModelInfo.formattedModelName if available
     private var selectedModelDisplayName: String {
