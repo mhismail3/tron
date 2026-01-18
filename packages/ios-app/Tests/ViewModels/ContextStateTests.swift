@@ -64,7 +64,7 @@ final class ContextStateTests: XCTestCase {
         XCTAssertEqual(state.accumulatedOutputTokens, 500)
         XCTAssertEqual(state.accumulatedCacheReadTokens, 200)
         XCTAssertEqual(state.accumulatedCacheCreationTokens, 100)
-        XCTAssertEqual(state.accumulatedCost, 0.05)
+        XCTAssertEqual(state.accumulatedCost, 0.05, accuracy: 0.0001)
 
         // Accumulate more
         state.accumulate(
@@ -79,7 +79,7 @@ final class ContextStateTests: XCTestCase {
         XCTAssertEqual(state.accumulatedOutputTokens, 750)
         XCTAssertEqual(state.accumulatedCacheReadTokens, 300)
         XCTAssertEqual(state.accumulatedCacheCreationTokens, 150)
-        XCTAssertEqual(state.accumulatedCost, 0.075)
+        XCTAssertEqual(state.accumulatedCost, 0.075, accuracy: 0.0001)
     }
 
     func testRecordTurnEnd() {
@@ -131,8 +131,8 @@ final class ContextStateTests: XCTestCase {
     func testUpdateFromModels() {
         let state = ContextTrackingState()
         let models = [
-            ModelInfo(id: "claude-opus-4-5-20251101", name: "Opus 4.5", contextWindow: 200_000, supportsExtendedThinking: true, pricingTier: "standard"),
-            ModelInfo(id: "claude-sonnet-4-20250514", name: "Sonnet 4", contextWindow: 180_000, supportsExtendedThinking: false, pricingTier: "standard")
+            createTestModelInfo(id: "claude-opus-4-5-20251101", name: "Opus 4.5", contextWindow: 200_000),
+            createTestModelInfo(id: "claude-sonnet-4-20250514", name: "Sonnet 4", contextWindow: 180_000)
         ]
 
         state.updateContextWindow(from: models, currentModel: "claude-sonnet-4-20250514")
@@ -144,11 +144,30 @@ final class ContextStateTests: XCTestCase {
         let state = ContextTrackingState()
         let initialWindow = state.currentContextWindow
         let models = [
-            ModelInfo(id: "claude-opus-4-5-20251101", name: "Opus 4.5", contextWindow: 200_000, supportsExtendedThinking: true, pricingTier: "standard")
+            createTestModelInfo(id: "claude-opus-4-5-20251101", name: "Opus 4.5", contextWindow: 200_000)
         ]
 
         state.updateContextWindow(from: models, currentModel: "unknown-model")
 
         XCTAssertEqual(state.currentContextWindow, initialWindow)
+    }
+
+    // MARK: - Helper Methods
+
+    private func createTestModelInfo(id: String, name: String, contextWindow: Int) -> ModelInfo {
+        return ModelInfo(
+            id: id,
+            name: name,
+            provider: "anthropic",
+            contextWindow: contextWindow,
+            maxOutputTokens: nil,
+            supportsThinking: nil,
+            supportsImages: nil,
+            tier: nil,
+            isLegacy: nil,
+            supportsReasoning: nil,
+            reasoningLevels: nil,
+            defaultReasoningLevel: nil
+        )
     }
 }

@@ -16,17 +16,13 @@ final class AskUserQuestionStateTests: XCTestCase {
         let state = AskUserQuestionState()
         XCTAssertNil(state.currentData)
 
-        let question = AskUserQuestionParams.Question(
-            id: "q1",
-            question: "Test question?",
-            header: "Test",
-            options: [],
-            multiSelect: false
-        )
-        let params = AskUserQuestionParams(questions: [question])
+        let question = createTestQuestion(id: "q1", question: "Test question?")
+        let params = AskUserQuestionParams(questions: [question], context: nil)
         let data = AskUserQuestionToolData(
             toolCallId: "tc-123",
-            params: params
+            params: params,
+            answers: [:],
+            status: .pending
         )
 
         state.currentData = data
@@ -71,7 +67,9 @@ final class AskUserQuestionStateTests: XCTestCase {
         state.showSheet = true
         state.currentData = AskUserQuestionToolData(
             toolCallId: "tc-123",
-            params: AskUserQuestionParams(questions: [])
+            params: AskUserQuestionParams(questions: [], context: nil),
+            answers: [:],
+            status: .pending
         )
         state.answers["q1"] = AskUserQuestionAnswer(
             questionId: "q1",
@@ -86,5 +84,18 @@ final class AskUserQuestionStateTests: XCTestCase {
         XCTAssertNil(state.currentData)
         XCTAssertTrue(state.answers.isEmpty)
         XCTAssertFalse(state.calledInTurn)
+    }
+
+    // MARK: - Helper Methods
+
+    private func createTestQuestion(id: String, question: String) -> AskUserQuestion {
+        return AskUserQuestion(
+            id: id,
+            question: question,
+            options: [],
+            mode: .single,
+            allowOther: nil,
+            otherPlaceholder: nil
+        )
     }
 }

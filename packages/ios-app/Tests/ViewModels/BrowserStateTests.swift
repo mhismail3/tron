@@ -26,10 +26,10 @@ final class BrowserStateTests: XCTestCase {
         let state = BrowserState()
         XCTAssertNil(state.browserStatus)
 
-        let status = BrowserGetStatusResult(isActive: true, isStreaming: true, url: "https://example.com")
+        let status = BrowserGetStatusResult(hasBrowser: true, isStreaming: true, currentUrl: "https://example.com")
         state.browserStatus = status
         XCTAssertNotNil(state.browserStatus)
-        XCTAssertEqual(state.browserStatus?.isActive, true)
+        XCTAssertEqual(state.browserStatus?.hasBrowser, true)
         XCTAssertEqual(state.browserStatus?.isStreaming, true)
     }
 
@@ -60,7 +60,7 @@ final class BrowserStateTests: XCTestCase {
 
         // Clear frame, add status
         state.browserFrame = nil
-        state.browserStatus = BrowserGetStatusResult(isActive: true, isStreaming: false, url: nil)
+        state.browserStatus = BrowserGetStatusResult(hasBrowser: true, isStreaming: false, currentUrl: nil)
         XCTAssertTrue(state.hasBrowserSession)
     }
 
@@ -74,7 +74,7 @@ final class BrowserStateTests: XCTestCase {
     func testClearAll() {
         let state = BrowserState()
         state.browserFrame = UIImage()
-        state.browserStatus = BrowserGetStatusResult(isActive: true, isStreaming: true, url: nil)
+        state.browserStatus = BrowserGetStatusResult(hasBrowser: true, isStreaming: true, currentUrl: nil)
         state.showBrowserWindow = true
         state.safariURL = URL(string: "https://example.com")
         state.userDismissedBrowserThisTurn = true

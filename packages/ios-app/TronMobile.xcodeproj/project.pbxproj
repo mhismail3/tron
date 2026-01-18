@@ -42,6 +42,13 @@
 		FF22AA33BB44CC55DD66EE04 /* ContextMessageViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = FF22AA33BB44CC55DD66EF04 /* ContextMessageViews.swift */; };
 		FF22AA33BB44CC55DD66EE05 /* ContextAnalyticsViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = FF22AA33BB44CC55DD66EF05 /* ContextAnalyticsViews.swift */; };
 		FF22AA33BB44CC55DD66EE06 /* GlassActionSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = FF22AA33BB44CC55DD66EF06 /* GlassActionSheet.swift */; };
+		AA33BB44CC55DD66EE77BB10 /* EventStoreManagerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA33BB44CC55DD66EE77F010 /* EventStoreManagerTests.swift */; };
+		AA33BB44CC55DD66EE77BB11 /* RPCClientTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA33BB44CC55DD66EE77F011 /* RPCClientTests.swift */; };
+		AA33BB44CC55DD66EE77BB20 /* AskUserQuestionStateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA33BB44CC55DD66EE77F020 /* AskUserQuestionStateTests.swift */; };
+		AA33BB44CC55DD66EE77BB21 /* BrowserStateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA33BB44CC55DD66EE77F021 /* BrowserStateTests.swift */; };
+		AA33BB44CC55DD66EE77BB22 /* ChatEventHandlerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA33BB44CC55DD66EE77F022 /* ChatEventHandlerTests.swift */; };
+		AA33BB44CC55DD66EE77BB23 /* ContextStateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA33BB44CC55DD66EE77F023 /* ContextStateTests.swift */; };
+		AA33BB44CC55DD66EE77BB24 /* PlanModeStateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA33BB44CC55DD66EE77F024 /* PlanModeStateTests.swift */; };
 		60F22FB87D2B5928A33384DB /* ImageCompressor.swift in Sources */ = {isa = PBXBuildFile; fileRef = B51A041B72683C6576D50E6F /* ImageCompressor.swift */; };
 		621DDABC4787FCAB22C6201B /* SafariView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5AD094851A0EDC87E49A537 /* SafariView.swift */; };
 		635F100955D3A973E63C057A /* UnifiedEventTransformer.swift in Sources */ = {isa = PBXBuildFile; fileRef = D8570EA3731FBC504D7AB252 /* UnifiedEventTransformer.swift */; };
@@ -159,6 +166,13 @@
 		FF22AA33BB44CC55DD66EF04 /* ContextMessageViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContextMessageViews.swift; sourceTree = "<group>"; };
 		FF22AA33BB44CC55DD66EF05 /* ContextAnalyticsViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContextAnalyticsViews.swift; sourceTree = "<group>"; };
 		FF22AA33BB44CC55DD66EF06 /* GlassActionSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GlassActionSheet.swift; sourceTree = "<group>"; };
+		AA33BB44CC55DD66EE77F010 /* EventStoreManagerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EventStoreManagerTests.swift; sourceTree = "<group>"; };
+		AA33BB44CC55DD66EE77F011 /* RPCClientTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RPCClientTests.swift; sourceTree = "<group>"; };
+		AA33BB44CC55DD66EE77F020 /* AskUserQuestionStateTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AskUserQuestionStateTests.swift; sourceTree = "<group>"; };
+		AA33BB44CC55DD66EE77F021 /* BrowserStateTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrowserStateTests.swift; sourceTree = "<group>"; };
+		AA33BB44CC55DD66EE77F022 /* ChatEventHandlerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatEventHandlerTests.swift; sourceTree = "<group>"; };
+		AA33BB44CC55DD66EE77F023 /* ContextStateTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContextStateTests.swift; sourceTree = "<group>"; };
+		AA33BB44CC55DD66EE77F024 /* PlanModeStateTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlanModeStateTests.swift; sourceTree = "<group>"; };
 		12D4005085E6F37ECCF3AC12 /* StreamingPayloads.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StreamingPayloads.swift; sourceTree = "<group>"; };
 		13A4AA26839505AD8FD5CEC5 /* TokenFormatter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TokenFormatter.swift; sourceTree = "<group>"; };
 		18C18EEFAB81D6052EB39694 /* TronLogger.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TronLogger.swift; sourceTree = "<group>"; };
@@ -385,6 +399,8 @@
 		161F8AEF8FBE5C9C772B5263 /* Tests */ = {
 			isa = PBXGroup;
 			children = (
+				AA33BB44CC55DD66EE771000 /* Services */,
+				AA33BB44CC55DD66EE772000 /* ViewModels */,
 				52A3C00972EDE3F2158000B3 /* AskUserQuestionTests.swift */,
 				4C99FDB162C904C6A622BA61 /* AttachmentTests.swift */,
 				A013DFE849DA84E8EA5F545C /* EventDatabaseTests.swift */,
@@ -395,6 +411,27 @@
 				0123F7482F532CD8FBA61F0E /* UnifiedEventTransformerTests.swift */,
 			);
 			path = Tests;
+			sourceTree = "<group>";
+		};
+		AA33BB44CC55DD66EE771000 /* Services */ = {
+			isa = PBXGroup;
+			children = (
+				AA33BB44CC55DD66EE77F010 /* EventStoreManagerTests.swift */,
+				AA33BB44CC55DD66EE77F011 /* RPCClientTests.swift */,
+			);
+			path = Services;
+			sourceTree = "<group>";
+		};
+		AA33BB44CC55DD66EE772000 /* ViewModels */ = {
+			isa = PBXGroup;
+			children = (
+				AA33BB44CC55DD66EE77F020 /* AskUserQuestionStateTests.swift */,
+				AA33BB44CC55DD66EE77F021 /* BrowserStateTests.swift */,
+				AA33BB44CC55DD66EE77F022 /* ChatEventHandlerTests.swift */,
+				AA33BB44CC55DD66EE77F023 /* ContextStateTests.swift */,
+				AA33BB44CC55DD66EE77F024 /* PlanModeStateTests.swift */,
+			);
+			path = ViewModels;
 			sourceTree = "<group>";
 		};
 		17D2D493213C68D1AB6E2B84 /* Utilities */ = {
@@ -834,6 +871,15 @@
 				A30DB8557BB5D3E5CFD61ADD /* RecentSessionsTests.swift in Sources */,
 				1F0AB8F273C1C38CCA7D1924 /* SkillStoreTests.swift in Sources */,
 				814753F04077C3B98C1BF843 /* UnifiedEventTransformerTests.swift in Sources */,
+				AA33BB44CC55DD66EE77BB01 /* MockEventDatabase.swift in Sources */,
+				AA33BB44CC55DD66EE77BB02 /* MockEventStoreManager.swift in Sources */,
+				AA33BB44CC55DD66EE77BB03 /* MockRPCClient.swift in Sources */,
+				AA33BB44CC55DD66EE77BB10 /* EventStoreManagerTests.swift in Sources */,
+				AA33BB44CC55DD66EE77BB11 /* RPCClientTests.swift in Sources */,
+				AA33BB44CC55DD66EE77BB20 /* AskUserQuestionStateTests.swift in Sources */,
+				AA33BB44CC55DD66EE77BB21 /* BrowserStateTests.swift in Sources */,
+				AA33BB44CC55DD66EE77BB23 /* ContextStateTests.swift in Sources */,
+				AA33BB44CC55DD66EE77BB24 /* PlanModeStateTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -953,6 +999,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
+				GENERATE_INFOPLIST_FILE = YES;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
@@ -990,6 +1037,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
+				GENERATE_INFOPLIST_FILE = YES;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
@@ -1084,6 +1132,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
+				GENERATE_INFOPLIST_FILE = YES;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
@@ -1099,6 +1148,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
+				GENERATE_INFOPLIST_FILE = YES;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
