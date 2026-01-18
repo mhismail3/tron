@@ -29,6 +29,9 @@ struct NewSessionFlow: View {
     // Session preview navigation
     @State private var previewSession: SessionInfo? = nil
 
+    // Clone repository sheet
+    @State private var showCloneSheet = false
+
     private var canCreate: Bool {
         !isCreating && !workingDirectory.isEmpty && !selectedModel.isEmpty
     }
@@ -88,6 +91,38 @@ struct NewSessionFlow: View {
                         .glassEffect(.regular.tint(Color.tronPhthaloGreen.opacity(0.35)).interactive(), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
 
                         Text("The directory where the agent will operate")
+                            .font(.system(size: 11, design: .monospaced))
+                            .foregroundStyle(.white.opacity(0.4))
+                    }
+
+                    // Clone from GitHub option
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text("Or clone a repository")
+                            .font(.system(size: 12, weight: .medium, design: .monospaced))
+                            .foregroundStyle(.white.opacity(0.6))
+
+                        Button {
+                            showCloneSheet = true
+                        } label: {
+                            HStack {
+                                Image(systemName: "arrow.down.doc.fill")
+                                    .font(.system(size: 14))
+                                    .foregroundStyle(.tronEmerald)
+                                Text("Clone from GitHub")
+                                    .font(.system(size: 14, weight: .regular, design: .monospaced))
+                                    .foregroundStyle(.tronEmerald)
+                                Spacer()
+                                Image(systemName: "chevron.right")
+                                    .font(.system(size: 10))
+                                    .foregroundStyle(.tronEmerald.opacity(0.4))
+                            }
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 14)
+                            .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        }
+                        .glassEffect(.regular.tint(Color.tronPhthaloGreen.opacity(0.35)).interactive(), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+
+                        Text("Clone a GitHub repo and start a session")
                             .font(.system(size: 11, design: .monospaced))
                             .foregroundStyle(.white.opacity(0.4))
                     }
@@ -205,6 +240,17 @@ struct NewSessionFlow: View {
                 WorkspaceSelector(
                     rpcClient: rpcClient,
                     selectedPath: $workingDirectory
+                )
+            }
+            .sheet(isPresented: $showCloneSheet) {
+                CloneRepoSheet(
+                    rpcClient: rpcClient,
+                    onCloned: { clonedPath in
+                        // Set the cloned path as the workspace
+                        workingDirectory = clonedPath
+                        // Auto-create session after clone
+                        createSession()
+                    }
                 )
             }
             .sheet(item: $previewSession) { session in

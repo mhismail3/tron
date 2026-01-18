@@ -623,6 +623,22 @@ class RPCClient: ObservableObject {
         )
     }
 
+    // MARK: - Git Methods
+
+    /// Clone a Git repository to a target path
+    func cloneRepository(url: String, targetPath: String) async throws -> GitCloneResult {
+        guard let ws = webSocket else {
+            throw RPCClientError.connectionNotEstablished
+        }
+
+        let params = GitCloneParams(url: url, targetPath: targetPath)
+        return try await ws.send(
+            method: "git.clone",
+            params: params,
+            timeout: 300.0  // 5 minutes for large repos
+        )
+    }
+
     // MARK: - Memory Methods
 
     func searchMemory(

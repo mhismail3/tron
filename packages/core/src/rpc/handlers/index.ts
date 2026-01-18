@@ -139,6 +139,11 @@ export {
 } from './tool.handler.js';
 
 export {
+  handleGitClone,
+  createGitHandlers,
+} from './git.handler.js';
+
+export {
   handleVoiceNotesSave,
   handleVoiceNotesList,
   handleVoiceNotesDelete,

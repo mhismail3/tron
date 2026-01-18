@@ -523,6 +523,20 @@ struct FilesystemCreateDirResult: Decodable {
     let path: String
 }
 
+// MARK: - Git Clone
+
+struct GitCloneParams: Encodable {
+    let url: String
+    let targetPath: String
+}
+
+struct GitCloneResult: Decodable {
+    let success: Bool
+    let path: String
+    let repoName: String
+    let error: String?
+}
+
 // MARK: - Memory Methods
 
 struct MemorySearchParams: Encodable {

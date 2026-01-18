@@ -228,6 +228,7 @@ export type RpcMiddleware = (
 import { MethodRegistry } from './registry.js';
 import { createSystemHandlers } from './handlers/system.handler.js';
 import { createFilesystemHandlers } from './handlers/filesystem.handler.js';
+import { createGitHandlers } from './handlers/git.handler.js';
 import { createModelHandlers } from './handlers/model.handler.js';
 import { createMemoryHandlers } from './handlers/memory.handler.js';
 import { createTranscribeHandlers } from './handlers/transcribe.handler.js';
@@ -258,6 +259,7 @@ export class RpcHandler extends EventEmitter {
     this.registry = new MethodRegistry();
     this.registry.registerAll(createSystemHandlers());
     this.registry.registerAll(createFilesystemHandlers());
+    this.registry.registerAll(createGitHandlers());
     this.registry.registerAll(createModelHandlers());
     this.registry.registerAll(createMemoryHandlers());
     this.registry.registerAll(createTranscribeHandlers());
