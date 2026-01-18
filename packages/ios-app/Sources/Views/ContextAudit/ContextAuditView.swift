@@ -221,15 +221,6 @@ struct ContextAuditView: View {
                         )
                         .padding(.horizontal)
 
-                        // Accumulated session tokens
-                        TotalSessionTokensView(
-                            inputTokens: sessionTokenUsage.input,
-                            outputTokens: sessionTokenUsage.output,
-                            cacheReadTokens: sessionTokenUsage.cacheRead,
-                            cacheCreationTokens: sessionTokenUsage.cacheCreation
-                        )
-                        .padding(.horizontal)
-
                         // Token Breakdown header and expandable sections
                         TokenBreakdownHeader()
                             .padding(.horizontal)
@@ -298,7 +289,11 @@ struct ContextAuditView: View {
                         // Analytics Section
                         AnalyticsSection(
                             sessionId: sessionId,
-                            events: sessionEvents
+                            events: sessionEvents,
+                            inputTokens: sessionTokenUsage.input,
+                            outputTokens: sessionTokenUsage.output,
+                            cacheReadTokens: sessionTokenUsage.cacheRead,
+                            cacheCreationTokens: sessionTokenUsage.cacheCreation
                         )
                         .padding(.horizontal)
                     }

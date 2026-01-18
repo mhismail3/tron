@@ -6,6 +6,10 @@ import SwiftUI
 struct AnalyticsSection: View {
     let sessionId: String
     let events: [SessionEvent]
+    let inputTokens: Int
+    let outputTokens: Int
+    let cacheReadTokens: Int
+    let cacheCreationTokens: Int
 
     @State private var showCopied = false
 
@@ -27,6 +31,14 @@ struct AnalyticsSection: View {
 
             // Session ID (tappable to copy)
             SessionIdRow(sessionId: sessionId)
+
+            // Session Tokens (accumulated across all turns for billing)
+            SessionTokensCard(
+                inputTokens: inputTokens,
+                outputTokens: outputTokens,
+                cacheReadTokens: cacheReadTokens,
+                cacheCreationTokens: cacheCreationTokens
+            )
 
             // Cost Summary
             CostSummaryCard(analytics: analytics)
@@ -76,6 +88,163 @@ struct SessionIdRow: View {
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
                 showCopied = false
             }
+        }
+    }
+}
+
+// MARK: - Session Tokens Card (Accumulated tokens for billing)
+
+@available(iOS 26.0, *)
+struct SessionTokensCard: View {
+    let inputTokens: Int
+    let outputTokens: Int
+    let cacheReadTokens: Int
+    let cacheCreationTokens: Int
+
+    private var totalTokens: Int {
+        inputTokens + outputTokens
+    }
+
+    /// Whether any cache tokens exist (hides cache section if none)
+    private var hasCacheTokens: Bool {
+        cacheReadTokens > 0 || cacheCreationTokens > 0
+    }
+
+    private func formatTokenCount(_ count: Int) -> String {
+        if count >= 1_000_000 {
+            return String(format: "%.1fM", Double(count) / 1_000_000)
+        } else if count >= 1000 {
+            return String(format: "%.1fk", Double(count) / 1000)
+        }
+        return "\(count)"
+    }
+
+    var body: some View {
+        VStack(spacing: 12) {
+            // Header with total
+            HStack {
+                Image(systemName: "arrow.up.arrow.down")
+                    .font(.system(size: 14))
+                    .foregroundStyle(.tronAmberLight)
+
+                Text("Session Tokens")
+                    .font(.system(size: 14, weight: .medium, design: .monospaced))
+                    .foregroundStyle(.tronAmberLight)
+
+                Spacer()
+
+                Text(formatTokenCount(totalTokens))
+                    .font(.system(size: 20, weight: .bold, design: .monospaced))
+                    .foregroundStyle(.tronAmberLight)
+            }
+
+            // Token breakdown row
+            HStack(spacing: 8) {
+                // Input tokens
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack(spacing: 4) {
+                        Image(systemName: "arrow.up.circle.fill")
+                            .font(.system(size: 10))
+                            .foregroundStyle(.tronOrange)
+                        Text("Input")
+                            .font(.system(size: 10, design: .monospaced))
+                            .foregroundStyle(.white.opacity(0.5))
+                    }
+                    Text(formatTokenCount(inputTokens))
+                        .font(.system(size: 12, weight: .medium, design: .monospaced))
+                        .foregroundStyle(.tronOrange)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(10)
+                .background {
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .fill(.clear)
+                        .glassEffect(.regular.tint(Color.tronOrange.opacity(0.3)), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                }
+
+                // Output tokens
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack(spacing: 4) {
+                        Image(systemName: "arrow.down.circle.fill")
+                            .font(.system(size: 10))
+                            .foregroundStyle(.tronRed)
+                        Text("Output")
+                            .font(.system(size: 10, design: .monospaced))
+                            .foregroundStyle(.white.opacity(0.5))
+                    }
+                    Text(formatTokenCount(outputTokens))
+                        .font(.system(size: 12, weight: .medium, design: .monospaced))
+                        .foregroundStyle(.tronRed)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(10)
+                .background {
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .fill(.clear)
+                        .glassEffect(.regular.tint(Color.tronRed.opacity(0.3)), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                }
+            }
+
+            // Cache tokens row (only shown if cache tokens exist)
+            if hasCacheTokens {
+                HStack(spacing: 8) {
+                    // Cache read tokens
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack(spacing: 4) {
+                            Image(systemName: "bolt.fill")
+                                .font(.system(size: 10))
+                                .foregroundStyle(.tronAmber)
+                            Text("Cache Read")
+                                .font(.system(size: 10, design: .monospaced))
+                                .foregroundStyle(.white.opacity(0.5))
+                        }
+                        Text(formatTokenCount(cacheReadTokens))
+                            .font(.system(size: 12, weight: .medium, design: .monospaced))
+                            .foregroundStyle(.tronAmber)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(10)
+                    .background {
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .fill(.clear)
+                            .glassEffect(.regular.tint(Color.tronAmber.opacity(0.3)), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    }
+
+                    // Cache creation tokens
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack(spacing: 4) {
+                            Image(systemName: "memorychip.fill")
+                                .font(.system(size: 10))
+                                .foregroundStyle(.tronAmberLight)
+                            Text("Cache Write")
+                                .font(.system(size: 10, design: .monospaced))
+                                .foregroundStyle(.white.opacity(0.5))
+                        }
+                        Text(formatTokenCount(cacheCreationTokens))
+                            .font(.system(size: 12, weight: .medium, design: .monospaced))
+                            .foregroundStyle(.tronAmberLight)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(10)
+                    .background {
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .fill(.clear)
+                            .glassEffect(.regular.tint(Color.tronAmberLight.opacity(0.3)), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    }
+                }
+            }
+
+            // Footer explanation
+            Text("Total tokens consumed this session (for billing)")
+                .font(.system(size: 10, design: .monospaced))
+                .foregroundStyle(.white.opacity(0.4))
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(14)
+        .background {
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(.clear)
+                .glassEffect(.regular.tint(Color.tronBronze.opacity(0.2)), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         }
     }
 }
