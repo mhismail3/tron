@@ -52,13 +52,17 @@ export const migration: Migration = {
         total_cost REAL DEFAULT 0,
         total_cache_read_tokens INTEGER DEFAULT 0,
         total_cache_creation_tokens INTEGER DEFAULT 0,
-        tags TEXT DEFAULT '[]'
+        tags TEXT DEFAULT '[]',
+        spawning_session_id TEXT,
+        spawn_type TEXT,
+        spawn_task TEXT
       );
       CREATE INDEX IF NOT EXISTS idx_sessions_workspace ON sessions(workspace_id);
       CREATE INDEX IF NOT EXISTS idx_sessions_ended ON sessions(ended_at);
       CREATE INDEX IF NOT EXISTS idx_sessions_activity ON sessions(last_activity_at DESC);
       CREATE INDEX IF NOT EXISTS idx_sessions_parent ON sessions(parent_session_id);
       CREATE INDEX IF NOT EXISTS idx_sessions_working_dir ON sessions(working_directory);
+      CREATE INDEX IF NOT EXISTS idx_sessions_spawning ON sessions(spawning_session_id, ended_at);
 
       -- Events
       CREATE TABLE IF NOT EXISTS events (

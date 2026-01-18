@@ -15,6 +15,9 @@ import type { SessionDbRow } from '../types.js';
 /**
  * Session entity with computed fields
  */
+/** Subagent spawn type */
+export type SpawnType = 'subsession' | 'tmux' | 'fork';
+
 export interface SessionRow {
   id: SessionId;
   workspaceId: WorkspaceId;
@@ -42,6 +45,12 @@ export interface SessionRow {
   model: string;
   /** Computed: whether session has ended (endedAt !== null) */
   isEnded: boolean;
+  /** Session ID that spawned this session (for subagents) */
+  spawningSessionId: SessionId | null;
+  /** Type of spawn (for subagents) */
+  spawnType: SpawnType | null;
+  /** Task given to this subagent (for subagents) */
+  spawnTask: string | null;
 }
 
 /**
@@ -55,6 +64,12 @@ export interface CreateSessionOptions {
   tags?: string[];
   parentSessionId?: SessionId;
   forkFromEventId?: EventId;
+  /** Session ID that spawned this session (for subagents) */
+  spawningSessionId?: SessionId;
+  /** Type of spawn (for subagents) */
+  spawnType?: SpawnType;
+  /** Task given to this subagent (for subagents) */
+  spawnTask?: string;
 }
 
 /**
@@ -111,9 +126,10 @@ export class SessionRepository extends BaseRepository {
     this.run(
       `INSERT INTO sessions (
         id, workspace_id, title, latest_model, working_directory,
-        parent_session_id, fork_from_event_id, created_at, last_activity_at, tags
+        parent_session_id, fork_from_event_id, created_at, last_activity_at, tags,
+        spawning_session_id, spawn_type, spawn_task
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       id,
       options.workspaceId,
       options.title ?? null,
@@ -123,7 +139,10 @@ export class SessionRepository extends BaseRepository {
       options.forkFromEventId ?? null,
       now,
       now,
-      JSON.stringify(options.tags ?? [])
+      JSON.stringify(options.tags ?? []),
+      options.spawningSessionId ?? null,
+      options.spawnType ?? null,
+      options.spawnTask ?? null
     );
 
     return {
@@ -151,6 +170,9 @@ export class SessionRepository extends BaseRepository {
       tags: options.tags ?? [],
       model: options.model,
       isEnded: false,
+      spawningSessionId: options.spawningSessionId ?? null,
+      spawnType: options.spawnType ?? null,
+      spawnTask: options.spawnTask ?? null,
     };
   }
 
@@ -536,6 +558,37 @@ export class SessionRepository extends BaseRepository {
       // Backward compatibility aliases
       model: latestModel,
       isEnded: endedAt !== null,
+      // Subagent tracking
+      spawningSessionId: row.spawning_session_id ? SessionId(row.spawning_session_id) : null,
+      spawnType: row.spawn_type as SpawnType | null,
+      spawnTask: row.spawn_task,
     };
+  }
+
+  /**
+   * List subagent sessions spawned by a parent session
+   */
+  listSubagents(spawningSessionId: SessionId): SessionRow[] {
+    const rows = this.all<SessionDbRow>(
+      `SELECT * FROM sessions
+       WHERE spawning_session_id = ?
+       ORDER BY created_at DESC`,
+      spawningSessionId
+    );
+    return rows.map(row => this.rowToSession(row));
+  }
+
+  /**
+   * List active (non-ended) subagent sessions for a parent session
+   */
+  listActiveSubagents(spawningSessionId: SessionId): SessionRow[] {
+    const rows = this.all<SessionDbRow>(
+      `SELECT * FROM sessions
+       WHERE spawning_session_id = ?
+         AND ended_at IS NULL
+       ORDER BY created_at DESC`,
+      spawningSessionId
+    );
+    return rows.map(row => this.rowToSession(row));
   }
 }

@@ -161,6 +161,8 @@ export interface Context {
   rulesContent?: string;
   /** Skill context to inject as system-level instructions (ephemeral, changes per-skill) */
   skillContext?: string;
+  /** Sub-agent results context to inform agent of completed sub-agent tasks */
+  subagentResultsContext?: string;
 }
 
 // Tool and ToolInputSchema are re-exported from ./tools.js

@@ -67,6 +67,8 @@ export class TronAgent {
   private currentReasoningLevel: 'low' | 'medium' | 'high' | 'xhigh' | undefined;
   /** Skill context to inject into system prompt for current run */
   private currentSkillContext: string | undefined;
+  /** Subagent results context to inject for current run */
+  private currentSubagentResults: string | undefined;
 
   // Extracted modules
   private eventEmitter: AgentEventEmitter;
@@ -313,6 +315,14 @@ export class TronAgent {
   }
 
   /**
+   * Set subagent results context to inject for the next run.
+   * This informs the agent about completed sub-agents and their results.
+   */
+  setSubagentResultsContext(resultsContext: string | undefined): void {
+    this.currentSubagentResults = resultsContext;
+  }
+
+  /**
    * Set rules content from AGENTS.md / CLAUDE.md hierarchy.
    */
   setRulesContent(rulesContent: string | undefined): void {
@@ -473,7 +483,11 @@ export class TronAgent {
       turn: this.currentTurn,
       reasoningLevel: this.currentReasoningLevel,
       skillContext: this.currentSkillContext,
+      subagentResultsContext: this.currentSubagentResults,
     });
+
+    // Clear subagent results after consuming (one-time injection)
+    this.currentSubagentResults = undefined;
 
     // Update token usage
     if (result.tokenUsage) {

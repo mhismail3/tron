@@ -14,5 +14,6 @@ export {
   type ListSessionsOptions,
   type IncrementCountersOptions,
   type MessagePreview,
+  type SpawnType,
 } from './session.repo.js';
 export { SearchRepository, type SearchOptions } from './search.repo.js';

@@ -56,6 +56,10 @@ export interface SessionDbRow {
   total_cache_read_tokens: number;
   total_cache_creation_tokens: number;
   tags: string;
+  // Subagent tracking columns
+  spawning_session_id: string | null;
+  spawn_type: string | null;
+  spawn_task: string | null;
 }
 
 /**

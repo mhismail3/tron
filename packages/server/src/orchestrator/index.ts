@@ -125,3 +125,57 @@ export {
   buildWorktreeInfoWithStatus,
   commitWorkingDirectory,
 } from './worktree-ops.js';
+
+// Sub-agent operations (Phase 1 extraction)
+export {
+  SubagentOperations,
+  createSubagentOperations,
+  type SubagentOperationsConfig,
+  type SpawnSubsessionResult,
+  type SpawnTmuxAgentResult,
+  type QuerySubagentResult,
+  type WaitForSubagentsResult,
+} from './subagent-ops.js';
+
+// Agent event handling (Phase 2 extraction)
+export {
+  AgentEventHandler,
+  createAgentEventHandler,
+  type AgentEventHandlerConfig,
+} from './agent-event-handler.js';
+
+// Skill loading (Phase 3 extraction)
+export {
+  SkillLoader,
+  createSkillLoader,
+  type SkillLoaderConfig,
+  type SkillLoadContext,
+} from './skill-loader.js';
+
+// Session management (Phase 5 extraction)
+export {
+  SessionManager,
+  createSessionManager,
+  type SessionManagerConfig,
+} from './session-manager.js';
+
+// Context operations (Phase 6 extraction)
+export {
+  ContextOps,
+  createContextOps,
+  type ContextOpsConfig,
+} from './context-ops.js';
+
+// Agent factory (Phase 7 extraction)
+export {
+  AgentFactory,
+  createAgentFactory,
+  type AgentFactoryConfig,
+} from './agent-factory.js';
+
+// Auth provider (Phase 8 extraction)
+export {
+  AuthProvider,
+  createAuthProvider,
+  type AuthProviderConfig,
+} from './auth-provider.js';

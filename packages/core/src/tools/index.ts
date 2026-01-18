@@ -17,6 +17,40 @@ export {
 export { OpenBrowserTool, type OpenBrowserConfig } from './open-browser.js';
 export { AstGrepTool, type AstGrepToolConfig, type AstGrepMatch, type AstGrepDetails } from './ast-grep.js';
 
+// Sub-agent spawning tools
+export {
+  SpawnSubsessionTool,
+  type SpawnSubsessionToolConfig,
+  type SpawnSubsessionParams,
+  type SpawnSubsessionResult,
+  type SpawnSubsessionCallback,
+} from './spawn-subsession.js';
+export {
+  SpawnTmuxAgentTool,
+  type SpawnTmuxAgentToolConfig,
+  type SpawnTmuxAgentParams,
+  type SpawnTmuxAgentResult,
+  type SpawnTmuxAgentCallback,
+} from './spawn-tmux-agent.js';
+export {
+  QuerySubagentTool,
+  type QuerySubagentToolConfig,
+  type QuerySubagentParams,
+  type QuerySubagentResult,
+  type QuerySubagentCallback,
+  type SubagentQueryType,
+  type SubagentStatusInfo,
+  type SubagentEventInfo,
+  type SubagentLogInfo,
+} from './query-subagent.js';
+export {
+  WaitForSubagentTool,
+  type WaitForSubagentToolConfig,
+  type WaitForSubagentParams,
+  type WaitForSubagentResult,
+  type WaitForSubagentCallback,
+} from './wait-for-subagent.js';
+
 // Utility functions for token estimation and output truncation
 export {
   estimateTokens,

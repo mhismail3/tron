@@ -53,6 +53,18 @@ export function runIncrementalMigrations(db: Database.Database): void {
   // Migration: Schema cleanup (remove provider/status, rename model)
   // This is a major migration that rebuilds the sessions table
   runProviderStatusMigration(db, runner);
+
+  // Migration: Add subagent tracking columns
+  runner.addColumnIfNotExists('sessions', 'spawning_session_id', 'TEXT');
+  runner.addColumnIfNotExists('sessions', 'spawn_type', 'TEXT');
+  runner.addColumnIfNotExists('sessions', 'spawn_task', 'TEXT');
+
+  // Create index for querying subagents by parent session
+  const indices = db.prepare("SELECT name FROM sqlite_master WHERE type='index'").all() as { name: string }[];
+  const hasIndex = indices.some(i => i.name === 'idx_sessions_spawning');
+  if (!hasIndex) {
+    db.exec('CREATE INDEX IF NOT EXISTS idx_sessions_spawning ON sessions(spawning_session_id, ended_at)');
+  }
 }
 
 /**

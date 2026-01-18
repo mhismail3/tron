@@ -71,6 +71,17 @@ export {
   isPlanModeExitedEvent,
   isPlanCreatedEvent,
   isPlanEvent,
+  // Subagent events
+  type SubagentSpawnType,
+  type SubagentSpawnedEvent,
+  type SubagentStatusUpdateEvent,
+  type SubagentCompletedEvent,
+  type SubagentFailedEvent,
+  isSubagentSpawnedEvent,
+  isSubagentStatusUpdateEvent,
+  isSubagentCompletedEvent,
+  isSubagentFailedEvent,
+  isSubagentEvent,
 } from './types.js';
 
 // Types - State types (with prefixes to avoid conflicts)

@@ -222,6 +222,8 @@ export interface TurnOptions {
   turn: number;
   reasoningLevel?: 'low' | 'medium' | 'high' | 'xhigh';
   skillContext?: string;
+  /** Context about completed sub-agents and their results */
+  subagentResultsContext?: string;
 }
 
 /**

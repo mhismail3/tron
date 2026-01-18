@@ -12,6 +12,7 @@ import {
   type WorktreeCoordinatorConfig,
   type SkillTracker,
   type RulesTracker,
+  type SubAgentTracker,
 } from '@tron/core';
 import type { SessionContext } from './session-context.js';
 
@@ -118,6 +119,11 @@ export interface ActiveSession {
    * All turn tracking, event persistence, and plan mode state are managed here.
    */
   sessionContext: SessionContext;
+  /**
+   * Tracks sub-agents spawned by this session.
+   * Reconstructed from events on session resume/fork.
+   */
+  subagentTracker: SubAgentTracker;
 }
 
 // =============================================================================

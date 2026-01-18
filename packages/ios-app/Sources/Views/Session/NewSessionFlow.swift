@@ -406,6 +406,7 @@ struct NewSessionFlow: View {
                         result.model,
                         workingDirectory
                     )
+                    isCreating = false
                 }
             } catch {
                 await MainActor.run {

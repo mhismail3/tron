@@ -125,8 +125,10 @@ function mergeMessageContent(
 export class EventStore {
   private backend: SQLiteBackend;
   private initialized = false;
+  private dbPath: string;
 
   constructor(dbPath: string) {
+    this.dbPath = dbPath;
     this.backend = new SQLiteBackend(dbPath);
   }
 
@@ -934,6 +936,64 @@ export class EventStore {
 
   async getWorkspaceByPath(path: string): Promise<Workspace | null> {
     return this.backend.getWorkspaceByPath(path);
+  }
+
+  // ===========================================================================
+  // Database Path
+  // ===========================================================================
+
+  /**
+   * Get the path to the SQLite database file.
+   * Used for spawning sub-agents that need to share the event store.
+   */
+  getDbPath(): string {
+    return this.dbPath;
+  }
+
+  // ===========================================================================
+  // Subagent Support
+  // ===========================================================================
+
+  /**
+   * Update spawn-related fields on a session.
+   * Used when creating sub-agent sessions.
+   */
+  async updateSessionSpawnInfo(
+    sessionId: SessionId,
+    spawningSessionId: SessionId,
+    spawnType: 'subsession' | 'tmux' | 'fork',
+    spawnTask: string
+  ): Promise<void> {
+    const db = this.backend.getDatabase();
+    db.prepare(`
+      UPDATE sessions
+      SET spawning_session_id = ?, spawn_type = ?, spawn_task = ?
+      WHERE id = ?
+    `).run(spawningSessionId, spawnType, spawnTask, sessionId);
+  }
+
+  /**
+   * Get log entries for a session.
+   * Used for QuerySubagent logs query.
+   */
+  async getLogsForSession(
+    sessionId: SessionId,
+    limit = 20
+  ): Promise<Array<{ timestamp: string; level: string; component: string; message: string }>> {
+    const db = this.backend.getDatabase();
+    const rows = db.prepare(`
+      SELECT timestamp, level, component, message
+      FROM logs
+      WHERE session_id = ?
+      ORDER BY timestamp DESC
+      LIMIT ?
+    `).all(sessionId, limit) as Array<{
+      timestamp: string;
+      level: string;
+      component: string;
+      message: string;
+    }>;
+    return rows;
   }
 
   // ===========================================================================

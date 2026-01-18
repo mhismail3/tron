@@ -108,6 +108,9 @@ export class SQLiteEventStore {
 
     const db = this.connection.open();
     runMigrations(db);
+    // Run incremental migrations for existing databases
+    // This adds columns that were introduced after v001
+    runIncrementalMigrations(db);
     this.connection.markInitialized();
 
     // Initialize repositories
