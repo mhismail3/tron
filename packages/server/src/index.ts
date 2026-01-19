@@ -215,6 +215,7 @@ export class TronServer {
           tokensBefore: data.tokensBefore,
           tokensAfter: data.tokensAfter,
           reason: 'manual',
+          summary: data.summary,
         },
       });
     });

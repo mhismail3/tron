@@ -393,12 +393,14 @@ struct CompactionEvent: Decodable {
         let tokensAfter: Int
         let compressionRatio: Double?
         let reason: String?
+        let summary: String?
     }
 
     var tokensBefore: Int { data.tokensBefore }
     var tokensAfter: Int { data.tokensAfter }
     var compressionRatio: Double { data.compressionRatio ?? Double(data.tokensAfter) / Double(data.tokensBefore) }
     var reason: String { data.reason ?? "auto" }
+    var summary: String? { data.summary }
 }
 
 struct ContextClearedEvent: Decodable {

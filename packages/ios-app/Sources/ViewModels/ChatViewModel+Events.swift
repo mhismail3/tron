@@ -586,7 +586,8 @@ extension ChatViewModel {
         let compactionMessage = ChatMessage.compaction(
             tokensBefore: event.tokensBefore,
             tokensAfter: event.tokensAfter,
-            reason: event.reason
+            reason: event.reason,
+            summary: event.summary
         )
         messages.append(compactionMessage)
 
