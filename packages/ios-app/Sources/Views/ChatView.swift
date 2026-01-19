@@ -542,7 +542,7 @@ struct ChatView: View {
                                         showCompactionDetail = true
                                     },
                                     onSubagentTap: { data in
-                                        viewModel.subagentState.showDetails(for: data.subagentSessionId)
+                                        viewModel.subagentState.showDetails(with: data)
                                     }
                                 )
                                 .id(message.id)

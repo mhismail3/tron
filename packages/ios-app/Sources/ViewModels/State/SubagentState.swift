@@ -139,8 +139,21 @@ final class SubagentState {
     // MARK: - UI Actions
 
     /// Select a subagent and show its detail sheet
+    /// Looks up from tracked subagents first, falls back to using provided data
     func showDetails(for subagentSessionId: String) {
         guard let data = subagents[subagentSessionId] else { return }
+        selectedSubagent = data
+        showDetailSheet = true
+    }
+
+    /// Show details for a subagent using data directly (for persisted/resumed sessions)
+    /// This is used when the subagent data comes from persisted tool events
+    /// rather than live WebSocket events tracked in the subagents dictionary
+    func showDetails(with data: SubagentToolData) {
+        // Update the tracked subagent if not already present (for consistency)
+        if subagents[data.subagentSessionId] == nil {
+            subagents[data.subagentSessionId] = data
+        }
         selectedSubagent = data
         showDetailSheet = true
     }
