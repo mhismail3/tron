@@ -66,11 +66,11 @@ struct CompactionDetailSheet: View {
                     CompactionTokenBox(label: "After", tokens: tokensAfter, color: .cyan)
                 }
 
-                // Stats row - use subtle color variations for visual distinction
+                // Stats row - all badges use mint for subtle distinction from cyan boxes
                 HStack(spacing: 16) {
-                    CompactionStatBadge(label: "Saved", value: formatTokens(tokensSaved), color: .teal)
+                    CompactionStatBadge(label: "Saved", value: formatTokens(tokensSaved), color: .mint)
                     CompactionStatBadge(label: "Reduction", value: "\(compressionPercent)%", color: .mint)
-                    CompactionStatBadge(label: reasonLabel, value: "", color: reasonColor)
+                    CompactionStatBadge(label: reasonLabel, value: "", color: .mint)
                 }
             }
             .padding(14)
@@ -152,14 +152,6 @@ struct CompactionDetailSheet: View {
         case "threshold_exceeded": return "Threshold"
         case "manual": return "Manual"
         default: return reason
-        }
-    }
-
-    private var reasonColor: Color {
-        switch reason {
-        case "pre_turn_guardrail", "threshold_exceeded": return .teal.opacity(0.8)
-        case "manual": return .cyan
-        default: return .cyan.opacity(0.6)
         }
     }
 
