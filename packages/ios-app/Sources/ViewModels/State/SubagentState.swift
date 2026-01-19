@@ -403,6 +403,67 @@ final class SubagentState {
         (subagentEvents[subagentSessionId] ?? []).reversed()
     }
 
+    /// Check if events have been loaded for a subagent
+    func hasLoadedEvents(for subagentSessionId: String) -> Bool {
+        subagentEvents[subagentSessionId] != nil
+    }
+
+    /// Load events from database for a subagent session (for resumed sessions)
+    /// This is called lazily when the detail sheet opens.
+    /// Uses UnifiedEventTransformer for consistent event parsing with normal sessions.
+    func loadEventsFromDatabase(for subagentSessionId: String, eventDB: EventDatabaseProtocol) {
+        // Skip if already loaded
+        guard subagentEvents[subagentSessionId] == nil else { return }
+
+        do {
+            let rawEvents = try eventDB.getEventsBySession(subagentSessionId)
+            let messages = UnifiedEventTransformer.transformPersistedEvents(rawEvents)
+            subagentEvents[subagentSessionId] = convertMessagesToEventItems(messages)
+        } catch {
+            // Failed to load - leave empty, will show "no activity" message
+            subagentEvents[subagentSessionId] = []
+        }
+    }
+
+    /// Convert ChatMessages to SubagentEventItems for the activity list
+    private func convertMessagesToEventItems(_ messages: [ChatMessage]) -> [SubagentEventItem] {
+        var items: [SubagentEventItem] = []
+
+        for message in messages {
+            switch message.content {
+            case .toolUse(let tool):
+                let item = SubagentEventItem(
+                    timestamp: message.timestamp,
+                    type: .tool,
+                    title: formatToolTitle(tool.toolName),
+                    detail: formatToolResult(toolName: tool.toolName, result: tool.result ?? "", success: tool.status != .error),
+                    toolCallId: tool.toolCallId,
+                    isRunning: false
+                )
+                items.append(item)
+
+            case .text(let text):
+                guard !text.isEmpty else { continue }
+                // Only include assistant text output, not user messages
+                if message.role == .assistant {
+                    let item = SubagentEventItem(
+                        timestamp: message.timestamp,
+                        type: .output,
+                        title: "Output",
+                        detail: formatAccumulatedOutput(text),
+                        isRunning: false
+                    )
+                    items.append(item)
+                }
+
+            default:
+                break // Skip other content types (streaming, thinking, toolResult, etc.)
+            }
+        }
+
+        return items
+    }
+
     // MARK: - Queries
 
     /// Get subagent data by session ID

@@ -324,8 +324,12 @@ struct ChatView: View {
             set: { viewModel.subagentState.showDetailSheet = $0 }
         )) {
             if let data = viewModel.subagentState.selectedSubagent {
-                SubagentDetailSheet(data: data, subagentState: viewModel.subagentState)
-                    .presentationDetents([.medium, .large])
+                SubagentDetailSheet(
+                    data: data,
+                    subagentState: viewModel.subagentState,
+                    eventDB: eventStoreManager.eventDB
+                )
+                .presentationDetents([.medium, .large])
             }
         }
         .alert("Error", isPresented: $viewModel.showError) {

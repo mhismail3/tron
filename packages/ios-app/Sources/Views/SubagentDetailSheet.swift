@@ -8,6 +8,7 @@ import UIKit
 struct SubagentDetailSheet: View {
     let data: SubagentToolData
     let subagentState: SubagentState
+    let eventDB: EventDatabase
     @Environment(\.dismiss) private var dismiss
 
     /// Number of events to show per page
@@ -87,6 +88,12 @@ struct SubagentDetailSheet: View {
         .presentationDragIndicator(.hidden)
         .tint(titleColor)
         .preferredColorScheme(.dark)
+        .onAppear {
+            // Lazy load events from database for resumed sessions
+            if !subagentState.hasLoadedEvents(for: data.subagentSessionId) {
+                subagentState.loadEventsFromDatabase(for: data.subagentSessionId, eventDB: eventDB)
+            }
+        }
     }
 
     // MARK: - Header Card
