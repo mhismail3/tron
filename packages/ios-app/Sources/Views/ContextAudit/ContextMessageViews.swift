@@ -195,14 +195,14 @@ struct MessagesContainer: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             // Header row (tappable)
-            HStack {
+            HStack(spacing: 8) {
                 Image(systemName: "message.fill")
                     .font(.system(size: 14))
-                    .foregroundStyle(.tronBlue)
-
+                    .foregroundStyle(.tronEmerald)
+                    .frame(width: 18)
                 Text("Messages")
                     .font(.system(size: 14, weight: .medium, design: .monospaced))
-                    .foregroundStyle(.tronBlue)
+                    .foregroundStyle(.tronEmerald)
 
                 // Count badge
                 Text("\(totalMessages)")
@@ -210,7 +210,7 @@ struct MessagesContainer: View {
                     .foregroundStyle(.white)
                     .padding(.horizontal, 6)
                     .padding(.vertical, 2)
-                    .background(Color.tronBlue.opacity(0.7))
+                    .background(Color.tronEmerald.opacity(0.7))
                     .clipShape(Capsule())
 
                 Spacer()
@@ -265,13 +265,13 @@ struct MessagesContainer: View {
                                             Text("Load \(min(10, totalMessages - messages.count)) more")
                                                 .font(.system(size: 11, design: .monospaced))
                                         }
-                                        .foregroundStyle(.tronBlue)
+                                        .foregroundStyle(.tronEmerald)
                                         Spacer()
                                     }
                                     .padding(10)
                                     .background {
                                         RoundedRectangle(cornerRadius: 8, style: .continuous)
-                                            .fill(Color.tronBlue.opacity(0.1))
+                                            .fill(Color.tronEmerald.opacity(0.1))
                                     }
                                 }
                                 .buttonStyle(.plain)
@@ -285,7 +285,7 @@ struct MessagesContainer: View {
         }
         .background {
             RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(Color.tronBlue.opacity(0.15))
+                .fill(Color.tronEmerald.opacity(0.15))
         }
         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
@@ -318,11 +318,11 @@ struct AddedSkillsContainer: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             // Header
-            HStack {
+            HStack(spacing: 8) {
                 Image(systemName: "sparkles")
                     .font(.system(size: 14))
                     .foregroundStyle(.tronCyan)
-
+                    .frame(width: 18)
                 Text("Added Skills")
                     .font(.system(size: 14, weight: .medium, design: .monospaced))
                     .foregroundStyle(.tronCyan)

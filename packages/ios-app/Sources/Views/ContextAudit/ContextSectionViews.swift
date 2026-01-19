@@ -18,10 +18,11 @@ struct SystemPromptSection: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             // Header
-            HStack {
+            HStack(spacing: 8) {
                 Image(systemName: "doc.text.fill")
                     .font(.system(size: 14))
                     .foregroundStyle(.tronPurple)
+                    .frame(width: 18)
                 Text("System Prompt")
                     .font(.system(size: 14, weight: .medium, design: .monospaced))
                     .foregroundStyle(.tronPurple)
@@ -86,10 +87,11 @@ struct ToolsSection: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             // Header - using onTapGesture to avoid any button highlight behavior
-            HStack {
+            HStack(spacing: 8) {
                 Image(systemName: "hammer.fill")
                     .font(.system(size: 14))
                     .foregroundStyle(.tronClay)
+                    .frame(width: 18)
                 Text("Tools")
                     .font(.system(size: 14, weight: .medium, design: .monospaced))
                     .foregroundStyle(.tronClay)
@@ -287,10 +289,11 @@ struct SkillReferencesSection: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             // Header
-            HStack {
+            HStack(spacing: 8) {
                 Image(systemName: "sparkles")
                     .font(.system(size: 14))
                     .foregroundStyle(.tronCyan)
+                    .frame(width: 18)
                 Text("Skill References")
                     .font(.system(size: 14, weight: .medium, design: .monospaced))
                     .foregroundStyle(.tronCyan)
@@ -569,11 +572,11 @@ struct RulesSection: View {
     var body: some View {
         VStack(spacing: 0) {
             // Header row (tappable)
-            HStack {
+            HStack(spacing: 8) {
                 Image(systemName: "doc.text.fill")
                     .font(.system(size: 14))
                     .foregroundStyle(.tronTerracotta)
-
+                    .frame(width: 18)
                 Text("Rules")
                     .font(.system(size: 14, weight: .medium, design: .monospaced))
                     .foregroundStyle(.tronTerracotta)
