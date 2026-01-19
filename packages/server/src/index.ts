@@ -66,7 +66,7 @@ export class TronServer {
 
     // Resolve paths to canonical ~/.tron directory
     const tronDir = getTronDataDir();
-    const eventStoreDbPath = resolveTronPath(this.config.eventStoreDbPath ?? 'events.db', tronDir);
+    const eventStoreDbPath = resolveTronPath(this.config.eventStoreDbPath ?? 'db/prod.db', tronDir);
 
     // Initialize EventStore orchestrator
     const orchestratorConfig: EventStoreOrchestratorConfig = {

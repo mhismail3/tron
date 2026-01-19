@@ -4,7 +4,7 @@
  * Loads and merges context/rules files (AGENTS.md, agents.md, CLAUDE.md, claude.md)
  * from multiple locations following a hierarchical priority system:
  *
- * 1. Global context: ~/.tron/AGENTS.md (or lowercase variants)
+ * 1. Global context: ~/.tron/rules/AGENTS.md (or lowercase variants)
  * 2. Project context: ./.agent/AGENTS.md or ./AGENTS.md
  * 3. Directory context: ./subdir/AGENTS.md (closest to working dir)
  *
@@ -157,11 +157,11 @@ export class ContextLoader {
 
   /**
    * Load only global context
-   * Looks in ~/.tron/ for global rules files
+   * Looks in ~/.tron/rules/ for global rules files
    */
   async loadGlobalContext(): Promise<ContextFile | null> {
-    // Use ~/.tron/ for global context (consistent with Tron data directory)
-    const globalDir = path.join(this.config.userHome, '.tron');
+    // Use ~/.tron/rules/ for global context
+    const globalDir = path.join(this.config.userHome, '.tron', 'rules');
 
     for (const fileName of this.config.contextFileNames) {
       const filePath = path.join(globalDir, fileName);
@@ -398,7 +398,7 @@ export class ContextLoader {
     onChange: (context: LoadedContext) => void
   ): Promise<() => void> {
     const paths = [
-      path.join(this.config.userHome, '.tron'),  // Global context
+      path.join(this.config.userHome, '.tron', 'rules'),  // Global context
       this.config.projectRoot,
     ];
 

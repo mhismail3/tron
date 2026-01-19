@@ -33,7 +33,7 @@ describe('ContextLoader', () => {
 
     await fs.mkdir(projectDir, { recursive: true });
     await fs.mkdir(subDir, { recursive: true });
-    await fs.mkdir(path.join(globalDir, '.tron'), { recursive: true });
+    await fs.mkdir(path.join(globalDir, '.tron', 'rules'), { recursive: true });
   });
 
   afterEach(async () => {
@@ -143,7 +143,7 @@ describe('ContextLoader', () => {
   describe('Global Context Loading', () => {
     it('should load global context file', async () => {
       await fs.writeFile(
-        path.join(globalDir, '.tron', 'AGENTS.md'),
+        path.join(globalDir, '.tron', 'rules', 'AGENTS.md'),
         '# Global Rules\n\nGlobal context here.'
       );
 
@@ -257,7 +257,7 @@ describe('ContextLoader', () => {
     it('should load context files from multiple levels', async () => {
       // Create contexts at different levels
       await fs.writeFile(
-        path.join(globalDir, '.tron', 'AGENTS.md'),
+        path.join(globalDir, '.tron', 'rules', 'AGENTS.md'),
         '# Global\n\nGlobal rules.'
       );
       await fs.writeFile(
@@ -281,7 +281,7 @@ describe('ContextLoader', () => {
 
     it('should merge contexts in correct order', async () => {
       await fs.writeFile(
-        path.join(globalDir, '.tron', 'AGENTS.md'),
+        path.join(globalDir, '.tron', 'rules', 'AGENTS.md'),
         '# Global\n\n1. Global rule'
       );
       await fs.writeFile(

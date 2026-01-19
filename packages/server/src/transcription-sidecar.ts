@@ -80,7 +80,7 @@ function startSidecarProcess(pythonBin: string, repoRoot: string): void {
   sidecarOwned = true;
 
   const transcribeBaseDir =
-    process.env.TRON_TRANSCRIBE_BASE_DIR ?? path.join(os.homedir(), '.tron', 'transcribe');
+    process.env.TRON_TRANSCRIBE_BASE_DIR ?? path.join(os.homedir(), '.tron', 'mods', 'transcribe');
   const hfCacheDir = path.join(transcribeBaseDir, 'models', 'hf');
 
   const env = {

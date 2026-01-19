@@ -298,9 +298,9 @@ cmd_logs() {
     fi
 
     # Database mode - query SQLite
-    local db_path="$TRON_HOME/events.db"
+    local db_path="$TRON_HOME/db/prod.db"
     if [ "$tier" = "beta" ]; then
-        db_path="$TRON_HOME/beta/events.db"
+        db_path="$TRON_HOME/db/beta.db"
     fi
 
     if [ ! -f "$db_path" ]; then
@@ -433,9 +433,9 @@ cmd_logs() {
 cmd_errors() {
     local tier="${1:-prod}"
     # Query database for errors
-    local db_path="$TRON_HOME/events.db"
+    local db_path="$TRON_HOME/db/prod.db"
     if [ "$tier" = "beta" ]; then
-        db_path="$TRON_HOME/events-beta.db"
+        db_path="$TRON_HOME/db/beta.db"
     fi
 
     if [ -f "$db_path" ]; then

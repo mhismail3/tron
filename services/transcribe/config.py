@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Optional
 
-DEFAULT_BASE_DIR = Path("~/.tron/transcribe").expanduser()
+DEFAULT_BASE_DIR = Path("~/.tron/mods/transcribe").expanduser()
 DEFAULT_CONFIG_PATH = DEFAULT_BASE_DIR / "config.json"
 
 

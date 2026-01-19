@@ -28,7 +28,7 @@ const logger = createLogger('context:system-prompts');
  * directly to the model.
  *
  * Users should customize their system prompt by creating:
- *   - ~/.tron/SYSTEM.md (global)
+ *   - ~/.tron/rules/SYSTEM.md (global)
  *   - .tron/SYSTEM.md (project-level, takes precedence)
  *
  * See loadSystemPromptFromFileSync() for the loading logic.
@@ -70,7 +70,7 @@ export interface LoadedSystemPrompt {
  *
  * Priority order:
  * 1. Project: .tron/SYSTEM.md in working directory
- * 2. Global: ~/.tron/SYSTEM.md
+ * 2. Global: ~/.tron/rules/SYSTEM.md (or system.md)
  *
  * Returns null if no files exist or if errors occur.
  *
@@ -104,27 +104,34 @@ export function loadSystemPromptFromFileSync(options: {
     // File doesn't exist or is unreadable - continue to global
   }
 
-  // 2. Try global SYSTEM.md (~/.tron/SYSTEM.md)
+  // 2. Try global SYSTEM.md (~/.tron/rules/SYSTEM.md or system.md)
   if (userHome) {
-    const globalPath = path.join(userHome, '.tron', 'SYSTEM.md');
-    try {
-      const stats = fs.statSync(globalPath);
+    // Try both uppercase and lowercase variants
+    const globalPaths = [
+      path.join(userHome, '.tron', 'rules', 'SYSTEM.md'),
+      path.join(userHome, '.tron', 'rules', 'system.md'),
+    ];
 
-      // Check file size limit
-      if (stats.size > MAX_SYSTEM_PROMPT_FILE_SIZE) {
-        logger.warn('Global SYSTEM.md exceeds size limit', {
-          path: globalPath,
-          size: stats.size,
-          limit: MAX_SYSTEM_PROMPT_FILE_SIZE,
-        });
-        return null;
+    for (const globalPath of globalPaths) {
+      try {
+        const stats = fs.statSync(globalPath);
+
+        // Check file size limit
+        if (stats.size > MAX_SYSTEM_PROMPT_FILE_SIZE) {
+          logger.warn('Global system prompt exceeds size limit', {
+            path: globalPath,
+            size: stats.size,
+            limit: MAX_SYSTEM_PROMPT_FILE_SIZE,
+          });
+          continue;
+        }
+
+        const content = fs.readFileSync(globalPath, 'utf-8');
+        logger.debug('Loaded system prompt from global', { path: globalPath });
+        return { content, source: 'global' };
+      } catch {
+        // File doesn't exist or is unreadable, try next
       }
-
-      const content = fs.readFileSync(globalPath, 'utf-8');
-      logger.debug('Loaded system prompt from global', { path: globalPath });
-      return { content, source: 'global' };
-    } catch (err) {
-      // File doesn't exist or is unreadable
     }
   }
 

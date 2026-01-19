@@ -35,7 +35,7 @@ TRON_REPO_ROOT=/path/to/tron
 
 ## Configuration
 
-The service reads config from `~/.tron/transcribe/config.json` by default.
+The service reads config from `~/.tron/mods/transcribe/config.json` by default.
 Set `TRON_TRANSCRIBE_CONFIG` to point elsewhere.
 
 Quickly write a config file:
@@ -92,7 +92,7 @@ To switch to faster-whisper:
 ```
 
 Notes:
-- Model downloads go to `~/.tron/transcribe/models`. Parakeet (HF) artifacts are cached under
-  `~/.tron/transcribe/models/hf` unless `HF_HOME` or `HUGGINGFACE_HUB_CACHE` is set.
+- Model downloads go to `~/.tron/mods/transcribe/models`. Parakeet (HF) artifacts are cached under
+  `~/.tron/mods/transcribe/models/hf` unless `HF_HOME` or `HUGGINGFACE_HUB_CACHE` is set.
 - `cleanup_mode` supports `none`, `basic`, or `llm`.
 - Whisper-style settings like `beam_size` are ignored by parakeet-mlx.

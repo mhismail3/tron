@@ -15,7 +15,7 @@ The Event-Sourced Session Tree System is a comprehensive, agent-first session ma
 ```
                      ┌─────────────────────────────────────┐
                      │    Global Event Store               │
-                     │    (~/.tron/events.db)              │
+                     │    (~/.tron/db/prod.db)              │
                      │                                     │
                      │  ┌─────────────────────────────┐    │
                      │  │         SQLite               │   │
@@ -376,7 +376,7 @@ class EventDatabase: ObservableObject {
 │                                      │                                      │
 │                                      ▼                                      │
 │                          ┌─────────────────────┐                            │
-│                          │  ~/.tron/events.db  │                            │
+│                          │  ~/.tron/db/prod.db  │                            │
 │                          │      (SQLite)       │                            │
 │                          └─────────────────────┘                            │
 └─────────────────────────────────────────────────────────────────────────────┘
@@ -452,7 +452,7 @@ User types message and hits Enter
 │  │   ┌──────────────┐    ┌──────────────┐    ┌──────────────────────┐  │   │
 │  │   │ TuiSession   │───▶│  EventStore  │───▶│  SQLiteBackend       │  │   │
 │  │   │              │    │              │    │                      │  │   │
-│  │   │ - sendPrompt │    │ - append()   │    │ ~/.tron/events.db    │  │   │
+│  │   │ - sendPrompt │    │ - append()   │    │ ~/.tron/db/prod.db    │  │   │
 │  │   │ - fork()     │    │ - fork()     │    │                      │  │   │
 │  │   │ - rewind()   │    │ - rewind()   │    └──────────────────────┘  │   │
 │  │   └──────────────┘    └──────────────┘                              │   │
@@ -875,7 +875,7 @@ These would provide:
 
 ```bash
 # Server
-TRON_EVENT_STORE_PATH=~/.tron/events.db  # Default event store location
+TRON_EVENT_STORE_PATH=~/.tron/db/prod.db  # Default event store location
 TRON_MEMORY_DB_PATH=~/.tron/memory.db    # Memory store location
 
 # Web
@@ -886,8 +886,8 @@ VITE_WS_URL=ws://localhost:8080/ws       # WebSocket server URL
 
 | Platform | Event Store Location |
 |----------|---------------------|
-| Server/TUI | `~/.tron/events.db` |
-| iOS | `~/Documents/.tron/events.db` |
+| Server/TUI | `~/.tron/db/prod.db` |
+| iOS | `~/Documents/.tron/db/prod.db` |
 | Web | IndexedDB: `tron_events` |
 
 ---

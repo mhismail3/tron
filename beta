@@ -36,7 +36,7 @@ echo -e "${CYAN}Starting Beta Server${NC}"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo "  WebSocket: ws://localhost:$BETA_WS_PORT/ws"
 echo "  Health:    http://localhost:$BETA_HEALTH_PORT/health"
-echo "  Database:  $TRON_HOME/events-beta.db"
+echo "  Database:  $TRON_HOME/db/beta.db"
 echo "  Workspace: $PROJECT_DIR"
 echo ""
 echo -e "${YELLOW}Press Ctrl+C to stop${NC}"
@@ -46,7 +46,7 @@ echo "━━━━━━━━━━━━━━━━━━━━━━━━�
 export TRON_WS_PORT=$BETA_WS_PORT
 export TRON_HEALTH_PORT=$BETA_HEALTH_PORT
 export TRON_BUILD_TIER=beta
-export TRON_EVENT_STORE_DB="$TRON_HOME/events-beta.db"
+export TRON_EVENT_STORE_DB="$TRON_HOME/db/beta.db"
 export LOG_LEVEL="${LOG_LEVEL:-trace}"
 export NODE_ENV=development
 

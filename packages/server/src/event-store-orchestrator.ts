@@ -173,7 +173,7 @@ export class EventStoreOrchestrator extends EventEmitter {
       this.eventStore = config.eventStore;
     } else {
       const eventStoreDbPath = config.eventStoreDbPath ??
-        path.join(os.homedir(), '.tron', 'events.db');
+        path.join(os.homedir(), '.tron', 'db', 'prod.db');
       this.eventStore = new EventStore(eventStoreDbPath);
     }
 
@@ -248,9 +248,7 @@ export class EventStoreOrchestrator extends EventEmitter {
     // Initialize AgentFactory (delegated module)
     this.agentFactory = createAgentFactory({
       getAuthForProvider: (model) => this.authProvider.getAuthForProvider(model),
-      getDbPath: () => this.eventStore.getDbPath(),
       spawnSubsession: (parentId, params) => this.spawnSubsession(parentId, params),
-      spawnTmuxAgent: (parentId, params) => this.spawnTmuxAgent(parentId, params),
       querySubagent: (sessionId, queryType, limit) => this.querySubagent(sessionId, queryType, limit),
       waitForSubagents: (sessionIds, mode, timeout) => this.waitForSubagents(sessionIds, mode, timeout),
       forwardAgentEvent: (sessionId, event) => this.forwardAgentEvent(sessionId, event),

@@ -36,6 +36,46 @@ print_warning() { echo -e "${YELLOW}!${NC} $1"; }
 is_running() { launchctl list 2>/dev/null | grep -q "$PLIST_NAME"; }
 get_pid() { lsof -t -i :$PROD_WS_PORT -sTCP:LISTEN 2>/dev/null || true; }
 
+# Rebuild better-sqlite3 native module for the target Node.js version
+# This prevents NODE_MODULE_VERSION mismatch errors when launchd runs
+# with a different Node.js than what was used during build
+rebuild_native_modules() {
+    local target_node="$1"
+    local install_dir="$2"
+
+    local sqlite_dir="$install_dir/node_modules/better-sqlite3"
+    if [ ! -d "$sqlite_dir" ]; then
+        return 0  # No better-sqlite3 to rebuild
+    fi
+
+    print_status "Rebuilding better-sqlite3 for $(basename "$(dirname "$(dirname "$target_node")")")..."
+
+    # Get the directory containing node (for npx)
+    local node_bin_dir="$(dirname "$target_node")"
+
+    # Find python3 (prefer homebrew, fall back to system)
+    local python_path="/opt/homebrew/bin/python3"
+    if [ ! -x "$python_path" ]; then
+        python_path="$(which python3 2>/dev/null || echo "/usr/bin/python3")"
+    fi
+
+    # Rebuild in the install directory
+    (
+        cd "$sqlite_dir"
+        rm -rf build 2>/dev/null || true
+        PATH="$node_bin_dir:/opt/homebrew/bin:/usr/bin:/bin" \
+        PYTHON="$python_path" \
+        "$node_bin_dir/npx" node-gyp rebuild --release 2>&1 | tail -5
+    )
+
+    if [ -f "$sqlite_dir/build/Release/better_sqlite3.node" ]; then
+        print_success "Native module rebuilt"
+    else
+        print_error "Failed to rebuild native module"
+        return 1
+    fi
+}
+
 cmd_deploy() {
     echo ""
     echo -e "${CYAN}Deploying to Production${NC}"
@@ -100,6 +140,14 @@ cmd_deploy() {
     cp -r "$PROJECT_DIR/dist/prod/"* "$INSTALL_DIR/"
     print_success "Installed to: $INSTALL_DIR"
 
+    # Rebuild native modules for the launchd Node.js version
+    # Extract the node path from the plist (format: exec "/path/to/node" ...)
+    plist_node_path=$(grep 'exec "' "$PLIST_PATH" 2>/dev/null | sed 's/.*exec "\([^"]*\)".*/\1/' | head -1)
+    if [ -z "$plist_node_path" ] || [ ! -x "$plist_node_path" ]; then
+        plist_node_path=$(which node)
+    fi
+    rebuild_native_modules "$plist_node_path" "$INSTALL_DIR"
+
     # Record deployed commit
     current_commit=$(git rev-parse HEAD)
     echo "$current_commit" > "$DEPLOYED_COMMIT_FILE"
@@ -142,14 +190,17 @@ cmd_install() {
         "$SCRIPT_DIR/build-prod.sh"
     fi
 
+    # Get node path (used for launchd plist and native module rebuild)
+    node_path=$(which node)
+
     # Copy production bundle to install directory
     print_status "Installing to $INSTALL_DIR..."
     rm -rf "$INSTALL_DIR"/*
     cp -r "$PROJECT_DIR/dist/prod/"* "$INSTALL_DIR/"
     print_success "Installed to: $INSTALL_DIR"
 
-    # Get node path
-    node_path=$(which node)
+    # Rebuild native modules for the target Node.js version
+    rebuild_native_modules "$node_path" "$INSTALL_DIR"
 
     # Create launchd plist
     print_status "Creating launchd service..."
@@ -322,6 +373,14 @@ cmd_rollback() {
 
     rm -rf "$INSTALL_DIR"/*
     cp -r "$PROJECT_DIR/dist/prod/"* "$INSTALL_DIR/"
+
+    # Rebuild native modules for the launchd Node.js version
+    plist_node_path=$(grep 'exec "' "$PLIST_PATH" 2>/dev/null | sed 's/.*exec "\([^"]*\)".*/\1/' | head -1)
+    if [ -z "$plist_node_path" ] || [ ! -x "$plist_node_path" ]; then
+        plist_node_path=$(which node)
+    fi
+    rebuild_native_modules "$plist_node_path" "$INSTALL_DIR"
+
     echo "$deployed_commit" > "$DEPLOYED_COMMIT_FILE"
 
     if [ -f "$PLIST_PATH" ]; then

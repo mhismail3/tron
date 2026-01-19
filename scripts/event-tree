@@ -13,7 +13,7 @@
 
 set -euo pipefail
 
-DB_PATH="${TRON_DB_PATH:-$HOME/.tron/events.db}"
+DB_PATH="${TRON_DB_PATH:-$HOME/.tron/db/prod.db}"
 WATCH_MODE=false
 SESSION_FILTER=""
 STATS_ONLY=false
@@ -67,7 +67,7 @@ while [[ $# -gt 0 ]]; do
             echo "  -h, --help         Show this help"
             echo ""
             echo "Environment:"
-            echo "  TRON_DB_PATH       Database path (default: ~/.tron/events.db)"
+            echo "  TRON_DB_PATH       Database path (default: ~/.tron/db/prod.db)"
             exit 0
             ;;
         *)
@@ -80,7 +80,7 @@ done
 # Check if database exists
 if [[ ! -f "$DB_PATH" ]]; then
     echo -e "${RED}Error: Database not found at $DB_PATH${RESET}"
-    echo "Set TRON_DB_PATH or ensure ~/.tron/events.db exists"
+    echo "Set TRON_DB_PATH or ensure ~/.tron/db/prod.db exists"
     exit 1
 fi
 

@@ -117,8 +117,8 @@ Run beta and production simultaneously on different ports:
 
 | Environment | WebSocket | Health | Database |
 |-------------|-----------|--------|----------|
-| Production  | 8080      | 8081   | `~/.tron/events.db` |
-| Beta        | 8082      | 8083   | `~/.tron/events-beta.db` |
+| Production  | 8080      | 8081   | `~/.tron/db/prod.db` |
+| Beta        | 8082      | 8083   | `~/.tron/db/beta.db` |
 
 ```bash
 tron beta        # Run beta server in terminal (Ctrl+C to stop)
@@ -212,13 +212,13 @@ See [docs/skills.md](docs/skills.md) for the complete guide.
 Customize Tron's core identity and behavior using `SYSTEM.md` files:
 
 **Locations:**
-- `~/.tron/SYSTEM.md` — Global default prompt (all projects)
+- `~/.tron/rules/SYSTEM.md` — Global default prompt (all projects)
 - `.tron/SYSTEM.md` — Project-specific prompt (overrides global)
 
 **Priority:**
 1. Programmatic `systemPrompt` parameter (highest)
 2. Project `.tron/SYSTEM.md`
-3. Global `~/.tron/SYSTEM.md`
+3. Global `~/.tron/rules/SYSTEM.md`
 4. Built-in default prompt (fallback)
 
 **Example `SYSTEM.md`:**

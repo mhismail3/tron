@@ -26,11 +26,12 @@ class EventDatabase: ObservableObject {
             fatalError("EventDatabase: Unable to access Documents directory - app cannot function")
         }
         let tronDir = documentsURL.appendingPathComponent(".tron", isDirectory: true)
+        let dbDir = tronDir.appendingPathComponent("db", isDirectory: true)
 
-        // Create directory if needed
-        try? fileManager.createDirectory(at: tronDir, withIntermediateDirectories: true)
+        // Create directories if needed
+        try? fileManager.createDirectory(at: dbDir, withIntermediateDirectories: true)
 
-        self.dbPath = tronDir.appendingPathComponent("events.db").path
+        self.dbPath = dbDir.appendingPathComponent("prod.db").path
     }
 
     func initialize() async throws {

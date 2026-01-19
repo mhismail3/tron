@@ -14,7 +14,7 @@ usage() {
 Usage: write-config.sh [--backend parakeet-mlx|mlx-whisper|faster-whisper] [--model MODEL]
 
 Environment overrides:
-  TRON_TRANSCRIBE_CONFIG       Config path (default: ~/.tron/transcribe/config.json)
+  TRON_TRANSCRIBE_CONFIG       Config path (default: ~/.tron/mods/transcribe/config.json)
   TRON_TRANSCRIBE_CLEANUP_MODE Cleanup mode (default: basic)
   TRON_TRANSCRIBE_LANGUAGE     Language (default: en)
   TRON_TRANSCRIBE_DEVICE       Device (default: mlx)
@@ -68,7 +68,7 @@ if [[ -z "$model" ]]; then
   model="$default_model"
 fi
 
-base_dir="${TRON_TRANSCRIBE_BASE_DIR:-$HOME/.tron/transcribe}"
+base_dir="${TRON_TRANSCRIBE_BASE_DIR:-$HOME/.tron/mods/transcribe}"
 config_path="${TRON_TRANSCRIBE_CONFIG:-$base_dir/config.json}"
 config_dir="$(dirname "$config_path")"
 

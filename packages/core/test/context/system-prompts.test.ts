@@ -170,7 +170,7 @@ describe('System Prompts', () => {
 
       mkdirSync(testHomeDir, { recursive: true });
       mkdirSync(testProjectDir, { recursive: true });
-      mkdirSync(join(testHomeDir, '.tron'), { recursive: true });
+      mkdirSync(join(testHomeDir, '.tron', 'rules'), { recursive: true });
       mkdirSync(join(testProjectDir, '.tron'), { recursive: true });
     });
 
@@ -193,7 +193,7 @@ describe('System Prompts', () => {
 
       it('loads global SYSTEM.md when it exists', () => {
         const globalPrompt = 'You are a global assistant.';
-        writeFileSync(join(testHomeDir, '.tron', 'SYSTEM.md'), globalPrompt);
+        writeFileSync(join(testHomeDir, '.tron', 'rules', 'SYSTEM.md'), globalPrompt);
 
         const result = loadSystemPromptFromFileSync({
           workingDirectory: testProjectDir,
@@ -223,7 +223,7 @@ describe('System Prompts', () => {
         const globalPrompt = 'You are a global assistant.';
         const projectPrompt = 'You are a project assistant.';
 
-        writeFileSync(join(testHomeDir, '.tron', 'SYSTEM.md'), globalPrompt);
+        writeFileSync(join(testHomeDir, '.tron', 'rules', 'SYSTEM.md'), globalPrompt);
         writeFileSync(join(testProjectDir, '.tron', 'SYSTEM.md'), projectPrompt);
 
         const result = loadSystemPromptFromFileSync({
@@ -335,7 +335,7 @@ Follow these guidelines:
     describe('ContextManager with file-based prompts', () => {
       it('loads and uses global SYSTEM.md', () => {
         const globalPrompt = 'You are a custom global assistant.';
-        writeFileSync(join(testHomeDir, '.tron', 'SYSTEM.md'), globalPrompt);
+        writeFileSync(join(testHomeDir, '.tron', 'rules', 'SYSTEM.md'), globalPrompt);
 
         const cm = createContextManager({
           model: 'claude-sonnet-4-20250514',
@@ -367,7 +367,7 @@ Follow these guidelines:
         const globalPrompt = 'Global assistant.';
         const projectPrompt = 'Project assistant.';
 
-        writeFileSync(join(testHomeDir, '.tron', 'SYSTEM.md'), globalPrompt);
+        writeFileSync(join(testHomeDir, '.tron', 'rules', 'SYSTEM.md'), globalPrompt);
         writeFileSync(join(testProjectDir, '.tron', 'SYSTEM.md'), projectPrompt);
 
         const cm = createContextManager({
@@ -398,7 +398,7 @@ Follow these guidelines:
         const projectPrompt = 'Project assistant.';
         const programmaticPrompt = 'Programmatic assistant.';
 
-        writeFileSync(join(testHomeDir, '.tron', 'SYSTEM.md'), globalPrompt);
+        writeFileSync(join(testHomeDir, '.tron', 'rules', 'SYSTEM.md'), globalPrompt);
         writeFileSync(join(testProjectDir, '.tron', 'SYSTEM.md'), projectPrompt);
 
         const cm = createContextManager({
