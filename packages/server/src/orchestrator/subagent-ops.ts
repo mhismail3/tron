@@ -24,7 +24,7 @@ import {
   type EventStore,
   type SessionId,
   type EventType,
-  type SpawnSubsessionParams,
+  type SpawnSubagentParams,
   type SpawnTmuxAgentParams,
   type SubagentQueryType,
   type TronSessionEvent,
@@ -66,7 +66,7 @@ export interface SubagentOperationsConfig {
 /**
  * Result of spawning a subsession
  */
-export interface SpawnSubsessionResult {
+export interface SpawnSubagentResult {
   sessionId: string;
   success: boolean;
   error?: string;
@@ -129,8 +129,8 @@ export class SubagentOperations {
    */
   async spawnSubsession(
     parentSessionId: string,
-    params: SpawnSubsessionParams
-  ): Promise<SpawnSubsessionResult> {
+    params: SpawnSubagentParams
+  ): Promise<SpawnSubagentResult> {
     const parent = this.config.getActiveSession(parentSessionId);
     if (!parent) {
       return { sessionId: '', success: false, error: 'Parent session not found' };
@@ -168,6 +168,19 @@ export class SubagentOperations {
           maxTurns: params.maxTurns ?? 50,
         }
       );
+
+      // Emit WebSocket event for iOS real-time updates
+      this.config.emit('agent_event', {
+        type: 'agent.subagent_spawned',
+        sessionId: parentSessionId,
+        timestamp: new Date().toISOString(),
+        data: {
+          subagentSessionId: subSession.sessionId,
+          task: params.task,
+          model: params.model ?? parent.model,
+          workingDirectory: params.workingDirectory ?? parent.workingDirectory,
+        },
+      });
 
       // Track in parent's subagent tracker
       parent.subagentTracker.spawn(
@@ -505,15 +518,28 @@ export class SubagentOperations {
         onEvent: (event) => {
           // Emit status updates periodically
           if (event.type === 'turn_complete') {
+            const currentTurn = (event.data as { turn?: number })?.turn ?? 0;
             this.config.appendEventLinearized(
               parentSessionId as SessionId,
               'subagent.status_update' as EventType,
               {
                 subagentSessionId: sessionId,
                 status: 'running',
-                currentTurn: (event.data as { turn?: number })?.turn ?? 0,
+                currentTurn,
               }
             );
+
+            // Emit WebSocket event for iOS real-time updates
+            this.config.emit('agent_event', {
+              type: 'agent.subagent_status',
+              sessionId: parentSessionId,
+              timestamp: new Date().toISOString(),
+              data: {
+                subagentSessionId: sessionId,
+                status: 'running',
+                currentTurn,
+              },
+            });
           }
         },
       });
@@ -562,6 +588,21 @@ export class SubagentOperations {
           duration,
         }
       );
+
+      // Emit WebSocket event for iOS real-time updates
+      this.config.emit('agent_event', {
+        type: 'agent.subagent_completed',
+        sessionId: parentSessionId,
+        timestamp: new Date().toISOString(),
+        data: {
+          subagentSessionId: sessionId,
+          resultSummary,
+          fullOutput,
+          totalTurns: session?.turnCount ?? 0,
+          duration,
+          tokenUsage,
+        },
+      });
 
       // Update tracker (this triggers waiting promises and callbacks)
       // Re-fetch parent since time has passed
@@ -616,6 +657,18 @@ export class SubagentOperations {
           duration,
         }
       );
+
+      // Emit WebSocket event for iOS real-time updates
+      this.config.emit('agent_event', {
+        type: 'agent.subagent_failed',
+        sessionId: parentSessionId,
+        timestamp: new Date().toISOString(),
+        data: {
+          subagentSessionId: sessionId,
+          error: err.message,
+          duration,
+        },
+      });
 
       // Update tracker
       // Re-fetch parent since time has passed

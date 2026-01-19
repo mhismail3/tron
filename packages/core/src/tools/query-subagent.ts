@@ -127,14 +127,14 @@ Query types:
 - **logs**: Get log entries from the sub-agent session
 - **output**: Get the final assistant response (only available when completed)
 
-Use this to monitor sub-agents you've spawned with SpawnSubsession or SpawnTmuxAgent.`;
+Use this to monitor sub-agents you've spawned with SpawnSubagent or SpawnTmuxAgent.`;
 
   readonly parameters = {
     type: 'object' as const,
     properties: {
       sessionId: {
         type: 'string' as const,
-        description: 'Session ID of the sub-agent to query (returned by SpawnSubsession/SpawnTmuxAgent).',
+        description: 'Session ID of the sub-agent to query (returned by SpawnSubagent/SpawnTmuxAgent).',
       },
       queryType: {
         type: 'string' as const,

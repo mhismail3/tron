@@ -1009,6 +1009,11 @@ export type RpcEventType =
   | 'agent.tool_end'
   | 'agent.error'
   | 'agent.complete'
+  // Subagent events (for iOS real-time updates)
+  | 'agent.subagent_spawned'
+  | 'agent.subagent_status'
+  | 'agent.subagent_completed'
+  | 'agent.subagent_failed'
   // Session events
   | 'session.created'
   | 'session.ended'
@@ -1074,6 +1079,53 @@ export interface AgentCompleteEvent {
   };
   success: boolean;
   error?: string;
+}
+
+/**
+ * Event data for subagent spawned (real-time WebSocket streaming for iOS)
+ * Note: Distinct from SubagentSpawnedEvent in events/types.ts which is for DB storage
+ */
+export interface RpcSubagentSpawnedData {
+  subagentSessionId: string;
+  task: string;
+  model: string;
+  workingDirectory: string;
+  toolCallId?: string;
+}
+
+/**
+ * Event data for subagent status update (real-time WebSocket streaming for iOS)
+ */
+export interface RpcSubagentStatusData {
+  subagentSessionId: string;
+  status: 'running' | 'completed' | 'failed';
+  currentTurn: number;
+}
+
+/**
+ * Event data for subagent completed (real-time WebSocket streaming for iOS)
+ * Note: Distinct from SubagentCompletedEvent in events/types.ts which is for DB storage
+ */
+export interface RpcSubagentCompletedData {
+  subagentSessionId: string;
+  resultSummary: string;
+  fullOutput: string;
+  totalTurns: number;
+  duration: number;
+  tokenUsage?: {
+    inputTokens: number;
+    outputTokens: number;
+  };
+}
+
+/**
+ * Event data for subagent failed (real-time WebSocket streaming for iOS)
+ * Note: Distinct from SubagentFailedEvent in events/types.ts which is for DB storage
+ */
+export interface RpcSubagentFailedData {
+  subagentSessionId: string;
+  error: string;
+  duration: number;
 }
 
 /**

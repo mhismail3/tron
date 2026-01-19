@@ -1,5 +1,5 @@
 /**
- * @fileoverview Spawn Subsession Tool
+ * @fileoverview Spawn Subagent Tool
  *
  * Spawns an in-process sub-agent using EventStoreOrchestrator.
  * The sub-agent runs asynchronously and can be monitored via QuerySubagent.
@@ -8,12 +8,12 @@
 import type { TronTool, TronToolResult } from '../types/index.js';
 import { createLogger } from '../logging/logger.js';
 
-const logger = createLogger('tool:spawn-subsession');
+const logger = createLogger('tool:spawn-subagent');
 
 /**
- * Parameters for spawning a sub-session
+ * Parameters for spawning a sub-agent
  */
-export interface SpawnSubsessionParams {
+export interface SpawnSubagentParams {
   /** The task/prompt for the sub-agent to execute */
   task: string;
   /** Override model for the sub-agent */
@@ -29,9 +29,9 @@ export interface SpawnSubsessionParams {
 }
 
 /**
- * Result of spawning a sub-session
+ * Result of spawning a sub-agent
  */
-export interface SpawnSubsessionResult {
+export interface SpawnSubagentResult {
   /** Session ID of the spawned sub-agent */
   sessionId: string;
   /** Whether spawn was successful */
@@ -41,32 +41,32 @@ export interface SpawnSubsessionResult {
 }
 
 /**
- * Callback to spawn a sub-session (provided by orchestrator)
+ * Callback to spawn a sub-agent (provided by orchestrator)
  */
-export type SpawnSubsessionCallback = (
+export type SpawnSubagentCallback = (
   parentSessionId: string,
-  params: SpawnSubsessionParams
-) => Promise<SpawnSubsessionResult>;
+  params: SpawnSubagentParams
+) => Promise<SpawnSubagentResult>;
 
 /**
- * Configuration for SpawnSubsessionTool
+ * Configuration for SpawnSubagentTool
  */
-export interface SpawnSubsessionToolConfig {
+export interface SpawnSubagentToolConfig {
   /** Current session ID (parent session) */
   sessionId: string;
   /** Default working directory */
   workingDirectory: string;
   /** Default model */
   model: string;
-  /** Callback to spawn the sub-session */
-  onSpawn: SpawnSubsessionCallback;
+  /** Callback to spawn the sub-agent */
+  onSpawn: SpawnSubagentCallback;
 }
 
 /**
  * Tool for spawning in-process sub-agents
  */
-export class SpawnSubsessionTool implements TronTool<SpawnSubsessionParams> {
-  readonly name = 'SpawnSubsession';
+export class SpawnSubagentTool implements TronTool<SpawnSubagentParams> {
+  readonly name = 'SpawnSubagent';
   readonly description = `Spawn an in-process sub-agent to handle a specific task. The sub-agent runs asynchronously and can be monitored using QuerySubagent. Use this for tasks that can be delegated to a focused sub-agent while you continue with other work.
 
 The sub-agent:
@@ -116,9 +116,9 @@ Best used for:
   readonly category = 'custom' as const;
   readonly label = 'Spawn Sub-Agent';
 
-  private config: SpawnSubsessionToolConfig;
+  private config: SpawnSubagentToolConfig;
 
-  constructor(config: SpawnSubsessionToolConfig) {
+  constructor(config: SpawnSubagentToolConfig) {
     this.config = config;
   }
 
@@ -126,7 +126,7 @@ Best used for:
     toolCallIdOrArgs: string | Record<string, unknown>,
     argsOrSignal?: Record<string, unknown> | AbortSignal,
     _signal?: AbortSignal
-  ): Promise<TronToolResult<SpawnSubsessionResult>> {
+  ): Promise<TronToolResult<SpawnSubagentResult>> {
     // Handle both old and new signatures
     let args: Record<string, unknown>;
 
@@ -154,7 +154,7 @@ Best used for:
       };
     }
 
-    logger.info('Spawning sub-session', {
+    logger.info('Spawning sub-agent', {
       parentSessionId: this.config.sessionId,
       task: task.slice(0, 100),
       model,
@@ -172,7 +172,7 @@ Best used for:
       });
 
       if (!result.success) {
-        logger.error('Failed to spawn sub-session', {
+        logger.error('Failed to spawn sub-agent', {
           parentSessionId: this.config.sessionId,
           error: result.error,
         });
@@ -184,7 +184,7 @@ Best used for:
         };
       }
 
-      logger.info('Sub-session spawned successfully', {
+      logger.info('Sub-agent spawned successfully', {
         parentSessionId: this.config.sessionId,
         subagentSessionId: result.sessionId,
       });
@@ -192,7 +192,7 @@ Best used for:
       return {
         content: `Sub-agent spawned successfully.
 **Session ID**: ${result.sessionId}
-**Type**: subsession (in-process)
+**Type**: subagent (in-process)
 **Task**: ${task.slice(0, 200)}${task.length > 200 ? '...' : ''}
 
 You are responsible for monitoring this sub-agent. Use QuerySubagent to check its status and retrieve results when complete.
@@ -203,7 +203,7 @@ Example: QuerySubagent({ sessionId: "${result.sessionId}", queryType: "status" }
       };
     } catch (error) {
       const err = error as Error;
-      logger.error('Error spawning sub-session', {
+      logger.error('Error spawning sub-agent', {
         parentSessionId: this.config.sessionId,
         error: err.message,
       });

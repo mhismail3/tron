@@ -49,6 +49,12 @@ class RPCClient: ObservableObject {
     var onBrowserFrame: ((BrowserFrameEvent) -> Void)?
     var onBrowserClosed: ((String) -> Void)?  // sessionId
 
+    // Subagent event callbacks (for real-time iOS updates)
+    var onSubagentSpawned: ((SubagentSpawnedEvent) -> Void)?
+    var onSubagentStatus: ((SubagentStatusEvent) -> Void)?
+    var onSubagentCompleted: ((SubagentCompletedEvent) -> Void)?
+    var onSubagentFailed: ((SubagentFailedEvent) -> Void)?
+
     // Global event callbacks (for ALL sessions - used by dashboard)
     var onGlobalComplete: ((String) -> Void)?  // sessionId
     var onGlobalError: ((String, String) -> Void)?  // sessionId, message
@@ -226,6 +232,23 @@ class RPCClient: ObservableObject {
 
         case .browserClosed(let sessionId):
             onBrowserClosed?(sessionId)
+
+        // Subagent events
+        case .subagentSpawned(let e):
+            guard checkSession(e.sessionId) else { return }
+            onSubagentSpawned?(e)
+
+        case .subagentStatus(let e):
+            guard checkSession(e.sessionId) else { return }
+            onSubagentStatus?(e)
+
+        case .subagentCompleted(let e):
+            guard checkSession(e.sessionId) else { return }
+            onSubagentCompleted?(e)
+
+        case .subagentFailed(let e):
+            guard checkSession(e.sessionId) else { return }
+            onSubagentFailed?(e)
 
         case .unknown(let type):
             logger.debug("Unknown event type: \(type)", category: .events)

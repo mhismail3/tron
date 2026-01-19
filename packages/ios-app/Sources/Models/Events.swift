@@ -466,6 +466,90 @@ struct SkillRemovedEvent: Decodable {
     var skillName: String { data.skillName }
 }
 
+// MARK: - Subagent Events (real-time WebSocket updates for iOS)
+
+/// Event fired when a subagent is spawned
+struct SubagentSpawnedEvent: Decodable {
+    let type: String
+    let sessionId: String?
+    let timestamp: String?
+    let data: SubagentSpawnedData
+
+    struct SubagentSpawnedData: Decodable {
+        let subagentSessionId: String
+        let task: String
+        let model: String?
+        let workingDirectory: String?
+        let toolCallId: String?
+    }
+
+    var subagentSessionId: String { data.subagentSessionId }
+    var task: String { data.task }
+    var model: String? { data.model }
+    var workingDirectory: String? { data.workingDirectory }
+    var toolCallId: String? { data.toolCallId }
+}
+
+/// Event fired when a subagent's status updates
+struct SubagentStatusEvent: Decodable {
+    let type: String
+    let sessionId: String?
+    let timestamp: String?
+    let data: SubagentStatusData
+
+    struct SubagentStatusData: Decodable {
+        let subagentSessionId: String
+        let status: String
+        let currentTurn: Int
+    }
+
+    var subagentSessionId: String { data.subagentSessionId }
+    var status: String { data.status }
+    var currentTurn: Int { data.currentTurn }
+}
+
+/// Event fired when a subagent completes successfully
+struct SubagentCompletedEvent: Decodable {
+    let type: String
+    let sessionId: String?
+    let timestamp: String?
+    let data: SubagentCompletedData
+
+    struct SubagentCompletedData: Decodable {
+        let subagentSessionId: String
+        let resultSummary: String
+        let fullOutput: String?
+        let totalTurns: Int
+        let duration: Int
+        let tokenUsage: TokenUsage?
+    }
+
+    var subagentSessionId: String { data.subagentSessionId }
+    var resultSummary: String { data.resultSummary }
+    var fullOutput: String? { data.fullOutput }
+    var totalTurns: Int { data.totalTurns }
+    var duration: Int { data.duration }
+    var tokenUsage: TokenUsage? { data.tokenUsage }
+}
+
+/// Event fired when a subagent fails
+struct SubagentFailedEvent: Decodable {
+    let type: String
+    let sessionId: String?
+    let timestamp: String?
+    let data: SubagentFailedData
+
+    struct SubagentFailedData: Decodable {
+        let subagentSessionId: String
+        let error: String
+        let duration: Int
+    }
+
+    var subagentSessionId: String { data.subagentSessionId }
+    var error: String { data.error }
+    var duration: Int { data.duration }
+}
+
 // MARK: - Plan Mode Events
 
 /// Event fired when plan mode is entered (read-only enforcement begins)
@@ -522,6 +606,11 @@ enum EventType: String {
     case sessionCreated = "session.created"
     case sessionEnded = "session.ended"
     case agentTurn = "agent.turn"
+    // Subagent events
+    case subagentSpawned = "agent.subagent_spawned"
+    case subagentStatus = "agent.subagent_status"
+    case subagentCompleted = "agent.subagent_completed"
+    case subagentFailed = "agent.subagent_failed"
 }
 
 // MARK: - Event Parsing
@@ -545,6 +634,11 @@ enum ParsedEvent {
     case browserFrame(BrowserFrameEvent)
     case browserClosed(String)
     case connected(ConnectedEvent)
+    // Subagent events
+    case subagentSpawned(SubagentSpawnedEvent)
+    case subagentStatus(SubagentStatusEvent)
+    case subagentCompleted(SubagentCompletedEvent)
+    case subagentFailed(SubagentFailedEvent)
     case unknown(String)
 
     static func parse(from data: Data) -> ParsedEvent? {
@@ -643,6 +737,27 @@ enum ParsedEvent {
                 // These are informational events we don't need to handle
                 logger.debug("Ignoring informational event: \(type)", category: .events)
                 return nil
+
+            // Subagent events
+            case EventType.subagentSpawned.rawValue:
+                let event = try decoder.decode(SubagentSpawnedEvent.self, from: data)
+                logger.info("Subagent spawned: \(event.subagentSessionId)", category: .events)
+                return .subagentSpawned(event)
+
+            case EventType.subagentStatus.rawValue:
+                let event = try decoder.decode(SubagentStatusEvent.self, from: data)
+                logger.debug("Subagent status: \(event.subagentSessionId) - \(event.status) turn \(event.currentTurn)", category: .events)
+                return .subagentStatus(event)
+
+            case EventType.subagentCompleted.rawValue:
+                let event = try decoder.decode(SubagentCompletedEvent.self, from: data)
+                logger.info("Subagent completed: \(event.subagentSessionId) in \(event.totalTurns) turns", category: .events)
+                return .subagentCompleted(event)
+
+            case EventType.subagentFailed.rawValue:
+                let event = try decoder.decode(SubagentFailedEvent.self, from: data)
+                logger.error("Subagent failed: \(event.subagentSessionId) - \(event.error)", category: .events)
+                return .subagentFailed(event)
 
             default:
                 logger.debug("Unknown event type: \(type)", category: .events)

@@ -19,12 +19,12 @@ export { AstGrepTool, type AstGrepToolConfig, type AstGrepMatch, type AstGrepDet
 
 // Sub-agent spawning tools
 export {
-  SpawnSubsessionTool,
-  type SpawnSubsessionToolConfig,
-  type SpawnSubsessionParams,
-  type SpawnSubsessionResult,
-  type SpawnSubsessionCallback,
-} from './spawn-subsession.js';
+  SpawnSubagentTool,
+  type SpawnSubagentToolConfig,
+  type SpawnSubagentParams,
+  type SpawnSubagentResult,
+  type SpawnSubagentCallback,
+} from './spawn-subagent.js';
 export {
   SpawnTmuxAgentTool,
   type SpawnTmuxAgentToolConfig,

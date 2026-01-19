@@ -82,7 +82,7 @@ import {
   type CompactionPreview,
   type CompactionResult,
   type UserContent,
-  type SpawnSubsessionParams,
+  type SpawnSubagentParams,
   type SpawnTmuxAgentParams,
   type SubagentQueryType,
   withLoggingContext,
@@ -1226,7 +1226,7 @@ export class EventStoreOrchestrator extends EventEmitter {
    */
   async spawnSubsession(
     parentSessionId: string,
-    params: SpawnSubsessionParams
+    params: SpawnSubagentParams
   ): Promise<{ sessionId: string; success: boolean; error?: string }> {
     return this.subagentOps.spawnSubsession(parentSessionId, params);
   }

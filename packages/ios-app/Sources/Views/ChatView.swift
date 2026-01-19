@@ -319,6 +319,15 @@ struct ChatView: View {
                 )
             }
         }
+        .sheet(isPresented: Binding(
+            get: { viewModel.subagentState.showDetailSheet },
+            set: { viewModel.subagentState.showDetailSheet = $0 }
+        )) {
+            if let data = viewModel.subagentState.selectedSubagent {
+                SubagentDetailSheet(data: data)
+                    .presentationDetents([.medium, .large])
+            }
+        }
         .alert("Error", isPresented: $viewModel.showError) {
             Button("OK") { viewModel.clearError() }
         } message: {
@@ -531,6 +540,9 @@ struct ChatView: View {
                                     onCompactionTap: { tokensBefore, tokensAfter, reason, summary in
                                         compactionDetailData = (tokensBefore, tokensAfter, reason, summary)
                                         showCompactionDetail = true
+                                    },
+                                    onSubagentTap: { data in
+                                        viewModel.subagentState.showDetails(for: data.subagentSessionId)
                                     }
                                 )
                                 .id(message.id)

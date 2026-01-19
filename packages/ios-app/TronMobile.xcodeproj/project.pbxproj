@@ -76,6 +76,10 @@
 		AA11BB22CC33DD44EE55FF11 /* AskUserQuestionState.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA11BB22CC33DD44EE55FF01 /* AskUserQuestionState.swift */; };
 		AA11BB22CC33DD44EE55FF12 /* PlanModeState.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA11BB22CC33DD44EE55FF02 /* PlanModeState.swift */; };
 		AA11BB22CC33DD44EE55FF13 /* ContextTrackingState.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA11BB22CC33DD44EE55FF03 /* ContextTrackingState.swift */; };
+		SBAG0001BULD0001SOURCE01 /* SubagentState.swift in Sources */ = {isa = PBXBuildFile; fileRef = SBAG0001FREF0001FILEREF1 /* SubagentState.swift */; };
+		SBAG0002BULD0001SOURCE01 /* ChatViewModel+Subagent.swift in Sources */ = {isa = PBXBuildFile; fileRef = SBAG0002FREF0001FILEREF1 /* ChatViewModel+Subagent.swift */; };
+		SBAG0003BULD0001SOURCE01 /* SubagentChip.swift in Sources */ = {isa = PBXBuildFile; fileRef = SBAG0003FREF0001FILEREF1 /* SubagentChip.swift */; };
+		SBAG0004BULD0001SOURCE01 /* SubagentDetailSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = SBAG0004FREF0001FILEREF1 /* SubagentDetailSheet.swift */; };
 		AA22BB33CC44DD55EE66FF01 /* ToolResultRouter.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA22BB33CC44DD55EE66F001 /* ToolResultRouter.swift */; };
 		AA22BB33CC44DD55EE66FF02 /* FileToolViewer.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA22BB33CC44DD55EE66F002 /* FileToolViewer.swift */; };
 		AA22BB33CC44DD55EE66FF03 /* BashToolViewer.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA22BB33CC44DD55EE66F003 /* BashToolViewer.swift */; };
@@ -230,6 +234,10 @@
 		AA11BB22CC33DD44EE55FF01 /* AskUserQuestionState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AskUserQuestionState.swift; sourceTree = "<group>"; };
 		AA11BB22CC33DD44EE55FF02 /* PlanModeState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlanModeState.swift; sourceTree = "<group>"; };
 		AA11BB22CC33DD44EE55FF03 /* ContextTrackingState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContextTrackingState.swift; sourceTree = "<group>"; };
+		SBAG0001FREF0001FILEREF1 /* SubagentState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SubagentState.swift; sourceTree = "<group>"; };
+		SBAG0002FREF0001FILEREF1 /* ChatViewModel+Subagent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ChatViewModel+Subagent.swift"; sourceTree = "<group>"; };
+		SBAG0003FREF0001FILEREF1 /* SubagentChip.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SubagentChip.swift; sourceTree = "<group>"; };
+		SBAG0004FREF0001FILEREF1 /* SubagentDetailSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SubagentDetailSheet.swift; sourceTree = "<group>"; };
 		AA22BB33CC44DD55EE66F001 /* ToolResultRouter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ToolResultRouter.swift; sourceTree = "<group>"; };
 		AA22BB33CC44DD55EE66F002 /* FileToolViewer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileToolViewer.swift; sourceTree = "<group>"; };
 		AA22BB33CC44DD55EE66F003 /* BashToolViewer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BashToolViewer.swift; sourceTree = "<group>"; };
@@ -460,6 +468,8 @@
 				27BE2BF13C3F0A560ECDA979 /* CameraPicker.swift */,
 				5571DC3A896875D1693192D9 /* ChatView.swift */,
 				CMPD0001FREF0001FILEREF1 /* CompactionDetailSheet.swift */,
+				SBAG0003FREF0001FILEREF1 /* SubagentChip.swift */,
+				SBAG0004FREF0001FILEREF1 /* SubagentDetailSheet.swift */,
 				EE11FF22AA33BB44CC55DE01 /* ContentView.swift */,
 				8E272C3BC972178AF980AB55 /* DocumentPicker.swift */,
 				1BDC8358FC12ECFA6C4A2526 /* FloatingBrowserView.swift */,
@@ -495,6 +505,7 @@
 				25C6E368AD4411B086E35A61 /* ChatViewModel.swift */,
 				E7285B697CF31BB6986535D3 /* ChatViewModel+Connection.swift */,
 				85AB906ED58C2A5018AA8055 /* ChatViewModel+Events.swift */,
+				SBAG0002FREF0001FILEREF1 /* ChatViewModel+Subagent.swift */,
 				E6F71203A3512D5375E51BE4 /* ChatViewModel+Messaging.swift */,
 				C8F9B0354BC7BDECDCD3DEAF /* ChatViewModel+Pagination.swift */,
 				F764D3E3A92C04B23A01BC4C /* ChatViewModel+Transcription.swift */,
@@ -571,6 +582,7 @@
 				AA11BB22CC33DD44EE55FF01 /* AskUserQuestionState.swift */,
 				AA11BB22CC33DD44EE55FF00 /* BrowserState.swift */,
 				AA11BB22CC33DD44EE55FF03 /* ContextTrackingState.swift */,
+				SBAG0001FREF0001FILEREF1 /* SubagentState.swift */,
 				AA11BB22CC33DD44EE55FF02 /* PlanModeState.swift */,
 			);
 			path = State;
@@ -775,6 +787,10 @@
 				AA11BB22CC33DD44EE55FF11 /* AskUserQuestionState.swift in Sources */,
 				AA11BB22CC33DD44EE55FF12 /* PlanModeState.swift in Sources */,
 				AA11BB22CC33DD44EE55FF13 /* ContextTrackingState.swift in Sources */,
+				SBAG0001BULD0001SOURCE01 /* SubagentState.swift in Sources */,
+				SBAG0002BULD0001SOURCE01 /* ChatViewModel+Subagent.swift in Sources */,
+				SBAG0003BULD0001SOURCE01 /* SubagentChip.swift in Sources */,
+				SBAG0004BULD0001SOURCE01 /* SubagentDetailSheet.swift in Sources */,
 				BB22CC33DD44EE55FF660021 /* RPCClientProtocol.swift in Sources */,
 				BB22CC33DD44EE55FF660022 /* EventDatabaseProtocol.swift in Sources */,
 				BB22CC33DD44EE55FF660023 /* EventStoreManagerProtocol.swift in Sources */,

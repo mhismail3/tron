@@ -54,6 +54,8 @@ class ChatViewModel: ObservableObject {
     let planModeState = PlanModeState()
     /// Context tracking state (tokens, cost, context window)
     let contextState = ContextTrackingState()
+    /// Subagent state (tracking spawned subagents for chip UI)
+    let subagentState = SubagentState()
 
     // MARK: - Browser State (Proxies for backward compatibility)
 
@@ -429,6 +431,23 @@ class ChatViewModel: ObservableObject {
 
         rpcClient.onBrowserClosed = { [weak self] sessionId in
             self?.handleBrowserClosed(sessionId)
+        }
+
+        // Subagent event handlers
+        rpcClient.onSubagentSpawned = { [weak self] event in
+            self?.handleSubagentSpawned(event)
+        }
+
+        rpcClient.onSubagentStatus = { [weak self] event in
+            self?.handleSubagentStatus(event)
+        }
+
+        rpcClient.onSubagentCompleted = { [weak self] event in
+            self?.handleSubagentCompleted(event)
+        }
+
+        rpcClient.onSubagentFailed = { [weak self] event in
+            self?.handleSubagentFailed(event)
         }
     }
 

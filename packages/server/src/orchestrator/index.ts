@@ -131,7 +131,7 @@ export {
   SubagentOperations,
   createSubagentOperations,
   type SubagentOperationsConfig,
-  type SpawnSubsessionResult,
+  type SpawnSubagentResult,
   type SpawnTmuxAgentResult,
   type QuerySubagentResult,
   type WaitForSubagentsResult,

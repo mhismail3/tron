@@ -212,6 +212,8 @@ enum MessageContent: Equatable {
     case askUserQuestion(AskUserQuestionToolData)
     /// User answered agent's questions (rendered as a chip)
     case answeredQuestions(questionCount: Int)
+    /// Subagent tool call (rendered as a tappable chip with status)
+    case subagent(SubagentToolData)
 
     var textContent: String {
         switch self {
@@ -265,6 +267,17 @@ enum MessageContent: Equatable {
             return "[\(data.params.questions.count) questions]"
         case .answeredQuestions(let count):
             return "Answered \(count) \(count == 1 ? "question" : "questions")"
+        case .subagent(let data):
+            switch data.status {
+            case .spawning:
+                return "Spawning subagent..."
+            case .running:
+                return "Subagent running (turn \(data.currentTurn))"
+            case .completed:
+                return data.resultSummary ?? "Subagent completed"
+            case .failed:
+                return data.error ?? "Subagent failed"
+            }
         }
     }
 
@@ -487,6 +500,60 @@ extension ChatMessage {
     /// In-chat notification for catching up to in-progress session
     static func catchingUp() -> ChatMessage {
         ChatMessage(role: .system, content: .catchingUp)
+    }
+}
+
+// MARK: - Subagent Types
+
+/// Status for a spawned subagent
+enum SubagentStatus: String, Codable, Equatable {
+    case spawning
+    case running
+    case completed
+    case failed
+}
+
+/// Data for tracking a spawned subagent (rendered as a chip in chat)
+struct SubagentToolData: Equatable {
+    /// The tool call ID from SpawnSubagent
+    let toolCallId: String
+    /// Session ID of the spawned subagent
+    let subagentSessionId: String
+    /// The task assigned to the subagent
+    let task: String
+    /// Model used by the subagent
+    let model: String?
+    /// Current status
+    var status: SubagentStatus
+    /// Current turn number (while running)
+    var currentTurn: Int
+    /// Result summary (when completed)
+    var resultSummary: String?
+    /// Full output (when completed)
+    var fullOutput: String?
+    /// Duration in milliseconds
+    var duration: Int?
+    /// Error message (when failed)
+    var error: String?
+    /// Token usage (when completed)
+    var tokenUsage: TokenUsage?
+
+    /// Formatted duration for display
+    var formattedDuration: String? {
+        guard let ms = duration else { return nil }
+        if ms < 1000 {
+            return "\(ms)ms"
+        } else {
+            return String(format: "%.1fs", Double(ms) / 1000.0)
+        }
+    }
+
+    /// Short task preview for chip display
+    var taskPreview: String {
+        if task.count > 40 {
+            return String(task.prefix(40)) + "..."
+        }
+        return task
     }
 }
 

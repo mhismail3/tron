@@ -59,7 +59,7 @@ export interface WaitForSubagentToolConfig {
  *
  * Use this when you need the result of a sub-agent before continuing.
  * For fire-and-forget tasks where you don't need immediate results,
- * use SpawnSubsession/SpawnTmuxAgent without waiting.
+ * use SpawnSubagent/SpawnTmuxAgent without waiting.
  */
 export class WaitForSubagentTool implements TronTool<WaitForSubagentParams> {
   readonly name = 'WaitForSubagent';

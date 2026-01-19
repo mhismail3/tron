@@ -22,7 +22,7 @@ import {
   AskUserQuestionTool,
   OpenBrowserTool,
   AstGrepTool,
-  SpawnSubsessionTool,
+  SpawnSubagentTool,
   QuerySubagentTool,
   WaitForSubagentTool,
   detectProviderFromModel,
@@ -31,7 +31,7 @@ import {
   type SessionId,
   type ServerAuth,
   type BrowserDelegate,
-  type SpawnSubsessionParams,
+  type SpawnSubagentParams,
   type SubagentQueryType,
   type TronEvent,
 } from '@tron/core';
@@ -46,7 +46,7 @@ export interface AgentFactoryConfig {
   /** Get authentication for a model */
   getAuthForProvider: (model: string) => Promise<ServerAuth>;
   /** Spawn subsession callback */
-  spawnSubsession: (parentId: string, params: SpawnSubsessionParams) => Promise<any>;
+  spawnSubsession: (parentId: string, params: SpawnSubagentParams) => Promise<any>;
   /** Query subagent callback */
   querySubagent: (sessionId: string, queryType: SubagentQueryType, limit?: number) => any;
   /** Wait for subagents callback */
@@ -123,11 +123,11 @@ export class AgentFactory {
       new OpenBrowserTool({ workingDirectory }),
       new AstGrepTool({ workingDirectory }),
       // Sub-agent spawning tools (in-process only for now)
-      new SpawnSubsessionTool({
+      new SpawnSubagentTool({
         sessionId,
         workingDirectory,
         model,
-        onSpawn: (parentId: string, params: SpawnSubsessionParams) =>
+        onSpawn: (parentId: string, params: SpawnSubagentParams) =>
           this.config.spawnSubsession(parentId, params),
       }),
       new QuerySubagentTool({
