@@ -193,7 +193,7 @@ enum MessageContent: Equatable {
     /// In-chat notification for no speech detected
     case transcriptionNoSpeech
     /// In-chat notification for context compaction
-    case compaction(tokensBefore: Int, tokensAfter: Int, reason: String)
+    case compaction(tokensBefore: Int, tokensAfter: Int, reason: String, summary: String?)
     /// In-chat notification for context clearing
     case contextCleared(tokensBefore: Int, tokensAfter: Int)
     /// In-chat notification for message deletion from context
@@ -240,7 +240,7 @@ enum MessageContent: Equatable {
             return "Transcription failed"
         case .transcriptionNoSpeech:
             return "No speech detected"
-        case .compaction(let before, let after, _):
+        case .compaction(let before, let after, _, _):
             let saved = before - after
             return "Context compacted: \(formatTokens(saved)) tokens saved"
         case .contextCleared(let before, let after):
@@ -450,8 +450,8 @@ extension ChatMessage {
     }
 
     /// In-chat notification for context compaction
-    static func compaction(tokensBefore: Int, tokensAfter: Int, reason: String) -> ChatMessage {
-        ChatMessage(role: .system, content: .compaction(tokensBefore: tokensBefore, tokensAfter: tokensAfter, reason: reason))
+    static func compaction(tokensBefore: Int, tokensAfter: Int, reason: String, summary: String? = nil) -> ChatMessage {
+        ChatMessage(role: .system, content: .compaction(tokensBefore: tokensBefore, tokensAfter: tokensAfter, reason: reason, summary: summary))
     }
 
     /// In-chat notification for context clearing

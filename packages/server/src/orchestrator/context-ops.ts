@@ -206,6 +206,8 @@ export class ContextOps {
           compactedTokens: result.tokensAfter,
           compressionRatio: result.compressionRatio,
           reason: compactionReason,
+          // Include summary in boundary event for easier iOS access
+          summary: result.summary,
         },
       },
       {

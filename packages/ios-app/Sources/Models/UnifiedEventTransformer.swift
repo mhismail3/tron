@@ -1045,7 +1045,8 @@ struct UnifiedEventTransformer {
             content: .compaction(
                 tokensBefore: parsed.originalTokens,
                 tokensAfter: parsed.compactedTokens,
-                reason: parsed.reason
+                reason: parsed.reason,
+                summary: parsed.summary
             ),
             timestamp: timestamp
         )

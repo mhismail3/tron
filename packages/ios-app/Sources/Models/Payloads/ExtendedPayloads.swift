@@ -109,6 +109,7 @@ struct CompactBoundaryPayload {
     let originalTokens: Int
     let compactedTokens: Int
     let reason: String
+    let summary: String?
 
     init?(from payload: [String: AnyCodable]) {
         // Range fields are optional (not present in auto-compaction events)
@@ -130,6 +131,9 @@ struct CompactBoundaryPayload {
 
         // Reason defaults to "manual" for backwards compatibility
         self.reason = payload.string("reason") ?? "manual"
+
+        // Summary is optional (may not be present in auto-compaction events)
+        self.summary = payload.string("summary")
     }
 }
 

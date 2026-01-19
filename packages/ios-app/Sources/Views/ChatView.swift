@@ -62,8 +62,8 @@ struct ChatView: View {
     @State private var showSkillDetailSheet = false
     /// Whether to show the compaction detail sheet
     @State private var showCompactionDetail = false
-    /// Data for compaction detail sheet (tokensBefore, tokensAfter, reason)
-    @State private var compactionDetailData: (tokensBefore: Int, tokensAfter: Int, reason: String)?
+    /// Data for compaction detail sheet (tokensBefore, tokensAfter, reason, summary)
+    @State private var compactionDetailData: (tokensBefore: Int, tokensAfter: Int, reason: String, summary: String?)?
 
     /// UserDefaults key for storing reasoning level per session
     private var reasoningLevelKey: String { "tron.reasoningLevel.\(sessionId)" }
@@ -297,9 +297,10 @@ struct ChatView: View {
                 CompactionDetailSheet(
                     tokensBefore: data.tokensBefore,
                     tokensAfter: data.tokensAfter,
-                    reason: data.reason
+                    reason: data.reason,
+                    summary: data.summary
                 )
-                .presentationDetents([.medium])
+                .presentationDetents([.medium, .large])
             }
         }
         .sheet(isPresented: $viewModel.showAskUserQuestionSheet) {
@@ -527,8 +528,8 @@ struct ChatView: View {
                                     onAskUserQuestionTap: { data in
                                         viewModel.openAskUserQuestionSheet(for: data)
                                     },
-                                    onCompactionTap: { tokensBefore, tokensAfter, reason in
-                                        compactionDetailData = (tokensBefore, tokensAfter, reason)
+                                    onCompactionTap: { tokensBefore, tokensAfter, reason, summary in
+                                        compactionDetailData = (tokensBefore, tokensAfter, reason, summary)
                                         showCompactionDetail = true
                                     }
                                 )
