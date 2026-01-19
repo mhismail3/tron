@@ -360,9 +360,9 @@ struct MessageBubble: View {
 
     private func extractSessionId(from result: String?) -> String? {
         guard let result = result else { return nil }
-        // Look for patterns like "Session ID: sess_xxx" or "**Session ID**: `sess_xxx`"
-        if let match = result.firstMatch(of: /Session ID[*:\s`]+([a-zA-Z0-9_-]+)/) {
-            return String(match.1)
+        // Look for sess_xxx pattern directly (most reliable)
+        if let match = result.firstMatch(of: /sess_[a-zA-Z0-9_-]+/) {
+            return String(match.0)
         }
         // Also try: sessionId: "..."
         if let match = result.firstMatch(of: /sessionId[:\s"]+([a-zA-Z0-9_-]+)/) {

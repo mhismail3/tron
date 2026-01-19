@@ -411,9 +411,15 @@ final class SubagentState {
     /// Load events from database for a subagent session (for resumed sessions)
     /// This is called lazily when the detail sheet opens.
     /// Uses UnifiedEventTransformer for consistent event parsing with normal sessions.
-    func loadEventsFromDatabase(for subagentSessionId: String, eventDB: EventDatabaseProtocol) {
-        // Skip if already loaded
-        guard subagentEvents[subagentSessionId] == nil else { return }
+    /// - Parameters:
+    ///   - subagentSessionId: The session ID of the subagent
+    ///   - eventDB: The event database to load from
+    ///   - forceReload: If true, reloads even if already loaded (e.g., after sync)
+    func loadEventsFromDatabase(for subagentSessionId: String, eventDB: EventDatabaseProtocol, forceReload: Bool = false) {
+        // Skip if already loaded (unless force reload)
+        if !forceReload && subagentEvents[subagentSessionId] != nil {
+            return
+        }
 
         do {
             let rawEvents = try eventDB.getEventsBySession(subagentSessionId)

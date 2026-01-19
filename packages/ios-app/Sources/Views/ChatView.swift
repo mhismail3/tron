@@ -327,7 +327,7 @@ struct ChatView: View {
                 SubagentDetailSheet(
                     data: data,
                     subagentState: viewModel.subagentState,
-                    eventDB: eventStoreManager.eventDB
+                    eventStoreManager: eventStoreManager
                 )
                 .presentationDetents([.medium, .large])
             }

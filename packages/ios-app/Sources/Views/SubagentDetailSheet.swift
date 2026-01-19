@@ -8,8 +8,11 @@ import UIKit
 struct SubagentDetailSheet: View {
     let data: SubagentToolData
     let subagentState: SubagentState
-    let eventDB: EventDatabase
+    let eventStoreManager: EventStoreManager
     @Environment(\.dismiss) private var dismiss
+
+    /// Loading state for async event sync
+    @State private var isLoadingEvents = false
 
     /// Number of events to show per page
     private static let eventsPageSize = 15
@@ -67,11 +70,10 @@ struct SubagentDetailSheet: View {
                     taskSection
                         .padding(.horizontal)
 
-                    // Activity section (shows real-time events while running)
-                    if !allEvents.isEmpty || data.status == .running || data.status == .spawning {
-                        activitySection
-                            .padding(.horizontal)
-                    }
+                    // Activity section - always show for subagents
+                    // Events are loaded lazily in onAppear
+                    activitySection
+                        .padding(.horizontal)
                 }
                 .padding(.vertical)
             }
@@ -88,10 +90,38 @@ struct SubagentDetailSheet: View {
         .presentationDragIndicator(.hidden)
         .tint(titleColor)
         .preferredColorScheme(.dark)
-        .onAppear {
-            // Lazy load events from database for resumed sessions
-            if !subagentState.hasLoadedEvents(for: data.subagentSessionId) {
-                subagentState.loadEventsFromDatabase(for: data.subagentSessionId, eventDB: eventDB)
+        .task {
+            // Lazy load events for resumed sessions
+            // First try local database, then sync from server if empty
+            await loadSubagentEvents()
+        }
+    }
+
+    // MARK: - Event Loading
+
+    /// Load subagent events - first from local DB, then sync from server if needed
+    private func loadSubagentEvents() async {
+        // Skip if already loaded with events
+        if subagentState.hasLoadedEvents(for: data.subagentSessionId),
+           !subagentState.getEvents(for: data.subagentSessionId).isEmpty {
+            return
+        }
+
+        isLoadingEvents = true
+        defer { isLoadingEvents = false }
+
+        // First try loading from local database
+        subagentState.loadEventsFromDatabase(for: data.subagentSessionId, eventDB: eventStoreManager.eventDB)
+
+        // If still empty, sync from server then reload
+        if subagentState.getEvents(for: data.subagentSessionId).isEmpty {
+            // Sync subagent session events from server
+            do {
+                try await eventStoreManager.syncSessionEvents(sessionId: data.subagentSessionId)
+                // Reload from database after sync
+                subagentState.loadEventsFromDatabase(for: data.subagentSessionId, eventDB: eventStoreManager.eventDB, forceReload: true)
+            } catch {
+                // Sync failed - events will remain empty
             }
         }
     }
@@ -193,15 +223,33 @@ struct SubagentDetailSheet: View {
             // Card content
             VStack(alignment: .leading, spacing: 0) {
                 if allEvents.isEmpty {
-                    // Waiting for events
+                    // Empty state - different message based on status and loading state
                     HStack(spacing: 8) {
-                        Image(systemName: "ellipsis")
-                            .font(.system(size: 12))
-                            .foregroundStyle(.white.opacity(0.4))
-                            .symbolEffect(.variableColor.iterative, options: .repeating)
-                        Text("Waiting for activity...")
-                            .font(.system(size: 12, design: .monospaced))
-                            .foregroundStyle(.white.opacity(0.4))
+                        if isLoadingEvents {
+                            ProgressView()
+                                .progressViewStyle(.circular)
+                                .scaleEffect(0.7)
+                                .frame(width: 14, height: 14)
+                                .tint(.white.opacity(0.4))
+                            Text("Loading activity...")
+                                .font(.system(size: 12, design: .monospaced))
+                                .foregroundStyle(.white.opacity(0.4))
+                        } else if data.status == .running || data.status == .spawning {
+                            Image(systemName: "ellipsis")
+                                .font(.system(size: 12))
+                                .foregroundStyle(.white.opacity(0.4))
+                                .symbolEffect(.variableColor.iterative, options: .repeating)
+                            Text("Waiting for activity...")
+                                .font(.system(size: 12, design: .monospaced))
+                                .foregroundStyle(.white.opacity(0.4))
+                        } else {
+                            Image(systemName: "tray")
+                                .font(.system(size: 12))
+                                .foregroundStyle(.white.opacity(0.4))
+                            Text("No activity recorded")
+                                .font(.system(size: 12, design: .monospaced))
+                                .foregroundStyle(.white.opacity(0.4))
+                        }
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(14)
