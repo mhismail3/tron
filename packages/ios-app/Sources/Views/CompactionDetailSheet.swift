@@ -59,17 +59,17 @@ struct CompactionDetailSheet: View {
             VStack(spacing: 16) {
                 // Before → After boxes
                 HStack(spacing: 16) {
-                    CompactionTokenBox(label: "Before", tokens: tokensBefore, color: .orange)
+                    CompactionTokenBox(label: "Before", tokens: tokensBefore, color: .cyan)
                     Image(systemName: "arrow.right")
                         .font(.title3)
                         .foregroundStyle(.white.opacity(0.4))
                     CompactionTokenBox(label: "After", tokens: tokensAfter, color: .cyan)
                 }
 
-                // Stats row
+                // Stats row - use subtle color variations for visual distinction
                 HStack(spacing: 16) {
-                    CompactionStatBadge(label: "Saved", value: formatTokens(tokensSaved), color: .green)
-                    CompactionStatBadge(label: "Reduction", value: "\(compressionPercent)%", color: .cyan)
+                    CompactionStatBadge(label: "Saved", value: formatTokens(tokensSaved), color: .teal)
+                    CompactionStatBadge(label: "Reduction", value: "\(compressionPercent)%", color: .mint)
                     CompactionStatBadge(label: reasonLabel, value: "", color: reasonColor)
                 }
             }
@@ -157,9 +157,9 @@ struct CompactionDetailSheet: View {
 
     private var reasonColor: Color {
         switch reason {
-        case "pre_turn_guardrail", "threshold_exceeded": return .orange
+        case "pre_turn_guardrail", "threshold_exceeded": return .teal.opacity(0.8)
         case "manual": return .cyan
-        default: return .gray
+        default: return .cyan.opacity(0.6)
         }
     }
 
