@@ -54,6 +54,7 @@ class RPCClient: ObservableObject {
     var onSubagentStatus: ((SubagentStatusEvent) -> Void)?
     var onSubagentCompleted: ((SubagentCompletedEvent) -> Void)?
     var onSubagentFailed: ((SubagentFailedEvent) -> Void)?
+    var onSubagentEvent: ((SubagentForwardedEvent) -> Void)?  // Forwarded events for detail sheet
 
     // Global event callbacks (for ALL sessions - used by dashboard)
     var onGlobalComplete: ((String) -> Void)?  // sessionId
@@ -249,6 +250,10 @@ class RPCClient: ObservableObject {
         case .subagentFailed(let e):
             guard checkSession(e.sessionId) else { return }
             onSubagentFailed?(e)
+
+        case .subagentEvent(let e):
+            guard checkSession(e.sessionId) else { return }
+            onSubagentEvent?(e)
 
         case .unknown(let type):
             logger.debug("Unknown event type: \(type)", category: .events)

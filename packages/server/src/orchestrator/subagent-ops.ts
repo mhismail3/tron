@@ -129,7 +129,8 @@ export class SubagentOperations {
    */
   async spawnSubsession(
     parentSessionId: string,
-    params: SpawnSubagentParams
+    params: SpawnSubagentParams,
+    toolCallId?: string
   ): Promise<SpawnSubagentResult> {
     const parent = this.config.getActiveSession(parentSessionId);
     if (!parent) {
@@ -176,6 +177,7 @@ export class SubagentOperations {
         timestamp: new Date().toISOString(),
         data: {
           subagentSessionId: subSession.sessionId,
+          toolCallId,  // Include for iOS to match with tool call message
           task: params.task,
           model: params.model ?? parent.model,
           workingDirectory: params.workingDirectory ?? parent.workingDirectory,
@@ -516,7 +518,29 @@ export class SubagentOperations {
         sessionId,
         prompt: task,
         onEvent: (event) => {
-          // Emit status updates periodically
+          // Forward key events to parent for real-time iOS detail sheet updates
+          const forwardableTypes = [
+            'tool_start', 'tool_end', 'text_delta', 'thinking_delta',
+            'tool.start', 'tool.end', 'text.delta', 'thinking.delta'
+          ];
+
+          if (forwardableTypes.includes(event.type)) {
+            this.config.emit('agent_event', {
+              type: 'agent.subagent_event',
+              sessionId: parentSessionId,
+              timestamp: new Date().toISOString(),
+              data: {
+                subagentSessionId: sessionId,
+                event: {
+                  type: event.type,
+                  data: event.data,
+                  timestamp: event.timestamp || new Date().toISOString(),
+                },
+              },
+            });
+          }
+
+          // Emit status updates on turn completion
           if (event.type === 'turn_complete') {
             const currentTurn = (event.data as { turn?: number })?.turn ?? 0;
             this.config.appendEventLinearized(

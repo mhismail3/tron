@@ -34,6 +34,7 @@ import {
   type SpawnSubagentParams,
   type SubagentQueryType,
   type TronEvent,
+  type SubAgentTracker,
 } from '@tron/core';
 
 const logger = createLogger('agent-factory');
@@ -45,14 +46,16 @@ const logger = createLogger('agent-factory');
 export interface AgentFactoryConfig {
   /** Get authentication for a model */
   getAuthForProvider: (model: string) => Promise<ServerAuth>;
-  /** Spawn subsession callback */
-  spawnSubsession: (parentId: string, params: SpawnSubagentParams) => Promise<any>;
+  /** Spawn subsession callback - toolCallId included for event correlation */
+  spawnSubsession: (parentId: string, params: SpawnSubagentParams, toolCallId?: string) => Promise<any>;
   /** Query subagent callback */
   querySubagent: (sessionId: string, queryType: SubagentQueryType, limit?: number) => any;
   /** Wait for subagents callback */
   waitForSubagents: (sessionIds: string[], mode: 'all' | 'any', timeout: number) => Promise<any>;
   /** Forward agent event callback */
   forwardAgentEvent: (sessionId: SessionId, event: TronEvent) => void;
+  /** Get SubAgentTracker for a session (for blocking SpawnSubagent) */
+  getSubagentTrackerForSession: (sessionId: string) => SubAgentTracker | undefined;
   /** Browser service (optional) */
   browserService?: {
     execute: (sessionId: string, action: string, params: any) => Promise<any>;
@@ -127,8 +130,15 @@ export class AgentFactory {
         sessionId,
         workingDirectory,
         model,
-        onSpawn: (parentId: string, params: SpawnSubagentParams) =>
-          this.config.spawnSubsession(parentId, params),
+        onSpawn: (parentId: string, params: SpawnSubagentParams, toolCallId: string) =>
+          this.config.spawnSubsession(parentId, params, toolCallId),
+        getSubagentTracker: () => {
+          const tracker = this.config.getSubagentTrackerForSession(sessionId);
+          if (!tracker) {
+            throw new Error(`No subagent tracker for session ${sessionId}`);
+          }
+          return tracker;
+        },
       }),
       new QuerySubagentTool({
         onQuery: (sid: string, queryType: SubagentQueryType, limit?: number) =>

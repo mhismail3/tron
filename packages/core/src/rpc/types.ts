@@ -1014,6 +1014,7 @@ export type RpcEventType =
   | 'agent.subagent_status'
   | 'agent.subagent_completed'
   | 'agent.subagent_failed'
+  | 'agent.subagent_event'  // Forwarded event from subagent (tool calls, text, etc.)
   // Session events
   | 'session.created'
   | 'session.ended'

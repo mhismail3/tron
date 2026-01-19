@@ -449,6 +449,10 @@ class ChatViewModel: ObservableObject {
         rpcClient.onSubagentFailed = { [weak self] event in
             self?.handleSubagentFailed(event)
         }
+
+        rpcClient.onSubagentEvent = { [weak self] event in
+            self?.handleSubagentForwardedEvent(event)
+        }
     }
 
     // MARK: - Windowed Messages (for virtual scrolling)

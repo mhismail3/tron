@@ -248,10 +248,11 @@ export class EventStoreOrchestrator extends EventEmitter {
     // Initialize AgentFactory (delegated module)
     this.agentFactory = createAgentFactory({
       getAuthForProvider: (model) => this.authProvider.getAuthForProvider(model),
-      spawnSubsession: (parentId, params) => this.spawnSubsession(parentId, params),
+      spawnSubsession: (parentId, params, toolCallId) => this.spawnSubsession(parentId, params, toolCallId),
       querySubagent: (sessionId, queryType, limit) => this.querySubagent(sessionId, queryType, limit),
       waitForSubagents: (sessionIds, mode, timeout) => this.waitForSubagents(sessionIds, mode, timeout),
       forwardAgentEvent: (sessionId, event) => this.forwardAgentEvent(sessionId, event),
+      getSubagentTrackerForSession: (sessionId) => this.activeSessions.get(sessionId)?.subagentTracker,
       browserService: this.browserService ? {
         execute: (sid, action, params) => this.browserService.execute(sid, action as any, params),
         createSession: async (sid) => { await this.browserService.createSession(sid); },
@@ -1226,9 +1227,10 @@ export class EventStoreOrchestrator extends EventEmitter {
    */
   async spawnSubsession(
     parentSessionId: string,
-    params: SpawnSubagentParams
+    params: SpawnSubagentParams,
+    toolCallId?: string
   ): Promise<{ sessionId: string; success: boolean; error?: string }> {
-    return this.subagentOps.spawnSubsession(parentSessionId, params);
+    return this.subagentOps.spawnSubsession(parentSessionId, params, toolCallId);
   }
 
   /**

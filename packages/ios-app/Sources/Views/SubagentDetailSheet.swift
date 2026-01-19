@@ -3,10 +3,17 @@ import UIKit
 
 /// Detail sheet shown when tapping a subagent chip.
 /// Displays task info, status, duration, turn count, and full output.
+/// Shows real-time activity events while the subagent is running.
 @available(iOS 26.0, *)
 struct SubagentDetailSheet: View {
     let data: SubagentToolData
+    let subagentState: SubagentState
     @Environment(\.dismiss) private var dismiss
+
+    /// Events for this subagent (derived from state for real-time updates)
+    private var events: [SubagentEventItem] {
+        subagentState.getEvents(for: data.subagentSessionId)
+    }
 
     var body: some View {
         NavigationStack {
@@ -19,6 +26,12 @@ struct SubagentDetailSheet: View {
                     // Task section
                     taskSection
                         .padding(.horizontal)
+
+                    // Activity section (shows real-time events while running)
+                    if !events.isEmpty || data.status == .running || data.status == .spawning {
+                        activitySection
+                            .padding(.horizontal)
+                    }
 
                     // Output section (when completed)
                     if data.status == .completed, let summary = data.resultSummary {
@@ -108,6 +121,57 @@ struct SubagentDetailSheet: View {
                     .lineSpacing(4)
                     .textSelection(.enabled)
                     .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .padding(14)
+            .background {
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(.clear)
+                    .glassEffect(.regular.tint(titleColor.opacity(0.12)), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            }
+        }
+    }
+
+    // MARK: - Activity Section
+
+    private var activitySection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            // Section header
+            HStack {
+                Text("Activity")
+                    .font(.system(size: 12, weight: .medium, design: .monospaced))
+                    .foregroundStyle(.white.opacity(0.6))
+
+                Spacer()
+
+                if data.status == .running || data.status == .spawning {
+                    ProgressView()
+                        .progressViewStyle(.circular)
+                        .scaleEffect(0.5)
+                        .frame(width: 12, height: 12)
+                        .tint(titleColor)
+                }
+            }
+
+            // Card content
+            VStack(alignment: .leading, spacing: 8) {
+                if events.isEmpty {
+                    // Waiting for events
+                    HStack(spacing: 8) {
+                        Image(systemName: "ellipsis")
+                            .font(.system(size: 12))
+                            .foregroundStyle(.white.opacity(0.4))
+                            .symbolEffect(.variableColor.iterative, options: .repeating)
+                        Text("Waiting for activity...")
+                            .font(.system(size: 12, design: .monospaced))
+                            .foregroundStyle(.white.opacity(0.4))
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                } else {
+                    // Event list
+                    ForEach(events) { event in
+                        SubagentEventRow(event: event, accentColor: titleColor)
+                    }
+                }
             }
             .padding(14)
             .background {
@@ -319,5 +383,72 @@ private struct SubagentStatBadge: View {
                 .fill(.clear)
                 .glassEffect(.regular.tint(color.opacity(0.2)), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
         }
+    }
+}
+
+// MARK: - Event Row
+
+@available(iOS 26.0, *)
+private struct SubagentEventRow: View {
+    let event: SubagentEventItem
+    let accentColor: Color
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 10) {
+            // Event icon
+            eventIcon
+                .frame(width: 16, height: 16)
+
+            // Event content
+            VStack(alignment: .leading, spacing: 4) {
+                Text(event.title)
+                    .font(.system(size: 12, weight: .medium, design: .monospaced))
+                    .foregroundStyle(.white.opacity(0.85))
+
+                if let detail = event.detail, !detail.isEmpty {
+                    Text(detail)
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundStyle(.white.opacity(0.5))
+                        .lineLimit(3)
+                        .lineSpacing(2)
+                }
+            }
+
+            Spacer(minLength: 0)
+
+            // Timestamp
+            Text(formatTime(event.timestamp))
+                .font(.system(size: 10, design: .monospaced))
+                .foregroundStyle(.white.opacity(0.3))
+        }
+        .padding(.vertical, 6)
+    }
+
+    @ViewBuilder
+    private var eventIcon: some View {
+        switch event.type {
+        case .toolStart:
+            Image(systemName: "gearshape.fill")
+                .font(.system(size: 11))
+                .foregroundStyle(.tronEmerald)
+        case .toolEnd:
+            Image(systemName: "checkmark.circle.fill")
+                .font(.system(size: 11))
+                .foregroundStyle(.tronSuccess)
+        case .textDelta:
+            Image(systemName: "text.bubble.fill")
+                .font(.system(size: 11))
+                .foregroundStyle(accentColor)
+        case .thinking:
+            Image(systemName: "brain")
+                .font(.system(size: 11))
+                .foregroundStyle(.tronPurple)
+        }
+    }
+
+    private func formatTime(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "HH:mm:ss"
+        return formatter.string(from: date)
     }
 }

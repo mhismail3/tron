@@ -550,6 +550,28 @@ struct SubagentFailedEvent: Decodable {
     var duration: Int { data.duration }
 }
 
+/// Event fired when a subagent's internal event is forwarded to parent (for real-time detail sheet)
+struct SubagentForwardedEvent: Decodable {
+    let type: String
+    let sessionId: String?
+    let timestamp: String?
+    let data: SubagentForwardedData
+
+    struct SubagentForwardedData: Decodable {
+        let subagentSessionId: String
+        let event: InnerEvent
+    }
+
+    struct InnerEvent: Decodable {
+        let type: String
+        let data: AnyCodable
+        let timestamp: String
+    }
+
+    var subagentSessionId: String { data.subagentSessionId }
+    var event: InnerEvent { data.event }
+}
+
 // MARK: - Plan Mode Events
 
 /// Event fired when plan mode is entered (read-only enforcement begins)
@@ -611,6 +633,7 @@ enum EventType: String {
     case subagentStatus = "agent.subagent_status"
     case subagentCompleted = "agent.subagent_completed"
     case subagentFailed = "agent.subagent_failed"
+    case subagentEvent = "agent.subagent_event"  // Forwarded event from subagent
 }
 
 // MARK: - Event Parsing
@@ -639,6 +662,7 @@ enum ParsedEvent {
     case subagentStatus(SubagentStatusEvent)
     case subagentCompleted(SubagentCompletedEvent)
     case subagentFailed(SubagentFailedEvent)
+    case subagentEvent(SubagentForwardedEvent)  // Forwarded event from subagent
     case unknown(String)
 
     static func parse(from data: Data) -> ParsedEvent? {
@@ -758,6 +782,11 @@ enum ParsedEvent {
                 let event = try decoder.decode(SubagentFailedEvent.self, from: data)
                 logger.error("Subagent failed: \(event.subagentSessionId) - \(event.error)", category: .events)
                 return .subagentFailed(event)
+
+            case EventType.subagentEvent.rawValue:
+                let event = try decoder.decode(SubagentForwardedEvent.self, from: data)
+                logger.debug("Subagent event forwarded: \(event.subagentSessionId) - \(event.event.type)", category: .events)
+                return .subagentEvent(event)
 
             default:
                 logger.debug("Unknown event type: \(type)", category: .events)

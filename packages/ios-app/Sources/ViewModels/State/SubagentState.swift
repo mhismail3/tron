@@ -1,5 +1,21 @@
 import SwiftUI
 
+/// A forwarded event from a subagent (tool call, text output, etc.)
+struct SubagentEventItem: Identifiable {
+    let id = UUID()
+    let timestamp: Date
+    let type: SubagentEventItemType
+    let title: String
+    let detail: String?
+}
+
+enum SubagentEventItemType {
+    case toolStart
+    case toolEnd
+    case textDelta
+    case thinking
+}
+
 /// Manages spawned subagent state for ChatViewModel
 /// Tracks all subagents and provides data for the SubagentChip UI
 @Observable
@@ -7,6 +23,9 @@ import SwiftUI
 final class SubagentState {
     /// All tracked subagents keyed by subagent session ID
     private(set) var subagents: [String: SubagentToolData] = [:]
+
+    /// Forwarded events from subagents (for detail sheet real-time display)
+    private(set) var subagentEvents: [String: [SubagentEventItem]] = [:]
 
     /// Currently selected subagent for detail sheet
     var selectedSubagent: SubagentToolData?
@@ -102,6 +121,75 @@ final class SubagentState {
         // Keep selectedSubagent for smooth dismissal animation
     }
 
+    // MARK: - Forwarded Events (for detail sheet)
+
+    /// Add a forwarded event from a subagent
+    func addForwardedEvent(
+        subagentSessionId: String,
+        eventType: String,
+        eventData: AnyCodable,
+        timestamp: String
+    ) {
+        let date = ISO8601DateFormatter().date(from: timestamp) ?? Date()
+
+        // Parse the event into a display item
+        let item: SubagentEventItem
+        let dataDict = eventData.value as? [String: Any] ?? [:]
+
+        switch eventType {
+        case "tool_start", "tool.start", "agent.tool_start":
+            let toolName = dataDict["toolName"] as? String ?? "unknown"
+            item = SubagentEventItem(
+                timestamp: date,
+                type: .toolStart,
+                title: "Tool: \(toolName)",
+                detail: nil
+            )
+        case "tool_end", "tool.end", "agent.tool_end":
+            let success = dataDict["success"] as? Bool ?? true
+            let result = dataDict["result"] as? String ?? dataDict["output"] as? String
+            item = SubagentEventItem(
+                timestamp: date,
+                type: .toolEnd,
+                title: success ? "Tool completed" : "Tool failed",
+                detail: result?.prefix(200).description
+            )
+        case "text_delta", "text.delta", "agent.text_delta":
+            let text = dataDict["delta"] as? String ?? ""
+            item = SubagentEventItem(
+                timestamp: date,
+                type: .textDelta,
+                title: "Output",
+                detail: text.prefix(200).description
+            )
+        case "thinking_delta", "thinking.delta", "agent.thinking_delta":
+            item = SubagentEventItem(
+                timestamp: date,
+                type: .thinking,
+                title: "Thinking...",
+                detail: nil
+            )
+        default:
+            item = SubagentEventItem(
+                timestamp: date,
+                type: .textDelta,
+                title: eventType,
+                detail: nil
+            )
+        }
+
+        // Add to the subagent's event list
+        if subagentEvents[subagentSessionId] == nil {
+            subagentEvents[subagentSessionId] = []
+        }
+        subagentEvents[subagentSessionId]?.append(item)
+    }
+
+    /// Get events for a subagent
+    func getEvents(for subagentSessionId: String) -> [SubagentEventItem] {
+        subagentEvents[subagentSessionId] ?? []
+    }
+
     // MARK: - Queries
 
     /// Get subagent data by session ID
@@ -130,6 +218,7 @@ final class SubagentState {
     /// Clear all subagent state (for new session)
     func clearAll() {
         subagents.removeAll()
+        subagentEvents.removeAll()
         selectedSubagent = nil
         showDetailSheet = false
     }

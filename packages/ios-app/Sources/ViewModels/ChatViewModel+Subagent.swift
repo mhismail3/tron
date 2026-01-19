@@ -70,6 +70,19 @@ extension ChatViewModel {
         updateSubagentMessageContent(subagentSessionId: event.subagentSessionId)
     }
 
+    /// Handle forwarded event from subagent - for real-time detail sheet updates
+    func handleSubagentForwardedEvent(_ event: SubagentForwardedEvent) {
+        logger.debug("Subagent forwarded event: \(event.subagentSessionId) - \(event.event.type)", category: .chat)
+
+        // Add to subagent's event stream (for detail sheet display)
+        subagentState.addForwardedEvent(
+            subagentSessionId: event.subagentSessionId,
+            eventType: event.event.type,
+            eventData: event.event.data,
+            timestamp: event.event.timestamp
+        )
+    }
+
     // MARK: - Private Helpers
 
     /// Convert a SpawnSubagent tool call message to a subagent chip
