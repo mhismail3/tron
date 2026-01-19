@@ -541,9 +541,12 @@ struct RenderAppUIChipData: Equatable {
         title ?? "App"
     }
 
-    /// Whether this chip should be tappable (only complete chips are tappable)
+    /// Whether this chip should be tappable (rendering and complete chips are tappable)
+    /// Rendering: tap to watch generation in real time
+    /// Complete: tap to view the rendered UI
+    /// Error: not tappable (nothing to show)
     var isTappable: Bool {
-        status == .complete
+        status == .rendering || status == .complete
     }
 }
 
