@@ -125,6 +125,7 @@ struct StatusPillsColumn: View {
         .animation(.spring(response: 0.4, dampingFraction: 0.75), value: hasAppeared)
         .animation(.spring(response: 0.35, dampingFraction: 0.8), value: showModelPill)
         .animation(.spring(response: 0.35, dampingFraction: 0.8), value: showReasoningPill)
+        .animation(.spring(response: 0.3, dampingFraction: 0.8), value: modelName)
     }
 
     // MARK: - Model Picker Menu
