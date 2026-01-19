@@ -5,6 +5,7 @@ import Foundation
 /// Status of a UI canvas rendering
 enum UICanvasStatus: Equatable {
     case rendering
+    case retrying(attempt: Int, errors: String)
     case complete
     case error(String)
 }
@@ -16,7 +17,7 @@ struct UICanvasData: Identifiable {
     let id: String
     let canvasId: String
     let title: String?
-    let toolCallId: String
+    var toolCallId: String  // var to allow update during retry
     var status: UICanvasStatus
     var partialJSON: String
     var parsedRoot: UICanvasComponent?

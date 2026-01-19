@@ -28,6 +28,19 @@ export interface RenderAppUIConfig {
 
 export class RenderAppUITool implements TronTool<RenderAppUIParams> {
   readonly name = 'RenderAppUI';
+
+  /**
+   * Retry tracking per canvasId to prevent infinite loops on validation failure.
+   * Key is canvasId, value is current retry count.
+   */
+  private retryCount: Map<string, number> = new Map();
+
+  /**
+   * Maximum number of automatic retries before giving up.
+   * After this many failures, we return a real error.
+   */
+  private readonly MAX_RETRIES = 3;
+
   readonly description = `Render a native iOS UI interface for the user to interact with.
 
 Use this tool to create custom interfaces when you need to:
@@ -105,12 +118,58 @@ presented to the user, and their response will come back as a new message.`;
     // Validate parameters
     const validation = validateRenderAppUIParams(params);
     if (!validation.valid) {
+      const canvasId = (params as { canvasId?: string }).canvasId || 'unknown';
+      const currentRetries = this.retryCount.get(canvasId) || 0;
+
+      // Check if we've exceeded max retries
+      if (currentRetries >= this.MAX_RETRIES) {
+        // Give up after max retries - return actual error
+        this.retryCount.delete(canvasId);
+        logger.error('Max retries exceeded for UI validation', {
+          canvasId,
+          attempts: currentRetries + 1,
+          errors: validation.errors,
+        });
+        return {
+          content: `Failed to render valid UI after ${this.MAX_RETRIES} attempts:\n${validation.errors.join('\n')}`,
+          isError: true,
+          stopTurn: true,
+          details: {
+            validation,
+            canvasId,
+            maxRetriesExceeded: true,
+          },
+        };
+      }
+
+      // Increment retry count
+      this.retryCount.set(canvasId, currentRetries + 1);
+      const attempt = currentRetries + 1;
+
+      logger.warn('UI validation failed, allowing retry', {
+        canvasId,
+        attempt,
+        maxRetries: this.MAX_RETRIES,
+        errors: validation.errors,
+      });
+
+      // Return non-error result with stopTurn: false so turn continues
+      // LLM will see the errors and can retry with corrections
       return {
-        content: `Invalid UI definition:\n${validation.errors.join('\n')}`,
-        isError: true,
-        details: { validation },
+        content: `UI validation failed (attempt ${attempt}/${this.MAX_RETRIES}). Fix these errors and call RenderAppUI again with the same canvasId:\n${validation.errors.join('\n')}\n\nKeep the iOS sheet open - user is waiting.`,
+        isError: false,      // NOT an error - just needs retry
+        stopTurn: false,     // Allow turn to continue so LLM can retry
+        details: {
+          validation,
+          needsRetry: true,
+          canvasId,
+          attempt,
+        },
       };
     }
+
+    // Validation passed - clear any retry count for this canvas
+    this.retryCount.delete(params.canvasId);
 
     // Log warnings if any
     if (validation.warnings.length > 0) {

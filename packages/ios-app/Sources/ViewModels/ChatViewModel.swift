@@ -468,6 +468,14 @@ class ChatViewModel: ObservableObject {
         rpcClient.onUIRenderComplete = { [weak self] event in
             self?.handleUIRenderComplete(event)
         }
+
+        rpcClient.onUIRenderError = { [weak self] event in
+            self?.handleUIRenderError(event)
+        }
+
+        rpcClient.onUIRenderRetry = { [weak self] event in
+            self?.handleUIRenderRetry(event)
+        }
     }
 
     // MARK: - Windowed Messages (for virtual scrolling)

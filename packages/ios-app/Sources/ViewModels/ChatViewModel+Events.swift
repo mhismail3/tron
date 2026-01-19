@@ -746,4 +746,24 @@ extension ChatViewModel {
             state: event.state
         )
     }
+
+    func handleUIRenderError(_ event: UIRenderErrorEvent) {
+        logger.warning("UI render error: canvasId=\(event.canvasId), error=\(event.error)", category: .events)
+
+        // Mark the canvas as errored - this will update the UI to show the error
+        // instead of leaving it stuck in "Rendering..." state
+        uiCanvasState.errorRender(canvasId: event.canvasId, error: event.error)
+    }
+
+    func handleUIRenderRetry(_ event: UIRenderRetryEvent) {
+        logger.info("UI render retry: canvasId=\(event.canvasId), attempt=\(event.attempt)", category: .events)
+
+        // Update canvas to show retry status - keeps the sheet open so user sees progress
+        // The agent will automatically retry with a corrected UI definition
+        uiCanvasState.setRetrying(
+            canvasId: event.canvasId,
+            attempt: event.attempt,
+            errors: event.errors
+        )
+    }
 }

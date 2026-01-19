@@ -662,6 +662,40 @@ struct UIRenderCompleteEvent: Decodable {
     var state: [String: AnyCodable]? { data.state }
 }
 
+/// UI Render Error Event - validation or parsing error
+struct UIRenderErrorEvent: Decodable {
+    let type: String
+    let sessionId: String?
+    let timestamp: String?
+    let data: UIRenderErrorData
+
+    struct UIRenderErrorData: Decodable {
+        let canvasId: String
+        let error: String
+    }
+
+    var canvasId: String { data.canvasId }
+    var error: String { data.error }
+}
+
+/// UI Render Retry Event - validation failed, agent will retry automatically
+struct UIRenderRetryEvent: Decodable {
+    let type: String
+    let sessionId: String?
+    let timestamp: String?
+    let data: UIRenderRetryData
+
+    struct UIRenderRetryData: Decodable {
+        let canvasId: String
+        let attempt: Int
+        let errors: String
+    }
+
+    var canvasId: String { data.canvasId }
+    var attempt: Int { data.attempt }
+    var errors: String { data.errors }
+}
+
 // MARK: - Event Type Constants
 
 enum EventType: String {
@@ -694,6 +728,8 @@ enum EventType: String {
     case uiRenderStart = "agent.ui_render_start"
     case uiRenderChunk = "agent.ui_render_chunk"
     case uiRenderComplete = "agent.ui_render_complete"
+    case uiRenderError = "agent.ui_render_error"
+    case uiRenderRetry = "agent.ui_render_retry"
 }
 
 // MARK: - Event Parsing
@@ -727,6 +763,8 @@ enum ParsedEvent {
     case uiRenderStart(UIRenderStartEvent)
     case uiRenderChunk(UIRenderChunkEvent)
     case uiRenderComplete(UIRenderCompleteEvent)
+    case uiRenderError(UIRenderErrorEvent)
+    case uiRenderRetry(UIRenderRetryEvent)
     case unknown(String)
 
     static func parse(from data: Data) -> ParsedEvent? {
@@ -867,6 +905,16 @@ enum ParsedEvent {
                 let event = try decoder.decode(UIRenderCompleteEvent.self, from: data)
                 logger.info("UI render complete: \(event.canvasId)", category: .events)
                 return .uiRenderComplete(event)
+
+            case EventType.uiRenderError.rawValue:
+                let event = try decoder.decode(UIRenderErrorEvent.self, from: data)
+                logger.warning("UI render error: \(event.canvasId) - \(event.error)", category: .events)
+                return .uiRenderError(event)
+
+            case EventType.uiRenderRetry.rawValue:
+                let event = try decoder.decode(UIRenderRetryEvent.self, from: data)
+                logger.info("UI render retry: \(event.canvasId) attempt \(event.attempt)", category: .events)
+                return .uiRenderRetry(event)
 
             default:
                 logger.debug("Unknown event type: \(type)", category: .events)

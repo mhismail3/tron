@@ -540,21 +540,73 @@ export class AgentEventHandler {
       },
     });
 
-    // Emit UI render complete event for RenderAppUI tool
+    // Emit UI render complete/error/retry event for RenderAppUI tool
     if (toolEndEvent.toolName === 'RenderAppUI') {
+      // Get tracking state before cleanup (may have canvasId from streaming)
+      const renderState = this.activeUIRenders.get(toolEndEvent.toolCallId);
+      const canvasIdFromStreaming = renderState?.canvasId;
+
       // Clean up streaming state
       this.activeUIRenders.delete(toolEndEvent.toolCallId);
 
-      if (!toolEndEvent.isError) {
-        // Extract UI data from details if available
-        const detailsObj = resultDetails as { canvasId?: string; ui?: unknown; state?: unknown } | undefined;
-        if (detailsObj?.canvasId) {
+      // Extract details from result
+      const detailsObj = resultDetails as {
+        canvasId?: string;
+        ui?: unknown;
+        state?: unknown;
+        needsRetry?: boolean;
+        attempt?: number;
+      } | undefined;
+      const canvasId = detailsObj?.canvasId ?? canvasIdFromStreaming;
+
+      // Check if this is a retry case (validation failed, turn continues)
+      if (detailsObj?.needsRetry && canvasId) {
+        // Emit retry event - iOS should keep sheet open and show retry status
+        this.config.emit('agent_event', {
+          type: 'agent.ui_render_retry',
+          sessionId,
+          timestamp,
+          data: {
+            canvasId,
+            attempt: detailsObj.attempt ?? 1,
+            errors: resultContent,
+          },
+        });
+
+        logger.debug('Emitted ui_render_retry', {
+          sessionId,
+          canvasId,
+          attempt: detailsObj.attempt,
+        });
+        // Don't emit complete or error - turn continues for retry
+      } else if (toolEndEvent.isError) {
+        // Emit error event so iOS can update the sheet
+        if (canvasId) {
+          this.config.emit('agent_event', {
+            type: 'agent.ui_render_error',
+            sessionId,
+            timestamp,
+            data: {
+              canvasId,
+              error: resultContent,
+            },
+          });
+
+          logger.debug('Emitted ui_render_error', {
+            sessionId,
+            canvasId,
+            error: resultContent.substring(0, 200),
+          });
+        }
+      } else {
+        // Emit completion event
+        if (canvasId && detailsObj?.ui) {
           this.config.emit('agent_event', {
             type: 'agent.ui_render_complete',
             sessionId,
             timestamp,
             data: {
-              canvasId: detailsObj.canvasId,
+              canvasId,
               ui: detailsObj.ui,
               state: detailsObj.state,
             },
@@ -562,7 +614,7 @@ export class AgentEventHandler {
 
           logger.debug('Emitted ui_render_complete', {
             sessionId,
-            canvasId: detailsObj.canvasId,
+            canvasId,
           });
         }
       }

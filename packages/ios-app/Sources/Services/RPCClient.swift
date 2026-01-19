@@ -60,6 +60,8 @@ class RPCClient: ObservableObject {
     var onUIRenderStart: ((UIRenderStartEvent) -> Void)?
     var onUIRenderChunk: ((UIRenderChunkEvent) -> Void)?
     var onUIRenderComplete: ((UIRenderCompleteEvent) -> Void)?
+    var onUIRenderError: ((UIRenderErrorEvent) -> Void)?
+    var onUIRenderRetry: ((UIRenderRetryEvent) -> Void)?
 
     // Global event callbacks (for ALL sessions - used by dashboard)
     var onGlobalComplete: ((String) -> Void)?  // sessionId
@@ -272,6 +274,14 @@ class RPCClient: ObservableObject {
         case .uiRenderComplete(let e):
             guard checkSession(e.sessionId) else { return }
             onUIRenderComplete?(e)
+
+        case .uiRenderError(let e):
+            guard checkSession(e.sessionId) else { return }
+            onUIRenderError?(e)
+
+        case .uiRenderRetry(let e):
+            guard checkSession(e.sessionId) else { return }
+            onUIRenderRetry?(e)
 
         case .unknown(let type):
             logger.debug("Unknown event type: \(type)", category: .events)

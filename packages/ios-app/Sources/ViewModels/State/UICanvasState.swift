@@ -25,19 +25,51 @@ final class UICanvasState {
 
     // MARK: - Canvas Lifecycle
 
-    /// Start rendering a new canvas
+    /// Start rendering a new canvas (or restart for retry)
     func startRender(canvasId: String, title: String?, toolCallId: String) {
-        let canvas = UICanvasData(
-            canvasId: canvasId,
-            title: title,
-            toolCallId: toolCallId,
-            status: .rendering
-        )
-        canvases[canvasId] = canvas
-        activeCanvasId = canvasId
-        showSheet = true
+        // Check if this is a retry for an existing canvas
+        if var existing = canvases[canvasId] {
+            // Keep the sheet open, just update status to rendering
+            existing.status = .rendering
+            existing.toolCallId = toolCallId
+            existing.partialJSON = ""
+            canvases[canvasId] = existing
+            logger.info("Canvas retry started: \(canvasId)", category: .ui)
+        } else {
+            // New canvas
+            let canvas = UICanvasData(
+                canvasId: canvasId,
+                title: title,
+                toolCallId: toolCallId,
+                status: .rendering
+            )
+            canvases[canvasId] = canvas
+            activeCanvasId = canvasId
+            showSheet = true
+            logger.info("Canvas render started: \(canvasId)", category: .ui)
+        }
+    }
 
-        logger.info("Canvas render started: \(canvasId)", category: .ui)
+    /// Mark canvas as retrying (validation failed, agent will retry)
+    func setRetrying(canvasId: String, attempt: Int, errors: String) {
+        guard var canvas = canvases[canvasId] else {
+            // Create a placeholder canvas if we haven't seen it yet
+            let newCanvas = UICanvasData(
+                canvasId: canvasId,
+                title: nil,
+                toolCallId: "",
+                status: .retrying(attempt: attempt, errors: errors)
+            )
+            canvases[canvasId] = newCanvas
+            activeCanvasId = canvasId
+            showSheet = true
+            logger.info("Canvas retry placeholder created: \(canvasId), attempt \(attempt)", category: .ui)
+            return
+        }
+
+        canvas.status = .retrying(attempt: attempt, errors: errors)
+        canvases[canvasId] = canvas
+        logger.info("Canvas retrying: \(canvasId), attempt \(attempt)", category: .ui)
     }
 
     /// Update canvas with streaming JSON chunk

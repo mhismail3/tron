@@ -12,6 +12,8 @@ struct UICanvasSheet: View {
                     switch canvas.status {
                     case .rendering:
                         renderingView(canvas: canvas)
+                    case .retrying(let attempt, let errors):
+                        retryingView(canvas: canvas, attempt: attempt, errors: errors)
                     case .complete:
                         contentView(canvas: canvas)
                     case .error(let message):
@@ -100,6 +102,51 @@ struct UICanvasSheet: View {
             .padding(.vertical, 16)
             .frame(maxWidth: .infinity)
             .background(Color.tronSurface.opacity(0.8))
+        }
+    }
+
+    // MARK: - Retrying View
+
+    private func retryingView(canvas: UICanvasData, attempt: Int, errors: String) -> some View {
+        VStack(spacing: 0) {
+            // Show any progressively rendered content (if available from previous attempt)
+            if let root = canvas.parsedRoot {
+                ScrollView(.vertical, showsIndicators: false) {
+                    UIComponentView(
+                        component: root,
+                        state: state
+                    )
+                    .padding(.horizontal, 20)
+                    .padding(.top, 16)
+                    .padding(.bottom, 32)
+                }
+                .scrollBounceBehavior(.basedOnSize)
+            } else {
+                Spacer()
+            }
+
+            // Retry indicator at bottom
+            VStack(spacing: 8) {
+                HStack(spacing: 10) {
+                    ProgressView()
+                        .tint(.tronWarning)
+                        .scaleEffect(0.8)
+                    Text("Fixing issues (attempt \(attempt)/3)")
+                        .font(.system(size: 13, weight: .medium, design: .monospaced))
+                        .foregroundStyle(.tronWarning)
+                }
+
+                // Show truncated error message
+                Text(String(errors.prefix(100)))
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundStyle(.tronTextMuted)
+                    .lineLimit(2)
+                    .multilineTextAlignment(.center)
+            }
+            .padding(.vertical, 12)
+            .padding(.horizontal, 16)
+            .frame(maxWidth: .infinity)
+            .background(Color.tronSurface.opacity(0.9))
         }
     }
 
