@@ -212,6 +212,8 @@ export class SessionManager {
       lastActivity: new Date(),
       workingDirectory: workingDir.path,
       model,
+      // Parent session ID if this is a subagent (for event forwarding)
+      parentSessionId: options.parentSessionId as SessionId | undefined,
       workingDir,
       // Initialize parallel event ID tracking for context manager messages
       messageEventIds: [],

@@ -144,6 +144,8 @@ export class SubagentOperations {
         model: params.model ?? parent.model,
         title: `Subagent: ${params.task.slice(0, 50)}`,
         tags: ['subagent', 'subsession'],
+        // Pass parent session ID for event forwarding
+        parentSessionId,
       });
 
       // Update the session in DB with spawning info
@@ -514,58 +516,11 @@ export class SubagentOperations {
       }
 
       // Run the agent with the task
+      // Note: Streaming events (tool_start, text_delta, etc.) are forwarded to parent
+      // automatically by AgentEventHandler.forwardToParent() based on parentSessionId
       await this.config.runAgent({
         sessionId,
         prompt: task,
-        onEvent: (event) => {
-          // Forward key events to parent for real-time iOS detail sheet updates
-          const forwardableTypes = [
-            'tool_start', 'tool_end', 'text_delta', 'thinking_delta',
-            'tool.start', 'tool.end', 'text.delta', 'thinking.delta'
-          ];
-
-          if (forwardableTypes.includes(event.type)) {
-            this.config.emit('agent_event', {
-              type: 'agent.subagent_event',
-              sessionId: parentSessionId,
-              timestamp: new Date().toISOString(),
-              data: {
-                subagentSessionId: sessionId,
-                event: {
-                  type: event.type,
-                  data: event.data,
-                  timestamp: event.timestamp || new Date().toISOString(),
-                },
-              },
-            });
-          }
-
-          // Emit status updates on turn completion
-          if (event.type === 'turn_complete') {
-            const currentTurn = (event.data as { turn?: number })?.turn ?? 0;
-            this.config.appendEventLinearized(
-              parentSessionId as SessionId,
-              'subagent.status_update' as EventType,
-              {
-                subagentSessionId: sessionId,
-                status: 'running',
-                currentTurn,
-              }
-            );
-
-            // Emit WebSocket event for iOS real-time updates
-            this.config.emit('agent_event', {
-              type: 'agent.subagent_status',
-              sessionId: parentSessionId,
-              timestamp: new Date().toISOString(),
-              data: {
-                subagentSessionId: sessionId,
-                status: 'running',
-                currentTurn,
-              },
-            });
-          }
-        },
       });
 
       // Get final stats

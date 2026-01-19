@@ -85,6 +85,11 @@ export class AgentEventHandler {
     const timestamp = new Date().toISOString();
     const active = this.config.getActiveSession(sessionId);
 
+    // If this is a subagent session, forward streaming events to parent
+    if (active?.parentSessionId) {
+      this.forwardToParent(sessionId, active.parentSessionId, event, timestamp);
+    }
+
     switch (event.type) {
       case 'turn_start':
         this.handleTurnStart(sessionId, event, timestamp, active);
@@ -567,6 +572,106 @@ export class AgentEventHandler {
         success: false,
         interrupted: true,
         partialContent: interruptedEvent.partialContent,
+      },
+    });
+  }
+
+  /**
+   * Forward streaming events from a subagent to its parent session.
+   * This enables real-time updates in the iOS detail sheet.
+   */
+  private forwardToParent(
+    subagentSessionId: SessionId,
+    parentSessionId: SessionId,
+    event: TronEvent,
+    timestamp: string
+  ): void {
+    // Only forward events useful for real-time detail sheet display
+    const forwardableTypes = [
+      'message_update',       // Text deltas
+      'tool_execution_start', // Tool start
+      'tool_execution_end',   // Tool end
+      'turn_start',           // Turn lifecycle
+      'turn_end',
+    ];
+
+    if (!forwardableTypes.includes(event.type)) {
+      return;
+    }
+
+    // Map event type to iOS-friendly format
+    let eventType: string;
+    let eventData: unknown;
+
+    switch (event.type) {
+      case 'message_update': {
+        const msgEvent = event as { content?: string };
+        eventType = 'text_delta';
+        eventData = { delta: msgEvent.content };
+        break;
+      }
+      case 'tool_execution_start': {
+        const toolEvent = event as { toolCallId: string; toolName: string; arguments?: unknown };
+        eventType = 'tool_start';
+        eventData = {
+          toolCallId: toolEvent.toolCallId,
+          toolName: toolEvent.toolName,
+          arguments: toolEvent.arguments,
+        };
+        break;
+      }
+      case 'tool_execution_end': {
+        const toolEvent = event as { toolCallId: string; toolName: string; result: unknown; isError?: boolean; duration?: number };
+        eventType = 'tool_end';
+        eventData = {
+          toolCallId: toolEvent.toolCallId,
+          toolName: toolEvent.toolName,
+          success: !toolEvent.isError,
+          result: typeof toolEvent.result === 'string' ? toolEvent.result : JSON.stringify(toolEvent.result),
+          duration: toolEvent.duration,
+        };
+        break;
+      }
+      case 'turn_start': {
+        const turnEvent = event as { turn?: number };
+        eventType = 'turn_start';
+        eventData = { turn: turnEvent.turn };
+
+        // Also emit a status update to parent
+        this.config.emit('agent_event', {
+          type: 'agent.subagent_status',
+          sessionId: parentSessionId,
+          timestamp,
+          data: {
+            subagentSessionId,
+            status: 'running',
+            currentTurn: turnEvent.turn ?? 1,
+          },
+        });
+        break;
+      }
+      case 'turn_end': {
+        const turnEvent = event as { turn?: number };
+        eventType = 'turn_end';
+        eventData = { turn: turnEvent.turn };
+        break;
+      }
+      default:
+        return;
+    }
+
+    // Emit the forwarded event to parent session
+    this.config.emit('agent_event', {
+      type: 'agent.subagent_event',
+      sessionId: parentSessionId,
+      timestamp,
+      data: {
+        subagentSessionId,
+        event: {
+          type: eventType,
+          data: eventData,
+          timestamp,
+        },
       },
     });
   }

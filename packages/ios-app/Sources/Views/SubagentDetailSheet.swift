@@ -299,13 +299,13 @@ struct SubagentDetailSheet: View {
                 .progressViewStyle(.circular)
                 .scaleEffect(0.7)
                 .frame(width: 16, height: 16)
-                .tint(.tronEmerald)
+                .tint(.tronBlue)       // Blue while spawning
         case .running:
             ProgressView()
                 .progressViewStyle(.circular)
                 .scaleEffect(0.7)
                 .frame(width: 16, height: 16)
-                .tint(.tronEmerald)
+                .tint(.tronOrange)     // Orange while running
         case .completed:
             Image(systemName: "checkmark.circle.fill")
                 .font(.system(size: 16, weight: .medium))
@@ -328,7 +328,8 @@ struct SubagentDetailSheet: View {
 
     private var statusColor: Color {
         switch data.status {
-        case .spawning, .running: return .tronEmerald
+        case .spawning: return .tronBlue       // Blue while spawning
+        case .running: return .tronOrange      // Orange while running
         case .completed: return .tronSuccess
         case .failed: return .tronError
         }
@@ -345,7 +346,8 @@ struct SubagentDetailSheet: View {
 
     private var titleColor: Color {
         switch data.status {
-        case .spawning, .running: return .tronEmerald
+        case .spawning: return .tronBlue       // Blue while spawning
+        case .running: return .tronOrange      // Orange while running
         case .completed: return .tronSuccess
         case .failed: return .tronError
         }

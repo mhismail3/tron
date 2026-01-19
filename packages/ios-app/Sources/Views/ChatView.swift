@@ -554,7 +554,11 @@ struct ChatView: View {
                             .animation(.easeOut(duration: 0.3), value: showEntryContent)
                             .animation(.easeOut(duration: 0.25), value: viewModel.messages.count)
 
-                            if viewModel.isProcessing && viewModel.messages.last?.isStreaming != true {
+                            // Show processing indicator only when:
+                            // 1. Processing is happening
+                            // 2. Last message is not streaming
+                            // 3. No subagent is blocking (subagent chip shows its own spinner)
+                            if viewModel.isProcessing && viewModel.messages.last?.isStreaming != true && !viewModel.subagentState.hasRunningSubagents {
                                 ProcessingIndicator()
                                     .id("processing")
                             }

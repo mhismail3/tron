@@ -68,13 +68,13 @@ struct SubagentChip: View {
                 .progressViewStyle(.circular)
                 .scaleEffect(0.6)
                 .frame(width: 12, height: 12)
-                .tint(.tronEmerald)
+                .tint(.tronBlue)       // Blue while spawning
         case .running:
             ProgressView()
                 .progressViewStyle(.circular)
                 .scaleEffect(0.6)
                 .frame(width: 12, height: 12)
-                .tint(.tronEmerald)
+                .tint(.tronOrange)     // Orange while running
         case .completed:
             Image(systemName: "checkmark.circle.fill")
                 .font(.system(size: 12, weight: .medium))
@@ -101,23 +101,27 @@ struct SubagentChip: View {
 
     private var textColor: Color {
         switch data.status {
-        case .spawning, .running:
-            return .tronEmerald
+        case .spawning:
+            return .tronBlue       // Blue while spawning
+        case .running:
+            return .tronOrange     // Orange while running
         case .completed:
-            return .tronSuccess
+            return .tronSuccess    // Green when completed
         case .failed:
-            return .tronError
+            return .tronError      // Red when failed
         }
     }
 
     private var tintColor: Color {
         switch data.status {
-        case .spawning, .running:
-            return .tronEmerald
+        case .spawning:
+            return .tronBlue       // Blue while spawning
+        case .running:
+            return .tronOrange     // Orange while running
         case .completed:
-            return .tronSuccess
+            return .tronSuccess    // Green when completed
         case .failed:
-            return .tronError
+            return .tronError      // Red when failed
         }
     }
 }
@@ -178,12 +182,18 @@ struct SubagentChipFallback: View {
     @ViewBuilder
     private var statusIcon: some View {
         switch data.status {
-        case .spawning, .running:
+        case .spawning:
             ProgressView()
                 .progressViewStyle(.circular)
                 .scaleEffect(0.6)
                 .frame(width: 12, height: 12)
-                .tint(.tronEmerald)
+                .tint(.tronBlue)
+        case .running:
+            ProgressView()
+                .progressViewStyle(.circular)
+                .scaleEffect(0.6)
+                .frame(width: 12, height: 12)
+                .tint(.tronOrange)
         case .completed:
             Image(systemName: "checkmark.circle.fill")
                 .font(.system(size: 12, weight: .medium))
@@ -206,7 +216,8 @@ struct SubagentChipFallback: View {
 
     private var textColor: Color {
         switch data.status {
-        case .spawning, .running: return .tronEmerald
+        case .spawning: return .tronBlue
+        case .running: return .tronOrange
         case .completed: return .tronSuccess
         case .failed: return .tronError
         }
@@ -214,7 +225,8 @@ struct SubagentChipFallback: View {
 
     private var tintColor: Color {
         switch data.status {
-        case .spawning, .running: return .tronEmerald
+        case .spawning: return .tronBlue
+        case .running: return .tronOrange
         case .completed: return .tronSuccess
         case .failed: return .tronError
         }

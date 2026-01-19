@@ -82,6 +82,8 @@ export interface ActiveSession {
   lastActivity: Date;
   workingDirectory: string;
   model: string;
+  /** Parent session ID if this is a subagent session (for event forwarding) */
+  parentSessionId?: SessionId;
   /** WorkingDirectory abstraction (if worktree coordination is enabled) */
   workingDir?: WorkingDirectory;
   /**
@@ -195,6 +197,8 @@ export interface CreateSessionOptions {
   systemPrompt?: string;
   /** Force worktree isolation even if not needed */
   forceIsolation?: boolean;
+  /** Parent session ID if this is a subagent session (for event forwarding) */
+  parentSessionId?: string;
 }
 
 export interface SessionInfo {
