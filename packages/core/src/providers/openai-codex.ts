@@ -752,10 +752,34 @@ export class OpenAICodexProvider {
 
   /**
    * Convert Tron context to Responses API input format
+   *
+   * Note: Tool call IDs from other providers (e.g., Anthropic's `toolu_` prefix)
+   * are remapped to OpenAI-compatible format to support mid-session provider switching.
    */
   private convertToResponsesInput(context: Context): ResponsesInputItem[] {
     const input: ResponsesInputItem[] = [];
 
+    // Build a mapping of original tool call IDs to normalized IDs.
+    // This is necessary when switching providers mid-session, as tool call IDs
+    // from other providers (e.g., Anthropic's `toolu_01...`) are not recognized.
+    // Only remap IDs that don't already look like OpenAI format.
+    const idMapping = new Map<string, string>();
+    let idCounter = 0;
+
+    // First pass: collect tool call IDs that need remapping (non-OpenAI format)
+    for (const msg of context.messages) {
+      if (msg.role === 'assistant') {
+        const toolUses = msg.content.filter((c): c is ToolCall => c.type === 'tool_use');
+        for (const tc of toolUses) {
+          // Only remap IDs that don't look like OpenAI format (call_*)
+          if (!idMapping.has(tc.id) && !tc.id.startsWith('call_')) {
+            idMapping.set(tc.id, `call_remap_${idCounter++}`);
+          }
+        }
+      }
+    }
+
+    // Second pass: convert messages with remapped IDs
     for (const msg of context.messages) {
       if (msg.role === 'user') {
         const text = typeof msg.content === 'string'
@@ -790,7 +814,7 @@ export class OpenAICodexProvider {
         for (const tc of toolUses) {
           input.push({
             type: 'function_call',
-            call_id: tc.id,
+            call_id: idMapping.get(tc.id) ?? tc.id,
             name: tc.name,
             // Ensure arguments is always a valid JSON string (required by Responses API)
             arguments: JSON.stringify(tc.arguments ?? {}),
@@ -811,7 +835,7 @@ export class OpenAICodexProvider {
 
         input.push({
           type: 'function_call_output',
-          call_id: msg.toolCallId,
+          call_id: idMapping.get(msg.toolCallId) ?? msg.toolCallId,
           output: truncatedOutput,
         });
       }

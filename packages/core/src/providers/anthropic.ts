@@ -834,10 +834,33 @@ export class AnthropicProvider {
 
   /**
    * Convert Tron messages to Anthropic format
+   *
+   * Note: Tool call IDs from other providers (e.g., OpenAI's `call_` prefix)
+   * are remapped to Anthropic-compatible format to support mid-session provider switching.
    */
   private convertMessages(
     messages: Message[]
   ): Anthropic.Messages.MessageParam[] {
+    // Build a mapping of original tool call IDs to normalized IDs.
+    // This is necessary when switching providers mid-session, as tool call IDs
+    // from other providers (e.g., OpenAI's `call_...`) may not be recognized.
+    // Only remap IDs that don't already look like Anthropic format.
+    const idMapping = new Map<string, string>();
+    let idCounter = 0;
+
+    // First pass: collect tool call IDs that need remapping (non-Anthropic format)
+    for (const msg of messages) {
+      if (msg.role === 'assistant') {
+        const toolUses = msg.content.filter((c): c is ToolCall => c.type === 'tool_use');
+        for (const tc of toolUses) {
+          // Only remap IDs that don't look like Anthropic format (toolu_*)
+          if (!idMapping.has(tc.id) && !tc.id.startsWith('toolu_')) {
+            idMapping.set(tc.id, `toolu_remap_${idCounter++}`);
+          }
+        }
+      }
+    }
+
     return messages
       .filter((msg): msg is Message => msg.role !== 'toolResult' || !!msg.toolCallId)
       .map((msg) => {
@@ -873,7 +896,7 @@ export class AnthropicProvider {
                 if (maybeToolResult.type === 'tool_result') {
                   return {
                     type: 'tool_result' as const,
-                    tool_use_id: maybeToolResult.tool_use_id!,
+                    tool_use_id: idMapping.get(maybeToolResult.tool_use_id!) ?? maybeToolResult.tool_use_id!,
                     content: maybeToolResult.content,
                     is_error: maybeToolResult.is_error,
                   };
@@ -891,7 +914,7 @@ export class AnthropicProvider {
               const input = c.arguments ?? (c as any).input ?? {};
               return {
                 type: 'tool_use' as const,
-                id: c.id,
+                id: idMapping.get(c.id) ?? c.id,
                 name: c.name,
                 input,
               };
@@ -922,7 +945,7 @@ export class AnthropicProvider {
             role: 'user' as const,
             content: [{
               type: 'tool_result' as const,
-              tool_use_id: msg.toolCallId,
+              tool_use_id: idMapping.get(msg.toolCallId) ?? msg.toolCallId,
               content,
               is_error: msg.isError,
             }],

@@ -454,9 +454,31 @@ export class GoogleProvider {
 
   /**
    * Convert Tron messages to Gemini format
+   *
+   * Note: Tool call IDs from other providers are remapped to ensure consistency
+   * when switching providers mid-session.
    */
   private convertMessages(context: Context): GeminiContent[] {
     const contents: GeminiContent[] = [];
+
+    // Build a mapping of original tool call IDs to normalized IDs.
+    // This is necessary when switching providers mid-session.
+    // Only remap IDs that don't already look like the expected format.
+    const idMapping = new Map<string, string>();
+    let idCounter = 0;
+
+    // First pass: collect tool call IDs that need remapping (non-standard format)
+    for (const msg of context.messages) {
+      if (msg.role === 'assistant') {
+        const toolUses = msg.content.filter((c): c is ToolCall => c.type === 'tool_use');
+        for (const tc of toolUses) {
+          // Only remap IDs that don't look like call_* format
+          if (!idMapping.has(tc.id) && !tc.id.startsWith('call_')) {
+            idMapping.set(tc.id, `call_remap_${idCounter++}`);
+          }
+        }
+      }
+    }
 
     for (const msg of context.messages) {
       if (msg.role === 'user') {
@@ -508,7 +530,7 @@ export class GoogleProvider {
               name: 'tool_result',
               response: {
                 result: content,
-                tool_call_id: msg.toolCallId,
+                tool_call_id: idMapping.get(msg.toolCallId) ?? msg.toolCallId,
               },
             },
           }],

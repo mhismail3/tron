@@ -534,9 +534,32 @@ export class OpenAIProvider {
 
   /**
    * Convert Tron messages to OpenAI format
+   *
+   * Note: Tool call IDs from other providers (e.g., Anthropic's `toolu_` prefix)
+   * are remapped to OpenAI-compatible format to support mid-session provider switching.
    */
   private convertMessages(context: Context): OpenAIMessage[] {
     const messages: OpenAIMessage[] = [];
+
+    // Build a mapping of original tool call IDs to normalized IDs.
+    // This is necessary when switching providers mid-session, as tool call IDs
+    // from other providers (e.g., Anthropic's `toolu_01...`) are not recognized.
+    // Only remap IDs that don't already look like OpenAI format.
+    const idMapping = new Map<string, string>();
+    let idCounter = 0;
+
+    // First pass: collect tool call IDs that need remapping (non-OpenAI format)
+    for (const msg of context.messages) {
+      if (msg.role === 'assistant') {
+        const toolUses = msg.content.filter((c): c is ToolCall => c.type === 'tool_use');
+        for (const tc of toolUses) {
+          // Only remap IDs that don't look like OpenAI format (call_*)
+          if (!idMapping.has(tc.id) && !tc.id.startsWith('call_')) {
+            idMapping.set(tc.id, `call_remap_${idCounter++}`);
+          }
+        }
+      }
+    }
 
     // Add system prompt
     if (context.systemPrompt) {
@@ -546,7 +569,7 @@ export class OpenAIProvider {
       });
     }
 
-    // Convert messages
+    // Convert messages with remapped IDs
     for (const msg of context.messages) {
       if (msg.role === 'user') {
         const content = typeof msg.content === 'string'
@@ -568,7 +591,7 @@ export class OpenAIProvider {
         const toolCalls = msg.content
           .filter((c): c is ToolCall => c.type === 'tool_use')
           .map(tc => ({
-            id: tc.id,
+            id: idMapping.get(tc.id) ?? tc.id,
             type: 'function' as const,
             function: {
               name: tc.name,
@@ -592,7 +615,7 @@ export class OpenAIProvider {
 
         messages.push({
           role: 'tool',
-          tool_call_id: msg.toolCallId,
+          tool_call_id: idMapping.get(msg.toolCallId) ?? msg.toolCallId,
           content,
         });
       }
