@@ -145,7 +145,7 @@ struct CloneRepoSheet: View {
                     }
                     .onChange(of: repoURL) { _, newValue in
                         // Auto-update destination when URL changes
-                        if let repo = GitHubURLParser.parse(newValue), destinationPath.isEmpty || destinationPath == defaultProjectsPath {
+                        if GitHubURLParser.parse(newValue) != nil, destinationPath.isEmpty || destinationPath == defaultProjectsPath {
                             destinationPath = defaultProjectsPath
                         }
                         // Clear previous error

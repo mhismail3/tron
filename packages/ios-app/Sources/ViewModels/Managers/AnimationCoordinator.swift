@@ -205,7 +205,7 @@ final class AnimationCoordinator: ObservableObject {
                 }
 
                 withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
-                    visibleToolCallIds.insert(pending.toolCallId)
+                    _ = visibleToolCallIds.insert(pending.toolCallId)
                 }
             }
 

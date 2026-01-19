@@ -92,42 +92,33 @@ struct SubagentDetailSheet: View {
     // MARK: - Header Card
 
     private var headerCard: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            // Section header
-            Text("Status")
-                .font(.system(size: 12, weight: .medium, design: .monospaced))
-                .foregroundStyle(.white.opacity(0.6))
+        HStack(spacing: 12) {
+            // Status (left-aligned)
+            statusIcon
+            Text(statusText)
+                .font(.system(size: 14, weight: .medium, design: .monospaced))
+                .foregroundStyle(statusColor)
 
-            // Card content
-            VStack(spacing: 16) {
-                // Status badge
-                HStack {
-                    statusIcon
-                    Text(statusText)
-                        .font(.system(size: 14, weight: .medium, design: .monospaced))
-                        .foregroundStyle(statusColor)
-                    Spacer()
+            Spacer()
+
+            // Tags (right-aligned)
+            HStack(spacing: 8) {
+                SubagentStatBadge(label: "Turns", value: "\(data.currentTurn)", color: titleColor)
+
+                if let duration = data.formattedDuration {
+                    SubagentStatBadge(label: "Duration", value: duration, color: titleColor)
                 }
 
-                // Stats row
-                HStack(spacing: 12) {
-                    SubagentStatBadge(label: "Turns", value: "\(data.currentTurn)", color: titleColor)
-
-                    if let duration = data.formattedDuration {
-                        SubagentStatBadge(label: "Duration", value: duration, color: titleColor)
-                    }
-
-                    if let model = data.model {
-                        SubagentStatBadge(label: "Model", value: formatModelName(model), color: titleColor)
-                    }
+                if let model = data.model {
+                    SubagentStatBadge(label: "Model", value: formatModelName(model), color: titleColor)
                 }
             }
-            .padding(14)
-            .background {
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .fill(.clear)
-                    .glassEffect(.regular.tint(titleColor.opacity(0.12)), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-            }
+        }
+        .padding(14)
+        .background {
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(.clear)
+                .glassEffect(.regular.tint(titleColor.opacity(0.12)), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         }
     }
 

@@ -1673,7 +1673,7 @@ extension UnifiedEventTransformer {
 
             case .messageUser, .messageSystem,
                  .notificationInterrupted, .configModelSwitch, .configReasoningLevel,
-                 .contextCleared, .compactBoundary, .skillRemoved, .rulesLoaded,
+                 .contextCleared, .skillRemoved, .rulesLoaded,
                  .errorAgent, .errorTool, .errorProvider:
                 // Debug: Log skill.removed events being processed (RawEvent version)
                 if eventType == .skillRemoved {
@@ -1789,6 +1789,11 @@ extension UnifiedEventTransformer {
                 ))
 
             case .compactBoundary:
+                // Add chat message for UI display
+                if let message = transformPersistedEvent(event) {
+                    state.messages.append(message)
+                }
+                // Update compaction state
                 if let parsed = CompactBoundaryPayload(from: event.payload) {
                     let ts = parseTimestamp(event.timestamp)
                     state.compaction.boundaries.append(ReconstructedState.CompactionState.Boundary(
@@ -1946,7 +1951,7 @@ extension UnifiedEventTransformer {
 
             case .messageUser, .messageSystem,
                  .notificationInterrupted, .configModelSwitch, .configReasoningLevel,
-                 .contextCleared, .compactBoundary, .skillRemoved, .rulesLoaded,
+                 .contextCleared, .skillRemoved, .rulesLoaded,
                  .errorAgent, .errorTool, .errorProvider:
                 // Add chat message using the SessionEvent overload
                 if var message = transformPersistedEvent(event) {
@@ -2052,6 +2057,11 @@ extension UnifiedEventTransformer {
                 ))
 
             case .compactBoundary:
+                // Add chat message for UI display
+                if let message = transformPersistedEvent(event) {
+                    state.messages.append(message)
+                }
+                // Update compaction state
                 if let parsed = CompactBoundaryPayload(from: event.payload) {
                     let ts = parseTimestamp(event.timestamp)
                     state.compaction.boundaries.append(ReconstructedState.CompactionState.Boundary(
