@@ -23,7 +23,6 @@ import {
   OpenBrowserTool,
   AstGrepTool,
   SpawnSubsessionTool,
-  SpawnTmuxAgentTool,
   QuerySubagentTool,
   WaitForSubagentTool,
   detectProviderFromModel,
@@ -33,7 +32,6 @@ import {
   type ServerAuth,
   type BrowserDelegate,
   type SpawnSubsessionParams,
-  type SpawnTmuxAgentParams,
   type SubagentQueryType,
   type TronEvent,
 } from '@tron/core';
@@ -47,12 +45,8 @@ const logger = createLogger('agent-factory');
 export interface AgentFactoryConfig {
   /** Get authentication for a model */
   getAuthForProvider: (model: string) => Promise<ServerAuth>;
-  /** Get EventStore database path */
-  getDbPath: () => string;
   /** Spawn subsession callback */
   spawnSubsession: (parentId: string, params: SpawnSubsessionParams) => Promise<any>;
-  /** Spawn tmux agent callback */
-  spawnTmuxAgent: (parentId: string, params: SpawnTmuxAgentParams) => Promise<any>;
   /** Query subagent callback */
   querySubagent: (sessionId: string, queryType: SubagentQueryType, limit?: number) => any;
   /** Wait for subagents callback */
@@ -128,21 +122,13 @@ export class AgentFactory {
       new AskUserQuestionTool({ workingDirectory }),
       new OpenBrowserTool({ workingDirectory }),
       new AstGrepTool({ workingDirectory }),
-      // Sub-agent spawning tools
+      // Sub-agent spawning tools (in-process only for now)
       new SpawnSubsessionTool({
         sessionId,
         workingDirectory,
         model,
         onSpawn: (parentId: string, params: SpawnSubsessionParams) =>
           this.config.spawnSubsession(parentId, params),
-      }),
-      new SpawnTmuxAgentTool({
-        sessionId,
-        workingDirectory,
-        model,
-        dbPath: this.config.getDbPath(),
-        onSpawn: (parentId: string, params: SpawnTmuxAgentParams) =>
-          this.config.spawnTmuxAgent(parentId, params),
       }),
       new QuerySubagentTool({
         onQuery: (sid: string, queryType: SubagentQueryType, limit?: number) =>

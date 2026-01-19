@@ -459,13 +459,9 @@ struct TurnRow: View {
                 VStack(alignment: .leading, spacing: 2) {
                     HStack(spacing: 8) {
                         // Tokens
-                        HStack(spacing: 3) {
-                            Image(systemName: "number")
-                                .font(.system(size: 9))
-                            Text(formatTokens(turn.totalTokens))
-                                .font(.system(size: 11, weight: .medium, design: .monospaced))
-                        }
-                        .foregroundStyle(.white.opacity(0.7))
+                        Text("\(formatTokens(turn.totalTokens)) tokens")
+                            .font(.system(size: 11, weight: .medium, design: .monospaced))
+                            .foregroundStyle(.white.opacity(0.7))
 
                         // Cost
                         Text(formatCost(turn.cost))

@@ -125,7 +125,6 @@ struct StatusPillsColumn: View {
         .animation(.spring(response: 0.4, dampingFraction: 0.75), value: hasAppeared)
         .animation(.spring(response: 0.35, dampingFraction: 0.8), value: showModelPill)
         .animation(.spring(response: 0.35, dampingFraction: 0.8), value: showReasoningPill)
-        .animation(.spring(response: 0.3, dampingFraction: 0.8), value: modelName)
     }
 
     // MARK: - Model Picker Menu
@@ -140,6 +139,7 @@ struct StatusPillsColumn: View {
                     .font(.system(size: 9, weight: .medium))
                 Text(modelName.shortModelName)
                     .font(.system(size: 10, weight: .medium, design: .monospaced))
+                    .contentTransition(.interpolate)
                 Image(systemName: "chevron.up.chevron.down")
                     .font(.system(size: 8, weight: .medium))
             }
@@ -152,6 +152,8 @@ struct StatusPillsColumn: View {
                     .glassEffect(.regular.tint(Color.tronPhthaloGreen.opacity(0.35)), in: .capsule)
             }
             .contentShape(Capsule())
+            .geometryGroup()
+            .animation(.spring(response: 0.3, dampingFraction: 0.8), value: modelName)
         }
     }
 
