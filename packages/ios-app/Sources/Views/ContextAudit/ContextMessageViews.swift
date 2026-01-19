@@ -9,6 +9,7 @@ struct DetailedMessageRow: View {
     var onDelete: (() -> Void)?
 
     @State private var isExpanded = false
+    @State private var contentExpanded = false
 
     private var icon: String {
         switch message.role {
@@ -134,15 +135,14 @@ struct DetailedMessageRow: View {
 
                     // Show text content if present
                     if !message.content.isEmpty {
-                        ScrollView {
-                            Text(message.content)
-                                .font(.system(size: 10, design: .monospaced))
-                                .foregroundStyle(.white.opacity(0.6))
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .padding(10)
-                                .textSelection(.enabled)
-                        }
-                        .frame(maxHeight: 200)
+                        LineNumberedContentView(
+                            content: message.content,
+                            maxCollapsedLines: 12,
+                            isExpanded: $contentExpanded,
+                            fontSize: 10,
+                            lineNumFontSize: 9,
+                            maxCollapsedHeight: 200
+                        )
                         .background(Color.black.opacity(0.2))
                         .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
                     }

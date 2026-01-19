@@ -8,6 +8,8 @@
 
 /* Begin PBXBuildFile section */
 		000927DC0F354756A0DC38F6 /* UIUpdateQueue.swift in Sources */ = {isa = PBXBuildFile; fileRef = E1544ADEDB4E4650897B91DC /* UIUpdateQueue.swift */; };
+		CLPR0001BULD0001SOURCE01 /* ContentLineParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = CLPR0001FREF0001FILEREF1 /* ContentLineParser.swift */; };
+		LNCV0001BULD0001SOURCE01 /* LineNumberedContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = LNCV0001FREF0001FILEREF1 /* LineNumberedContentView.swift */; };
 		0186B0083110F291EA235935 /* RPCTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = B082B6CE011A17ED14F3393B /* RPCTypes.swift */; };
 		029590450DF8FB55EBB86C23 /* ModelNameFormatter.swift in Sources */ = {isa = PBXBuildFile; fileRef = D03A2E1D488FAFF8C0088D61 /* ModelNameFormatter.swift */; };
 		0586FDB3434B135163CEE2D4 /* ChatViewModel+Events.swift in Sources */ = {isa = PBXBuildFile; fileRef = 85AB906ED58C2A5018AA8055 /* ChatViewModel+Events.swift */; };
@@ -163,6 +165,8 @@
 
 /* Begin PBXFileReference section */
 		00621F6FD9BF0B51E5370E4B /* EventDatabase.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EventDatabase.swift; sourceTree = "<group>"; };
+		CLPR0001FREF0001FILEREF1 /* ContentLineParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentLineParser.swift; sourceTree = "<group>"; };
+		LNCV0001FREF0001FILEREF1 /* LineNumberedContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LineNumberedContentView.swift; sourceTree = "<group>"; };
 		00739C1F26626C7791649198 /* TronIcons.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TronIcons.swift; sourceTree = "<group>"; };
 		0123F7482F532CD8FBA61F0E /* UnifiedEventTransformerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UnifiedEventTransformerTests.swift; sourceTree = "<group>"; };
 		0BA5810A34C92084B89C6EA4 /* TronColors.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TronColors.swift; sourceTree = "<group>"; };
@@ -442,6 +446,7 @@
 		8019A5A03208D1ACB7D52BA9 /* Views */ = {
 			isa = PBXGroup;
 			children = (
+				COMP0001GRUP0001GRUPREF1 /* Components */,
 				FF22AA33BB44CC55DD660000 /* ContextAudit */,
 				FF11AA22BB33CC44DD550000 /* InputBar */,
 				EE55FF66778899AABBCC0011 /* MessageBubble */,
@@ -518,6 +523,15 @@
 				AA22BB33CC44DD55EE66F001 /* ToolResultRouter.swift */,
 			);
 			path = ToolViewers;
+			sourceTree = "<group>";
+		};
+		COMP0001GRUP0001GRUPREF1 /* Components */ = {
+			isa = PBXGroup;
+			children = (
+				CLPR0001FREF0001FILEREF1 /* ContentLineParser.swift */,
+				LNCV0001FREF0001FILEREF1 /* LineNumberedContentView.swift */,
+			);
+			path = Components;
 			sourceTree = "<group>";
 		};
 		AA33BB44CC55DD66EE771000 /* Services */ = {
@@ -796,6 +810,8 @@
 				FAB8DDF19B41096984717D12 /* CameraPicker.swift in Sources */,
 				2AC4711FE03EDA25CA10832D /* ChatView.swift in Sources */,
 				CMPD0001BULD0001SOURCE01 /* CompactionDetailSheet.swift in Sources */,
+				CLPR0001BULD0001SOURCE01 /* ContentLineParser.swift in Sources */,
+				LNCV0001BULD0001SOURCE01 /* LineNumberedContentView.swift in Sources */,
 				4896F1E74C19CBDFCFE1F5EC /* ChatViewModel+Connection.swift in Sources */,
 				0586FDB3434B135163CEE2D4 /* ChatViewModel+Events.swift in Sources */,
 				5A1242156B1B5AAC643EBB82 /* ChatViewModel+Messaging.swift in Sources */,

@@ -6,14 +6,6 @@ struct StandaloneToolResultView: View {
     let result: ToolResultData
     @State private var isExpanded = false
 
-    private var lines: [String] {
-        result.content.components(separatedBy: "\n")
-    }
-
-    private var displayLines: [String] {
-        isExpanded ? lines : Array(lines.prefix(8))
-    }
-
     /// Extract a short summary from arguments for display (e.g., command for Bash, path for Read)
     private var toolDetail: String {
         guard let args = result.arguments else { return "" }
@@ -110,49 +102,15 @@ struct StandaloneToolResultView: View {
             .background(Color.tronSurfaceElevated)
 
             // Content lines
-            ScrollView(.horizontal, showsIndicators: false) {
-                VStack(alignment: .leading, spacing: 0) {
-                    ForEach(Array(displayLines.enumerated()), id: \.offset) { index, line in
-                        HStack(spacing: 0) {
-                            // Line number
-                            Text("\(index + 1)")
-                                .font(.system(size: 10, design: .monospaced))
-                                .foregroundStyle(.tronTextMuted)
-                                .frame(width: 32, alignment: .trailing)
-                                .padding(.trailing, 8)
-                                .background(Color.tronSurface)
-
-                            // Line content
-                            Text(line.isEmpty ? " " : line)
-                                .font(.system(size: 11, design: .monospaced))
-                                .foregroundStyle(.tronTextSecondary)
-                        }
-                        .frame(minHeight: 18)
-                    }
-                }
-                .padding(.vertical, 4)
-            }
-            .frame(maxHeight: isExpanded ? .infinity : 160)
-
-            // Expand/collapse button
-            if lines.count > 8 {
-                Button {
-                    withAnimation(.tronFast) {
-                        isExpanded.toggle()
-                    }
-                } label: {
-                    HStack {
-                        Text(isExpanded ? "Show less" : "Show more (\(lines.count) lines)")
-                            .font(.system(size: 11, design: .monospaced))
-                        Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
-                            .font(.system(size: 10))
-                    }
-                    .foregroundStyle(.tronTextMuted)
-                    .padding(.vertical, 6)
-                    .frame(maxWidth: .infinity)
-                    .background(Color.tronSurface)
-                }
-            }
+            LineNumberedContentView(
+                content: result.content,
+                maxCollapsedLines: 8,
+                isExpanded: $isExpanded,
+                fontSize: 11,
+                lineNumFontSize: 10,
+                maxCollapsedHeight: 160,
+                lineHeight: 18
+            )
         }
         .background(Color.tronSurface.opacity(0.5))
         .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))

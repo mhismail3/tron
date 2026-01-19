@@ -7,21 +7,11 @@ struct ReadResultViewer: View {
     let content: String
     @Binding var isExpanded: Bool
 
-    /// Parse lines, stripping server-side line number prefixes like "1→", "42→", "  1\t" etc.
-    private var parsedLines: [(lineNum: Int, content: String)] {
-        content.components(separatedBy: "\n").enumerated().map { index, line in
-            // Check for server-side line number prefix patterns:
-            // - "123→content" (arrow character)
-            // - "  123\tcontent" (spaces + number + tab, cat -n format)
-            // - "123:content" (colon separator)
-            if let match = line.firstMatch(of: /^\s*(\d+)[→\t:](.*)/) {
-                return (Int(match.1) ?? (index + 1), String(match.2))
-            }
-            return (index + 1, line)
-        }
+    private var parsedLines: [ContentLineParser.ParsedLine] {
+        ContentLineParser.parse(content)
     }
 
-    private var displayLines: [(lineNum: Int, content: String)] {
+    private var displayLines: [ContentLineParser.ParsedLine] {
         isExpanded ? parsedLines : Array(parsedLines.prefix(12))
     }
 
@@ -98,7 +88,7 @@ struct ReadResultViewer: View {
             // Content lines
             ScrollView(.horizontal, showsIndicators: false) {
                 VStack(alignment: .leading, spacing: 0) {
-                    ForEach(Array(displayLines.enumerated()), id: \.offset) { _, line in
+                    ForEach(displayLines) { line in
                         HStack(spacing: 0) {
                             // Line number
                             Text("\(line.lineNum)")
