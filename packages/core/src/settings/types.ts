@@ -466,6 +466,80 @@ export interface UiSettings {
 }
 
 // =============================================================================
+// Guardrail Settings
+// =============================================================================
+
+/**
+ * Guardrail severity levels
+ */
+export type GuardrailSeverity = 'block' | 'warn' | 'audit';
+
+/**
+ * Guardrail scope - where the rule applies
+ */
+export type GuardrailScope = 'global' | 'tool' | 'session' | 'directory';
+
+/**
+ * Guardrail tier - determines if rule can be disabled
+ */
+export type GuardrailTier = 'core' | 'standard' | 'custom';
+
+/**
+ * Custom guardrail rule defined by user
+ */
+export interface CustomGuardrailRule {
+  /** Unique identifier for the rule */
+  id: string;
+  /** Rule type */
+  type: 'pattern' | 'path' | 'resource' | 'context';
+  /** Cannot be 'core' - users can only create standard/custom rules */
+  tier: 'standard' | 'custom';
+  /** Severity when rule is triggered */
+  severity: GuardrailSeverity;
+  /** Tools this rule applies to (empty = all tools) */
+  tools?: string[];
+  /** Priority - higher = evaluated first */
+  priority?: number;
+  /** Tags for categorization */
+  tags?: string[];
+  /** For pattern rules: argument to match against */
+  targetArgument?: string;
+  /** For pattern rules: regex patterns to match */
+  patterns?: string[];
+  /** For path rules: paths to protect (glob patterns) */
+  protectedPaths?: string[];
+  /** For resource rules: max value (e.g., timeout) */
+  maxValue?: number;
+}
+
+/**
+ * Audit logging configuration
+ */
+export interface GuardrailAuditSettings {
+  /** Enable audit logging */
+  enabled?: boolean;
+  /** Maximum audit log entries to keep */
+  maxEntries?: number;
+}
+
+/**
+ * Guardrail settings
+ */
+export interface GuardrailSettings {
+  /** Override standard rules by ID */
+  rules?: {
+    [ruleId: string]: {
+      enabled?: boolean;
+      [key: string]: unknown;
+    };
+  };
+  /** Additional custom rules */
+  customRules?: CustomGuardrailRule[];
+  /** Audit logging options */
+  audit?: GuardrailAuditSettings;
+}
+
+// =============================================================================
 // Root Settings
 // =============================================================================
 
@@ -497,6 +571,8 @@ export interface TronSettings {
   session: SessionSettings;
   /** UI configuration */
   ui: UiSettings;
+  /** Guardrail configuration (optional - uses defaults if not specified) */
+  guardrails?: GuardrailSettings;
 }
 
 /**

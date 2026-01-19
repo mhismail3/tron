@@ -64,6 +64,9 @@ export * from './subagents/index.js';
 // Re-export events (Event Sourcing system)
 export * from './events/index.js';
 
+// Re-export guardrails
+export * from './guardrails/index.js';
+
 // Re-export utilities (error handling, clipboard, etc.)
 export * from './utils/index.js';
 

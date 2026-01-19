@@ -53,6 +53,14 @@ export const DEFAULT_SKIP_DIRECTORIES = [
 ];
 
 /**
+ * Default guardrail audit settings
+ */
+export const DEFAULT_GUARDRAIL_AUDIT = {
+  enabled: true,
+  maxEntries: 1000,
+};
+
+/**
  * Complete default settings
  */
 export const DEFAULT_SETTINGS: TronSettings = {

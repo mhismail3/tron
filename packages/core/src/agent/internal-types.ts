@@ -18,6 +18,8 @@ import type { HookEngine } from '../hooks/engine.js';
 import type { ContextManager } from '../context/context-manager.js';
 import type { Summarizer } from '../context/summarizer.js';
 import type { Provider } from '../providers/index.js';
+import type { GuardrailEngine } from '../guardrails/engine.js';
+import type { SessionState } from '../guardrails/types.js';
 import type { TurnResult, ToolExecutionRequest, ToolExecutionResponse } from './types.js';
 
 // =============================================================================
@@ -58,6 +60,10 @@ export interface ToolExecutorDependencies {
   eventEmitter: EventEmitter;
   sessionId: string;
   getAbortSignal: () => AbortSignal | undefined;
+  /** Optional guardrail engine for safety checks */
+  guardrailEngine?: GuardrailEngine;
+  /** Optional callback to get current session state for guardrails */
+  getSessionState?: () => SessionState | undefined;
 }
 
 /**

@@ -15,6 +15,8 @@ import type {
   EventEmitter,
 } from './internal-types.js';
 import type { ToolExecutionRequest, ToolExecutionResponse } from './types.js';
+import type { GuardrailEngine } from '../guardrails/engine.js';
+import type { SessionState } from '../guardrails/types.js';
 import { createLogger } from '../logging/logger.js';
 
 const logger = createLogger('agent:tools');
@@ -29,6 +31,8 @@ export class AgentToolExecutor implements IToolExecutor {
   private readonly eventEmitter: EventEmitter;
   private readonly sessionId: string;
   private readonly getAbortSignal: () => AbortSignal | undefined;
+  private readonly guardrailEngine: GuardrailEngine | undefined;
+  private readonly getSessionState: (() => SessionState | undefined) | undefined;
 
   private activeTool: string | null = null;
 
@@ -39,6 +43,8 @@ export class AgentToolExecutor implements IToolExecutor {
     this.eventEmitter = deps.eventEmitter;
     this.sessionId = deps.sessionId;
     this.getAbortSignal = deps.getAbortSignal;
+    this.guardrailEngine = deps.guardrailEngine;
+    this.getSessionState = deps.getSessionState;
   }
 
   /**
@@ -73,6 +79,42 @@ export class AgentToolExecutor implements IToolExecutor {
         },
         duration: Date.now() - startTime,
       };
+    }
+
+    // Evaluate guardrails FIRST (before hooks)
+    if (this.guardrailEngine) {
+      const sessionState = this.getSessionState?.();
+      const evaluation = await this.guardrailEngine.evaluate({
+        toolName: request.toolName,
+        toolArguments: request.arguments,
+        sessionState,
+        sessionId: this.sessionId,
+        toolCallId: request.toolCallId,
+      });
+
+      if (evaluation.blocked) {
+        logger.warn('Tool blocked by guardrail', {
+          toolName: request.toolName,
+          reason: evaluation.blockReason,
+          triggeredRules: evaluation.triggeredRules.map(r => r.ruleId),
+        });
+        this.activeTool = null;
+        return {
+          toolCallId: request.toolCallId,
+          result: {
+            content: `Tool execution blocked: ${evaluation.blockReason}`,
+            isError: true,
+          },
+          duration: Date.now() - startTime,
+        };
+      }
+
+      // Log warnings if any
+      if (evaluation.hasWarnings) {
+        for (const warning of evaluation.warnings) {
+          logger.info('Guardrail warning', { toolName: request.toolName, warning });
+        }
+      }
     }
 
     // Execute PreToolUse hooks
