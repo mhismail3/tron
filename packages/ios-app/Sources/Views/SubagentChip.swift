@@ -74,7 +74,7 @@ struct SubagentChip: View {
                 .progressViewStyle(.circular)
                 .scaleEffect(0.6)
                 .frame(width: 12, height: 12)
-                .tint(.tronOrange)     // Orange while running
+                .tint(.tronAmber)      // Amber while running
         case .completed:
             Image(systemName: "checkmark.circle.fill")
                 .font(.system(size: 12, weight: .medium))
@@ -104,7 +104,7 @@ struct SubagentChip: View {
         case .spawning:
             return .tronBlue       // Blue while spawning
         case .running:
-            return .tronOrange     // Orange while running
+            return .tronAmber      // Amber while running
         case .completed:
             return .tronSuccess    // Green when completed
         case .failed:
@@ -117,7 +117,7 @@ struct SubagentChip: View {
         case .spawning:
             return .tronBlue       // Blue while spawning
         case .running:
-            return .tronOrange     // Orange while running
+            return .tronAmber      // Amber while running
         case .completed:
             return .tronSuccess    // Green when completed
         case .failed:
@@ -193,7 +193,7 @@ struct SubagentChipFallback: View {
                 .progressViewStyle(.circular)
                 .scaleEffect(0.6)
                 .frame(width: 12, height: 12)
-                .tint(.tronOrange)
+                .tint(.tronAmber)
         case .completed:
             Image(systemName: "checkmark.circle.fill")
                 .font(.system(size: 12, weight: .medium))
@@ -217,7 +217,7 @@ struct SubagentChipFallback: View {
     private var textColor: Color {
         switch data.status {
         case .spawning: return .tronBlue
-        case .running: return .tronOrange
+        case .running: return .tronAmber
         case .completed: return .tronSuccess
         case .failed: return .tronError
         }
@@ -226,7 +226,7 @@ struct SubagentChipFallback: View {
     private var tintColor: Color {
         switch data.status {
         case .spawning: return .tronBlue
-        case .running: return .tronOrange
+        case .running: return .tronAmber
         case .completed: return .tronSuccess
         case .failed: return .tronError
         }

@@ -1,7 +1,8 @@
 import SwiftUI
 
 /// A forwarded event from a subagent (tool call, text output, etc.)
-struct SubagentEventItem: Identifiable {
+/// Equatable conformance enables efficient SwiftUI diffing for smooth updates.
+struct SubagentEventItem: Identifiable, Equatable {
     let id: UUID
     let timestamp: Date
     var type: SubagentEventItemType
@@ -29,9 +30,17 @@ struct SubagentEventItem: Identifiable {
         self.toolCallId = toolCallId
         self.isRunning = isRunning
     }
+
+    static func == (lhs: SubagentEventItem, rhs: SubagentEventItem) -> Bool {
+        lhs.id == rhs.id &&
+        lhs.type == rhs.type &&
+        lhs.title == rhs.title &&
+        lhs.detail == rhs.detail &&
+        lhs.isRunning == rhs.isRunning
+    }
 }
 
-enum SubagentEventItemType {
+enum SubagentEventItemType: Equatable {
     case tool       // Combined tool start/end
     case output     // Accumulated text output
     case thinking
@@ -167,6 +176,16 @@ final class SubagentState {
             let toolName = dataDict["toolName"] as? String ?? "unknown"
             let toolCallId = dataDict["toolCallId"] as? String
 
+            // Mark any running output events as complete (finalize the text block)
+            if let events = subagentEvents[subagentSessionId] {
+                for i in events.indices {
+                    if subagentEvents[subagentSessionId]?[i].type == .output &&
+                       subagentEvents[subagentSessionId]?[i].isRunning == true {
+                        subagentEvents[subagentSessionId]?[i].isRunning = false
+                    }
+                }
+            }
+
             // Create a new tool event (will be updated when tool ends)
             let item = SubagentEventItem(
                 timestamp: date,
@@ -209,17 +228,26 @@ final class SubagentState {
             let delta = dataDict["delta"] as? String ?? ""
             guard !delta.isEmpty else { return }
 
-            // Accumulate text
-            let currentOutput = accumulatedOutput[subagentSessionId] ?? ""
-            accumulatedOutput[subagentSessionId] = currentOutput + delta
+            // Check if the last event is an output event (not a tool)
+            // If so, append to it. Otherwise, create a new output event.
+            // This ensures text is linearized with tools properly.
+            let events = subagentEvents[subagentSessionId] ?? []
+            let lastEvent = events.last
 
-            // Find existing output event or create new one
-            if let index = subagentEvents[subagentSessionId]?.lastIndex(where: { $0.type == .output }) {
-                // Update existing output event
-                let accumulated = accumulatedOutput[subagentSessionId] ?? ""
-                subagentEvents[subagentSessionId]?[index].detail = formatAccumulatedOutput(accumulated)
+            if let lastEvent = lastEvent, lastEvent.type == .output, lastEvent.isRunning {
+                // Append to existing output event
+                let currentText = accumulatedOutput[subagentSessionId] ?? ""
+                accumulatedOutput[subagentSessionId] = currentText + delta
+
+                if let index = subagentEvents[subagentSessionId]?.lastIndex(where: { $0.type == .output && $0.isRunning }) {
+                    let accumulated = accumulatedOutput[subagentSessionId] ?? ""
+                    subagentEvents[subagentSessionId]?[index].detail = formatAccumulatedOutput(accumulated)
+                }
             } else {
-                // Create new output event
+                // Create new output event (after a tool or at start)
+                // Reset accumulator for this new output block
+                accumulatedOutput[subagentSessionId] = delta
+
                 let item = SubagentEventItem(
                     timestamp: date,
                     type: .output,
@@ -357,9 +385,9 @@ final class SubagentState {
         return "...\n\(lastLines)"
     }
 
-    /// Get events for a subagent
+    /// Get events for a subagent (in reverse chronological order - newest first)
     func getEvents(for subagentSessionId: String) -> [SubagentEventItem] {
-        subagentEvents[subagentSessionId] ?? []
+        (subagentEvents[subagentSessionId] ?? []).reversed()
     }
 
     // MARK: - Queries

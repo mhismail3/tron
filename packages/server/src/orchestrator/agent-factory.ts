@@ -78,12 +78,17 @@ export class AgentFactory {
 
   /**
    * Create an agent for a session with all configured tools.
+   *
+   * @param isSubagent - If true, excludes SpawnSubagent tool to prevent nested subagent spawning.
+   *                     Subagents cannot spawn their own subagents to avoid complexity and
+   *                     potential infinite recursion. This restriction may be relaxed in the future.
    */
   async createAgentForSession(
     sessionId: SessionId,
     workingDirectory: string,
     model: string,
-    systemPrompt?: string
+    systemPrompt?: string,
+    isSubagent?: boolean
   ): Promise<TronAgent> {
     // Get auth for the model (handles Codex OAuth vs standard auth)
     const auth = await this.config.getAuthForProvider(model);
@@ -125,30 +130,38 @@ export class AgentFactory {
       new AskUserQuestionTool({ workingDirectory }),
       new OpenBrowserTool({ workingDirectory }),
       new AstGrepTool({ workingDirectory }),
-      // Sub-agent spawning tools (in-process only for now)
-      new SpawnSubagentTool({
-        sessionId,
-        workingDirectory,
-        model,
-        onSpawn: (parentId: string, params: SpawnSubagentParams, toolCallId: string) =>
-          this.config.spawnSubsession(parentId, params, toolCallId),
-        getSubagentTracker: () => {
-          const tracker = this.config.getSubagentTrackerForSession(sessionId);
-          if (!tracker) {
-            throw new Error(`No subagent tracker for session ${sessionId}`);
-          }
-          return tracker;
-        },
-      }),
-      new QuerySubagentTool({
-        onQuery: (sid: string, queryType: SubagentQueryType, limit?: number) =>
-          this.config.querySubagent(sid, queryType, limit),
-      }),
-      new WaitForSubagentTool({
-        onWait: (sessionIds: string[], mode: 'all' | 'any', timeout: number) =>
-          this.config.waitForSubagents(sessionIds, mode, timeout),
-      }),
     ];
+
+    // Sub-agent tools: Only add SpawnSubagent for top-level agents.
+    // Subagents cannot spawn their own subagents to prevent complexity and infinite recursion.
+    // QuerySubagent and WaitForSubagent are also excluded since they only make sense
+    // when spawning is allowed.
+    if (!isSubagent) {
+      tools.push(
+        new SpawnSubagentTool({
+          sessionId,
+          workingDirectory,
+          model,
+          onSpawn: (parentId: string, params: SpawnSubagentParams, toolCallId: string) =>
+            this.config.spawnSubsession(parentId, params, toolCallId),
+          getSubagentTracker: () => {
+            const tracker = this.config.getSubagentTrackerForSession(sessionId);
+            if (!tracker) {
+              throw new Error(`No subagent tracker for session ${sessionId}`);
+            }
+            return tracker;
+          },
+        }),
+        new QuerySubagentTool({
+          onQuery: (sid: string, queryType: SubagentQueryType, limit?: number) =>
+            this.config.querySubagent(sid, queryType, limit),
+        }),
+        new WaitForSubagentTool({
+          onWait: (sessionIds: string[], mode: 'all' | 'any', timeout: number) =>
+            this.config.waitForSubagents(sessionIds, mode, timeout),
+        }),
+      );
+    }
 
     // System prompt is now handled by ContextManager based on provider type
     // Only pass custom prompt if explicitly provided - otherwise ContextManager

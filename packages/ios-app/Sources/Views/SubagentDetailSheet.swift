@@ -10,9 +10,30 @@ struct SubagentDetailSheet: View {
     let subagentState: SubagentState
     @Environment(\.dismiss) private var dismiss
 
-    /// Events for this subagent (derived from state for real-time updates)
-    private var events: [SubagentEventItem] {
+    /// Number of events to show per page
+    private static let eventsPageSize = 15
+
+    /// Number of visible events (pagination state)
+    @State private var visibleEventCount: Int = eventsPageSize
+
+    /// All events for this subagent (derived from state for real-time updates)
+    private var allEvents: [SubagentEventItem] {
         subagentState.getEvents(for: data.subagentSessionId)
+    }
+
+    /// Visible events based on pagination
+    private var visibleEvents: [SubagentEventItem] {
+        Array(allEvents.prefix(visibleEventCount))
+    }
+
+    /// Whether there are more events to show
+    private var hasMoreEvents: Bool {
+        allEvents.count > visibleEventCount
+    }
+
+    /// Count of hidden events
+    private var hiddenEventCount: Int {
+        max(0, allEvents.count - visibleEventCount)
     }
 
     var body: some View {
@@ -28,7 +49,7 @@ struct SubagentDetailSheet: View {
                         .padding(.horizontal)
 
                     // Activity section (shows real-time events while running)
-                    if !events.isEmpty || data.status == .running || data.status == .spawning {
+                    if !allEvents.isEmpty || data.status == .running || data.status == .spawning {
                         activitySection
                             .padding(.horizontal)
                     }
@@ -141,6 +162,19 @@ struct SubagentDetailSheet: View {
                     .font(.system(size: 12, weight: .medium, design: .monospaced))
                     .foregroundStyle(.white.opacity(0.6))
 
+                // Event count badge
+                if !allEvents.isEmpty {
+                    Text("\(allEvents.count)")
+                        .font(.system(size: 10, weight: .medium, design: .monospaced))
+                        .foregroundStyle(.white.opacity(0.4))
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(
+                            Capsule()
+                                .fill(.white.opacity(0.1))
+                        )
+                }
+
                 Spacer()
 
                 if data.status == .running || data.status == .spawning {
@@ -153,8 +187,8 @@ struct SubagentDetailSheet: View {
             }
 
             // Card content
-            VStack(alignment: .leading, spacing: 8) {
-                if events.isEmpty {
+            VStack(alignment: .leading, spacing: 0) {
+                if allEvents.isEmpty {
                     // Waiting for events
                     HStack(spacing: 8) {
                         Image(systemName: "ellipsis")
@@ -166,20 +200,61 @@ struct SubagentDetailSheet: View {
                             .foregroundStyle(.white.opacity(0.4))
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(14)
                 } else {
-                    // Event list
-                    ForEach(events) { event in
-                        SubagentEventRow(event: event, accentColor: titleColor)
+                    // Event list with pagination
+                    // Use LazyVStack for performance with many events
+                    LazyVStack(alignment: .leading, spacing: 0) {
+                        ForEach(visibleEvents) { event in
+                            SubagentEventRow(event: event, accentColor: titleColor)
+                                .id(event.id)
+                        }
+
+                        // "Show more" button when there are hidden events
+                        if hasMoreEvents {
+                            showMoreButton
+                        }
                     }
+                    .padding(.vertical, 6)
+                    .padding(.horizontal, 8)
                 }
             }
-            .padding(14)
             .background {
                 RoundedRectangle(cornerRadius: 12, style: .continuous)
                     .fill(.clear)
                     .glassEffect(.regular.tint(titleColor.opacity(0.12)), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
             }
         }
+    }
+
+    // MARK: - Show More Button
+
+    private var showMoreButton: some View {
+        Button {
+            withAnimation(.easeInOut(duration: 0.2)) {
+                visibleEventCount += Self.eventsPageSize
+            }
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 10, weight: .medium))
+                Text("Show \(min(hiddenEventCount, Self.eventsPageSize)) more")
+                    .font(.system(size: 11, weight: .medium, design: .monospaced))
+                Text("(\(hiddenEventCount) hidden)")
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundStyle(.white.opacity(0.4))
+            }
+            .foregroundStyle(titleColor)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 10)
+            .background(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(titleColor.opacity(0.08))
+            )
+        }
+        .buttonStyle(.plain)
+        .padding(.horizontal, 6)
+        .padding(.top, 4)
     }
 
     // MARK: - Output Section
@@ -305,7 +380,7 @@ struct SubagentDetailSheet: View {
                 .progressViewStyle(.circular)
                 .scaleEffect(0.7)
                 .frame(width: 16, height: 16)
-                .tint(.tronOrange)     // Orange while running
+                .tint(.tronAmber)      // Amber while running
         case .completed:
             Image(systemName: "checkmark.circle.fill")
                 .font(.system(size: 16, weight: .medium))
@@ -329,7 +404,7 @@ struct SubagentDetailSheet: View {
     private var statusColor: Color {
         switch data.status {
         case .spawning: return .tronBlue       // Blue while spawning
-        case .running: return .tronOrange      // Orange while running
+        case .running: return .tronAmber       // Amber while running
         case .completed: return .tronSuccess
         case .failed: return .tronError
         }
@@ -347,7 +422,7 @@ struct SubagentDetailSheet: View {
     private var titleColor: Color {
         switch data.status {
         case .spawning: return .tronBlue       // Blue while spawning
-        case .running: return .tronOrange      // Orange while running
+        case .running: return .tronAmber       // Amber while running
         case .completed: return .tronSuccess
         case .failed: return .tronError
         }
@@ -455,7 +530,7 @@ private struct SubagentEventRow: View {
     private var iconColor: Color {
         switch event.type {
         case .tool:
-            return event.isRunning ? .tronOrange : .tronEmerald
+            return event.isRunning ? .tronAmber : .tronEmerald
         case .output:
             return accentColor
         case .thinking:
@@ -470,7 +545,7 @@ private struct SubagentEventRow: View {
             if event.isRunning {
                 Image(systemName: "gearshape.fill")
                     .font(.system(size: 11))
-                    .foregroundStyle(.tronOrange)
+                    .foregroundStyle(.tronAmber)
             } else if event.title.contains("✗") {
                 Image(systemName: "xmark.circle.fill")
                     .font(.system(size: 11))

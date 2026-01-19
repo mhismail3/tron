@@ -75,7 +75,8 @@ export interface SessionManagerConfig {
     sessionId: SessionId,
     workingDirectory: string,
     model: string,
-    systemPrompt?: string
+    systemPrompt?: string,
+    isSubagent?: boolean
   ) => Promise<TronAgent>;
   /** Emit event */
   emit: (event: string, data: unknown) => void;
@@ -135,11 +136,14 @@ export class SessionManager {
     );
 
     // Create agent for session (use the resolved working directory path)
+    // Pass isSubagent flag to exclude SpawnSubagent tool for subagent sessions
+    const isSubagent = !!options.parentSessionId;
     const agent = await this.config.createAgentForSession(
       sessionId,
       workingDir.path,
       model,
-      options.systemPrompt
+      options.systemPrompt,
+      isSubagent
     );
 
     // Load rules files for the session
