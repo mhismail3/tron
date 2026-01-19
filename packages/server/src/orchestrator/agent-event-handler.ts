@@ -583,6 +583,7 @@ export class AgentEventHandler {
       compressionRatio?: number;
       reason?: string;
       success?: boolean;
+      summary?: string;
     };
 
     const reason = compactionEvent.reason || 'auto';
@@ -597,6 +598,7 @@ export class AgentEventHandler {
         tokensAfter: compactionEvent.tokensAfter,
         compressionRatio: compactionEvent.compressionRatio,
         reason,
+        summary: compactionEvent.summary,
       },
     });
 
@@ -608,6 +610,7 @@ export class AgentEventHandler {
         compactedTokens: compactionEvent.tokensAfter,
         compressionRatio: compactionEvent.compressionRatio,
         reason,
+        summary: compactionEvent.summary,
       });
 
       logger.debug('Persisted compact.boundary event', {

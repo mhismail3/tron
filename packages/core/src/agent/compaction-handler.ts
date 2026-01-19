@@ -114,6 +114,7 @@ export class AgentCompactionHandler implements ICompactionHandler {
         tokensAfter: result.tokensAfter,
         compressionRatio: result.compressionRatio,
         reason,
+        summary: result.summary,
       });
 
       if (result.success) {

@@ -316,6 +316,8 @@ export interface CompactionCompleteEvent extends BaseTronEvent {
   compressionRatio: number;
   /** Why compaction was triggered */
   reason?: 'pre_turn_guardrail' | 'threshold_exceeded' | 'manual';
+  /** Summary of compacted context (for display in UI) */
+  summary?: string;
 }
 
 /**
