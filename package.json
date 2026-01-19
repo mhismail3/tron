@@ -9,6 +9,7 @@
     "packages/*"
   ],
   "scripts": {
+    "postinstall": "node-gyp rebuild --release --directory=node_modules/.bun/better-sqlite3@11.10.0/node_modules/better-sqlite3 2>/dev/null || true",
     "setup": "./scripts/setup.sh",
     "build": "./scripts/build-workspace.sh",
     "build:prod": "./scripts/build.sh prod",
