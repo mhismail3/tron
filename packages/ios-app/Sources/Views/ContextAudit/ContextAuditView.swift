@@ -208,107 +208,111 @@ struct ContextAuditView: View {
     // MARK: - Context View
 
     private var contextView: some View {
-        Group {
-            if let snapshot = detailedSnapshot {
-                ScrollView(.vertical, showsIndicators: true) {
-                    VStack(spacing: 16) {
-                        // Usage gauge
-                        ContextUsageGaugeView(
-                            currentTokens: snapshot.currentTokens,
-                            contextLimit: snapshot.contextLimit,
-                            usagePercent: snapshot.usagePercent,
-                            thresholdLevel: snapshot.thresholdLevel
-                        )
-                        .padding(.horizontal)
-
-                        // Token Breakdown header and expandable sections
-                        TokenBreakdownHeader()
+        GeometryReader { geometry in
+            Group {
+                if let snapshot = detailedSnapshot {
+                    ScrollView(.vertical, showsIndicators: true) {
+                        VStack(spacing: 16) {
+                            // Usage gauge
+                            ContextUsageGaugeView(
+                                currentTokens: snapshot.currentTokens,
+                                contextLimit: snapshot.contextLimit,
+                                usagePercent: snapshot.usagePercent,
+                                thresholdLevel: snapshot.thresholdLevel
+                            )
                             .padding(.horizontal)
 
-                        // System section containers with tighter spacing
-                        VStack(spacing: 10) {
-                            // System Prompt (standalone container)
-                            SystemPromptSection(
-                                tokens: snapshot.breakdown.systemPrompt,
-                                content: snapshot.systemPromptContent
-                            )
+                            // Token Breakdown header and expandable sections
+                            TokenBreakdownHeader()
+                                .padding(.horizontal)
 
-                            // Tools (standalone container with badge - clay/ochre)
-                            ToolsSection(
-                                toolsContent: snapshot.toolsContent,
-                                tokens: snapshot.breakdown.tools
-                            )
-
-                            // Rules section (immutable, terracotta - right after Tools)
-                            if let rules = snapshot.rules, rules.totalFiles > 0 {
-                                RulesSection(
-                                    rules: rules,
-                                    onFetchContent: { path in
-                                        // Fetch rule content from server
-                                        try await rpcClient.readFile(path: path)
-                                    }
+                            // System section containers with tighter spacing
+                            VStack(spacing: 10) {
+                                // System Prompt (standalone container)
+                                SystemPromptSection(
+                                    tokens: snapshot.breakdown.systemPrompt,
+                                    content: snapshot.systemPromptContent
                                 )
-                            }
 
-                            // Skill References (standalone container with badge and token count)
-                            if let skills = skillStore?.skills, !skills.isEmpty {
-                                SkillReferencesSection(skills: skills)
-                            }
-
-                            // Added Skills section (explicitly added via @skillname or skill sheet, deletable)
-                            if !displayedSkills.isEmpty {
-                                AddedSkillsContainer(
-                                    skills: displayedSkills,
-                                    onDelete: { skillName in
-                                        Task { await removeSkillFromContext(skillName: skillName) }
-                                    },
-                                    onFetchContent: { skillName in
-                                        guard let store = skillStore else { return nil }
-                                        let metadata = await store.getSkill(name: skillName, sessionId: sessionId)
-                                        return metadata?.content
-                                    }
+                                // Tools (standalone container with badge - clay/ochre)
+                                ToolsSection(
+                                    toolsContent: snapshot.toolsContent,
+                                    tokens: snapshot.breakdown.tools
                                 )
-                            }
 
-                            // Messages (collapsible container with count badge and token total)
-                            MessagesContainer(
-                                messages: paginatedMessages,
-                                totalMessages: displayedMessages.count,
-                                totalTokens: snapshot.breakdown.messages,
-                                hasMoreMessages: hasMoreMessages,
-                                onLoadMore: {
-                                    messagesLoadedCount += 10  // Load 10 at a time
-                                },
-                                onDelete: { eventId in
-                                    Task { await deleteMessage(eventId: eventId) }
+                                // Rules section (immutable, terracotta - right after Tools)
+                                if let rules = snapshot.rules, rules.totalFiles > 0 {
+                                    RulesSection(
+                                        rules: rules,
+                                        onFetchContent: { path in
+                                            // Fetch rule content from server
+                                            try await rpcClient.readFile(path: path)
+                                        }
+                                    )
                                 }
+
+                                // Skill References (standalone container with badge and token count)
+                                if let skills = skillStore?.skills, !skills.isEmpty {
+                                    SkillReferencesSection(skills: skills)
+                                }
+
+                                // Added Skills section (explicitly added via @skillname or skill sheet, deletable)
+                                if !displayedSkills.isEmpty {
+                                    AddedSkillsContainer(
+                                        skills: displayedSkills,
+                                        onDelete: { skillName in
+                                            Task { await removeSkillFromContext(skillName: skillName) }
+                                        },
+                                        onFetchContent: { skillName in
+                                            guard let store = skillStore else { return nil }
+                                            let metadata = await store.getSkill(name: skillName, sessionId: sessionId)
+                                            return metadata?.content
+                                        }
+                                    )
+                                }
+
+                                // Messages (collapsible container with count badge and token total)
+                                MessagesContainer(
+                                    messages: paginatedMessages,
+                                    totalMessages: displayedMessages.count,
+                                    totalTokens: snapshot.breakdown.messages,
+                                    hasMoreMessages: hasMoreMessages,
+                                    onLoadMore: {
+                                        messagesLoadedCount += 10  // Load 10 at a time
+                                    },
+                                    onDelete: { eventId in
+                                        Task { await deleteMessage(eventId: eventId) }
+                                    }
+                                )
+                            }
+                            .padding(.horizontal)
+
+                            // Analytics Section
+                            AnalyticsSection(
+                                sessionId: sessionId,
+                                events: sessionEvents,
+                                inputTokens: sessionTokenUsage.input,
+                                outputTokens: sessionTokenUsage.output,
+                                cacheReadTokens: sessionTokenUsage.cacheRead,
+                                cacheCreationTokens: sessionTokenUsage.cacheCreation
                             )
+                            .padding(.horizontal)
                         }
-                        .padding(.horizontal)
-
-                        // Analytics Section
-                        AnalyticsSection(
-                            sessionId: sessionId,
-                            events: sessionEvents,
-                            inputTokens: sessionTokenUsage.input,
-                            outputTokens: sessionTokenUsage.output,
-                            cacheReadTokens: sessionTokenUsage.cacheRead,
-                            cacheCreationTokens: sessionTokenUsage.cacheCreation
-                        )
-                        .padding(.horizontal)
+                        .padding(.vertical)
+                        .frame(width: geometry.size.width)
                     }
-                    .padding(.vertical)
-                }
-            } else {
-                VStack(spacing: 16) {
-                    ProgressView()
-                        .tint(.cyan)
+                    .frame(width: geometry.size.width)
+                } else {
+                    VStack(spacing: 16) {
+                        ProgressView()
+                            .tint(.cyan)
 
-                    Text("Loading context...")
-                        .font(.caption)
-                        .foregroundStyle(.tronTextMuted)
+                        Text("Loading context...")
+                            .font(.caption)
+                            .foregroundStyle(.tronTextMuted)
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
     }

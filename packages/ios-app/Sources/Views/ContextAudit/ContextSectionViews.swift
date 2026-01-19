@@ -123,7 +123,7 @@ struct ToolsSection: View {
 
             // Content
             if isExpanded {
-                ScrollView(.vertical, showsIndicators: true) {
+                ScrollView {
                     VStack(alignment: .leading, spacing: 0) {
                         ForEach(Array(toolsContent.enumerated()), id: \.offset) { index, tool in
                             ToolItemView(tool: tool)
@@ -134,7 +134,6 @@ struct ToolsSection: View {
                         }
                     }
                     .padding(.vertical, 4)
-                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 .frame(maxHeight: 300)
                 .background(Color.black.opacity(0.2))
