@@ -16,6 +16,12 @@ struct SubagentDetailSheet: View {
     /// Number of visible events (pagination state)
     @State private var visibleEventCount: Int = eventsPageSize
 
+    /// Whether summary is expanded (for long outputs)
+    @State private var isSummaryExpanded: Bool = false
+
+    /// Character limit before showing expand/collapse
+    private static let summaryCharacterLimit = 500
+
     /// All events for this subagent (derived from state for real-time updates)
     private var allEvents: [SubagentEventItem] {
         subagentState.getEvents(for: data.subagentSessionId)
@@ -40,9 +46,21 @@ struct SubagentDetailSheet: View {
         NavigationStack {
             ScrollView(.vertical, showsIndicators: true) {
                 VStack(spacing: 16) {
-                    // Header card
+                    // Header card (status, turns, duration)
                     headerCard
                         .padding(.horizontal)
+
+                    // Summary section (when completed - shown prominently at top)
+                    if data.status == .completed, let output = data.fullOutput ?? data.resultSummary {
+                        summarySection(content: output)
+                            .padding(.horizontal)
+                    }
+
+                    // Error section (when failed - shown prominently)
+                    if data.status == .failed, let error = data.error {
+                        errorSection(error: error)
+                            .padding(.horizontal)
+                    }
 
                     // Task section
                     taskSection
@@ -51,18 +69,6 @@ struct SubagentDetailSheet: View {
                     // Activity section (shows real-time events while running)
                     if !allEvents.isEmpty || data.status == .running || data.status == .spawning {
                         activitySection
-                            .padding(.horizontal)
-                    }
-
-                    // Output section (when completed)
-                    if data.status == .completed, let summary = data.resultSummary {
-                        outputSection(summary: summary, fullOutput: data.fullOutput)
-                            .padding(.horizontal)
-                    }
-
-                    // Error section (when failed)
-                    if data.status == .failed, let error = data.error {
-                        errorSection(error: error)
                             .padding(.horizontal)
                     }
                 }
@@ -257,73 +263,99 @@ struct SubagentDetailSheet: View {
         .padding(.top, 4)
     }
 
-    // MARK: - Output Section
+    // MARK: - Summary Section
 
-    private func outputSection(summary: String, fullOutput: String?) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
+    /// Whether content exceeds the character limit
+    private func contentExceedsLimit(_ content: String) -> Bool {
+        content.count > Self.summaryCharacterLimit
+    }
+
+    /// Truncated content for collapsed state
+    private func truncatedContent(_ content: String) -> String {
+        if content.count <= Self.summaryCharacterLimit {
+            return content
+        }
+        // Find a good break point (newline or space) near the limit
+        let searchRange = content.index(content.startIndex, offsetBy: min(Self.summaryCharacterLimit, content.count))
+        if let breakIndex = content[..<searchRange].lastIndex(of: "\n") {
+            return String(content[..<breakIndex])
+        }
+        if let breakIndex = content[..<searchRange].lastIndex(of: " ") {
+            return String(content[..<breakIndex])
+        }
+        return String(content.prefix(Self.summaryCharacterLimit))
+    }
+
+    private func summarySection(content: String) -> some View {
+        let needsExpansion = contentExceedsLimit(content)
+        let displayContent = needsExpansion && !isSummaryExpanded
+            ? truncatedContent(content)
+            : content
+
+        return VStack(alignment: .leading, spacing: 12) {
             // Section header
             HStack {
-                Text("Output")
+                Text("Summary")
                     .font(.system(size: 12, weight: .medium, design: .monospaced))
                     .foregroundStyle(.white.opacity(0.6))
 
                 Spacer()
 
                 // Copy button
-                if let output = fullOutput {
-                    Button {
-                        UIPasteboard.general.string = output
-                    } label: {
-                        Image(systemName: "doc.on.doc")
-                            .font(.system(size: 12))
-                            .foregroundStyle(titleColor.opacity(0.6))
-                    }
+                Button {
+                    UIPasteboard.general.string = content
+                } label: {
+                    Image(systemName: "doc.on.doc")
+                        .font(.system(size: 12))
+                        .foregroundStyle(.tronSuccess.opacity(0.6))
                 }
             }
 
             // Card content
-            VStack(alignment: .leading, spacing: 12) {
-                // Summary
-                HStack {
-                    Image(systemName: "text.alignleft")
-                        .font(.system(size: 14))
-                        .foregroundStyle(.tronSuccess)
-                    Text("Summary")
-                        .font(.system(size: 14, weight: .medium, design: .monospaced))
-                        .foregroundStyle(.tronSuccess)
-                    Spacer()
-                }
-
-                Text(summary)
+            VStack(alignment: .leading, spacing: 0) {
+                Text(displayContent)
                     .font(.system(size: 12, design: .monospaced))
-                    .foregroundStyle(.white.opacity(0.7))
+                    .foregroundStyle(.white.opacity(0.8))
                     .lineSpacing(4)
                     .textSelection(.enabled)
                     .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(14)
 
-                // Full output (if available and different from summary)
-                if let output = fullOutput, output != summary, !output.isEmpty {
-                    Divider()
-                        .background(.white.opacity(0.2))
-
-                    Text("Full Output")
-                        .font(.system(size: 12, weight: .medium, design: .monospaced))
-                        .foregroundStyle(.white.opacity(0.5))
-
-                    Text(output)
-                        .font(.system(size: 11, design: .monospaced))
-                        .foregroundStyle(.white.opacity(0.6))
-                        .lineSpacing(3)
-                        .textSelection(.enabled)
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                // Expand/collapse banner for long content
+                if needsExpansion {
+                    Button {
+                        withAnimation(.easeInOut(duration: 0.2)) {
+                            isSummaryExpanded.toggle()
+                        }
+                    } label: {
+                        HStack(spacing: 6) {
+                            Image(systemName: isSummaryExpanded ? "chevron.up" : "chevron.down")
+                                .font(.system(size: 10, weight: .medium))
+                            Text(isSummaryExpanded ? "Show less" : "Show more")
+                                .font(.system(size: 11, weight: .medium, design: .monospaced))
+                            if !isSummaryExpanded {
+                                Text("(\(content.count - Self.summaryCharacterLimit) more chars)")
+                                    .font(.system(size: 10, design: .monospaced))
+                                    .foregroundStyle(.white.opacity(0.4))
+                            }
+                        }
+                        .foregroundStyle(.tronSuccess)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 10)
+                        .background(
+                            Rectangle()
+                                .fill(.tronSuccess.opacity(0.06))
+                        )
+                    }
+                    .buttonStyle(.plain)
                 }
             }
-            .padding(14)
             .background {
                 RoundedRectangle(cornerRadius: 12, style: .continuous)
                     .fill(.clear)
                     .glassEffect(.regular.tint(Color.tronSuccess.opacity(0.12)), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
             }
+            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         }
     }
 
