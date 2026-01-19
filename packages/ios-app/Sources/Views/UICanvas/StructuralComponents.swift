@@ -7,17 +7,29 @@ struct CanvasSection: View {
     let state: UICanvasState
 
     var body: some View {
-        Section {
-            UIComponentView.renderChildren(component.children, state: state)
-        } header: {
+        VStack(alignment: .leading, spacing: 12) {
+            // Header
             if let header = component.props.header {
                 Text(header)
+                    .font(.system(size: 13, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(.tronEmerald)
+                    .textCase(.uppercase)
+                    .tracking(0.5)
             }
-        } footer: {
+
+            // Content
+            VStack(alignment: .leading, spacing: 12) {
+                UIComponentView.renderChildren(component.children, state: state)
+            }
+
+            // Footer
             if let footer = component.props.footer {
                 Text(footer)
+                    .font(.system(size: 12, design: .monospaced))
+                    .foregroundStyle(.tronTextMuted)
             }
         }
+        .padding(.vertical, 8)
     }
 }
 
@@ -28,29 +40,51 @@ struct CanvasCard: View {
     let state: UICanvasState
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 12) {
             UIComponentView.renderChildren(component.children, state: state)
         }
         .padding(component.props.padding ?? 16)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .background(cardBackground)
-        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
         .overlay(cardOverlay)
     }
 
     @ViewBuilder
     private var cardBackground: some View {
-        if component.props.cardStyle == "outlined" {
+        switch component.props.cardStyle {
+        case "outlined":
             Color.clear
-        } else {
-            Color(.secondarySystemBackground)
+        case "elevated":
+            Color.tronSurfaceElevated
+        case "glass":
+            Color.tronSurface.opacity(0.5)
+        default:
+            Color.tronSurface
         }
     }
 
     @ViewBuilder
     private var cardOverlay: some View {
-        if component.props.cardStyle == "outlined" {
-            RoundedRectangle(cornerRadius: 12)
-                .stroke(Color(.separator), lineWidth: 1)
+        switch component.props.cardStyle {
+        case "outlined":
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .stroke(Color.tronBorder, lineWidth: 1)
+        case "glass":
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .stroke(Color.tronBorder.opacity(0.5), lineWidth: 0.5)
+        default:
+            EmptyView()
         }
+    }
+}
+
+// MARK: - Divider (Enhanced)
+
+struct CanvasDivider: View {
+    var body: some View {
+        Rectangle()
+            .fill(Color.tronBorder)
+            .frame(height: 1)
     }
 }

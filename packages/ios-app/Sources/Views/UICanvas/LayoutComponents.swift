@@ -7,7 +7,7 @@ struct CanvasVStack: View {
     let state: UICanvasState
 
     var body: some View {
-        let spacing = component.props.spacing ?? 8
+        let spacing = component.props.spacing ?? 12
 
         VStack(alignment: alignment, spacing: spacing) {
             UIComponentView.renderChildren(component.children, state: state)
@@ -30,7 +30,7 @@ struct CanvasHStack: View {
     let state: UICanvasState
 
     var body: some View {
-        let spacing = component.props.spacing ?? 8
+        let spacing = component.props.spacing ?? 12
 
         HStack(alignment: alignment, spacing: spacing) {
             UIComponentView.renderChildren(component.children, state: state)
@@ -80,13 +80,13 @@ struct CanvasScrollView: View {
     let state: UICanvasState
 
     var body: some View {
-        ScrollView(axes) {
+        ScrollView(axes, showsIndicators: false) {
             if axes == .horizontal {
-                HStack(spacing: 8) {
+                HStack(spacing: 12) {
                     UIComponentView.renderChildren(component.children, state: state)
                 }
             } else {
-                VStack(spacing: 8) {
+                VStack(alignment: .leading, spacing: 12) {
                     UIComponentView.renderChildren(component.children, state: state)
                 }
             }
@@ -109,7 +109,7 @@ struct CanvasSpacer: View {
 
     var body: some View {
         if let minLength = component.props.minLength {
-            Spacer(minLength: minLength)
+            Spacer(minLength: CGFloat(minLength))
         } else {
             Spacer()
         }

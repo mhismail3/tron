@@ -13,12 +13,17 @@ struct CanvasButton: View {
             HStack(spacing: 8) {
                 if let iconName = component.props.icon {
                     Image(systemName: iconName)
+                        .font(.system(size: 14, weight: .medium))
                 }
                 Text(component.props.label ?? "Button")
+                    .font(.system(size: 14, weight: .medium, design: .monospaced))
             }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
         }
-        .buttonStyleForCanvas(component.props.buttonStyle)
+        .canvasButtonStyle(component.props.buttonStyle)
         .disabled(component.props.disabled ?? false)
+        .opacity(component.props.disabled == true ? 0.5 : 1.0)
     }
 
     private func handleTap() {
@@ -31,17 +36,30 @@ struct CanvasButton: View {
 
 extension View {
     @ViewBuilder
-    func buttonStyleForCanvas(_ style: String?) -> some View {
+    func canvasButtonStyle(_ style: String?) -> some View {
         switch style {
         case "secondary":
-            self.buttonStyle(.bordered)
+            self
+                .foregroundStyle(.tronEmerald)
+                .background(Color.tronSurface)
+                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .stroke(Color.tronEmerald.opacity(0.5), lineWidth: 1)
+                )
         case "link":
-            self.buttonStyle(.plain)
+            self
+                .foregroundStyle(.tronEmerald)
         case "destructive":
-            self.buttonStyle(.borderedProminent)
-                .tint(.red)
-        default:
-            self.buttonStyle(.borderedProminent)
+            self
+                .foregroundStyle(.white)
+                .background(Color.tronError)
+                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        default: // primary
+            self
+                .foregroundStyle(.black)
+                .background(Color.tronEmerald)
+                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
         }
     }
 }
@@ -53,7 +71,12 @@ struct CanvasToggle: View {
     let state: UICanvasState
 
     var body: some View {
-        Toggle(component.props.label ?? "", isOn: binding)
+        Toggle(isOn: binding) {
+            Text(component.props.label ?? "")
+                .font(.system(size: 15, design: .monospaced))
+                .foregroundStyle(.tronTextPrimary)
+        }
+        .tint(.tronEmerald)
     }
 
     private var binding: Binding<Bool> {
@@ -79,17 +102,19 @@ struct CanvasSlider: View {
     let state: UICanvasState
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: 8) {
             if let label = component.props.label {
                 HStack {
                     Text(label)
+                        .font(.system(size: 15, design: .monospaced))
+                        .foregroundStyle(.tronTextPrimary)
                     Spacer()
                     if component.props.showValue != false {
                         Text(String(format: "%.1f", binding.wrappedValue))
-                            .foregroundStyle(.secondary)
+                            .font(.system(size: 14, weight: .medium, design: .monospaced))
+                            .foregroundStyle(.tronEmerald)
                     }
                 }
-                .font(.subheadline)
             }
 
             Slider(
@@ -97,6 +122,7 @@ struct CanvasSlider: View {
                 in: minValue...maxValue,
                 step: stepValue
             )
+            .tint(.tronEmerald)
         }
     }
 
@@ -127,20 +153,32 @@ struct CanvasTextField: View {
     let state: UICanvasState
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: 8) {
             if let label = component.props.label {
                 Text(label)
-                    .font(.subheadline)
+                    .font(.system(size: 14, weight: .medium, design: .monospaced))
+                    .foregroundStyle(.tronTextSecondary)
             }
 
-            if component.props.isSecure == true {
-                SecureField(component.props.placeholder ?? "", text: binding)
-                    .textFieldStyle(.roundedBorder)
-            } else {
-                TextField(component.props.placeholder ?? "", text: binding)
-                    .textFieldStyle(.roundedBorder)
-                    .keyboardType(keyboardType)
+            Group {
+                if component.props.isSecure == true {
+                    SecureField(component.props.placeholder ?? "", text: binding)
+                } else {
+                    TextField(component.props.placeholder ?? "", text: binding)
+                        .keyboardType(keyboardType)
+                }
             }
+            .textFieldStyle(.plain)
+            .font(.system(size: 15, design: .monospaced))
+            .foregroundStyle(.tronEmerald)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 12)
+            .background(Color.tronSurface)
+            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .stroke(Color.tronBorder, lineWidth: 1)
+            )
         }
     }
 
@@ -177,18 +215,21 @@ struct CanvasPicker: View {
     let state: UICanvasState
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: 8) {
             if let label = component.props.label {
                 Text(label)
-                    .font(.subheadline)
+                    .font(.system(size: 14, weight: .medium, design: .monospaced))
+                    .foregroundStyle(.tronTextSecondary)
             }
 
             Picker("", selection: binding) {
                 ForEach(options) { option in
-                    Text(option.label).tag(option.value)
+                    Text(option.label)
+                        .tag(option.value)
                 }
             }
-            .pickerStyleForCanvas(component.props.pickerStyle)
+            .canvasPickerStyle(component.props.pickerStyle)
+            .tint(.tronEmerald)
         }
     }
 
@@ -210,19 +251,24 @@ struct CanvasPicker: View {
             }
         )
     }
-
 }
 
 // MARK: - Picker Style Helper
 
 extension View {
     @ViewBuilder
-    func pickerStyleForCanvas(_ style: String?) -> some View {
+    func canvasPickerStyle(_ style: String?) -> some View {
         switch style {
         case "wheel":
             self.pickerStyle(.wheel)
         case "segmented":
-            self.pickerStyle(.segmented)
+            self
+                .pickerStyle(.segmented)
+                .padding(4)
+                .background(Color.tronSurface)
+                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        case "inline":
+            self.pickerStyle(.inline)
         default:
             self.pickerStyle(.menu)
         }

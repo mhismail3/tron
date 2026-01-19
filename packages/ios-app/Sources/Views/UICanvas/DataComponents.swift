@@ -7,11 +7,26 @@ struct CanvasList: View {
     let state: UICanvasState
 
     var body: some View {
-        if let items = component.props.items {
-            ForEach(Array(items.enumerated()), id: \.offset) { index, item in
-                listItem(item: item, index: index)
+        VStack(alignment: .leading, spacing: 8) {
+            if let items = component.props.items {
+                ForEach(Array(items.enumerated()), id: \.offset) { index, item in
+                    listItem(item: item, index: index)
+                        .padding(.vertical, 4)
+
+                    if index < items.count - 1 {
+                        Divider()
+                            .background(Color.tronBorder)
+                    }
+                }
             }
         }
+        .padding(12)
+        .background(Color.tronSurface)
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(Color.tronBorder, lineWidth: 1)
+        )
     }
 
     @ViewBuilder
@@ -24,17 +39,23 @@ struct CanvasList: View {
             UIComponentView(component: templates[0], state: state)
         case .text(let template):
             Text(template)
+                .font(.system(size: 15, design: .monospaced))
+                .foregroundStyle(.tronTextPrimary)
         default:
             // Fallback: display item value
-            if let stringValue = item.stringValue {
-                Text(stringValue)
-            } else if let intValue = item.intValue {
-                Text("\(intValue)")
-            } else if let doubleValue = item.doubleValue {
-                Text(String(format: "%.2f", doubleValue))
-            } else {
-                Text("Item \(index + 1)")
+            HStack {
+                if let stringValue = item.stringValue {
+                    Text(stringValue)
+                } else if let intValue = item.intValue {
+                    Text("\(intValue)")
+                } else if let doubleValue = item.doubleValue {
+                    Text(String(format: "%.2f", doubleValue))
+                } else {
+                    Text("Item \(index + 1)")
+                }
             }
+            .font(.system(size: 15, design: .monospaced))
+            .foregroundStyle(.tronTextPrimary)
         }
     }
 }
@@ -45,10 +66,11 @@ struct CanvasProgressView: View {
     let component: UICanvasComponent
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: 8) {
             if let label = component.props.label {
                 Text(label)
-                    .font(.subheadline)
+                    .font(.system(size: 14, weight: .medium, design: .monospaced))
+                    .foregroundStyle(.tronTextSecondary)
             }
 
             if let value = component.props.value {
@@ -58,9 +80,20 @@ struct CanvasProgressView: View {
                         .progressViewStyle(.circular)
                         .tint(tintColor)
                 } else {
-                    ProgressView(value: value, total: 1.0)
-                        .progressViewStyle(.linear)
-                        .tint(tintColor)
+                    GeometryReader { geometry in
+                        ZStack(alignment: .leading) {
+                            // Background track
+                            RoundedRectangle(cornerRadius: 4, style: .continuous)
+                                .fill(Color.tronSurface)
+                                .frame(height: 8)
+
+                            // Progress fill
+                            RoundedRectangle(cornerRadius: 4, style: .continuous)
+                                .fill(tintColor)
+                                .frame(width: geometry.size.width * CGFloat(value), height: 8)
+                        }
+                    }
+                    .frame(height: 8)
                 }
             } else {
                 // Indeterminate progress
@@ -70,15 +103,14 @@ struct CanvasProgressView: View {
                         .tint(tintColor)
                 } else {
                     ProgressView()
-                        .progressViewStyle(.linear)
                         .tint(tintColor)
                 }
             }
         }
     }
 
-    private var tintColor: Color? {
-        parseColor(component.props.tint)
+    private var tintColor: Color {
+        canvasParseColor(component.props.tint) ?? .tronEmerald
     }
 }
 
@@ -89,16 +121,26 @@ struct CanvasBadge: View {
 
     var body: some View {
         Text(component.props.text ?? "")
-            .font(.caption)
-            .fontWeight(.medium)
-            .padding(.horizontal, 8)
-            .padding(.vertical, 4)
+            .font(.system(size: 12, weight: .semibold, design: .monospaced))
+            .padding(.horizontal, 10)
+            .padding(.vertical, 5)
             .background(badgeColor)
-            .foregroundStyle(.white)
+            .foregroundStyle(badgeTextColor)
             .clipShape(Capsule())
     }
 
     private var badgeColor: Color {
-        parseColor(component.props.color) ?? .accentColor
+        canvasParseColor(component.props.color) ?? .tronEmerald
+    }
+
+    private var badgeTextColor: Color {
+        // Use dark text for light badges, white for dark badges
+        let colorName = component.props.color?.lowercased() ?? ""
+        switch colorName {
+        case "warning", "amber", "yellow", "orange":
+            return .black
+        default:
+            return .white
+        }
     }
 }

@@ -22,15 +22,15 @@ struct CanvasText: View {
 
     private var font: Font {
         switch component.props.style {
-        case "largeTitle": return .largeTitle
-        case "title": return .title
-        case "title2": return .title2
-        case "title3": return .title3
-        case "headline": return .headline
-        case "subheadline": return .subheadline
-        case "caption": return .caption
-        case "footnote": return .footnote
-        default: return .body
+        case "largeTitle": return .system(size: 32, weight: .bold, design: .monospaced)
+        case "title": return .system(size: 26, weight: .semibold, design: .monospaced)
+        case "title2": return .system(size: 22, weight: .semibold, design: .monospaced)
+        case "title3": return .system(size: 18, weight: .semibold, design: .monospaced)
+        case "headline": return .system(size: 16, weight: .semibold, design: .monospaced)
+        case "subheadline": return .system(size: 14, design: .monospaced)
+        case "caption": return .system(size: 12, design: .monospaced)
+        case "footnote": return .system(size: 11, design: .monospaced)
+        default: return .system(size: 15, design: .monospaced)
         }
     }
 
@@ -45,7 +45,7 @@ struct CanvasText: View {
     }
 
     private var textColor: Color {
-        parseColor(component.props.color) ?? .primary
+        canvasParseColor(component.props.color) ?? .tronTextPrimary
     }
 }
 
@@ -56,12 +56,12 @@ struct CanvasIcon: View {
 
     var body: some View {
         Image(systemName: component.props.name ?? "questionmark.circle")
-            .font(.system(size: component.props.size ?? 24))
+            .font(.system(size: component.props.size ?? 24, weight: .medium))
             .foregroundStyle(iconColor)
     }
 
     private var iconColor: Color {
-        parseColor(component.props.color) ?? .primary
+        canvasParseColor(component.props.color) ?? .tronEmerald
     }
 }
 
@@ -76,6 +76,7 @@ struct CanvasImage: View {
                 .resizable()
                 .aspectRatio(contentMode: contentMode)
                 .frame(width: frameWidth, height: frameHeight)
+                .foregroundStyle(.tronEmerald)
         } else if let base64Data = component.props.data,
                   let data = Data(base64Encoded: base64Data),
                   let uiImage = UIImage(data: data) {
@@ -83,12 +84,13 @@ struct CanvasImage: View {
                 .resizable()
                 .aspectRatio(contentMode: contentMode)
                 .frame(width: frameWidth, height: frameHeight)
+                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
         } else {
             Image(systemName: "photo")
                 .resizable()
                 .aspectRatio(contentMode: .fit)
                 .frame(width: frameWidth ?? 100, height: frameHeight ?? 100)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(.tronTextMuted)
         }
     }
 
@@ -107,24 +109,37 @@ struct CanvasImage: View {
 
 // MARK: - Color Parsing
 
-func parseColor(_ colorString: String?) -> Color? {
+/// Parse color strings into SwiftUI colors with Tron theme support
+func canvasParseColor(_ colorString: String?) -> Color? {
     guard let colorString = colorString else { return nil }
 
-    // Semantic colors
+    // Tron semantic colors (preferred)
     switch colorString.lowercased() {
-    case "primary": return .primary
-    case "secondary": return .secondary
-    case "accent": return .accentColor
-    case "destructive", "red": return .red
-    case "success", "green": return .green
-    case "warning", "orange": return .orange
-    case "blue": return .blue
-    case "purple": return .purple
-    case "pink": return .pink
-    case "yellow": return .yellow
-    case "gray", "grey": return .gray
-    case "white": return .white
-    case "black": return .black
+    case "primary": return .tronTextPrimary
+    case "secondary": return .tronTextSecondary
+    case "accent", "emerald": return .tronEmerald
+    case "muted": return .tronTextMuted
+
+    // Semantic action colors
+    case "destructive", "error": return .tronError
+    case "success": return .tronSuccess
+    case "warning": return .tronWarning
+    case "info": return .tronInfo
+
+    // Named colors (mapped to Tron palette)
+    case "red": return .tronError
+    case "green": return .tronSuccess
+    case "orange": return .tronWarning
+    case "blue": return .tronInfo
+    case "purple": return .tronPurple
+    case "cyan": return .tronCyan
+    case "amber": return .tronAmber
+    case "pink": return Color.pink
+    case "yellow": return Color.yellow
+    case "gray", "grey": return .tronTextMuted
+    case "white": return .tronTextPrimary
+    case "black": return .tronBackground
+
     default: break
     }
 
