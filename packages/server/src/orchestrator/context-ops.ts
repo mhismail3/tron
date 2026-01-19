@@ -177,7 +177,7 @@ export class ContextOps {
    */
   async confirmCompaction(
     sessionId: string,
-    opts?: { editedSummary?: string }
+    opts?: { editedSummary?: string; reason?: string }
   ): Promise<CompactionResult> {
     const active = this.config.getActiveSession(sessionId);
     if (!active) {
@@ -197,6 +197,7 @@ export class ContextOps {
     active.skillTracker.clear();
 
     // Store compaction events in EventStore (linearized via SessionContext)
+    const compactionReason = opts?.reason || 'manual';
     await active.sessionContext!.appendMultipleEvents([
       {
         type: 'compact.boundary',
@@ -204,6 +205,7 @@ export class ContextOps {
           originalTokens: tokensBefore,
           compactedTokens: result.tokensAfter,
           compressionRatio: result.compressionRatio,
+          reason: compactionReason,
         },
       },
       {

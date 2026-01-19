@@ -60,6 +60,10 @@ struct ChatView: View {
     @State private var skillForDetailSheet: Skill?
     /// Whether to show the skill detail sheet
     @State private var showSkillDetailSheet = false
+    /// Whether to show the compaction detail sheet
+    @State private var showCompactionDetail = false
+    /// Data for compaction detail sheet (tokensBefore, tokensAfter, reason)
+    @State private var compactionDetailData: (tokensBefore: Int, tokensAfter: Int, reason: String)?
 
     /// UserDefaults key for storing reasoning level per session
     private var reasoningLevelKey: String { "tron.reasoningLevel.\(sessionId)" }
@@ -288,6 +292,16 @@ struct ChatView: View {
                 SkillDetailSheet(skill: skill, skillStore: store)
             }
         }
+        .sheet(isPresented: $showCompactionDetail) {
+            if let data = compactionDetailData {
+                CompactionDetailSheet(
+                    tokensBefore: data.tokensBefore,
+                    tokensAfter: data.tokensAfter,
+                    reason: data.reason
+                )
+                .presentationDetents([.medium])
+            }
+        }
         .sheet(isPresented: $viewModel.showAskUserQuestionSheet) {
             if #available(iOS 26.0, *), let data = viewModel.currentAskUserQuestionData {
                 AskUserQuestionSheet(
@@ -512,6 +526,10 @@ struct ChatView: View {
                                     },
                                     onAskUserQuestionTap: { data in
                                         viewModel.openAskUserQuestionSheet(for: data)
+                                    },
+                                    onCompactionTap: { tokensBefore, tokensAfter, reason in
+                                        compactionDetailData = (tokensBefore, tokensAfter, reason)
+                                        showCompactionDetail = true
                                     }
                                 )
                                 .id(message.id)

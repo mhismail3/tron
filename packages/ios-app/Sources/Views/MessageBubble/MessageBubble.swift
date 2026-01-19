@@ -6,6 +6,7 @@ struct MessageBubble: View {
     let message: ChatMessage
     var onSkillTap: ((Skill) -> Void)?
     var onAskUserQuestionTap: ((AskUserQuestionToolData) -> Void)?
+    var onCompactionTap: ((Int, Int, String) -> Void)?
 
     private var isUserMessage: Bool {
         message.role == .user
@@ -105,7 +106,14 @@ struct MessageBubble: View {
             TranscriptionNoSpeechNotificationView()
 
         case .compaction(let tokensBefore, let tokensAfter, let reason):
-            CompactionNotificationView(tokensBefore: tokensBefore, tokensAfter: tokensAfter, reason: reason)
+            CompactionNotificationView(
+                tokensBefore: tokensBefore,
+                tokensAfter: tokensAfter,
+                reason: reason,
+                onTap: {
+                    onCompactionTap?(tokensBefore, tokensAfter, reason)
+                }
+            )
 
         case .contextCleared(let tokensBefore, let tokensAfter):
             ContextClearedNotificationView(tokensBefore: tokensBefore, tokensAfter: tokensAfter)

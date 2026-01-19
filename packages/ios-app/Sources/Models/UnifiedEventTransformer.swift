@@ -1045,7 +1045,7 @@ struct UnifiedEventTransformer {
             content: .compaction(
                 tokensBefore: parsed.originalTokens,
                 tokensAfter: parsed.compactedTokens,
-                reason: "manual"
+                reason: parsed.reason
             ),
             timestamp: timestamp
         )
@@ -1479,8 +1479,8 @@ extension UnifiedEventTransformer {
             var summaries: [Summary]
 
             struct Boundary {
-                let rangeFrom: String
-                let rangeTo: String
+                let rangeFrom: String?
+                let rangeTo: String?
                 let originalTokens: Int
                 let compactedTokens: Int
                 let timestamp: Date

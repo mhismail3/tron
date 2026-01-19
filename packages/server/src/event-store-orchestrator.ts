@@ -1000,7 +1000,7 @@ export class EventStoreOrchestrator extends EventEmitter {
 
   async confirmCompaction(
     sessionId: string,
-    opts?: { editedSummary?: string }
+    opts?: { editedSummary?: string; reason?: string }
   ): Promise<CompactionResult> {
     return this.contextOps.confirmCompaction(sessionId, opts);
   }

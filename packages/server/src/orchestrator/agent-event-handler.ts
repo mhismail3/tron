@@ -582,7 +582,12 @@ export class AgentEventHandler {
       tokensAfter?: number;
       compressionRatio?: number;
       reason?: string;
+      success?: boolean;
     };
+
+    const reason = compactionEvent.reason || 'auto';
+
+    // Broadcast streaming event for live clients
     this.config.emit('agent_event', {
       type: 'agent.compaction',
       sessionId,
@@ -591,9 +596,27 @@ export class AgentEventHandler {
         tokensBefore: compactionEvent.tokensBefore,
         tokensAfter: compactionEvent.tokensAfter,
         compressionRatio: compactionEvent.compressionRatio,
-        reason: compactionEvent.reason || 'auto',
+        reason,
       },
     });
+
+    // Persist compact.boundary event so it shows up on session resume
+    // Only persist successful compactions
+    if (compactionEvent.success !== false) {
+      this.config.appendEventLinearized(sessionId, 'compact.boundary', {
+        originalTokens: compactionEvent.tokensBefore,
+        compactedTokens: compactionEvent.tokensAfter,
+        compressionRatio: compactionEvent.compressionRatio,
+        reason,
+      });
+
+      logger.debug('Persisted compact.boundary event', {
+        sessionId,
+        tokensBefore: compactionEvent.tokensBefore,
+        tokensAfter: compactionEvent.tokensAfter,
+        reason,
+      });
+    }
   }
 }
 

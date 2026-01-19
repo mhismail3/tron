@@ -186,6 +186,7 @@ struct CompactionNotificationView: View {
     let tokensBefore: Int
     let tokensAfter: Int
     let reason: String
+    var onTap: (() -> Void)? = nil
 
     private var tokensSaved: Int {
         tokensBefore - tokensAfter
@@ -246,6 +247,10 @@ struct CompactionNotificationView: View {
             Capsule()
                 .stroke(Color.cyan.opacity(0.3), lineWidth: 0.5)
         )
+        .contentShape(Capsule())
+        .onTapGesture {
+            onTap?()
+        }
         .frame(maxWidth: .infinity, alignment: .center)
     }
 }

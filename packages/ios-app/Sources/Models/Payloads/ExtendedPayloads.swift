@@ -104,21 +104,32 @@ struct FileEditPayload {
 /// Payload for compact.boundary event
 /// Server: CompactBoundaryEvent.payload
 struct CompactBoundaryPayload {
-    let rangeFrom: String
-    let rangeTo: String
+    let rangeFrom: String?
+    let rangeTo: String?
     let originalTokens: Int
     let compactedTokens: Int
+    let reason: String
 
     init?(from payload: [String: AnyCodable]) {
-        guard let range = payload.dict("range"),
-              let from = range["from"] as? String,
-              let to = range["to"] as? String else {
+        // Range fields are optional (not present in auto-compaction events)
+        if let range = payload.dict("range") {
+            self.rangeFrom = range["from"] as? String
+            self.rangeTo = range["to"] as? String
+        } else {
+            self.rangeFrom = nil
+            self.rangeTo = nil
+        }
+
+        // Token counts are required
+        guard let originalTokens = payload.int("originalTokens"),
+              let compactedTokens = payload.int("compactedTokens") else {
             return nil
         }
-        self.rangeFrom = from
-        self.rangeTo = to
-        self.originalTokens = payload.int("originalTokens") ?? 0
-        self.compactedTokens = payload.int("compactedTokens") ?? 0
+        self.originalTokens = originalTokens
+        self.compactedTokens = compactedTokens
+
+        // Reason defaults to "manual" for backwards compatibility
+        self.reason = payload.string("reason") ?? "manual"
     }
 }
 
