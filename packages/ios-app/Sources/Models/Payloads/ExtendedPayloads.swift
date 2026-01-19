@@ -251,7 +251,10 @@ struct DetailedContextSnapshotResult: Codable {
     let thresholdLevel: String
     let breakdown: ContextSnapshotResult.ContextBreakdown
     let messages: [DetailedMessageInfo]
+    /// Effective system-level context sent to the model
     let systemPromptContent: String
+    /// Raw tool clarification content if applicable (for debugging)
+    let toolClarificationContent: String?
     let toolsContent: [String]
     /// Skills explicitly added to this session's context
     let addedSkills: [AddedSkillInfo]

@@ -117,7 +117,10 @@ export interface DetailedMessageInfo {
  */
 export interface DetailedContextSnapshot extends ContextSnapshot {
   messages: DetailedMessageInfo[];
+  /** Effective system-level context sent to the model */
   systemPromptContent: string;
+  /** Raw tool clarification content if applicable (for debugging) */
+  toolClarificationContent?: string;
   toolsContent: string[];
 }
 
@@ -503,10 +506,16 @@ export class ContextManager {
       }
     }
 
+    // Use the effective system-level context: tool clarification for Codex, system prompt for others
+    const systemPrompt = this.getSystemPrompt();
+    const toolClarification = this.getToolClarificationMessage();
+    const effectiveSystemContent = toolClarification || systemPrompt;
+
     return {
       ...snapshot,
       messages: detailedMessages,
-      systemPromptContent: this.getSystemPrompt(),
+      systemPromptContent: effectiveSystemContent,
+      toolClarificationContent: toolClarification ?? undefined,
       toolsContent: this.tools.map(t => `${t.name}: ${t.description || 'No description'}`),
     };
   }
