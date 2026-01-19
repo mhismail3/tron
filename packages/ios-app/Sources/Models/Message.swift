@@ -214,6 +214,8 @@ enum MessageContent: Equatable {
     case answeredQuestions(questionCount: Int)
     /// Subagent tool call (rendered as a tappable chip with status)
     case subagent(SubagentToolData)
+    /// RenderAppUI tool call (rendered as a tappable chip with canvas status)
+    case renderAppUI(RenderAppUIChipData)
 
     var textContent: String {
         switch self {
@@ -277,6 +279,15 @@ enum MessageContent: Equatable {
                 return data.resultSummary ?? "Subagent completed"
             case .failed:
                 return data.error ?? "Subagent failed"
+            }
+        case .renderAppUI(let data):
+            switch data.status {
+            case .rendering:
+                return "Rendering \(data.displayTitle)..."
+            case .complete:
+                return "\(data.displayTitle) rendered"
+            case .error:
+                return data.errorMessage ?? "Error generating"
             }
         }
     }
@@ -500,6 +511,39 @@ extension ChatMessage {
     /// In-chat notification for catching up to in-progress session
     static func catchingUp() -> ChatMessage {
         ChatMessage(role: .system, content: .catchingUp)
+    }
+}
+
+// MARK: - RenderAppUI Types
+
+/// Status for a RenderAppUI canvas render
+enum RenderAppUIStatus: String, Equatable {
+    case rendering
+    case complete
+    case error
+}
+
+/// Data for tracking a RenderAppUI tool call (rendered as a chip in chat)
+struct RenderAppUIChipData: Equatable {
+    /// The tool call ID from RenderAppUI (var to allow updating placeholder → real ID)
+    var toolCallId: String
+    /// Canvas ID for the rendered UI
+    let canvasId: String
+    /// Title of the rendered app
+    let title: String?
+    /// Current status
+    var status: RenderAppUIStatus
+    /// Error message (when failed)
+    var errorMessage: String?
+
+    /// Display title (falls back to "App" if no title)
+    var displayTitle: String {
+        title ?? "App"
+    }
+
+    /// Whether this chip should be tappable (only complete chips are tappable)
+    var isTappable: Bool {
+        status == .complete
     }
 }
 

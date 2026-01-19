@@ -8,6 +8,7 @@ struct MessageBubble: View {
     var onAskUserQuestionTap: ((AskUserQuestionToolData) -> Void)?
     var onCompactionTap: ((Int, Int, String, String?) -> Void)?
     var onSubagentTap: ((SubagentToolData) -> Void)?
+    var onRenderAppUITap: ((RenderAppUIChipData) -> Void)?
 
     private var isUserMessage: Bool {
         message.role == .user
@@ -114,6 +115,22 @@ struct MessageBubble: View {
                     // Fallback to regular tool view if parsing fails
                     ToolResultRouter(tool: tool)
                 }
+            case "renderappui":
+                // Show RenderAppUI as chip with canvas status
+                if let chipData = createRenderAppUIChipData(from: tool) {
+                    if #available(iOS 26.0, *) {
+                        RenderAppUIChip(data: chipData) {
+                            onRenderAppUITap?(chipData)
+                        }
+                    } else {
+                        RenderAppUIChipFallback(data: chipData) {
+                            onRenderAppUITap?(chipData)
+                        }
+                    }
+                } else {
+                    // Fallback to regular tool view if parsing fails
+                    ToolResultRouter(tool: tool)
+                }
             default:
                 ToolResultRouter(tool: tool)
             }
@@ -208,6 +225,17 @@ struct MessageBubble: View {
             } else {
                 SubagentChipFallback(data: data) {
                     onSubagentTap?(data)
+                }
+            }
+
+        case .renderAppUI(let data):
+            if #available(iOS 26.0, *) {
+                RenderAppUIChip(data: data) {
+                    onRenderAppUITap?(data)
+                }
+            } else {
+                RenderAppUIChipFallback(data: data) {
+                    onRenderAppUITap?(data)
                 }
             }
         }
@@ -398,6 +426,52 @@ struct MessageBubble: View {
         // For spawned messages, just return a simple summary
         if result.lowercased().contains("spawned") {
             return "Sub-agent spawned successfully"
+        }
+        return nil
+    }
+
+    // MARK: - RenderAppUI Tool Parsing
+
+    /// Parse RenderAppUI tool arguments to create RenderAppUIChipData for chip display
+    private func createRenderAppUIChipData(from tool: ToolUseData) -> RenderAppUIChipData? {
+        // Extract canvasId from arguments
+        let canvasId = extractCanvasId(from: tool.arguments) ?? tool.toolCallId
+        let title = extractTitleFromArguments(tool.arguments)
+
+        // Determine status based on tool status
+        let status: RenderAppUIStatus
+        switch tool.status {
+        case .running:
+            status = .rendering
+        case .success:
+            status = .complete
+        case .error:
+            status = .error
+        }
+
+        return RenderAppUIChipData(
+            toolCallId: tool.toolCallId,
+            canvasId: canvasId,
+            title: title,
+            status: status,
+            errorMessage: tool.status == .error ? tool.result : nil
+        )
+    }
+
+    private func extractCanvasId(from args: String) -> String? {
+        // Try to extract "canvasId" field from JSON arguments
+        if let match = args.firstMatch(of: /"canvasId"\s*:\s*"([^"]+)"/) {
+            return String(match.1)
+        }
+        return nil
+    }
+
+    private func extractTitleFromArguments(_ args: String) -> String? {
+        // Try to extract "title" field from JSON arguments
+        if let match = args.firstMatch(of: /"title"\s*:\s*"((?:[^"\\]|\\.)*)"/) {
+            return String(match.1)
+                .replacingOccurrences(of: "\\n", with: "\n")
+                .replacingOccurrences(of: "\\\"", with: "\"")
         }
         return nil
     }

@@ -70,7 +70,68 @@ extension ChatViewModel {
             status: .running
         )
 
-        let message = ChatMessage(role: .assistant, content: .toolUse(tool))
+        var message = ChatMessage(role: .assistant, content: .toolUse(tool))
+
+        // For RenderAppUI: check if chip already exists (created from ui_render_chunk)
+        if event.toolName.lowercased() == "renderappui" {
+            if let argsData = event.formattedArguments.data(using: .utf8),
+               let argsJson = try? JSONSerialization.jsonObject(with: argsData) as? [String: Any],
+               let canvasId = argsJson["canvasId"] as? String {
+
+                // Check if chip already exists from ui_render_chunk
+                if let messageId = renderAppUIChipMessageIds[canvasId],
+                   let index = messages.firstIndex(where: { $0.id == messageId }),
+                   case .renderAppUI(var chipData) = messages[index].content {
+                    // Chip already exists - update toolCallId to real one
+                    let oldToolCallId = chipData.toolCallId
+                    chipData.toolCallId = event.toolCallId
+                    messages[index].content = .renderAppUI(chipData)
+
+                    // Clean up placeholder tracking
+                    canvasIdToPlaceholderToolCallId.removeValue(forKey: canvasId)
+
+                    // Update currentToolMessages with correct ID
+                    currentToolMessages[messages[index].id] = messages[index]
+
+                    // Track tool call for persistence
+                    let record = ToolCallRecord(
+                        toolCallId: event.toolCallId,
+                        toolName: event.toolName,
+                        arguments: event.formattedArguments
+                    )
+                    currentTurnToolCalls.append(record)
+
+                    logger.info("Updated existing RenderAppUI chip toolCallId: \(canvasId), \(oldToolCallId) → \(event.toolCallId)", category: .events)
+                    return // Don't create a new message
+                }
+
+                // No existing chip - create one now
+                let title = argsJson["title"] as? String
+                let chipData = RenderAppUIChipData(
+                    toolCallId: event.toolCallId,
+                    canvasId: canvasId,
+                    title: title,
+                    status: .rendering,
+                    errorMessage: nil
+                )
+                message.content = .renderAppUI(chipData)
+                renderAppUIChipMessageIds[canvasId] = message.id
+                logger.debug("Created RenderAppUI chip from tool_start: \(canvasId)", category: .events)
+            }
+        } else if let pendingRender = pendingUIRenderStarts.removeValue(forKey: event.toolCallId) {
+            // Handle pending UI render start (legacy path)
+            let chipData = RenderAppUIChipData(
+                toolCallId: event.toolCallId,
+                canvasId: pendingRender.canvasId,
+                title: pendingRender.title,
+                status: .rendering,
+                errorMessage: nil
+            )
+            message.content = .renderAppUI(chipData)
+            renderAppUIChipMessageIds[pendingRender.canvasId] = message.id
+            logger.debug("Applied pending UI render start to new tool message: \(pendingRender.canvasId)", category: .events)
+        }
+
         messages.append(message)
         currentToolMessages[message.id] = message
 
@@ -703,6 +764,36 @@ extension ChatViewModel {
     func handleUIRenderStart(_ event: UIRenderStartEvent) {
         logger.info("UI render started: canvasId=\(event.canvasId), title=\(event.title ?? "none")", category: .events)
 
+        // Find the RenderAppUI message by toolCallId
+        // Check if already converted to chip (from handleToolStart) or still a toolUse
+        if let index = messages.lastIndex(where: {
+            switch $0.content {
+            case .renderAppUI(let chipData):
+                return chipData.toolCallId == event.toolCallId
+            case .toolUse(let tool):
+                return tool.toolCallId == event.toolCallId && tool.toolName.lowercased() == "renderappui"
+            default:
+                return false
+            }
+        }) {
+            // Update or convert to chip with rendering status
+            let chipData = RenderAppUIChipData(
+                toolCallId: event.toolCallId,
+                canvasId: event.canvasId,
+                title: event.title,
+                status: .rendering,
+                errorMessage: nil
+            )
+            messages[index].content = .renderAppUI(chipData)
+            renderAppUIChipMessageIds[event.canvasId] = messages[index].id
+            logger.debug("Updated/converted RenderAppUI to chip: \(event.canvasId)", category: .events)
+        } else {
+            // Tool message doesn't exist yet (ui.render.start arrived before tool.start via streaming)
+            // Store the event for processing when tool.start arrives
+            pendingUIRenderStarts[event.toolCallId] = event
+            logger.debug("Stored pending UI render start for toolCallId: \(event.toolCallId)", category: .events)
+        }
+
         // Start rendering in canvas state (this will show the sheet)
         uiCanvasState.startRender(
             canvasId: event.canvasId,
@@ -714,6 +805,43 @@ extension ChatViewModel {
     func handleUIRenderChunk(_ event: UIRenderChunkEvent) {
         logger.verbose("UI render chunk: canvasId=\(event.canvasId), +\(event.chunk.count) chars", category: .events)
 
+        // CRITICAL FIX: ui_render_chunk arrives BEFORE tool_start in streaming mode.
+        // Create the chip on FIRST chunk so user sees "Rendering..." immediately.
+        if renderAppUIChipMessageIds[event.canvasId] == nil {
+            // First chunk for this canvasId - create the rendering chip
+            let placeholderToolCallId = "pending_\(event.canvasId)"
+            canvasIdToPlaceholderToolCallId[event.canvasId] = placeholderToolCallId
+
+            // Try to extract title from accumulated JSON
+            let title = extractTitleFromAccumulated(event.accumulated)
+
+            let chipData = RenderAppUIChipData(
+                toolCallId: placeholderToolCallId,
+                canvasId: event.canvasId,
+                title: title,
+                status: .rendering,
+                errorMessage: nil
+            )
+            let message = ChatMessage(role: .assistant, content: .renderAppUI(chipData))
+            messages.append(message)
+            renderAppUIChipMessageIds[event.canvasId] = message.id
+
+            // Make chip immediately visible
+            animationCoordinator.makeToolVisible(placeholderToolCallId)
+
+            // Sync to MessageWindowManager
+            messageWindowManager.appendMessage(message)
+
+            logger.info("Created RenderAppUI chip from first chunk: \(event.canvasId), title=\(title ?? "nil")", category: .events)
+
+            // Also start canvas render state (shows sheet)
+            uiCanvasState.startRender(
+                canvasId: event.canvasId,
+                title: title,
+                toolCallId: placeholderToolCallId
+            )
+        }
+
         // Update the canvas with the new chunk
         uiCanvasState.updateRender(
             canvasId: event.canvasId,
@@ -722,8 +850,33 @@ extension ChatViewModel {
         )
     }
 
+    /// Extract title from accumulated RenderAppUI JSON arguments
+    private func extractTitleFromAccumulated(_ accumulated: String) -> String? {
+        // Try to extract "title" field: {"canvasId": "...", "title": "...", ...}
+        // Use NSRegularExpression for compatibility
+        let pattern = #""title"\s*:\s*"([^"\\]*(?:\\.[^"\\]*)*)""#
+        guard let regex = try? NSRegularExpression(pattern: pattern, options: []),
+              let match = regex.firstMatch(in: accumulated, options: [], range: NSRange(accumulated.startIndex..., in: accumulated)),
+              let range = Range(match.range(at: 1), in: accumulated) else {
+            return nil
+        }
+        return String(accumulated[range])
+            .replacingOccurrences(of: "\\n", with: "\n")
+            .replacingOccurrences(of: "\\\"", with: "\"")
+    }
+
     func handleUIRenderComplete(_ event: UIRenderCompleteEvent) {
         logger.info("UI render complete: canvasId=\(event.canvasId)", category: .events)
+
+        // Update chip status to complete
+        if let messageId = renderAppUIChipMessageIds[event.canvasId],
+           let index = messages.firstIndex(where: { $0.id == messageId }),
+           case .renderAppUI(var chipData) = messages[index].content {
+            chipData.status = .complete
+            chipData.errorMessage = nil
+            messages[index].content = .renderAppUI(chipData)
+            logger.debug("Updated RenderAppUI chip to complete: \(event.canvasId)", category: .events)
+        }
 
         // Convert [String: AnyCodable] to [String: Any] for parsing
         guard let uiDict = event.ui else {
@@ -750,6 +903,16 @@ extension ChatViewModel {
     func handleUIRenderError(_ event: UIRenderErrorEvent) {
         logger.warning("UI render error: canvasId=\(event.canvasId), error=\(event.error)", category: .events)
 
+        // Update chip status to error
+        if let messageId = renderAppUIChipMessageIds[event.canvasId],
+           let index = messages.firstIndex(where: { $0.id == messageId }),
+           case .renderAppUI(var chipData) = messages[index].content {
+            chipData.status = .error
+            chipData.errorMessage = event.error
+            messages[index].content = .renderAppUI(chipData)
+            logger.debug("Updated RenderAppUI chip to error: \(event.canvasId)", category: .events)
+        }
+
         // Mark the canvas as errored - this will update the UI to show the error
         // instead of leaving it stuck in "Rendering..." state
         uiCanvasState.errorRender(canvasId: event.canvasId, error: event.error)
@@ -757,6 +920,17 @@ extension ChatViewModel {
 
     func handleUIRenderRetry(_ event: UIRenderRetryEvent) {
         logger.info("UI render retry: canvasId=\(event.canvasId), attempt=\(event.attempt)", category: .events)
+
+        // Validation failure means error - chip shows error state (not tappable)
+        // The agent will create a NEW chip with the retry, so this one stays as error
+        if let messageId = renderAppUIChipMessageIds[event.canvasId],
+           let index = messages.firstIndex(where: { $0.id == messageId }),
+           case .renderAppUI(var chipData) = messages[index].content {
+            chipData.status = .error
+            chipData.errorMessage = "Error generating"
+            messages[index].content = .renderAppUI(chipData)
+            logger.debug("Updated RenderAppUI chip to error (validation failed): \(event.canvasId)", category: .events)
+        }
 
         // Update canvas to show retry status - keeps the sheet open so user sees progress
         // The agent will automatically retry with a corrected UI definition

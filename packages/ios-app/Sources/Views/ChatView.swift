@@ -553,6 +553,11 @@ struct ChatView: View {
                                     },
                                     onSubagentTap: { data in
                                         viewModel.subagentState.showDetails(with: data)
+                                    },
+                                    onRenderAppUITap: { data in
+                                        // Set active canvas and show sheet
+                                        viewModel.uiCanvasState.activeCanvasId = data.canvasId
+                                        viewModel.uiCanvasState.showSheet = true
                                     }
                                 )
                                 .id(message.id)

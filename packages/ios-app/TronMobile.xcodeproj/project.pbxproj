@@ -80,6 +80,7 @@
 		SBAG0002BULD0001SOURCE01 /* ChatViewModel+Subagent.swift in Sources */ = {isa = PBXBuildFile; fileRef = SBAG0002FREF0001FILEREF1 /* ChatViewModel+Subagent.swift */; };
 		SBAG0003BULD0001SOURCE01 /* SubagentChip.swift in Sources */ = {isa = PBXBuildFile; fileRef = SBAG0003FREF0001FILEREF1 /* SubagentChip.swift */; };
 		SBAG0004BULD0001SOURCE01 /* SubagentDetailSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = SBAG0004FREF0001FILEREF1 /* SubagentDetailSheet.swift */; };
+		RAUI0001BULD0001SOURCE01 /* RenderAppUIChip.swift in Sources */ = {isa = PBXBuildFile; fileRef = RAUI0001FREF0001FILEREF1 /* RenderAppUIChip.swift */; };
 		AA22BB33CC44DD55EE66FF01 /* ToolResultRouter.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA22BB33CC44DD55EE66F001 /* ToolResultRouter.swift */; };
 		AA22BB33CC44DD55EE66FF02 /* FileToolViewer.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA22BB33CC44DD55EE66F002 /* FileToolViewer.swift */; };
 		AA22BB33CC44DD55EE66FF03 /* BashToolViewer.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA22BB33CC44DD55EE66F003 /* BashToolViewer.swift */; };
@@ -248,6 +249,7 @@
 		SBAG0002FREF0001FILEREF1 /* ChatViewModel+Subagent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ChatViewModel+Subagent.swift"; sourceTree = "<group>"; };
 		SBAG0003FREF0001FILEREF1 /* SubagentChip.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SubagentChip.swift; sourceTree = "<group>"; };
 		SBAG0004FREF0001FILEREF1 /* SubagentDetailSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SubagentDetailSheet.swift; sourceTree = "<group>"; };
+		RAUI0001FREF0001FILEREF1 /* RenderAppUIChip.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RenderAppUIChip.swift; sourceTree = "<group>"; };
 		AA22BB33CC44DD55EE66F001 /* ToolResultRouter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ToolResultRouter.swift; sourceTree = "<group>"; };
 		AA22BB33CC44DD55EE66F002 /* FileToolViewer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileToolViewer.swift; sourceTree = "<group>"; };
 		AA22BB33CC44DD55EE66F003 /* BashToolViewer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BashToolViewer.swift; sourceTree = "<group>"; };
@@ -491,6 +493,7 @@
 				CMPD0001FREF0001FILEREF1 /* CompactionDetailSheet.swift */,
 				SBAG0003FREF0001FILEREF1 /* SubagentChip.swift */,
 				SBAG0004FREF0001FILEREF1 /* SubagentDetailSheet.swift */,
+				RAUI0001FREF0001FILEREF1 /* RenderAppUIChip.swift */,
 				EE11FF22AA33BB44CC55DE01 /* ContentView.swift */,
 				8E272C3BC972178AF980AB55 /* DocumentPicker.swift */,
 				1BDC8358FC12ECFA6C4A2526 /* FloatingBrowserView.swift */,
@@ -829,6 +832,7 @@
 				SBAG0002BULD0001SOURCE01 /* ChatViewModel+Subagent.swift in Sources */,
 				SBAG0003BULD0001SOURCE01 /* SubagentChip.swift in Sources */,
 				SBAG0004BULD0001SOURCE01 /* SubagentDetailSheet.swift in Sources */,
+				RAUI0001BULD0001SOURCE01 /* RenderAppUIChip.swift in Sources */,
 				BB22CC33DD44EE55FF660021 /* RPCClientProtocol.swift in Sources */,
 				BB22CC33DD44EE55FF660022 /* EventDatabaseProtocol.swift in Sources */,
 				BB22CC33DD44EE55FF660023 /* EventStoreManagerProtocol.swift in Sources */,

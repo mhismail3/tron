@@ -183,6 +183,13 @@ class ChatViewModel: ObservableObject {
 
     /// Track tool calls for the current turn (for display purposes)
     var currentTurnToolCalls: [ToolCallRecord] = []
+    /// Track RenderAppUI chip messages by canvasId for status updates
+    var renderAppUIChipMessageIds: [String: UUID] = [:]
+    /// Pending UI render starts that arrived before tool.start (toolCallId → UIRenderStartEvent)
+    var pendingUIRenderStarts: [String: UIRenderStartEvent] = [:]
+    /// Track canvasIds that already have a chip created (from ui_render_chunk)
+    /// Maps canvasId → placeholder toolCallId used before real tool_start arrives
+    var canvasIdToPlaceholderToolCallId: [String: String] = [:]
     let audioRecorder = AudioRecorder()
 
     /// Track the message index where the current turn started

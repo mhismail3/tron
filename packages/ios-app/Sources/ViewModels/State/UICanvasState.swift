@@ -223,4 +223,38 @@ final class UICanvasState {
         guard let canvasId = activeCanvasId else { return nil }
         return canvases[canvasId]
     }
+
+    // MARK: - Chip Data Helper
+
+    /// Get chip data for a canvas (used for reconstruction and status sync)
+    func getChipData(for canvasId: String, toolCallId: String) -> RenderAppUIChipData? {
+        guard let canvas = canvases[canvasId] else { return nil }
+
+        let status: RenderAppUIStatus
+        let errorMessage: String?
+
+        switch canvas.status {
+        case .rendering:
+            status = .rendering
+            errorMessage = nil
+        case .retrying:
+            // Retrying = validation failed, show as error (not tappable)
+            status = .error
+            errorMessage = "Error generating"
+        case .complete:
+            status = .complete
+            errorMessage = nil
+        case .error(let error):
+            status = .error
+            errorMessage = error
+        }
+
+        return RenderAppUIChipData(
+            toolCallId: toolCallId,
+            canvasId: canvasId,
+            title: canvas.title,
+            status: status,
+            errorMessage: errorMessage
+        )
+    }
 }
