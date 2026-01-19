@@ -397,47 +397,90 @@ private struct SubagentEventRow: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
-            // Event icon
-            eventIcon
-                .frame(width: 16, height: 16)
+            // Event icon with optional spinner
+            ZStack {
+                eventIcon
+                if event.isRunning {
+                    ProgressView()
+                        .progressViewStyle(.circular)
+                        .scaleEffect(0.4)
+                        .tint(iconColor)
+                }
+            }
+            .frame(width: 16, height: 16)
 
             // Event content
             VStack(alignment: .leading, spacing: 4) {
-                Text(event.title)
-                    .font(.system(size: 12, weight: .medium, design: .monospaced))
-                    .foregroundStyle(.white.opacity(0.85))
+                HStack(spacing: 6) {
+                    Text(event.title)
+                        .font(.system(size: 12, weight: .medium, design: .monospaced))
+                        .foregroundStyle(.white.opacity(0.85))
+
+                    if event.isRunning {
+                        Text("•")
+                            .font(.system(size: 8))
+                            .foregroundStyle(iconColor)
+                    }
+                }
 
                 if let detail = event.detail, !detail.isEmpty {
                     Text(detail)
                         .font(.system(size: 11, design: .monospaced))
-                        .foregroundStyle(.white.opacity(0.5))
-                        .lineLimit(3)
+                        .foregroundStyle(.white.opacity(0.6))
+                        .lineLimit(6)
                         .lineSpacing(2)
+                        .textSelection(.enabled)
                 }
             }
 
             Spacer(minLength: 0)
 
-            // Timestamp
-            Text(formatTime(event.timestamp))
-                .font(.system(size: 10, design: .monospaced))
-                .foregroundStyle(.white.opacity(0.3))
+            // Timestamp (only show for completed events)
+            if !event.isRunning {
+                Text(formatTime(event.timestamp))
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundStyle(.white.opacity(0.3))
+            }
         }
-        .padding(.vertical, 6)
+        .padding(.vertical, 8)
+        .padding(.horizontal, 10)
+        .background {
+            if event.isRunning {
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(iconColor.opacity(0.08))
+            }
+        }
+    }
+
+    private var iconColor: Color {
+        switch event.type {
+        case .tool:
+            return event.isRunning ? .tronOrange : .tronEmerald
+        case .output:
+            return accentColor
+        case .thinking:
+            return .tronPurple
+        }
     }
 
     @ViewBuilder
     private var eventIcon: some View {
         switch event.type {
-        case .toolStart:
-            Image(systemName: "gearshape.fill")
-                .font(.system(size: 11))
-                .foregroundStyle(.tronEmerald)
-        case .toolEnd:
-            Image(systemName: "checkmark.circle.fill")
-                .font(.system(size: 11))
-                .foregroundStyle(.tronSuccess)
-        case .textDelta:
+        case .tool:
+            if event.isRunning {
+                Image(systemName: "gearshape.fill")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.tronOrange)
+            } else if event.title.contains("✗") {
+                Image(systemName: "xmark.circle.fill")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.tronError)
+            } else {
+                Image(systemName: "checkmark.circle.fill")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.tronEmerald)
+            }
+        case .output:
             Image(systemName: "text.bubble.fill")
                 .font(.system(size: 11))
                 .foregroundStyle(accentColor)
