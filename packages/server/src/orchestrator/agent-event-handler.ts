@@ -73,6 +73,16 @@ export interface AgentEventHandlerConfig {
 export class AgentEventHandler {
   private config: AgentEventHandlerConfig;
 
+  /**
+   * Track active RenderAppUI tool calls for progressive streaming.
+   * Maps toolCallId to streaming state.
+   */
+  private activeUIRenders: Map<string, {
+    canvasId: string | null;
+    accumulatedJson: string;
+    startEmitted: boolean;
+  }> = new Map();
+
   constructor(config: AgentEventHandlerConfig) {
     this.config = config;
   }
@@ -133,6 +143,10 @@ export class AgentEventHandler {
 
       case 'compaction_complete':
         this.handleCompactionComplete(sessionId, event, timestamp);
+        break;
+
+      case 'toolcall_delta':
+        this.handleToolCallDelta(sessionId, event, timestamp);
         break;
     }
   }
@@ -416,25 +430,36 @@ export class AgentEventHandler {
       },
     });
 
-    // Emit UI render start event for RenderAppUI tool
+    // Emit UI render start event for RenderAppUI tool (fallback if streaming didn't capture it)
     if (toolStartEvent.toolName === 'RenderAppUI' && toolStartEvent.arguments) {
       const args = toolStartEvent.arguments;
-      this.config.emit('agent_event', {
-        type: 'agent.ui_render_start',
-        sessionId,
-        timestamp,
-        data: {
-          canvasId: args.canvasId as string,
-          title: args.title as string | undefined,
-          toolCallId: toolStartEvent.toolCallId,
-        },
-      });
+      const existingRender = this.activeUIRenders.get(toolStartEvent.toolCallId);
 
-      logger.debug('Emitted ui_render_start', {
-        sessionId,
-        canvasId: args.canvasId,
-        toolCallId: toolStartEvent.toolCallId,
-      });
+      // Only emit ui_render_start if streaming didn't already emit it
+      if (!existingRender?.startEmitted) {
+        this.config.emit('agent_event', {
+          type: 'agent.ui_render_start',
+          sessionId,
+          timestamp,
+          data: {
+            canvasId: args.canvasId as string,
+            title: args.title as string | undefined,
+            toolCallId: toolStartEvent.toolCallId,
+          },
+        });
+
+        logger.debug('Emitted ui_render_start (fallback)', {
+          sessionId,
+          canvasId: args.canvasId,
+          toolCallId: toolStartEvent.toolCallId,
+        });
+      } else {
+        logger.debug('Skipped ui_render_start (already emitted from streaming)', {
+          sessionId,
+          canvasId: args.canvasId,
+          toolCallId: toolStartEvent.toolCallId,
+        });
+      }
     }
 
     // Store discrete tool.call event (linearized)
@@ -516,25 +541,30 @@ export class AgentEventHandler {
     });
 
     // Emit UI render complete event for RenderAppUI tool
-    if (toolEndEvent.toolName === 'RenderAppUI' && !toolEndEvent.isError) {
-      // Extract UI data from details if available
-      const detailsObj = resultDetails as { canvasId?: string; ui?: unknown; state?: unknown } | undefined;
-      if (detailsObj?.canvasId) {
-        this.config.emit('agent_event', {
-          type: 'agent.ui_render_complete',
-          sessionId,
-          timestamp,
-          data: {
-            canvasId: detailsObj.canvasId,
-            ui: detailsObj.ui,
-            state: detailsObj.state,
-          },
-        });
+    if (toolEndEvent.toolName === 'RenderAppUI') {
+      // Clean up streaming state
+      this.activeUIRenders.delete(toolEndEvent.toolCallId);
 
-        logger.debug('Emitted ui_render_complete', {
-          sessionId,
-          canvasId: detailsObj.canvasId,
-        });
+      if (!toolEndEvent.isError) {
+        // Extract UI data from details if available
+        const detailsObj = resultDetails as { canvasId?: string; ui?: unknown; state?: unknown } | undefined;
+        if (detailsObj?.canvasId) {
+          this.config.emit('agent_event', {
+            type: 'agent.ui_render_complete',
+            sessionId,
+            timestamp,
+            data: {
+              canvasId: detailsObj.canvasId,
+              ui: detailsObj.ui,
+              state: detailsObj.state,
+            },
+          });
+
+          logger.debug('Emitted ui_render_complete', {
+            sessionId,
+            canvasId: detailsObj.canvasId,
+          });
+        }
       }
     }
 
@@ -595,6 +625,9 @@ export class AgentEventHandler {
       // Use SessionContext for agent lifecycle
       active.sessionContext!.onAgentEnd();
     }
+
+    // Clean up any orphaned UI render tracking state
+    this.cleanupUIRenders();
 
     // NOTE: agent.complete is now emitted in runAgent() AFTER all events are persisted
     // This ensures linearized events (message.assistant, tool.call, tool.result)
@@ -768,6 +801,134 @@ export class AgentEventHandler {
         tokensAfter: compactionEvent.tokensAfter,
         reason,
       });
+    }
+  }
+
+  /**
+   * Handle tool call argument streaming for progressive UI rendering.
+   * Captures RenderAppUI argument chunks and emits ui_render_chunk events.
+   */
+  private handleToolCallDelta(
+    sessionId: SessionId,
+    event: TronEvent,
+    timestamp: string
+  ): void {
+    // Cast to access toolcall_delta specific properties
+    const delta = event as {
+      toolCallId: string;
+      toolName?: string;
+      argumentsDelta: string;
+    };
+
+    logger.debug('Received toolcall_delta', {
+      sessionId,
+      toolCallId: delta.toolCallId,
+      toolName: delta.toolName,
+      deltaLength: delta.argumentsDelta.length,
+    });
+
+    // Check if we're already tracking this tool call
+    const existingRender = this.activeUIRenders.get(delta.toolCallId);
+
+    // If not tracking and we know the tool name, check if it's RenderAppUI
+    if (!existingRender) {
+      // Only start tracking RenderAppUI calls
+      // If toolName is undefined, we can't determine the tool yet - skip
+      // (toolcall_start should have set the name before deltas arrive)
+      if (delta.toolName !== 'RenderAppUI') {
+        logger.debug('Skipping non-RenderAppUI delta', {
+          sessionId,
+          toolCallId: delta.toolCallId,
+          toolName: delta.toolName,
+        });
+        return;
+      }
+
+      // Initialize tracking for this RenderAppUI call
+      logger.info('Started tracking RenderAppUI streaming', {
+        sessionId,
+        toolCallId: delta.toolCallId,
+      });
+      this.activeUIRenders.set(delta.toolCallId, {
+        canvasId: null,
+        accumulatedJson: '',
+        startEmitted: false,
+      });
+    }
+
+    // Get tracking state (now guaranteed to exist for RenderAppUI calls)
+    const render = this.activeUIRenders.get(delta.toolCallId);
+    if (!render) {
+      return; // Safety check
+    }
+
+    // Accumulate the JSON chunk
+    render.accumulatedJson += delta.argumentsDelta;
+
+    // Try to extract canvasId if we don't have it yet
+    if (!render.canvasId) {
+      const match = render.accumulatedJson.match(/"canvasId"\s*:\s*"([^"]+)"/);
+      if (match && match[1]) {
+        render.canvasId = match[1];
+
+        // Emit ui_render_start now that we have canvasId
+        this.config.emit('agent_event', {
+          type: 'agent.ui_render_start',
+          sessionId,
+          timestamp,
+          data: {
+            canvasId: render.canvasId,
+            toolCallId: delta.toolCallId,
+          },
+        });
+        render.startEmitted = true;
+
+        logger.debug('Emitted ui_render_start from streaming', {
+          sessionId,
+          canvasId: render.canvasId,
+          toolCallId: delta.toolCallId,
+        });
+      }
+    }
+
+    // Emit chunk if we have canvasId (can progressively render)
+    if (render.canvasId) {
+      logger.debug('Emitting ui_render_chunk', {
+        sessionId,
+        canvasId: render.canvasId,
+        chunkLength: delta.argumentsDelta.length,
+        accumulatedLength: render.accumulatedJson.length,
+      });
+      this.config.emit('agent_event', {
+        type: 'agent.ui_render_chunk',
+        sessionId,
+        timestamp,
+        data: {
+          canvasId: render.canvasId,
+          chunk: delta.argumentsDelta,
+          accumulated: render.accumulatedJson,
+        },
+      });
+    } else {
+      logger.debug('Waiting for canvasId before emitting chunks', {
+        sessionId,
+        toolCallId: delta.toolCallId,
+        accumulatedLength: render.accumulatedJson.length,
+      });
+    }
+  }
+
+  /**
+   * Clean up any orphaned UI render tracking state.
+   * Called when agent ends or errors to prevent memory leaks.
+   */
+  cleanupUIRenders(): void {
+    if (this.activeUIRenders.size > 0) {
+      logger.debug('Cleaning up orphaned UI renders', {
+        count: this.activeUIRenders.size,
+        toolCallIds: Array.from(this.activeUIRenders.keys()),
+      });
+      this.activeUIRenders.clear();
     }
   }
 }

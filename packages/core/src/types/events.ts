@@ -255,6 +255,21 @@ export interface ToolExecutionEndEvent extends BaseTronEvent {
 }
 
 /**
+ * Tool call argument delta event - emitted during streaming when
+ * tool call arguments are being streamed from the LLM.
+ * Used for progressive UI rendering of tools like RenderAppUI.
+ */
+export interface ToolCallArgumentDeltaEvent extends BaseTronEvent {
+  type: 'toolcall_delta';
+  /** Tool call ID */
+  toolCallId: string;
+  /** Tool name (if known) */
+  toolName?: string;
+  /** Partial JSON arguments delta */
+  argumentsDelta: string;
+}
+
+/**
  * Hook events
  */
 export interface HookTriggeredEvent extends BaseTronEvent {
@@ -463,6 +478,7 @@ export type TronEvent =
   | ToolExecutionStartEvent
   | ToolExecutionUpdateEvent
   | ToolExecutionEndEvent
+  | ToolCallArgumentDeltaEvent
   | HookTriggeredEvent
   | HookCompletedEvent
   | SessionSavedEvent

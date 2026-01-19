@@ -33,6 +33,9 @@ export class AgentStreamProcessor implements IStreamProcessor {
 
   private streamingContent: string = '';
 
+  /** Track active tool calls for toolcall_delta events */
+  private activeToolCalls: Map<string, string> = new Map(); // toolCallId -> toolName
+
   constructor(deps: StreamProcessorDependencies) {
     this.eventEmitter = deps.eventEmitter;
     this.sessionId = deps.sessionId;
@@ -88,7 +91,37 @@ export class AgentStreamProcessor implements IStreamProcessor {
           callbacks?.onTextDelta?.(event.delta);
           break;
 
+        case 'toolcall_start':
+          // Track tool name for subsequent delta events
+          this.activeToolCalls.set(event.toolCallId, event.name);
+          logger.debug('Tool call started', {
+            toolCallId: event.toolCallId,
+            toolName: event.name,
+          });
+          break;
+
+        case 'toolcall_delta': {
+          // Emit toolcall_delta TronEvent for progressive UI rendering
+          const toolName = this.activeToolCalls.get(event.toolCallId);
+          logger.debug('Tool call delta', {
+            toolCallId: event.toolCallId,
+            toolName,
+            deltaLength: event.argumentsDelta.length,
+          });
+          this.eventEmitter.emit({
+            type: 'toolcall_delta',
+            sessionId: this.sessionId,
+            timestamp: new Date().toISOString(),
+            toolCallId: event.toolCallId,
+            toolName,
+            argumentsDelta: event.argumentsDelta,
+          });
+          break;
+        }
+
         case 'toolcall_end':
+          // Clean up tool call tracking
+          this.activeToolCalls.delete(event.toolCall.id);
           toolCalls.push(event.toolCall);
           callbacks?.onToolCallEnd?.(event.toolCall);
           break;

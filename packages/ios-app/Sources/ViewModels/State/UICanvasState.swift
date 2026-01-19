@@ -49,9 +49,12 @@ final class UICanvasState {
 
         canvas.partialJSON = accumulated
 
-        // Try to parse the accumulated JSON (with recovery for truncated input)
-        if let component = UICanvasParser.parseProgressively(accumulated) {
+        // Parse the accumulated tool arguments JSON and extract the "ui" field.
+        // The accumulated JSON has structure: {"canvasId": "...", "ui": {...}, "state": {...}}
+        // We need to extract just the "ui" value and parse it as a component tree.
+        if let component = UICanvasParser.parseFromArguments(accumulated) {
             canvas.parsedRoot = component
+            logger.verbose("Progressive parse succeeded for canvas: \(canvasId)", category: .ui)
         }
 
         canvases[canvasId] = canvas
