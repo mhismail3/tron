@@ -334,13 +334,24 @@ export class EventStore {
   async getMessagesAt(eventId: EventId): Promise<Message[]> {
     const ancestors = await this.backend.getAncestors(eventId);
 
-    // Two-pass reconstruction: First collect deleted event IDs, then build messages
+    // Two-pass reconstruction: First collect deleted event IDs and tool.call arguments
     // This ensures deletions that occur later in the chain are properly filtered
     const deletedEventIds = new Set<EventId>();
+
+    // Build toolCallId -> full arguments map from tool.call events
+    // This is used to restore truncated tool_use inputs in message.assistant events
+    const toolCallArgsMap = new Map<string, Record<string, unknown>>();
+
     for (const event of ancestors) {
       if (event.type === 'message.deleted') {
         const payload = event.payload as { targetEventId: EventId };
         deletedEventIds.add(payload.targetEventId);
+      } else if (event.type === 'tool.call') {
+        // Collect full arguments from tool.call events for restoring truncated inputs
+        const payload = event.payload as { toolCallId: string; arguments: Record<string, unknown> };
+        if (payload.toolCallId && payload.arguments) {
+          toolCallArgsMap.set(payload.toolCallId, payload.arguments);
+        }
       }
     }
 
@@ -445,9 +456,28 @@ export class EventStore {
         }
       } else if (event.type === 'message.assistant') {
         const payload = event.payload as { content: Message['content'] };
-        const contentArray = Array.isArray(payload.content) ? payload.content : [];
+
+        // Restore truncated tool_use inputs from tool.call events
+        // This is necessary because content-normalizer truncates large inputs (>5KB) for storage,
+        // but the API requires the full arguments to be sent back on session resume
+        let restoredContent: Message['content'];
+        if (Array.isArray(payload.content)) {
+          restoredContent = payload.content.map((block: { type: string; id?: string; input?: { _truncated?: boolean } }) => {
+            if (block.type === 'tool_use' && block.input?._truncated && block.id) {
+              const fullArgs = toolCallArgsMap.get(block.id);
+              if (fullArgs) {
+                return { ...block, input: fullArgs };
+              }
+            }
+            return block;
+          }) as Message['content'];
+        } else {
+          // Content is a string, no restoration needed
+          restoredContent = payload.content;
+        }
 
         // Check if this assistant message contains tool_use blocks
+        const contentArray = Array.isArray(restoredContent) ? restoredContent : [];
         const hasToolUse = contentArray.some(
           (block: { type: string }) => block.type === 'tool_use'
         );
@@ -468,11 +498,11 @@ export class EventStore {
 
         // Merge consecutive assistant messages for robustness
         if (lastMessageAfterFlush && lastMessageAfterFlush.role === 'assistant') {
-          lastMessageAfterFlush.content = mergeMessageContent(lastMessageAfterFlush.content, payload.content, 'assistant');
+          lastMessageAfterFlush.content = mergeMessageContent(lastMessageAfterFlush.content, restoredContent, 'assistant');
         } else {
           messages.push({
             role: 'assistant',
-            content: payload.content,
+            content: restoredContent,
           });
         }
 
@@ -521,15 +551,25 @@ export class EventStore {
 
     const ancestors = await this.backend.getAncestors(eventId);
 
-    // Two-pass reconstruction: First collect deleted event IDs and config state
+    // Two-pass reconstruction: First collect deleted event IDs, config state, and tool.call arguments
     const deletedEventIds = new Set<EventId>();
     let reasoningLevel: 'low' | 'medium' | 'high' | 'xhigh' | undefined;
     let systemPrompt: string | undefined;
+
+    // Build toolCallId -> full arguments map from tool.call events
+    // This is used to restore truncated tool_use inputs in message.assistant events
+    const toolCallArgsMap = new Map<string, Record<string, unknown>>();
 
     for (const evt of ancestors) {
       if (evt.type === 'message.deleted') {
         const payload = evt.payload as { targetEventId: EventId };
         deletedEventIds.add(payload.targetEventId);
+      } else if (evt.type === 'tool.call') {
+        // Collect full arguments from tool.call events for restoring truncated inputs
+        const payload = evt.payload as { toolCallId: string; arguments: Record<string, unknown> };
+        if (payload.toolCallId && payload.arguments) {
+          toolCallArgsMap.set(payload.toolCallId, payload.arguments);
+        }
       } else if (evt.type === 'config.reasoning_level') {
         const payload = evt.payload as { newLevel?: 'low' | 'medium' | 'high' | 'xhigh' };
         reasoningLevel = payload.newLevel;
@@ -672,9 +712,28 @@ export class EventStore {
           turn?: number;
           tokenUsage?: TokenUsage;
         };
-        const contentArray = Array.isArray(payload.content) ? payload.content : [];
+
+        // Restore truncated tool_use inputs from tool.call events
+        // This is necessary because content-normalizer truncates large inputs (>5KB) for storage,
+        // but the API requires the full arguments to be sent back on session resume
+        let restoredContent: Message['content'];
+        if (Array.isArray(payload.content)) {
+          restoredContent = payload.content.map((block: { type: string; id?: string; input?: { _truncated?: boolean } }) => {
+            if (block.type === 'tool_use' && block.input?._truncated && block.id) {
+              const fullArgs = toolCallArgsMap.get(block.id);
+              if (fullArgs) {
+                return { ...block, input: fullArgs };
+              }
+            }
+            return block;
+          }) as Message['content'];
+        } else {
+          // Content is a string, no restoration needed
+          restoredContent = payload.content;
+        }
 
         // Check if this assistant message contains tool_use blocks
+        const contentArray = Array.isArray(restoredContent) ? restoredContent : [];
         const hasToolUse = contentArray.some(
           (block: { type: string }) => block.type === 'tool_use'
         );
@@ -695,13 +754,13 @@ export class EventStore {
 
         // Merge consecutive assistant messages for robustness
         if (lastMessageAfterFlush && lastMessageAfterFlush.role === 'assistant') {
-          lastMessageAfterFlush.content = mergeMessageContent(lastMessageAfterFlush.content, payload.content, 'assistant');
+          lastMessageAfterFlush.content = mergeMessageContent(lastMessageAfterFlush.content, restoredContent, 'assistant');
           // Still track the event ID even when merging
           messageEventIds.push(evt.id);
         } else {
           messages.push({
             role: 'assistant',
-            content: payload.content,
+            content: restoredContent,
           });
           messageEventIds.push(evt.id); // Track eventId for deletion
         }
