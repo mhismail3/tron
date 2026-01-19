@@ -56,6 +56,11 @@ class RPCClient: ObservableObject {
     var onSubagentFailed: ((SubagentFailedEvent) -> Void)?
     var onSubagentEvent: ((SubagentForwardedEvent) -> Void)?  // Forwarded events for detail sheet
 
+    // UI Canvas event callbacks (for RenderAppUI tool)
+    var onUIRenderStart: ((UIRenderStartEvent) -> Void)?
+    var onUIRenderChunk: ((UIRenderChunkEvent) -> Void)?
+    var onUIRenderComplete: ((UIRenderCompleteEvent) -> Void)?
+
     // Global event callbacks (for ALL sessions - used by dashboard)
     var onGlobalComplete: ((String) -> Void)?  // sessionId
     var onGlobalError: ((String, String) -> Void)?  // sessionId, message
@@ -254,6 +259,19 @@ class RPCClient: ObservableObject {
         case .subagentEvent(let e):
             guard checkSession(e.sessionId) else { return }
             onSubagentEvent?(e)
+
+        // UI Canvas events
+        case .uiRenderStart(let e):
+            guard checkSession(e.sessionId) else { return }
+            onUIRenderStart?(e)
+
+        case .uiRenderChunk(let e):
+            guard checkSession(e.sessionId) else { return }
+            onUIRenderChunk?(e)
+
+        case .uiRenderComplete(let e):
+            guard checkSession(e.sessionId) else { return }
+            onUIRenderComplete?(e)
 
         case .unknown(let type):
             logger.debug("Unknown event type: \(type)", category: .events)

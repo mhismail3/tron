@@ -155,6 +155,16 @@
 		TRON0001TYPO0001GRAPHY01 /* TronTypography.swift in Sources */ = {isa = PBXBuildFile; fileRef = TRON0001TYPO0001FILEREF1 /* TronTypography.swift */; };
 		TRON0002ERRH0001BUILD001 /* ErrorHandler.swift in Sources */ = {isa = PBXBuildFile; fileRef = TRON0002ERRH0001FILEREF1 /* ErrorHandler.swift */; };
 		TRON0002ERRO0001BUILD001 /* TronError.swift in Sources */ = {isa = PBXBuildFile; fileRef = TRON0002ERRO0001FILEREF1 /* TronError.swift */; };
+		UICV0001BULD0001SOURCE01 /* UICanvas.swift in Sources */ = {isa = PBXBuildFile; fileRef = UICV0001FREF0001FILEREF1 /* UICanvas.swift */; };
+		UICV0002BULD0001SOURCE01 /* UICanvasState.swift in Sources */ = {isa = PBXBuildFile; fileRef = UICV0002FREF0001FILEREF1 /* UICanvasState.swift */; };
+		UICV0003BULD0001SOURCE01 /* UICanvasSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = UICV0003FREF0001FILEREF1 /* UICanvasSheet.swift */; };
+		UICV0004BULD0001SOURCE01 /* UICanvasParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = UICV0004FREF0001FILEREF1 /* UICanvasParser.swift */; };
+		UICV0005BULD0001SOURCE01 /* UIComponentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = UICV0005FREF0001FILEREF1 /* UIComponentView.swift */; };
+		UICV0006BULD0001SOURCE01 /* LayoutComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = UICV0006FREF0001FILEREF1 /* LayoutComponents.swift */; };
+		UICV0007BULD0001SOURCE01 /* ContentComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = UICV0007FREF0001FILEREF1 /* ContentComponents.swift */; };
+		UICV0008BULD0001SOURCE01 /* InteractiveComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = UICV0008FREF0001FILEREF1 /* InteractiveComponents.swift */; };
+		UICV0009BULD0001SOURCE01 /* DataComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = UICV0009FREF0001FILEREF1 /* DataComponents.swift */; };
+		UICV0010BULD0001SOURCE01 /* StructuralComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = UICV0010FREF0001FILEREF1 /* StructuralComponents.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -324,6 +334,16 @@
 		TRON0001TYPO0001FILEREF1 /* TronTypography.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TronTypography.swift; sourceTree = "<group>"; };
 		TRON0002ERRH0001FILEREF1 /* ErrorHandler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ErrorHandler.swift; sourceTree = "<group>"; };
 		TRON0002ERRO0001FILEREF1 /* TronError.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TronError.swift; sourceTree = "<group>"; };
+		UICV0001FREF0001FILEREF1 /* UICanvas.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UICanvas.swift; sourceTree = "<group>"; };
+		UICV0002FREF0001FILEREF1 /* UICanvasState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UICanvasState.swift; sourceTree = "<group>"; };
+		UICV0003FREF0001FILEREF1 /* UICanvasSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UICanvasSheet.swift; sourceTree = "<group>"; };
+		UICV0004FREF0001FILEREF1 /* UICanvasParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UICanvasParser.swift; sourceTree = "<group>"; };
+		UICV0005FREF0001FILEREF1 /* UIComponentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UIComponentView.swift; sourceTree = "<group>"; };
+		UICV0006FREF0001FILEREF1 /* LayoutComponents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LayoutComponents.swift; sourceTree = "<group>"; };
+		UICV0007FREF0001FILEREF1 /* ContentComponents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentComponents.swift; sourceTree = "<group>"; };
+		UICV0008FREF0001FILEREF1 /* InteractiveComponents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InteractiveComponents.swift; sourceTree = "<group>"; };
+		UICV0009FREF0001FILEREF1 /* DataComponents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DataComponents.swift; sourceTree = "<group>"; };
+		UICV0010FREF0001FILEREF1 /* StructuralComponents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StructuralComponents.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXGroup section */
@@ -393,6 +413,7 @@
 				18C18EEFAB81D6052EB39694 /* TronLogger.swift */,
 				767C173B9461A1CE0689EA1C /* VoiceNotesRecorder.swift */,
 				79449B7B56831FA69C873699 /* WebSocketService.swift */,
+				UICV0004FREF0001FILEREF1 /* UICanvasParser.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -492,8 +513,23 @@
 				192E08DF91426E43F5AFE03F /* VoiceNotesListView.swift */,
 				7906E8A2A558AE0B39C7AE12 /* VoiceNotesRecordingSheet.swift */,
 				33342D92F24E04282ECE2DBA /* WorktreeStatusView.swift */,
+				UICV0003FREF0001FILEREF1 /* UICanvasSheet.swift */,
+				UICV0000GRUP0001GRUPREF1 /* UICanvas */,
 			);
 			path = Views;
+			sourceTree = "<group>";
+		};
+		UICV0000GRUP0001GRUPREF1 /* UICanvas */ = {
+			isa = PBXGroup;
+			children = (
+				UICV0005FREF0001FILEREF1 /* UIComponentView.swift */,
+				UICV0006FREF0001FILEREF1 /* LayoutComponents.swift */,
+				UICV0007FREF0001FILEREF1 /* ContentComponents.swift */,
+				UICV0008FREF0001FILEREF1 /* InteractiveComponents.swift */,
+				UICV0009FREF0001FILEREF1 /* DataComponents.swift */,
+				UICV0010FREF0001FILEREF1 /* StructuralComponents.swift */,
+			);
+			path = UICanvas;
 			sourceTree = "<group>";
 		};
 		92E678876BE6D4CFFD746FD7 /* ViewModels */ = {
@@ -584,6 +620,7 @@
 				AA11BB22CC33DD44EE55FF03 /* ContextTrackingState.swift */,
 				SBAG0001FREF0001FILEREF1 /* SubagentState.swift */,
 				AA11BB22CC33DD44EE55FF02 /* PlanModeState.swift */,
+				UICV0002FREF0001FILEREF1 /* UICanvasState.swift */,
 			);
 			path = State;
 			sourceTree = "<group>";
@@ -621,6 +658,7 @@
 				EBE831F49A028C0325D5391D /* Rules.swift */,
 				7420CAC58E7D403E0BEDEBC5 /* Skill.swift */,
 				D8570EA3731FBC504D7AB252 /* UnifiedEventTransformer.swift */,
+				UICV0001FREF0001FILEREF1 /* UICanvas.swift */,
 				5968571F13D0263D95DDF1E3 /* Payloads */,
 			);
 			path = Models;
@@ -916,6 +954,16 @@
 				EE11FF22AA33BB44CC55DD04 /* WorkspaceSelector.swift in Sources */,
 				79AB0D77F24CDAFC84452DF2 /* GitHubURLParser.swift in Sources */,
 				E013ABB33A990625CCC13ECC /* CloneRepoSheet.swift in Sources */,
+				UICV0001BULD0001SOURCE01 /* UICanvas.swift in Sources */,
+				UICV0002BULD0001SOURCE01 /* UICanvasState.swift in Sources */,
+				UICV0003BULD0001SOURCE01 /* UICanvasSheet.swift in Sources */,
+				UICV0004BULD0001SOURCE01 /* UICanvasParser.swift in Sources */,
+				UICV0005BULD0001SOURCE01 /* UIComponentView.swift in Sources */,
+				UICV0006BULD0001SOURCE01 /* LayoutComponents.swift in Sources */,
+				UICV0007BULD0001SOURCE01 /* ContentComponents.swift in Sources */,
+				UICV0008BULD0001SOURCE01 /* InteractiveComponents.swift in Sources */,
+				UICV0009BULD0001SOURCE01 /* DataComponents.swift in Sources */,
+				UICV0010BULD0001SOURCE01 /* StructuralComponents.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

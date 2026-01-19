@@ -22,6 +22,7 @@ import {
   AskUserQuestionTool,
   OpenBrowserTool,
   AstGrepTool,
+  RenderAppUITool,
   SpawnSubagentTool,
   QuerySubagentTool,
   WaitForSubagentTool,
@@ -130,6 +131,7 @@ export class AgentFactory {
       new AskUserQuestionTool({ workingDirectory }),
       new OpenBrowserTool({ workingDirectory }),
       new AstGrepTool({ workingDirectory }),
+      new RenderAppUITool({ workingDirectory }),
     ];
 
     // Sub-agent tools: Only add SpawnSubagent for top-level agents.

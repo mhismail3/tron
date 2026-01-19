@@ -606,6 +606,62 @@ struct PlanModeExitedEvent: Decodable {
     var planPath: String? { data.planPath }
 }
 
+// MARK: - UI Canvas Events (RenderAppUI tool)
+
+/// Event fired when UI canvas rendering starts
+struct UIRenderStartEvent: Decodable {
+    let type: String
+    let sessionId: String?
+    let timestamp: String?
+    let data: UIRenderStartData
+
+    struct UIRenderStartData: Decodable {
+        let canvasId: String
+        let title: String?
+        let toolCallId: String
+    }
+
+    var canvasId: String { data.canvasId }
+    var title: String? { data.title }
+    var toolCallId: String { data.toolCallId }
+}
+
+/// Event fired during progressive UI render with JSON chunks
+struct UIRenderChunkEvent: Decodable {
+    let type: String
+    let sessionId: String?
+    let timestamp: String?
+    let data: UIRenderChunkData
+
+    struct UIRenderChunkData: Decodable {
+        let canvasId: String
+        let chunk: String
+        let accumulated: String
+    }
+
+    var canvasId: String { data.canvasId }
+    var chunk: String { data.chunk }
+    var accumulated: String { data.accumulated }
+}
+
+/// Event fired when UI canvas rendering completes
+struct UIRenderCompleteEvent: Decodable {
+    let type: String
+    let sessionId: String?
+    let timestamp: String?
+    let data: UIRenderCompleteData
+
+    struct UIRenderCompleteData: Decodable {
+        let canvasId: String
+        let ui: [String: AnyCodable]?
+        let state: [String: AnyCodable]?
+    }
+
+    var canvasId: String { data.canvasId }
+    var ui: [String: AnyCodable]? { data.ui }
+    var state: [String: AnyCodable]? { data.state }
+}
+
 // MARK: - Event Type Constants
 
 enum EventType: String {
@@ -634,6 +690,10 @@ enum EventType: String {
     case subagentCompleted = "agent.subagent_completed"
     case subagentFailed = "agent.subagent_failed"
     case subagentEvent = "agent.subagent_event"  // Forwarded event from subagent
+    // UI Canvas events
+    case uiRenderStart = "agent.ui_render_start"
+    case uiRenderChunk = "agent.ui_render_chunk"
+    case uiRenderComplete = "agent.ui_render_complete"
 }
 
 // MARK: - Event Parsing
@@ -663,6 +723,10 @@ enum ParsedEvent {
     case subagentCompleted(SubagentCompletedEvent)
     case subagentFailed(SubagentFailedEvent)
     case subagentEvent(SubagentForwardedEvent)  // Forwarded event from subagent
+    // UI Canvas events
+    case uiRenderStart(UIRenderStartEvent)
+    case uiRenderChunk(UIRenderChunkEvent)
+    case uiRenderComplete(UIRenderCompleteEvent)
     case unknown(String)
 
     static func parse(from data: Data) -> ParsedEvent? {
@@ -787,6 +851,22 @@ enum ParsedEvent {
                 let event = try decoder.decode(SubagentForwardedEvent.self, from: data)
                 logger.debug("Subagent event forwarded: \(event.subagentSessionId) - \(event.event.type)", category: .events)
                 return .subagentEvent(event)
+
+            // UI Canvas events
+            case EventType.uiRenderStart.rawValue:
+                let event = try decoder.decode(UIRenderStartEvent.self, from: data)
+                logger.info("UI render start: \(event.canvasId)", category: .events)
+                return .uiRenderStart(event)
+
+            case EventType.uiRenderChunk.rawValue:
+                let event = try decoder.decode(UIRenderChunkEvent.self, from: data)
+                logger.debug("UI render chunk: \(event.canvasId)", category: .events)
+                return .uiRenderChunk(event)
+
+            case EventType.uiRenderComplete.rawValue:
+                let event = try decoder.decode(UIRenderCompleteEvent.self, from: data)
+                logger.info("UI render complete: \(event.canvasId)", category: .events)
+                return .uiRenderComplete(event)
 
             default:
                 logger.debug("Unknown event type: \(type)", category: .events)

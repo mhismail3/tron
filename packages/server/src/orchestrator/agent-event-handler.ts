@@ -416,6 +416,27 @@ export class AgentEventHandler {
       },
     });
 
+    // Emit UI render start event for RenderAppUI tool
+    if (toolStartEvent.toolName === 'RenderAppUI' && toolStartEvent.arguments) {
+      const args = toolStartEvent.arguments;
+      this.config.emit('agent_event', {
+        type: 'agent.ui_render_start',
+        sessionId,
+        timestamp,
+        data: {
+          canvasId: args.canvasId as string,
+          title: args.title as string | undefined,
+          toolCallId: toolStartEvent.toolCallId,
+        },
+      });
+
+      logger.debug('Emitted ui_render_start', {
+        sessionId,
+        canvasId: args.canvasId,
+        toolCallId: toolStartEvent.toolCallId,
+      });
+    }
+
     // Store discrete tool.call event (linearized)
     this.config.appendEventLinearized(sessionId, 'tool.call' as EventType, {
       toolCallId: toolStartEvent.toolCallId,
@@ -493,6 +514,29 @@ export class AgentEventHandler {
         details: resultDetails,
       },
     });
+
+    // Emit UI render complete event for RenderAppUI tool
+    if (toolEndEvent.toolName === 'RenderAppUI' && !toolEndEvent.isError) {
+      // Extract UI data from details if available
+      const detailsObj = resultDetails as { canvasId?: string; ui?: unknown; state?: unknown } | undefined;
+      if (detailsObj?.canvasId) {
+        this.config.emit('agent_event', {
+          type: 'agent.ui_render_complete',
+          sessionId,
+          timestamp,
+          data: {
+            canvasId: detailsObj.canvasId,
+            ui: detailsObj.ui,
+            state: detailsObj.state,
+          },
+        });
+
+        logger.debug('Emitted ui_render_complete', {
+          sessionId,
+          canvasId: detailsObj.canvasId,
+        });
+      }
+    }
 
     // Store discrete tool.result event (linearized)
     this.config.appendEventLinearized(sessionId, 'tool.result' as EventType, {

@@ -17,6 +17,12 @@ export {
 export { OpenBrowserTool, type OpenBrowserConfig } from './open-browser.js';
 export { AstGrepTool, type AstGrepToolConfig, type AstGrepMatch, type AstGrepDetails } from './ast-grep.js';
 
+// UI rendering tool
+export {
+  RenderAppUITool,
+  type RenderAppUIConfig,
+} from './render-app-ui.js';
+
 // Sub-agent spawning tools
 export {
   SpawnSubagentTool,

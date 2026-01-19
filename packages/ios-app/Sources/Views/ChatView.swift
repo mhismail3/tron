@@ -332,6 +332,12 @@ struct ChatView: View {
                 .presentationDetents([.medium, .large])
             }
         }
+        .sheet(isPresented: Binding(
+            get: { viewModel.uiCanvasState.showSheet },
+            set: { viewModel.uiCanvasState.showSheet = $0 }
+        )) {
+            UICanvasSheet(state: viewModel.uiCanvasState)
+        }
         .alert("Error", isPresented: $viewModel.showError) {
             Button("OK") { viewModel.clearError() }
         } message: {

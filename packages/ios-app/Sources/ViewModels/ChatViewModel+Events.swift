@@ -697,4 +697,53 @@ extension ChatViewModel {
             logger.error("Failed to sync session events: \(error.localizedDescription)", category: .events)
         }
     }
+
+    // MARK: - UI Canvas Event Handlers
+
+    func handleUIRenderStart(_ event: UIRenderStartEvent) {
+        logger.info("UI render started: canvasId=\(event.canvasId), title=\(event.title ?? "none")", category: .events)
+
+        // Start rendering in canvas state (this will show the sheet)
+        uiCanvasState.startRender(
+            canvasId: event.canvasId,
+            title: event.title,
+            toolCallId: event.toolCallId
+        )
+    }
+
+    func handleUIRenderChunk(_ event: UIRenderChunkEvent) {
+        logger.verbose("UI render chunk: canvasId=\(event.canvasId), +\(event.chunk.count) chars", category: .events)
+
+        // Update the canvas with the new chunk
+        uiCanvasState.updateRender(
+            canvasId: event.canvasId,
+            chunk: event.chunk,
+            accumulated: event.accumulated
+        )
+    }
+
+    func handleUIRenderComplete(_ event: UIRenderCompleteEvent) {
+        logger.info("UI render complete: canvasId=\(event.canvasId)", category: .events)
+
+        // Convert [String: AnyCodable] to [String: Any] for parsing
+        guard let uiDict = event.ui else {
+            logger.error("No UI dictionary for canvas \(event.canvasId)", category: .events)
+            return
+        }
+
+        let rawDict: [String: Any] = uiDict.mapValues { $0.value }
+
+        // Parse the raw UI dictionary into UICanvasComponent
+        guard let component = UICanvasParser.parse(rawDict) else {
+            logger.error("Failed to parse UI component for canvas \(event.canvasId)", category: .events)
+            return
+        }
+
+        // Complete the render with the final UI tree
+        uiCanvasState.completeRender(
+            canvasId: event.canvasId,
+            ui: component,
+            state: event.state
+        )
+    }
 }

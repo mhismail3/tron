@@ -56,6 +56,8 @@ class ChatViewModel: ObservableObject {
     let contextState = ContextTrackingState()
     /// Subagent state (tracking spawned subagents for chip UI)
     let subagentState = SubagentState()
+    /// UI canvas state (for RenderAppUI tool)
+    let uiCanvasState = UICanvasState()
 
     // MARK: - Browser State (Proxies for backward compatibility)
 
@@ -452,6 +454,19 @@ class ChatViewModel: ObservableObject {
 
         rpcClient.onSubagentEvent = { [weak self] event in
             self?.handleSubagentForwardedEvent(event)
+        }
+
+        // UI Canvas event handlers
+        rpcClient.onUIRenderStart = { [weak self] event in
+            self?.handleUIRenderStart(event)
+        }
+
+        rpcClient.onUIRenderChunk = { [weak self] event in
+            self?.handleUIRenderChunk(event)
+        }
+
+        rpcClient.onUIRenderComplete = { [weak self] event in
+            self?.handleUIRenderComplete(event)
         }
     }
 

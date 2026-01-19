@@ -433,8 +433,8 @@ const createTestOrchestrator = async (testDir: string) => {
     eventStore,
   });
 
-  // Mock auth for tests
-  (orchestrator as any).cachedAuth = { type: 'api_key', apiKey: 'test-key' };
+  // Mock auth for tests - must set on authProvider, not orchestrator
+  (orchestrator as any).authProvider.setCachedAuth({ type: 'api_key', apiKey: 'test-key' });
   (orchestrator as any).initialized = true;
 
   return { orchestrator, eventStore };
