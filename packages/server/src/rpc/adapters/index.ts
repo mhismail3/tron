@@ -7,6 +7,7 @@
 // Simple adapters (no orchestrator dependency)
 export { createTranscriptionAdapter } from './transcription.adapter.js';
 export { createMemoryAdapter } from './memory.adapter.js';
+export { createCanvasAdapter } from './canvas.adapter.js';
 
 // Orchestrator-dependent adapters
 export { createBrowserAdapter } from './browser.adapter.js';

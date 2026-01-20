@@ -77,6 +77,8 @@ export interface RpcContext {
   skillManager?: SkillRpcManager;
   /** Tool call tracker for interactive tools (optional) */
   toolCallTracker?: ToolCallTrackerManager;
+  /** Canvas manager for UI artifact persistence (optional) */
+  canvasManager?: CanvasRpcManager;
 }
 
 /**
@@ -212,6 +214,23 @@ export interface SkillRpcManager {
   removeSkill(params: SkillRemoveParams): Promise<SkillRemoveResult>;
 }
 
+/**
+ * Canvas manager interface for RPC operations
+ */
+export interface CanvasRpcManager {
+  getCanvas(canvasId: string): Promise<{
+    found: boolean;
+    canvas?: {
+      canvasId: string;
+      sessionId: string;
+      title?: string;
+      ui: Record<string, unknown>;
+      state?: Record<string, unknown>;
+      savedAt: string;
+    };
+  }>;
+}
+
 // =============================================================================
 // Middleware Types
 // =============================================================================
@@ -245,6 +264,7 @@ import { createSkillHandlers } from './handlers/skill.handler.js';
 import { createFileHandlers } from './handlers/file.handler.js';
 import { createToolHandlers } from './handlers/tool.handler.js';
 import { createVoiceNotesHandlers } from './handlers/voiceNotes.handler.js';
+import { createCanvasHandlers } from './handlers/canvas.handler.js';
 
 export class RpcHandler extends EventEmitter {
   private context: RpcContext;
@@ -276,6 +296,7 @@ export class RpcHandler extends EventEmitter {
     this.registry.registerAll(createFileHandlers());
     this.registry.registerAll(createToolHandlers());
     this.registry.registerAll(createVoiceNotesHandlers());
+    this.registry.registerAll(createCanvasHandlers());
 
     logger.debug('RPC handler initialized', {
       registeredMethods: this.registry.list(),

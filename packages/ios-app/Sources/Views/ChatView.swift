@@ -559,9 +559,22 @@ struct ChatView: View {
                                         viewModel.subagentState.showDetails(with: data)
                                     },
                                     onRenderAppUITap: { data in
-                                        // Set active canvas and show sheet
-                                        viewModel.uiCanvasState.activeCanvasId = data.canvasId
-                                        viewModel.uiCanvasState.showSheet = true
+                                        // Load canvas from server if not in memory, then show sheet
+                                        Task {
+                                            // Try to load from server (skips if already in memory)
+                                            let loaded = await viewModel.uiCanvasState.loadFromServer(
+                                                canvasId: data.canvasId,
+                                                rpcClient: rpcClient
+                                            )
+
+                                            if loaded {
+                                                viewModel.uiCanvasState.activeCanvasId = data.canvasId
+                                                viewModel.uiCanvasState.showSheet = true
+                                            } else {
+                                                // Canvas not found on server - show error
+                                                viewModel.showErrorAlert("Canvas not found")
+                                            }
+                                        }
                                     }
                                 )
                                 .id(message.id)

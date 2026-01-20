@@ -53,6 +53,7 @@ import { createSkillAdapter } from './adapters/skill.adapter.js';
 // Standalone adapters (no orchestrator dependency)
 import { createMemoryAdapter } from './adapters/memory.adapter.js';
 import { createTranscriptionAdapter } from './adapters/transcription.adapter.js';
+import { createCanvasAdapter } from './adapters/canvas.adapter.js';
 
 // =============================================================================
 // Context Factory
@@ -120,6 +121,9 @@ export function createRpcContext(
     context.contextManager = createContextAdapter(deps);
     context.browserManager = createBrowserAdapter(deps);
     context.skillManager = createSkillAdapter(deps);
+
+    // Canvas manager is standalone (no orchestrator dependency)
+    context.canvasManager = createCanvasAdapter();
   }
 
   return context;

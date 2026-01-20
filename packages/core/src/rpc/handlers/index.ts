@@ -149,3 +149,8 @@ export {
   handleVoiceNotesDelete,
   createVoiceNotesHandlers,
 } from './voiceNotes.handler.js';
+
+export {
+  handleCanvasGet,
+  createCanvasHandlers,
+} from './canvas.handler.js';

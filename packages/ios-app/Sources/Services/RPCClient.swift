@@ -1119,6 +1119,18 @@ class RPCClient: ObservableObject {
         return try await ws.send(method: "skill.remove", params: params)
     }
 
+    // MARK: - Canvas Methods
+
+    /// Get a persisted canvas artifact from the server
+    func getCanvas(canvasId: String) async throws -> CanvasGetResult {
+        guard let ws = webSocket else {
+            throw RPCClientError.connectionNotEstablished
+        }
+
+        let params = CanvasGetParams(canvasId: canvasId)
+        return try await ws.send(method: "canvas.get", params: params)
+    }
+
     // MARK: - File Reading
 
     /// Read file content from server

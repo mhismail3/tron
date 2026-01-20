@@ -224,6 +224,57 @@ final class UICanvasState {
         return canvases[canvasId]
     }
 
+    // MARK: - Server Loading
+
+    /// Load a persisted canvas artifact from the server.
+    /// Used when tapping a chip from a previous session where the canvas isn't in memory.
+    func loadFromServer(canvasId: String, rpcClient: RPCClient) async -> Bool {
+        // Skip if already loaded
+        if canvases[canvasId] != nil {
+            return true
+        }
+
+        do {
+            let result = try await rpcClient.getCanvas(canvasId: canvasId)
+
+            guard result.found, let canvasData = result.canvas else {
+                logger.warning("Canvas not found on server: \(canvasId)", category: .ui)
+                return false
+            }
+
+            // Convert [String: AnyCodable] to [String: Any] for the parser
+            let uiDict = canvasData.ui.mapValues { $0.value }
+
+            // Parse the UI tree from the server response
+            guard let component = UICanvasParser.parse(uiDict) else {
+                logger.error("Failed to parse canvas UI from server: \(canvasId)", category: .ui)
+                return false
+            }
+
+            // Create canvas data with complete status
+            var canvas = UICanvasData(
+                canvasId: canvasId,
+                title: canvasData.title,
+                toolCallId: "",  // Not available from persisted data
+                status: .complete
+            )
+            canvas.parsedRoot = component
+            if let state = canvasData.state {
+                // Keep as [String: AnyCodable] for canvas state
+                canvas.state = state
+            }
+
+            // Store in memory
+            canvases[canvasId] = canvas
+            logger.info("Loaded canvas from server: \(canvasId)", category: .ui)
+            return true
+
+        } catch {
+            logger.error("Failed to load canvas from server: \(canvasId) - \(error)", category: .ui)
+            return false
+        }
+    }
+
     // MARK: - Chip Data Helper
 
     /// Get chip data for a canvas (used for reconstruction and status sync)

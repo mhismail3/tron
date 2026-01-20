@@ -25,6 +25,7 @@
 import {
   createLogger,
   calculateCost,
+  saveCanvasArtifact,
   type TronEvent,
   type SessionId,
   type EventType,
@@ -552,6 +553,7 @@ export class AgentEventHandler {
       // Extract details from result
       const detailsObj = resultDetails as {
         canvasId?: string;
+        title?: string;
         ui?: unknown;
         state?: unknown;
         needsRetry?: boolean;
@@ -610,6 +612,22 @@ export class AgentEventHandler {
               ui: detailsObj.ui,
               state: detailsObj.state,
             },
+          });
+
+          // Persist canvas artifact to disk for session resumption
+          saveCanvasArtifact({
+            canvasId,
+            sessionId,
+            title: detailsObj.title,
+            ui: detailsObj.ui as Record<string, unknown>,
+            state: detailsObj.state as Record<string, unknown> | undefined,
+            savedAt: timestamp,
+          }).catch(err => {
+            logger.error('Failed to persist canvas artifact', {
+              canvasId,
+              sessionId,
+              error: err instanceof Error ? err.message : String(err),
+            });
           });
 
           logger.debug('Emitted ui_render_complete', {

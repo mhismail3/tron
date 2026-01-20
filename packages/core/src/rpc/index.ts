@@ -24,6 +24,7 @@ export {
   type BrowserRpcManager,
   type SkillRpcManager,
   type ToolCallTrackerManager,
+  type CanvasRpcManager,
 } from './handler.js';
 
 // Registry (new approach)
