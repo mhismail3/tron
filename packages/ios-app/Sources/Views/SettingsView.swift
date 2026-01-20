@@ -71,8 +71,6 @@ struct SettingsView: View {
                     Text("Environment")
                         .font(TronTypography.caption)
                 }
-                .listRowBackground(Color.clear)
-                .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 0, trailing: 16))
 
                 // Server Section
                 Section {
@@ -101,6 +99,7 @@ struct SettingsView: View {
                     Text("Default ports: Prod (8080), Beta (8082). Only set custom port if using a non-standard port.")
                         .font(TronTypography.caption2)
                 }
+                .listSectionSpacing(24)
 
                 // Preferences Section
                 Section {
@@ -113,6 +112,7 @@ struct SettingsView: View {
                     Text("Show a confirmation dialog when archiving sessions.")
                         .font(TronTypography.caption2)
                 }
+                .listSectionSpacing(24)
 
                 // Font Style Section
                 if #available(iOS 26.0, *) {
@@ -291,6 +291,7 @@ struct FontStyleSection: View {
             Text("Adjust the casual axis of the Recursive font. Linear (0) is precise and geometric, Casual (1) is more playful and hand-drawn.")
                 .font(TronTypography.caption2)
         }
+        .listSectionSpacing(24)
     }
 
     private var casualLabel: String {
