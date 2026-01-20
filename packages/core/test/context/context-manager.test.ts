@@ -335,13 +335,13 @@ describe('ContextManager', () => {
 
     it('improves threshold after switch to larger model', () => {
       const simulator = createContextSimulator({ targetTokens: 1000 });
-      // 90% of 128k = ~115k tokens
-      const session = simulator.generateAtUtilization(90, 128_000);
+      // 88% of 128k = ~113k tokens (use 88% to stay safely in critical zone)
+      const session = simulator.generateAtUtilization(88, 128_000);
 
       const cm = createContextManager({ model: 'gpt-4o' });
       cm.setMessages(session.messages);
 
-      // At 90% of 128k, should be "critical"
+      // At 88% of 128k, should be "critical" (85-95%)
       expect(cm.getSnapshot().thresholdLevel).toBe('critical');
 
       // Switch to Gemini (1M limit)
