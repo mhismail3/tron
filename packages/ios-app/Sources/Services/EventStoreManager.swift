@@ -92,13 +92,16 @@ class EventStoreManager: ObservableObject {
                 // Update the RPC client reference with the new one from AppState
                 self.updateRPCClient(appState.rpcClient)
 
-                // Reload sessions with new origin filter
+                // Reload sessions with new origin filter (only shows existing local sessions)
                 self.loadSessions()
 
-                // Connect to the new server and sync
+                // Connect to the new server (but DON'T auto-sync)
+                // We intentionally don't call fullSync() here because:
+                // 1. User only wants to see sessions already on this device
+                // 2. Auto-populating sessions from server on environment switch is confusing
+                // 3. User can manually sync if they want to pull sessions from server
                 Task {
                     await appState.rpcClient.connect()
-                    await self.fullSync()
                 }
             }
         }
