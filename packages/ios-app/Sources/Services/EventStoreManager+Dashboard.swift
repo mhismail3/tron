@@ -35,6 +35,9 @@ extension EventStoreManager {
 
     // MARK: - Background State
 
+    /// Continuation for resuming polling when app returns to foreground
+    private static var backgroundResumeContinuation: CheckedContinuation<Void, Never>?
+
     /// Set background state to pause polling and save battery
     /// Call this from scene phase changes in TronMobileApp
     func setBackgroundState(_ inBackground: Bool) {
@@ -43,9 +46,12 @@ extension EventStoreManager {
         setIsInBackground(inBackground)
 
         if inBackground {
-            logger.info("App entering background - pausing dashboard polling", category: .session)
+            logger.info("App entering background - suspending dashboard polling", category: .session)
         } else {
             logger.info("App returning to foreground - resuming dashboard polling", category: .session)
+            // Resume any suspended polling task
+            Self.backgroundResumeContinuation?.resume()
+            Self.backgroundResumeContinuation = nil
         }
     }
 
@@ -63,9 +69,12 @@ extension EventStoreManager {
             await self?.preWarmConnection()
 
             while !Task.isCancelled {
-                // Skip polling when in background
+                // Truly suspend when in background (saves battery vs polling every 5s)
                 if self?.isInBackground == true {
-                    try? await Task.sleep(for: .seconds(5))
+                    await withCheckedContinuation { continuation in
+                        Self.backgroundResumeContinuation = continuation
+                    }
+                    // Resumed by setBackgroundState when app returns to foreground
                     continue
                 }
 

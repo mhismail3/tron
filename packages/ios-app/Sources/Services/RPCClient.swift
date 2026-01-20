@@ -28,6 +28,11 @@ class RPCClient: ObservableObject {
     @Published private(set) var currentSessionId: String?
     @Published private(set) var currentModel: String = "claude-opus-4-5-20251101"
 
+    // Model list cache (5-minute TTL to reduce redundant server calls)
+    private var modelCache: [ModelInfo]?
+    private var modelCacheTime: Date?
+    private let modelCacheTTL: TimeInterval = 300 // 5 minutes
+
     // Event callbacks (for current session)
     var onTextDelta: ((String) -> Void)?
     var onThinkingDelta: ((String) -> Void)?
@@ -628,7 +633,17 @@ class RPCClient: ObservableObject {
         return result
     }
 
-    func listModels() async throws -> [ModelInfo] {
+    /// List available models with client-side caching (5-minute TTL)
+    /// - Parameter forceRefresh: Bypass cache and fetch fresh data
+    func listModels(forceRefresh: Bool = false) async throws -> [ModelInfo] {
+        // Return cached models if still valid
+        if !forceRefresh,
+           let cached = modelCache,
+           let cacheTime = modelCacheTime,
+           Date().timeIntervalSince(cacheTime) < modelCacheTTL {
+            return cached
+        }
+
         guard let ws = webSocket else {
             throw RPCClientError.connectionNotEstablished
         }
@@ -638,7 +653,17 @@ class RPCClient: ObservableObject {
             params: EmptyParams()
         )
 
+        // Update cache
+        modelCache = result.models
+        modelCacheTime = Date()
+
         return result.models
+    }
+
+    /// Invalidate the model cache (e.g., after API key changes)
+    func invalidateModelCache() {
+        modelCache = nil
+        modelCacheTime = nil
     }
 
     // MARK: - Filesystem Methods
@@ -1021,11 +1046,18 @@ class RPCClient: ObservableObject {
     // MARK: - Browser Methods
 
     /// Start browser frame streaming for a session
+    /// - Parameters:
+    ///   - sessionId: The session to stream from
+    ///   - quality: JPEG quality (0-100, default 60)
+    ///   - maxWidth: Max frame width (default 1280)
+    ///   - maxHeight: Max frame height (default 800)
+    ///   - everyNthFrame: Skip frames for battery savings (default 2 = ~5 FPS, still smooth)
     func startBrowserStream(
         sessionId: String,
         quality: Int = 60,
         maxWidth: Int = 1280,
-        maxHeight: Int = 800
+        maxHeight: Int = 800,
+        everyNthFrame: Int = 2
     ) async throws -> BrowserStartStreamResult {
         guard let ws = webSocket else {
             throw RPCClientError.connectionNotEstablished
@@ -1037,7 +1069,7 @@ class RPCClient: ObservableObject {
             maxWidth: maxWidth,
             maxHeight: maxHeight,
             format: "jpeg",
-            everyNthFrame: 1
+            everyNthFrame: everyNthFrame
         )
 
         return try await ws.send(method: "browser.startStream", params: params)

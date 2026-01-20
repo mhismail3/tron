@@ -108,7 +108,8 @@ protocol RPCClientProtocol: ObservableObject {
 
     // MARK: - Model Methods
     func switchModel(_ sessionId: String, model: String) async throws -> ModelSwitchResult
-    func listModels() async throws -> [ModelInfo]
+    func listModels(forceRefresh: Bool) async throws -> [ModelInfo]
+    func invalidateModelCache()
 
     // MARK: - Filesystem Methods
     func listDirectory(path: String?, showHidden: Bool) async throws -> DirectoryListResult
@@ -177,7 +178,8 @@ protocol RPCClientProtocol: ObservableObject {
         sessionId: String,
         quality: Int,
         maxWidth: Int,
-        maxHeight: Int
+        maxHeight: Int,
+        everyNthFrame: Int
     ) async throws -> BrowserStartStreamResult
 
     func stopBrowserStream(sessionId: String) async throws -> BrowserStopStreamResult
@@ -285,8 +287,12 @@ extension RPCClientProtocol {
         try await listVoiceNotes(limit: limit, offset: offset)
     }
 
-    func startBrowserStream(sessionId: String, quality: Int = 60, maxWidth: Int = 1280, maxHeight: Int = 800) async throws -> BrowserStartStreamResult {
-        try await startBrowserStream(sessionId: sessionId, quality: quality, maxWidth: maxWidth, maxHeight: maxHeight)
+    func startBrowserStream(sessionId: String, quality: Int = 60, maxWidth: Int = 1280, maxHeight: Int = 800, everyNthFrame: Int = 2) async throws -> BrowserStartStreamResult {
+        try await startBrowserStream(sessionId: sessionId, quality: quality, maxWidth: maxWidth, maxHeight: maxHeight, everyNthFrame: everyNthFrame)
+    }
+
+    func listModels(forceRefresh: Bool = false) async throws -> [ModelInfo] {
+        try await listModels(forceRefresh: forceRefresh)
     }
 
     func listSkills(sessionId: String? = nil, source: String? = nil) async throws -> SkillListResponse {

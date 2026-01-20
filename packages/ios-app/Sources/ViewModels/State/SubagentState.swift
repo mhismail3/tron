@@ -63,6 +63,9 @@ final class SubagentState {
     /// Whether to show the subagent detail sheet
     var showDetailSheet = false
 
+    /// Maximum events to keep per subagent to prevent unbounded memory growth
+    private let maxEventsPerSubagent = 500
+
     init() {}
 
     // MARK: - Subagent Lifecycle
@@ -168,6 +171,17 @@ final class SubagentState {
 
     /// Tracks accumulated output text per subagent (for merging text deltas)
     private var accumulatedOutput: [String: String] = [:]
+
+    /// Enforce memory limit by evicting oldest events if over limit
+    private func enforceEventLimit(for subagentSessionId: String) {
+        guard var events = subagentEvents[subagentSessionId],
+              events.count > maxEventsPerSubagent else { return }
+
+        // Remove oldest events (from the front) to stay under limit
+        let excess = events.count - maxEventsPerSubagent
+        events.removeFirst(excess)
+        subagentEvents[subagentSessionId] = events
+    }
 
     /// Add a forwarded event from a subagent
     func addForwardedEvent(
@@ -286,6 +300,9 @@ final class SubagentState {
         default:
             break // Ignore unknown events
         }
+
+        // Enforce memory limit to prevent unbounded growth
+        enforceEventLimit(for: subagentSessionId)
     }
 
     // MARK: - Formatting Helpers
@@ -424,7 +441,14 @@ final class SubagentState {
         do {
             let rawEvents = try eventDB.getEventsBySession(subagentSessionId)
             let messages = UnifiedEventTransformer.transformPersistedEvents(rawEvents)
-            subagentEvents[subagentSessionId] = convertMessagesToEventItems(messages)
+            var items = convertMessagesToEventItems(messages)
+
+            // Enforce memory limit on loaded events (keep most recent)
+            if items.count > maxEventsPerSubagent {
+                items = Array(items.suffix(maxEventsPerSubagent))
+            }
+
+            subagentEvents[subagentSessionId] = items
         } catch {
             // Failed to load - leave empty, will show "no activity" message
             subagentEvents[subagentSessionId] = []
