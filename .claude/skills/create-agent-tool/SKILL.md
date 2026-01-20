@@ -1,6 +1,19 @@
-# Create Agent Tool
-
-Guide for creating a new tool that the agent can use to trigger actions in the iOS app.
+---
+name: Create Agent Tool
+description: Guide for creating a new tool that the agent can use to trigger actions in the iOS app
+autoInject: false
+version: "1.0.0"
+tools:
+  - Read
+  - Edit
+  - Write
+  - Bash
+tags:
+  - development
+  - tools
+  - ios
+  - typescript
+---
 
 ## Overview
 
