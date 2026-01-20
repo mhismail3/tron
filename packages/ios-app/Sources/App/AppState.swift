@@ -15,11 +15,8 @@ struct ServerSettingsChanged {
 
 @MainActor
 class AppState: ObservableObject {
-    #if BETA
+    // Default to Beta (8082) for all builds
     private static let defaultPort = "8082"
-    #else
-    private static let defaultPort = "8080"
-    #endif
 
     @AppStorage("serverHost") private var serverHost = "localhost"
     @AppStorage("serverPort") private var serverPort = AppState.defaultPort
@@ -53,7 +50,7 @@ class AppState: ObservableObject {
     }
 
     /// Default fallback URL when user-provided settings are invalid
-    private static let fallbackURL = URL(string: "ws://localhost:8080/ws")!
+    private static let fallbackURL = URL(string: "ws://localhost:8082/ws")!
 
     var serverURL: URL {
         let scheme = useTLS ? "wss" : "ws"

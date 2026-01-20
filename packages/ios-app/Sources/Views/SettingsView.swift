@@ -24,17 +24,13 @@ struct SettingsView: View {
         // If custom port is set, check if it matches standard ports
         if !serverPort.isEmpty {
             switch serverPort {
-            case "8080": return "prod"
             case "8082": return "beta"
+            case "8080": return "prod"
             default: return "custom"
             }
         }
-        // Empty port defaults based on build config
-        #if BETA
+        // Empty port defaults to Beta
         return "beta"
-        #else
-        return "prod"
-        #endif
     }
 
     /// Effective port to use for connections
@@ -42,12 +38,8 @@ struct SettingsView: View {
         if !serverPort.isEmpty {
             return serverPort
         }
-        // Default based on build
-        #if BETA
+        // Default to Beta (8082)
         return "8082"
-        #else
-        return "8080"
-        #endif
     }
 
     var body: some View {
@@ -60,18 +52,18 @@ struct SettingsView: View {
                         set: { newValue in
                             let newPort: String
                             switch newValue {
-                            case "prod": newPort = "8080"
                             case "beta": newPort = "8082"
+                            case "prod": newPort = "8080"
                             default: return
                             }
                             serverPort = ""  // Clear custom port
                             appState.updateServerSettings(host: serverHost, port: newPort, useTLS: false)
                         }
                     )) {
-                        Text("Prod")
-                            .tag("prod")
                         Text("Beta")
                             .tag("beta")
+                        Text("Prod")
+                            .tag("prod")
                     }
                     .pickerStyle(.segmented)
                     .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
@@ -214,10 +206,10 @@ struct SettingsView: View {
 
     private func resetToDefaults() {
         serverHost = "localhost"
-        serverPort = ""  // Empty = use default based on build
+        serverPort = ""  // Empty = use Beta (8082) as default
         confirmArchive = true
-        // Trigger server reconnection with default port
-        appState.updateServerSettings(host: "localhost", port: SettingsView.defaultPort, useTLS: false)
+        // Trigger server reconnection with Beta port
+        appState.updateServerSettings(host: "localhost", port: "8082", useTLS: false)
     }
 }
 
