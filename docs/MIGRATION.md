@@ -1,107 +1,56 @@
-# Migration to Bun
+# Bun Migration
 
-This document outlines the comprehensive migration from pnpm to Bun completed on 2026-01-12.
+<!--
+PURPOSE: Documents the migration from pnpm to Bun (completed 2026-01-12).
+AUDIENCE: Developers who need to understand why Bun and how to use it.
 
-## What Changed
+AGENT MAINTENANCE:
+- This is a historical record, update only if Bun usage patterns change
+- Last verified: 2026-01-20
+-->
 
-### Package Manager
-- **Before**: pnpm with pnpm-workspace.yaml
-- **After**: Bun with native workspace support in package.json
+## Summary
 
-### Performance Improvements
-- **Installation**: 70% faster than pnpm, 3x faster than npm
-- **SQLite**: Bun's built-in `bun:sqlite` is 3-6x faster than better-sqlite3
-- **TypeScript**: Native execution without transpilation overhead
+Tron uses Bun as its package manager and runtime. Migration from pnpm completed 2026-01-12.
 
-### File Changes
+## Why Bun
 
-#### Added
-- `bun.lockb` - Bun's binary lockfile (faster, more reliable)
-- `scripts/tron` - Unified CLI for all dev/deploy workflows
+- **70% faster** package installation than pnpm
+- **Native TypeScript** execution without transpilation
+- **Built-in SQLite** (3-6x faster than better-sqlite3, future consideration)
 
-#### Removed
-- `.npmrc` - No longer needed (Bun doesn't use npm config)
-- `pnpm-workspace.yaml` - Replaced by package.json workspaces field
-- `pnpm-lock.yaml` - Replaced by bun.lockb
+## Command Reference
 
-#### Modified
-- `package.json` - Updated packageManager, workspaces, and all scripts
-- `README.md` - Updated documentation with Bun instructions
-
-## Setup on a New Machine
-
-**One command:**
-```bash
-./scripts/tron setup
-```
-
-Or manually:
-```bash
-# Install Bun
-curl -fsSL https://bun.sh/install | bash
-
-# Install dependencies
-bun install
-
-# Build all packages
-bun run build
-```
-
-## Command Equivalents
-
-| pnpm command | Bun command |
-|--------------|-------------|
+| pnpm | Bun |
+|------|-----|
 | `pnpm install` | `bun install` |
 | `pnpm add <pkg>` | `bun add <pkg>` |
 | `pnpm run <script>` | `bun run <script>` |
-| `pnpm --filter @pkg run build` | `cd packages/pkg && bun run build` |
-| `pnpm store prune` | Automatic - Bun manages cache |
+| `pnpm --filter @pkg build` | `cd packages/pkg && bun run build` |
 
-## Future Considerations
+## Setup
 
-### Better-sqlite3
-The project still uses `better-sqlite3` for Node.js compatibility. Consider migrating to Bun's native `bun:sqlite` API for better performance:
+```bash
+# One command setup
+./scripts/tron setup
 
-```typescript
-// Current (works with Node.js and Bun)
-import Database from 'better-sqlite3';
-
-// Future (Bun-only, 3-6x faster)
-import { Database } from 'bun:sqlite';
+# Or manually
+curl -fsSL https://bun.sh/install | bash
+bun install
+bun run build
 ```
 
 ## Verification
 
-Test the complete setup:
 ```bash
-# Clean slate
 bun run clean
-
-# Fresh install
 bun install
-
-# Build
 bun run build
-
-# Run tests
-bun test
-
-# Start dev server
-bun run dev:tui
+bun run test
 ```
 
-## Rollback
+## Notes
 
-If needed, revert to pnpm:
-```bash
-git revert HEAD
-npm install -g pnpm
-pnpm install
-```
-
-## Sources
-
-- [Bun Workspaces Documentation](https://bun.com/docs/pm/workspaces)
-- [Bun SQLite Documentation](https://bun.com/docs/runtime/sqlite)
-- [Bun Filter CLI](https://bun.com/docs/pm/filter)
-- [Package Manager Comparison 2026](https://dev.to/pockit_tools/pnpm-vs-npm-vs-yarn-vs-bun-the-2026-package-manager-showdown-51dc)
+- Lock file is `bun.lockb` (binary, faster)
+- Workspaces defined in root `package.json`
+- Still using `better-sqlite3` for Node.js compatibility

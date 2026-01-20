@@ -1,4 +1,15 @@
-# Tron Agent - Architecture
+# Architecture
+
+<!--
+PURPOSE: System architecture overview for developers.
+AUDIENCE: Developers needing to understand how Tron works.
+
+AGENT MAINTENANCE:
+- Update diagrams if package structure changes
+- Update interface definitions if types change
+- Verify package paths match actual codebase structure
+- Last verified: 2026-01-20
+-->
 
 ## System Overview
 
@@ -6,24 +17,18 @@
 ┌─────────────────────────────────────────────────────────────────────┐
 │                         User Interfaces                              │
 ├──────────────────────┬──────────────────────┬──────────────────────┤
-│     Terminal UI      │      Web Chat        │     Mobile PWA       │
-│   (React/Ink CLI)    │     (React SPA)      │     (React)          │
+│     Terminal UI      │      Web Chat        │     iOS App          │
+│   (React/Ink CLI)    │     (React SPA)      │     (SwiftUI)        │
 └──────────┬───────────┴──────────┬───────────┴──────────┬───────────┘
            │                      │                      │
-           │ stdin/stdout         │ WebSocket            │ WebSocket
+           │ Direct               │ WebSocket            │ WebSocket
            │                      │                      │
            ▼                      ▼                      ▼
 ┌─────────────────────────────────────────────────────────────────────┐
-│                        RPC Protocol Layer                            │
-│   JSON messages over stdio (TUI) or WebSocket (Web/Mobile)          │
-└─────────────────────────────────────────────────────────────────────┘
-           │
-           ▼
-┌─────────────────────────────────────────────────────────────────────┐
-│                      Session Orchestrator                            │
+│                    Event Store Orchestrator                          │
 │   - Multi-session management                                         │
 │   - Agent lifecycle (spawn, run, abort)                              │
-│   - Event routing                                                    │
+│   - Event routing and persistence                                    │
 └─────────────────────────────────────────────────────────────────────┘
            │
            ▼
@@ -43,69 +48,30 @@
            │
            ▼
 ┌─────────────────────────────────────────────────────────────────────┐
-│                        Persistence Layer                             │
-│   ┌─────────────┐  ┌─────────────┐  ┌─────────────┐                 │
-│   │  Sessions   │  │   Ledger    │  │  Handoffs   │                 │
-│   │   (JSONL)   │  │ (Markdown)  │  │  (SQLite)   │                 │
-│   └─────────────┘  └─────────────┘  └─────────────┘                 │
+│                     Event Store (SQLite)                             │
+│   - Immutable event log                                              │
+│   - Session state reconstruction                                     │
+│   - Fork/rewind operations                                           │
+│   - Full-text search (FTS5)                                          │
 └─────────────────────────────────────────────────────────────────────┘
 ```
 
-## Package Structure
+## Packages
 
 ### @tron/core
 
-Core agent logic, tools, memory, hooks, skills.
+Core agent logic, tools, and event storage.
 
 ```
 packages/core/src/
-├── agent/
-│   ├── tron-agent.ts      # Main agent class
-│   ├── turn-executor.ts   # Single turn execution
-│   └── types.ts           # Agent types
-├── providers/
-│   ├── anthropic.ts       # Claude provider
-│   ├── openai.ts          # GPT provider
-│   ├── google.ts          # Gemini provider
-│   └── factory.ts         # Provider factory
-├── tools/
-│   ├── read.ts            # File read
-│   ├── write.ts           # File write
-│   ├── edit.ts            # File edit
-│   ├── bash.ts            # Shell execution
-│   └── types.ts           # Tool interfaces
-├── memory/
-│   ├── ledger-manager.ts  # Working memory
-│   ├── handoff-manager.ts # Episodic memory
-│   ├── sqlite-store.ts    # SQLite persistence
-│   └── types.ts           # Memory types
-├── hooks/
-│   ├── hook-engine.ts     # Hook execution
-│   ├── hook-discovery.ts  # Find user hooks
-│   └── builtin/           # Built-in hooks
-├── skills/
-│   ├── skill-loader.ts    # SKILL.md parser
-│   ├── skill-registry.ts  # Skill storage
-│   ├── skill-executor.ts  # Skill runner
-│   └── builtin/           # Built-in skills
-├── commands/
-│   ├── command-router.ts  # /command routing
-│   ├── command-parser.ts  # Argument parsing
-│   └── builtin/           # Built-in commands
-├── context/
-│   ├── context-loader.ts  # AGENTS.md loading
-│   └── hierarchy.ts       # Merge strategy
-├── session/
-│   ├── session-manager.ts # Session CRUD
-│   └── types.ts           # Session types
-├── rpc/
-│   ├── handler.ts         # RPC command handler
-│   └── types.ts           # RPC message types
-├── auth/
-│   ├── oauth.ts           # OAuth flow
-│   ├── token-store.ts     # Credential storage
-│   └── refresh.ts         # Token refresh
-└── index.ts               # Public API
+├── agent/           # TronAgent, turn execution
+├── providers/       # Anthropic, OpenAI, Google
+├── tools/           # read, write, edit, bash, grep, find
+├── events/          # Event store, SQLite backend
+├── hooks/           # Hook engine, discovery
+├── skills/          # Skill loader, registry
+├── context/         # AGENTS.md loader, system prompts
+└── subagents/       # Sub-agent spawning and tracking
 ```
 
 ### @tron/server
@@ -114,10 +80,10 @@ WebSocket server and session orchestration.
 
 ```
 packages/server/src/
-├── index.ts               # Server entry
-├── orchestrator.ts        # Session orchestrator
-├── websocket.ts           # WebSocket handler
-└── health.ts              # Health endpoints
+├── index.ts                    # Server entry
+├── event-store-orchestrator.ts # Session management
+├── websocket-handler.ts        # WebSocket protocol
+└── health-server.ts            # Health endpoints
 ```
 
 ### @tron/tui
@@ -126,156 +92,71 @@ Terminal UI using React/Ink.
 
 ```
 packages/tui/src/
-├── cli.ts                 # CLI entry
-├── app.tsx                # Main app
-├── components/
-│   ├── Header.tsx
-│   ├── MessageList.tsx
-│   ├── InputArea.tsx
-│   ├── StatusBar.tsx
-│   └── ...
-└── auth/
-    └── oauth-cli.ts       # OAuth in terminal
+├── cli.ts           # CLI entry point
+├── app.tsx          # Main React component
+└── components/      # UI components
 ```
 
 ### @tron/chat-web
 
-Web chat interface.
+Web chat interface (React SPA).
 
 ```
 packages/chat-web/src/
-├── App.tsx                # Main app
-├── components/
-│   ├── ChatContainer.tsx
-│   ├── MessageList.tsx
-│   ├── PromptInput.tsx
-│   └── ...
-├── hooks/
-│   ├── useWebSocket.ts
-│   ├── useSession.ts
-│   └── useAgent.ts
-└── main.tsx               # Entry point
+├── App.tsx          # Main app
+├── components/      # UI components
+├── hooks/           # React hooks
+└── store/           # State management
 ```
 
-## Data Flow
+### @tron/ios-app
 
-### Agent Turn
-
-```
-User Message
-     │
-     ▼
-┌─────────────────┐
-│  RPC Handler    │ ← Parse request
-└────────┬────────┘
-         │
-         ▼
-┌─────────────────┐
-│ Hook: user_prompt │ ← Skill suggestions
-└────────┬────────┘
-         │
-         ▼
-┌─────────────────┐
-│  TronAgent.run  │ ← Start agent loop
-└────────┬────────┘
-         │
-         ▼
-┌─────────────────┐
-│   LLM Stream    │ ← Stream response
-└────────┬────────┘
-         │
-         ▼
-┌─────────────────┐
-│  Tool Calls?    │──No──▶ Return response
-└────────┬────────┘
-         │ Yes
-         ▼
-┌─────────────────┐
-│ Hook: pre_tool  │ ← Validate/block
-└────────┬────────┘
-         │
-         ▼
-┌─────────────────┐
-│ Execute Tool    │
-└────────┬────────┘
-         │
-         ▼
-┌─────────────────┐
-│ Hook: post_tool │ ← Index changes
-└────────┬────────┘
-         │
-         ▼
-    Loop back to LLM
-```
-
-### Session Fork
+iOS application (SwiftUI).
 
 ```
-Original Session
-     │
-     ├── sess_abc123.jsonl
-     │   ├── msg 0: user
-     │   ├── msg 1: assistant
-     │   ├── msg 2: user
-     │   ├── msg 3: assistant
-     │   └── msg 4: user
-     │
-     ▼
-┌─────────────────┐
-│  Fork Session   │ ← fromIndex=3
-└────────┬────────┘
-         │
-         ▼
-Forked Session
-     │
-     └── sess_xyz789.jsonl
-         ├── msg 0: user
-         ├── msg 1: assistant
-         └── msg 2: user
-         (metadata: parentSessionId=abc123)
+packages/ios-app/Sources/
+├── App/             # App entry, state
+├── Views/           # SwiftUI views
+├── ViewModels/      # View models
+├── Services/        # RPC client, event sync
+└── Database/        # Local SQLite cache
 ```
 
-### Memory Flow
+## Key Concepts
+
+### Event Sourcing
+
+All state changes are recorded as immutable events. Session state is reconstructed by replaying events from root to head. See [event-system.md](./event-system.md) for details.
+
+### Tool Execution Flow
 
 ```
-Session Start
-     │
-     ▼
-┌─────────────────┐
-│ Load Ledger     │ ← Read ledger.md
-└────────┬────────┘
-         │
-         ▼
-┌─────────────────┐
-│ Search Handoffs │ ← FTS5 query
-└────────┬────────┘
-         │
-         ▼
-┌─────────────────┐
-│ Inject Context  │ ← Add to system prompt
-└────────┬────────┘
-         │
-         ▼
-    ... session runs ...
-         │
-         ▼
-┌─────────────────┐
-│ Update Ledger   │ ← Save current state
-└────────┬────────┘
-         │
-         ▼
-Session End
-     │
-     ▼
-┌─────────────────┐
-│ Create Handoff  │ ← Summarize session
-└────────┬────────┘
-         │
-         ▼
-┌─────────────────┐
-│ Extract Lessons │ ← Pattern recognition
-└─────────────────┘
+User message
+    │
+    ▼
+TronAgent.run()
+    │
+    ▼
+LLM generates response
+    │
+    ├── Text only → Return response
+    │
+    └── Tool calls → For each tool:
+        │
+        ├── PreToolUse hook (can block)
+        ├── Execute tool
+        ├── PostToolUse hook (can log)
+        └── Loop back to LLM
 ```
+
+### Context Loading
+
+Context files are loaded hierarchically:
+1. Global: `~/.tron/rules/AGENTS.md`
+2. Project: `.claude/AGENTS.md` or `.tron/AGENTS.md`
+3. Directory: Subdirectory AGENTS.md files
+
+Both `.claude/` and `.tron/` directories are checked for compatibility.
 
 ## Key Interfaces
 
@@ -284,139 +165,35 @@ Session End
 ```typescript
 interface Session {
   id: string;
-  workingDirectory: string;
-  messages: Message[];
+  workspaceId: string;
+  rootEventId: string;      // First event
+  headEventId: string;      // Current position
+  status: 'active' | 'ended';
   model: string;
   provider: string;
-  status: 'active' | 'ended' | 'failed';
-  metadata: {
-    createdAt: Date;
-    endedAt?: Date;
-    parentSessionId?: string;
-  };
 }
 ```
 
-### Message
+### Event
 
 ```typescript
-type Message = UserMessage | AssistantMessage | ToolResultMessage;
-
-interface UserMessage {
-  role: 'user';
-  content: string | Content[];
-  timestamp?: number;
-}
-
-interface AssistantMessage {
-  role: 'assistant';
-  content: AssistantContent[];
-  usage?: TokenUsage;
-  thinking?: string;
-}
-
-interface ToolResultMessage {
-  role: 'toolResult';
-  toolCallId: string;
-  content: Content[];
-  isError?: boolean;
-}
-```
-
-### Tool
-
-```typescript
-interface AgentTool<TParams = unknown, TDetails = unknown> {
-  name: string;
-  label: string;
-  description: string;
-  parameters: TSchema;
-  execute: (
-    toolCallId: string,
-    params: TParams,
-    signal: AbortSignal,
-    onUpdate?: (update: string) => void
-  ) => Promise<AgentToolResult<TDetails>>;
-}
-```
-
-### Hook
-
-```typescript
-interface Hook {
-  id: string;
-  event: HookEvent;
-  priority: number;
-  matcher?: RegExp;
-  handler: (context: HookContext) => Promise<HookResult>;
-}
-
-type HookEvent =
-  | 'session_start'
-  | 'session_end'
-  | 'pre_tool_use'
-  | 'post_tool_use'
-  | 'pre_compact'
-  | 'user_prompt'
-  | 'stop';
-
-interface HookResult {
-  action: 'continue' | 'block' | 'modify';
-  message?: string;
-  modifications?: Record<string, unknown>;
-}
-```
-
-### Handoff
-
-```typescript
-interface Handoff {
-  id: string;
+interface BaseEvent {
+  id: string;               // UUID v7 (time-sortable)
+  parentId: string | null;  // Previous event (null for root)
   sessionId: string;
-  timestamp: Date;
-  summary: string;
-  codeChanges: CodeChange[];
-  currentState: string;
-  nextSteps: string[];
-  blockers: string[];
-  patterns: string[];
-  metadata?: Record<string, unknown>;
+  sequence: number;         // Monotonic within session
+  type: string;             // Event type discriminator
+  timestamp: string;        // ISO 8601
+  payload: Record<string, unknown>;
 }
 ```
 
 ## Design Decisions
 
-### Why JSONL for Sessions?
-
-- Append-only is crash-safe
-- Easy to inspect with jq
-- Streaming-friendly
-- Git-friendly diffs
-
-### Why SQLite for Handoffs?
-
-- FTS5 for full-text search
-- ACID transactions
-- Zero-config deployment
-- Portable single file
-
-### Why Markdown for Ledger?
-
-- Human-readable
-- Agent can edit directly
-- Version-controllable
-- Supports rich formatting
-
-### Why React/Ink for TUI?
-
-- Component model for UI
-- Same mental model as web
-- Good for complex layouts
-- Hot reload in dev
-
-### Why Separate Packages?
-
-- Independent deployability
-- Clear boundaries
-- Testable in isolation
-- Different release cycles
+| Decision | Rationale |
+|----------|-----------|
+| SQLite for events | Single file, ACID, FTS5, portable |
+| Event sourcing | Auditability, fork/rewind, reproducibility |
+| React/Ink for TUI | Component model, hot reload |
+| Separate packages | Clear boundaries, independent testing |
+| Multi-directory compat | Support both Claude Code and Tron conventions |

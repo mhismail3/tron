@@ -1,4 +1,14 @@
-# System Prompt Customization
+# System Prompt
+
+<!--
+PURPOSE: How to customize Tron's system prompt.
+AUDIENCE: Users who want to change Tron's core behavior.
+
+AGENT MAINTENANCE:
+- Update if system prompt loading logic changes
+- Update file locations if directory conventions change
+- Last verified: 2026-01-20
+-->
 
 Tron's system prompt defines the agent's identity, available tools, and behavioral guidelines. By default, Tron uses a built-in prompt, but you can customize it using `SYSTEM.md` files.
 
@@ -40,7 +50,7 @@ System prompts follow a hierarchical pattern similar to `AGENTS.md` and `CLAUDE.
 - Good for tool usage patterns you prefer across projects
 
 ### Project Prompt
-**Location:** `.tron/SYSTEM.md` (in project root)
+**Location:** `.claude/SYSTEM.md` or `.tron/SYSTEM.md` (in project root)
 
 - Overrides global prompt completely (no merging)
 - Project-specific behavior and constraints
@@ -52,7 +62,7 @@ System prompts follow a hierarchical pattern similar to `AGENTS.md` and `CLAUDE.
 When Tron initializes, it loads the system prompt following this priority:
 
 1. **Programmatic override** (highest) - Via `systemPrompt` parameter in code
-2. **Project prompt** - `.tron/SYSTEM.md` in project
+2. **Project prompt** - `.claude/SYSTEM.md` or `.tron/SYSTEM.md` in project
 3. **Global prompt** - `~/.tron/SYSTEM.md` in home directory
 4. **Built-in default** (fallback) - Hardcoded `TRON_CORE_PROMPT`
 
@@ -107,8 +117,8 @@ EOF
 
 **For project-specific customization:**
 ```bash
-mkdir -p .tron
-cat > .tron/SYSTEM.md << 'EOF'
+mkdir -p .claude
+cat > .claude/SYSTEM.md << 'EOF'
 You are Tron, a TypeScript expert for this React project.
 
 Available tools: read, write, edit, bash, grep, find, ls
@@ -253,13 +263,13 @@ TDD workflow:
 ls -la ~/.tron/SYSTEM.md
 
 # Project
-ls -la .tron/SYSTEM.md
+ls -la .claude/SYSTEM.md
 ```
 
 **Check file permissions:**
 ```bash
 chmod 644 ~/.tron/SYSTEM.md
-chmod 644 .tron/SYSTEM.md
+chmod 644 .claude/SYSTEM.md
 ```
 
 **Enable debug logging:**
@@ -286,11 +296,11 @@ ls -lh .tron/SYSTEM.md
 ```bash
 # Check which files exist
 ls -la ~/.tron/SYSTEM.md        # Global
-ls -la .tron/SYSTEM.md           # Project
+ls -la .claude/SYSTEM.md           # Project
 
 # Remember: Project overrides global completely
 # Delete project file to test global
-rm .tron/SYSTEM.md
+rm .claude/SYSTEM.md
 ```
 
 ### Changes Not Reflected
@@ -380,5 +390,4 @@ A: Create an empty `SYSTEM.md` file for minimal prompting, but this may reduce e
 
 ---
 
-**Last updated:** 2026-01-14
-**Version:** 1.0.0
+**Last updated:** 2026-01-20

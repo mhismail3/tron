@@ -1,10 +1,21 @@
-# Skills Guide
+# Skills
+
+<!--
+PURPOSE: How to create and use skills (reusable context packages).
+AUDIENCE: Users who want to extend Tron with custom instructions.
+
+AGENT MAINTENANCE:
+- Update paths if skill directory conventions change
+- Update frontmatter fields if schema changes
+- Verify auto-inject behavior matches code
+- Last verified: 2026-01-20
+-->
 
 Skills are reusable context packages that extend Tron's capabilities. Each skill is a folder containing a `SKILL.md` file with optional YAML frontmatter and supporting files.
 
 ## Quick Start
 
-Create a skill in `~/.tron/skills/` (global) or `.tron/skills/` (project):
+Create a skill in `~/.tron/skills/` (global) or `.claude/skills/` (project):
 
 ```bash
 mkdir -p ~/.tron/skills/my-skill
@@ -35,9 +46,9 @@ Reference it in prompts with `@my-skill`:
 | Location | Path | Scope | Precedence |
 |----------|------|-------|------------|
 | **Global** | `~/.tron/skills/` | All projects | Lower |
-| **Project** | `.tron/skills/` | Current project only | Higher |
+| **Project** | `.claude/skills/` or `.tron/skills/` | Current project only | Higher |
 
-Project skills override global skills with the same name.
+Project skills override global skills with the same name. Both `.claude/` and `.tron/` directories are checked for compatibility.
 
 ---
 
@@ -596,7 +607,7 @@ In the iOS app, skills appear in:
 
 1. Verify `autoInject: true` in frontmatter
 2. Check frontmatter syntax (proper `---` delimiters)
-3. Ensure skill is in correct location (`~/.tron/skills/` or `.tron/skills/`)
+3. Ensure skill is in correct location (`~/.tron/skills/`, `.claude/skills/`, or `.tron/skills/`)
 
 ### Content not appearing correctly
 
