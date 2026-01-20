@@ -30,12 +30,12 @@ struct ToolResultRouter: View {
             toolIcon
 
             Text(displayToolName)
-                .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .semibold))
                 .foregroundStyle(.tronTextPrimary)
 
             if !toolDetail.isEmpty {
                 Text(toolDetail)
-                    .font(.system(size: 11, design: .monospaced))
+                    .font(TronTypography.codeCaption)
                     .foregroundStyle(.tronTextMuted)
                     .lineLimit(1)
             }
@@ -46,7 +46,7 @@ struct ToolResultRouter: View {
 
             if let duration = tool.formattedDuration {
                 Text(duration)
-                    .font(.system(size: 10, design: .monospaced))
+                    .font(TronTypography.codeSM)
                     .foregroundStyle(.tronTextMuted)
             }
         }
@@ -60,7 +60,7 @@ struct ToolResultRouter: View {
     private var toolIcon: some View {
         let (iconName, iconColor) = toolIconConfig
         return Image(systemName: iconName)
-            .font(.system(size: 11, weight: .medium))
+            .font(TronTypography.mono(size: TronTypography.sizeBody2, weight: .medium))
             .foregroundStyle(iconColor)
             .frame(width: 16)
     }
@@ -105,11 +105,11 @@ struct ToolResultRouter: View {
                 .frame(width: 14, height: 14)
         case .success:
             Image(systemName: "checkmark.circle.fill")
-                .font(.system(size: 11))
+                .font(TronTypography.codeCaption)
                 .foregroundStyle(.tronSuccess)
         case .error:
             Image(systemName: "xmark.circle.fill")
-                .font(.system(size: 11))
+                .font(TronTypography.codeCaption)
                 .foregroundStyle(.tronError)
         }
     }

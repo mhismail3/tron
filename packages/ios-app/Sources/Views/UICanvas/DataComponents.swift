@@ -39,7 +39,7 @@ struct CanvasList: View {
             UIComponentView(component: templates[0], state: state)
         case .text(let template):
             Text(template)
-                .font(.system(size: 15, design: .monospaced))
+                .font(TronTypography.code)
                 .foregroundStyle(.tronTextPrimary)
         default:
             // Fallback: display item value
@@ -54,7 +54,7 @@ struct CanvasList: View {
                     Text("Item \(index + 1)")
                 }
             }
-            .font(.system(size: 15, design: .monospaced))
+            .font(TronTypography.code)
             .foregroundStyle(.tronTextPrimary)
         }
     }
@@ -69,7 +69,7 @@ struct CanvasProgressView: View {
         VStack(alignment: .leading, spacing: 8) {
             if let label = component.props.label {
                 Text(label)
-                    .font(.system(size: 14, weight: .medium, design: .monospaced))
+                    .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
                     .foregroundStyle(.tronTextSecondary)
             }
 
@@ -121,7 +121,7 @@ struct CanvasBadge: View {
 
     var body: some View {
         Text(component.props.text ?? "")
-            .font(.system(size: 12, weight: .semibold, design: .monospaced))
+            .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .semibold))
             .padding(.horizontal, 10)
             .padding(.vertical, 5)
             .background(badgeColor)

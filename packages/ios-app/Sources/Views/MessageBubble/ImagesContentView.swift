@@ -62,19 +62,19 @@ struct AttachmentThumbnail: View {
                 // Document/PDF thumbnail with icon
                 VStack(spacing: 2) {
                     Image(systemName: attachment.isPDF ? "doc.fill" : "doc.text.fill")
-                        .font(.system(size: 20))
+                        .font(TronTypography.sans(size: TronTypography.sizeXL))
                         .foregroundStyle(.tronEmerald)
 
                     if let fileName = attachment.fileName {
                         Text(fileName)
-                            .font(.system(size: 8))
+                            .font(TronTypography.labelSM)
                             .foregroundStyle(.white.opacity(0.7))
                             .lineLimit(1)
                             .truncationMode(.middle)
                     }
 
                     Text(attachment.formattedSize)
-                        .font(.system(size: 7))
+                        .font(TronTypography.sans(size: TronTypography.sizeXXS))
                         .foregroundStyle(.white.opacity(0.5))
                 }
                 .frame(width: 56, height: 56)

@@ -43,14 +43,14 @@ struct WorkspaceSelector: View {
                 ToolbarItem(placement: .topBarLeading) {
                     Button { dismiss() } label: {
                         Image(systemName: "xmark")
-                            .font(.system(size: 14, weight: .medium))
+                            .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .medium))
                             .foregroundStyle(.tronEmerald)
                     }
                 }
 
                 ToolbarItem(placement: .principal) {
                     Text("Select Workspace")
-                        .font(.system(size: 16, weight: .semibold))
+                        .font(TronTypography.button)
                         .foregroundStyle(.tronEmerald)
                 }
 
@@ -60,7 +60,7 @@ struct WorkspaceSelector: View {
                         dismiss()
                     } label: {
                         Image(systemName: "checkmark")
-                            .font(.system(size: 14, weight: .semibold))
+                            .font(TronTypography.buttonSM)
                     }
                     .disabled(currentPath.isEmpty)
                     .foregroundStyle(currentPath.isEmpty ? .white.opacity(0.3) : .tronEmerald)
@@ -78,15 +78,15 @@ struct WorkspaceSelector: View {
     private func connectionErrorView(_ error: String) -> some View {
         VStack(spacing: 20) {
             Image(systemName: "wifi.exclamationmark")
-                .font(.system(size: 48))
+                .font(TronTypography.sans(size: 48))
                 .foregroundStyle(.tronError)
 
             Text("Connection Failed")
-                .font(.headline)
+                .font(TronTypography.headline)
                 .foregroundStyle(.tronTextPrimary)
 
             Text(error)
-                .font(.subheadline)
+                .font(TronTypography.subheadline)
                 .foregroundStyle(.tronTextSecondary)
                 .multilineTextAlignment(.center)
                 .padding(.horizontal)
@@ -98,7 +98,7 @@ struct WorkspaceSelector: View {
                 }
             } label: {
                 Label("Retry", systemImage: "arrow.clockwise")
-                    .font(.headline)
+                    .font(TronTypography.headline)
                     .foregroundStyle(.tronBackground)
                     .padding(.horizontal, 24)
                     .padding(.vertical, 12)
@@ -107,7 +107,7 @@ struct WorkspaceSelector: View {
             }
 
             Text("Check that the Tron server is running\nand the host/port in Settings is correct.")
-                .font(.caption)
+                .font(TronTypography.caption)
                 .foregroundStyle(.tronTextMuted)
                 .multilineTextAlignment(.center)
         }
@@ -119,11 +119,11 @@ struct WorkspaceSelector: View {
             // Current path header - same dark background as list
             HStack(spacing: 16) {
                 Image(systemName: "folder.fill")
-                    .font(.system(size: 12))
+                    .font(TronTypography.sans(size: TronTypography.sizeBodySM))
                     .foregroundStyle(.tronEmerald)
                     .frame(width: 16)
                 Text(currentPath)
-                    .font(.system(size: 11, weight: .regular, design: .monospaced))
+                    .font(TronTypography.mono(size: TronTypography.sizeBody2))
                     .foregroundStyle(.tronEmerald.opacity(0.7))
                     .lineLimit(1)
                     .truncationMode(.head)
@@ -142,11 +142,11 @@ struct WorkspaceSelector: View {
                         } label: {
                             HStack(spacing: 16) {
                                 Image(systemName: "arrow.up.circle")
-                                    .font(.system(size: 14))
+                                    .font(TronTypography.sans(size: TronTypography.sizeBody))
                                     .foregroundStyle(.tronEmerald)
                                     .frame(width: 16)
                                 Text("Go Up")
-                                    .font(.system(size: 13, weight: .medium, design: .monospaced))
+                                    .font(TronTypography.mono(size: TronTypography.sizeBody3, weight: .medium))
                                     .foregroundStyle(.tronEmerald)
                                 Spacer()
                             }
@@ -169,15 +169,15 @@ struct WorkspaceSelector: View {
                         } label: {
                             HStack(spacing: 16) {
                                 Image(systemName: "folder.fill")
-                                    .font(.system(size: 14))
+                                    .font(TronTypography.sans(size: TronTypography.sizeBody))
                                     .foregroundStyle(.tronEmerald)
                                     .frame(width: 16)
                                 Text(entry.name)
-                                    .font(.system(size: 13, weight: .regular, design: .monospaced))
+                                    .font(TronTypography.mono(size: TronTypography.sizeBody3))
                                     .foregroundStyle(.tronEmerald)
                                 Spacer()
                                 Image(systemName: "chevron.right")
-                                    .font(.system(size: 10))
+                                    .font(TronTypography.sans(size: TronTypography.sizeCaption))
                                     .foregroundStyle(.tronEmerald.opacity(0.4))
                             }
                             .padding(.horizontal, 16)
@@ -251,12 +251,12 @@ struct WorkspaceSelector: View {
             VStack(spacing: 0) {
                 HStack(spacing: 16) {
                     Image(systemName: "folder.badge.plus")
-                        .font(.system(size: 14))
+                        .font(TronTypography.sans(size: TronTypography.sizeBody))
                         .foregroundStyle(.tronEmerald)
                         .frame(width: 16)
 
                     TextField("Folder name", text: $newFolderName)
-                        .font(.system(size: 13, weight: .regular, design: .monospaced))
+                        .font(TronTypography.mono(size: TronTypography.sizeBody3))
                         .foregroundStyle(.tronEmerald)
                         .textFieldStyle(.plain)
                         .autocorrectionDisabled()
@@ -277,7 +277,7 @@ struct WorkspaceSelector: View {
                                 cancelFolderCreation()
                             } label: {
                                 Image(systemName: "xmark.circle.fill")
-                                    .font(.system(size: 18))
+                                    .font(TronTypography.sans(size: TronTypography.sizeLargeTitle))
                                     .foregroundStyle(.white.opacity(0.4))
                             }
 
@@ -285,7 +285,7 @@ struct WorkspaceSelector: View {
                                 submitNewFolder()
                             } label: {
                                 Image(systemName: "checkmark.circle.fill")
-                                    .font(.system(size: 18))
+                                    .font(TronTypography.sans(size: TronTypography.sizeLargeTitle))
                                     .foregroundStyle(canSubmitFolder ? .tronEmerald : .white.opacity(0.2))
                             }
                             .disabled(!canSubmitFolder)
@@ -299,10 +299,10 @@ struct WorkspaceSelector: View {
                 if let error = folderCreationError {
                     HStack {
                         Image(systemName: "exclamationmark.triangle.fill")
-                            .font(.system(size: 10))
+                            .font(TronTypography.sans(size: TronTypography.sizeCaption))
                             .foregroundStyle(.tronError)
                         Text(error)
-                            .font(.system(size: 11, design: .monospaced))
+                            .font(TronTypography.mono(size: TronTypography.sizeBody2))
                             .foregroundStyle(.tronError)
                         Spacer()
                     }
@@ -321,11 +321,11 @@ struct WorkspaceSelector: View {
             } label: {
                 HStack(spacing: 16) {
                     Image(systemName: "folder.badge.plus")
-                        .font(.system(size: 14))
+                        .font(TronTypography.sans(size: TronTypography.sizeBody))
                         .foregroundStyle(.tronEmerald.opacity(0.8))
                         .frame(width: 16)
                     Text("New Folder")
-                        .font(.system(size: 13, weight: .medium, design: .monospaced))
+                        .font(TronTypography.mono(size: TronTypography.sizeBody3, weight: .medium))
                         .foregroundStyle(.tronEmerald.opacity(0.8))
                     Spacer()
                 }

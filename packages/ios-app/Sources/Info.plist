@@ -48,6 +48,17 @@
 			</array>
 		</dict>
 	</dict>
+	<key>UIAppFonts</key>
+	<array>
+		<string>Fonts/RecursiveMono-Regular.ttf</string>
+		<string>Fonts/RecursiveMono-Medium.ttf</string>
+		<string>Fonts/RecursiveMono-SemiBold.ttf</string>
+		<string>Fonts/RecursiveMono-Bold.ttf</string>
+		<string>Fonts/RecursiveSans-Regular.ttf</string>
+		<string>Fonts/RecursiveSans-Medium.ttf</string>
+		<string>Fonts/RecursiveSans-SemiBold.ttf</string>
+		<string>Fonts/RecursiveSans-Bold.ttf</string>
+	</array>
 	<key>UILaunchScreen</key>
 	<dict>
 		<key>UIColorName</key>

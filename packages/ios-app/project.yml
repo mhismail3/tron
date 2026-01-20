@@ -40,6 +40,9 @@ targets:
     sources:
       - path: Sources
         createIntermediateGroups: true
+      - path: Sources/Resources/Fonts
+        type: folder
+        buildPhase: resources
     settings:
       base:
         INFOPLIST_FILE: Sources/Info.plist

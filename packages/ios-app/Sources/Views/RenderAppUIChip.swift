@@ -30,14 +30,14 @@ struct RenderAppUIChip: View {
 
             // Status text
             Text(statusText)
-                .font(.system(size: 11, weight: .medium, design: .monospaced))
+                .font(TronTypography.filePath)
                 .foregroundStyle(textColor)
                 .lineLimit(1)
 
             // Chevron only for tappable chips
             if data.isTappable {
                 Image(systemName: "chevron.right")
-                    .font(.system(size: 9, weight: .semibold))
+                    .font(TronTypography.sans(size: TronTypography.sizeSM, weight: .semibold))
                     .foregroundStyle(textColor.opacity(0.6))
             }
         }
@@ -69,11 +69,11 @@ struct RenderAppUIChip: View {
                 .tint(.tronAmber)
         case .complete:
             Image(systemName: "checkmark.circle.fill")
-                .font(.system(size: 12, weight: .medium))
+                .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
                 .foregroundStyle(.tronSuccess)
         case .error:
             Image(systemName: "xmark.circle.fill")
-                .font(.system(size: 12, weight: .medium))
+                .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
                 .foregroundStyle(.tronError)
         }
     }
@@ -137,14 +137,14 @@ struct RenderAppUIChipFallback: View {
 
             // Status text
             Text(statusText)
-                .font(.system(size: 11, weight: .medium, design: .monospaced))
+                .font(TronTypography.filePath)
                 .foregroundStyle(textColor)
                 .lineLimit(1)
 
             // Chevron only for tappable chips
             if data.isTappable {
                 Image(systemName: "chevron.right")
-                    .font(.system(size: 9, weight: .semibold))
+                    .font(TronTypography.sans(size: TronTypography.sizeSM, weight: .semibold))
                     .foregroundStyle(textColor.opacity(0.6))
             }
         }
@@ -172,11 +172,11 @@ struct RenderAppUIChipFallback: View {
                 .tint(.tronAmber)
         case .complete:
             Image(systemName: "checkmark.circle.fill")
-                .font(.system(size: 12, weight: .medium))
+                .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
                 .foregroundStyle(.tronSuccess)
         case .error:
             Image(systemName: "xmark.circle.fill")
-                .font(.system(size: 12, weight: .medium))
+                .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
                 .foregroundStyle(.tronError)
         }
     }

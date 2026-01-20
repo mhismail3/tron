@@ -50,13 +50,13 @@ struct TextContentView: View {
                             // Use styled text for user messages to highlight @skillname
                             if isUser {
                                 StyledSkillMentionText(text: content)
-                                    .font(.system(size: 14, design: .monospaced))
+                                    .font(TronTypography.messageBody)
                                     .foregroundStyle(.tronEmerald)
                                     .textSelection(.enabled)
                                     .lineSpacing(4)
                             } else {
                                 Text(LocalizedStringKey(content))
-                                    .font(.system(size: 14, design: .monospaced))
+                                    .font(TronTypography.messageBody)
                                     .foregroundStyle(.tronTextPrimary)
                                     .textSelection(.enabled)
                                     .lineSpacing(4)
@@ -372,7 +372,7 @@ struct MarkdownTableView: View {
         let isLastColumn = column == table.headers.count - 1
 
         Text(content)
-            .font(.system(size: 12, weight: isHeader ? .semibold : .regular, design: .monospaced))
+            .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: isHeader ? .semibold : .regular))
             .foregroundStyle(isHeader ? .tronTextPrimary : .tronTextSecondary)
             .lineLimit(nil)
             .multilineTextAlignment(textAlignment(for: alignment))

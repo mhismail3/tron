@@ -36,7 +36,7 @@ struct LineNumberedContentView: View {
                         HStack(spacing: 0) {
                             // Line number gutter
                             Text("\(line.lineNum)")
-                                .font(.system(size: lineNumFontSize, design: .monospaced))
+                                .font(TronTypography.mono(size: lineNumFontSize))
                                 .foregroundStyle(.tronTextMuted.opacity(0.4))
                                 .frame(width: lineNumWidth, alignment: .trailing)
                                 .padding(.leading, 4)
@@ -44,7 +44,7 @@ struct LineNumberedContentView: View {
 
                             // Content
                             Text(line.content.isEmpty ? " " : line.content)
-                                .font(.system(size: fontSize, design: .monospaced))
+                                .font(TronTypography.mono(size: fontSize))
                                 .foregroundStyle(.tronTextSecondary)
                         }
                         .frame(minHeight: lineHeight)
@@ -63,9 +63,9 @@ struct LineNumberedContentView: View {
                 } label: {
                     HStack {
                         Text(isExpanded ? "Show less" : "Show more (\(parsedLines.count) lines)")
-                            .font(.system(size: 10, design: .monospaced))
+                            .font(TronTypography.mono(size: TronTypography.sizeCaption))
                         Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
-                            .font(.system(size: 9))
+                            .font(TronTypography.sans(size: TronTypography.sizeSM))
                     }
                     .foregroundStyle(.tronTextMuted)
                     .padding(.vertical, 6)

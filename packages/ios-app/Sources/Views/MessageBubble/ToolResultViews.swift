@@ -62,24 +62,24 @@ struct StandaloneToolResultView: View {
             HStack(spacing: 8) {
                 let (iconName, iconColor) = toolIconConfig
                 Image(systemName: iconName)
-                    .font(.system(size: 11, weight: .bold))
+                    .font(TronTypography.mono(size: TronTypography.sizeBody2, weight: .bold))
                     .foregroundStyle(result.isError ? .tronError : iconColor)
 
                 // Show tool name if available, otherwise "result" or "error"
                 if let toolName = result.toolName {
                     Text(toolName)
-                        .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                        .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .semibold))
                         .foregroundStyle(.tronTextPrimary)
 
                     if !toolDetail.isEmpty {
                         Text(toolDetail)
-                            .font(.system(size: 11, design: .monospaced))
+                            .font(TronTypography.codeCaption)
                             .foregroundStyle(.tronTextMuted)
                             .lineLimit(1)
                     }
                 } else {
                     Text(result.isError ? "error" : "result")
-                        .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                        .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .semibold))
                         .foregroundStyle(result.isError ? .tronError : .tronTextPrimary)
                 }
 
@@ -87,13 +87,13 @@ struct StandaloneToolResultView: View {
 
                 // Status badge
                 Image(systemName: result.isError ? "xmark.circle.fill" : "checkmark.circle.fill")
-                    .font(.system(size: 11))
+                    .font(TronTypography.codeCaption)
                     .foregroundStyle(result.isError ? .tronError : .tronSuccess)
 
                 // Duration if available
                 if let durationMs = result.durationMs {
                     Text(formatDuration(durationMs))
-                        .font(.system(size: 10, design: .monospaced))
+                        .font(TronTypography.codeSM)
                         .foregroundStyle(.tronTextMuted)
                 }
             }
@@ -139,10 +139,10 @@ struct ErrorContentView: View {
     var body: some View {
         HStack(spacing: 8) {
             Image(systemName: "exclamationmark.triangle.fill")
-                .font(.system(size: 12))
+                .font(TronTypography.mono(size: TronTypography.sizeBodySM))
                 .foregroundStyle(.tronError)
             Text(message)
-                .font(.system(size: 12, design: .monospaced))
+                .font(TronTypography.mono(size: TronTypography.sizeBodySM))
                 .foregroundStyle(.tronTextSecondary)
         }
         .padding(10)

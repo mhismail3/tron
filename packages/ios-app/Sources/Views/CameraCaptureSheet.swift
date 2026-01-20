@@ -19,7 +19,7 @@ struct CameraCaptureSheet: View {
             VStack(spacing: 16) {
                 // Header
                 Text("Take Photo")
-                    .font(.system(size: 16, weight: .semibold))
+                    .font(TronTypography.button)
                     .foregroundStyle(.tronEmerald)
                     .padding(.top, 16)
 
@@ -46,13 +46,13 @@ struct CameraCaptureSheet: View {
                                 if cameraModel.permissionDenied {
                                     VStack(spacing: 12) {
                                         Image(systemName: "camera.fill")
-                                            .font(.system(size: 32))
+                                            .font(TronTypography.sans(size: TronTypography.sizeDisplay))
                                             .foregroundStyle(.white.opacity(0.4))
                                         Text("Camera Access Required")
-                                            .font(.subheadline.weight(.medium))
+                                            .font(TronTypography.subheadline)
                                             .foregroundStyle(.white.opacity(0.7))
                                         Text("Enable in Settings")
-                                            .font(.caption)
+                                            .font(TronTypography.caption)
                                             .foregroundStyle(.white.opacity(0.4))
                                     }
                                 } else {
@@ -96,7 +96,7 @@ struct CameraCaptureSheet: View {
                 // Retake
                 Button(action: retake) {
                     Image(systemName: "arrow.counterclockwise")
-                        .font(.system(size: 18, weight: .semibold))
+                        .font(TronTypography.sans(size: TronTypography.sizeLargeTitle, weight: .semibold))
                         .foregroundStyle(.white.opacity(0.9))
                         .frame(width: 52, height: 52)
                 }
@@ -105,7 +105,7 @@ struct CameraCaptureSheet: View {
                 // Use Photo - primary action
                 Button(action: usePhoto) {
                     Image(systemName: "checkmark")
-                        .font(.system(size: 24, weight: .semibold))
+                        .font(TronTypography.sans(size: TronTypography.sizeHero, weight: .semibold))
                         .foregroundStyle(.white)
                         .frame(width: 64, height: 64)
                 }
@@ -121,7 +121,7 @@ struct CameraCaptureSheet: View {
                 // Night mode (torch)
                 Button(action: { cameraModel.toggleTorch() }) {
                     Image(systemName: cameraModel.isTorchOn ? "moon.fill" : "moon")
-                        .font(.system(size: 18, weight: .semibold))
+                        .font(TronTypography.sans(size: TronTypography.sizeLargeTitle, weight: .semibold))
                         .foregroundStyle(cameraModel.isTorchOn ? .tronEmerald : .white.opacity(0.9))
                         .frame(width: 52, height: 52)
                 }
@@ -149,7 +149,7 @@ struct CameraCaptureSheet: View {
                 // Flip camera
                 Button(action: flipCamera) {
                     Image(systemName: "arrow.triangle.2.circlepath.camera")
-                        .font(.system(size: 18, weight: .semibold))
+                        .font(TronTypography.sans(size: TronTypography.sizeLargeTitle, weight: .semibold))
                         .foregroundStyle(.white.opacity(0.9))
                         .frame(width: 52, height: 52)
                 }

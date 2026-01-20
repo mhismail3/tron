@@ -16,13 +16,13 @@ struct VoiceNoteDetailSheet: View {
                         Image(systemName: "waveform")
                             .foregroundStyle(.tronEmerald)
                         Text(note.formattedDate)
-                            .font(.headline)
+                            .font(TronTypography.headline)
                             .foregroundStyle(.tronEmerald)
 
                         Spacer()
 
                         Text(note.formattedDuration)
-                            .font(.caption)
+                            .font(TronTypography.caption)
                             .foregroundStyle(.white.opacity(0.6))
                     }
                     .padding()
@@ -33,7 +33,7 @@ struct VoiceNoteDetailSheet: View {
 
                     // Transcription content
                     Text(note.transcript)
-                        .font(.system(size: 15, design: .monospaced))
+                        .font(TronTypography.mono(size: TronTypography.sizeBodyLG))
                         .foregroundStyle(.white.opacity(0.9))
                         .textSelection(.enabled)
                 }
@@ -45,20 +45,20 @@ struct VoiceNoteDetailSheet: View {
                 ToolbarItem(placement: .topBarLeading) {
                     Button { dismiss() } label: {
                         Image(systemName: "xmark")
-                            .font(.system(size: 14, weight: .medium))
+                            .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .medium))
                             .foregroundStyle(.tronEmerald)
                             .frame(width: 24, height: 24)
                     }
                 }
                 ToolbarItem(placement: .principal) {
                     Text("Voice Note")
-                        .font(.system(size: 16, weight: .semibold))
+                        .font(TronTypography.button)
                         .foregroundStyle(.tronEmerald)
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     ShareLink(item: note.transcript) {
                         Image(systemName: "square.and.arrow.up")
-                            .font(.system(size: 14, weight: .medium))
+                            .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .medium))
                             .foregroundStyle(.tronEmerald)
                             .frame(width: 24, height: 24)
                     }

@@ -21,11 +21,11 @@ struct FindResultViewer: View {
             // File count header
             HStack {
                 Image(systemName: "doc.text.magnifyingglass")
-                    .font(.system(size: 11))
+                    .font(TronTypography.codeCaption)
                     .foregroundStyle(.cyan)
 
                 Text("\(files.count) files found")
-                    .font(.system(size: 11, design: .monospaced))
+                    .font(TronTypography.codeCaption)
                     .foregroundStyle(.tronTextMuted)
 
                 Spacer()
@@ -39,12 +39,12 @@ struct FindResultViewer: View {
                 ForEach(displayFiles, id: \.self) { file in
                     HStack(spacing: 8) {
                         Image(systemName: fileIcon(for: file))
-                            .font(.system(size: 10))
+                            .font(TronTypography.codeSM)
                             .foregroundStyle(fileIconColor(for: file))
                             .frame(width: 14)
 
                         Text(file)
-                            .font(.system(size: 11, design: .monospaced))
+                            .font(TronTypography.codeCaption)
                             .foregroundStyle(.tronTextSecondary)
                             .lineLimit(1)
                     }
@@ -62,9 +62,9 @@ struct FindResultViewer: View {
                 } label: {
                     HStack {
                         Text(isExpanded ? "Show less" : "Show all \(files.count) files")
-                            .font(.system(size: 11, design: .monospaced))
+                            .font(TronTypography.codeCaption)
                         Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
-                            .font(.system(size: 10))
+                            .font(TronTypography.codeSM)
                     }
                     .foregroundStyle(.tronTextMuted)
                     .padding(.vertical, 6)
@@ -126,16 +126,16 @@ struct GrepResultViewer: View {
             // Match count header
             HStack {
                 Image(systemName: "magnifyingglass")
-                    .font(.system(size: 11))
+                    .font(TronTypography.codeCaption)
                     .foregroundStyle(.purple)
 
                 Text("\(lines.count) matches")
-                    .font(.system(size: 11, design: .monospaced))
+                    .font(TronTypography.codeCaption)
                     .foregroundStyle(.tronTextMuted)
 
                 if !pattern.isEmpty {
                     Text("for \"\(pattern)\"")
-                        .font(.system(size: 10, design: .monospaced))
+                        .font(TronTypography.codeSM)
                         .foregroundStyle(.tronTextMuted)
                         .lineLimit(1)
                 }
@@ -151,7 +151,7 @@ struct GrepResultViewer: View {
                 VStack(alignment: .leading, spacing: 0) {
                     ForEach(Array(displayLines.enumerated()), id: \.offset) { _, line in
                         Text(line)
-                            .font(.system(size: 11, design: .monospaced))
+                            .font(TronTypography.codeCaption)
                             .foregroundStyle(.tronTextSecondary)
                             .frame(minHeight: 16, alignment: .leading)
                             .padding(.leading, 8)
@@ -170,9 +170,9 @@ struct GrepResultViewer: View {
                 } label: {
                     HStack {
                         Text(isExpanded ? "Show less" : "Show all \(lines.count) matches")
-                            .font(.system(size: 11, design: .monospaced))
+                            .font(TronTypography.codeCaption)
                         Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
-                            .font(.system(size: 10))
+                            .font(TronTypography.codeSM)
                     }
                     .foregroundStyle(.tronTextMuted)
                     .padding(.vertical, 6)
@@ -256,11 +256,11 @@ struct LsResultViewer: View {
             // Header
             HStack {
                 Image(systemName: "folder")
-                    .font(.system(size: 11))
+                    .font(TronTypography.codeCaption)
                     .foregroundStyle(.yellow)
 
                 Text("\(entries.count) items")
-                    .font(.system(size: 11, design: .monospaced))
+                    .font(TronTypography.codeCaption)
                     .foregroundStyle(.tronTextMuted)
 
                 Spacer()
@@ -275,13 +275,13 @@ struct LsResultViewer: View {
                     HStack(spacing: 6) {
                         // Icon
                         Image(systemName: entry.isDirectory ? "folder.fill" : entryIcon(for: entry.name))
-                            .font(.system(size: 10))
+                            .font(TronTypography.codeSM)
                             .foregroundStyle(entry.isDirectory ? .yellow : entryIconColor(for: entry.name))
                             .frame(width: 14)
 
                         // Name (first, most prominent)
                         Text(entry.name)
-                            .font(.system(size: 11, design: .monospaced))
+                            .font(TronTypography.codeCaption)
                             .foregroundStyle(entry.isDirectory ? .tronTextPrimary : .tronTextSecondary)
                             .lineLimit(1)
 
@@ -290,14 +290,14 @@ struct LsResultViewer: View {
                         // Size
                         if let size = entry.size {
                             Text(formatSize(size))
-                                .font(.system(size: 10, design: .monospaced))
+                                .font(TronTypography.codeSM)
                                 .foregroundStyle(.tronTextMuted)
                         }
 
                         // Date
                         if let dateStr = entry.dateStr {
                             Text(dateStr)
-                                .font(.system(size: 10, design: .monospaced))
+                                .font(TronTypography.codeSM)
                                 .foregroundStyle(.tronTextMuted)
                         }
                     }
@@ -315,9 +315,9 @@ struct LsResultViewer: View {
                 } label: {
                     HStack {
                         Text(isExpanded ? "Show less" : "Show all \(entries.count) items")
-                            .font(.system(size: 11, design: .monospaced))
+                            .font(TronTypography.codeCaption)
                         Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
-                            .font(.system(size: 10))
+                            .font(TronTypography.codeSM)
                     }
                     .foregroundStyle(.tronTextMuted)
                     .padding(.vertical, 6)

@@ -47,16 +47,16 @@ struct SkillMentionPopup: View {
             HStack {
                 HStack(spacing: 5) {
                     Image(systemName: "sparkles")
-                        .font(.system(size: 11, weight: .semibold))
+                        .font(TronTypography.sans(size: TronTypography.sizeBody2, weight: .semibold))
                         .foregroundStyle(.tronCyan)
 
                     Text("Skills")
-                        .font(.system(size: 16, weight: .semibold, design: .monospaced))
+                        .font(TronTypography.mono(size: TronTypography.sizeTitle, weight: .semibold))
                         .foregroundStyle(.tronCyan)
 
                     if !query.isEmpty {
                         Text("· \"\(query)\"")
-                            .font(.system(size: 11))
+                            .font(TronTypography.sans(size: TronTypography.sizeBody2))
                             .foregroundStyle(.secondary)
                     }
                 }
@@ -68,7 +68,7 @@ struct SkillMentionPopup: View {
                     onDismiss()
                 } label: {
                     Image(systemName: "xmark.circle.fill")
-                        .font(.system(size: 20))
+                        .font(TronTypography.sans(size: TronTypography.sizeXL))
                         .foregroundStyle(.secondary)
                         .frame(width: 36, height: 36)
                         .contentShape(Rectangle())
@@ -84,11 +84,11 @@ struct SkillMentionPopup: View {
                 // Empty state - compact
                 HStack(spacing: 8) {
                     Image(systemName: "magnifyingglass")
-                        .font(.system(size: 16))
+                        .font(TronTypography.sans(size: TronTypography.sizeTitle))
                         .foregroundStyle(.tertiary)
 
                     Text("No skills found")
-                        .font(.system(size: 12))
+                        .font(TronTypography.sans(size: TronTypography.sizeBodySM))
                         .foregroundStyle(.secondary)
                 }
                 .frame(maxWidth: .infinity)
@@ -138,7 +138,7 @@ private struct SkillMentionRow: View {
                         .frame(width: 32, height: 32)
 
                     Image(systemName: skill.autoInject ? "bolt.fill" : "sparkles")
-                        .font(.system(size: 12, weight: .semibold))
+                        .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
                         .foregroundStyle(skill.autoInject ? .tronAmber : .tronCyan)
                 }
 
@@ -146,13 +146,13 @@ private struct SkillMentionRow: View {
                 VStack(alignment: .leading, spacing: 2) {
                     HStack(spacing: 5) {
                         Text("@\(skill.name)")
-                            .font(.system(size: 13, weight: .medium, design: .monospaced))
+                            .font(TronTypography.mono(size: TronTypography.sizeBody3, weight: .medium))
                             .foregroundStyle(.primary)
 
                         // Source badge
                         if skill.source == .project {
                             Text("project")
-                                .font(.system(size: 8, weight: .medium))
+                                .font(TronTypography.sans(size: TronTypography.sizeXS, weight: .medium))
                                 .foregroundStyle(.tronEmerald)
                                 .padding(.horizontal, 4)
                                 .padding(.vertical, 1)
@@ -163,7 +163,7 @@ private struct SkillMentionRow: View {
                         // Auto-inject badge
                         if skill.autoInject {
                             Text("rule")
-                                .font(.system(size: 8, weight: .medium))
+                                .font(TronTypography.sans(size: TronTypography.sizeXS, weight: .medium))
                                 .foregroundStyle(.tronAmber)
                                 .padding(.horizontal, 4)
                                 .padding(.vertical, 1)
@@ -173,7 +173,7 @@ private struct SkillMentionRow: View {
                     }
 
                     Text(skill.description)
-                        .font(.system(size: 11))
+                        .font(TronTypography.sans(size: TronTypography.sizeBody2))
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                 }
@@ -182,7 +182,7 @@ private struct SkillMentionRow: View {
 
                 // Add indicator
                 Image(systemName: "plus.circle.fill")
-                    .font(.system(size: 18))
+                    .font(TronTypography.sans(size: TronTypography.sizeLargeTitle))
                     .foregroundStyle(.tronCyan)
             }
             .padding(.horizontal, 14)

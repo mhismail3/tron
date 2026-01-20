@@ -45,7 +45,7 @@ struct AskUserQuestionSheet: View {
             .toolbar {
                 ToolbarItem(placement: .principal) {
                     Text(readOnly ? "Answers" : "Questions")
-                        .font(.system(size: 15, weight: .semibold, design: .monospaced))
+                        .font(TronTypography.mono(size: TronTypography.sizeBodyLG, weight: .semibold))
                         .foregroundStyle(readOnly ? .tronSuccess : .tronAmber)
                 }
                 ToolbarItem(placement: .topBarTrailing) {
@@ -55,9 +55,9 @@ struct AskUserQuestionSheet: View {
                         } label: {
                             HStack(spacing: 4) {
                                 Image(systemName: "paperplane.fill")
-                                    .font(.system(size: 11, weight: .medium))
+                                    .font(TronTypography.sans(size: TronTypography.sizeBody2, weight: .medium))
                                 Text("Submit")
-                                    .font(.system(size: 13, weight: .medium, design: .monospaced))
+                                    .font(TronTypography.mono(size: TronTypography.sizeBody3, weight: .medium))
                             }
                             .foregroundStyle(hasAnyAnswer ? .tronAmber : .tronTextMuted)
                         }
@@ -225,14 +225,14 @@ struct QuestionCardView: View {
             // Header: mode indicator + question number (left aligned)
             HStack(spacing: 8) {
                 Text(question.mode == .single ? "Select one" : "Select multiple")
-                    .font(.system(size: 11, weight: .medium, design: .monospaced))
+                    .font(TronTypography.codeCaption)
                     .foregroundStyle(.tronTextMuted)
 
                 if totalQuestions > 1 {
                     Text("·")
                         .foregroundStyle(.tronTextMuted.opacity(0.5))
                     Text("\(questionNumber)/\(totalQuestions)")
-                        .font(.system(size: 11, weight: .medium, design: .monospaced))
+                        .font(TronTypography.codeCaption)
                         .foregroundStyle(accentColor.opacity(0.7))
                 }
 
@@ -241,7 +241,7 @@ struct QuestionCardView: View {
 
             // Question text
             Text(question.question)
-                .font(.system(size: 15, weight: .medium, design: .monospaced))
+                .font(TronTypography.mono(size: TronTypography.sizeBodyLG, weight: .medium))
                 .foregroundStyle(.tronTextPrimary)
                 .fixedSize(horizontal: false, vertical: true)
                 .lineSpacing(4)
@@ -266,12 +266,12 @@ struct QuestionCardView: View {
             if question.allowOther == true {
                 VStack(alignment: .leading, spacing: 6) {
                     Text("Other")
-                        .font(.system(size: 11, weight: .medium, design: .monospaced))
+                        .font(TronTypography.codeCaption)
                         .foregroundStyle(.tronTextMuted)
 
                     TextField(question.otherPlaceholder ?? "Enter your answer...", text: $otherText)
                         .textFieldStyle(.plain)
-                        .font(.system(size: 14, design: .monospaced))
+                        .font(TronTypography.messageBody)
                         .foregroundStyle(.tronTextPrimary)
                         .padding(.horizontal, 14)
                         .padding(.vertical, 12)
@@ -338,12 +338,12 @@ struct CompactOptionRowView: View {
                 // Label and description
                 VStack(alignment: .leading, spacing: 2) {
                     Text(option.label)
-                        .font(.system(size: 14, weight: isSelected ? .medium : .regular, design: .monospaced))
+                        .font(TronTypography.mono(size: TronTypography.sizeBody, weight: isSelected ? .medium : .regular))
                         .foregroundStyle(.tronTextPrimary)
 
                     if let description = option.description {
                         Text(description)
-                            .font(.system(size: 12, design: .monospaced))
+                            .font(TronTypography.mono(size: TronTypography.sizeBodySM))
                             .foregroundStyle(.tronTextSecondary)
                             .lineSpacing(2)
                     }
@@ -354,7 +354,7 @@ struct CompactOptionRowView: View {
                 // Checkmark for selected state
                 if isSelected {
                     Image(systemName: "checkmark")
-                        .font(.system(size: 12, weight: .semibold))
+                        .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
                         .foregroundStyle(accentColor)
                 }
             }
@@ -394,7 +394,7 @@ struct CompactOptionRowView: View {
                 .overlay {
                     if isSelected {
                         Image(systemName: "checkmark")
-                            .font(.system(size: 9, weight: .bold))
+                            .font(TronTypography.badge)
                             .foregroundStyle(accentColor)
                     }
                 }

@@ -9,23 +9,23 @@ struct ModelChangeNotificationView: View {
     var body: some View {
         HStack(spacing: 8) {
             Image(systemName: "cpu")
-                .font(.system(size: 10, weight: .medium))
+                .font(TronTypography.codeSM)
                 .foregroundStyle(.tronEmerald)
 
             Text("Switched from")
-                .font(.system(size: 11))
+                .font(TronTypography.codeCaption)
                 .foregroundStyle(.tronTextMuted)
 
             Text(from.shortModelName)
-                .font(.system(size: 11, weight: .medium))
+                .font(TronTypography.mono(size: TronTypography.sizeBody2, weight: .medium))
                 .foregroundStyle(.tronTextSecondary)
 
             Image(systemName: "arrow.right")
-                .font(.system(size: 9, weight: .medium))
+                .font(TronTypography.pill)
                 .foregroundStyle(.tronTextMuted)
 
             Text(to.shortModelName)
-                .font(.system(size: 11, weight: .medium))
+                .font(TronTypography.mono(size: TronTypography.sizeBody2, weight: .medium))
                 .foregroundStyle(.tronEmerald)
         }
         .padding(.horizontal, 12)
@@ -49,23 +49,23 @@ struct ReasoningLevelChangeNotificationView: View {
     var body: some View {
         HStack(spacing: 8) {
             Image(systemName: "brain")
-                .font(.system(size: 10, weight: .medium))
+                .font(TronTypography.codeSM)
                 .foregroundStyle(.tronEmerald)
 
             Text("Reasoning")
-                .font(.system(size: 11))
+                .font(TronTypography.codeCaption)
                 .foregroundStyle(.tronTextMuted)
 
             Text(from)
-                .font(.system(size: 11, weight: .medium))
+                .font(TronTypography.mono(size: TronTypography.sizeBody2, weight: .medium))
                 .foregroundStyle(.tronTextSecondary)
 
             Image(systemName: "arrow.right")
-                .font(.system(size: 9, weight: .medium))
+                .font(TronTypography.pill)
                 .foregroundStyle(.tronTextMuted)
 
             Text(to)
-                .font(.system(size: 11, weight: .medium))
+                .font(TronTypography.mono(size: TronTypography.sizeBody2, weight: .medium))
                 .foregroundStyle(.tronEmerald)
         }
         .padding(.horizontal, 12)
@@ -86,11 +86,11 @@ struct InterruptedNotificationView: View {
     var body: some View {
         HStack(spacing: 8) {
             Image(systemName: "stop.circle.fill")
-                .font(.system(size: 10, weight: .medium))
+                .font(TronTypography.codeSM)
                 .foregroundStyle(.red)
 
             Text("Session interrupted")
-                .font(.system(size: 11, weight: .medium, design: .monospaced))
+                .font(TronTypography.filePath)
                 .foregroundStyle(.red.opacity(0.9))
         }
         .padding(.horizontal, 12)
@@ -115,7 +115,7 @@ struct CatchingUpNotificationView: View {
                 .tint(.gray)
 
             Text("Loading latest messages...")
-                .font(.system(size: 11, weight: .medium, design: .monospaced))
+                .font(TronTypography.filePath)
                 .foregroundStyle(.gray)
         }
         .padding(.horizontal, 12)
@@ -136,11 +136,11 @@ struct TranscriptionFailedNotificationView: View {
     var body: some View {
         HStack(spacing: 8) {
             Image(systemName: "mic.slash.fill")
-                .font(.system(size: 10, weight: .medium))
+                .font(TronTypography.codeSM)
                 .foregroundStyle(.red)
 
             Text("Transcription failed")
-                .font(.system(size: 11, weight: .medium, design: .monospaced))
+                .font(TronTypography.filePath)
                 .foregroundStyle(.red.opacity(0.9))
         }
         .padding(.horizontal, 12)
@@ -161,11 +161,11 @@ struct TranscriptionNoSpeechNotificationView: View {
     var body: some View {
         HStack(spacing: 8) {
             Image(systemName: "waveform")
-                .font(.system(size: 10, weight: .medium))
+                .font(TronTypography.codeSM)
                 .foregroundStyle(Color.orange)
 
             Text("No speech detected")
-                .font(.system(size: 11, weight: .medium, design: .monospaced))
+                .font(TronTypography.filePath)
                 .foregroundStyle(Color.orange.opacity(0.9))
         }
         .padding(.horizontal, 12)
@@ -220,23 +220,23 @@ struct CompactionNotificationView: View {
     var body: some View {
         HStack(spacing: 8) {
             Image(systemName: "arrow.triangle.2.circlepath.circle.fill")
-                .font(.system(size: 10, weight: .medium))
+                .font(TronTypography.codeSM)
                 .foregroundStyle(.cyan)
 
             Text("Context compacted")
-                .font(.system(size: 11, weight: .medium, design: .monospaced))
+                .font(TronTypography.filePath)
                 .foregroundStyle(.cyan.opacity(0.9))
 
             Text("\u{2022}")
-                .font(.system(size: 8))
+                .font(TronTypography.badge)
                 .foregroundStyle(.cyan.opacity(0.5))
 
             Text("\(formattedSaved) tokens saved")
-                .font(.system(size: 11, design: .monospaced))
+                .font(TronTypography.codeCaption)
                 .foregroundStyle(.cyan.opacity(0.7))
 
             Text("(\(compressionPercent)%)")
-                .font(.system(size: 10, design: .monospaced))
+                .font(TronTypography.codeSM)
                 .foregroundStyle(.cyan.opacity(0.5))
         }
         .padding(.horizontal, 12)
@@ -275,19 +275,19 @@ struct ContextClearedNotificationView: View {
     var body: some View {
         HStack(spacing: 8) {
             Image(systemName: "xmark.circle.fill")
-                .font(.system(size: 10, weight: .medium))
+                .font(TronTypography.codeSM)
                 .foregroundStyle(.teal)
 
             Text("Context cleared")
-                .font(.system(size: 11, weight: .medium, design: .monospaced))
+                .font(TronTypography.filePath)
                 .foregroundStyle(.teal.opacity(0.9))
 
             Text("\u{2022}")
-                .font(.system(size: 8))
+                .font(TronTypography.badge)
                 .foregroundStyle(.teal.opacity(0.5))
 
             Text("\(formattedFreed) tokens freed")
-                .font(.system(size: 11, design: .monospaced))
+                .font(TronTypography.codeCaption)
                 .foregroundStyle(.teal.opacity(0.7))
         }
         .padding(.horizontal, 12)
@@ -336,11 +336,11 @@ struct MessageDeletedNotificationView: View {
     var body: some View {
         HStack(spacing: 8) {
             Image(systemName: icon)
-                .font(.system(size: 10, weight: .medium))
+                .font(TronTypography.codeSM)
                 .foregroundStyle(.tronAmber)
 
             Text("Deleted \(typeLabel) from context")
-                .font(.system(size: 11, weight: .medium, design: .monospaced))
+                .font(TronTypography.filePath)
                 .foregroundStyle(.tronAmber.opacity(0.9))
         }
         .padding(.horizontal, 12)
@@ -363,15 +363,15 @@ struct SkillRemovedNotificationView: View {
     var body: some View {
         HStack(spacing: 8) {
             Image(systemName: "sparkles")
-                .font(.system(size: 10, weight: .medium))
+                .font(TronTypography.codeSM)
                 .foregroundStyle(.tronCyan)
 
             Text(skillName)
-                .font(.system(size: 11, weight: .medium, design: .monospaced))
+                .font(TronTypography.filePath)
                 .foregroundStyle(Color.tronCyan.opacity(0.9))
 
             Text("removed from context")
-                .font(.system(size: 11, design: .monospaced))
+                .font(TronTypography.codeCaption)
                 .foregroundStyle(Color.tronCyan.opacity(0.6))
         }
         .padding(.horizontal, 12)
@@ -394,11 +394,11 @@ struct RulesLoadedNotificationView: View {
     var body: some View {
         HStack(spacing: 8) {
             Image(systemName: "doc.text.fill")
-                .font(.system(size: 10, weight: .medium))
+                .font(TronTypography.codeSM)
                 .foregroundStyle(.tronAmber)
 
             Text("Loaded \(count) \(count == 1 ? "rule" : "rules")")
-                .font(.system(size: 11, weight: .medium, design: .monospaced))
+                .font(TronTypography.filePath)
                 .foregroundStyle(.tronAmber.opacity(0.9))
         }
         .padding(.horizontal, 12)
@@ -420,11 +420,11 @@ struct WorkspaceDeletedNotificationView: View {
     var body: some View {
         HStack(spacing: 8) {
             Image(systemName: "folder.badge.questionmark")
-                .font(.system(size: 10, weight: .medium))
+                .font(TronTypography.codeSM)
                 .foregroundStyle(.red)
 
             Text("Workspace deleted – session in read-only mode")
-                .font(.system(size: 11, weight: .medium, design: .monospaced))
+                .font(TronTypography.filePath)
                 .foregroundStyle(.red.opacity(0.9))
         }
         .padding(.horizontal, 12)

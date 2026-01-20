@@ -13,10 +13,10 @@ struct CanvasButton: View {
             HStack(spacing: 8) {
                 if let iconName = component.props.icon {
                     Image(systemName: iconName)
-                        .font(.system(size: 14, weight: .medium))
+                        .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .medium))
                 }
                 Text(component.props.label ?? "Button")
-                    .font(.system(size: 14, weight: .medium, design: .monospaced))
+                    .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 10)
@@ -73,7 +73,7 @@ struct CanvasToggle: View {
     var body: some View {
         Toggle(isOn: binding) {
             Text(component.props.label ?? "")
-                .font(.system(size: 15, design: .monospaced))
+                .font(TronTypography.code)
                 .foregroundStyle(.tronTextPrimary)
         }
         .tint(.tronEmerald)
@@ -106,12 +106,12 @@ struct CanvasSlider: View {
             if let label = component.props.label {
                 HStack {
                     Text(label)
-                        .font(.system(size: 15, design: .monospaced))
+                        .font(TronTypography.code)
                         .foregroundStyle(.tronTextPrimary)
                     Spacer()
                     if component.props.showValue != false {
                         Text(String(format: "%.1f", binding.wrappedValue))
-                            .font(.system(size: 14, weight: .medium, design: .monospaced))
+                            .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
                             .foregroundStyle(.tronEmerald)
                     }
                 }
@@ -156,7 +156,7 @@ struct CanvasTextField: View {
         VStack(alignment: .leading, spacing: 8) {
             if let label = component.props.label {
                 Text(label)
-                    .font(.system(size: 14, weight: .medium, design: .monospaced))
+                    .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
                     .foregroundStyle(.tronTextSecondary)
             }
 
@@ -169,7 +169,7 @@ struct CanvasTextField: View {
                 }
             }
             .textFieldStyle(.plain)
-            .font(.system(size: 15, design: .monospaced))
+            .font(TronTypography.code)
             .foregroundStyle(.tronEmerald)
             .padding(.horizontal, 14)
             .padding(.vertical, 12)
@@ -218,7 +218,7 @@ struct CanvasPicker: View {
         VStack(alignment: .leading, spacing: 8) {
             if let label = component.props.label {
                 Text(label)
-                    .font(.system(size: 14, weight: .medium, design: .monospaced))
+                    .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
                     .foregroundStyle(.tronTextSecondary)
             }
 

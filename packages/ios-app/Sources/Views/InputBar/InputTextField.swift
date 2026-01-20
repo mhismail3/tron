@@ -17,7 +17,7 @@ struct GlassTextField: View {
             // Placeholder overlay - only show when empty AND not focused
             if text.isEmpty && !isFocused {
                 Text("Type here")
-                    .font(.system(.subheadline, design: .monospaced))
+                    .font(TronTypography.input)
                     .foregroundStyle(.tronEmerald.opacity(0.5))
                     .padding(.leading, 14)
                     .padding(.vertical, 10)
@@ -25,7 +25,7 @@ struct GlassTextField: View {
 
             TextField("", text: $text, axis: .vertical)
                 .textFieldStyle(.plain)
-                .font(.system(.subheadline, design: .monospaced))
+                .font(TronTypography.input)
                 .foregroundStyle(.tronEmerald)
                 .padding(.leading, 14)
                 .padding(.trailing, trailingPadding)
@@ -57,7 +57,7 @@ struct SimplifiedTextField: View {
             // Placeholder overlay - only show when empty AND not focused
             if text.isEmpty && !isFocused {
                 Text("Type here")
-                    .font(.system(.subheadline, design: .monospaced))
+                    .font(TronTypography.input)
                     .foregroundStyle(.tronEmerald.opacity(0.5))
                     .padding(.leading, 14)
                     .padding(.vertical, 10)
@@ -65,7 +65,7 @@ struct SimplifiedTextField: View {
 
             TextField("", text: $text, axis: .vertical)
                 .textFieldStyle(.plain)
-                .font(.system(.subheadline, design: .monospaced))
+                .font(TronTypography.input)
                 .foregroundStyle(.tronEmerald)
                 .padding(.horizontal, 14)
                 .padding(.vertical, 10)
@@ -99,7 +99,7 @@ struct TextFieldWithHistory: View {
             if let history = inputHistory, history.isNavigating,
                let position = history.navigationPosition {
                 Text("History: \(position)")
-                    .font(.caption2)
+                    .font(TronTypography.caption2)
                     .foregroundStyle(.tronTextMuted)
                     .padding(.horizontal, 8)
                     .padding(.vertical, 2)
@@ -117,7 +117,7 @@ struct TextFieldWithHistory: View {
                     // Placeholder overlay - only show when empty AND not focused
                     if text.isEmpty && !isFocused {
                         Text("Type here")
-                            .font(.system(.subheadline, design: .monospaced))
+                            .font(TronTypography.input)
                             .foregroundStyle(.tronEmerald.opacity(0.5))
                             .padding(.leading, 14)
                             .padding(.vertical, 10)
@@ -125,7 +125,7 @@ struct TextFieldWithHistory: View {
 
                     TextField("", text: $text, axis: .vertical)
                         .textFieldStyle(.plain)
-                        .font(.system(.subheadline, design: .monospaced))
+                        .font(TronTypography.input)
                         .foregroundStyle(.tronEmerald)
                         .padding(.horizontal, 14)
                         .padding(.vertical, 10)
@@ -152,7 +152,7 @@ struct TextFieldWithHistory: View {
                 navigateHistoryUp()
             } label: {
                 Image(systemName: "chevron.up")
-                    .font(.caption)
+                    .font(TronTypography.caption)
                     .foregroundStyle(.tronTextSecondary)
                     .frame(width: 24, height: 16)
             }
@@ -162,7 +162,7 @@ struct TextFieldWithHistory: View {
                 navigateHistoryDown()
             } label: {
                 Image(systemName: "chevron.down")
-                    .font(.caption)
+                    .font(TronTypography.caption)
                     .foregroundStyle(.tronTextSecondary)
                     .frame(width: 24, height: 16)
             }

@@ -9,15 +9,15 @@ struct PlanModeEnteredFallbackView: View {
     var body: some View {
         HStack(spacing: 8) {
             Image(systemName: "doc.text.magnifyingglass")
-                .font(.system(size: 10, weight: .medium))
+                .font(TronTypography.codeSM)
                 .foregroundStyle(.tronAmber)
 
             Text("Plan Mode Active")
-                .font(.system(size: 11, weight: .medium, design: .monospaced))
+                .font(TronTypography.filePath)
                 .foregroundStyle(.tronAmber.opacity(0.9))
 
             Text("(\(skillName))")
-                .font(.system(size: 11, design: .monospaced))
+                .font(TronTypography.codeCaption)
                 .foregroundStyle(.tronAmber.opacity(0.6))
         }
         .padding(.horizontal, 12)
@@ -66,11 +66,11 @@ struct PlanModeExitedFallbackView: View {
     var body: some View {
         HStack(spacing: 8) {
             Image(systemName: reasonIcon)
-                .font(.system(size: 10, weight: .medium))
+                .font(TronTypography.codeSM)
                 .foregroundStyle(reasonColor)
 
             Text(reasonText)
-                .font(.system(size: 11, weight: .medium, design: .monospaced))
+                .font(TronTypography.filePath)
                 .foregroundStyle(reasonColor.opacity(0.9))
         }
         .padding(.horizontal, 12)
@@ -92,11 +92,11 @@ struct AskUserQuestionFallbackView: View {
     var body: some View {
         HStack(spacing: 8) {
             Image(systemName: "questionmark.circle.fill")
-                .font(.system(size: 10, weight: .medium))
+                .font(TronTypography.codeSM)
                 .foregroundStyle(.tronAmber)
 
             Text("\(questionCount) \(questionCount == 1 ? "question" : "questions") pending")
-                .font(.system(size: 11, weight: .medium, design: .monospaced))
+                .font(TronTypography.filePath)
                 .foregroundStyle(.tronAmber.opacity(0.9))
         }
         .padding(.horizontal, 12)

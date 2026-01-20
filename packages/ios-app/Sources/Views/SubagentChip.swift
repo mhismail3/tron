@@ -18,27 +18,27 @@ struct SubagentChip: View {
 
                 // Task preview
                 Text(statusText)
-                    .font(.system(size: 11, weight: .medium, design: .monospaced))
+                    .font(TronTypography.filePath)
                     .foregroundStyle(textColor)
                     .lineLimit(1)
 
                 // Turn count badge (while running)
                 if data.status == .running || data.status == .spawning {
                     Text("(T\(data.currentTurn))")
-                        .font(.system(size: 10, design: .monospaced))
+                        .font(TronTypography.codeSM)
                         .foregroundStyle(textColor.opacity(0.7))
                 }
 
                 // Duration badge (when completed)
                 if let duration = data.formattedDuration, data.status == .completed || data.status == .failed {
                     Text("(\(duration))")
-                        .font(.system(size: 10, design: .monospaced))
+                        .font(TronTypography.codeSM)
                         .foregroundStyle(textColor.opacity(0.7))
                 }
 
                 // Chevron for tappable action
                 Image(systemName: "chevron.right")
-                    .font(.system(size: 9, weight: .semibold))
+                    .font(TronTypography.sans(size: TronTypography.sizeSM, weight: .semibold))
                     .foregroundStyle(textColor.opacity(0.6))
             }
             .padding(.horizontal, 10)
@@ -77,11 +77,11 @@ struct SubagentChip: View {
                 .tint(.tronAmber)      // Amber while running
         case .completed:
             Image(systemName: "checkmark.circle.fill")
-                .font(.system(size: 12, weight: .medium))
+                .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
                 .foregroundStyle(.tronSuccess)
         case .failed:
             Image(systemName: "xmark.circle.fill")
-                .font(.system(size: 12, weight: .medium))
+                .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
                 .foregroundStyle(.tronError)
         }
     }
@@ -141,27 +141,27 @@ struct SubagentChipFallback: View {
 
                 // Task preview
                 Text(statusText)
-                    .font(.system(size: 11, weight: .medium, design: .monospaced))
+                    .font(TronTypography.filePath)
                     .foregroundStyle(textColor)
                     .lineLimit(1)
 
                 // Turn count badge (while running)
                 if data.status == .running || data.status == .spawning {
                     Text("(T\(data.currentTurn))")
-                        .font(.system(size: 10, design: .monospaced))
+                        .font(TronTypography.codeSM)
                         .foregroundStyle(textColor.opacity(0.7))
                 }
 
                 // Duration badge (when completed)
                 if let duration = data.formattedDuration, data.status == .completed || data.status == .failed {
                     Text("(\(duration))")
-                        .font(.system(size: 10, design: .monospaced))
+                        .font(TronTypography.codeSM)
                         .foregroundStyle(textColor.opacity(0.7))
                 }
 
                 // Chevron
                 Image(systemName: "chevron.right")
-                    .font(.system(size: 9, weight: .semibold))
+                    .font(TronTypography.sans(size: TronTypography.sizeSM, weight: .semibold))
                     .foregroundStyle(textColor.opacity(0.6))
             }
             .padding(.horizontal, 10)
@@ -196,11 +196,11 @@ struct SubagentChipFallback: View {
                 .tint(.tronAmber)
         case .completed:
             Image(systemName: "checkmark.circle.fill")
-                .font(.system(size: 12, weight: .medium))
+                .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
                 .foregroundStyle(.tronSuccess)
         case .failed:
             Image(systemName: "xmark.circle.fill")
-                .font(.system(size: 12, weight: .medium))
+                .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
                 .foregroundStyle(.tronError)
         }
     }

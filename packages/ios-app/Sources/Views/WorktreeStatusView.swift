@@ -26,10 +26,10 @@ struct WorktreeStatusView: View {
                 HStack(spacing: 4) {
                     Image(systemName: "arrow.triangle.branch")
                         .foregroundStyle(.tronEmerald)
-                        .font(.caption)
+                        .font(TronTypography.caption)
 
                     Text(worktree.shortBranch)
-                        .font(.caption.monospaced())
+                        .font(TronTypography.codeCaption)
                         .foregroundStyle(.secondary)
 
                     if worktree.hasUncommittedChanges == true {
@@ -42,7 +42,7 @@ struct WorktreeStatusView: View {
                 // Isolated badge
                 if worktree.isolated {
                     Text("Isolated")
-                        .font(.caption2)
+                        .font(TronTypography.caption2)
                         .fontWeight(.medium)
                         .foregroundStyle(.secondary)
                         .padding(.horizontal, 6)
@@ -53,7 +53,7 @@ struct WorktreeStatusView: View {
 
                 // Commit count
                 Text(commitLabel)
-                    .font(.caption)
+                    .font(TronTypography.caption)
                     .foregroundStyle(.tertiary)
 
                 // Loading indicator
@@ -68,7 +68,7 @@ struct WorktreeStatusView: View {
                 if let onCommit = onCommit {
                     Button(action: onCommit) {
                         Label("Commit", systemImage: "checkmark.circle")
-                            .font(.caption)
+                            .font(TronTypography.caption)
                     }
                     .buttonStyle(.bordered)
                     .controlSize(.mini)
@@ -79,7 +79,7 @@ struct WorktreeStatusView: View {
                 if let onMerge = onMerge {
                     Button(action: onMerge) {
                         Label("Merge", systemImage: "arrow.triangle.merge")
-                            .font(.caption)
+                            .font(TronTypography.caption)
                     }
                     .buttonStyle(.bordered)
                     .controlSize(.mini)
@@ -118,10 +118,10 @@ struct WorktreeBadge: View {
     var body: some View {
         HStack(spacing: 4) {
             Image(systemName: "arrow.triangle.branch")
-                .font(.caption2)
+                .font(TronTypography.caption2)
 
             Text(worktree.shortBranch)
-                .font(.caption2.monospaced())
+                .font(TronTypography.mono(size: TronTypography.sizeCaption))
 
             if worktree.hasUncommittedChanges == true {
                 Circle()

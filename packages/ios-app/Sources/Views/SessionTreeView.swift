@@ -367,29 +367,29 @@ struct InheritedSection: View {
             // Header (always visible, entire container tappable)
             HStack(spacing: 12) {
                 Image(systemName: "clock.arrow.circlepath")
-                    .font(.system(size: 14))
+                    .font(TronTypography.sans(size: TronTypography.sizeBody))
                     .foregroundStyle(.tronPurple)
 
                 VStack(alignment: .leading, spacing: 2) {
                     HStack(spacing: 6) {
                         Text("Inherited from")
-                            .font(.system(size: 13, weight: .medium))
+                            .font(TronTypography.sans(size: TronTypography.sizeBody3, weight: .medium))
                             .foregroundStyle(.tronTextPrimary)
 
                         Text(displaySessionId)
-                            .font(.system(size: 12, weight: .medium, design: .monospaced))
+                            .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
                             .foregroundStyle(.tronPurple)
                     }
 
                     Text("\(events.count) events")
-                        .font(.system(size: 11, design: .monospaced))
+                        .font(TronTypography.mono(size: TronTypography.sizeBody2))
                         .foregroundStyle(.tronTextMuted)
                 }
 
                 Spacer()
 
                 Image(systemName: "chevron.down")
-                    .font(.system(size: 12, weight: .medium))
+                    .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
                     .foregroundStyle(.tronTextMuted)
                     .rotationEffect(.degrees(isExpanded ? -180 : 0))
             }
@@ -449,15 +449,15 @@ struct ThisSessionSection: View {
                 // Empty state - just forked, no new messages
                 VStack(spacing: 8) {
                     Image(systemName: "text.bubble")
-                        .font(.system(size: 24, weight: .light))
+                        .font(TronTypography.sans(size: TronTypography.sizeHero, weight: .light))
                         .foregroundStyle(.tronTextMuted.opacity(0.5))
 
                     Text("No new messages yet")
-                        .font(.system(size: 12, design: .monospaced))
+                        .font(TronTypography.mono(size: TronTypography.sizeBodySM))
                         .foregroundStyle(.tronTextMuted)
 
                     Text("Start chatting to build history")
-                        .font(.system(size: 11))
+                        .font(TronTypography.sans(size: TronTypography.sizeBody2))
                         .foregroundStyle(.tronTextMuted.opacity(0.7))
                 }
                 .frame(maxWidth: .infinity)
@@ -495,9 +495,9 @@ struct SectionCard<Content: View>: View {
             // Section header
             HStack(spacing: 6) {
                 Image(systemName: icon)
-                    .font(.system(size: 10))
+                    .font(TronTypography.sans(size: TronTypography.sizeCaption))
                 Text(title.uppercased())
-                    .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                    .font(TronTypography.mono(size: TronTypography.sizeCaption, weight: .semibold))
             }
             .foregroundStyle(accentColor.opacity(0.8))
             .padding(.leading, 4)
@@ -531,9 +531,9 @@ struct GlassSectionCard<Content: View>: View {
             // Section header
             HStack(spacing: 6) {
                 Image(systemName: icon)
-                    .font(.system(size: 10))
+                    .font(TronTypography.sans(size: TronTypography.sizeCaption))
                 Text(title.uppercased())
-                    .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                    .font(TronTypography.mono(size: TronTypography.sizeCaption, weight: .semibold))
             }
             .foregroundStyle(accentColor.opacity(0.8))
             .padding(.leading, 4)
@@ -565,9 +565,9 @@ struct ForkPointIndicator: View {
 
             HStack(spacing: 4) {
                 Image(systemName: "arrow.triangle.branch")
-                    .font(.system(size: 9))
+                    .font(TronTypography.sans(size: TronTypography.sizeSM))
                 Text("FORKED HERE")
-                    .font(.system(size: 9, weight: .bold, design: .monospaced))
+                    .font(TronTypography.mono(size: TronTypography.sizeSM, weight: .bold))
             }
             .foregroundStyle(.tronPurple)
             .padding(.horizontal, 10)
@@ -604,20 +604,20 @@ struct EventRow: View {
             HStack(spacing: 10) {
                 // Icon
                 eventIcon
-                    .font(.system(size: 12))
+                    .font(TronTypography.sans(size: TronTypography.sizeBodySM))
                     .foregroundStyle(isMuted ? iconColor.opacity(0.5) : iconColor)
                     .frame(width: 20)
 
                 // Summary + expand indicator
                 Text(event.summary)
-                    .font(.system(size: 12, design: .monospaced))
+                    .font(TronTypography.mono(size: TronTypography.sizeBodySM))
                     .foregroundStyle(isMuted ? .tronTextMuted : .tronTextPrimary)
                     .lineLimit(1)
 
                 // Expand indicator (if has content) - placed next to event name
                 if hasExpandableContent {
                     Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
-                        .font(.system(size: 9, weight: .medium))
+                        .font(TronTypography.sans(size: TronTypography.sizeSM, weight: .medium))
                         .foregroundStyle(.tronTextMuted)
                 }
 
@@ -626,7 +626,7 @@ struct EventRow: View {
                 // HEAD badge
                 if isHead {
                     Text("HEAD")
-                        .font(.system(size: 8, weight: .bold))
+                        .font(TronTypography.sans(size: TronTypography.sizeXS, weight: .bold))
                         .foregroundStyle(.white)
                         .padding(.horizontal, 6)
                         .padding(.vertical, 2)
@@ -638,7 +638,7 @@ struct EventRow: View {
                 if showForkButton {
                     Button(action: onFork) {
                         Image(systemName: "arrow.triangle.branch")
-                            .font(.system(size: 10))
+                            .font(TronTypography.sans(size: TronTypography.sizeCaption))
                             .foregroundStyle(.tronPurple)
                             .frame(width: 28, height: 28)
                             .background(Color.tronPurple.opacity(0.15))
@@ -663,7 +663,7 @@ struct EventRow: View {
             // Expanded content
             if isExpanded, let content = event.expandedContent {
                 Text(content)
-                    .font(.system(size: 11, design: .monospaced))
+                    .font(TronTypography.mono(size: TronTypography.sizeBody2))
                     .foregroundStyle(isMuted ? .tronTextMuted : .tronTextSecondary)
                     .lineLimit(12)
                     .padding(10)
@@ -766,7 +766,7 @@ struct LoadingHistoryView: View {
             ProgressView()
                 .tint(.tronPurple)
             Text("Loading history...")
-                .font(.system(size: 13, design: .monospaced))
+                .font(TronTypography.mono(size: TronTypography.sizeBody3))
                 .foregroundStyle(.tronTextMuted)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -777,15 +777,15 @@ struct EmptyHistoryView: View {
     var body: some View {
         VStack(spacing: 12) {
             Image(systemName: "clock")
-                .font(.system(size: 36, weight: .light))
+                .font(TronTypography.sans(size: 36, weight: .light))
                 .foregroundStyle(.tronTextMuted.opacity(0.5))
 
             Text("No History")
-                .font(.system(size: 14, weight: .medium))
+                .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .medium))
                 .foregroundStyle(.tronTextPrimary)
 
             Text("Events will appear as you chat")
-                .font(.system(size: 12))
+                .font(TronTypography.sans(size: TronTypography.sizeBodySM))
                 .foregroundStyle(.tronTextMuted)
         }
         .padding(32)
@@ -991,21 +991,21 @@ struct ForkContextHeader: View {
     var body: some View {
         HStack(spacing: 8) {
             Image(systemName: "arrow.triangle.branch")
-                .font(.system(size: 12))
+                .font(TronTypography.sans(size: TronTypography.sizeBodySM))
                 .foregroundStyle(.tronAmber)
 
             VStack(alignment: .leading, spacing: 2) {
                 Text("Forked Session")
-                    .font(.system(size: 11, weight: .semibold))
+                    .font(TronTypography.sans(size: TronTypography.sizeBody2, weight: .semibold))
                     .foregroundStyle(.tronAmber)
 
                 HStack(spacing: 4) {
                     Text("from")
-                        .font(.system(size: 10))
+                        .font(TronTypography.sans(size: TronTypography.sizeCaption))
                         .foregroundStyle(.tronTextMuted)
 
                     Text(context.parentSessionTitle ?? "Unknown Session")
-                        .font(.system(size: 10, weight: .medium))
+                        .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .medium))
                         .foregroundStyle(.tronTextSecondary)
                 }
             }
@@ -1015,9 +1015,9 @@ struct ForkContextHeader: View {
             // Parent event count badge
             HStack(spacing: 3) {
                 Image(systemName: "clock.arrow.circlepath")
-                    .font(.system(size: 9))
+                    .font(TronTypography.sans(size: TronTypography.sizeSM))
                 Text("\(context.parentEventIds.count)")
-                    .font(.system(size: 10, weight: .medium, design: .monospaced))
+                    .font(TronTypography.codeSM)
             }
             .foregroundStyle(.tronTextMuted)
             .padding(.horizontal, 8)
@@ -1048,9 +1048,9 @@ struct ForkDivider: View {
 
             HStack(spacing: 4) {
                 Image(systemName: "arrow.triangle.branch")
-                    .font(.system(size: 9))
+                    .font(TronTypography.sans(size: TronTypography.sizeSM))
                 Text("FORK POINT")
-                    .font(.system(size: 8, weight: .bold, design: .monospaced))
+                    .font(TronTypography.mono(size: TronTypography.sizeXS, weight: .bold))
             }
             .foregroundStyle(.tronAmber)
             .padding(.horizontal, 8)
@@ -1123,10 +1123,10 @@ struct StatBadge: View {
     var body: some View {
         HStack(spacing: 4) {
             Text("\(value)")
-                .font(.system(size: 16, weight: .semibold, design: .monospaced))
+                .font(TronTypography.mono(size: TronTypography.sizeTitle, weight: .semibold))
                 .foregroundStyle(isSecondary ? .tronTextMuted : accentColor)
             Text(label)
-                .font(.caption2)
+                .font(TronTypography.caption2)
                 .foregroundStyle(.tronTextMuted)
         }
     }
@@ -1203,7 +1203,7 @@ struct TreeNodeRow: View {
             HStack(alignment: .center, spacing: 8) {
                 // Event sequence number - outside the container
                 Text("\(event.sequence)")
-                    .font(.system(size: 10, weight: .medium, design: .monospaced))
+                    .font(TronTypography.codeSM)
                     .foregroundStyle(.tronTextMuted)
                     .frame(width: 20, alignment: .trailing)
 
@@ -1223,20 +1223,20 @@ struct TreeNodeRow: View {
 
                     // Node icon
                     eventIcon
-                        .font(.system(size: 11))
+                        .font(TronTypography.sans(size: TronTypography.sizeBody2))
                         .foregroundStyle(iconColor)
                         .frame(width: 16)
 
                     // Content
                     Text(event.summary)
-                        .font(.system(size: 12, weight: .medium, design: .monospaced))
+                        .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
                         .foregroundStyle(textColor)
                         .lineLimit(1)
 
                     // Parent session badge
                     if isFromParentSession {
                         Text("inherited")
-                            .font(.system(size: 7, weight: .medium))
+                            .font(TronTypography.sans(size: TronTypography.sizeXXS, weight: .medium))
                             .foregroundStyle(.tronTextMuted)
                             .padding(.horizontal, 4)
                             .padding(.vertical, 1)
@@ -1246,7 +1246,7 @@ struct TreeNodeRow: View {
 
                     if isHead {
                         Text("HEAD")
-                            .font(.system(size: 8, weight: .bold))
+                            .font(TronTypography.sans(size: TronTypography.sizeXS, weight: .bold))
                             .foregroundStyle(.white)
                             .padding(.horizontal, 4)
                             .padding(.vertical, 1)
@@ -1256,7 +1256,7 @@ struct TreeNodeRow: View {
 
                     if isBranchPoint {
                         Image(systemName: "arrow.triangle.branch")
-                            .font(.system(size: 9))
+                            .font(TronTypography.sans(size: TronTypography.sizeSM))
                             .foregroundStyle(.tronAmber)
                     }
 
@@ -1265,7 +1265,7 @@ struct TreeNodeRow: View {
                     // Expandable indicator
                     if hasExpandableContent {
                         Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
-                            .font(.system(size: 9, weight: .medium))
+                            .font(TronTypography.sans(size: TronTypography.sizeSM, weight: .medium))
                             .foregroundStyle(.tronTextMuted)
                     }
                 }
@@ -1293,7 +1293,7 @@ struct TreeNodeRow: View {
                     // Show expanded content if available
                     if let content = event.expandedContent {
                         Text(content)
-                            .font(.system(size: 10, design: .monospaced))
+                            .font(TronTypography.mono(size: TronTypography.sizeCaption))
                             .foregroundStyle(.tronTextSecondary)
                             .lineLimit(10)
                             .padding(8)
@@ -1312,9 +1312,9 @@ struct TreeNodeRow: View {
                             Button(action: onFork) {
                                 HStack(spacing: 3) {
                                     Image(systemName: "arrow.triangle.branch")
-                                        .font(.system(size: 10))
+                                        .font(TronTypography.sans(size: TronTypography.sizeCaption))
                                     Text("Fork")
-                                        .font(.system(size: 11, weight: .medium))
+                                        .font(TronTypography.sans(size: TronTypography.sizeBody2, weight: .medium))
                                 }
                                 .foregroundStyle(.white)
                                 .padding(.horizontal, 10)
@@ -1442,7 +1442,7 @@ struct LoadingTreeView: View {
             ProgressView()
                 .tint(.tronPurple)
             Text("Loading history...")
-                .font(.subheadline)
+                .font(TronTypography.subheadline)
                 .foregroundStyle(.tronTextMuted)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -1453,15 +1453,15 @@ struct EmptyTreeView: View {
     var body: some View {
         VStack(spacing: 12) {
             Image(systemName: "arrow.triangle.branch")
-                .font(.system(size: 36, weight: .light))
+                .font(TronTypography.sans(size: 36, weight: .light))
                 .foregroundStyle(.tronTextMuted)
 
             Text("No History")
-                .font(.subheadline.weight(.medium))
+                .font(TronTypography.subheadline.weight(.medium))
                 .foregroundStyle(.tronTextPrimary)
 
             Text("Events will appear here as you interact")
-                .font(.caption)
+                .font(TronTypography.caption)
                 .foregroundStyle(.tronTextMuted)
                 .multilineTextAlignment(.center)
         }
@@ -1509,18 +1509,18 @@ struct CompactTreeView: View {
                 ForEach(Array(pathEvents.enumerated()), id: \.element.id) { index, event in
                     if index > 0 {
                         Image(systemName: "chevron.right")
-                            .font(.system(size: 8))
+                            .font(TronTypography.sans(size: TronTypography.sizeXS))
                             .foregroundStyle(.tronTextMuted)
                     }
 
                     compactIcon(for: event)
-                        .font(.system(size: 10))
+                        .font(TronTypography.sans(size: TronTypography.sizeCaption))
                         .foregroundStyle(event.id == headEventId ? .tronPurple : .tronTextSecondary)
                 }
 
                 if pathEvents.isEmpty {
                     Text("No history")
-                        .font(.caption2)
+                        .font(TronTypography.caption2)
                         .foregroundStyle(.tronTextMuted)
                 }
             }
@@ -1569,17 +1569,17 @@ struct BranchIndicator: View {
                 // Branch count badge
                 HStack(spacing: 3) {
                     Image(systemName: "arrow.triangle.branch")
-                        .font(.system(size: 9))
+                        .font(TronTypography.sans(size: TronTypography.sizeSM))
                     Text("\(branchCount)")
-                        .font(.system(size: 10, weight: .medium, design: .monospaced))
+                        .font(TronTypography.codeSM)
                     Text(branchCount == 1 ? "branch" : "branches")
-                        .font(.system(size: 9))
+                        .font(TronTypography.sans(size: TronTypography.sizeSM))
                 }
                 .foregroundStyle(.tronPurple)
 
                 // Expand/collapse chevron
                 Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
-                    .font(.system(size: 9, weight: .medium))
+                    .font(TronTypography.sans(size: TronTypography.sizeSM, weight: .medium))
                     .foregroundStyle(.tronTextMuted)
             }
             .padding(.horizontal, 8)
@@ -1620,15 +1620,15 @@ struct GhostTrackColumn: View {
                     // Branch header
                     HStack(spacing: 6) {
                         Image(systemName: "arrow.triangle.branch")
-                            .font(.system(size: 10))
+                            .font(TronTypography.sans(size: TronTypography.sizeCaption))
                             .foregroundStyle(.tronPurple.opacity(0.6))
 
                         Text(branch.displayTitle)
-                            .font(.system(size: 11, weight: .medium, design: .monospaced))
+                            .font(TronTypography.mono(size: TronTypography.sizeBody2, weight: .medium))
                             .foregroundStyle(.tronTextMuted)
 
                         Text("(\(branch.eventCount) events)")
-                            .font(.system(size: 9, design: .monospaced))
+                            .font(TronTypography.mono(size: TronTypography.sizeSM))
                             .foregroundStyle(.tronTextMuted.opacity(0.7))
                     }
                     .padding(.horizontal, 8)
@@ -1651,7 +1651,7 @@ struct GhostTrackColumn: View {
 
                             if branch.events.count > 5 {
                                 Text("+ \(branch.events.count - 5) more...")
-                                    .font(.system(size: 9, design: .monospaced))
+                                    .font(TronTypography.mono(size: TronTypography.sizeSM))
                                     .foregroundStyle(.tronTextMuted.opacity(0.5))
                                     .padding(.leading, 20)
                             }
@@ -1662,7 +1662,7 @@ struct GhostTrackColumn: View {
                             ProgressView()
                                 .scaleEffect(0.6)
                             Text("Loading...")
-                                .font(.system(size: 9, design: .monospaced))
+                                .font(TronTypography.mono(size: TronTypography.sizeSM))
                                 .foregroundStyle(.tronTextMuted.opacity(0.5))
                         }
                         .padding(.leading, 8)
@@ -1704,13 +1704,13 @@ struct GhostEventRow: View {
             HStack(spacing: 6) {
                 // Event icon
                 eventIcon
-                    .font(.system(size: 9))
+                    .font(TronTypography.sans(size: TronTypography.sizeSM))
                     .foregroundStyle(iconColor.opacity(0.6))
                     .frame(width: 12)
 
                 // Summary (truncated)
                 Text(event.summary)
-                    .font(.system(size: 10, design: .monospaced))
+                    .font(TronTypography.mono(size: TronTypography.sizeCaption))
                     .foregroundStyle(.tronTextMuted)
                     .lineLimit(1)
 
@@ -1718,7 +1718,7 @@ struct GhostEventRow: View {
 
                 // Timestamp
                 Text(formattedTime)
-                    .font(.system(size: 8, design: .monospaced))
+                    .font(TronTypography.mono(size: TronTypography.sizeXS))
                     .foregroundStyle(.tronTextMuted.opacity(0.5))
             }
             .padding(.horizontal, 8)
@@ -1730,7 +1730,7 @@ struct GhostEventRow: View {
         .overlay(alignment: .top) {
             if showingToast {
                 Text("Switch to \(sessionTitle) to interact")
-                    .font(.system(size: 9, weight: .medium))
+                    .font(TronTypography.sans(size: TronTypography.sizeSM, weight: .medium))
                     .foregroundStyle(.white)
                     .padding(.horizontal, 8)
                     .padding(.vertical, 4)
@@ -1826,13 +1826,13 @@ struct SessionHistorySheet: View {
             .toolbar {
                 ToolbarItem(placement: .principal) {
                     Text("Session History")
-                        .font(.system(size: 16, weight: .semibold, design: .monospaced))
+                        .font(TronTypography.mono(size: TronTypography.sizeTitle, weight: .semibold))
                         .foregroundStyle(.tronPurple)
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button { dismiss() } label: {
                         Image(systemName: "checkmark")
-                            .font(.system(size: 14, weight: .semibold))
+                            .font(TronTypography.buttonSM)
                             .foregroundStyle(.tronPurple)
                     }
                 }
@@ -1888,7 +1888,7 @@ struct ForkConfirmationSheet: View {
 
                 // Icon
                 Image(systemName: "arrow.triangle.branch")
-                    .font(.system(size: 44, weight: .light))
+                    .font(TronTypography.sans(size: 44, weight: .light))
                     .foregroundStyle(.tronPurple)
                     .frame(width: 72, height: 72)
                     .background {
@@ -1900,27 +1900,27 @@ struct ForkConfirmationSheet: View {
                 // Title and description
                 VStack(spacing: 8) {
                     Text("Fork Session")
-                        .font(.system(size: 20, weight: .semibold))
+                        .font(TronTypography.sans(size: TronTypography.sizeXL, weight: .semibold))
                         .foregroundStyle(.tronTextPrimary)
 
                     Text("Create a new branch from this point")
-                        .font(.system(size: 14, design: .monospaced))
+                        .font(TronTypography.messageBody)
                         .foregroundStyle(.tronTextMuted)
 
                     // Show the fork point summary
                     if let event = event {
                         HStack(spacing: 6) {
                             Image(systemName: "quote.opening")
-                                .font(.system(size: 10))
+                                .font(TronTypography.sans(size: TronTypography.sizeCaption))
                                 .foregroundStyle(.tronPurple.opacity(0.5))
 
                             Text(event.summary)
-                                .font(.system(size: 12, design: .monospaced))
+                                .font(TronTypography.mono(size: TronTypography.sizeBodySM))
                                 .foregroundStyle(.tronTextSecondary)
                                 .lineLimit(2)
 
                             Image(systemName: "quote.closing")
-                                .font(.system(size: 10))
+                                .font(TronTypography.sans(size: TronTypography.sizeCaption))
                                 .foregroundStyle(.tronPurple.opacity(0.5))
                         }
                         .padding(.horizontal, 12)
@@ -1942,14 +1942,14 @@ struct ForkConfirmationSheet: View {
                         dismiss()
                     } label: {
                         Image(systemName: "xmark")
-                            .font(.system(size: 14, weight: .semibold))
+                            .font(TronTypography.buttonSM)
                             .foregroundStyle(.tronTextSecondary)
                     }
                     .disabled(isForking)
                 }
                 ToolbarItem(placement: .principal) {
                     Text("Fork Session")
-                        .font(.system(size: 16, weight: .semibold, design: .monospaced))
+                        .font(TronTypography.mono(size: TronTypography.sizeTitle, weight: .semibold))
                         .foregroundStyle(.tronPurple)
                 }
                 ToolbarItem(placement: .topBarTrailing) {
@@ -1964,7 +1964,7 @@ struct ForkConfirmationSheet: View {
                                 .tint(.tronPurple)
                         } else {
                             Image(systemName: "checkmark")
-                                .font(.system(size: 14, weight: .semibold))
+                                .font(TronTypography.buttonSM)
                                 .foregroundStyle(.tronPurple)
                         }
                     }

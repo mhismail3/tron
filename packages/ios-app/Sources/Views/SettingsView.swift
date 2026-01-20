@@ -25,35 +25,35 @@ struct SettingsView: View {
                 // Server Section
                 Section {
                     TextField("Host", text: $serverHost)
-                        .font(.subheadline)
+                        .font(TronTypography.subheadline)
                         .textContentType(.URL)
                         .autocapitalization(.none)
                         .autocorrectionDisabled()
 
                     TextField("Port", text: $serverPort)
-                        .font(.subheadline)
+                        .font(TronTypography.subheadline)
                         .keyboardType(.numberPad)
 
                     Toggle("Use TLS (wss://)", isOn: $useTLS)
-                        .font(.subheadline)
+                        .font(TronTypography.subheadline)
                 } header: {
                     Text("Server")
-                        .font(.caption)
+                        .font(TronTypography.caption)
                 } footer: {
                     Text("Connect to your Tron server. Default is localhost:\(SettingsView.defaultPort).")
-                        .font(.caption2)
+                        .font(TronTypography.caption2)
                 }
 
                 // Preferences Section
                 Section {
                     Toggle("Confirm before archiving", isOn: $confirmArchive)
-                        .font(.subheadline)
+                        .font(TronTypography.subheadline)
                 } header: {
                     Text("Preferences")
-                        .font(.caption)
+                        .font(TronTypography.caption)
                 } footer: {
                     Text("Show a confirmation dialog when archiving sessions.")
-                        .font(.caption2)
+                        .font(TronTypography.caption2)
                 }
 
                 // Advanced Section
@@ -62,12 +62,12 @@ struct SettingsView: View {
                         showingResetAlert = true
                     } label: {
                         Label("Reset All Settings", systemImage: "arrow.counterclockwise")
-                            .font(.subheadline)
+                            .font(TronTypography.subheadline)
                             .foregroundStyle(.red)
                     }
                 } header: {
                     Text("Advanced")
-                        .font(.caption)
+                        .font(TronTypography.caption)
                 }
 
                 // Footer
@@ -76,13 +76,13 @@ struct SettingsView: View {
                 } footer: {
                     VStack(spacing: 4) {
                         Text("v0.0.1")
-                            .font(.caption2)
+                            .font(TronTypography.caption2)
                         Link(destination: URL(string: "https://github.com/yourusername/tron")!) {
                             HStack(spacing: 3) {
                                 Text("GitHub")
-                                    .font(.caption2)
+                                    .font(TronTypography.caption2)
                                 Image(systemName: "arrow.up.right")
-                                    .font(.system(size: 8))
+                                    .font(TronTypography.labelSM)
                             }
                         }
                     }
@@ -102,19 +102,19 @@ struct SettingsView: View {
                 ToolbarItem(placement: .topBarLeading) {
                     Button { showLogViewer = true } label: {
                         Image(systemName: "doc.text.magnifyingglass")
-                            .font(.system(size: 14, weight: .semibold))
+                            .font(TronTypography.buttonSM)
                             .foregroundStyle(.tronEmerald)
                     }
                 }
                 ToolbarItem(placement: .principal) {
                     Text("Settings")
-                        .font(.system(size: 16, weight: .semibold))
+                        .font(TronTypography.button)
                         .foregroundStyle(.tronEmerald)
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button { dismiss() } label: {
                         Image(systemName: "checkmark")
-                            .font(.system(size: 14, weight: .semibold))
+                            .font(TronTypography.buttonSM)
                             .foregroundStyle(.tronEmerald)
                     }
                 }

@@ -11,11 +11,11 @@ struct ModelPillLabel: View {
     var body: some View {
         HStack(spacing: 4) {
             Image(systemName: "cpu")
-                .font(.system(size: 9, weight: .medium))
+                .font(TronTypography.pill)
             Text(modelName.shortModelName)
-                .font(.system(size: 10, weight: .medium, design: .monospaced))
+                .font(TronTypography.codeSM)
             Image(systemName: "chevron.up.chevron.down")
-                .font(.system(size: 8, weight: .medium))
+                .font(TronTypography.sans(size: TronTypography.sizeXS, weight: .medium))
         }
         .foregroundStyle(.tronEmerald)
         .padding(.horizontal, 10)
@@ -87,11 +87,11 @@ struct ModelPickerMenu: View {
         } label: {
             HStack(spacing: 4) {
                 Image(systemName: "cpu")
-                    .font(.system(size: 9, weight: .medium))
+                    .font(TronTypography.pill)
                 Text(currentModel.shortModelName)
-                    .font(.system(size: 10, weight: .medium, design: .monospaced))
+                    .font(TronTypography.codeSM)
                 Image(systemName: "chevron.up.chevron.down")
-                    .font(.system(size: 8, weight: .medium))
+                    .font(TronTypography.sans(size: TronTypography.sizeXS, weight: .medium))
             }
             .foregroundStyle(.tronEmerald)
             .padding(.horizontal, 10)
@@ -124,7 +124,7 @@ struct ModelPickerMenu: View {
                 Text(model.formattedModelName)
                 if model.supportsReasoning == true {
                     Text("reasoning")
-                        .font(.caption2)
+                        .font(TronTypography.caption2)
                         .foregroundStyle(.secondary)
                 }
             }
@@ -408,17 +408,17 @@ struct ModelRow: View {
             // Selection indicator
             Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
                 .foregroundStyle(isSelected ? .tronEmerald : .tronTextMuted)
-                .font(.title3)
+                .font(TronTypography.sans(size: TronTypography.sizeXL))
 
             VStack(alignment: .leading, spacing: 4) {
                 HStack {
                     Text(model.formattedModelName)
-                        .font(.headline)
+                        .font(TronTypography.headline)
                         .foregroundStyle(.tronTextPrimary)
 
                     if isCurrent {
                         Text("Current")
-                            .font(.caption2.weight(.medium))
+                            .font(TronTypography.caption2)
                             .foregroundStyle(.tronEmerald)
                             .padding(.horizontal, 6)
                             .padding(.vertical, 2)
@@ -428,7 +428,7 @@ struct ModelRow: View {
 
                     if model.is45Model {
                         Text("Latest")
-                            .font(.caption2.weight(.medium))
+                            .font(TronTypography.caption2)
                             .foregroundStyle(.tronEmerald)
                             .padding(.horizontal, 6)
                             .padding(.vertical, 2)
@@ -436,7 +436,7 @@ struct ModelRow: View {
                             .clipShape(Capsule())
                     } else if model.isLegacy == true {
                         Text("Legacy")
-                            .font(.caption2.weight(.medium))
+                            .font(TronTypography.caption2)
                             .foregroundStyle(.tronTextMuted)
                             .padding(.horizontal, 6)
                             .padding(.vertical, 2)
@@ -464,7 +464,7 @@ struct ModelRow: View {
                         Label("Vision", systemImage: "photo")
                     }
                 }
-                .font(.caption)
+                .font(TronTypography.caption)
                 .foregroundStyle(.tronTextSecondary)
             }
 

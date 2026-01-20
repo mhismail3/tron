@@ -79,14 +79,14 @@ struct CloneRepoSheet: View {
                 ToolbarItem(placement: .topBarLeading) {
                     Button { dismiss() } label: {
                         Image(systemName: "xmark")
-                            .font(.system(size: 14, weight: .medium))
+                            .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .medium))
                             .foregroundStyle(.tronEmerald)
                     }
                     .disabled(isCloning)
                 }
                 ToolbarItem(placement: .principal) {
                     Text("Clone Repository")
-                        .font(.system(size: 16, weight: .semibold))
+                        .font(TronTypography.button)
                         .foregroundStyle(.tronEmerald)
                 }
             }
@@ -111,12 +111,12 @@ struct CloneRepoSheet: View {
     private var urlInputSection: some View {
         VStack(alignment: .leading, spacing: 10) {
             Text("GitHub URL")
-                .font(.system(size: 12, weight: .medium, design: .monospaced))
+                .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
                 .foregroundStyle(.white.opacity(0.6))
 
             VStack(alignment: .leading, spacing: 8) {
                 TextField("github.com/owner/repo", text: $repoURL)
-                    .font(.system(size: 14, design: .monospaced))
+                    .font(TronTypography.messageBody)
                     .foregroundStyle(.tronEmerald)
                     .textFieldStyle(.plain)
                     .autocorrectionDisabled()
@@ -156,26 +156,26 @@ struct CloneRepoSheet: View {
                 if let error = urlValidationError {
                     HStack(spacing: 6) {
                         Image(systemName: "exclamationmark.triangle.fill")
-                            .font(.system(size: 10))
+                            .font(TronTypography.sans(size: TronTypography.sizeCaption))
                             .foregroundStyle(.tronError)
                         Text(error)
-                            .font(.system(size: 11, design: .monospaced))
+                            .font(TronTypography.codeCaption)
                             .foregroundStyle(.tronError)
                     }
                 } else if let repo = parsedRepo {
                     HStack(spacing: 6) {
                         Image(systemName: "checkmark.circle.fill")
-                            .font(.system(size: 10))
+                            .font(TronTypography.sans(size: TronTypography.sizeCaption))
                             .foregroundStyle(.tronEmerald)
                         Text(repo.repoName)
-                            .font(.system(size: 11, weight: .medium, design: .monospaced))
+                            .font(TronTypography.codeCaption)
                             .foregroundStyle(.tronEmerald)
                     }
                 }
             }
 
             Text("Paste a GitHub repository URL")
-                .font(.system(size: 11, design: .monospaced))
+                .font(TronTypography.codeCaption)
                 .foregroundStyle(.white.opacity(0.4))
         }
     }
@@ -185,7 +185,7 @@ struct CloneRepoSheet: View {
     private var destinationSection: some View {
         VStack(alignment: .leading, spacing: 10) {
             Text("Destination")
-                .font(.system(size: 12, weight: .medium, design: .monospaced))
+                .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
                 .foregroundStyle(.white.opacity(0.6))
 
             Button {
@@ -193,13 +193,13 @@ struct CloneRepoSheet: View {
             } label: {
                 HStack {
                     Text(displayDestinationPath)
-                        .font(.system(size: 13, design: .monospaced))
+                        .font(TronTypography.mono(size: TronTypography.sizeBody3))
                         .foregroundStyle(.tronEmerald)
                         .lineLimit(1)
                         .truncationMode(.middle)
                     Spacer()
                     Text("Change")
-                        .font(.system(size: 11, weight: .medium, design: .monospaced))
+                        .font(TronTypography.codeCaption)
                         .foregroundStyle(.tronEmerald.opacity(0.6))
                 }
                 .padding(.horizontal, 16)
@@ -210,7 +210,7 @@ struct CloneRepoSheet: View {
             .disabled(isCloning)
 
             Text("The repository will be cloned to this folder")
-                .font(.system(size: 11, design: .monospaced))
+                .font(TronTypography.codeCaption)
                 .foregroundStyle(.white.opacity(0.4))
         }
     }
@@ -227,13 +227,13 @@ struct CloneRepoSheet: View {
                         .scaleEffect(0.9)
                         .tint(.tronBackground)
                     Text("Cloning...")
-                        .font(.system(size: 14, weight: .semibold, design: .monospaced))
+                        .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .semibold))
                         .foregroundStyle(.tronBackground)
                 } else {
                     Image(systemName: "arrow.down.doc.fill")
-                        .font(.system(size: 14))
+                        .font(TronTypography.sans(size: TronTypography.sizeBody))
                     Text("Clone Repository")
-                        .font(.system(size: 14, weight: .semibold, design: .monospaced))
+                        .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .semibold))
                 }
             }
             .frame(maxWidth: .infinity)
@@ -253,14 +253,14 @@ struct CloneRepoSheet: View {
                 .foregroundStyle(.tronError)
             VStack(alignment: .leading, spacing: 6) {
                 Text(error)
-                    .font(.system(size: 13, design: .monospaced))
+                    .font(TronTypography.mono(size: TronTypography.sizeBody3))
                     .foregroundStyle(.tronError)
 
                 Button {
                     cloneError = nil
                 } label: {
                     Text("Dismiss")
-                        .font(.system(size: 11, weight: .medium, design: .monospaced))
+                        .font(TronTypography.codeCaption)
                         .foregroundStyle(.white.opacity(0.6))
                 }
             }

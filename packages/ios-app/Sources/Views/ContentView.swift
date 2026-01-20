@@ -207,7 +207,7 @@ struct ContentView: View {
                     .frame(height: 64)
 
                 Text("TRON")
-                    .font(.system(size: 24, weight: .bold, design: .monospaced))
+                    .font(TronTypography.mono(size: TronTypography.sizeHero, weight: .bold))
                     .foregroundStyle(.tronEmerald)
                     .tracking(3)
             }
@@ -215,11 +215,11 @@ struct ContentView: View {
             // Prompt
             VStack(spacing: 8) {
                 Text("Select a Session")
-                    .font(.title3.weight(.medium))
+                    .font(TronTypography.sans(size: TronTypography.sizeXL, weight: .medium))
                     .foregroundStyle(.white.opacity(0.9))
 
                 Text("Choose a session from the sidebar or create a new one")
-                    .font(.subheadline)
+                    .font(TronTypography.subheadline)
                     .foregroundStyle(.white.opacity(0.5))
                     .multilineTextAlignment(.center)
             }
@@ -230,7 +230,7 @@ struct ContentView: View {
                     columnVisibility = .all
                 } label: {
                     Label("Show Sessions", systemImage: "sidebar.left")
-                        .font(.headline)
+                        .font(TronTypography.headline)
                         .foregroundStyle(.white)
                         .padding(.horizontal, 24)
                         .padding(.vertical, 12)
@@ -283,7 +283,7 @@ struct WelcomePage: View {
 
                     // Subtle tagline
                     Text("Start talking")
-                        .font(.system(size: 14, weight: .regular, design: .monospaced))
+                        .font(TronTypography.messageBody)
                         .foregroundStyle(.white.opacity(0.4))
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -318,14 +318,14 @@ struct WelcomePage: View {
                 }
                 ToolbarItem(placement: .principal) {
                     Text("TRON")
-                        .font(.system(size: 16, weight: .bold, design: .monospaced))
+                        .font(TronTypography.mono(size: TronTypography.sizeTitle, weight: .bold))
                         .foregroundStyle(.tronEmerald)
                         .tracking(2)
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button(action: onSettings) {
                         Image(systemName: "gearshape")
-                            .font(.system(size: 16, weight: .medium))
+                            .font(TronTypography.sans(size: TronTypography.sizeTitle, weight: .medium))
                             .foregroundStyle(.tronEmerald)
                     }
                 }

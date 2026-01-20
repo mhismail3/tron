@@ -30,7 +30,7 @@ struct UICanvasSheet: View {
             .toolbar {
                 ToolbarItem(placement: .principal) {
                     Text(state.activeCanvas?.title ?? "")
-                        .font(.system(size: 16, weight: .semibold, design: .monospaced))
+                        .font(TronTypography.mono(size: TronTypography.sizeTitle, weight: .semibold))
                         .foregroundStyle(.tronEmerald)
                 }
                 ToolbarItem(placement: .confirmationAction) {
@@ -38,7 +38,7 @@ struct UICanvasSheet: View {
                         state.dismissCanvas()
                     } label: {
                         Text("Done")
-                            .font(.system(size: 14, weight: .medium, design: .monospaced))
+                            .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
                             .foregroundStyle(.tronEmerald)
                     }
                 }
@@ -96,7 +96,7 @@ struct UICanvasSheet: View {
                     .tint(.tronEmerald)
                     .scaleEffect(0.8)
                 Text("Rendering...")
-                    .font(.system(size: 13, weight: .medium, design: .monospaced))
+                    .font(TronTypography.mono(size: TronTypography.sizeBody3, weight: .medium))
                     .foregroundStyle(.tronTextSecondary)
             }
             .padding(.vertical, 14)
@@ -136,13 +136,13 @@ struct UICanvasSheet: View {
                         .tint(.tronWarning)
                         .scaleEffect(0.8)
                     Text("Fixing issues (attempt \(attempt)/3)")
-                        .font(.system(size: 13, weight: .medium, design: .monospaced))
+                        .font(TronTypography.mono(size: TronTypography.sizeBody3, weight: .medium))
                         .foregroundStyle(.tronWarning)
                 }
 
                 // Show truncated error message
                 Text(String(errors.prefix(100)))
-                    .font(.system(size: 11, design: .monospaced))
+                    .font(TronTypography.codeCaption)
                     .foregroundStyle(.tronTextMuted)
                     .lineLimit(2)
                     .multilineTextAlignment(.center)
@@ -163,15 +163,15 @@ struct UICanvasSheet: View {
     private func errorView(message: String) -> some View {
         VStack(spacing: 20) {
             Image(systemName: "exclamationmark.triangle.fill")
-                .font(.system(size: 48))
+                .font(TronTypography.sans(size: 48))
                 .foregroundStyle(.tronError)
 
             Text("Render Error")
-                .font(.system(size: 18, weight: .semibold, design: .monospaced))
+                .font(TronTypography.mono(size: TronTypography.sizeLargeTitle, weight: .semibold))
                 .foregroundStyle(.tronTextPrimary)
 
             Text(message)
-                .font(.system(size: 14, design: .monospaced))
+                .font(TronTypography.messageBody)
                 .foregroundStyle(.tronTextSecondary)
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, 32)
@@ -184,11 +184,11 @@ struct UICanvasSheet: View {
     private var emptyView: some View {
         VStack(spacing: 20) {
             Image(systemName: "square.dashed")
-                .font(.system(size: 48))
+                .font(TronTypography.sans(size: 48))
                 .foregroundStyle(.tronTextMuted)
 
             Text("No content")
-                .font(.system(size: 16, weight: .medium, design: .monospaced))
+                .font(TronTypography.mono(size: TronTypography.sizeTitle, weight: .medium))
                 .foregroundStyle(.tronTextSecondary)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -226,7 +226,7 @@ struct UICanvasSheetFallback: View {
             .toolbar {
                 ToolbarItem(placement: .principal) {
                     Text(state.activeCanvas?.title ?? "")
-                        .font(.system(size: 16, weight: .semibold, design: .monospaced))
+                        .font(TronTypography.mono(size: TronTypography.sizeTitle, weight: .semibold))
                         .foregroundStyle(.tronEmerald)
                 }
                 ToolbarItem(placement: .confirmationAction) {
@@ -234,7 +234,7 @@ struct UICanvasSheetFallback: View {
                         state.dismissCanvas()
                     } label: {
                         Text("Done")
-                            .font(.system(size: 14, weight: .medium, design: .monospaced))
+                            .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
                             .foregroundStyle(.tronEmerald)
                     }
                 }
@@ -280,7 +280,7 @@ struct UICanvasSheetFallback: View {
                     .tint(.tronEmerald)
                     .scaleEffect(0.8)
                 Text("Rendering...")
-                    .font(.system(size: 13, weight: .medium, design: .monospaced))
+                    .font(TronTypography.mono(size: TronTypography.sizeBody3, weight: .medium))
                     .foregroundStyle(.tronTextSecondary)
             }
             .padding(.vertical, 14)
@@ -309,11 +309,11 @@ struct UICanvasSheetFallback: View {
                         .tint(.tronWarning)
                         .scaleEffect(0.8)
                     Text("Fixing issues (attempt \(attempt)/3)")
-                        .font(.system(size: 13, weight: .medium, design: .monospaced))
+                        .font(TronTypography.mono(size: TronTypography.sizeBody3, weight: .medium))
                         .foregroundStyle(.tronWarning)
                 }
                 Text(String(errors.prefix(100)))
-                    .font(.system(size: 11, design: .monospaced))
+                    .font(TronTypography.codeCaption)
                     .foregroundStyle(.tronTextMuted)
                     .lineLimit(2)
                     .multilineTextAlignment(.center)
@@ -328,13 +328,13 @@ struct UICanvasSheetFallback: View {
     private func errorView(message: String) -> some View {
         VStack(spacing: 20) {
             Image(systemName: "exclamationmark.triangle.fill")
-                .font(.system(size: 48))
+                .font(TronTypography.sans(size: 48))
                 .foregroundStyle(.tronError)
             Text("Render Error")
-                .font(.system(size: 18, weight: .semibold, design: .monospaced))
+                .font(TronTypography.mono(size: TronTypography.sizeLargeTitle, weight: .semibold))
                 .foregroundStyle(.tronTextPrimary)
             Text(message)
-                .font(.system(size: 14, design: .monospaced))
+                .font(TronTypography.messageBody)
                 .foregroundStyle(.tronTextSecondary)
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, 32)
@@ -345,10 +345,10 @@ struct UICanvasSheetFallback: View {
     private var emptyView: some View {
         VStack(spacing: 20) {
             Image(systemName: "square.dashed")
-                .font(.system(size: 48))
+                .font(TronTypography.sans(size: 48))
                 .foregroundStyle(.tronTextMuted)
             Text("No content")
-                .font(.system(size: 16, weight: .medium, design: .monospaced))
+                .font(TronTypography.mono(size: TronTypography.sizeTitle, weight: .medium))
                 .foregroundStyle(.tronTextSecondary)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)

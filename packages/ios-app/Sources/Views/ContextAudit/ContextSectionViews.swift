@@ -20,18 +20,18 @@ struct SystemPromptSection: View {
             // Header
             HStack(spacing: 8) {
                 Image(systemName: "doc.text.fill")
-                    .font(.system(size: 14))
+                    .font(TronTypography.sans(size: TronTypography.sizeBody))
                     .foregroundStyle(.tronPurple)
                     .frame(width: 18)
                 Text("System Prompt")
-                    .font(.system(size: 14, weight: .medium, design: .monospaced))
+                    .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
                     .foregroundStyle(.tronPurple)
                 Spacer()
                 Text(formatTokens(tokens))
-                    .font(.system(size: 12, weight: .medium, design: .monospaced))
+                    .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
                     .foregroundStyle(.white.opacity(0.6))
                 Image(systemName: "chevron.down")
-                    .font(.system(size: 10, weight: .medium))
+                    .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .medium))
                     .foregroundStyle(.white.opacity(0.4))
                     .rotationEffect(.degrees(isExpanded ? -180 : 0))
                     .animation(.spring(response: 0.35, dampingFraction: 0.8), value: isExpanded)
@@ -48,7 +48,7 @@ struct SystemPromptSection: View {
             if isExpanded {
                 ScrollView {
                     Text(content)
-                        .font(.system(size: 10, design: .monospaced))
+                        .font(TronTypography.mono(size: TronTypography.sizeCaption))
                         .foregroundStyle(.white.opacity(0.6))
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(10)
@@ -89,16 +89,16 @@ struct ToolsSection: View {
             // Header - using onTapGesture to avoid any button highlight behavior
             HStack(spacing: 8) {
                 Image(systemName: "hammer.fill")
-                    .font(.system(size: 14))
+                    .font(TronTypography.sans(size: TronTypography.sizeBody))
                     .foregroundStyle(.tronClay)
                     .frame(width: 18)
                 Text("Tools")
-                    .font(.system(size: 14, weight: .medium, design: .monospaced))
+                    .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
                     .foregroundStyle(.tronClay)
 
                 // Count badge
                 Text("\(toolsContent.count)")
-                    .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                    .font(TronTypography.pillValue)
                     .foregroundStyle(.white)
                     .padding(.horizontal, 6)
                     .padding(.vertical, 2)
@@ -107,10 +107,10 @@ struct ToolsSection: View {
 
                 Spacer()
                 Text(formatTokens(tokens))
-                    .font(.system(size: 12, weight: .medium, design: .monospaced))
+                    .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
                     .foregroundStyle(.white.opacity(0.6))
                 Image(systemName: "chevron.down")
-                    .font(.system(size: 10, weight: .medium))
+                    .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .medium))
                     .foregroundStyle(.white.opacity(0.4))
                     .rotationEffect(.degrees(isExpanded ? -180 : 0))
                     .animation(.spring(response: 0.35, dampingFraction: 0.8), value: isExpanded)
@@ -176,12 +176,12 @@ struct ToolItemView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(toolName)
-                .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                .font(TronTypography.mono(size: TronTypography.sizeBody2, weight: .semibold))
                 .foregroundStyle(.tronClay)
                 .lineLimit(2)
             if !toolDescription.isEmpty {
                 Text(toolDescription)
-                    .font(.system(size: 10, design: .monospaced))
+                    .font(TronTypography.mono(size: TronTypography.sizeCaption))
                     .foregroundStyle(.white.opacity(0.5))
                     .lineLimit(3)
             }
@@ -215,17 +215,17 @@ struct ExpandableContentSection: View {
             // Header
             HStack {
                 Image(systemName: icon)
-                    .font(.system(size: 12))
+                    .font(TronTypography.sans(size: TronTypography.sizeBodySM))
                     .foregroundStyle(iconColor.opacity(0.8))
                 Text(title)
-                    .font(.system(size: 12, weight: .medium, design: .monospaced))
+                    .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
                     .foregroundStyle(.white.opacity(0.7))
                 Spacer()
                 Text(formatTokens(tokens))
-                    .font(.system(size: 11, design: .monospaced))
+                    .font(TronTypography.codeCaption)
                     .foregroundStyle(.white.opacity(0.5))
                 Image(systemName: "chevron.down")
-                    .font(.system(size: 10, weight: .medium))
+                    .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .medium))
                     .foregroundStyle(.white.opacity(0.4))
                     .rotationEffect(.degrees(isExpanded ? -180 : 0))
                     .animation(.spring(response: 0.35, dampingFraction: 0.8), value: isExpanded)
@@ -242,7 +242,7 @@ struct ExpandableContentSection: View {
             if isExpanded {
                 ScrollView {
                     Text(content)
-                        .font(.system(size: 10, design: .monospaced))
+                        .font(TronTypography.mono(size: TronTypography.sizeCaption))
                         .foregroundStyle(.white.opacity(0.6))
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(10)
@@ -291,16 +291,16 @@ struct SkillReferencesSection: View {
             // Header
             HStack(spacing: 8) {
                 Image(systemName: "sparkles")
-                    .font(.system(size: 14))
+                    .font(TronTypography.sans(size: TronTypography.sizeBody))
                     .foregroundStyle(.tronCyan)
                     .frame(width: 18)
                 Text("Skill References")
-                    .font(.system(size: 14, weight: .medium, design: .monospaced))
+                    .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
                     .foregroundStyle(.tronCyan)
 
                 // Count badge
                 Text("\(skills.count)")
-                    .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                    .font(TronTypography.pillValue)
                     .foregroundStyle(.white)
                     .padding(.horizontal, 6)
                     .padding(.vertical, 2)
@@ -311,11 +311,11 @@ struct SkillReferencesSection: View {
 
                 // Token count
                 Text(formatTokens(estimatedTokens))
-                    .font(.system(size: 12, weight: .medium, design: .monospaced))
+                    .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
                     .foregroundStyle(.white.opacity(0.6))
 
                 Image(systemName: "chevron.down")
-                    .font(.system(size: 10, weight: .medium))
+                    .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .medium))
                     .foregroundStyle(.white.opacity(0.4))
                     .rotationEffect(.degrees(isExpanded ? -180 : 0))
                     .animation(.spring(response: 0.35, dampingFraction: 0.8), value: isExpanded)
@@ -372,11 +372,11 @@ struct SkillReferenceRow: View {
             // Header row
             HStack(spacing: 8) {
                 Image(systemName: sourceIcon)
-                    .font(.system(size: 10))
+                    .font(TronTypography.sans(size: TronTypography.sizeCaption))
                     .foregroundStyle(sourceColor)
 
                 Text("@\(skill.name)")
-                    .font(.system(size: 11, weight: .medium, design: .monospaced))
+                    .font(TronTypography.codeCaption)
                     .foregroundStyle(.tronCyan)
 
                 Spacer()
@@ -384,7 +384,7 @@ struct SkillReferenceRow: View {
                 // Auto-inject badge if applicable
                 if let badge = autoInjectBadge {
                     Text(badge)
-                        .font(.system(size: 8, weight: .medium, design: .monospaced))
+                        .font(TronTypography.badge)
                         .foregroundStyle(.tronAmber)
                         .padding(.horizontal, 4)
                         .padding(.vertical, 2)
@@ -397,13 +397,13 @@ struct SkillReferenceRow: View {
                 // Tags if any
                 if let tags = skill.tags, !tags.isEmpty {
                     Text(tags.prefix(2).joined(separator: ", "))
-                        .font(.system(size: 9, design: .monospaced))
+                        .font(TronTypography.pill)
                         .foregroundStyle(.white.opacity(0.4))
                         .lineLimit(1)
                 }
 
                 Image(systemName: "chevron.down")
-                    .font(.system(size: 8, weight: .medium))
+                    .font(TronTypography.sans(size: TronTypography.sizeXS, weight: .medium))
                     .foregroundStyle(.white.opacity(0.3))
                     .rotationEffect(.degrees(isExpanded ? -180 : 0))
                     .animation(.spring(response: 0.35, dampingFraction: 0.8), value: isExpanded)
@@ -419,7 +419,7 @@ struct SkillReferenceRow: View {
             // Expanded description (just description, not full content)
             if isExpanded {
                 Text(skill.description)
-                    .font(.system(size: 10, design: .monospaced))
+                    .font(TronTypography.mono(size: TronTypography.sizeCaption))
                     .foregroundStyle(.white.opacity(0.6))
                     .padding(.horizontal, 8)
                     .padding(.bottom, 8)
@@ -460,17 +460,17 @@ struct AddedSkillRow: View {
             // Header row
             HStack(spacing: 8) {
                 Image(systemName: sourceIcon)
-                    .font(.system(size: 10))
+                    .font(TronTypography.sans(size: TronTypography.sizeCaption))
                     .foregroundStyle(.tronCyan)
 
                 Text("@\(skill.name)")
-                    .font(.system(size: 11, weight: .medium, design: .monospaced))
+                    .font(TronTypography.codeCaption)
                     .foregroundStyle(.tronCyan)
 
                 Spacer()
 
                 Image(systemName: "chevron.down")
-                    .font(.system(size: 8, weight: .medium))
+                    .font(TronTypography.sans(size: TronTypography.sizeXS, weight: .medium))
                     .foregroundStyle(.white.opacity(0.3))
                     .rotationEffect(.degrees(isExpanded ? -180 : 0))
                     .animation(.spring(response: 0.35, dampingFraction: 0.8), value: isExpanded)
@@ -499,7 +499,7 @@ struct AddedSkillRow: View {
                                 .scaleEffect(0.7)
                                 .tint(.tronCyan)
                             Text("Loading content...")
-                                .font(.system(size: 10, design: .monospaced))
+                                .font(TronTypography.mono(size: TronTypography.sizeCaption))
                                 .foregroundStyle(.white.opacity(0.4))
                         }
                         .frame(maxWidth: .infinity)
@@ -507,7 +507,7 @@ struct AddedSkillRow: View {
                     } else if let content = fullContent {
                         ScrollView {
                             Text(content)
-                                .font(.system(size: 10, design: .monospaced))
+                                .font(TronTypography.mono(size: TronTypography.sizeCaption))
                                 .foregroundStyle(.white.opacity(0.6))
                                 .frame(maxWidth: .infinity, alignment: .leading)
                                 .padding(10)
@@ -519,7 +519,7 @@ struct AddedSkillRow: View {
                         .padding(.horizontal, 8)
                     } else {
                         Text("Content not available")
-                            .font(.system(size: 10, design: .monospaced))
+                            .font(TronTypography.mono(size: TronTypography.sizeCaption))
                             .foregroundStyle(.white.opacity(0.4))
                             .padding(8)
                     }
@@ -574,16 +574,16 @@ struct RulesSection: View {
             // Header row (tappable)
             HStack(spacing: 8) {
                 Image(systemName: "doc.text.fill")
-                    .font(.system(size: 14))
+                    .font(TronTypography.sans(size: TronTypography.sizeBody))
                     .foregroundStyle(.tronTerracotta)
                     .frame(width: 18)
                 Text("Rules")
-                    .font(.system(size: 14, weight: .medium, design: .monospaced))
+                    .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
                     .foregroundStyle(.tronTerracotta)
 
                 // Count badge
                 Text("\(rules.totalFiles)")
-                    .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                    .font(TronTypography.pillValue)
                     .foregroundStyle(.white)
                     .padding(.horizontal, 6)
                     .padding(.vertical, 2)
@@ -593,11 +593,11 @@ struct RulesSection: View {
                 Spacer()
 
                 Text(formatTokens(rules.tokens))
-                    .font(.system(size: 12, weight: .medium, design: .monospaced))
+                    .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
                     .foregroundStyle(.white.opacity(0.6))
 
                 Image(systemName: "chevron.down")
-                    .font(.system(size: 10, weight: .medium))
+                    .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .medium))
                     .foregroundStyle(.white.opacity(0.4))
                     .rotationEffect(.degrees(isExpanded ? -180 : 0))
                     .animation(.spring(response: 0.35, dampingFraction: 0.8), value: isExpanded)
@@ -649,25 +649,25 @@ struct RulesFileRow: View {
             // Header row (tappable)
             HStack(spacing: 10) {
                 Image(systemName: file.icon)
-                    .font(.system(size: 12))
+                    .font(TronTypography.sans(size: TronTypography.sizeBodySM))
                     .foregroundStyle(.tronTerracotta.opacity(0.8))
                     .frame(width: 20)
 
                 VStack(alignment: .leading, spacing: 2) {
                     Text(file.displayPath)
-                        .font(.system(size: 12, weight: .medium, design: .monospaced))
+                        .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
                         .foregroundStyle(.white.opacity(0.8))
                         .lineLimit(1)
 
                     Text(file.label)
-                        .font(.system(size: 10, design: .monospaced))
+                        .font(TronTypography.mono(size: TronTypography.sizeCaption))
                         .foregroundStyle(.white.opacity(0.4))
                 }
 
                 Spacer()
 
                 Image(systemName: "chevron.down")
-                    .font(.system(size: 8, weight: .medium))
+                    .font(TronTypography.sans(size: TronTypography.sizeXS, weight: .medium))
                     .foregroundStyle(.white.opacity(0.3))
                     .rotationEffect(.degrees(isExpanded ? -180 : 0))
                     .animation(.spring(response: 0.35, dampingFraction: 0.8), value: isExpanded)
@@ -695,7 +695,7 @@ struct RulesFileRow: View {
                                 .scaleEffect(0.7)
                                 .tint(.tronTerracotta)
                             Text("Loading content...")
-                                .font(.system(size: 10, design: .monospaced))
+                                .font(TronTypography.mono(size: TronTypography.sizeCaption))
                                 .foregroundStyle(.white.opacity(0.4))
                         }
                         .frame(maxWidth: .infinity)
@@ -704,17 +704,17 @@ struct RulesFileRow: View {
                         VStack(alignment: .leading, spacing: 4) {
                             HStack(spacing: 6) {
                                 Image(systemName: "exclamationmark.triangle.fill")
-                                    .font(.system(size: 10))
+                                    .font(TronTypography.sans(size: TronTypography.sizeCaption))
                                     .foregroundStyle(.tronError)
                                 Text("Failed to load content")
-                                    .font(.system(size: 10, weight: .medium, design: .monospaced))
+                                    .font(TronTypography.codeSM)
                                     .foregroundStyle(.tronError)
                             }
                             Text(error)
-                                .font(.system(size: 9, design: .monospaced))
+                                .font(TronTypography.pill)
                                 .foregroundStyle(.white.opacity(0.4))
                             Text("Path: \(file.path)")
-                                .font(.system(size: 9, design: .monospaced))
+                                .font(TronTypography.pill)
                                 .foregroundStyle(.white.opacity(0.3))
                                 .lineLimit(2)
                         }
@@ -725,7 +725,7 @@ struct RulesFileRow: View {
                     } else if let displayContent = loadedContent ?? content {
                         ScrollView {
                             Text(displayContent)
-                                .font(.system(size: 10, design: .monospaced))
+                                .font(TronTypography.mono(size: TronTypography.sizeCaption))
                                 .foregroundStyle(.white.opacity(0.6))
                                 .frame(maxWidth: .infinity, alignment: .leading)
                                 .padding(10)
@@ -736,7 +736,7 @@ struct RulesFileRow: View {
                         .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
                     } else {
                         Text("Content not available")
-                            .font(.system(size: 10, design: .monospaced))
+                            .font(TronTypography.mono(size: TronTypography.sizeCaption))
                             .foregroundStyle(.white.opacity(0.4))
                             .padding(8)
                     }

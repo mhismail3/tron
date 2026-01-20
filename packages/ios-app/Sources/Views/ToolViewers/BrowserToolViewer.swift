@@ -17,7 +17,7 @@ struct BrowserResultViewer: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             Text(displayText)
-                .font(.system(size: 11, design: .monospaced))
+                .font(TronTypography.codeCaption)
                 .foregroundStyle(.tronTextSecondary)
                 .padding(.horizontal, 12)
                 .padding(.vertical, 8)
@@ -31,9 +31,9 @@ struct BrowserResultViewer: View {
                 } label: {
                     HStack {
                         Text(isExpanded ? "Show less" : "Show more")
-                            .font(.system(size: 11, design: .monospaced))
+                            .font(TronTypography.codeCaption)
                         Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
-                            .font(.system(size: 10))
+                            .font(TronTypography.codeSM)
                     }
                     .foregroundStyle(.tronTextMuted)
                     .padding(.vertical, 5)
@@ -97,19 +97,19 @@ struct OpenBrowserResultViewer: View {
             HStack(spacing: 10) {
                 // Status icon
                 Image(systemName: displayInfo.icon)
-                    .font(.system(size: 14))
+                    .font(TronTypography.messageBody)
                     .foregroundStyle(isSuccess ? .tronSuccess : .tronError)
 
                 VStack(alignment: .leading, spacing: 2) {
                     // Main message
                     Text(displayInfo.message)
-                        .font(.system(size: 11, weight: .medium, design: .monospaced))
+                        .font(TronTypography.filePath)
                         .foregroundStyle(.tronTextSecondary)
 
                     // URL or detail
                     if let detail = displayInfo.detail {
                         Text(detail)
-                            .font(.system(size: 10, design: .monospaced))
+                            .font(TronTypography.codeSM)
                             .foregroundStyle(.blue)
                             .lineLimit(isExpanded ? nil : 1)
                     }
@@ -127,7 +127,7 @@ struct OpenBrowserResultViewer: View {
                     .frame(height: 0.5)
 
                 Text(isExpanded ? displayResult : String(displayResult.prefix(200)) + (displayResult.count > 200 ? "..." : ""))
-                    .font(.system(size: 10, design: .monospaced))
+                    .font(TronTypography.codeSM)
                     .foregroundStyle(.tronTextMuted)
                     .padding(.horizontal, 12)
                     .padding(.vertical, 8)
@@ -140,9 +140,9 @@ struct OpenBrowserResultViewer: View {
                     } label: {
                         HStack {
                             Text(isExpanded ? "Show less" : "Show more")
-                                .font(.system(size: 10, design: .monospaced))
+                                .font(TronTypography.codeSM)
                             Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
-                                .font(.system(size: 9))
+                                .font(TronTypography.pill)
                         }
                         .foregroundStyle(.tronTextMuted)
                         .padding(.vertical, 5)

@@ -51,17 +51,17 @@ struct ReadResultViewer: View {
             // File info header
             HStack(spacing: 8) {
                 Image(systemName: "doc.text")
-                    .font(.system(size: 12))
+                    .font(TronTypography.mono(size: TronTypography.sizeBodySM))
                     .foregroundStyle(languageColor)
 
                 Text(fileName)
-                    .font(.system(size: 11, weight: .medium, design: .monospaced))
+                    .font(TronTypography.filePath)
                     .foregroundStyle(.tronTextSecondary)
                     .lineLimit(1)
 
                 if !fileExtension.isEmpty {
                     Text(fileExtension)
-                        .font(.system(size: 9, weight: .medium))
+                        .font(TronTypography.pill)
                         .foregroundStyle(.tronTextMuted)
                         .padding(.horizontal, 6)
                         .padding(.vertical, 2)
@@ -72,7 +72,7 @@ struct ReadResultViewer: View {
                 Spacer()
 
                 Text("\(parsedLines.count) lines")
-                    .font(.system(size: 10, design: .monospaced))
+                    .font(TronTypography.codeSM)
                     .foregroundStyle(.tronTextMuted)
             }
             .padding(.horizontal, 12)
@@ -92,7 +92,7 @@ struct ReadResultViewer: View {
                         HStack(spacing: 0) {
                             // Line number
                             Text("\(line.lineNum)")
-                                .font(.system(size: 9, design: .monospaced))
+                                .font(TronTypography.pill)
                                 .foregroundStyle(.tronTextMuted.opacity(0.4))
                                 .frame(width: lineNumWidth, alignment: .trailing)
                                 .padding(.leading, 4)
@@ -100,7 +100,7 @@ struct ReadResultViewer: View {
 
                             // Line content (cleaned)
                             Text(line.content.isEmpty ? " " : line.content)
-                                .font(.system(size: 11, design: .monospaced))
+                                .font(TronTypography.codeCaption)
                                 .foregroundStyle(.tronTextSecondary)
                         }
                         .frame(minHeight: 16)
@@ -119,9 +119,9 @@ struct ReadResultViewer: View {
                 } label: {
                     HStack {
                         Text(isExpanded ? "Show less" : "Show more")
-                            .font(.system(size: 11, design: .monospaced))
+                            .font(TronTypography.codeCaption)
                         Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
-                            .font(.system(size: 10))
+                            .font(TronTypography.codeSM)
                     }
                     .foregroundStyle(.tronTextMuted)
                     .padding(.vertical, 6)
@@ -158,11 +158,11 @@ struct WriteResultViewer: View {
             // Success message
             HStack(spacing: 8) {
                 Image(systemName: "checkmark.circle.fill")
-                    .font(.system(size: 12))
+                    .font(TronTypography.mono(size: TronTypography.sizeBodySM))
                     .foregroundStyle(.tronSuccess)
 
                 Text(result)
-                    .font(.system(size: 11, design: .monospaced))
+                    .font(TronTypography.codeCaption)
                     .foregroundStyle(.tronTextSecondary)
                     .lineLimit(2)
             }
@@ -183,14 +183,14 @@ struct WriteResultViewer: View {
                             ForEach(Array(displayLines.enumerated()), id: \.offset) { index, line in
                                 HStack(spacing: 0) {
                                     Text("\(index + 1)")
-                                        .font(.system(size: 9, design: .monospaced))
+                                        .font(TronTypography.pill)
                                         .foregroundStyle(.tronTextMuted.opacity(0.4))
                                         .frame(width: 16, alignment: .trailing)
                                         .padding(.leading, 4)
                                         .padding(.trailing, 8)
 
                                     Text(line.isEmpty ? " " : line)
-                                        .font(.system(size: 10, design: .monospaced))
+                                        .font(TronTypography.codeSM)
                                         .foregroundStyle(.tronTextMuted)
                                 }
                                 .frame(minHeight: 15)
@@ -209,9 +209,9 @@ struct WriteResultViewer: View {
                         } label: {
                             HStack {
                                 Text(isExpanded ? "Hide content" : "Show all \(contentLines.count) lines")
-                                    .font(.system(size: 10, design: .monospaced))
+                                    .font(TronTypography.codeSM)
                                 Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
-                                    .font(.system(size: 9))
+                                    .font(TronTypography.pill)
                             }
                             .foregroundStyle(.tronTextMuted)
                             .padding(.vertical, 5)
@@ -305,7 +305,7 @@ struct EditResultViewer: View {
             // File info header with stats
             HStack(spacing: 8) {
                 Text(URL(fileURLWithPath: filePath).lastPathComponent)
-                    .font(.system(size: 11, weight: .medium, design: .monospaced))
+                    .font(TronTypography.filePath)
                     .foregroundStyle(.tronTextSecondary)
                     .lineLimit(1)
 
@@ -314,7 +314,7 @@ struct EditResultViewer: View {
                 // Stats badges
                 if diffStats.added > 0 {
                     Text("+\(diffStats.added)")
-                        .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                        .font(TronTypography.pillValue)
                         .foregroundStyle(.tronSuccess)
                         .padding(.horizontal, 6)
                         .padding(.vertical, 2)
@@ -324,7 +324,7 @@ struct EditResultViewer: View {
 
                 if diffStats.removed > 0 {
                     Text("-\(diffStats.removed)")
-                        .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                        .font(TronTypography.pillValue)
                         .foregroundStyle(.tronError)
                         .padding(.horizontal, 6)
                         .padding(.vertical, 2)
@@ -362,9 +362,9 @@ struct EditResultViewer: View {
                     } label: {
                         HStack {
                             Text(isExpanded ? "Show less" : "Show more")
-                                .font(.system(size: 11, design: .monospaced))
+                                .font(TronTypography.codeCaption)
                             Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
-                                .font(.system(size: 10))
+                                .font(TronTypography.codeSM)
                         }
                         .foregroundStyle(.tronTextMuted)
                         .padding(.vertical, 6)
@@ -375,7 +375,7 @@ struct EditResultViewer: View {
             } else if !result.isEmpty {
                 // Fallback: show raw result text
                 Text(result)
-                    .font(.system(size: 11, design: .monospaced))
+                    .font(TronTypography.codeCaption)
                     .foregroundStyle(.tronTextSecondary)
                     .padding(.horizontal, 12)
                     .padding(.vertical, 8)
@@ -412,7 +412,7 @@ struct DiffLineView: View {
         HStack(spacing: 0) {
             // Line number
             Text(displayLineNum)
-                .font(.system(size: 9, design: .monospaced))
+                .font(TronTypography.pill)
                 .foregroundStyle(lineNumColor.opacity(0.6))
                 .frame(width: 20, alignment: .trailing)
                 .padding(.leading, 4)
@@ -421,13 +421,13 @@ struct DiffLineView: View {
 
             // Marker
             Text(marker)
-                .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                .font(TronTypography.mono(size: TronTypography.sizeBody2, weight: .semibold))
                 .foregroundStyle(markerColor)
                 .frame(width: 12)
 
             // Content
             Text(content.isEmpty ? " " : content)
-                .font(.system(size: 11, design: .monospaced))
+                .font(TronTypography.codeCaption)
                 .foregroundStyle(contentColor)
         }
         .frame(minHeight: 16)

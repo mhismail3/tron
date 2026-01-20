@@ -25,19 +25,19 @@ struct SessionPreviewSheet: View {
                         ProgressView()
                             .tint(.tronEmerald)
                         Text("Loading session history...")
-                            .font(.subheadline)
+                            .font(TronTypography.subheadline)
                             .foregroundStyle(.white.opacity(0.6))
                     }
                 } else if let error = loadError {
                     VStack(spacing: 16) {
                         Image(systemName: "exclamationmark.triangle.fill")
-                            .font(.largeTitle)
+                            .font(TronTypography.sans(size: TronTypography.sizeLargeTitle))
                             .foregroundStyle(.tronError)
                         Text("Failed to load history")
-                            .font(.headline)
+                            .font(TronTypography.headline)
                             .foregroundStyle(.white.opacity(0.9))
                         Text(error)
-                            .font(.subheadline)
+                            .font(TronTypography.subheadline)
                             .foregroundStyle(.white.opacity(0.6))
                             .multilineTextAlignment(.center)
                         Button("Retry") {
@@ -56,17 +56,17 @@ struct SessionPreviewSheet: View {
                 ToolbarItem(placement: .topBarLeading) {
                     Button { onDismiss() } label: {
                         Image(systemName: "xmark")
-                            .font(.system(size: 14, weight: .medium))
+                            .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .medium))
                             .foregroundStyle(.tronEmerald)
                     }
                 }
                 ToolbarItem(placement: .principal) {
                     VStack(spacing: 2) {
                         Text(session.displayName)
-                            .font(.system(size: 14, weight: .semibold))
+                            .font(TronTypography.buttonSM)
                             .foregroundStyle(.tronEmerald)
                         Text("\(session.messageCount) messages")
-                            .font(.system(size: 10))
+                            .font(TronTypography.sans(size: TronTypography.sizeCaption))
                             .foregroundStyle(.white.opacity(0.5))
                     }
                 }
@@ -79,7 +79,7 @@ struct SessionPreviewSheet: View {
                             forkSession()
                         } label: {
                             Image(systemName: "arrow.branch")
-                                .font(.system(size: 14, weight: .semibold))
+                                .font(TronTypography.buttonSM)
                                 .foregroundStyle(.tronEmerald)
                         }
                     }
@@ -117,10 +117,10 @@ struct SessionPreviewSheet: View {
             if let dir = session.workingDirectory {
                 HStack(spacing: 6) {
                     Image(systemName: "folder.fill")
-                        .font(.system(size: 12))
+                        .font(TronTypography.sans(size: TronTypography.sizeBodySM))
                         .foregroundStyle(.tronEmerald.opacity(0.7))
                     Text(dir.replacingOccurrences(of: "/Users/[^/]+/", with: "~/", options: .regularExpression))
-                        .font(.system(size: 12, design: .monospaced))
+                        .font(TronTypography.mono(size: TronTypography.sizeBodySM))
                         .foregroundStyle(.white.opacity(0.6))
                         .lineLimit(1)
                         .truncationMode(.middle)
@@ -130,19 +130,19 @@ struct SessionPreviewSheet: View {
             HStack(spacing: 12) {
                 HStack(spacing: 4) {
                     Image(systemName: "cpu")
-                        .font(.system(size: 10))
+                        .font(TronTypography.sans(size: TronTypography.sizeCaption))
                     Text(session.model.shortModelName)
-                        .font(.system(size: 11, weight: .medium, design: .monospaced))
+                        .font(TronTypography.codeCaption)
                 }
                 .foregroundStyle(.tronEmerald.opacity(0.8))
 
                 Text(session.formattedDate)
-                    .font(.system(size: 11, design: .monospaced))
+                    .font(TronTypography.codeCaption)
                     .foregroundStyle(.white.opacity(0.4))
 
                 if session.isActive {
                     Text("ACTIVE")
-                        .font(.system(size: 9, weight: .bold, design: .monospaced))
+                        .font(TronTypography.badge)
                         .foregroundStyle(.tronEmerald)
                         .padding(.horizontal, 6)
                         .padding(.vertical, 2)
@@ -150,7 +150,7 @@ struct SessionPreviewSheet: View {
                         .clipShape(Capsule())
                 } else {
                     Text("ENDED")
-                        .font(.system(size: 9, weight: .bold, design: .monospaced))
+                        .font(TronTypography.badge)
                         .foregroundStyle(.white.opacity(0.5))
                         .padding(.horizontal, 6)
                         .padding(.vertical, 2)

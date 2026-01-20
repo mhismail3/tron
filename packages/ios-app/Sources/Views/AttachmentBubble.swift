@@ -14,12 +14,12 @@ struct AttachmentBubble: View {
             // File info
             VStack(alignment: .leading, spacing: 1) {
                 Text(attachment.displayName)
-                    .font(.system(size: 10, weight: .medium, design: .monospaced))
+                    .font(TronTypography.codeSM)
                     .lineLimit(1)
                     .foregroundStyle(.primary)
 
                 Text(attachment.formattedSize)
-                    .font(.system(size: 9, weight: .regular, design: .monospaced))
+                    .font(TronTypography.pill)
                     .foregroundStyle(.secondary)
             }
             .frame(maxWidth: 60, alignment: .leading)
@@ -27,7 +27,7 @@ struct AttachmentBubble: View {
             // Remove button
             Button(action: onRemove) {
                 Image(systemName: "xmark.circle.fill")
-                    .font(.system(size: 14))
+                    .font(TronTypography.sans(size: TronTypography.sizeBody))
                     .foregroundStyle(.secondary)
             }
             .buttonStyle(.plain)
@@ -64,7 +64,7 @@ struct AttachmentBubble: View {
                 .frame(width: 28, height: 28)
 
             Image(systemName: iconName)
-                .font(.system(size: 12, weight: .medium))
+                .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
                 .foregroundStyle(iconForegroundColor)
         }
     }

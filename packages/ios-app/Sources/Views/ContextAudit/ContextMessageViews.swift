@@ -56,19 +56,19 @@ struct DetailedMessageRow: View {
             // Header row (tappable)
             HStack(alignment: .top, spacing: 10) {
                 Image(systemName: icon)
-                    .font(.system(size: 12))
+                    .font(TronTypography.sans(size: TronTypography.sizeBodySM))
                     .foregroundStyle(iconColor)
                     .frame(width: 18)
                     .padding(.top, 2)
 
                 VStack(alignment: .leading, spacing: 2) {
                     Text(title)
-                        .font(.system(size: 12, weight: .medium, design: .monospaced))
+                        .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
                         .foregroundStyle(iconColor)
 
                     // Summary fades out when expanded
                     Text(message.summary)
-                        .font(.system(size: 10, design: .monospaced))
+                        .font(TronTypography.mono(size: TronTypography.sizeCaption))
                         .foregroundStyle(.white.opacity(0.5))
                         .lineLimit(1)
                         .opacity(isExpanded ? 0 : 1)
@@ -79,12 +79,12 @@ struct DetailedMessageRow: View {
                 Spacer()
 
                 Text(formatTokens(message.tokens))
-                    .font(.system(size: 10, design: .monospaced))
+                    .font(TronTypography.mono(size: TronTypography.sizeCaption))
                     .foregroundStyle(.white.opacity(0.5))
                     .padding(.top, 2)
 
                 Image(systemName: "chevron.down")
-                    .font(.system(size: 10, weight: .medium))
+                    .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .medium))
                     .foregroundStyle(.white.opacity(0.4))
                     .rotationEffect(.degrees(isExpanded ? -180 : 0))
                     .animation(.spring(response: 0.35, dampingFraction: 0.8), value: isExpanded)
@@ -108,19 +108,19 @@ struct DetailedMessageRow: View {
                             VStack(alignment: .leading, spacing: 4) {
                                 HStack {
                                     Image(systemName: "hammer.fill")
-                                        .font(.system(size: 10))
+                                        .font(TronTypography.sans(size: TronTypography.sizeCaption))
                                         .foregroundStyle(.tronAmber)
                                     Text(toolCall.name)
-                                        .font(.system(size: 11, weight: .medium, design: .monospaced))
+                                        .font(TronTypography.codeCaption)
                                         .foregroundStyle(.tronAmber)
                                     Spacer()
                                     Text(formatTokens(toolCall.tokens))
-                                        .font(.system(size: 9, design: .monospaced))
+                                        .font(TronTypography.pill)
                                         .foregroundStyle(.white.opacity(0.4))
                                 }
 
                                 Text(toolCall.arguments)
-                                    .font(.system(size: 10, design: .monospaced))
+                                    .font(TronTypography.mono(size: TronTypography.sizeCaption))
                                     .foregroundStyle(.white.opacity(0.6))
                                     .lineLimit(5)
                             }
@@ -197,16 +197,16 @@ struct MessagesContainer: View {
             // Header row (tappable)
             HStack(spacing: 8) {
                 Image(systemName: "message.fill")
-                    .font(.system(size: 14))
+                    .font(TronTypography.sans(size: TronTypography.sizeBody))
                     .foregroundStyle(.tronEmerald)
                     .frame(width: 18)
                 Text("Messages")
-                    .font(.system(size: 14, weight: .medium, design: .monospaced))
+                    .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
                     .foregroundStyle(.tronEmerald)
 
                 // Count badge
                 Text("\(totalMessages)")
-                    .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                    .font(TronTypography.pillValue)
                     .foregroundStyle(.white)
                     .padding(.horizontal, 6)
                     .padding(.vertical, 2)
@@ -216,11 +216,11 @@ struct MessagesContainer: View {
                 Spacer()
 
                 Text(formatTokens(totalTokens))
-                    .font(.system(size: 12, weight: .medium, design: .monospaced))
+                    .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
                     .foregroundStyle(.white.opacity(0.6))
 
                 Image(systemName: "chevron.down")
-                    .font(.system(size: 10, weight: .medium))
+                    .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .medium))
                     .foregroundStyle(.white.opacity(0.4))
                     .rotationEffect(.degrees(isExpanded ? -180 : 0))
                     .animation(.spring(response: 0.35, dampingFraction: 0.8), value: isExpanded)
@@ -238,7 +238,7 @@ struct MessagesContainer: View {
                 VStack(spacing: 4) {
                     if totalMessages == 0 {
                         Text("No messages in context")
-                            .font(.system(size: 11, design: .monospaced))
+                            .font(TronTypography.codeCaption)
                             .foregroundStyle(.white.opacity(0.4))
                             .frame(maxWidth: .infinity)
                             .padding(12)
@@ -261,9 +261,9 @@ struct MessagesContainer: View {
                                         Spacer()
                                         HStack(spacing: 6) {
                                             Image(systemName: "chevron.down")
-                                                .font(.system(size: 11, weight: .medium))
+                                                .font(TronTypography.sans(size: TronTypography.sizeBody2, weight: .medium))
                                             Text("Load \(min(10, totalMessages - messages.count)) more")
-                                                .font(.system(size: 11, design: .monospaced))
+                                                .font(TronTypography.codeCaption)
                                         }
                                         .foregroundStyle(.tronEmerald)
                                         Spacer()
@@ -320,16 +320,16 @@ struct AddedSkillsContainer: View {
             // Header
             HStack(spacing: 8) {
                 Image(systemName: "sparkles")
-                    .font(.system(size: 14))
+                    .font(TronTypography.sans(size: TronTypography.sizeBody))
                     .foregroundStyle(.tronCyan)
                     .frame(width: 18)
                 Text("Added Skills")
-                    .font(.system(size: 14, weight: .medium, design: .monospaced))
+                    .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
                     .foregroundStyle(.tronCyan)
 
                 // Count badge
                 Text("\(skills.count)")
-                    .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                    .font(TronTypography.pillValue)
                     .foregroundStyle(.white)
                     .padding(.horizontal, 6)
                     .padding(.vertical, 2)
@@ -339,11 +339,11 @@ struct AddedSkillsContainer: View {
                 Spacer()
 
                 Text("~\(formatTokens(estimatedTokens))")
-                    .font(.system(size: 12, weight: .medium, design: .monospaced))
+                    .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
                     .foregroundStyle(.white.opacity(0.6))
 
                 Image(systemName: "chevron.down")
-                    .font(.system(size: 10, weight: .medium))
+                    .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .medium))
                     .foregroundStyle(.white.opacity(0.4))
                     .rotationEffect(.degrees(isExpanded ? -180 : 0))
                     .animation(.spring(response: 0.35, dampingFraction: 0.8), value: isExpanded)

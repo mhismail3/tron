@@ -80,7 +80,7 @@ struct ReasoningLevelPicker: View {
                                     Text(levelLabel(level))
                                     if !levelDescription(level).isEmpty {
                                         Text(levelDescription(level))
-                                            .font(.caption)
+                                            .font(TronTypography.caption)
                                             .foregroundStyle(.secondary)
                                     }
                                 }
@@ -126,11 +126,11 @@ struct ReasoningLevelPillLabel: View {
     var body: some View {
         HStack(spacing: 4) {
             Image(systemName: ReasoningLevelPicker.levelIcon(level))
-                .font(.system(size: 9, weight: .medium))
+                .font(TronTypography.pill)
             Text(labelFunc(level))
-                .font(.system(size: 10, weight: .medium, design: .monospaced))
+                .font(TronTypography.codeSM)
             Image(systemName: "chevron.up.chevron.down")
-                .font(.system(size: 8, weight: .medium))
+                .font(TronTypography.sans(size: TronTypography.sizeXS, weight: .medium))
         }
         .foregroundStyle(levelColor)
         .padding(.horizontal, 10)
@@ -167,16 +167,16 @@ struct InlineReasoningControl: View {
                 }
             } label: {
                 Image(systemName: "minus.circle")
-                    .font(.system(size: 14, weight: .medium))
+                    .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .medium))
             }
             .disabled(currentIndex == 0)
 
             // Current level indicator
             HStack(spacing: 4) {
                 Image(systemName: ReasoningLevelPicker.levelIcon(level))
-                    .font(.system(size: 10))
+                    .font(TronTypography.sans(size: TronTypography.sizeCaption))
                 Text(level.prefix(1).uppercased())
-                    .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                    .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .semibold))
             }
             .frame(minWidth: 32)
             .foregroundStyle(ReasoningLevelPicker.levelColor(level, levels: levels))
@@ -188,7 +188,7 @@ struct InlineReasoningControl: View {
                 }
             } label: {
                 Image(systemName: "plus.circle")
-                    .font(.system(size: 14, weight: .medium))
+                    .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .medium))
             }
             .disabled(currentIndex == levels.count - 1)
         }
@@ -239,7 +239,7 @@ struct InlineReasoningControl: View {
                         .fill(ReasoningLevelPicker.levelColor(level))
                         .frame(width: 24, height: 24)
                     Text(level)
-                        .font(.caption2)
+                        .font(TronTypography.caption2)
                 }
             }
         }

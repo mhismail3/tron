@@ -19,7 +19,7 @@ struct VoiceNotesRecordingSheet: View {
 
                 // Duration display
                 Text(formattedDuration)
-                    .font(.system(size: 56, weight: .ultraLight, design: .monospaced))
+                    .font(TronTypography.timerDisplay)
                     .foregroundStyle(.white)
 
                 // Sine wave visualization
@@ -46,12 +46,12 @@ struct VoiceNotesRecordingSheet: View {
                             .foregroundStyle(.white.opacity(0.5))
                     }
                 }
-                .font(.system(size: 14, design: .monospaced))
+                .font(TronTypography.messageBody)
 
                 // Max duration indicator
                 if recorder.isRecording {
                     Text("Max: 5 minutes")
-                        .font(.system(size: 12, design: .monospaced))
+                        .font(TronTypography.mono(size: TronTypography.sizeBodySM))
                         .foregroundStyle(.white.opacity(0.3))
                 }
 
@@ -67,7 +67,7 @@ struct VoiceNotesRecordingSheet: View {
             .toolbar {
                 ToolbarItem(placement: .principal) {
                     Text("Voice Note")
-                        .font(.system(size: 16, weight: .semibold))
+                        .font(TronTypography.button)
                         .foregroundStyle(.tronEmerald)
                 }
             }
@@ -106,7 +106,7 @@ struct VoiceNotesRecordingSheet: View {
                 // Cancel - smaller button
                 Button(action: onCancel) {
                     Image(systemName: "xmark")
-                        .font(.system(size: 18, weight: .semibold))
+                        .font(TronTypography.sans(size: TronTypography.sizeLargeTitle, weight: .semibold))
                         .foregroundStyle(.white.opacity(0.9))
                         .frame(width: 52, height: 52)
                 }
@@ -120,7 +120,7 @@ struct VoiceNotesRecordingSheet: View {
                             .frame(width: 64, height: 64)
                     } else {
                         Image(systemName: "checkmark")
-                            .font(.system(size: 24, weight: .semibold))
+                            .font(TronTypography.sans(size: TronTypography.sizeHero, weight: .semibold))
                             .foregroundStyle(.white)
                             .frame(width: 64, height: 64)
                     }
@@ -131,7 +131,7 @@ struct VoiceNotesRecordingSheet: View {
                 // Re-record - smaller button
                 Button(action: handleReRecord) {
                     Image(systemName: "arrow.counterclockwise")
-                        .font(.system(size: 18, weight: .semibold))
+                        .font(TronTypography.sans(size: TronTypography.sizeLargeTitle, weight: .semibold))
                         .foregroundStyle(.white.opacity(0.9))
                         .frame(width: 52, height: 52)
                 }
@@ -144,7 +144,7 @@ struct VoiceNotesRecordingSheet: View {
                 // Cancel
                 Button(action: onCancel) {
                     Image(systemName: "xmark")
-                        .font(.system(size: 18, weight: .semibold))
+                        .font(TronTypography.sans(size: TronTypography.sizeLargeTitle, weight: .semibold))
                         .foregroundStyle(.white.opacity(0.9))
                         .frame(width: 52, height: 52)
                 }
@@ -153,7 +153,7 @@ struct VoiceNotesRecordingSheet: View {
                 // Record/Stop
                 Button(action: handleRecordTap) {
                     Image(systemName: recorder.isRecording ? "stop.fill" : "mic.fill")
-                        .font(.system(size: 24, weight: .semibold))
+                        .font(TronTypography.sans(size: TronTypography.sizeHero, weight: .semibold))
                         .foregroundStyle(recorder.isRecording ? .white : .tronEmerald)
                         .frame(width: 72, height: 72)
                 }

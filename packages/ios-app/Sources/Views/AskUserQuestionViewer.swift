@@ -22,21 +22,21 @@ struct AskUserQuestionToolViewer: View {
 
                 // Status text
                 Text(statusText)
-                    .font(.system(size: 11, weight: .medium, design: .monospaced))
+                    .font(TronTypography.codeCaption)
                     .foregroundStyle(textColor)
                     .lineLimit(1)
 
                 // Question count badge (for multiple questions)
                 if questionCount > 1 {
                     Text("(\(questionCount))")
-                        .font(.system(size: 10, design: .monospaced))
+                        .font(TronTypography.codeSM)
                         .foregroundStyle(textColor.opacity(0.7))
                 }
 
                 // Chevron for tappable states
                 if data.status != .superseded {
                     Image(systemName: "chevron.right")
-                        .font(.system(size: 9, weight: .semibold))
+                        .font(TronTypography.sans(size: TronTypography.sizeSM, weight: .semibold))
                         .foregroundStyle(textColor.opacity(0.6))
                 }
             }
@@ -66,15 +66,15 @@ struct AskUserQuestionToolViewer: View {
         switch data.status {
         case .pending:
             Image(systemName: "questionmark.circle.fill")
-                .font(.system(size: 12, weight: .medium))
+                .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
                 .foregroundStyle(.tronAmber)
         case .answered:
             Image(systemName: "checkmark.circle.fill")
-                .font(.system(size: 12, weight: .medium))
+                .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
                 .foregroundStyle(.tronSuccess)
         case .superseded:
             Image(systemName: "xmark.circle.fill")
-                .font(.system(size: 12, weight: .medium))
+                .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
                 .foregroundStyle(.tronTextMuted)
         }
     }

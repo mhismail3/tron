@@ -100,22 +100,22 @@ struct AstGrepResultViewer: View {
             // Header with match count
             HStack {
                 Image(systemName: "wand.and.stars")
-                    .font(.system(size: 11))
+                    .font(TronTypography.codeCaption)
                     .foregroundStyle(.mint)
 
                 if isNoMatches {
                     Text("No matches found")
-                        .font(.system(size: 11, design: .monospaced))
+                        .font(TronTypography.codeCaption)
                         .foregroundStyle(.tronTextMuted)
                 } else {
                     Text("\(matches.count) match\(matches.count == 1 ? "" : "es")")
-                        .font(.system(size: 11, design: .monospaced))
+                        .font(TronTypography.codeCaption)
                         .foregroundStyle(.tronTextMuted)
                 }
 
                 if !pattern.isEmpty {
                     Text("for \"\(pattern)\"")
-                        .font(.system(size: 10, design: .monospaced))
+                        .font(TronTypography.codeSM)
                         .foregroundStyle(.tronTextMuted)
                         .lineLimit(1)
                 }
@@ -129,7 +129,7 @@ struct AstGrepResultViewer: View {
             if isNoMatches && matches.isEmpty {
                 // Show raw result for "no matches" messages
                 Text(result)
-                    .font(.system(size: 11, design: .monospaced))
+                    .font(TronTypography.codeCaption)
                     .foregroundStyle(.tronTextMuted)
                     .padding(.horizontal, 12)
                     .padding(.vertical, 8)
@@ -150,9 +150,9 @@ struct AstGrepResultViewer: View {
                     } label: {
                         HStack {
                             Text(isExpanded ? "Show less" : "Show all \(matches.count) matches")
-                                .font(.system(size: 11, design: .monospaced))
+                                .font(TronTypography.codeCaption)
                             Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
-                                .font(.system(size: 10))
+                                .font(TronTypography.codeSM)
                         }
                         .foregroundStyle(.tronTextMuted)
                         .padding(.vertical, 6)
@@ -188,28 +188,28 @@ struct AstGrepMatchRow: View {
             // File and location
             HStack(spacing: 4) {
                 Image(systemName: "doc.text")
-                    .font(.system(size: 9))
+                    .font(TronTypography.pill)
                     .foregroundStyle(.tronTextMuted)
 
                 Text(match.fileName)
-                    .font(.system(size: 10, weight: .medium, design: .monospaced))
+                    .font(TronTypography.pillValue)
                     .foregroundStyle(.tronTextSecondary)
 
                 Text(":\(match.line):\(match.column)")
-                    .font(.system(size: 10, design: .monospaced))
+                    .font(TronTypography.codeSM)
                     .foregroundStyle(.tronTextMuted)
             }
 
             // Matched code
             Text(match.matchedCode)
-                .font(.system(size: 11, design: .monospaced))
+                .font(TronTypography.codeCaption)
                 .foregroundStyle(.mint)
                 .padding(.leading, 14)
 
             // Captured variables if present
             if let captured = match.captured {
                 Text(captured)
-                    .font(.system(size: 10, design: .monospaced))
+                    .font(TronTypography.codeSM)
                     .foregroundStyle(.tronTextMuted)
                     .padding(.leading, 14)
             }

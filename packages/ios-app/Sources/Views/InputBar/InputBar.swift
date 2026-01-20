@@ -347,7 +347,7 @@ struct InputBar: View {
         ZStack(alignment: .leading) {
             if text.isEmpty && !isFocused {
                 Text("Type here")
-                    .font(.system(.subheadline, design: .monospaced))
+                    .font(TronTypography.input)
                     .foregroundStyle(.tronEmerald.opacity(0.5))
                     .padding(.leading, 14)
                     .padding(.vertical, 10)
@@ -355,7 +355,7 @@ struct InputBar: View {
 
             TextField("", text: $text, axis: .vertical)
                 .textFieldStyle(.plain)
-                .font(.system(.subheadline, design: .monospaced))
+                .font(TronTypography.input)
                 .foregroundStyle(readOnly ? .tronEmerald.opacity(0.5) : .tronEmerald)
                 .padding(.leading, 14)
                 .padding(.trailing, textFieldTrailingPadding)

@@ -29,14 +29,14 @@ struct LogViewer: View {
                 ToolbarItem(placement: .topBarLeading) {
                     Button { dismiss() } label: {
                         Image(systemName: "xmark")
-                            .font(.system(size: 14, weight: .medium))
+                            .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .medium))
                             .foregroundStyle(.tronEmerald)
                     }
                 }
 
                 ToolbarItem(placement: .principal) {
                     Text("Logs")
-                        .font(.system(size: 16, weight: .semibold))
+                        .font(TronTypography.button)
                         .foregroundStyle(.tronEmerald)
                 }
 
@@ -45,7 +45,7 @@ struct LogViewer: View {
                         copyFilteredLogs()
                     } label: {
                         Image(systemName: "doc.on.doc")
-                            .font(.system(size: 12, weight: .medium))
+                            .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
                             .foregroundStyle(.tronEmerald)
                     }
                 }
@@ -147,13 +147,13 @@ struct LogViewer: View {
                 .fixedSize()
 
                 Text("Auto-refresh")
-                    .font(.caption)
+                    .font(TronTypography.caption)
                     .foregroundStyle(.gray)
 
                 Spacer()
 
                 Text("\(filteredLogs.count) entries")
-                    .font(.caption)
+                    .font(TronTypography.caption)
                     .foregroundStyle(.gray)
             }
             .padding(.horizontal)
@@ -260,7 +260,7 @@ struct FilterChip: View {
     var body: some View {
         Button(action: action) {
             Text(title)
-                .font(.caption)
+                .font(TronTypography.caption)
                 .fontWeight(isSelected ? .semibold : .regular)
                 .padding(.horizontal, 12)
                 .padding(.vertical, 6)
@@ -289,16 +289,16 @@ struct LogRow: View {
         // Use Text concatenation so continuation lines wrap to leading edge
         // instead of being indented to align with message start
         (Text(formatTime(date))
-            .font(.system(size: 9, design: .monospaced))
+            .font(TronTypography.pill)
             .foregroundColor(.gray)
         + Text(" ● ")
-            .font(.system(size: 8, design: .monospaced))
+            .font(TronTypography.mono(size: TronTypography.sizeXS))
             .foregroundColor(levelColor)
         + Text("[\(category.rawValue)] ")
-            .font(.system(size: 10, design: .monospaced))
+            .font(TronTypography.mono(size: TronTypography.sizeCaption))
             .foregroundColor(categoryColor)
         + Text(message)
-            .font(.system(size: 11, design: .monospaced))
+            .font(TronTypography.codeCaption)
             .foregroundColor(levelColor))
         .lineLimit(nil)
         .fixedSize(horizontal: false, vertical: true)

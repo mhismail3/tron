@@ -34,7 +34,7 @@ struct BrowserSheetView: View {
                             .progressViewStyle(CircularProgressViewStyle(tint: .tronEmerald))
                             .scaleEffect(1.5)
                         Text("Waiting for browser...")
-                            .font(.system(size: 14, weight: .medium, design: .monospaced))
+                            .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
                             .foregroundStyle(.tronTextMuted)
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -51,7 +51,7 @@ struct BrowserSheetView: View {
                                 .frame(width: 8, height: 8)
                         }
                         Text(urlDisplayText)
-                            .font(.system(size: 16, weight: .semibold, design: .monospaced))
+                            .font(TronTypography.mono(size: TronTypography.sizeTitle, weight: .semibold))
                             .foregroundStyle(.tronEmerald)
                     }
                 }
@@ -61,7 +61,7 @@ struct BrowserSheetView: View {
                         dismiss()
                     } label: {
                         Image(systemName: "xmark")
-                            .font(.system(size: 14, weight: .semibold))
+                            .font(TronTypography.buttonSM)
                             .foregroundStyle(.tronEmerald)
                     }
                 }

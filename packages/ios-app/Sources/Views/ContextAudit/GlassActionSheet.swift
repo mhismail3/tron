@@ -33,10 +33,10 @@ struct GlassActionSheet: View {
                     HStack(spacing: 8) {
                         if let icon = action.icon {
                             Image(systemName: icon)
-                                .font(.system(size: 14, weight: .medium))
+                                .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .medium))
                         }
                         Text(action.title)
-                            .font(.system(size: 15, weight: action.role == .cancel ? .regular : .medium))
+                            .font(TronTypography.sans(size: TronTypography.sizeBodyLG, weight: action.role == .cancel ? .regular : .medium))
                     }
                     .foregroundStyle(action.color)
                     .frame(maxWidth: .infinity)

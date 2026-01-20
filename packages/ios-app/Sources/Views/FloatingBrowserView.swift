@@ -60,12 +60,12 @@ struct FloatingBrowserView: View {
         HStack(spacing: 8) {
             // Browser icon
             Image(systemName: "globe")
-                .font(.system(size: 14, weight: .semibold))
+                .font(TronTypography.buttonSM)
                 .foregroundStyle(.secondary)
 
             // URL or status
             Text(urlDisplayText)
-                .font(.caption)
+                .font(TronTypography.caption)
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
                 .truncationMode(.middle)
@@ -79,7 +79,7 @@ struct FloatingBrowserView: View {
                 }
             } label: {
                 Image(systemName: isMinimized ? "arrow.up.left.and.arrow.down.right" : "minus")
-                    .font(.system(size: 12, weight: .semibold))
+                    .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
                     .foregroundStyle(.secondary)
                     .frame(width: 24, height: 24)
                     .contentShape(Rectangle())
@@ -89,7 +89,7 @@ struct FloatingBrowserView: View {
             // Close button
             Button(action: onClose) {
                 Image(systemName: "xmark")
-                    .font(.system(size: 12, weight: .semibold))
+                    .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
                     .foregroundStyle(.secondary)
                     .frame(width: 24, height: 24)
                     .contentShape(Rectangle())
@@ -114,7 +114,7 @@ struct FloatingBrowserView: View {
                     ProgressView()
                         .progressViewStyle(CircularProgressViewStyle(tint: .secondary))
                     Text("Connecting...")
-                        .font(.caption)
+                        .font(TronTypography.caption)
                         .foregroundStyle(.secondary)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)

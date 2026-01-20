@@ -15,19 +15,19 @@ struct SkillChip: View {
         HStack(spacing: 5) {
             // Skill icon
             Image(systemName: skill.autoInject ? "bolt.fill" : "sparkles")
-                .font(.system(size: 9, weight: .semibold))
+                .font(TronTypography.sans(size: TronTypography.sizeSM, weight: .semibold))
                 .foregroundStyle(skill.autoInject ? .tronAmber : .tronCyan)
 
             // Skill name
             Text(skill.name)
-                .font(.system(size: 11, weight: .medium, design: .monospaced))
+                .font(TronTypography.filePath)
                 .foregroundStyle(.white.opacity(0.9))
                 .lineLimit(1)
 
             // Source indicator (subtle)
             if skill.source == .project {
                 Image(systemName: "folder.fill")
-                    .font(.system(size: 7))
+                    .font(TronTypography.sans(size: TronTypography.sizeXXS))
                     .foregroundStyle(.tronEmerald.opacity(0.6))
             }
 
@@ -37,7 +37,7 @@ struct SkillChip: View {
                     onRemove?()
                 } label: {
                     Image(systemName: "xmark.circle.fill")
-                        .font(.system(size: 14))
+                        .font(TronTypography.sans(size: TronTypography.sizeBody))
                         .foregroundStyle(.white.opacity(0.6))
                 }
                 .buttonStyle(.plain)
@@ -136,17 +136,17 @@ struct SkillChipFallback: View {
         } label: {
             HStack(spacing: 5) {
                 Image(systemName: skill.autoInject ? "bolt.fill" : "sparkles")
-                    .font(.system(size: 9, weight: .semibold))
+                    .font(TronTypography.sans(size: TronTypography.sizeSM, weight: .semibold))
                     .foregroundStyle(skill.autoInject ? .orange : .cyan)
 
                 Text(skill.name)
-                    .font(.system(size: 11, weight: .medium, design: .monospaced))
+                    .font(TronTypography.filePath)
                     .foregroundStyle(.white.opacity(0.9))
                     .lineLimit(1)
 
                 if skill.source == .project {
                     Image(systemName: "folder.fill")
-                        .font(.system(size: 7))
+                        .font(TronTypography.sans(size: TronTypography.sizeXXS))
                         .foregroundStyle(.green.opacity(0.6))
                 }
 
@@ -155,7 +155,7 @@ struct SkillChipFallback: View {
                         onRemove?()
                     } label: {
                         Image(systemName: "xmark.circle.fill")
-                            .font(.system(size: 12))
+                            .font(TronTypography.sans(size: TronTypography.sizeBodySM))
                             .foregroundStyle(.white.opacity(0.5))
                     }
                     .buttonStyle(.plain)

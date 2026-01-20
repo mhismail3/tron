@@ -53,14 +53,14 @@ struct VoiceNotesListView: View {
             }
             ToolbarItem(placement: .principal) {
                 Text("VOICE NOTES")
-                    .font(.system(size: 16, weight: .bold, design: .monospaced))
+                    .font(TronTypography.mono(size: TronTypography.sizeTitle, weight: .bold))
                     .foregroundStyle(.tronEmerald)
                     .tracking(2)
             }
             ToolbarItem(placement: .topBarTrailing) {
                 Button(action: onSettings) {
                     Image(systemName: "gearshape")
-                        .font(.system(size: 16, weight: .medium))
+                        .font(TronTypography.sans(size: TronTypography.sizeTitle, weight: .medium))
                         .foregroundStyle(.tronEmerald)
                 }
             }
@@ -126,16 +126,16 @@ struct VoiceNotesListView: View {
     private var emptyView: some View {
         VStack(spacing: 20) {
             Image(systemName: "waveform")
-                .font(.system(size: 48, weight: .light))
+                .font(TronTypography.sans(size: 48, weight: .light))
                 .foregroundStyle(.white.opacity(0.4))
 
             VStack(spacing: 6) {
                 Text("No Voice Notes")
-                    .font(.title3.weight(.semibold))
+                    .font(TronTypography.sans(size: TronTypography.sizeXL, weight: .semibold))
                     .foregroundStyle(.white.opacity(0.9))
 
                 Text("Tap the mic button to record")
-                    .font(.subheadline)
+                    .font(TronTypography.subheadline)
                     .foregroundStyle(.white.opacity(0.5))
             }
         }
@@ -145,11 +145,11 @@ struct VoiceNotesListView: View {
     private func errorView(_ error: String) -> some View {
         VStack(spacing: 16) {
             Image(systemName: "exclamationmark.triangle")
-                .font(.system(size: 40))
+                .font(TronTypography.sans(size: 40))
                 .foregroundStyle(.red)
 
             Text(error)
-                .font(.subheadline)
+                .font(TronTypography.subheadline)
                 .foregroundStyle(.white.opacity(0.7))
                 .multilineTextAlignment(.center)
 
@@ -190,23 +190,23 @@ struct VoiceNoteRow: View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
                 Image(systemName: "waveform")
-                    .font(.system(size: 12))
+                    .font(TronTypography.sans(size: TronTypography.sizeBodySM))
                     .foregroundStyle(.tronEmerald)
 
                 Text(note.formattedDate)
-                    .font(.system(size: 12, weight: .medium, design: .monospaced))
+                    .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
                     .foregroundStyle(.tronEmerald)
 
                 Spacer()
 
                 Text(note.formattedDuration)
-                    .font(.system(size: 11, design: .monospaced))
+                    .font(TronTypography.mono(size: TronTypography.sizeBody2))
                     .foregroundStyle(.white.opacity(0.5))
             }
 
             if !note.preview.isEmpty {
                 Text(note.preview)
-                    .font(.system(size: 13, design: .monospaced))
+                    .font(TronTypography.mono(size: TronTypography.sizeBody3))
                     .foregroundStyle(.white.opacity(0.7))
                     .lineLimit(2)
             }

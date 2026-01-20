@@ -73,14 +73,14 @@ struct SessionSidebar: View {
             }
             ToolbarItem(placement: .principal) {
                 Text("TRON")
-                    .font(.system(size: 16, weight: .bold, design: .monospaced))
+                    .font(TronTypography.mono(size: TronTypography.sizeTitle, weight: .bold))
                     .foregroundStyle(.tronEmerald)
                     .tracking(2)
             }
             ToolbarItem(placement: .topBarTrailing) {
                 Button(action: onSettings) {
                     Image(systemName: "gearshape")
-                        .font(.system(size: 16, weight: .medium))
+                        .font(TronTypography.sans(size: TronTypography.sizeTitle, weight: .medium))
                         .foregroundStyle(.tronEmerald)
                 }
             }
@@ -97,7 +97,7 @@ struct FloatingNewSessionButton: View {
     var body: some View {
         Button(action: action) {
             Image(systemName: "plus")
-                .font(.system(size: 22, weight: .semibold))
+                .font(TronTypography.sans(size: TronTypography.sizeXXL, weight: .semibold))
                 .foregroundStyle(.tronEmerald)
                 .frame(width: 56, height: 56)
                 .contentShape(Circle())
@@ -118,14 +118,14 @@ struct CachedSessionSidebarRow: View {
             // Title row with message count
             HStack(spacing: 6) {
                 Text(session.displayTitle)
-                    .font(.system(size: 14, weight: .medium, design: .monospaced))
+                    .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
                     .foregroundStyle(.tronEmerald)
                     .lineLimit(1)
 
                 // Forked badge
                 if session.isFork == true {
                     Text("forked")
-                        .font(.system(size: 9, weight: .medium, design: .monospaced))
+                        .font(TronTypography.mono(size: TronTypography.sizeSM, weight: .medium))
                         .foregroundStyle(.tronEmerald.opacity(0.7))
                         .padding(.horizontal, 6)
                         .padding(.vertical, 2)
@@ -136,16 +136,16 @@ struct CachedSessionSidebarRow: View {
                 // Message count (moved to right of title)
                 HStack(spacing: 3) {
                     Image(systemName: "bubble.left")
-                        .font(.system(size: 9))
+                        .font(TronTypography.sans(size: TronTypography.sizeSM))
                     Text("\(session.messageCount)")
-                        .font(.system(size: 10, weight: .regular, design: .monospaced))
+                        .font(TronTypography.codeSM)
                 }
                 .foregroundStyle(.white.opacity(0.5))
 
                 Spacer()
 
                 Text(session.formattedDate)
-                    .font(.system(size: 10, weight: .regular, design: .monospaced))
+                    .font(TronTypography.codeSM)
                     .foregroundStyle(.white.opacity(0.5))
             }
 
@@ -156,14 +156,14 @@ struct CachedSessionSidebarRow: View {
 
                     HStack(alignment: .top, spacing: 6) {
                         Text(prompt)
-                            .font(.system(size: 11, design: .monospaced))
+                            .font(TronTypography.codeCaption)
                             .foregroundStyle(.white.opacity(0.7))
                             .lineLimit(2)
                             .truncationMode(.tail)
                             .multilineTextAlignment(.trailing)
 
                         Image(systemName: "person.fill")
-                            .font(.system(size: 8))
+                            .font(TronTypography.labelSM)
                             .foregroundStyle(.tronEmerald.opacity(0.6))
                             .frame(width: 12)
                             .offset(y: 2)
@@ -182,13 +182,13 @@ struct CachedSessionSidebarRow: View {
             } else if let response = session.lastAssistantResponse, !response.isEmpty {
                 HStack(alignment: .top, spacing: 6) {
                     Image(systemName: "cpu")
-                        .font(.system(size: 8))
+                        .font(TronTypography.labelSM)
                         .foregroundStyle(.tronEmerald.opacity(0.8))
                         .frame(width: 12)
                         .offset(y: 2)
 
                     Text(response)
-                        .font(.system(size: 11, design: .monospaced))
+                        .font(TronTypography.codeCaption)
                         .foregroundStyle(.white.opacity(0.6))
                         .lineLimit(2)
                         .truncationMode(.tail)
@@ -198,7 +198,7 @@ struct CachedSessionSidebarRow: View {
                     // Tool count badge
                     if let toolCount = session.lastToolCount, toolCount > 0 {
                         Text("(\(toolCount) \(toolCount == 1 ? "tool" : "tools"))")
-                            .font(.system(size: 9, weight: .medium, design: .monospaced))
+                            .font(TronTypography.mono(size: TronTypography.sizeSM, weight: .medium))
                             .foregroundStyle(.tronEmerald.opacity(0.7))
                     }
                 }
@@ -211,7 +211,7 @@ struct CachedSessionSidebarRow: View {
             // Bottom row: Working directory + tokens/cost
             HStack(spacing: 6) {
                 Text(session.displayDirectory)
-                    .font(.system(size: 10, weight: .regular, design: .monospaced))
+                    .font(TronTypography.codeSM)
                     .foregroundStyle(.white.opacity(0.4))
                     .lineLimit(1)
                     .truncationMode(.head)
@@ -219,11 +219,11 @@ struct CachedSessionSidebarRow: View {
                 Spacer()
 
                 Text(session.formattedTokens)
-                    .font(.system(size: 9, design: .monospaced))
+                    .font(TronTypography.pill)
                     .foregroundStyle(.white.opacity(0.35))
 
                 Text(session.formattedCost)
-                    .font(.system(size: 9, weight: .medium, design: .monospaced))
+                    .font(TronTypography.mono(size: TronTypography.sizeSM, weight: .medium))
                     .foregroundStyle(.tronEmerald.opacity(0.5))
             }
         }
@@ -247,12 +247,12 @@ struct SessionProcessingIndicator: View {
     var body: some View {
         HStack(spacing: 6) {
             Image(systemName: "brain")
-                .font(.system(size: 10))
+                .font(TronTypography.sans(size: TronTypography.sizeCaption))
                 .foregroundStyle(.tronEmerald)
                 .symbolEffect(.pulse, options: .repeating, value: isPulsing)
 
             Text("Thinking...")
-                .font(.system(size: 11, weight: .medium, design: .monospaced))
+                .font(TronTypography.filePath)
                 .foregroundStyle(.tronEmerald.opacity(0.9))
         }
         .padding(.horizontal, 10)
@@ -297,25 +297,25 @@ struct EmptySessionsView: View {
     var body: some View {
         VStack(spacing: 20) {
             Image(systemName: "bubble.left.and.text.bubble.right")
-                .font(.system(size: 48, weight: .light))
+                .font(TronTypography.sans(size: 48, weight: .light))
                 .foregroundStyle(.white.opacity(0.4))
 
             VStack(spacing: 6) {
                 Text("No Sessions")
-                    .font(.title3.weight(.semibold))
+                    .font(TronTypography.sans(size: TronTypography.sizeXL, weight: .semibold))
                     .foregroundStyle(.white.opacity(0.9))
 
                 Text("Create a new session to start")
-                    .font(.subheadline)
+                    .font(TronTypography.subheadline)
                     .foregroundStyle(.white.opacity(0.5))
             }
 
             Button(action: onNewSession) {
                 HStack(spacing: 6) {
                     Image(systemName: "plus")
-                        .font(.system(size: 14, weight: .semibold))
+                        .font(TronTypography.buttonSM)
                     Text("New Session")
-                        .font(.subheadline.weight(.medium))
+                        .font(TronTypography.subheadline)
                 }
                 .foregroundStyle(.white)
                 .padding(.horizontal, 20)

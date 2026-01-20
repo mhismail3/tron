@@ -12,16 +12,16 @@ struct PlanModeEnteredView: View {
         HStack(spacing: 10) {
             // Icon
             Image(systemName: "doc.text.magnifyingglass")
-                .font(.system(size: 18))
+                .font(TronTypography.sans(size: TronTypography.sizeLargeTitle))
                 .foregroundStyle(.tronAmber)
 
             VStack(alignment: .leading, spacing: 2) {
                 Text("Plan Mode Active")
-                    .font(.system(size: 14, weight: .semibold))
+                    .font(TronTypography.buttonSM)
                     .foregroundStyle(.tronAmber)
 
                 Text("Read-only until plan is approved")
-                    .font(.system(size: 12, design: .monospaced))
+                    .font(TronTypography.mono(size: TronTypography.sizeBodySM))
                     .foregroundStyle(.tronTextSecondary)
             }
 
@@ -29,7 +29,7 @@ struct PlanModeEnteredView: View {
 
             // Skill name badge
             Text(skillName)
-                .font(.system(size: 11, weight: .medium, design: .monospaced))
+                .font(TronTypography.filePath)
                 .foregroundStyle(.tronAmber)
                 .padding(.horizontal, 8)
                 .padding(.vertical, 4)
@@ -83,18 +83,18 @@ struct PlanModeExitedView: View {
         HStack(spacing: 10) {
             // Icon
             Image(systemName: reasonIcon)
-                .font(.system(size: 18))
+                .font(TronTypography.sans(size: TronTypography.sizeLargeTitle))
                 .foregroundStyle(reasonColor)
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(reasonText)
-                    .font(.system(size: 14, weight: .semibold))
+                    .font(TronTypography.buttonSM)
                     .foregroundStyle(reasonColor)
 
                 if reason == "approved", let path = planPath {
                     // Show truncated plan path
                     Text(truncatePath(path))
-                        .font(.system(size: 11, design: .monospaced))
+                        .font(TronTypography.codeCaption)
                         .foregroundStyle(.tronTextMuted)
                         .lineLimit(1)
                 }
@@ -130,9 +130,9 @@ struct PlanModePill: View {
         if isActive {
             HStack(spacing: 4) {
                 Image(systemName: "doc.text.magnifyingglass")
-                    .font(.system(size: 10))
+                    .font(TronTypography.sans(size: TronTypography.sizeCaption))
                 Text("Plan Mode")
-                    .font(.system(size: 10, weight: .medium, design: .monospaced))
+                    .font(TronTypography.pillValue)
             }
             .foregroundStyle(.tronAmber)
             .padding(.horizontal, 8)

@@ -23,11 +23,11 @@ struct GlassActionButton: View {
             Group {
                 if isProcessing {
                     Image(systemName: "stop.fill")
-                        .font(.system(size: 16, weight: .semibold))
+                        .font(TronTypography.button)
                         .foregroundStyle(.red)
                 } else {
                     Image(systemName: "arrow.up")
-                        .font(.system(size: 16, weight: .semibold))
+                        .font(TronTypography.button)
                         .foregroundStyle(canSend ? .white : .white.opacity(0.3))
                 }
             }
@@ -110,11 +110,11 @@ struct GlassMicButton: View {
                         .scaleEffect(0.8)
                 } else if isRecording {
                     Image(systemName: "stop.fill")
-                        .font(.system(size: 14, weight: .semibold))
+                        .font(TronTypography.buttonSM)
                         .foregroundStyle(.red)
                 } else {
                     Image(systemName: audioMonitor.isRecordingAvailable ? "mic.fill" : "mic.slash.fill")
-                        .font(.system(size: 14, weight: .semibold))
+                        .font(TronTypography.buttonSM)
                         .foregroundStyle(isMicDisabled ? Color.tronEmerald.opacity(0.3) : Color.tronEmerald)
                 }
             }
@@ -211,7 +211,7 @@ struct GlassAttachmentButton: View {
         } label: {
             ZStack(alignment: .topTrailing) {
                 Image(systemName: "plus")
-                    .font(.system(size: 14, weight: .semibold))
+                    .font(TronTypography.buttonSM)
                     .foregroundStyle(isProcessing ? Color.tronEmerald.opacity(0.3) : Color.tronEmerald)
                     .frame(width: buttonSize, height: buttonSize)
                     .background {
@@ -224,7 +224,7 @@ struct GlassAttachmentButton: View {
                 // Skills available indicator - small sparkles badge
                 if hasSkillsAvailable && !isProcessing {
                     Image(systemName: "sparkle")
-                        .font(.system(size: 8, weight: .bold))
+                        .font(TronTypography.badge)
                         .foregroundStyle(.tronCyan)
                         .offset(x: 2, y: -2)
                         .transition(.scale.combined(with: .opacity))

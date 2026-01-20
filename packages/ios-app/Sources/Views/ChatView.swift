@@ -202,18 +202,18 @@ struct ChatView: View {
                     dismiss()
                 } label: {
                     Image(systemName: "chevron.left")
-                        .font(.system(size: 16, weight: .semibold))
+                        .font(TronTypography.button)
                         .foregroundStyle(.tronEmerald)
                 }
             }
             ToolbarItem(placement: .principal) {
                 VStack(spacing: 2) {
                     Text(eventStoreManager.activeSession?.displayTitle ?? "Chat")
-                        .font(.system(size: 16, weight: .semibold, design: .monospaced))
+                        .font(TronTypography.mono(size: TronTypography.sizeTitle, weight: .semibold))
                         .foregroundStyle(.tronEmerald)
                     if eventStoreManager.activeSession?.isFork == true {
                         Text("forked")
-                            .font(.system(size: 10, weight: .medium, design: .monospaced))
+                            .font(TronTypography.pillValue)
                             .foregroundStyle(.tronEmerald.opacity(0.6))
                     }
                 }
@@ -226,7 +226,7 @@ struct ChatView: View {
                             viewModel.toggleBrowserWindow()
                         } label: {
                             Image(systemName: "globe")
-                                .font(.system(size: 16, weight: .medium))
+                                .font(TronTypography.sans(size: TronTypography.sizeTitle, weight: .medium))
                                 .foregroundStyle(.tronEmerald)
                         }
                     }
@@ -245,7 +245,7 @@ struct ChatView: View {
                         }
                     } label: {
                         Image(systemName: "gearshape")
-                            .font(.system(size: 16, weight: .medium))
+                            .font(TronTypography.sans(size: TronTypography.sizeTitle, weight: .medium))
                             .foregroundStyle(.tronEmerald)
                     }
                 }
@@ -529,7 +529,7 @@ struct ChatView: View {
             Button("Settings") { viewModel.showSettings = true }
         } label: {
             Image(systemName: "gearshape")
-                .font(.system(size: 16, weight: .medium))
+                .font(TronTypography.sans(size: TronTypography.sizeTitle, weight: .medium))
                 .foregroundStyle(.tronEmerald)
         }
     }
@@ -726,10 +726,10 @@ struct ChatView: View {
         } label: {
             HStack(spacing: 6) {
                 Image(systemName: "arrow.down")
-                    .font(.system(size: 12, weight: .semibold))
+                    .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
                 if hasUnreadContent {
                     Text("New content")
-                        .font(.system(size: 12, weight: .medium))
+                        .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
                 }
             }
             .foregroundStyle(.white)
@@ -754,10 +754,10 @@ struct ChatView: View {
                         .tint(.white.opacity(0.7))
                 } else {
                     Image(systemName: "arrow.up.circle")
-                        .font(.system(size: 14, weight: .medium))
+                        .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .medium))
                 }
                 Text(viewModel.isLoadingMoreMessages ? "Loading..." : "Load Earlier Messages")
-                    .font(.system(size: 13, weight: .medium))
+                    .font(TronTypography.sans(size: TronTypography.sizeBody3, weight: .medium))
             }
             .foregroundStyle(.white.opacity(0.6))
             .padding(.vertical, 8)
@@ -777,7 +777,7 @@ struct ProcessingIndicator: View {
     var body: some View {
         HStack(spacing: 4) {
             Text("Processing")
-                .font(.caption)
+                .font(TronTypography.caption)
                 .foregroundStyle(.tronEmerald)
 
             HStack(spacing: 3) {
@@ -818,18 +818,18 @@ struct ThinkingBanner: View {
                 HStack(spacing: 6) {
                     RotatingIcon(icon: .thinking, size: 12, color: .tronTextMuted)
                     Text("Thinking")
-                        .font(.caption.weight(.medium))
+                        .font(TronTypography.caption)
                         .foregroundStyle(.tronTextMuted)
                     Spacer()
                     Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
-                        .font(.system(size: 10, weight: .medium))
+                        .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .medium))
                         .foregroundStyle(.tronTextMuted)
                 }
             }
 
             if isExpanded {
                 Text(text)
-                    .font(.caption)
+                    .font(TronTypography.caption)
                     .foregroundStyle(.tronTextSecondary)
                     .italic()
                     .lineLimit(10)

@@ -82,7 +82,7 @@ struct SubagentDetailSheet: View {
             .toolbar {
                 ToolbarItem(placement: .principal) {
                     Text(titleText)
-                        .font(.system(size: 16, weight: .semibold, design: .monospaced))
+                        .font(TronTypography.mono(size: TronTypography.sizeTitle, weight: .semibold))
                         .foregroundStyle(titleColor)
                 }
             }
@@ -133,7 +133,7 @@ struct SubagentDetailSheet: View {
             // Status (left-aligned)
             statusIcon
             Text(statusText)
-                .font(.system(size: 14, weight: .medium, design: .monospaced))
+                .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
                 .foregroundStyle(statusColor)
 
             Spacer()
@@ -165,13 +165,13 @@ struct SubagentDetailSheet: View {
         VStack(alignment: .leading, spacing: 12) {
             // Section header
             Text("Task")
-                .font(.system(size: 12, weight: .medium, design: .monospaced))
+                .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
                 .foregroundStyle(.white.opacity(0.6))
 
             // Card content
             VStack(alignment: .leading, spacing: 8) {
                 Text(data.task)
-                    .font(.system(size: 13, design: .monospaced))
+                    .font(TronTypography.mono(size: TronTypography.sizeBody3))
                     .foregroundStyle(.white.opacity(0.85))
                     .lineSpacing(4)
                     .textSelection(.enabled)
@@ -193,13 +193,13 @@ struct SubagentDetailSheet: View {
             // Section header
             HStack {
                 Text("Activity")
-                    .font(.system(size: 12, weight: .medium, design: .monospaced))
+                    .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
                     .foregroundStyle(.white.opacity(0.6))
 
                 // Event count badge
                 if !allEvents.isEmpty {
                     Text("\(allEvents.count)")
-                        .font(.system(size: 10, weight: .medium, design: .monospaced))
+                        .font(TronTypography.codeSM)
                         .foregroundStyle(.white.opacity(0.4))
                         .padding(.horizontal, 6)
                         .padding(.vertical, 2)
@@ -232,22 +232,22 @@ struct SubagentDetailSheet: View {
                                 .frame(width: 14, height: 14)
                                 .tint(.white.opacity(0.4))
                             Text("Loading activity...")
-                                .font(.system(size: 12, design: .monospaced))
+                                .font(TronTypography.mono(size: TronTypography.sizeBodySM))
                                 .foregroundStyle(.white.opacity(0.4))
                         } else if data.status == .running || data.status == .spawning {
                             Image(systemName: "ellipsis")
-                                .font(.system(size: 12))
+                                .font(TronTypography.sans(size: TronTypography.sizeBodySM))
                                 .foregroundStyle(.white.opacity(0.4))
                                 .symbolEffect(.variableColor.iterative, options: .repeating)
                             Text("Waiting for activity...")
-                                .font(.system(size: 12, design: .monospaced))
+                                .font(TronTypography.mono(size: TronTypography.sizeBodySM))
                                 .foregroundStyle(.white.opacity(0.4))
                         } else {
                             Image(systemName: "tray")
-                                .font(.system(size: 12))
+                                .font(TronTypography.sans(size: TronTypography.sizeBodySM))
                                 .foregroundStyle(.white.opacity(0.4))
                             Text("No activity recorded")
-                                .font(.system(size: 12, design: .monospaced))
+                                .font(TronTypography.mono(size: TronTypography.sizeBodySM))
                                 .foregroundStyle(.white.opacity(0.4))
                         }
                     }
@@ -289,11 +289,11 @@ struct SubagentDetailSheet: View {
         } label: {
             HStack(spacing: 8) {
                 Image(systemName: "chevron.down")
-                    .font(.system(size: 10, weight: .medium))
+                    .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .medium))
                 Text("Show \(min(hiddenEventCount, Self.eventsPageSize)) more")
-                    .font(.system(size: 11, weight: .medium, design: .monospaced))
+                    .font(TronTypography.mono(size: TronTypography.sizeBody2, weight: .medium))
                 Text("(\(hiddenEventCount) hidden)")
-                    .font(.system(size: 10, design: .monospaced))
+                    .font(TronTypography.mono(size: TronTypography.sizeCaption))
                     .foregroundStyle(.white.opacity(0.4))
             }
             .foregroundStyle(titleColor)
@@ -342,7 +342,7 @@ struct SubagentDetailSheet: View {
             // Section header
             HStack {
                 Text("Summary")
-                    .font(.system(size: 12, weight: .medium, design: .monospaced))
+                    .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
                     .foregroundStyle(.white.opacity(0.6))
 
                 Spacer()
@@ -352,7 +352,7 @@ struct SubagentDetailSheet: View {
                     UIPasteboard.general.string = content
                 } label: {
                     Image(systemName: "doc.on.doc")
-                        .font(.system(size: 12))
+                        .font(TronTypography.sans(size: TronTypography.sizeBodySM))
                         .foregroundStyle(.tronSuccess.opacity(0.6))
                 }
             }
@@ -360,7 +360,7 @@ struct SubagentDetailSheet: View {
             // Card content
             VStack(alignment: .leading, spacing: 0) {
                 Text(displayContent)
-                    .font(.system(size: 12, design: .monospaced))
+                    .font(TronTypography.mono(size: TronTypography.sizeBodySM))
                     .foregroundStyle(.white.opacity(0.8))
                     .lineSpacing(4)
                     .textSelection(.enabled)
@@ -376,12 +376,12 @@ struct SubagentDetailSheet: View {
                     } label: {
                         HStack(spacing: 6) {
                             Image(systemName: isSummaryExpanded ? "chevron.up" : "chevron.down")
-                                .font(.system(size: 10, weight: .medium))
+                                .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .medium))
                             Text(isSummaryExpanded ? "Show less" : "Show more")
-                                .font(.system(size: 11, weight: .medium, design: .monospaced))
+                                .font(TronTypography.mono(size: TronTypography.sizeBody2, weight: .medium))
                             if !isSummaryExpanded {
                                 Text("(\(content.count - Self.summaryCharacterLimit) more chars)")
-                                    .font(.system(size: 10, design: .monospaced))
+                                    .font(TronTypography.mono(size: TronTypography.sizeCaption))
                                     .foregroundStyle(.white.opacity(0.4))
                             }
                         }
@@ -411,23 +411,23 @@ struct SubagentDetailSheet: View {
         VStack(alignment: .leading, spacing: 12) {
             // Section header
             Text("Error")
-                .font(.system(size: 12, weight: .medium, design: .monospaced))
+                .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
                 .foregroundStyle(.white.opacity(0.6))
 
             // Card content
             VStack(alignment: .leading, spacing: 8) {
                 HStack {
                     Image(systemName: "exclamationmark.triangle.fill")
-                        .font(.system(size: 14))
+                        .font(TronTypography.sans(size: TronTypography.sizeBody))
                         .foregroundStyle(.tronError)
                     Text("Failed")
-                        .font(.system(size: 14, weight: .medium, design: .monospaced))
+                        .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
                         .foregroundStyle(.tronError)
                     Spacer()
                 }
 
                 Text(error)
-                    .font(.system(size: 12, design: .monospaced))
+                    .font(TronTypography.mono(size: TronTypography.sizeBodySM))
                     .foregroundStyle(.white.opacity(0.7))
                     .lineSpacing(4)
                     .textSelection(.enabled)
@@ -461,11 +461,11 @@ struct SubagentDetailSheet: View {
                 .tint(.tronAmber)      // Amber while running
         case .completed:
             Image(systemName: "checkmark.circle.fill")
-                .font(.system(size: 16, weight: .medium))
+                .font(TronTypography.sans(size: TronTypography.sizeTitle, weight: .medium))
                 .foregroundStyle(.tronSuccess)
         case .failed:
             Image(systemName: "xmark.circle.fill")
-                .font(.system(size: 16, weight: .medium))
+                .font(TronTypography.sans(size: TronTypography.sizeTitle, weight: .medium))
                 .foregroundStyle(.tronError)
         }
     }
@@ -526,9 +526,9 @@ private struct SubagentStatBadge: View {
     var body: some View {
         HStack(spacing: 4) {
             Text(label)
-                .font(.system(size: 10, design: .monospaced))
+                .font(TronTypography.mono(size: TronTypography.sizeCaption))
             Text(value)
-                .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                .font(TronTypography.mono(size: TronTypography.sizeCaption, weight: .semibold))
         }
         .foregroundStyle(color)
         .padding(.horizontal, 8)
@@ -566,19 +566,19 @@ private struct SubagentEventRow: View {
             VStack(alignment: .leading, spacing: 4) {
                 HStack(spacing: 6) {
                     Text(event.title)
-                        .font(.system(size: 12, weight: .medium, design: .monospaced))
+                        .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
                         .foregroundStyle(.white.opacity(0.85))
 
                     if event.isRunning {
                         Text("•")
-                            .font(.system(size: 8))
+                            .font(TronTypography.sans(size: TronTypography.sizeXS))
                             .foregroundStyle(iconColor)
                     }
                 }
 
                 if let detail = event.detail, !detail.isEmpty {
                     Text(detail)
-                        .font(.system(size: 11, design: .monospaced))
+                        .font(TronTypography.mono(size: TronTypography.sizeBody2))
                         .foregroundStyle(.white.opacity(0.6))
                         .lineLimit(6)
                         .lineSpacing(2)
@@ -591,7 +591,7 @@ private struct SubagentEventRow: View {
             // Timestamp (only show for completed events)
             if !event.isRunning {
                 Text(formatTime(event.timestamp))
-                    .font(.system(size: 10, design: .monospaced))
+                    .font(TronTypography.mono(size: TronTypography.sizeCaption))
                     .foregroundStyle(.white.opacity(0.3))
             }
         }
@@ -622,24 +622,24 @@ private struct SubagentEventRow: View {
         case .tool:
             if event.isRunning {
                 Image(systemName: "gearshape.fill")
-                    .font(.system(size: 11))
+                    .font(TronTypography.sans(size: TronTypography.sizeBody2))
                     .foregroundStyle(.tronAmber)
             } else if event.title.contains("✗") {
                 Image(systemName: "xmark.circle.fill")
-                    .font(.system(size: 11))
+                    .font(TronTypography.sans(size: TronTypography.sizeBody2))
                     .foregroundStyle(.tronError)
             } else {
                 Image(systemName: "checkmark.circle.fill")
-                    .font(.system(size: 11))
+                    .font(TronTypography.sans(size: TronTypography.sizeBody2))
                     .foregroundStyle(.tronEmerald)
             }
         case .output:
             Image(systemName: "text.bubble.fill")
-                .font(.system(size: 11))
+                .font(TronTypography.sans(size: TronTypography.sizeBody2))
                 .foregroundStyle(accentColor)
         case .thinking:
             Image(systemName: "brain")
-                .font(.system(size: 11))
+                .font(TronTypography.sans(size: TronTypography.sizeBody2))
                 .foregroundStyle(.tronPurple)
         }
     }

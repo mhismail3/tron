@@ -22,10 +22,10 @@ struct AnalyticsSection: View {
             // Section header
             VStack(alignment: .leading, spacing: 2) {
                 Text("Analytics")
-                    .font(.system(size: 14, weight: .medium, design: .monospaced))
+                    .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
                     .foregroundStyle(.white.opacity(0.6))
                 Text("Session performance and cost breakdown")
-                    .font(.system(size: 10, design: .monospaced))
+                    .font(TronTypography.mono(size: TronTypography.sizeCaption))
                     .foregroundStyle(.white.opacity(0.35))
             }
 
@@ -60,11 +60,11 @@ struct SessionIdRow: View {
     var body: some View {
         HStack {
             Image(systemName: "number.circle")
-                .font(.system(size: 12))
+                .font(TronTypography.sans(size: TronTypography.sizeBodySM))
                 .foregroundStyle(.tronTextMuted)
 
             Text(showCopied ? "Copied!" : sessionId)
-                .font(.system(size: 11, design: .monospaced))
+                .font(TronTypography.codeCaption)
                 .foregroundStyle(showCopied ? .tronEmerald : .tronTextSecondary)
                 .lineLimit(1)
                 .truncationMode(.middle)
@@ -73,7 +73,7 @@ struct SessionIdRow: View {
             Spacer()
 
             Image(systemName: "doc.on.doc")
-                .font(.system(size: 10))
+                .font(TronTypography.sans(size: TronTypography.sizeCaption))
                 .foregroundStyle(.tronTextMuted)
         }
         .padding(12)
@@ -124,17 +124,17 @@ struct SessionTokensCard: View {
             // Header with total
             HStack {
                 Image(systemName: "arrow.up.arrow.down")
-                    .font(.system(size: 14))
+                    .font(TronTypography.sans(size: TronTypography.sizeBody))
                     .foregroundStyle(.tronAmberLight)
 
                 Text("Session Tokens")
-                    .font(.system(size: 14, weight: .medium, design: .monospaced))
+                    .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
                     .foregroundStyle(.tronAmberLight)
 
                 Spacer()
 
                 Text(formatTokenCount(totalTokens))
-                    .font(.system(size: 20, weight: .bold, design: .monospaced))
+                    .font(TronTypography.mono(size: TronTypography.sizeXL, weight: .bold))
                     .foregroundStyle(.tronAmberLight)
             }
 
@@ -144,14 +144,14 @@ struct SessionTokensCard: View {
                 VStack(alignment: .leading, spacing: 4) {
                     HStack(spacing: 4) {
                         Image(systemName: "arrow.up.circle.fill")
-                            .font(.system(size: 10))
+                            .font(TronTypography.sans(size: TronTypography.sizeCaption))
                             .foregroundStyle(.tronOrange)
                         Text("Input")
-                            .font(.system(size: 10, design: .monospaced))
+                            .font(TronTypography.mono(size: TronTypography.sizeCaption))
                             .foregroundStyle(.white.opacity(0.5))
                     }
                     Text(formatTokenCount(inputTokens))
-                        .font(.system(size: 12, weight: .medium, design: .monospaced))
+                        .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
                         .foregroundStyle(.tronOrange)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -166,14 +166,14 @@ struct SessionTokensCard: View {
                 VStack(alignment: .leading, spacing: 4) {
                     HStack(spacing: 4) {
                         Image(systemName: "arrow.down.circle.fill")
-                            .font(.system(size: 10))
+                            .font(TronTypography.sans(size: TronTypography.sizeCaption))
                             .foregroundStyle(.tronRed)
                         Text("Output")
-                            .font(.system(size: 10, design: .monospaced))
+                            .font(TronTypography.mono(size: TronTypography.sizeCaption))
                             .foregroundStyle(.white.opacity(0.5))
                     }
                     Text(formatTokenCount(outputTokens))
-                        .font(.system(size: 12, weight: .medium, design: .monospaced))
+                        .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
                         .foregroundStyle(.tronRed)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -192,14 +192,14 @@ struct SessionTokensCard: View {
                     VStack(alignment: .leading, spacing: 4) {
                         HStack(spacing: 4) {
                             Image(systemName: "bolt.fill")
-                                .font(.system(size: 10))
+                                .font(TronTypography.sans(size: TronTypography.sizeCaption))
                                 .foregroundStyle(.tronAmber)
                             Text("Cache Read")
-                                .font(.system(size: 10, design: .monospaced))
+                                .font(TronTypography.mono(size: TronTypography.sizeCaption))
                                 .foregroundStyle(.white.opacity(0.5))
                         }
                         Text(formatTokenCount(cacheReadTokens))
-                            .font(.system(size: 12, weight: .medium, design: .monospaced))
+                            .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
                             .foregroundStyle(.tronAmber)
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -214,14 +214,14 @@ struct SessionTokensCard: View {
                     VStack(alignment: .leading, spacing: 4) {
                         HStack(spacing: 4) {
                             Image(systemName: "memorychip.fill")
-                                .font(.system(size: 10))
+                                .font(TronTypography.sans(size: TronTypography.sizeCaption))
                                 .foregroundStyle(.tronAmberLight)
                             Text("Cache Write")
-                                .font(.system(size: 10, design: .monospaced))
+                                .font(TronTypography.mono(size: TronTypography.sizeCaption))
                                 .foregroundStyle(.white.opacity(0.5))
                         }
                         Text(formatTokenCount(cacheCreationTokens))
-                            .font(.system(size: 12, weight: .medium, design: .monospaced))
+                            .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
                             .foregroundStyle(.tronAmberLight)
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -236,7 +236,7 @@ struct SessionTokensCard: View {
 
             // Footer explanation
             Text("Total tokens consumed this session (for billing)")
-                .font(.system(size: 10, design: .monospaced))
+                .font(TronTypography.mono(size: TronTypography.sizeCaption))
                 .foregroundStyle(.white.opacity(0.4))
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
@@ -268,17 +268,17 @@ struct CostSummaryCard: View {
             // Header
             HStack {
                 Image(systemName: "dollarsign.circle.fill")
-                    .font(.system(size: 14))
+                    .font(TronTypography.sans(size: TronTypography.sizeBody))
                     .foregroundStyle(.tronAmber)
 
                 Text("Session Cost")
-                    .font(.system(size: 14, weight: .medium, design: .monospaced))
+                    .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
                     .foregroundStyle(.tronAmber)
 
                 Spacer()
 
                 Text(formatCost(analytics.totalCost))
-                    .font(.system(size: 20, weight: .bold, design: .monospaced))
+                    .font(TronTypography.mono(size: TronTypography.sizeXL, weight: .bold))
                     .foregroundStyle(.tronAmber)
             }
 
@@ -316,10 +316,10 @@ struct CostStatItem: View {
     var body: some View {
         VStack(spacing: 2) {
             Text(value)
-                .font(.system(size: 14, weight: .semibold, design: .monospaced))
+                .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .semibold))
                 .foregroundStyle(isError ? .tronError : .white.opacity(0.8))
             Text(label)
-                .font(.system(size: 9, design: .monospaced))
+                .font(TronTypography.pill)
                 .foregroundStyle(.white.opacity(0.5))
         }
         .frame(maxWidth: .infinity)
@@ -349,16 +349,16 @@ struct TurnBreakdownContainer: View {
             // Header
             HStack {
                 Image(systemName: "list.number")
-                    .font(.system(size: 14))
+                    .font(TronTypography.sans(size: TronTypography.sizeBody))
                     .foregroundStyle(.tronEmerald)
 
                 Text("Turn Breakdown")
-                    .font(.system(size: 14, weight: .medium, design: .monospaced))
+                    .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
                     .foregroundStyle(.tronEmerald)
 
                 // Count badge
                 Text("\(turns.count)")
-                    .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                    .font(TronTypography.pillValue)
                     .foregroundStyle(.white)
                     .padding(.horizontal, 6)
                     .padding(.vertical, 2)
@@ -368,11 +368,11 @@ struct TurnBreakdownContainer: View {
                 Spacer()
 
                 Text(formatTokens(totalTokens))
-                    .font(.system(size: 12, weight: .medium, design: .monospaced))
+                    .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
                     .foregroundStyle(.white.opacity(0.6))
 
                 Image(systemName: "chevron.down")
-                    .font(.system(size: 10, weight: .medium))
+                    .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .medium))
                     .foregroundStyle(.white.opacity(0.4))
                     .rotationEffect(.degrees(isExpanded ? -180 : 0))
                     .animation(.spring(response: 0.35, dampingFraction: 0.8), value: isExpanded)
@@ -389,7 +389,7 @@ struct TurnBreakdownContainer: View {
             if isExpanded {
                 if turns.isEmpty {
                     Text("No turns recorded")
-                        .font(.system(size: 11, design: .monospaced))
+                        .font(TronTypography.codeCaption)
                         .foregroundStyle(.white.opacity(0.4))
                         .frame(maxWidth: .infinity)
                         .padding(12)
@@ -449,7 +449,7 @@ struct TurnRow: View {
             HStack(spacing: 10) {
                 // Turn number badge
                 Text("\(turn.turn)")
-                    .font(.system(size: 11, weight: .bold, design: .monospaced))
+                    .font(TronTypography.mono(size: TronTypography.sizeBody2, weight: .bold))
                     .foregroundStyle(.tronEmerald)
                     .frame(width: 24, height: 24)
                     .background(Color.tronEmerald.opacity(0.2))
@@ -460,18 +460,18 @@ struct TurnRow: View {
                     HStack(spacing: 8) {
                         // Tokens
                         Text("\(formatTokens(turn.totalTokens)) tokens")
-                            .font(.system(size: 11, weight: .medium, design: .monospaced))
+                            .font(TronTypography.codeCaption)
                             .foregroundStyle(.white.opacity(0.7))
 
                         // Cost
                         Text(formatCost(turn.cost))
-                            .font(.system(size: 11, weight: .medium, design: .monospaced))
+                            .font(TronTypography.codeCaption)
                             .foregroundStyle(.tronAmber)
 
                         // Latency
                         if turn.latency > 0 {
                             Text(formatLatency(turn.latency))
-                                .font(.system(size: 10, design: .monospaced))
+                                .font(TronTypography.mono(size: TronTypography.sizeCaption))
                                 .foregroundStyle(.white.opacity(0.5))
                         }
                     }
@@ -481,9 +481,9 @@ struct TurnRow: View {
                         if turn.toolCount > 0 {
                             HStack(spacing: 3) {
                                 Image(systemName: "hammer.fill")
-                                    .font(.system(size: 8))
+                                    .font(TronTypography.sans(size: TronTypography.sizeXS))
                                 Text("\(turn.toolCount)")
-                                    .font(.system(size: 10, design: .monospaced))
+                                    .font(TronTypography.mono(size: TronTypography.sizeCaption))
                             }
                             .foregroundStyle(.tronCyan)
                         }
@@ -491,16 +491,16 @@ struct TurnRow: View {
                         if turn.errorCount > 0 {
                             HStack(spacing: 3) {
                                 Image(systemName: "exclamationmark.triangle.fill")
-                                    .font(.system(size: 8))
+                                    .font(TronTypography.sans(size: TronTypography.sizeXS))
                                 Text("\(turn.errorCount)")
-                                    .font(.system(size: 10, design: .monospaced))
+                                    .font(TronTypography.mono(size: TronTypography.sizeCaption))
                             }
                             .foregroundStyle(.tronError)
                         }
 
                         if let model = turn.model {
                             Text(model)
-                                .font(.system(size: 9, design: .monospaced))
+                                .font(TronTypography.pill)
                                 .foregroundStyle(.white.opacity(0.4))
                         }
                     }
@@ -509,7 +509,7 @@ struct TurnRow: View {
                 Spacer()
 
                 Image(systemName: "chevron.down")
-                    .font(.system(size: 8, weight: .medium))
+                    .font(TronTypography.sans(size: TronTypography.sizeXS, weight: .medium))
                     .foregroundStyle(.white.opacity(0.3))
                     .rotationEffect(.degrees(isExpanded ? -180 : 0))
                     .animation(.spring(response: 0.35, dampingFraction: 0.8), value: isExpanded)
@@ -529,19 +529,19 @@ struct TurnRow: View {
                     HStack(spacing: 12) {
                         VStack(alignment: .leading, spacing: 2) {
                             Text("Input")
-                                .font(.system(size: 9, design: .monospaced))
+                                .font(TronTypography.pill)
                                 .foregroundStyle(.white.opacity(0.4))
                             Text(formatTokens(turn.inputTokens))
-                                .font(.system(size: 12, weight: .medium, design: .monospaced))
+                                .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
                                 .foregroundStyle(.tronOrange)
                         }
 
                         VStack(alignment: .leading, spacing: 2) {
                             Text("Output")
-                                .font(.system(size: 9, design: .monospaced))
+                                .font(TronTypography.pill)
                                 .foregroundStyle(.white.opacity(0.4))
                             Text(formatTokens(turn.outputTokens))
-                                .font(.system(size: 12, weight: .medium, design: .monospaced))
+                                .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
                                 .foregroundStyle(.tronRed)
                         }
 
@@ -549,17 +549,17 @@ struct TurnRow: View {
                         if turn.cacheReadTokens > 0 || turn.cacheCreationTokens > 0 {
                             VStack(alignment: .leading, spacing: 2) {
                                 Text("Cache")
-                                    .font(.system(size: 9, design: .monospaced))
+                                    .font(TronTypography.pill)
                                     .foregroundStyle(.white.opacity(0.4))
                                 HStack(spacing: 4) {
                                     if turn.cacheReadTokens > 0 {
                                         Text("↓\(formatTokens(turn.cacheReadTokens))")
-                                            .font(.system(size: 10, weight: .medium, design: .monospaced))
+                                            .font(TronTypography.codeSM)
                                             .foregroundStyle(.tronEmerald)
                                     }
                                     if turn.cacheCreationTokens > 0 {
                                         Text("↑\(formatTokens(turn.cacheCreationTokens))")
-                                            .font(.system(size: 10, weight: .medium, design: .monospaced))
+                                            .font(TronTypography.codeSM)
                                             .foregroundStyle(.tronPurple)
                                     }
                                 }
@@ -573,13 +573,13 @@ struct TurnRow: View {
                     if !turn.tools.isEmpty {
                         VStack(alignment: .leading, spacing: 4) {
                             Text("Tools")
-                                .font(.system(size: 9, design: .monospaced))
+                                .font(TronTypography.pill)
                                 .foregroundStyle(.white.opacity(0.4))
 
                             FlowLayout(spacing: 4) {
                                 ForEach(turn.tools, id: \.self) { tool in
                                     Text(tool)
-                                        .font(.system(size: 9, design: .monospaced))
+                                        .font(TronTypography.pill)
                                         .foregroundStyle(.tronCyan)
                                         .padding(.horizontal, 6)
                                         .padding(.vertical, 3)
@@ -594,12 +594,12 @@ struct TurnRow: View {
                     if !turn.errors.isEmpty {
                         VStack(alignment: .leading, spacing: 4) {
                             Text("Errors")
-                                .font(.system(size: 9, design: .monospaced))
+                                .font(TronTypography.pill)
                                 .foregroundStyle(.white.opacity(0.4))
 
                             ForEach(turn.errors, id: \.self) { error in
                                 Text(error)
-                                    .font(.system(size: 10, design: .monospaced))
+                                    .font(TronTypography.mono(size: TronTypography.sizeCaption))
                                     .foregroundStyle(.tronError)
                                     .lineLimit(2)
                             }

@@ -86,10 +86,10 @@ struct ContextAuditView: View {
                                     .tint(.tronError)
                             } else {
                                 Image(systemName: "trash")
-                                    .font(.system(size: 12, weight: .medium))
+                                    .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
                             }
                             Text("Clear")
-                                .font(.system(size: 13, weight: .medium, design: .monospaced))
+                                .font(TronTypography.mono(size: TronTypography.sizeBody3, weight: .medium))
                         }
                         .foregroundStyle(hasMessages && !readOnly ? .tronError : .tronTextMuted)
                     }
@@ -121,7 +121,7 @@ struct ContextAuditView: View {
                 }
                 ToolbarItem(placement: .principal) {
                     Text("Context")
-                        .font(.system(size: 16, weight: .semibold, design: .monospaced))
+                        .font(TronTypography.mono(size: TronTypography.sizeTitle, weight: .semibold))
                         .foregroundStyle(.tronEmerald)
                 }
                 ToolbarItem(placement: .topBarTrailing) {
@@ -135,10 +135,10 @@ struct ContextAuditView: View {
                                     .tint(.tronSlate)
                             } else {
                                 Image(systemName: "arrow.down.right.and.arrow.up.left")
-                                    .font(.system(size: 12, weight: .medium))
+                                    .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
                             }
                             Text("Compact")
-                                .font(.system(size: 13, weight: .medium, design: .monospaced))
+                                .font(TronTypography.mono(size: TronTypography.sizeBody3, weight: .medium))
                         }
                         .foregroundStyle(hasMessages && !readOnly ? .tronSlate : .tronTextMuted)
                     }
@@ -309,7 +309,7 @@ struct ContextAuditView: View {
                             .tint(.cyan)
 
                         Text("Loading context...")
-                            .font(.caption)
+                            .font(TronTypography.caption)
                             .foregroundStyle(.tronTextMuted)
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)

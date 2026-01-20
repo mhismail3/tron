@@ -139,13 +139,13 @@ struct StatusPillsColumn: View {
         ) {
             HStack(spacing: 4) {
                 Image(systemName: "cpu")
-                    .font(.system(size: 9, weight: .medium))
+                    .font(TronTypography.pill)
                 Text(modelName.shortModelName)
-                    .font(.system(size: 10, weight: .medium, design: .monospaced))
+                    .font(TronTypography.pillValue)
                     .contentTransition(.interpolate)
                 if !readOnly {
                     Image(systemName: "chevron.up.chevron.down")
-                        .font(.system(size: 8, weight: .medium))
+                        .font(TronTypography.labelSM)
                 }
             }
             .foregroundStyle(readOnly ? .tronEmerald.opacity(0.5) : .tronEmerald)
@@ -182,12 +182,12 @@ struct StatusPillsColumn: View {
         } label: {
             HStack(spacing: 4) {
                 Image(systemName: reasoningLevelIcon(reasoningLevel))
-                    .font(.system(size: 9, weight: .medium))
+                    .font(TronTypography.pill)
                 Text(reasoningLevelLabel(reasoningLevel))
-                    .font(.system(size: 10, weight: .medium, design: .monospaced))
+                    .font(TronTypography.pillValue)
                 if !readOnly {
                     Image(systemName: "chevron.up.chevron.down")
-                        .font(.system(size: 8, weight: .medium))
+                        .font(TronTypography.labelSM)
                 }
             }
             .foregroundStyle(readOnly ? reasoningLevelColor(reasoningLevel).opacity(0.5) : reasoningLevelColor(reasoningLevel))
@@ -233,11 +233,11 @@ struct StatusPillsColumn: View {
                         .foregroundStyle(contextPercentageColor)
 
                     Image(systemName: "chevron.up.chevron.down")
-                        .font(.system(size: 8, weight: .medium))
+                        .font(TronTypography.labelSM)
                         .foregroundStyle(contextPercentageColor)
                 }
             }
-            .font(.system(size: 10, weight: .medium, design: .monospaced))
+            .font(TronTypography.pillValue)
             .padding(.horizontal, 10)
             .padding(.vertical, 6)
             .contentShape(Capsule())
@@ -300,7 +300,7 @@ struct TokenStatsPill: View {
                 Text("\(formattedTokensRemaining) left")
                     .foregroundStyle(contextPercentageColor)
             }
-            .font(.system(size: 10, weight: .medium, design: .monospaced))
+            .font(TronTypography.pillValue)
             .padding(.horizontal, 10)
             .padding(.vertical, 6)
             .contentShape(Capsule())

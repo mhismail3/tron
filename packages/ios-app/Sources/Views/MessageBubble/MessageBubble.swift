@@ -485,11 +485,11 @@ struct AnsweredQuestionsChipView: View {
     var body: some View {
         HStack(spacing: 8) {
             Image(systemName: "checkmark.circle.fill")
-                .font(.system(size: 14, weight: .medium))
+                .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .medium))
                 .foregroundStyle(.tronSuccess)
 
             Text("Answered agent's questions")
-                .font(.system(size: 13, weight: .medium, design: .monospaced))
+                .font(TronTypography.mono(size: TronTypography.sizeBody3, weight: .medium))
                 .foregroundStyle(.tronTextSecondary)
         }
         .padding(.horizontal, 12)

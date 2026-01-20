@@ -22,15 +22,15 @@ struct CanvasText: View {
 
     private var font: Font {
         switch component.props.style {
-        case "largeTitle": return .system(size: 32, weight: .bold, design: .monospaced)
-        case "title": return .system(size: 26, weight: .semibold, design: .monospaced)
-        case "title2": return .system(size: 22, weight: .semibold, design: .monospaced)
-        case "title3": return .system(size: 18, weight: .semibold, design: .monospaced)
-        case "headline": return .system(size: 16, weight: .semibold, design: .monospaced)
-        case "subheadline": return .system(size: 14, design: .monospaced)
-        case "caption": return .system(size: 12, design: .monospaced)
-        case "footnote": return .system(size: 11, design: .monospaced)
-        default: return .system(size: 15, design: .monospaced)
+        case "largeTitle": return TronTypography.mono(size: TronTypography.sizeDisplay, weight: .bold)
+        case "title": return TronTypography.mono(size: 26, weight: .semibold)
+        case "title2": return TronTypography.mono(size: TronTypography.sizeXXL, weight: .semibold)
+        case "title3": return TronTypography.mono(size: TronTypography.sizeLargeTitle, weight: .semibold)
+        case "headline": return TronTypography.mono(size: TronTypography.sizeTitle, weight: .semibold)
+        case "subheadline": return TronTypography.mono(size: TronTypography.sizeBody)
+        case "caption": return TronTypography.mono(size: TronTypography.sizeBodySM)
+        case "footnote": return TronTypography.mono(size: TronTypography.sizeBody2)
+        default: return TronTypography.code
         }
     }
 
@@ -56,7 +56,7 @@ struct CanvasIcon: View {
 
     var body: some View {
         Image(systemName: component.props.name ?? "questionmark.circle")
-            .font(.system(size: component.props.size ?? 24, weight: .medium))
+            .font(TronTypography.sans(size: component.props.size ?? 24, weight: .medium))
             .foregroundStyle(iconColor)
     }
 

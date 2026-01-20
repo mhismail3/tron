@@ -36,7 +36,7 @@ struct CompactionDetailSheet: View {
             .toolbar {
                 ToolbarItem(placement: .principal) {
                     Text("Context Compacted")
-                        .font(.system(size: 16, weight: .semibold, design: .monospaced))
+                        .font(TronTypography.mono(size: TronTypography.sizeTitle, weight: .semibold))
                         .foregroundStyle(.cyan)
                 }
             }
@@ -52,7 +52,7 @@ struct CompactionDetailSheet: View {
         VStack(alignment: .leading, spacing: 12) {
             // Section header
             Text("Compression")
-                .font(.system(size: 12, weight: .medium, design: .monospaced))
+                .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
                 .foregroundStyle(.white.opacity(0.6))
 
             // Card content
@@ -61,7 +61,7 @@ struct CompactionDetailSheet: View {
                 HStack(spacing: 16) {
                     CompactionTokenBox(label: "Before", tokens: tokensBefore, color: .cyan)
                     Image(systemName: "arrow.right")
-                        .font(.title3)
+                        .font(TronTypography.sans(size: TronTypography.sizeXL))
                         .foregroundStyle(.white.opacity(0.4))
                     CompactionTokenBox(label: "After", tokens: tokensAfter, color: .cyan)
                 }
@@ -89,7 +89,7 @@ struct CompactionDetailSheet: View {
             // Section header
             HStack {
                 Text("Summary")
-                    .font(.system(size: 12, weight: .medium, design: .monospaced))
+                    .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
                     .foregroundStyle(.white.opacity(0.6))
 
                 Spacer()
@@ -100,7 +100,7 @@ struct CompactionDetailSheet: View {
                         UIPasteboard.general.string = summary
                     } label: {
                         Image(systemName: "doc.on.doc")
-                            .font(.system(size: 12))
+                            .font(TronTypography.sans(size: TronTypography.sizeBodySM))
                             .foregroundStyle(.cyan.opacity(0.6))
                     }
                 }
@@ -110,11 +110,11 @@ struct CompactionDetailSheet: View {
             VStack(alignment: .leading, spacing: 12) {
                 HStack {
                     Image(systemName: "doc.text.fill")
-                        .font(.system(size: 14))
+                        .font(TronTypography.sans(size: TronTypography.sizeBody))
                         .foregroundStyle(.cyan)
 
                     Text("Compaction Summary")
-                        .font(.system(size: 14, weight: .medium, design: .monospaced))
+                        .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
                         .foregroundStyle(.cyan)
 
                     Spacer()
@@ -123,14 +123,14 @@ struct CompactionDetailSheet: View {
                 // Summary content
                 if let summary = summary, !summary.isEmpty {
                     Text(summary)
-                        .font(.system(size: 12, design: .monospaced))
+                        .font(TronTypography.mono(size: TronTypography.sizeBodySM))
                         .foregroundStyle(.white.opacity(0.7))
                         .lineSpacing(4)
                         .textSelection(.enabled)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 } else {
                     Text("No summary available")
-                        .font(.system(size: 12, design: .monospaced))
+                        .font(TronTypography.mono(size: TronTypography.sizeBodySM))
                         .foregroundStyle(.white.opacity(0.3))
                         .italic()
                 }
@@ -174,10 +174,10 @@ private struct CompactionTokenBox: View {
     var body: some View {
         VStack(spacing: 6) {
             Text(label)
-                .font(.system(size: 10, weight: .medium, design: .monospaced))
+                .font(TronTypography.codeSM)
                 .foregroundStyle(.white.opacity(0.5))
             Text(formatTokens(tokens))
-                .font(.system(size: 20, weight: .semibold, design: .rounded))
+                .font(TronTypography.sans(size: TronTypography.sizeXL, weight: .semibold))
                 .foregroundStyle(color)
         }
         .frame(maxWidth: .infinity)
@@ -206,10 +206,10 @@ private struct CompactionStatBadge: View {
     var body: some View {
         HStack(spacing: 4) {
             Text(label)
-                .font(.system(size: 10, design: .monospaced))
+                .font(TronTypography.mono(size: TronTypography.sizeCaption))
             if !value.isEmpty {
                 Text(value)
-                    .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                    .font(TronTypography.pillValue)
             }
         }
         .foregroundStyle(color)

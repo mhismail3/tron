@@ -32,7 +32,7 @@ struct SkillDetailSheet: View {
             .toolbar {
                 ToolbarItem(placement: .principal) {
                     Text(skill.displayName)
-                        .font(.system(size: 16, weight: .semibold, design: .monospaced))
+                        .font(TronTypography.mono(size: TronTypography.sizeTitle, weight: .semibold))
                         .foregroundStyle(.tronCyan)
                 }
             }
@@ -55,7 +55,7 @@ struct SkillDetailSheet: View {
                 .scaleEffect(1.2)
 
             Text("Loading skill content...")
-                .font(.system(size: 14))
+                .font(TronTypography.sans(size: TronTypography.sizeBody))
                 .foregroundStyle(.tronTextMuted)
         }
     }
@@ -63,15 +63,15 @@ struct SkillDetailSheet: View {
     private func errorView(_ message: String) -> some View {
         VStack(spacing: 16) {
             Image(systemName: "exclamationmark.triangle.fill")
-                .font(.system(size: 40))
+                .font(TronTypography.sans(size: 40))
                 .foregroundStyle(.tronError)
 
             Text("Failed to load skill")
-                .font(.system(size: 16, weight: .semibold))
+                .font(TronTypography.button)
                 .foregroundStyle(.tronTextPrimary)
 
             Text(message)
-                .font(.system(size: 14))
+                .font(TronTypography.sans(size: TronTypography.sizeBody))
                 .foregroundStyle(.tronTextMuted)
                 .multilineTextAlignment(.center)
 
@@ -79,7 +79,7 @@ struct SkillDetailSheet: View {
                 Task { await loadSkillContent() }
             } label: {
                 Text("Try Again")
-                    .font(.system(size: 14, weight: .medium))
+                    .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .medium))
                     .foregroundStyle(.tronCyan)
                     .padding(.horizontal, 20)
                     .padding(.vertical, 10)
@@ -115,14 +115,14 @@ struct SkillDetailSheet: View {
         VStack(alignment: .leading, spacing: 12) {
             // Section header (outside the card, like Context Manager)
             Text("Description")
-                .font(.system(size: 12, weight: .medium, design: .monospaced))
+                .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
                 .foregroundStyle(.white.opacity(0.6))
 
             // Card content
             VStack(spacing: 12) {
                 // Description text
                 Text(metadata.description)
-                    .font(.system(size: 14, weight: .medium, design: .monospaced))
+                    .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
                     .foregroundStyle(.tronCyan)
                     .frame(maxWidth: .infinity, alignment: .leading)
 
@@ -131,9 +131,9 @@ struct SkillDetailSheet: View {
                     // Source badge (emerald for project scope visibility)
                     HStack(spacing: 4) {
                         Image(systemName: metadata.source == .project ? "folder.fill" : "globe")
-                            .font(.system(size: 10))
+                            .font(TronTypography.sans(size: TronTypography.sizeCaption))
                         Text(metadata.source == .project ? "Project" : "Global")
-                            .font(.system(size: 10, design: .monospaced))
+                            .font(TronTypography.mono(size: TronTypography.sizeCaption))
                     }
                     .foregroundStyle(.tronEmerald)
                     .padding(.horizontal, 8)
@@ -148,9 +148,9 @@ struct SkillDetailSheet: View {
                     if metadata.autoInject {
                         HStack(spacing: 4) {
                             Image(systemName: "bolt.fill")
-                                .font(.system(size: 10))
+                                .font(TronTypography.sans(size: TronTypography.sizeCaption))
                             Text("Auto-inject")
-                                .font(.system(size: 10, design: .monospaced))
+                                .font(TronTypography.mono(size: TronTypography.sizeCaption))
                         }
                         .foregroundStyle(.tronAmber)
                         .padding(.horizontal, 8)
@@ -168,7 +168,7 @@ struct SkillDetailSheet: View {
                     if let tags = metadata.tags, !tags.isEmpty {
                         ForEach(tags.prefix(3), id: \.self) { tag in
                             Text(tag)
-                                .font(.system(size: 10, weight: .medium, design: .monospaced))
+                                .font(TronTypography.codeSM)
                                 .foregroundStyle(.tronPurple.opacity(0.9))
                                 .padding(.horizontal, 8)
                                 .padding(.vertical, 6)
@@ -195,7 +195,7 @@ struct SkillDetailSheet: View {
             // Section header
             HStack {
                 Text("SKILL.md")
-                    .font(.system(size: 12, weight: .medium, design: .monospaced))
+                    .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
                     .foregroundStyle(.white.opacity(0.6))
 
                 Spacer()
@@ -205,7 +205,7 @@ struct SkillDetailSheet: View {
                     UIPasteboard.general.string = metadata.content
                 } label: {
                     Image(systemName: "doc.on.doc")
-                        .font(.system(size: 12))
+                        .font(TronTypography.sans(size: TronTypography.sizeBodySM))
                         .foregroundStyle(.tronCyan.opacity(0.6))
                 }
             }
@@ -214,11 +214,11 @@ struct SkillDetailSheet: View {
             VStack(alignment: .leading, spacing: 12) {
                 HStack {
                     Image(systemName: "doc.text.fill")
-                        .font(.system(size: 14))
+                        .font(TronTypography.sans(size: TronTypography.sizeBody))
                         .foregroundStyle(.tronCyan)
 
                     Text("Content")
-                        .font(.system(size: 14, weight: .medium, design: .monospaced))
+                        .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
                         .foregroundStyle(.tronCyan)
 
                     Spacer()
@@ -226,7 +226,7 @@ struct SkillDetailSheet: View {
 
                 // Markdown content
                 Text(LocalizedStringKey(metadata.content))
-                    .font(.system(size: 12, design: .monospaced))
+                    .font(TronTypography.mono(size: TronTypography.sizeBodySM))
                     .foregroundStyle(.white.opacity(0.7))
                     .lineSpacing(4)
                     .textSelection(.enabled)
@@ -244,13 +244,13 @@ struct SkillDetailSheet: View {
         VStack(alignment: .leading, spacing: 12) {
             // Section header
             Text("Other Files")
-                .font(.system(size: 12, weight: .medium, design: .monospaced))
+                .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
                 .foregroundStyle(.white.opacity(0.6))
 
             if metadata.additionalFiles.isEmpty {
                 // Empty state
                 Text("No other files")
-                    .font(.system(size: 12, design: .monospaced))
+                    .font(TronTypography.mono(size: TronTypography.sizeBodySM))
                     .foregroundStyle(.white.opacity(0.3))
                     .frame(maxWidth: .infinity, alignment: .leading)
             } else {
@@ -259,11 +259,11 @@ struct SkillDetailSheet: View {
                     ForEach(metadata.additionalFiles, id: \.self) { file in
                         HStack(spacing: 8) {
                             Image(systemName: fileIcon(for: file))
-                                .font(.system(size: 12))
+                                .font(TronTypography.sans(size: TronTypography.sizeBodySM))
                                 .foregroundStyle(.tronCyan.opacity(0.8))
 
                             Text(file)
-                                .font(.system(size: 12, design: .monospaced))
+                                .font(TronTypography.mono(size: TronTypography.sizeBodySM))
                                 .foregroundStyle(.white.opacity(0.7))
 
                             Spacer()

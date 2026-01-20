@@ -9,17 +9,17 @@ struct TokenBadge: View {
         HStack(spacing: 8) {
             HStack(spacing: 2) {
                 Image(systemName: "arrow.down")
-                    .font(.system(size: 8, weight: .medium))
+                    .font(TronTypography.labelSM)
                 Text(usage.formattedInput)
             }
 
             HStack(spacing: 2) {
                 Image(systemName: "arrow.up")
-                    .font(.system(size: 8, weight: .medium))
+                    .font(TronTypography.labelSM)
                 Text(usage.formattedOutput)
             }
         }
-        .font(.system(size: 10, design: .monospaced))
+        .font(TronTypography.codeSM)
         .foregroundStyle(.tronTextMuted)
     }
 }
@@ -61,35 +61,35 @@ struct MessageMetadataBadge: View {
             // Separator after tokens
             if needsSeparator {
                 Text("\u{2022}")
-                    .font(.system(size: 10, design: .monospaced))
+                    .font(TronTypography.codeSM)
                     .foregroundStyle(.tronTextMuted)
             }
 
             // Model name pill
             if let model = model {
                 Text(model)
-                    .font(.system(size: 10, weight: .medium, design: .monospaced))
+                    .font(TronTypography.pillValue)
                     .foregroundStyle(.tronTextMuted)
             }
 
             // Separator between model and latency
             if needsModelLatencySeparator {
                 Text("\u{2022}")
-                    .font(.system(size: 10, design: .monospaced))
+                    .font(TronTypography.codeSM)
                     .foregroundStyle(.tronTextMuted)
             }
 
             // Latency pill
             if let latency = latency {
                 Text(latency)
-                    .font(.system(size: 10, design: .monospaced))
+                    .font(TronTypography.codeSM)
                     .foregroundStyle(.tronTextMuted)
             }
 
             // Thinking indicator (text, not emoji)
             if hasThinking == true {
                 Text("Thinking")
-                    .font(.system(size: 10, weight: .medium, design: .monospaced))
+                    .font(TronTypography.pillValue)
                     .foregroundStyle(.tronAmber)
             }
         }

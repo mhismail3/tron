@@ -10,7 +10,7 @@ struct FloatingVoiceNotesButton: View {
     var body: some View {
         Button(action: action) {
             Image(systemName: audioMonitor.isRecordingAvailable ? "mic.fill" : "mic.slash.fill")
-                .font(.system(size: 16, weight: .semibold))
+                .font(TronTypography.button)
                 .foregroundStyle(audioMonitor.isRecordingAvailable ? .tronEmerald : .white.opacity(0.3))
                 .frame(width: 48, height: 48)
                 .contentShape(Circle())

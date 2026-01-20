@@ -11,7 +11,7 @@ struct CanvasSection: View {
             // Header
             if let header = component.props.header {
                 Text(header)
-                    .font(.system(size: 13, weight: .semibold, design: .monospaced))
+                    .font(TronTypography.mono(size: TronTypography.sizeBody3, weight: .semibold))
                     .foregroundStyle(.tronEmerald)
                     .textCase(.uppercase)
                     .tracking(0.5)
@@ -25,7 +25,7 @@ struct CanvasSection: View {
             // Footer
             if let footer = component.props.footer {
                 Text(footer)
-                    .font(.system(size: 12, design: .monospaced))
+                    .font(TronTypography.mono(size: TronTypography.sizeBodySM))
                     .foregroundStyle(.tronTextMuted)
             }
         }

@@ -9,6 +9,10 @@ struct TronMobileApp: App {
     // EventStoreManager is created lazily since it needs appState.rpcClient
     @State private var eventStoreManager: EventStoreManager?
 
+    init() {
+        TronFontLoader.registerFonts()
+    }
+
     var body: some Scene {
         WindowGroup {
             Group {

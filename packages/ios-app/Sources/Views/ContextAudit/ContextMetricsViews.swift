@@ -54,10 +54,10 @@ struct ContextUsageGaugeView: View {
             // Section header with explanatory subtitle
             VStack(alignment: .leading, spacing: 2) {
                 Text("Context Window")
-                    .font(.system(size: 14, weight: .medium, design: .monospaced))
+                    .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
                     .foregroundStyle(.white.opacity(0.6))
                 Text("What's being sent to the model this turn")
-                    .font(.system(size: 10, design: .monospaced))
+                    .font(TronTypography.mono(size: TronTypography.sizeCaption))
                     .foregroundStyle(.white.opacity(0.35))
             }
 
@@ -66,17 +66,17 @@ struct ContextUsageGaugeView: View {
                 // Header
                 HStack {
                     Image(systemName: "brain.head.profile")
-                        .font(.system(size: 14))
+                        .font(TronTypography.sans(size: TronTypography.sizeBody))
                         .foregroundStyle(usageColor)
 
                     Text("Current Size")
-                        .font(.system(size: 14, weight: .medium, design: .monospaced))
+                        .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
                         .foregroundStyle(.tronSlate)
 
                     Spacer()
 
                     Text("\(Int(usagePercent * 100))%")
-                        .font(.system(size: 20, weight: .bold, design: .monospaced))
+                        .font(TronTypography.mono(size: TronTypography.sizeXL, weight: .bold))
                         .foregroundStyle(usageColor)
                 }
 
@@ -98,13 +98,13 @@ struct ContextUsageGaugeView: View {
                 // Token counts
                 HStack {
                     Text("\(formattedTokens) / \(formattedLimit)")
-                        .font(.system(size: 11, weight: .medium, design: .monospaced))
+                        .font(TronTypography.codeCaption)
                         .foregroundStyle(.white.opacity(0.6))
 
                     Spacer()
 
                     Text("\(formatTokenCount(contextLimit - currentTokens)) remaining")
-                        .font(.system(size: 11, design: .monospaced))
+                        .font(TronTypography.codeCaption)
                         .foregroundStyle(.white.opacity(0.4))
                 }
             }
@@ -125,10 +125,10 @@ struct TokenBreakdownHeader: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
             Text("Window Breakdown")
-                .font(.system(size: 14, weight: .medium, design: .monospaced))
+                .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
                 .foregroundStyle(.white.opacity(0.6))
             Text("Components that make up the Context Window above")
-                .font(.system(size: 10, design: .monospaced))
+                .font(TronTypography.mono(size: TronTypography.sizeCaption))
                 .foregroundStyle(.white.opacity(0.35))
         }
         .frame(maxWidth: .infinity, alignment: .leading)

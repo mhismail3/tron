@@ -24,18 +24,19 @@ struct ThinkingContentView: View {
                 HStack(spacing: 6) {
                     TronIconView(icon: .thinking, size: 12, color: .tronTextMuted)
                     Text("Thinking")
-                        .font(.caption.weight(.medium))
+                        .font(TronTypography.caption)
+                        .fontWeight(.medium)
                         .foregroundStyle(.tronTextMuted)
                     Spacer()
                     Image(systemName: expanded ? "chevron.up" : "chevron.down")
-                        .font(.system(size: 10, weight: .medium))
+                        .font(TronTypography.codeSM)
                         .foregroundStyle(.tronTextMuted)
                 }
             }
 
             if expanded {
                 Text(content)
-                    .font(.caption)
+                    .font(TronTypography.caption)
                     .foregroundStyle(.tronTextSecondary)
                     .italic()
             }

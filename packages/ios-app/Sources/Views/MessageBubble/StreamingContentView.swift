@@ -15,10 +15,10 @@ struct StreamingContentView: View {
 
             if text.isEmpty {
                 Text(" ")
-                    .font(.system(size: 14, design: .monospaced))
+                    .font(TronTypography.messageBody)
             } else {
                 Text(LocalizedStringKey(text))
-                    .font(.system(size: 14, design: .monospaced))
+                    .font(TronTypography.messageBody)
                     .foregroundStyle(.tronTextPrimary)
                     .lineSpacing(4)
             }

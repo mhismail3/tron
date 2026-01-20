@@ -71,7 +71,7 @@ struct NewSessionFlow: View {
                     // Workspace section
                     VStack(alignment: .leading, spacing: 10) {
                         Text("Workspace")
-                            .font(.system(size: 12, weight: .medium, design: .monospaced))
+                            .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
                             .foregroundStyle(.white.opacity(0.6))
 
                         Button {
@@ -80,18 +80,18 @@ struct NewSessionFlow: View {
                             HStack {
                                 if workingDirectory.isEmpty {
                                     Text("Select Workspace")
-                                        .font(.system(size: 14, weight: .regular, design: .monospaced))
+                                        .font(TronTypography.messageBody)
                                         .foregroundStyle(.tronEmerald)
                                 } else {
                                     Text(displayWorkspacePath)
-                                        .font(.system(size: 14, weight: .regular, design: .monospaced))
+                                        .font(TronTypography.messageBody)
                                         .foregroundStyle(.tronEmerald)
                                         .lineLimit(1)
                                         .truncationMode(.middle)
                                 }
                                 Spacer()
                                 Image(systemName: "folder.fill")
-                                    .font(.system(size: 14))
+                                    .font(TronTypography.sans(size: TronTypography.sizeBody))
                                     .foregroundStyle(.tronEmerald)
                             }
                             .padding(.horizontal, 16)
@@ -101,14 +101,14 @@ struct NewSessionFlow: View {
                         .glassEffect(.regular.tint(Color.tronPhthaloGreen.opacity(0.35)).interactive(), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
 
                         Text("The directory where the agent will operate")
-                            .font(.system(size: 11, design: .monospaced))
+                            .font(TronTypography.codeCaption)
                             .foregroundStyle(.white.opacity(0.4))
                     }
 
                     // Clone from GitHub option
                     VStack(alignment: .leading, spacing: 10) {
                         Text("Or clone a repository")
-                            .font(.system(size: 12, weight: .medium, design: .monospaced))
+                            .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
                             .foregroundStyle(.white.opacity(0.6))
 
                         Button {
@@ -116,14 +116,14 @@ struct NewSessionFlow: View {
                         } label: {
                             HStack {
                                 Image(systemName: "arrow.down.doc.fill")
-                                    .font(.system(size: 14))
+                                    .font(TronTypography.sans(size: TronTypography.sizeBody))
                                     .foregroundStyle(.tronEmerald)
                                 Text("Clone from GitHub")
-                                    .font(.system(size: 14, weight: .regular, design: .monospaced))
+                                    .font(TronTypography.messageBody)
                                     .foregroundStyle(.tronEmerald)
                                 Spacer()
                                 Image(systemName: "chevron.right")
-                                    .font(.system(size: 10))
+                                    .font(TronTypography.sans(size: TronTypography.sizeCaption))
                                     .foregroundStyle(.tronEmerald.opacity(0.4))
                             }
                             .padding(.horizontal, 16)
@@ -133,14 +133,14 @@ struct NewSessionFlow: View {
                         .glassEffect(.regular.tint(Color.tronPhthaloGreen.opacity(0.35)).interactive(), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
 
                         Text("Clone a GitHub repo and start a session")
-                            .font(.system(size: 11, design: .monospaced))
+                            .font(TronTypography.codeCaption)
                             .foregroundStyle(.white.opacity(0.4))
                     }
 
                     // Model section - dynamically loaded from server
                     VStack(alignment: .leading, spacing: 10) {
                         Text("Model")
-                            .font(.system(size: 12, weight: .medium, design: .monospaced))
+                            .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
                             .foregroundStyle(.white.opacity(0.6))
 
                         ModelPickerMenuContent(
@@ -151,18 +151,18 @@ struct NewSessionFlow: View {
                             HStack {
                                 if isLoadingModels && selectedModel.isEmpty {
                                     Text("Loading...")
-                                        .font(.system(size: 14, weight: .regular, design: .monospaced))
+                                        .font(TronTypography.messageBody)
                                         .foregroundStyle(.tronEmerald.opacity(0.8))
                                 } else {
                                     Text(selectedModelDisplayName)
-                                        .font(.system(size: 14, weight: .regular, design: .monospaced))
+                                        .font(TronTypography.messageBody)
                                         .foregroundStyle(.tronEmerald)
                                 }
 
                                 Spacer()
 
                                 Image(systemName: "chevron.up.chevron.down")
-                                    .font(.system(size: 10))
+                                    .font(TronTypography.sans(size: TronTypography.sizeCaption))
                                     .foregroundStyle(.tronEmerald.opacity(0.5))
                             }
                             .padding(.horizontal, 16)
@@ -176,7 +176,7 @@ struct NewSessionFlow: View {
                         }
 
                         Text(modelDescription)
-                            .font(.system(size: 11, design: .monospaced))
+                            .font(TronTypography.codeCaption)
                             .foregroundStyle(.white.opacity(0.4))
                     }
 
@@ -187,7 +187,7 @@ struct NewSessionFlow: View {
                                 .fill(.white.opacity(0.15))
                                 .frame(height: 1)
                             Text("OR")
-                                .font(.system(size: 10, weight: .medium, design: .monospaced))
+                                .font(TronTypography.pillValue)
                                 .foregroundStyle(.white.opacity(0.3))
                                 .fixedSize()
                             Rectangle()
@@ -205,7 +205,7 @@ struct NewSessionFlow: View {
                             Image(systemName: "exclamationmark.triangle.fill")
                                 .foregroundStyle(.tronError)
                             Text(error)
-                                .font(.subheadline)
+                                .font(TronTypography.subheadline)
                                 .foregroundStyle(.tronError)
                         }
                         .padding()
@@ -221,13 +221,13 @@ struct NewSessionFlow: View {
                 ToolbarItem(placement: .topBarLeading) {
                     Button { dismiss() } label: {
                         Image(systemName: "xmark")
-                            .font(.system(size: 14, weight: .medium))
+                            .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .medium))
                             .foregroundStyle(.tronEmerald)
                     }
                 }
                 ToolbarItem(placement: .principal) {
                     Text("New Session")
-                        .font(.system(size: 16, weight: .semibold))
+                        .font(TronTypography.button)
                         .foregroundStyle(.tronEmerald)
                 }
                 ToolbarItem(placement: .topBarTrailing) {
@@ -239,7 +239,7 @@ struct NewSessionFlow: View {
                             createSession()
                         } label: {
                             Image(systemName: "checkmark")
-                                .font(.system(size: 14, weight: .semibold))
+                                .font(TronTypography.buttonSM)
                                 .foregroundStyle(canCreate ? .tronEmerald : .white.opacity(0.3))
                         }
                         .disabled(!canCreate)
@@ -462,7 +462,7 @@ struct NewSessionFlow: View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
                 Text("Recent Sessions")
-                    .font(.system(size: 12, weight: .medium, design: .monospaced))
+                    .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
                     .foregroundStyle(.white.opacity(0.6))
 
                 Spacer()
@@ -481,7 +481,7 @@ struct NewSessionFlow: View {
                     ProgressView()
                         .tint(.tronEmerald)
                     Text("Loading sessions...")
-                        .font(.caption)
+                        .font(TronTypography.caption)
                         .foregroundStyle(.white.opacity(0.5))
                     Spacer()
                 }
@@ -492,7 +492,7 @@ struct NewSessionFlow: View {
                     Image(systemName: "exclamationmark.triangle.fill")
                         .foregroundStyle(.tronError)
                     Text(error)
-                        .font(.caption)
+                        .font(TronTypography.caption)
                         .foregroundStyle(.tronError)
                 }
                 .padding()
@@ -501,12 +501,12 @@ struct NewSessionFlow: View {
                 // Empty state
                 VStack(spacing: 8) {
                     Image(systemName: "clock.arrow.circlepath")
-                        .font(.title2)
+                        .font(TronTypography.sans(size: TronTypography.sizeXXL))
                         .foregroundStyle(.white.opacity(0.3))
                     Text(workingDirectory.isEmpty
                         ? "No sessions found"
                         : "No sessions in this workspace")
-                        .font(.caption)
+                        .font(TronTypography.caption)
                         .foregroundStyle(.white.opacity(0.4))
                 }
                 .frame(maxWidth: .infinity)
@@ -539,12 +539,12 @@ struct RecentSessionRow: View {
                 // Header: Session ID + Date
                 HStack {
                     Text(session.displayName)
-                        .font(.system(size: 13, weight: .medium, design: .monospaced))
+                        .font(TronTypography.mono(size: TronTypography.sizeBody3, weight: .medium))
                         .foregroundStyle(.tronEmerald)
                         .lineLimit(1)
                     Spacer()
                     Text(session.formattedDate)
-                        .font(.system(size: 9, design: .monospaced))
+                        .font(TronTypography.pill)
                         .foregroundStyle(.white.opacity(0.9))
                 }
 
@@ -555,14 +555,14 @@ struct RecentSessionRow: View {
 
                         HStack(alignment: .top, spacing: 6) {
                             Text(prompt)
-                                .font(.system(size: 11, design: .monospaced))
+                                .font(TronTypography.codeCaption)
                                 .foregroundStyle(.white.opacity(0.7))
                                 .lineLimit(2)
                                 .truncationMode(.tail)
                                 .multilineTextAlignment(.trailing)
 
                             Image(systemName: "person.fill")
-                                .font(.system(size: 8))
+                                .font(TronTypography.labelSM)
                                 .foregroundStyle(.tronEmerald.opacity(0.6))
                                 .frame(width: 12)
                                 .offset(y: 2)
@@ -578,13 +578,13 @@ struct RecentSessionRow: View {
                 if let response = session.lastAssistantResponse, !response.isEmpty {
                     HStack(alignment: .top, spacing: 6) {
                         Image(systemName: "cpu")
-                            .font(.system(size: 8))
+                            .font(TronTypography.labelSM)
                             .foregroundStyle(.tronEmerald.opacity(0.8))
                             .frame(width: 12)
                             .offset(y: 2)
 
                         Text(response)
-                            .font(.system(size: 11, design: .monospaced))
+                            .font(TronTypography.codeCaption)
                             .foregroundStyle(.white.opacity(0.6))
                             .lineLimit(2)
                             .truncationMode(.tail)
@@ -598,17 +598,17 @@ struct RecentSessionRow: View {
                 // Footer: Model + tokens/cost
                 HStack(spacing: 6) {
                     Text(session.model.shortModelName)
-                        .font(.system(size: 10, weight: .medium, design: .monospaced))
+                        .font(TronTypography.pillValue)
                         .foregroundStyle(.tronEmerald.opacity(0.6))
 
                     Spacer()
 
                     Text(session.formattedTokens)
-                        .font(.system(size: 9, design: .monospaced))
+                        .font(TronTypography.pill)
                         .foregroundStyle(.white.opacity(0.45))
 
                     Text(session.formattedCost)
-                        .font(.system(size: 9, weight: .medium, design: .monospaced))
+                        .font(TronTypography.mono(size: TronTypography.sizeSM, weight: .medium))
                         .foregroundStyle(.tronEmerald.opacity(0.5))
                 }
             }
@@ -645,7 +645,7 @@ struct SessionPreviewSheetWrapper: View {
                     ProgressView()
                         .tint(.tronEmerald)
                     Text("Checking workspace...")
-                        .font(.subheadline)
+                        .font(TronTypography.subheadline)
                         .foregroundStyle(.white.opacity(0.6))
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -653,13 +653,13 @@ struct SessionPreviewSheetWrapper: View {
                 // Workspace deleted state
                 VStack(spacing: 16) {
                     Image(systemName: "folder.badge.questionmark")
-                        .font(.system(size: 48))
+                        .font(TronTypography.sans(size: 48))
                         .foregroundStyle(.tronError)
                     Text("Workspace Deleted")
-                        .font(.headline)
+                        .font(TronTypography.headline)
                         .foregroundStyle(.white.opacity(0.9))
                     Text("The workspace folder for this session no longer exists.")
-                        .font(.subheadline)
+                        .font(TronTypography.subheadline)
                         .foregroundStyle(.white.opacity(0.6))
                         .multilineTextAlignment(.center)
                         .padding(.horizontal)
