@@ -17,26 +17,43 @@ import { parseSkillMd } from './skill-parser.js';
 // =============================================================================
 
 const SKILL_MD_FILENAME = 'SKILL.md';
-const DEFAULT_GLOBAL_SKILLS_DIR = '.tron/skills';
-const DEFAULT_PROJECT_SKILLS_DIR = '.tron/skills';
 const MAX_SKILL_FILE_SIZE = 100 * 1024; // 100KB limit
+
+// Support both .claude/ (Claude Code convention) and .tron/ (backwards compatibility)
+const GLOBAL_SKILLS_DIRS = ['.tron/skills'];
+const PROJECT_SKILLS_DIRS = ['.claude/skills', '.tron/skills'];
 
 // =============================================================================
 // Loader Functions
 // =============================================================================
 
 /**
- * Get the default global skills directory path
+ * Get the global skills directory paths (returns all possible locations)
  */
-export function getGlobalSkillsDir(): string {
-  return path.join(os.homedir(), DEFAULT_GLOBAL_SKILLS_DIR);
+export function getGlobalSkillsDirs(): string[] {
+  return GLOBAL_SKILLS_DIRS.map(dir => path.join(os.homedir(), dir));
 }
 
 /**
- * Get the project skills directory path for a working directory
+ * Get the default global skills directory path (first location)
+ */
+export function getGlobalSkillsDir(): string {
+  return path.join(os.homedir(), GLOBAL_SKILLS_DIRS[0]!);
+}
+
+/**
+ * Get the project skills directory paths for a working directory
+ * Returns all possible locations (.claude/skills, .tron/skills)
+ */
+export function getProjectSkillsDirs(workingDirectory: string): string[] {
+  return PROJECT_SKILLS_DIRS.map(dir => path.join(workingDirectory, dir));
+}
+
+/**
+ * Get the project skills directory path for a working directory (first location)
  */
 export function getProjectSkillsDir(workingDirectory: string): string {
-  return path.join(workingDirectory, DEFAULT_PROJECT_SKILLS_DIR);
+  return path.join(workingDirectory, PROJECT_SKILLS_DIRS[0]!);
 }
 
 /**
@@ -152,6 +169,7 @@ async function loadSkill(
 
 /**
  * Scan both global and project skill directories
+ * Scans all possible locations (.claude/skills, .tron/skills) and merges results
  */
 export async function scanAllSkills(
   workingDirectory: string,
@@ -162,14 +180,47 @@ export async function scanAllSkills(
   globalResult: SkillScanResult;
   projectResult: SkillScanResult;
 }> {
-  const globalDir = options?.globalSkillsDir ?? getGlobalSkillsDir();
-  const projectDir = getProjectSkillsDir(workingDirectory);
+  // Get all global directories to scan
+  const globalDirs = options?.globalSkillsDir
+    ? [options.globalSkillsDir]
+    : getGlobalSkillsDirs();
 
-  // Scan both directories in parallel
-  const [globalResult, projectResult] = await Promise.all([
-    scanSkillsDirectory(globalDir, 'global'),
-    scanSkillsDirectory(projectDir, 'project'),
-  ]);
+  // Get all project directories to scan
+  const projectDirs = getProjectSkillsDirs(workingDirectory);
+
+  // Scan all directories in parallel
+  const globalResults = await Promise.all(
+    globalDirs.map(dir => scanSkillsDirectory(dir, 'global'))
+  );
+
+  const projectResults = await Promise.all(
+    projectDirs.map(dir => scanSkillsDirectory(dir, 'project'))
+  );
+
+  // Merge results, deduplicating by skill name (first occurrence wins)
+  const globalResult = mergeSkillResults(globalResults);
+  const projectResult = mergeSkillResults(projectResults);
 
   return { globalResult, projectResult };
+}
+
+/**
+ * Merge multiple skill scan results, deduplicating by name
+ */
+function mergeSkillResults(results: SkillScanResult[]): SkillScanResult {
+  const seenNames = new Set<string>();
+  const skills: SkillScanResult['skills'] = [];
+  const errors: SkillScanError[] = [];
+
+  for (const result of results) {
+    for (const skill of result.skills) {
+      if (!seenNames.has(skill.name)) {
+        seenNames.add(skill.name);
+        skills.push(skill);
+      }
+    }
+    errors.push(...result.errors);
+  }
+
+  return { skills, errors };
 }

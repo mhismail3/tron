@@ -35,7 +35,9 @@ export interface ContextLoaderConfig {
   projectRoot?: string;
   /** Context file names to search for (default: AGENTS.md, CLAUDE.md) */
   contextFileNames?: string[];
-  /** Agent config directory name (default: .agent) */
+  /** Agent config directory names to check (default: ['.claude', '.tron', '.agent']) */
+  agentDirs?: string[];
+  /** @deprecated Use agentDirs instead. Single agent dir for backwards compatibility */
   agentDir?: string;
   /** Maximum directory depth to search (default: 10) */
   maxDepth?: number;
@@ -85,12 +87,20 @@ export class ContextLoader {
   private cache: Map<string, LoadedContext> = new Map();
 
   constructor(config: ContextLoaderConfig = {}) {
+    // Handle deprecated agentDir -> agentDirs conversion
+    let agentDirs = config.agentDirs;
+    if (!agentDirs && config.agentDir) {
+      // Backwards compatibility: single agentDir becomes first in list
+      agentDirs = [config.agentDir, '.claude', '.tron', '.agent'];
+    }
+
     this.config = {
       userHome: process.env.HOME ?? '',
       projectRoot: process.cwd(),
       // Support both uppercase and lowercase variants
       contextFileNames: ['AGENTS.md', 'agents.md', 'CLAUDE.md', 'claude.md'],
-      agentDir: '.agent',
+      // Support .claude (Claude Code), .tron (Tron), and .agent (legacy) directories
+      agentDirs: agentDirs ?? ['.claude', '.tron', '.agent'],
       maxDepth: 10,
       cacheEnabled: true,
       ...config,
@@ -186,25 +196,28 @@ export class ContextLoader {
 
   /**
    * Load project-level context
+   * Checks .claude/, .tron/, .agent/ directories in order, then project root
    */
   async loadProjectContext(): Promise<ContextFile | null> {
-    // Check .agent directory first
-    const agentDir = path.join(this.config.projectRoot, this.config.agentDir);
-    for (const fileName of this.config.contextFileNames) {
-      const filePath = path.join(agentDir, fileName);
-      try {
-        const content = await fs.readFile(filePath, 'utf-8');
-        const stats = await fs.stat(filePath);
+    // Check agent directories first (.claude, .tron, .agent)
+    for (const agentDirName of this.config.agentDirs) {
+      const agentDir = path.join(this.config.projectRoot, agentDirName);
+      for (const fileName of this.config.contextFileNames) {
+        const filePath = path.join(agentDir, fileName);
+        try {
+          const content = await fs.readFile(filePath, 'utf-8');
+          const stats = await fs.stat(filePath);
 
-        return {
-          path: filePath,
-          content,
-          level: 'project',
-          depth: 0,
-          modifiedAt: stats.mtime,
-        };
-      } catch {
-        // Continue to next file name
+          return {
+            path: filePath,
+            content,
+            level: 'project',
+            depth: 0,
+            modifiedAt: stats.mtime,
+          };
+        } catch {
+          // Continue to next file name
+        }
       }
     }
 
@@ -400,6 +413,8 @@ export class ContextLoader {
     const paths = [
       path.join(this.config.userHome, '.tron', 'rules'),  // Global context
       this.config.projectRoot,
+      // Also watch agent directories
+      ...this.config.agentDirs.map(dir => path.join(this.config.projectRoot, dir)),
     ];
 
     const watchers: Array<{ close: () => void }> = [];

@@ -72,6 +72,7 @@ struct SettingsView: View {
                         .font(TronTypography.caption)
                 }
                 .listRowBackground(Color.clear)
+                .listSectionSpacing(8)
 
                 // Server Section
                 Section {
