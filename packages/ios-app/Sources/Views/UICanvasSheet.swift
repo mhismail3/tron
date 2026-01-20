@@ -46,9 +46,8 @@ struct UICanvasSheet: View {
         }
         .presentationDetents([.medium, .large])
         .presentationDragIndicator(.hidden)
-        .presentationBackground(.regularMaterial)
-        .preferredColorScheme(.dark)
         .tint(.tronEmerald)
+        .preferredColorScheme(.dark)
     }
 
     // MARK: - Content View
