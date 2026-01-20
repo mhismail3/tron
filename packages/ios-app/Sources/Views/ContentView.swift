@@ -17,6 +17,10 @@ struct ContentView: View {
     @State private var sessionToArchive: String?
     @AppStorage("confirmArchive") private var confirmArchive = true
 
+    // Deleted workspace handling - tracks which sessions have deleted workspaces
+    @State private var workspaceDeletedForSession: [String: Bool] = [:]
+    @State private var isValidatingWorkspace = false
+
     // Voice notes recording
     @State private var showVoiceNotesRecording = false
 
@@ -84,7 +88,8 @@ struct ContentView: View {
                         ChatView(
                             rpcClient: appState.rpcClient,
                             sessionId: sessionId,
-                            skillStore: appState.skillStore
+                            skillStore: appState.skillStore,
+                            workspaceDeleted: workspaceDeletedForSession[sessionId] ?? false
                         )
                     } else if eventStoreManager.sessions.isEmpty {
                         WelcomePage(
@@ -169,9 +174,23 @@ struct ContentView: View {
             // Stop polling when leaving the dashboard
             eventStoreManager.stopDashboardPolling()
         }
-        .onChange(of: selectedSessionId) { _, newValue in
-            if let id = newValue {
+        .onChange(of: selectedSessionId) { oldValue, newValue in
+            guard let id = newValue else { return }
+
+            // Find the session to validate
+            guard let session = eventStoreManager.sessions.first(where: { $0.id == id }) else {
                 eventStoreManager.setActiveSession(id)
+                return
+            }
+
+            // Always allow selection, but validate workspace path
+            eventStoreManager.setActiveSession(id)
+
+            Task {
+                isValidatingWorkspace = true
+                let pathExists = await eventStoreManager.validateWorkspacePath(session.workingDirectory)
+                isValidatingWorkspace = false
+                workspaceDeletedForSession[id] = !pathExists
             }
         }
     }

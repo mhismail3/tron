@@ -7,6 +7,7 @@ struct ContextAuditView: View {
     let rpcClient: RPCClient
     let sessionId: String
     var skillStore: SkillStore?
+    var readOnly: Bool = false
 
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject var eventStoreManager: EventStoreManager
@@ -90,9 +91,9 @@ struct ContextAuditView: View {
                             Text("Clear")
                                 .font(.system(size: 13, weight: .medium, design: .monospaced))
                         }
-                        .foregroundStyle(hasMessages ? .tronError : .tronTextMuted)
+                        .foregroundStyle(hasMessages && !readOnly ? .tronError : .tronTextMuted)
                     }
-                    .disabled(isClearing || !hasMessages)
+                    .disabled(isClearing || !hasMessages || readOnly)
                     .popover(isPresented: $showClearPopover, arrowEdge: .top) {
                         GlassActionSheet(
                             actions: [
@@ -139,9 +140,9 @@ struct ContextAuditView: View {
                             Text("Compact")
                                 .font(.system(size: 13, weight: .medium, design: .monospaced))
                         }
-                        .foregroundStyle(hasMessages ? .tronSlate : .tronTextMuted)
+                        .foregroundStyle(hasMessages && !readOnly ? .tronSlate : .tronTextMuted)
                     }
-                    .disabled(isCompacting || !hasMessages)
+                    .disabled(isCompacting || !hasMessages || readOnly)
                     .popover(isPresented: $showCompactPopover, arrowEdge: .top) {
                         GlassActionSheet(
                             actions: [
@@ -260,7 +261,7 @@ struct ContextAuditView: View {
                                 if !displayedSkills.isEmpty {
                                     AddedSkillsContainer(
                                         skills: displayedSkills,
-                                        onDelete: { skillName in
+                                        onDelete: readOnly ? nil : { skillName in
                                             Task { await removeSkillFromContext(skillName: skillName) }
                                         },
                                         onFetchContent: { skillName in
@@ -280,7 +281,7 @@ struct ContextAuditView: View {
                                     onLoadMore: {
                                         messagesLoadedCount += 10  // Load 10 at a time
                                     },
-                                    onDelete: { eventId in
+                                    onDelete: readOnly ? nil : { eventId in
                                         Task { await deleteMessage(eventId: eventId) }
                                     }
                                 )

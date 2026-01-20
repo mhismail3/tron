@@ -91,11 +91,13 @@ struct ChatView: View {
     private let sessionId: String
     private let rpcClient: RPCClient
     private let skillStore: SkillStore?
+    let workspaceDeleted: Bool
 
-    init(rpcClient: RPCClient, sessionId: String, skillStore: SkillStore? = nil) {
+    init(rpcClient: RPCClient, sessionId: String, skillStore: SkillStore? = nil, workspaceDeleted: Bool = false) {
         self.sessionId = sessionId
         self.rpcClient = rpcClient
         self.skillStore = skillStore
+        self.workspaceDeleted = workspaceDeleted
         _viewModel = StateObject(wrappedValue: ChatViewModel(rpcClient: rpcClient, sessionId: sessionId))
     }
 
@@ -182,7 +184,8 @@ struct ChatView: View {
                             skillForDetailSheet = skill
                             showSkillDetailSheet = true
                         },
-                        animationCoordinator: viewModel.animationCoordinator
+                        animationCoordinator: viewModel.animationCoordinator,
+                        readOnly: workspaceDeleted
                     )
                     .id(sessionId)
                 }
@@ -277,7 +280,8 @@ struct ChatView: View {
             ContextAuditView(
                 rpcClient: rpcClient,
                 sessionId: sessionId,
-                skillStore: skillStore
+                skillStore: skillStore,
+                readOnly: workspaceDeleted
             )
         }
         .sheet(isPresented: $showSessionHistory) {
@@ -593,6 +597,12 @@ struct ChatView: View {
                             if viewModel.isProcessing && viewModel.messages.last?.isStreaming != true && !viewModel.subagentState.hasRunningSubagents {
                                 ProcessingIndicator()
                                     .id("processing")
+                            }
+
+                            // Show workspace deleted notification when workspace folder no longer exists
+                            if workspaceDeleted {
+                                WorkspaceDeletedNotificationView()
+                                    .id("workspaceDeleted")
                             }
 
                             // Scroll anchor with position detection for "at bottom" tracking

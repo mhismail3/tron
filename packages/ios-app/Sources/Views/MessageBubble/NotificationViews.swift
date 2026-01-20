@@ -412,3 +412,29 @@ struct RulesLoadedNotificationView: View {
         .frame(maxWidth: .infinity, alignment: .center)
     }
 }
+
+// MARK: - Workspace Deleted Notification View (Red pill-style in-chat notification)
+
+/// Notification shown when workspace folder was deleted
+struct WorkspaceDeletedNotificationView: View {
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "folder.badge.questionmark")
+                .font(.system(size: 10, weight: .medium))
+                .foregroundStyle(.red)
+
+            Text("Workspace deleted – session in read-only mode")
+                .font(.system(size: 11, weight: .medium, design: .monospaced))
+                .foregroundStyle(.red.opacity(0.9))
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(Color.red.opacity(0.1))
+        .clipShape(Capsule())
+        .overlay(
+            Capsule()
+                .stroke(Color.red.opacity(0.3), lineWidth: 0.5)
+        )
+        .frame(maxWidth: .infinity, alignment: .center)
+    }
+}

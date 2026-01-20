@@ -99,6 +99,21 @@ extension EventStoreManager {
         logger.debug("Updated session \(sessionId) tokens: in=\(inputTokens) out=\(outputTokens) lastTurnIn=\(lastTurnInputTokens) cacheRead=\(cacheReadTokens) cacheCreation=\(cacheCreationTokens) cost=\(cost)", category: .session)
     }
 
+    // MARK: - Workspace Validation
+
+    /// Check if a workspace path exists on the filesystem.
+    /// Returns false for empty paths or if the path doesn't exist.
+    func validateWorkspacePath(_ path: String) async -> Bool {
+        guard !path.isEmpty else { return false }
+        do {
+            _ = try await rpcClient.listDirectory(path: path, showHidden: false)
+            return true
+        } catch {
+            logger.debug("Workspace path validation failed for '\(path)': \(error.localizedDescription)", category: .session)
+            return false
+        }
+    }
+
     // MARK: - Tree Operations (Fork)
 
     /// Fork a session at a specific event (or HEAD if nil)

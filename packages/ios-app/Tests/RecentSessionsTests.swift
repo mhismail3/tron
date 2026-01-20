@@ -672,4 +672,109 @@ final class RecentSessionsTests: XCTestCase {
         // Should contain "Jun" for absolute date format
         XCTAssertTrue(formatted.contains("Jun") || formatted.contains("2023"))
     }
+
+    // MARK: - Deleted Workspace Filtering Tests
+
+    /// Test that filteredRecentSessions excludes sessions with invalid workspace paths
+    @MainActor
+    func testFilteredRecentSessionsExcludesInvalidWorkspaces() async throws {
+        // This tests the filtering logic that will be added to NewSessionFlow
+        let serverSessions = [
+            createServerSessionInfo(id: "s1", workingDirectory: "/valid/workspace"),
+            createServerSessionInfo(id: "s2", workingDirectory: "/deleted/workspace"),
+            createServerSessionInfo(id: "s3", workingDirectory: "/another/valid"),
+        ]
+
+        let localSessionIds: Set<String> = []
+        let invalidWorkspacePaths: Set<String> = ["/deleted/workspace"]
+        let selectedWorkspace = ""  // No filter
+
+        // Apply the filtering logic
+        var filtered = serverSessions.filter { !localSessionIds.contains($0.sessionId) }
+
+        if !selectedWorkspace.isEmpty {
+            filtered = filtered.filter { $0.workingDirectory == selectedWorkspace }
+        }
+
+        // Filter out invalid workspace paths
+        filtered = filtered.filter { session in
+            guard let path = session.workingDirectory else { return true }
+            return !invalidWorkspacePaths.contains(path)
+        }
+
+        let result = Array(filtered.prefix(10))
+
+        XCTAssertEqual(result.count, 2)
+        XCTAssertFalse(result.contains { $0.sessionId == "s2" })
+    }
+
+    /// Test that workspace filtering works with selected workspace
+    @MainActor
+    func testFilteredRecentSessionsWithWorkspaceAndInvalidPaths() async throws {
+        let serverSessions = [
+            createServerSessionInfo(id: "s1", workingDirectory: "/projects/app-a"),
+            createServerSessionInfo(id: "s2", workingDirectory: "/projects/app-a"),  // Will be marked invalid
+            createServerSessionInfo(id: "s3", workingDirectory: "/projects/app-b"),
+        ]
+
+        let localSessionIds: Set<String> = []
+        let invalidWorkspacePaths: Set<String> = ["/projects/app-a"]  // Entire workspace deleted
+        let selectedWorkspace = "/projects/app-a"
+
+        var filtered = serverSessions.filter { !localSessionIds.contains($0.sessionId) }
+
+        if !selectedWorkspace.isEmpty {
+            filtered = filtered.filter { $0.workingDirectory == selectedWorkspace }
+        }
+
+        filtered = filtered.filter { session in
+            guard let path = session.workingDirectory else { return true }
+            return !invalidWorkspacePaths.contains(path)
+        }
+
+        // All sessions in deleted workspace should be filtered
+        XCTAssertEqual(filtered.count, 0)
+    }
+
+    /// Test that sessions with nil workingDirectory are preserved during filtering
+    @MainActor
+    func testFilteredRecentSessionsPreservesNilWorkingDirectory() async throws {
+        let serverSessions = [
+            createServerSessionInfo(id: "s1", workingDirectory: "/valid/workspace"),
+            createServerSessionInfo(id: "s2", workingDirectory: nil),
+            createServerSessionInfo(id: "s3", workingDirectory: "/deleted/workspace"),
+        ]
+
+        let invalidWorkspacePaths: Set<String> = ["/deleted/workspace"]
+
+        let filtered = serverSessions.filter { session in
+            guard let path = session.workingDirectory else { return true }
+            return !invalidWorkspacePaths.contains(path)
+        }
+
+        // s1 (valid) and s2 (nil) should be preserved, s3 (deleted) filtered
+        XCTAssertEqual(filtered.count, 2)
+        XCTAssertTrue(filtered.contains { $0.sessionId == "s1" })
+        XCTAssertTrue(filtered.contains { $0.sessionId == "s2" })
+        XCTAssertFalse(filtered.contains { $0.sessionId == "s3" })
+    }
+
+    // MARK: - Helper for Server Sessions
+
+    private func createServerSessionInfo(id: String, workingDirectory: String?) -> SessionInfo {
+        // Create a minimal JSON to decode into SessionInfo
+        var json: [String: Any] = [
+            "sessionId": id,
+            "model": "claude-sonnet-4",
+            "createdAt": "2024-01-01T00:00:00Z",
+            "messageCount": 0,
+            "isActive": true
+        ]
+        if let dir = workingDirectory {
+            json["workingDirectory"] = dir
+        }
+
+        let data = try! JSONSerialization.data(withJSONObject: json)
+        return try! JSONDecoder().decode(SessionInfo.self, from: data)
+    }
 }

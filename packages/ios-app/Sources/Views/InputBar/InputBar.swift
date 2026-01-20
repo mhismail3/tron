@@ -49,6 +49,9 @@ struct InputBar: View {
     /// Optional animation coordinator for chained pill morph animations
     var animationCoordinator: AnimationCoordinator?
 
+    /// Read-only mode disables input when workspace is deleted
+    var readOnly: Bool = false
+
     // MARK: - Private State
 
     @FocusState private var isFocused: Bool
@@ -134,7 +137,7 @@ struct InputBar: View {
                 // Attachment button
                 if showAttachmentButton {
                     GlassAttachmentButton(
-                        isProcessing: isProcessing,
+                        isProcessing: isProcessing || readOnly,
                         hasSkillsAvailable: hasSkillsAvailable,
                         buttonSize: actionButtonSize,
                         skillStore: skillStore,
@@ -170,7 +173,7 @@ struct InputBar: View {
                     }
 
                 // Send/Abort button
-                if shouldShowActionButton {
+                if shouldShowActionButton && !readOnly {
                     GlassActionButton(
                         isProcessing: isProcessing,
                         canSend: canSend,
@@ -187,7 +190,7 @@ struct InputBar: View {
                     GlassMicButton(
                         isRecording: isRecording,
                         isTranscribing: isTranscribing,
-                        isProcessing: isProcessing,
+                        isProcessing: isProcessing || readOnly,
                         onMicTap: onMicTap,
                         buttonSize: actionButtonSize,
                         audioMonitor: audioMonitor
@@ -325,7 +328,8 @@ struct InputBar: View {
                 reasoningLevel: $reasoningLevel,
                 hasAppeared: hasAppeared,
                 reasoningPillNamespace: reasoningPillNamespace,
-                onContextTap: onContextTap
+                onContextTap: onContextTap,
+                readOnly: readOnly
             )
             .opacity(shouldShowStatusPills ? 1 : 0)
         }
@@ -346,15 +350,15 @@ struct InputBar: View {
             TextField("", text: $text, axis: .vertical)
                 .textFieldStyle(.plain)
                 .font(.system(.subheadline, design: .monospaced))
-                .foregroundStyle(.tronEmerald)
+                .foregroundStyle(readOnly ? .tronEmerald.opacity(0.5) : .tronEmerald)
                 .padding(.leading, 14)
                 .padding(.trailing, textFieldTrailingPadding)
                 .padding(.vertical, 10)
                 .lineLimit(1...8)
                 .focused($isFocused)
-                .disabled(isProcessing)
+                .disabled(isProcessing || readOnly)
                 .onSubmit {
-                    if !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    if !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !readOnly {
                         onSend()
                     }
                 }

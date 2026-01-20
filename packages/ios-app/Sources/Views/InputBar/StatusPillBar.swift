@@ -28,6 +28,9 @@ struct StatusPillsColumn: View {
     // Actions
     var onContextTap: (() -> Void)?
 
+    // Read-only mode (disables model and reasoning pickers)
+    var readOnly: Bool = false
+
     // MARK: - Reasoning Level Helpers
 
     private func reasoningLevelLabel(_ level: String) -> String {
@@ -140,10 +143,12 @@ struct StatusPillsColumn: View {
                 Text(modelName.shortModelName)
                     .font(.system(size: 10, weight: .medium, design: .monospaced))
                     .contentTransition(.interpolate)
-                Image(systemName: "chevron.up.chevron.down")
-                    .font(.system(size: 8, weight: .medium))
+                if !readOnly {
+                    Image(systemName: "chevron.up.chevron.down")
+                        .font(.system(size: 8, weight: .medium))
+                }
             }
-            .foregroundStyle(.tronEmerald)
+            .foregroundStyle(readOnly ? .tronEmerald.opacity(0.5) : .tronEmerald)
             .padding(.horizontal, 10)
             .padding(.vertical, 5)
             .background {
@@ -155,6 +160,7 @@ struct StatusPillsColumn: View {
             .geometryGroup()
             .animation(.spring(response: 0.3, dampingFraction: 0.8), value: modelName)
         }
+        .disabled(readOnly)
     }
 
     // MARK: - Reasoning Level Menu
@@ -179,10 +185,12 @@ struct StatusPillsColumn: View {
                     .font(.system(size: 9, weight: .medium))
                 Text(reasoningLevelLabel(reasoningLevel))
                     .font(.system(size: 10, weight: .medium, design: .monospaced))
-                Image(systemName: "chevron.up.chevron.down")
-                    .font(.system(size: 8, weight: .medium))
+                if !readOnly {
+                    Image(systemName: "chevron.up.chevron.down")
+                        .font(.system(size: 8, weight: .medium))
+                }
             }
-            .foregroundStyle(reasoningLevelColor(reasoningLevel))
+            .foregroundStyle(readOnly ? reasoningLevelColor(reasoningLevel).opacity(0.5) : reasoningLevelColor(reasoningLevel))
             .padding(.horizontal, 10)
             .padding(.vertical, 5)
             .background {
@@ -192,6 +200,7 @@ struct StatusPillsColumn: View {
             }
             .contentShape(Capsule())
         }
+        .disabled(readOnly)
         .matchedGeometryEffect(id: "reasoningPillMorph", in: reasoningPillNamespace)
         .transition(.asymmetric(
             insertion: .scale(scale: 0.6, anchor: .leading).combined(with: .opacity),

@@ -49,6 +49,8 @@
 		76E6E6A8716E9453A1D82DAD /* FloatingBrowserView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1BDC8358FC12ECFA6C4A2526 /* FloatingBrowserView.swift */; };
 		7704175EFC374D5E5425BC6D /* TronIcons.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00739C1F26626C7791649198 /* TronIcons.swift */; };
 		795F7DB1C7D9D5E767F6B47B /* FolderCreationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 503FA6D07E7A6723F5720DCD /* FolderCreationTests.swift */; };
+		WSVL0001BULD0001SOURCE01 /* WorkspaceValidationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = WSVL0001FREF0001FILEREF1 /* WorkspaceValidationTests.swift */; };
+		MKRP0001BULD0001SOURCE01 /* MockRPCClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = MKRP0001FREF0001FILEREF1 /* MockRPCClient.swift */; };
 		79AB0D77F24CDAFC84452DF2 /* GitHubURLParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = 15765B144A406E5289D9D096 /* GitHubURLParser.swift */; };
 		7E5E03B3D452DA98E4B6F768 /* LogViewer.swift in Sources */ = {isa = PBXBuildFile; fileRef = AD61CD33CD78B1F23CDBABD7 /* LogViewer.swift */; };
 		800F755B27FECE9F3AF0FD28 /* AttachmentBubble.swift in Sources */ = {isa = PBXBuildFile; fileRef = EAC26D6B90EF858307684FE2 /* AttachmentBubble.swift */; };
@@ -206,6 +208,8 @@
 		4C46C2D9874A2C1C807D43A0 /* EventTypeRegistry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EventTypeRegistry.swift; sourceTree = "<group>"; };
 		4C99FDB162C904C6A622BA61 /* AttachmentTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AttachmentTests.swift; sourceTree = "<group>"; };
 		503FA6D07E7A6723F5720DCD /* FolderCreationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FolderCreationTests.swift; sourceTree = "<group>"; };
+		WSVL0001FREF0001FILEREF1 /* WorkspaceValidationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceValidationTests.swift; sourceTree = "<group>"; };
+		MKRP0001FREF0001FILEREF1 /* MockRPCClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MockRPCClient.swift; sourceTree = "<group>"; };
 		52A3C00972EDE3F2158000B3 /* AskUserQuestionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AskUserQuestionTests.swift; sourceTree = "<group>"; };
 		5571DC3A896875D1693192D9 /* ChatView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatView.swift; sourceTree = "<group>"; };
 		CMPD0001FREF0001FILEREF1 /* CompactionDetailSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CompactionDetailSheet.swift; sourceTree = "<group>"; };
@@ -362,6 +366,8 @@
 				7A113B9D98B4711E36919F2A /* RecentSessionsTests.swift */,
 				6D63E93FC060C98B2C377CAB /* SkillStoreTests.swift */,
 				0123F7482F532CD8FBA61F0E /* UnifiedEventTransformerTests.swift */,
+				WSVL0001FREF0001FILEREF1 /* WorkspaceValidationTests.swift */,
+				MKSP0001GRPREF001 /* Mocks */,
 			);
 			path = Tests;
 			sourceTree = "<group>";
@@ -591,6 +597,14 @@
 				AA33BB44CC55DD66EE77F011 /* RPCClientTests.swift */,
 			);
 			path = Services;
+			sourceTree = "<group>";
+		};
+		MKSP0001GRPREF001 /* Mocks */ = {
+			isa = PBXGroup;
+			children = (
+				MKRP0001FREF0001FILEREF1 /* MockRPCClient.swift */,
+			);
+			path = Mocks;
 			sourceTree = "<group>";
 		};
 		AA33BB44CC55DD66EE772000 /* ViewModels */ = {
@@ -982,6 +996,8 @@
 				3836D88C7E6A0EFC2BBE9B6B /* ImageCompressorTests.swift in Sources */,
 				A30DB8557BB5D3E5CFD61ADD /* RecentSessionsTests.swift in Sources */,
 				1F0AB8F273C1C38CCA7D1924 /* SkillStoreTests.swift in Sources */,
+				WSVL0001BULD0001SOURCE01 /* WorkspaceValidationTests.swift in Sources */,
+				MKRP0001BULD0001SOURCE01 /* MockRPCClient.swift in Sources */,
 				814753F04077C3B98C1BF843 /* UnifiedEventTransformerTests.swift in Sources */,
 				AA33BB44CC55DD66EE77BB10 /* EventStoreManagerTests.swift in Sources */,
 				AA33BB44CC55DD66EE77BB11 /* RPCClientTests.swift in Sources */,

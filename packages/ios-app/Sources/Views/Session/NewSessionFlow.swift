@@ -32,12 +32,16 @@ struct NewSessionFlow: View {
     // Clone repository sheet
     @State private var showCloneSheet = false
 
+    // Workspace validation - track paths that no longer exist
+    @State private var invalidWorkspacePaths: Set<String> = []
+
     private var canCreate: Bool {
         !isCreating && !workingDirectory.isEmpty && !selectedModel.isEmpty
     }
 
     /// Recent sessions from SERVER, excluding sessions already on this device
     /// Filtered by workspace if one is selected
+    /// Also excludes sessions with invalid (deleted) workspace paths
     private var filteredRecentSessions: [SessionInfo] {
         // Get IDs of sessions already on this device
         let localSessionIds = Set(eventStoreManager.sessions.map { $0.id })
@@ -48,6 +52,12 @@ struct NewSessionFlow: View {
         // Filter by workspace if selected
         if !workingDirectory.isEmpty {
             filtered = filtered.filter { $0.workingDirectory == workingDirectory }
+        }
+
+        // Filter out sessions with known invalid workspace paths
+        filtered = filtered.filter { session in
+            guard let path = session.workingDirectory else { return true }
+            return !invalidWorkspacePaths.contains(path)
         }
 
         // Return up to 10 most recent
@@ -254,7 +264,7 @@ struct NewSessionFlow: View {
                 )
             }
             .sheet(item: $previewSession) { session in
-                SessionPreviewSheet(
+                SessionPreviewSheetWrapper(
                     session: session,
                     rpcClient: rpcClient,
                     eventStoreManager: eventStoreManager,
@@ -269,12 +279,21 @@ struct NewSessionFlow: View {
                     },
                     onDismiss: {
                         previewSession = nil
+                    },
+                    onWorkspaceDeleted: {
+                        // Add to invalid paths so it doesn't appear again
+                        if let path = session.workingDirectory {
+                            invalidWorkspacePaths.insert(path)
+                        }
+                        serverSessions.removeAll { $0.sessionId == session.sessionId }
+                        previewSession = nil
                     }
                 )
             }
             .task {
                 await loadModels()
                 await loadServerSessions()
+                await validateWorkspacePaths()
             }
             .onAppear {
                 // Don't auto-open workspace selector - let user explicitly tap to select
@@ -383,6 +402,26 @@ struct NewSessionFlow: View {
             await MainActor.run {
                 serverSessionsError = error.localizedDescription
                 isLoadingServerSessions = false
+            }
+        }
+    }
+
+    /// Validate workspace paths in background and track invalid ones.
+    /// This allows filtering out sessions whose workspaces have been deleted.
+    private func validateWorkspacePaths() async {
+        // Get unique workspace paths from server sessions
+        let paths = Set(serverSessions.compactMap { $0.workingDirectory })
+
+        for path in paths {
+            guard !path.isEmpty else { continue }
+            do {
+                _ = try await rpcClient.listDirectory(path: path, showHidden: false)
+                // Path exists, no action needed
+            } catch {
+                // Path doesn't exist, mark as invalid
+                await MainActor.run {
+                    invalidWorkspacePaths.insert(path)
+                }
             }
         }
     }
@@ -579,5 +618,93 @@ struct RecentSessionRow: View {
         }
         .buttonStyle(.plain)
         .glassEffect(.regular.tint(Color.tronPhthaloGreen.opacity(0.35)).interactive(), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+    }
+}
+
+// MARK: - Session Preview Sheet Wrapper
+
+/// Validates workspace before showing session preview.
+/// If workspace is deleted, shows an error state instead of the preview.
+@available(iOS 26.0, *)
+struct SessionPreviewSheetWrapper: View {
+    let session: SessionInfo
+    let rpcClient: RPCClient
+    let eventStoreManager: EventStoreManager
+    let onFork: (String) -> Void
+    let onDismiss: () -> Void
+    let onWorkspaceDeleted: () -> Void
+
+    @State private var isValidating = true
+    @State private var workspaceExists = true
+
+    var body: some View {
+        Group {
+            if isValidating {
+                // Loading state while checking workspace
+                VStack(spacing: 16) {
+                    ProgressView()
+                        .tint(.tronEmerald)
+                    Text("Checking workspace...")
+                        .font(.subheadline)
+                        .foregroundStyle(.white.opacity(0.6))
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if !workspaceExists {
+                // Workspace deleted state
+                VStack(spacing: 16) {
+                    Image(systemName: "folder.badge.questionmark")
+                        .font(.system(size: 48))
+                        .foregroundStyle(.tronError)
+                    Text("Workspace Deleted")
+                        .font(.headline)
+                        .foregroundStyle(.white.opacity(0.9))
+                    Text("The workspace folder for this session no longer exists.")
+                        .font(.subheadline)
+                        .foregroundStyle(.white.opacity(0.6))
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal)
+                    Button("Dismiss") {
+                        onWorkspaceDeleted()
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(.tronEmerald)
+                    .padding(.top, 8)
+                }
+                .padding()
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                // Normal preview
+                SessionPreviewSheet(
+                    session: session,
+                    rpcClient: rpcClient,
+                    eventStoreManager: eventStoreManager,
+                    onFork: onFork,
+                    onDismiss: onDismiss
+                )
+            }
+        }
+        .task {
+            await validateWorkspace()
+        }
+        .presentationDetents([.large])
+        .presentationDragIndicator(.hidden)
+        .preferredColorScheme(.dark)
+    }
+
+    private func validateWorkspace() async {
+        guard let workDir = session.workingDirectory, !workDir.isEmpty else {
+            // No workspace directory - consider it deleted/invalid
+            workspaceExists = false
+            isValidating = false
+            return
+        }
+
+        do {
+            _ = try await rpcClient.listDirectory(path: workDir, showHidden: false)
+            workspaceExists = true
+        } catch {
+            workspaceExists = false
+        }
+        isValidating = false
     }
 }
