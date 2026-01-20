@@ -70,9 +70,10 @@ struct SettingsView: View {
                 } header: {
                     Text("Environment")
                         .font(TronTypography.caption)
+                        .textCase(nil)
                 }
                 .listRowBackground(Color.clear)
-                .listSectionSpacing(8)
+                .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 8, trailing: 16))
 
                 // Server Section
                 Section {
