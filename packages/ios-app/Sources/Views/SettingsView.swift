@@ -178,7 +178,7 @@ struct FontStyleSection: View {
 
     var body: some View {
         Section {
-            VStack(alignment: .leading, spacing: 16) {
+            VStack(alignment: .leading, spacing: 12) {
                 // Preview text showing current font style
                 HStack(spacing: 12) {
                     Text("Aa")
@@ -192,33 +192,40 @@ struct FontStyleSection: View {
                         Text(casualLabel)
                             .font(TronTypography.caption)
                             .foregroundStyle(.tronTextSecondary)
+                            .contentTransition(.numericText())
                     }
 
                     Spacer()
+
+                    // Numeric value display
+                    Text(String(format: "%.2f", fontSettings.casualAxis))
+                        .font(TronTypography.codeSM)
+                        .foregroundStyle(.tronTextMuted)
+                        .monospacedDigit()
+                        .contentTransition(.numericText())
                 }
-                .padding(.vertical, 4)
 
-                // Liquid glass slider
-                VStack(spacing: 8) {
-                    HStack {
-                        Text("Linear")
-                            .font(TronTypography.caption2)
-                            .foregroundStyle(.tronTextMuted)
-                        Spacer()
-                        Text("Casual")
-                            .font(TronTypography.caption2)
-                            .foregroundStyle(.tronTextMuted)
-                    }
-
-                    // Custom slider with glass effect
-                    FontStyleSlider(value: Binding(
+                // Native iOS 26 Slider with labels
+                Slider(
+                    value: Binding(
                         get: { fontSettings.casualAxis },
                         set: { fontSettings.casualAxis = $0 }
-                    ))
+                    ),
+                    in: 0...1
+                ) {
+                    Text("Font Style")
+                } minimumValueLabel: {
+                    Text("Linear")
+                        .font(TronTypography.caption2)
+                        .foregroundStyle(.tronTextMuted)
+                } maximumValueLabel: {
+                    Text("Casual")
+                        .font(TronTypography.caption2)
+                        .foregroundStyle(.tronTextMuted)
                 }
+                .tint(.tronEmerald)
             }
-            .padding(.vertical, 8)
-            .listRowBackground(Color.clear)
+            .padding(.vertical, 4)
         } header: {
             Text("Font Style")
                 .font(TronTypography.caption)
@@ -235,73 +242,6 @@ struct FontStyleSection: View {
         if value < 0.6 { return "Balanced" }
         if value < 0.8 { return "Semi-Casual" }
         return "Casual"
-    }
-}
-
-// MARK: - Font Style Slider (Liquid Glass)
-
-@available(iOS 26.0, *)
-struct FontStyleSlider: View {
-    @Binding var value: Double
-    @State private var isDragging = false
-
-    private let trackHeight: CGFloat = 8
-    private let thumbSize: CGFloat = 28
-
-    var body: some View {
-        GeometryReader { geometry in
-            let trackWidth = geometry.size.width
-            let thumbX = CGFloat(value) * (trackWidth - thumbSize) + thumbSize / 2
-
-            ZStack(alignment: .leading) {
-                // Track background
-                Capsule()
-                    .fill(Color.white.opacity(0.1))
-                    .frame(height: trackHeight)
-                    .glassEffect(.regular.tint(Color.tronPhthaloGreen.opacity(0.2)), in: .capsule)
-
-                // Filled portion
-                Capsule()
-                    .fill(
-                        LinearGradient(
-                            colors: [.tronPhthaloGreen, .tronEmerald],
-                            startPoint: .leading,
-                            endPoint: .trailing
-                        )
-                    )
-                    .frame(width: max(thumbX, 0), height: trackHeight)
-
-                // Thumb
-                Circle()
-                    .fill(.clear)
-                    .frame(width: thumbSize, height: thumbSize)
-                    .glassEffect(
-                        .regular.tint(Color.tronEmerald.opacity(isDragging ? 0.6 : 0.4)),
-                        in: .circle
-                    )
-                    .overlay {
-                        Circle()
-                            .stroke(Color.tronEmerald.opacity(0.8), lineWidth: 2)
-                    }
-                    .scaleEffect(isDragging ? 1.15 : 1.0)
-                    .position(x: thumbX, y: geometry.size.height / 2)
-                    .animation(.spring(response: 0.25, dampingFraction: 0.7), value: isDragging)
-            }
-            .frame(height: geometry.size.height)
-            .contentShape(Rectangle())
-            .gesture(
-                DragGesture(minimumDistance: 0)
-                    .onChanged { gesture in
-                        isDragging = true
-                        let newValue = (gesture.location.x - thumbSize / 2) / (trackWidth - thumbSize)
-                        value = min(max(Double(newValue), 0), 1)
-                    }
-                    .onEnded { _ in
-                        isDragging = false
-                    }
-            )
-        }
-        .frame(height: thumbSize)
     }
 }
 
