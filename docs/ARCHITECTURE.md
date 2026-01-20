@@ -1,13 +1,13 @@
 # Architecture
 
 <!--
-PURPOSE: System architecture overview for developers.
-AUDIENCE: Developers needing to understand how Tron works.
+PURPOSE: System architecture and internals for developers.
+AUDIENCE: Developers working on the Tron codebase.
 
 AGENT MAINTENANCE:
 - Update diagrams if package structure changes
-- Update interface definitions if types change
-- Verify package paths match actual codebase structure
+- Update event types when new ones added to packages/core/src/events/types.ts
+- Verify schemas match actual SQLite tables
 - Last verified: 2026-01-20
 -->
 
@@ -35,32 +35,32 @@ AGENT MAINTENANCE:
 ┌─────────────────────────────────────────────────────────────────────┐
 │                        TronAgent Core                                │
 │   ┌─────────────┐  ┌─────────────┐  ┌─────────────┐                 │
-│   │   Provider  │  │    Tools    │  │   Hooks     │                 │
-│   │  (LLM API)  │  │ read/write/ │  │ lifecycle   │                 │
-│   │             │  │ edit/bash   │  │ events      │                 │
-│   └─────────────┘  └─────────────┘  └─────────────┘                 │
-│                                                                      │
-│   ┌─────────────┐  ┌─────────────┐  ┌─────────────┐                 │
-│   │   Skills    │  │  Commands   │  │  Context    │                 │
-│   │  registry   │  │   router    │  │   loader    │                 │
+│   │   Provider  │  │    Tools    │  │   Context   │                 │
+│   │  (LLM API)  │  │ read/write/ │  │   loader    │                 │
+│   │             │  │ edit/bash   │  │             │                 │
 │   └─────────────┘  └─────────────┘  └─────────────┘                 │
 └─────────────────────────────────────────────────────────────────────┘
            │
            ▼
 ┌─────────────────────────────────────────────────────────────────────┐
 │                     Event Store (SQLite)                             │
-│   - Immutable event log                                              │
-│   - Session state reconstruction                                     │
+│   - Immutable event log with tree structure                          │
+│   - Session state reconstruction via ancestor traversal              │
 │   - Fork/rewind operations                                           │
-│   - Full-text search (FTS5)                                          │
 └─────────────────────────────────────────────────────────────────────┘
 ```
 
 ## Packages
 
-### @tron/core
+| Package | Purpose | Entry |
+|---------|---------|-------|
+| `@tron/core` | Agent logic, tools, events, context | `packages/core/src/` |
+| `@tron/server` | WebSocket server, orchestration | `packages/server/src/` |
+| `@tron/tui` | Terminal UI (React/Ink) | `packages/tui/src/` |
+| `@tron/chat-web` | Web chat (React SPA) | `packages/chat-web/src/` |
+| `@tron/ios-app` | iOS app (SwiftUI) | `packages/ios-app/Sources/` |
 
-Core agent logic, tools, and event storage.
+### Core Package Structure
 
 ```
 packages/core/src/
@@ -68,132 +68,121 @@ packages/core/src/
 ├── providers/       # Anthropic, OpenAI, Google
 ├── tools/           # read, write, edit, bash, grep, find
 ├── events/          # Event store, SQLite backend
-├── hooks/           # Hook engine, discovery
-├── skills/          # Skill loader, registry
 ├── context/         # AGENTS.md loader, system prompts
+├── skills/          # Skill loader, registry
 └── subagents/       # Sub-agent spawning and tracking
 ```
 
-### @tron/server
+## Event Sourcing
 
-WebSocket server and session orchestration.
+All state is stored as immutable events forming a tree via `parentId` references.
 
-```
-packages/server/src/
-├── index.ts                    # Server entry
-├── event-store-orchestrator.ts # Session management
-├── websocket-handler.ts        # WebSocket protocol
-└── health-server.ts            # Health endpoints
-```
-
-### @tron/tui
-
-Terminal UI using React/Ink.
-
-```
-packages/tui/src/
-├── cli.ts           # CLI entry point
-├── app.tsx          # Main React component
-└── components/      # UI components
-```
-
-### @tron/chat-web
-
-Web chat interface (React SPA).
-
-```
-packages/chat-web/src/
-├── App.tsx          # Main app
-├── components/      # UI components
-├── hooks/           # React hooks
-└── store/           # State management
-```
-
-### @tron/ios-app
-
-iOS application (SwiftUI).
-
-```
-packages/ios-app/Sources/
-├── App/             # App entry, state
-├── Views/           # SwiftUI views
-├── ViewModels/      # View models
-├── Services/        # RPC client, event sync
-└── Database/        # Local SQLite cache
-```
-
-## Key Concepts
-
-### Event Sourcing
-
-All state changes are recorded as immutable events. Session state is reconstructed by replaying events from root to head. See [event-system.md](./event-system.md) for details.
-
-### Tool Execution Flow
-
-```
-User message
-    │
-    ▼
-TronAgent.run()
-    │
-    ▼
-LLM generates response
-    │
-    ├── Text only → Return response
-    │
-    └── Tool calls → For each tool:
-        │
-        ├── PreToolUse hook (can block)
-        ├── Execute tool
-        ├── PostToolUse hook (can log)
-        └── Loop back to LLM
-```
-
-### Context Loading
-
-Context files are loaded hierarchically:
-1. Global: `~/.tron/rules/AGENTS.md`
-2. Project: `.claude/AGENTS.md` or `.tron/AGENTS.md`
-3. Directory: Subdirectory AGENTS.md files
-
-Both `.claude/` and `.tron/` directories are checked for compatibility.
-
-## Key Interfaces
-
-### Session
-
-```typescript
-interface Session {
-  id: string;
-  workspaceId: string;
-  rootEventId: string;      // First event
-  headEventId: string;      // Current position
-  status: 'active' | 'ended';
-  model: string;
-  provider: string;
-}
-```
-
-### Event
+### Event Structure
 
 ```typescript
 interface BaseEvent {
-  id: string;               // UUID v7 (time-sortable)
-  parentId: string | null;  // Previous event (null for root)
+  id: string;              // UUID v7 (time-sortable)
+  parentId: string | null; // Previous event (null for root)
   sessionId: string;
-  sequence: number;         // Monotonic within session
-  type: string;             // Event type discriminator
-  timestamp: string;        // ISO 8601
+  sequence: number;        // Monotonic within session
+  type: string;            // Discriminator
+  timestamp: string;       // ISO 8601
   payload: Record<string, unknown>;
 }
 ```
+
+### Event Tree
+
+```
+[session.start] ← root (parentId=null)
+      │
+[message.user]
+      │
+[message.assistant]
+      │
+[message.user]  ← FORK POINT
+      │         \
+[message.a]    [session.fork] ← New branch
+```
+
+### Sessions as Pointers
+
+Sessions don't store messages directly. They hold:
+- `rootEventId`: First event (session.start)
+- `headEventId`: Current position
+
+State is reconstructed by walking ancestors from head to root.
+
+### Key Event Types
+
+| Type | Payload |
+|------|---------|
+| `session.start` | workingDirectory, model, provider |
+| `session.end` | reason, summary |
+| `message.user` | content, turn |
+| `message.assistant` | content, tokenUsage |
+| `tool.call` | name, arguments |
+| `tool.result` | content, isError, duration |
+
+### Operations
+
+**Fork:** Create new session branching from any event. New session's root = fork event with parentId pointing to branch point.
+
+**Rewind:** Move session's headEventId back. Events after become orphaned (preserved in DB).
+
+## Database Schema
+
+```sql
+CREATE TABLE events (
+  id TEXT PRIMARY KEY,
+  session_id TEXT NOT NULL,
+  parent_id TEXT,
+  sequence INTEGER NOT NULL,
+  depth INTEGER NOT NULL DEFAULT 0,
+  type TEXT NOT NULL,
+  timestamp TEXT NOT NULL,
+  payload TEXT NOT NULL,
+  workspace_id TEXT NOT NULL
+);
+
+CREATE TABLE sessions (
+  id TEXT PRIMARY KEY,
+  workspace_id TEXT NOT NULL,
+  head_event_id TEXT,
+  root_event_id TEXT,
+  status TEXT DEFAULT 'active',
+  model TEXT NOT NULL,
+  provider TEXT NOT NULL,
+  working_directory TEXT NOT NULL
+);
+```
+
+## Tool Execution Flow
+
+```
+User message → TronAgent.run() → LLM generates response
+                                        │
+                    ├── Text only → Return response
+                    │
+                    └── Tool calls → For each tool:
+                        ├── PreToolUse hook (can block)
+                        ├── Execute tool
+                        ├── PostToolUse hook
+                        └── Loop back to LLM
+```
+
+## Context Loading
+
+Hierarchical loading with multi-directory support:
+
+1. Global: `~/.tron/rules/AGENTS.md`
+2. Project: `.claude/AGENTS.md` or `.tron/AGENTS.md`
+3. Subdirectory: `subdir/AGENTS.md` files
 
 ## Design Decisions
 
 | Decision | Rationale |
 |----------|-----------|
-| SQLite for events | Single file, ACID, FTS5, portable |
+| SQLite | Single file, ACID, FTS5, portable |
 | Event sourcing | Auditability, fork/rewind, reproducibility |
-| React/Ink for TUI | Component model, hot reload |
-| Separate packages | Clear boundaries, independent testing |
-| Multi-directory compat | Support both Claude Code and Tron conventions |
+| Multi-directory | Support both Claude Code and Tron conventions |
