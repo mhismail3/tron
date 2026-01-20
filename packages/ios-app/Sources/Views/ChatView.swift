@@ -336,7 +336,11 @@ struct ChatView: View {
             get: { viewModel.uiCanvasState.showSheet },
             set: { viewModel.uiCanvasState.showSheet = $0 }
         )) {
-            UICanvasSheet(state: viewModel.uiCanvasState)
+            if #available(iOS 26.0, *) {
+                UICanvasSheet(state: viewModel.uiCanvasState)
+            } else {
+                UICanvasSheetFallback(state: viewModel.uiCanvasState)
+            }
         }
         .alert("Error", isPresented: $viewModel.showError) {
             Button("OK") { viewModel.clearError() }
