@@ -154,10 +154,14 @@ struct InputBar: View {
                 // Text field with glass background
                 textFieldGlass
                     .overlay(alignment: .leading) {
-                        if !showAttachmentButton {
-                            AttachmentButtonDock(buttonSize: actionButtonSize)
-                                .matchedGeometryEffect(id: "attachmentMorph", in: attachmentButtonNamespace)
+                        Group {
+                            if !showAttachmentButton {
+                                AttachmentButtonDock(buttonSize: actionButtonSize)
+                                    .matchedGeometryEffect(id: "attachmentMorph", in: attachmentButtonNamespace)
+                            }
                         }
+                        // Prevent overlay from intercepting text selection drag gestures
+                        .allowsHitTesting(false)
                     }
                     .overlay(alignment: .trailing) {
                         HStack(spacing: 8) {
@@ -170,6 +174,8 @@ struct InputBar: View {
                             }
                         }
                         .padding(.trailing, 8)
+                        // Prevent overlay from intercepting text selection drag gestures
+                        .allowsHitTesting(false)
                     }
 
                 // Send/Abort button
