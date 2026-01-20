@@ -68,10 +68,10 @@ struct SettingsView: View {
                     .pickerStyle(.segmented)
                     .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
                 } header: {
-                    EmptyView()
+                    Text("Environment")
+                        .font(TronTypography.caption)
                 }
                 .listRowBackground(Color.clear)
-                .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
 
                 // Server Section
                 Section {

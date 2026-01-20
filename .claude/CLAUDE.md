@@ -1,8 +1,47 @@
-# Tron Agent Instructions
+# Tron Project Guidelines
+
+## Project Structure
+
+```
+packages/
+├── core/       # Event system, SQLite storage, types, sub-agent tools
+├── server/     # EventStoreOrchestrator, tools, agent orchestration
+├── tui/        # Terminal UI and CLI
+├── chat-web/   # Web chat interface
+└── ios-app/    # iOS application
+```
+
+## Commands
+
+```bash
+tron dev        # Build, test, start beta server (ports 8082/8083)
+tron deploy     # Build, test, deploy to production
+tron status     # Show service status
+tron logs       # Query database logs
+bun run test    # Run tests (uses Vitest)
+bun run build   # Build all packages
+```
+
+## Testing
+
+```bash
+bun run test        # Run all tests
+bun run test:watch  # Watch mode
+```
+
+**Known Issue**: Vitest may fail 1 test file with "Worker terminated due to reaching memory limit: JS heap out of memory". This is a pre-existing Vitest issue, not related to code changes.
+
+## Database Migrations
+
+Schema migrations are in `packages/core/src/events/sqlite/migrations/versions/`. When adding new columns:
+1. Add to the base schema in `v001-initial.ts` for fresh databases
+2. Create incremental migration for existing databases if needed
+
+---
 
 ## Adding New Tools - CRITICAL CHECKLIST
 
-When adding a new tool to Tron, you MUST ensure all the following are handled correctly to prevent breaking session resume, forks, and API compatibility. **Tool use/result formatting bugs have occurred repeatedly** when new tools are added without updating all touchpoints.
+When adding a new tool to Tron, you MUST ensure all the following are handled correctly to prevent breaking session resume, forks, and API compatibility.
 
 ### The Tool Lifecycle
 
@@ -61,13 +100,32 @@ Reconstruction (getStateAt/getMessagesAt):
   3. Inject tool_result as synthetic user message after assistant with tool_use
 ```
 
-### Quick Verification Command
+---
 
-After adding a new tool, run:
+## Key Sub-Agent Files
+
+- `packages/core/src/subagents/subagent-tracker.ts` - Tracks sub-agents and manages pending results
+- `packages/core/src/tools/spawn-subsession.ts` - In-process spawning
+- `packages/core/src/tools/spawn-tmux-agent.ts` - Out-of-process spawning
+- `packages/core/src/tools/query-subagent.ts` - Querying sub-agent state
+- `packages/core/src/tools/wait-for-subagent.ts` - Blocking wait for completion
+- `packages/server/src/event-store-orchestrator.ts` - Orchestrates sub-agent lifecycle
+
+---
+
+## Native Module Issues (better-sqlite3)
+
+This project uses `better-sqlite3` which requires native compilation. There's a known issue where bun's node-gyp may pick up the wrong Node.js version.
+
+### Symptoms
+- Tests fail with: `NODE_MODULE_VERSION X. This version of Node.js requires NODE_MODULE_VERSION Y`
+- The mismatch happens when Homebrew's Node.js is used for compilation but nvm's Node.js runs the tests
+
+### Fix
+The `tron dev` and `tron deploy` commands automatically detect and rebuild native modules when needed. For manual rebuild:
+
 ```bash
-bun run test
+cd node_modules/.bun/better-sqlite3@11.10.0/node_modules/better-sqlite3
+rm -rf build
+PYTHON=/opt/homebrew/bin/python3 npx node-gyp rebuild --release
 ```
-
-Pay special attention to tests in:
-- `packages/server/test/eventstore-integration.test.ts`
-- `packages/core/test/events/` (if exists)
