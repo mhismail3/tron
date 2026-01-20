@@ -16,8 +16,8 @@ This document outlines the comprehensive migration from pnpm to Bun completed on
 ### File Changes
 
 #### Added
-- `scripts/build-workspace.sh` - Robust build script for all workspace packages
 - `bun.lockb` - Bun's binary lockfile (faster, more reliable)
+- `scripts/tron` - Unified CLI for all dev/deploy workflows
 
 #### Removed
 - `.npmrc` - No longer needed (Bun doesn't use npm config)
@@ -26,14 +26,13 @@ This document outlines the comprehensive migration from pnpm to Bun completed on
 
 #### Modified
 - `package.json` - Updated packageManager, workspaces, and all scripts
-- `scripts/setup.sh` - Auto-installs Bun, uses Bun commands
 - `README.md` - Updated documentation with Bun instructions
 
 ## Setup on a New Machine
 
 **One command:**
 ```bash
-./scripts/setup.sh
+./scripts/tron setup
 ```
 
 Or manually:

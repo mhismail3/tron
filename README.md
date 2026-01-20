@@ -37,7 +37,9 @@ tron/
 **One-command setup:**
 
 ```bash
-./scripts/setup.sh
+tron setup
+# or from the project directory:
+./scripts/tron setup
 ```
 
 This will:
@@ -121,7 +123,7 @@ Run beta and production simultaneously on different ports:
 | Beta        | 8082      | 8083   | `~/.tron/db/beta.db` |
 
 ```bash
-tron beta        # Run beta server in terminal (Ctrl+C to stop)
+tron dev        # Run beta server in terminal (Ctrl+C to stop)
 ```
 
 Beta uses a separate database so you can test changes without affecting production data.
@@ -136,7 +138,7 @@ bun run test          # Run all tests once
 bun run test:watch    # Watch mode
 
 # 3. Test live with beta server
-tron beta             # Starts on 8082/8083, Ctrl+C to stop
+tron dev             # Starts on 8082/8083, Ctrl+C to stop
 
 # 4. Deploy when ready
 tron deploy
