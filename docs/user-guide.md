@@ -92,7 +92,7 @@ Skills are reusable context packages. Reference with `@skill-name`:
 - Global: `~/.tron/skills/`
 - Project: `.claude/skills/` or `.tron/skills/`
 
-See [skills.md](./skills.md) for details.
+See [customization.md](./customization.md) for details.
 
 ## Context Files
 
@@ -113,7 +113,7 @@ Settings file: `~/.tron/settings.json`
 }
 ```
 
-See [settings.md](./settings.md) for all options.
+See [customization.md](./customization.md) for all options.
 
 ## Keyboard Shortcuts (TUI)
 
