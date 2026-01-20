@@ -15,7 +15,7 @@
 - `events` table: All session events (messages, tool calls, results)
 - `logs` table: All application logs with timestamps and context
 
-**ALWAYS use the `@tron-db` skill** (`.claude/skills/tron-db/`) when the user asks to investigate an issue. Query the database directly—don't guess.
+**ALWAYS use the `@tron-db` skill** (`.claude/skills/tron-db/`) when the user asks to investigate an issue. Query the database directly — do not guess.
 
 ### Build & Test Verification
 **ALWAYS run before completing any task:**
@@ -33,7 +33,7 @@ Do not mark work as complete until both succeed. If tests fail, fix them.
 
 ---
 
-## Adding New Tools - CRITICAL CHECKLIST
+## Adding New Tools
 
 When adding a new tool, you MUST handle all of the following to prevent breaking session resume, forks, and API compatibility.
 
