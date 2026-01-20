@@ -1,5 +1,36 @@
 # Tron Project Guidelines
 
+## ⚠️ CRITICAL RULES - ALWAYS FOLLOW
+
+### Root Cause Analysis
+**NEVER apply bandaid fixes.** When you find a bug, ALWAYS:
+1. Analyze the code and trace call paths to identify the TRUE root cause
+2. Understand WHY the bug exists, not just WHERE it manifests
+3. Fix the underlying issue robustly, even if it requires more effort
+
+### Debugging with Database Logs
+**Source of truth for all agent sessions is `$HOME/.tron/db/`**. The databases contain:
+- `events` table: All session events (messages, tool calls, results)
+- `logs` table: All application logs with timestamps and context
+
+**ALWAYS use the `@tron-db` skill** (`.claude/skills/tron-db/`) when the user asks to investigate an issue. Query the database directly—don't guess.
+
+### Build & Test Verification
+**ALWAYS run before completing any task:**
+```bash
+bun run build && bun run test
+```
+Do not mark work as complete until both succeed. If tests fail, fix them.
+
+### Test-Driven Development
+**Prioritize zero regressions.** When making changes:
+1. Write or update tests FIRST when adding features
+2. Run existing tests BEFORE and AFTER changes
+3. If refactoring, ensure test coverage exists before touching code
+4. Never commit code that introduces test failures
+
+---
+
 ## Project Structure
 
 ```
