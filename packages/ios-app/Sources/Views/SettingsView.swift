@@ -56,6 +56,11 @@ struct SettingsView: View {
                         .font(TronTypography.caption2)
                 }
 
+                // Font Style Section
+                if #available(iOS 26.0, *) {
+                    FontStyleSection()
+                }
+
                 // Advanced Section
                 Section {
                     Button(role: .destructive) {
@@ -162,6 +167,141 @@ struct ServerURLBuilder {
         let scheme = useTLS ? "wss" : "ws"
         let urlString = "\(scheme)://\(host):\(port)/ws"
         return URL(string: urlString)
+    }
+}
+
+// MARK: - Font Style Section
+
+@available(iOS 26.0, *)
+struct FontStyleSection: View {
+    @State private var fontSettings = FontSettings.shared
+
+    var body: some View {
+        Section {
+            VStack(alignment: .leading, spacing: 16) {
+                // Preview text showing current font style
+                HStack(spacing: 12) {
+                    Text("Aa")
+                        .font(TronTypography.mono(size: 28, weight: .medium))
+                        .foregroundStyle(.tronEmerald)
+
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Recursive")
+                            .font(TronTypography.headline)
+                            .foregroundStyle(.tronTextPrimary)
+                        Text(casualLabel)
+                            .font(TronTypography.caption)
+                            .foregroundStyle(.tronTextSecondary)
+                    }
+
+                    Spacer()
+                }
+                .padding(.vertical, 4)
+
+                // Liquid glass slider
+                VStack(spacing: 8) {
+                    HStack {
+                        Text("Linear")
+                            .font(TronTypography.caption2)
+                            .foregroundStyle(.tronTextMuted)
+                        Spacer()
+                        Text("Casual")
+                            .font(TronTypography.caption2)
+                            .foregroundStyle(.tronTextMuted)
+                    }
+
+                    // Custom slider with glass effect
+                    FontStyleSlider(value: Binding(
+                        get: { fontSettings.casualAxis },
+                        set: { fontSettings.casualAxis = $0 }
+                    ))
+                }
+            }
+            .padding(.vertical, 8)
+            .listRowBackground(Color.clear)
+        } header: {
+            Text("Font Style")
+                .font(TronTypography.caption)
+        } footer: {
+            Text("Adjust the casual axis of the Recursive font. Linear (0) is precise and geometric, Casual (1) is more playful and hand-drawn.")
+                .font(TronTypography.caption2)
+        }
+    }
+
+    private var casualLabel: String {
+        let value = fontSettings.casualAxis
+        if value < 0.2 { return "Linear" }
+        if value < 0.4 { return "Semi-Linear" }
+        if value < 0.6 { return "Balanced" }
+        if value < 0.8 { return "Semi-Casual" }
+        return "Casual"
+    }
+}
+
+// MARK: - Font Style Slider (Liquid Glass)
+
+@available(iOS 26.0, *)
+struct FontStyleSlider: View {
+    @Binding var value: Double
+    @State private var isDragging = false
+
+    private let trackHeight: CGFloat = 8
+    private let thumbSize: CGFloat = 28
+
+    var body: some View {
+        GeometryReader { geometry in
+            let trackWidth = geometry.size.width
+            let thumbX = CGFloat(value) * (trackWidth - thumbSize) + thumbSize / 2
+
+            ZStack(alignment: .leading) {
+                // Track background
+                Capsule()
+                    .fill(Color.white.opacity(0.1))
+                    .frame(height: trackHeight)
+                    .glassEffect(.regular.tint(Color.tronPhthaloGreen.opacity(0.2)), in: .capsule)
+
+                // Filled portion
+                Capsule()
+                    .fill(
+                        LinearGradient(
+                            colors: [.tronPhthaloGreen, .tronEmerald],
+                            startPoint: .leading,
+                            endPoint: .trailing
+                        )
+                    )
+                    .frame(width: max(thumbX, 0), height: trackHeight)
+
+                // Thumb
+                Circle()
+                    .fill(.clear)
+                    .frame(width: thumbSize, height: thumbSize)
+                    .glassEffect(
+                        .regular.tint(Color.tronEmerald.opacity(isDragging ? 0.6 : 0.4)),
+                        in: .circle
+                    )
+                    .overlay {
+                        Circle()
+                            .stroke(Color.tronEmerald.opacity(0.8), lineWidth: 2)
+                    }
+                    .scaleEffect(isDragging ? 1.15 : 1.0)
+                    .position(x: thumbX, y: geometry.size.height / 2)
+                    .animation(.spring(response: 0.25, dampingFraction: 0.7), value: isDragging)
+            }
+            .frame(height: geometry.size.height)
+            .contentShape(Rectangle())
+            .gesture(
+                DragGesture(minimumDistance: 0)
+                    .onChanged { gesture in
+                        isDragging = true
+                        let newValue = (gesture.location.x - thumbSize / 2) / (trackWidth - thumbSize)
+                        value = min(max(Double(newValue), 0), 1)
+                    }
+                    .onEnded { _ in
+                        isDragging = false
+                    }
+            )
+        }
+        .frame(height: thumbSize)
     }
 }
 

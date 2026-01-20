@@ -3,8 +3,8 @@ import UIKit
 
 // MARK: - Tron Typography System
 
-/// Centralized typography definitions using Recursive font family.
-/// Recursive provides seamless switching between proportional (sans) and monospace variants.
+/// Centralized typography definitions using Recursive variable font.
+/// Fonts are created dynamically based on FontSettings.shared.casualAxis.
 enum TronTypography {
     // MARK: - Font Sizes
 
@@ -59,132 +59,102 @@ enum TronTypography {
     // MARK: - Factory Methods
 
     /// Create a monospace font with specified size and weight
+    @MainActor
     static func mono(size: CGFloat, weight: Font.Weight = .regular) -> Font {
-        let fontName: String
-        switch weight {
-        case .bold, .heavy, .black:
-            fontName = TronFontLoader.Mono.bold
-        case .semibold:
-            fontName = TronFontLoader.Mono.semiBold
-        case .medium:
-            fontName = TronFontLoader.Mono.medium
-        default:
-            fontName = TronFontLoader.Mono.regular
-        }
-        return TronFontLoader.font(name: fontName, size: size)
+        TronFontLoader.createFont(
+            size: size,
+            weight: TronFontLoader.weight(from: weight),
+            mono: true
+        )
     }
 
-    /// Create a sans-serif font with specified size and weight
+    /// Create a sans-serif (proportional) font with specified size and weight
+    @MainActor
     static func sans(size: CGFloat, weight: Font.Weight = .regular) -> Font {
-        let fontName: String
-        switch weight {
-        case .bold, .heavy, .black:
-            fontName = TronFontLoader.Sans.bold
-        case .semibold:
-            fontName = TronFontLoader.Sans.semiBold
-        case .medium:
-            fontName = TronFontLoader.Sans.medium
-        default:
-            fontName = TronFontLoader.Sans.regular
-        }
-        return TronFontLoader.font(name: fontName, size: size)
+        TronFontLoader.createFont(
+            size: size,
+            weight: TronFontLoader.weight(from: weight),
+            mono: false
+        )
     }
 
     /// Create a UIKit monospace font with specified size and weight
+    @MainActor
     static func uiFont(mono: Bool, size: CGFloat, weight: UIFont.Weight = .regular) -> UIFont {
-        let fontName: String
-        if mono {
-            switch weight {
-            case .bold, .heavy, .black:
-                fontName = TronFontLoader.Mono.bold
-            case .semibold:
-                fontName = TronFontLoader.Mono.semiBold
-            case .medium:
-                fontName = TronFontLoader.Mono.medium
-            default:
-                fontName = TronFontLoader.Mono.regular
-            }
-        } else {
-            switch weight {
-            case .bold, .heavy, .black:
-                fontName = TronFontLoader.Sans.bold
-            case .semibold:
-                fontName = TronFontLoader.Sans.semiBold
-            case .medium:
-                fontName = TronFontLoader.Sans.medium
-            default:
-                fontName = TronFontLoader.Sans.regular
-            }
-        }
-        return TronFontLoader.uiFont(name: fontName, size: size)
+        TronFontLoader.createUIFont(
+            size: size,
+            weight: TronFontLoader.weight(from: weight),
+            mono: mono
+        )
     }
 
     // MARK: - Semantic Presets (Monospace)
+    // Note: These are computed properties so they pick up current FontSettings
 
     /// Code blocks - Mono Regular 15pt
-    static let code = mono(size: sizeBodyLG)
+    @MainActor static var code: Font { mono(size: sizeBodyLG) }
 
     /// Chat messages - Mono Regular 14pt
-    static let messageBody = mono(size: sizeBody)
+    @MainActor static var messageBody: Font { mono(size: sizeBody) }
 
     /// Code captions, secondary code text - Mono Regular 11pt
-    static let codeCaption = mono(size: sizeBody2)
+    @MainActor static var codeCaption: Font { mono(size: sizeBody2) }
 
     /// Small code/metrics - Mono Regular 10pt
-    static let codeSM = mono(size: sizeCaption)
+    @MainActor static var codeSM: Font { mono(size: sizeCaption) }
 
     /// Input fields - Mono Regular 15pt
-    static let input = mono(size: sizeBodyLG)
+    @MainActor static var input: Font { mono(size: sizeBodyLG) }
 
     /// File paths - Mono Medium 11pt
-    static let filePath = mono(size: sizeBody2, weight: .medium)
+    @MainActor static var filePath: Font { mono(size: sizeBody2, weight: .medium) }
 
     /// Pill values (token counts) - Mono Medium 10pt
-    static let pillValue = mono(size: sizeCaption, weight: .medium)
+    @MainActor static var pillValue: Font { mono(size: sizeCaption, weight: .medium) }
 
     /// Timer display - Mono Bold 56pt
-    static let timerDisplay = mono(size: sizeTimer, weight: .bold)
+    @MainActor static var timerDisplay: Font { mono(size: sizeTimer, weight: .bold) }
 
     /// Display text - Mono SemiBold 32pt
-    static let display = mono(size: sizeDisplay, weight: .semibold)
+    @MainActor static var display: Font { mono(size: sizeDisplay, weight: .semibold) }
 
     // MARK: - Semantic Presets (Sans)
 
     /// Primary buttons - Sans SemiBold 16pt
-    static let button = sans(size: sizeTitle, weight: .semibold)
+    @MainActor static var button: Font { sans(size: sizeTitle, weight: .semibold) }
 
     /// Compact buttons - Sans SemiBold 14pt
-    static let buttonSM = sans(size: sizeBody, weight: .semibold)
+    @MainActor static var buttonSM: Font { sans(size: sizeBody, weight: .semibold) }
 
     /// Pill labels - Sans Medium 9pt
-    static let pill = sans(size: sizeSM, weight: .medium)
+    @MainActor static var pill: Font { sans(size: sizeSM, weight: .medium) }
 
     /// Badge text - Sans Bold 8pt
-    static let badge = sans(size: sizeXS, weight: .bold)
+    @MainActor static var badge: Font { sans(size: sizeXS, weight: .bold) }
 
     /// Caption text - Sans Regular 10pt
-    static let caption = sans(size: sizeCaption)
+    @MainActor static var caption: Font { sans(size: sizeCaption) }
 
     /// Section headers - Sans SemiBold 16pt
-    static let headline = sans(size: sizeTitle, weight: .semibold)
+    @MainActor static var headline: Font { sans(size: sizeTitle, weight: .semibold) }
 
     /// Subheadline - Sans Regular 14pt
-    static let subheadline = sans(size: sizeBody)
+    @MainActor static var subheadline: Font { sans(size: sizeBody) }
 
     /// Small label - Sans Medium 8pt
-    static let labelSM = sans(size: sizeXS, weight: .medium)
+    @MainActor static var labelSM: Font { sans(size: sizeXS, weight: .medium) }
 
     /// Caption 2 (smallest) - Sans Regular 9pt
-    static let caption2 = sans(size: sizeSM)
+    @MainActor static var caption2: Font { sans(size: sizeSM) }
 
     /// Large title - Sans Bold 18pt
-    static let largeTitle = sans(size: sizeLargeTitle, weight: .bold)
+    @MainActor static var largeTitle: Font { sans(size: sizeLargeTitle, weight: .bold) }
 
     /// Body text - Sans Regular 14pt
-    static let body = sans(size: sizeBody)
+    @MainActor static var body: Font { sans(size: sizeBody) }
 
     /// Small body - Sans Regular 12pt
-    static let bodySM = sans(size: sizeBodySM)
+    @MainActor static var bodySM: Font { sans(size: sizeBodySM) }
 }
 
 // MARK: - View Extension for Typography
@@ -235,3 +205,4 @@ extension View {
         self.font(TronTypography.filePath)
     }
 }
+
