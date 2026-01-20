@@ -892,11 +892,10 @@ extension ChatViewModel {
             return
         }
 
-        // Complete the render with the final UI tree and persist to disk
+        // Complete the render with the final UI tree
         uiCanvasState.completeRender(
             canvasId: event.canvasId,
             ui: component,
-            rawUI: uiDict,  // Pass raw UI for persistence
             state: event.state
         )
     }

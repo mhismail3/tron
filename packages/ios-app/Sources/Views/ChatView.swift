@@ -559,11 +559,6 @@ struct ChatView: View {
                                         viewModel.subagentState.showDetails(with: data)
                                     },
                                     onRenderAppUITap: { data in
-                                        // Load canvas from disk if not in memory (session resumption)
-                                        viewModel.uiCanvasState.loadFromDiskIfNeeded(
-                                            canvasId: data.canvasId,
-                                            toolCallId: data.toolCallId
-                                        )
                                         // Set active canvas and show sheet
                                         viewModel.uiCanvasState.activeCanvasId = data.canvasId
                                         viewModel.uiCanvasState.showSheet = true
