@@ -192,6 +192,8 @@ extension EventStoreManager {
         // Use worktree path from fork result (preferred) or fallback to source session
         let workingDir = result.worktree?.path ?? sourceSession?.workingDirectory ?? ""
         let workspaceName = URL(fileURLWithPath: workingDir).lastPathComponent
+        // CRITICAL: Tag with current server origin for filtering
+        let serverOrigin = rpcClient.serverOrigin
         let forkedSession = CachedSession(
             id: result.newSessionId,
             workspaceId: sourceSession?.workspaceId ?? workingDir,
@@ -215,7 +217,8 @@ extension EventStoreManager {
             lastAssistantResponse: sourceSession?.lastAssistantResponse,
             lastToolCount: nil,
             isProcessing: false,
-            isFork: true
+            isFork: true,
+            serverOrigin: serverOrigin
         )
         try eventDB.insertSession(forkedSession)
         logger.info("[FORK] Inserted forked session into local DB", category: .session)
