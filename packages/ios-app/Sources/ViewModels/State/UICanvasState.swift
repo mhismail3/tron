@@ -15,6 +15,11 @@ final class UICanvasState {
     /// Whether the canvas sheet is shown
     var showSheet = false
 
+    // MARK: - Persistence
+
+    /// Artifact store for persisting completed canvases to disk
+    private let artifactStore = CanvasArtifactStore()
+
     // MARK: - Callbacks
 
     /// Called when user taps a button
@@ -93,7 +98,12 @@ final class UICanvasState {
     }
 
     /// Complete canvas render with final UI tree
-    func completeRender(canvasId: String, ui: UICanvasComponent, state: [String: AnyCodable]?) {
+    /// - Parameters:
+    ///   - canvasId: Unique canvas identifier
+    ///   - ui: Parsed UI component tree
+    ///   - rawUI: Raw UI dictionary from server (for persistence)
+    ///   - state: Initial form state
+    func completeRender(canvasId: String, ui: UICanvasComponent, rawUI: [String: AnyCodable]?, state: [String: AnyCodable]?) {
         guard var canvas = canvases[canvasId] else {
             logger.warning("completeRender called for unknown canvas: \(canvasId)", category: .ui)
             return
@@ -107,6 +117,16 @@ final class UICanvasState {
 
         canvases[canvasId] = canvas
         logger.info("Canvas render complete: \(canvasId)", category: .ui)
+
+        // Persist to disk for session resumption
+        if let rawUI = rawUI {
+            artifactStore.save(
+                canvasId: canvasId,
+                title: canvas.title,
+                ui: rawUI,
+                state: state
+            )
+        }
     }
 
     /// Mark canvas as error
@@ -256,5 +276,50 @@ final class UICanvasState {
             status: status,
             errorMessage: errorMessage
         )
+    }
+
+    // MARK: - Persistence Loading
+
+    /// Load a canvas from disk if not already in memory.
+    /// Used for session resumption when user taps a completed chip.
+    /// Returns true if canvas was loaded or already exists.
+    @discardableResult
+    func loadFromDiskIfNeeded(canvasId: String, toolCallId: String) -> Bool {
+        // Already in memory
+        if canvases[canvasId] != nil {
+            return true
+        }
+
+        // Try to load from disk
+        guard let artifact = artifactStore.load(canvasId: canvasId) else {
+            logger.warning("No artifact found for canvas: \(canvasId)", category: .ui)
+            return false
+        }
+
+        // Parse the raw UI into component tree
+        guard let component = UICanvasParser.parse(artifact.ui.mapValues { $0.value }) else {
+            logger.error("Failed to parse UI from artifact: \(canvasId)", category: .ui)
+            return false
+        }
+
+        // Reconstruct canvas data
+        let canvas = UICanvasData(
+            canvasId: canvasId,
+            title: artifact.title,
+            toolCallId: toolCallId,
+            status: .complete,
+            partialJSON: "",
+            parsedRoot: component,
+            state: artifact.state
+        )
+
+        canvases[canvasId] = canvas
+        logger.info("Loaded canvas from disk: \(canvasId)", category: .ui)
+        return true
+    }
+
+    /// Check if a canvas exists on disk (without loading it)
+    func hasArtifact(canvasId: String) -> Bool {
+        return artifactStore.exists(canvasId: canvasId)
     }
 }
