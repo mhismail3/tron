@@ -25,22 +25,12 @@ const TRANSCRIPTION_MODELS: TranscriptionModelProfile[] = [
   {
     id: 'parakeet-tdt-0.6b-v3',
     label: 'Parakeet TDT 0.6B v3',
-    description: 'Fastest on Apple Silicon',
+    description: 'Fast transcription on Apple Silicon',
     backend: 'parakeet-mlx',
     modelName: 'mlx-community/parakeet-tdt-0.6b-v3',
     device: 'mlx',
     computeType: 'mlx',
     endpoint: '/transcribe/faster',
-  },
-  {
-    id: 'whisper-large-v3',
-    label: 'Whisper Large v3',
-    description: 'Higher accuracy (CPU)',
-    backend: 'faster-whisper',
-    modelName: 'large-v3',
-    device: 'cpu',
-    computeType: 'int8',
-    endpoint: '/transcribe/better',
   },
 ];
 
@@ -172,11 +162,9 @@ function getProfileById(id?: string): TranscriptionModelProfile | null {
 function getProfileByQuality(
   quality: TranscribeAudioParams['transcriptionQuality'],
 ): TranscriptionModelProfile | null {
-  if (quality === 'faster') {
+  // All quality levels now use parakeet (the only supported model)
+  if (quality === 'faster' || quality === 'better') {
     return getProfileById('parakeet-tdt-0.6b-v3');
-  }
-  if (quality === 'better') {
-    return getProfileById('whisper-large-v3');
   }
   return null;
 }

@@ -88,7 +88,7 @@ describe('voiceNotes.handler', () => {
         text: 'Hello, this is a test transcription.',
         durationSeconds: 15.5,
         language: 'en',
-        model: 'whisper-1',
+        model: 'parakeet-tdt-0.6b-v3',
       };
       vi.mocked(mockContext.transcriptionManager!.transcribeAudio).mockResolvedValue(transcribeResult);
       vi.mocked(fs.mkdir).mockResolvedValue(undefined);
@@ -170,7 +170,7 @@ type: voice-note
 created: 2025-01-15T12:00:00.000Z
 duration: 30
 language: en
-model: whisper-1
+model: parakeet-tdt-0.6b-v3
 ---
 
 # Voice Note - January 15, 2025 at 12:00 PM
@@ -203,7 +203,7 @@ type: voice-note
 created: 2025-01-15T12:00:00.000Z
 duration: 45.5
 language: es
-model: whisper-1
+model: parakeet-tdt-0.6b-v3
 ---
 
 # Voice Note - January 15, 2025 at 12:00 PM

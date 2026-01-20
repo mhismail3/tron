@@ -25,13 +25,12 @@ describe('Transcribe Handlers', () => {
       text: 'Hello world',
       language: 'en',
       durationSeconds: 5.2,
-      model: 'whisper-1',
+      model: 'parakeet-tdt-0.6b-v3',
     });
 
     mockListModels = vi.fn().mockResolvedValue({
       models: [
-        { id: 'whisper-1', name: 'Whisper', provider: 'openai' },
-        { id: 'whisper-large', name: 'Whisper Large', provider: 'openai' },
+        { id: 'parakeet-tdt-0.6b-v3', name: 'Parakeet TDT', provider: 'mlx' },
       ],
     });
 
@@ -127,7 +126,7 @@ describe('Transcribe Handlers', () => {
           audioBase64: 'base64data',
           mimeType: 'audio/wav',
           fileName: 'recording.wav',
-          transcriptionModelId: 'whisper-large',
+          transcriptionModelId: 'parakeet-tdt-0.6b-v3',
         },
       };
 
@@ -138,7 +137,7 @@ describe('Transcribe Handlers', () => {
         audioBase64: 'base64data',
         mimeType: 'audio/wav',
         fileName: 'recording.wav',
-        transcriptionModelId: 'whisper-large',
+        transcriptionModelId: 'parakeet-tdt-0.6b-v3',
       });
     });
   });
@@ -155,8 +154,8 @@ describe('Transcribe Handlers', () => {
       expect(response.success).toBe(true);
       expect(mockListModels).toHaveBeenCalled();
       const result = response.result as { models: any[] };
-      expect(result.models).toHaveLength(2);
-      expect(result.models[0].id).toBe('whisper-1');
+      expect(result.models).toHaveLength(1);
+      expect(result.models[0].id).toBe('parakeet-tdt-0.6b-v3');
     });
 
     it('should return error when transcription not available', async () => {

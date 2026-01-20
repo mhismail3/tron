@@ -15,13 +15,9 @@ struct SettingsView: View {
     @AppStorage("serverPort") private var serverPort = SettingsView.defaultPort
     @AppStorage("useTLS") private var useTLS = false
     @AppStorage("confirmArchive") private var confirmArchive = true
-    @AppStorage("transcriptionModelId") private var transcriptionModelId = ""
 
     @State private var showingResetAlert = false
     @State private var showLogViewer = false
-    @State private var transcriptionModels: [TranscriptionModelInfo] = []
-    @State private var isLoadingTranscriptionModels = false
-    @State private var transcriptionModelError: String?
 
     var body: some View {
         NavigationStack {
@@ -57,43 +53,6 @@ struct SettingsView: View {
                         .font(.caption)
                 } footer: {
                     Text("Show a confirmation dialog when archiving sessions.")
-                        .font(.caption2)
-                }
-
-                // Transcription Section
-                Section {
-                    HStack {
-                        Text("Transcription Model")
-                            .font(.subheadline)
-                        Spacer()
-                        if isLoadingTranscriptionModels {
-                            ProgressView()
-                        } else if transcriptionModels.isEmpty {
-                            Text("Unavailable")
-                                .font(.subheadline)
-                                .foregroundStyle(.secondary)
-                        } else {
-                            if #available(iOS 26.0, *) {
-                                TranscriptionModelMenu(
-                                    models: transcriptionModels,
-                                    selectedModelId: $transcriptionModelId
-                                )
-                            } else {
-                                Picker("", selection: $transcriptionModelId) {
-                                    ForEach(transcriptionModels) { model in
-                                        Text(model.label).tag(model.id)
-                                    }
-                                }
-                                .labelsHidden()
-                                .tint(.tronEmerald)
-                            }
-                        }
-                    }
-                } header: {
-                    Text("Transcription")
-                        .font(.caption)
-                } footer: {
-                    Text(transcriptionModelError ?? "Select the model used for voice transcription.")
                         .font(.caption2)
                 }
 
@@ -173,9 +132,6 @@ struct SettingsView: View {
         .presentationDragIndicator(.hidden)
         .tint(.tronEmerald)
         .preferredColorScheme(.dark)
-        .task {
-            await loadTranscriptionModels()
-        }
     }
 
     // MARK: - Computed Properties
@@ -192,65 +148,6 @@ struct SettingsView: View {
         serverPort = SettingsView.defaultPort
         useTLS = false
         confirmArchive = true
-        transcriptionModelId = ""
-    }
-
-    @MainActor
-    private func loadTranscriptionModels() async {
-        if isLoadingTranscriptionModels {
-            return
-        }
-        isLoadingTranscriptionModels = true
-        transcriptionModelError = nil
-
-        if !rpcClient.isConnected {
-            await rpcClient.connect()
-        }
-
-        do {
-            let result = try await rpcClient.listTranscriptionModels()
-            transcriptionModels = result.models
-            let availableIds = Set(result.models.map { $0.id })
-            if transcriptionModelId.isEmpty || !availableIds.contains(transcriptionModelId) {
-                transcriptionModelId = result.defaultModelId ?? result.models.first?.id ?? transcriptionModelId
-            }
-        } catch {
-            transcriptionModelError = "Failed to load models: \(error.localizedDescription)"
-            transcriptionModels = []
-        }
-
-        isLoadingTranscriptionModels = false
-    }
-}
-
-// MARK: - Transcription Model Menu (iOS 26 Liquid Glass Popup)
-
-@available(iOS 26.0, *)
-struct TranscriptionModelMenu: View {
-    let models: [TranscriptionModelInfo]
-    @Binding var selectedModelId: String
-
-    private var currentModelLabel: String {
-        models.first { $0.id == selectedModelId }?.label ?? "Select"
-    }
-
-    var body: some View {
-        Menu {
-            ForEach(models) { model in
-                Button(model.label) {
-                    selectedModelId = model.id
-                }
-            }
-        } label: {
-            HStack(spacing: 4) {
-                Text(currentModelLabel)
-                    .font(.subheadline)
-                Image(systemName: "chevron.up.chevron.down")
-                    .font(.system(size: 10, weight: .medium))
-            }
-            .foregroundStyle(.tronEmerald)
-        }
-        .menuStyle(.button)
     }
 }
 

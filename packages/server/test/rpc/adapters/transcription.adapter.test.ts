@@ -34,7 +34,7 @@ describe('TranscriptionAdapter', () => {
       const params = {
         audioData: 'base64-audio-data',
         mimeType: 'audio/wav',
-        model: 'whisper-1',
+        model: 'parakeet-tdt-0.6b-v3',
       };
 
       const result = await adapter.transcribeAudio(params);
@@ -60,7 +60,7 @@ describe('TranscriptionAdapter', () => {
     it('should return available transcription models', async () => {
       const mockModels = {
         models: [
-          { id: 'whisper-1', name: 'Whisper', provider: 'openai' },
+          { id: 'parakeet-tdt-0.6b-v3', name: 'Parakeet TDT', provider: 'mlx' },
         ],
       };
       vi.mocked(listTranscriptionModels).mockResolvedValue(mockModels);
