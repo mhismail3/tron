@@ -13,60 +13,60 @@ struct SettingsView: View {
     @EnvironmentObject var appState: AppState
     let rpcClient: RPCClient
     @AppStorage("serverHost") private var serverHost = "localhost"
-    @AppStorage("serverPort") private var serverPort = SettingsView.defaultPort
-    @AppStorage("useTLS") private var useTLS = false
+    @AppStorage("serverPort") private var serverPort = ""
     @AppStorage("confirmArchive") private var confirmArchive = true
 
     @State private var showingResetAlert = false
     @State private var showLogViewer = false
 
-    /// Derives environment selection from current port
+    /// Derives environment selection from current port (or custom port override)
     private var selectedEnvironment: String {
-        switch serverPort {
-        case "8080": return "prod"
-        case "8082": return "beta"
-        default: return "custom"
+        // If custom port is set, check if it matches standard ports
+        if !serverPort.isEmpty {
+            switch serverPort {
+            case "8080": return "prod"
+            case "8082": return "beta"
+            default: return "custom"
+            }
         }
+        // Empty port defaults based on build config
+        #if BETA
+        return "beta"
+        #else
+        return "prod"
+        #endif
+    }
+
+    /// Effective port to use for connections
+    private var effectivePort: String {
+        if !serverPort.isEmpty {
+            return serverPort
+        }
+        // Default based on build
+        #if BETA
+        return "8082"
+        #else
+        return "8080"
+        #endif
     }
 
     var body: some View {
         NavigationStack {
             List {
-                // Environment Quick Switch
+                // Environment Toggle (no section container)
                 Section {
-                    Picker("Environment", selection: Binding(
-                        get: { selectedEnvironment },
-                        set: { newValue in
-                            let newPort: String
-                            switch newValue {
-                            case "prod": newPort = "8080"
-                            case "beta": newPort = "8082"
-                            default: return // Don't change port for custom
-                            }
-                            // Update via AppState to trigger reconnection
-                            appState.updateServerSettings(
-                                host: serverHost,
-                                port: newPort,
-                                useTLS: useTLS
-                            )
-                            serverPort = newPort
-                        }
-                    )) {
-                        Text("Prod").tag("prod")
-                        Text("Beta").tag("beta")
-                        if selectedEnvironment == "custom" {
-                            Text("Custom").tag("custom")
-                        }
+                    HStack(spacing: 0) {
+                        environmentButton("Prod", tag: "prod")
+                        environmentButton("Beta", tag: "beta")
                     }
-                    .pickerStyle(.segmented)
-                    .font(TronTypography.subheadline)
+                    .padding(3)
+                    .background(Color.white.opacity(0.05))
+                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
                 } header: {
-                    Text("Environment")
-                        .font(TronTypography.caption)
-                } footer: {
-                    Text("Quickly switch between production (8080) and beta (8082) servers.")
-                        .font(TronTypography.caption2)
+                    EmptyView()
                 }
+                .listRowBackground(Color.clear)
+                .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
 
                 // Server Section
                 Section {
@@ -76,26 +76,23 @@ struct SettingsView: View {
                         .autocapitalization(.none)
                         .autocorrectionDisabled()
                         .onSubmit {
-                            appState.updateServerSettings(host: serverHost, port: serverPort, useTLS: useTLS)
+                            appState.updateServerSettings(host: serverHost, port: effectivePort, useTLS: false)
                         }
 
-                    TextField("Port", text: $serverPort)
+                    TextField("Custom Port (optional)", text: $serverPort)
                         .font(TronTypography.subheadline)
                         .keyboardType(.numberPad)
-                        .onSubmit {
-                            appState.updateServerSettings(host: serverHost, port: serverPort, useTLS: useTLS)
-                        }
-
-                    Toggle("Use TLS (wss://)", isOn: $useTLS)
-                        .font(TronTypography.subheadline)
-                        .onChange(of: useTLS) { _, newValue in
-                            appState.updateServerSettings(host: serverHost, port: serverPort, useTLS: newValue)
+                        .onChange(of: serverPort) { _, newValue in
+                            // Only trigger update if port actually changed to something meaningful
+                            if !newValue.isEmpty {
+                                appState.updateServerSettings(host: serverHost, port: newValue, useTLS: false)
+                            }
                         }
                 } header: {
                     Text("Server")
                         .font(TronTypography.caption)
                 } footer: {
-                    Text("Connect to your Tron server. Default is localhost:\(SettingsView.defaultPort).")
+                    Text("Default ports: Prod (8080), Beta (8082). Only set custom port if using a non-standard port.")
                         .font(TronTypography.caption2)
                 }
 
@@ -194,24 +191,49 @@ struct SettingsView: View {
         .preferredColorScheme(.dark)
     }
 
+    // MARK: - Environment Button
+
+    @ViewBuilder
+    private func environmentButton(_ title: String, tag: String) -> some View {
+        let isSelected = selectedEnvironment == tag
+
+        Button {
+            let newPort: String
+            switch tag {
+            case "prod": newPort = "8080"
+            case "beta": newPort = "8082"
+            default: return
+            }
+            // Clear custom port when selecting standard environment
+            serverPort = ""
+            // Update via AppState to trigger reconnection
+            appState.updateServerSettings(host: serverHost, port: newPort, useTLS: false)
+        } label: {
+            Text(title)
+                .font(TronTypography.mono(size: TronTypography.sizeBody, weight: isSelected ? .semibold : .regular))
+                .foregroundStyle(isSelected ? .tronEmerald : .white.opacity(0.5))
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 10)
+                .background(isSelected ? Color.tronEmerald.opacity(0.15) : Color.clear)
+                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+        }
+        .buttonStyle(.plain)
+    }
+
     // MARK: - Computed Properties
 
     var serverURL: URL? {
-        let scheme = useTLS ? "wss" : "ws"
-        return URL(string: "\(scheme)://\(serverHost):\(serverPort)/ws")
+        URL(string: "ws://\(serverHost):\(effectivePort)/ws")
     }
 
     // MARK: - Actions
 
     private func resetToDefaults() {
-        let defaultHost = "localhost"
-        let defaultTLS = false
-        serverHost = defaultHost
-        serverPort = SettingsView.defaultPort
-        useTLS = defaultTLS
+        serverHost = "localhost"
+        serverPort = ""  // Empty = use default based on build
         confirmArchive = true
-        // Trigger server reconnection
-        appState.updateServerSettings(host: defaultHost, port: SettingsView.defaultPort, useTLS: defaultTLS)
+        // Trigger server reconnection with default port
+        appState.updateServerSettings(host: "localhost", port: SettingsView.defaultPort, useTLS: false)
     }
 }
 
