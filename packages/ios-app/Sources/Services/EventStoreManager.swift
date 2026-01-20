@@ -24,7 +24,7 @@ class EventStoreManager: ObservableObject {
     // Uses global `logger` from TronLogger.swift
 
     let eventDB: EventDatabase
-    let rpcClient: RPCClient
+    private(set) var rpcClient: RPCClient
 
     // MARK: - Published State
 
@@ -32,6 +32,14 @@ class EventStoreManager: ObservableObject {
     @Published private(set) var isSyncing = false
     @Published private(set) var lastSyncError: String?
     @Published private(set) var activeSessionId: String?
+
+    /// Whether to filter sessions by current server origin
+    @Published var filterByOrigin: Bool = true
+
+    /// Current server origin from the RPC client
+    var currentServerOrigin: String {
+        rpcClient.serverOrigin
+    }
 
     // Session change notification for views that need to react
     let sessionUpdated = PassthroughSubject<String, Never>()
@@ -56,12 +64,44 @@ class EventStoreManager: ObservableObject {
     /// Tracks whether the app is in the background to pause polling and save battery
     private(set) var isInBackground = false
 
+    /// Cancellable for server settings subscription
+    private var serverSettingsSubscription: AnyCancellable?
+
     // MARK: - Initialization
 
     init(eventDB: EventDatabase, rpcClient: RPCClient) {
         self.eventDB = eventDB
         self.rpcClient = rpcClient
         setupGlobalEventHandlers()
+    }
+
+    /// Update the RPC client (e.g., when server settings change)
+    func updateRPCClient(_ client: RPCClient) {
+        rpcClient = client
+        setupGlobalEventHandlers()
+        logger.info("RPC client updated to \(client.serverOrigin)", category: .session)
+    }
+
+    /// Subscribe to server settings changes to reload sessions with new filter
+    func subscribeToServerChanges(_ publisher: PassthroughSubject<ServerSettingsChanged, Never>, appState: AppState) {
+        serverSettingsSubscription = publisher.sink { [weak self, weak appState] change in
+            Task { @MainActor in
+                guard let self = self, let appState = appState else { return }
+                logger.info("Server settings changed to \(change.serverOrigin), reloading sessions", category: .session)
+
+                // Update the RPC client reference with the new one from AppState
+                self.updateRPCClient(appState.rpcClient)
+
+                // Reload sessions with new origin filter
+                self.loadSessions()
+
+                // Connect to the new server and sync
+                Task {
+                    await appState.rpcClient.connect()
+                    await self.fullSync()
+                }
+            }
+        }
     }
 
     /// Set up handlers for global events (events from all sessions)
@@ -149,8 +189,10 @@ class EventStoreManager: ObservableObject {
                 )
             }
 
-            sessions = try eventDB.getAllSessions()
-            logger.info("Loaded \(self.sessions.count) sessions from EventDatabase", category: .session)
+            // Filter by current server origin if enabled
+            let origin = filterByOrigin ? currentServerOrigin : nil
+            sessions = try eventDB.getSessionsByOrigin(origin)
+            logger.info("Loaded \(self.sessions.count) sessions from EventDatabase (origin filter: \(origin ?? "none"))", category: .session)
 
             // Restore preserved transient state and extract dashboard info
             for i in sessions.indices {

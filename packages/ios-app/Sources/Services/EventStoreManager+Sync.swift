@@ -5,6 +5,7 @@ import Foundation
 extension EventStoreManager {
 
     /// Full sync: fetch all sessions and their events from server
+    /// This is origin-aware: only syncs sessions that belong to the current server
     func fullSync() async {
         guard !isSyncing else { return }
 
@@ -13,22 +14,60 @@ extension EventStoreManager {
         logger.info("Starting full sync...", category: .session)
 
         do {
+            // Get current server origin for tagging sessions
+            let serverOrigin = rpcClient.serverOrigin
+
             // First, fetch session list from server
             let serverSessions = try await rpcClient.listSessions(includeEnded: true)
-            logger.info("Fetched \(serverSessions.count) sessions from server", category: .session)
+            logger.info("Fetched \(serverSessions.count) sessions from server (origin: \(serverOrigin))", category: .session)
 
-            // Convert and cache each session
+            var syncedCount = 0
+            var skippedCount = 0
+
+            // Convert and cache each session (with origin protection)
             for serverSession in serverSessions {
-                let cachedSession = serverSessionToCached(serverSession)
+                let sessionId = serverSession.sessionId
+
+                // Check if this session already exists locally with a DIFFERENT origin
+                // This prevents cross-server session corruption
+                let sessionExistsLocally = try eventDB.sessionExists(sessionId)
+                if sessionExistsLocally {
+                    // Session exists - check its origin
+                    let existingOrigin = try eventDB.getSessionOrigin(sessionId)
+                    if let existingOrigin = existingOrigin, existingOrigin != serverOrigin {
+                        // Session exists with DIFFERENT origin - DON'T overwrite
+                        logger.warning("[SYNC] Skipping session \(sessionId) - exists locally with different origin (\(existingOrigin) vs \(serverOrigin))", category: .session)
+                        skippedCount += 1
+                        continue
+                    }
+                    // Session exists with same origin OR NULL origin (legacy) - safe to update
+                    // For legacy sessions, this will also set the origin properly
+                }
+
+                // Either new session or same origin - safe to insert/update
+                // Merge server data with existing local data to preserve titles and other metadata
+                let cachedSession: CachedSession
+                if sessionExistsLocally, let existingSession = try eventDB.getSession(sessionId) {
+                    // Merge: prefer local data for fields the server might not have
+                    cachedSession = mergeSessionData(
+                        existing: existingSession,
+                        serverInfo: serverSession,
+                        serverOrigin: serverOrigin
+                    )
+                } else {
+                    // New session - use server data
+                    cachedSession = serverSessionToCached(serverSession, serverOrigin: serverOrigin)
+                }
                 try eventDB.insertSession(cachedSession)
+                syncedCount += 1
 
                 // Sync events for this session
-                try await syncSessionEvents(sessionId: serverSession.sessionId)
+                try await syncSessionEvents(sessionId: sessionId)
             }
 
-            // Reload local sessions
+            // Reload local sessions (filtered by current origin)
             loadSessions()
-            logger.info("Full sync completed: \(self.sessions.count) sessions", category: .session)
+            logger.info("Full sync completed: synced \(syncedCount), skipped \(skippedCount) cross-origin, showing \(self.sessions.count) sessions", category: .session)
 
         } catch {
             setLastSyncError(error.localizedDescription)
@@ -157,13 +196,23 @@ extension EventStoreManager {
     }
 
     /// Convert server SessionInfo to CachedSession
-    func serverSessionToCached(_ info: SessionInfo) -> CachedSession {
-        CachedSession(
+    func serverSessionToCached(_ info: SessionInfo, serverOrigin: String? = nil) -> CachedSession {
+        // Determine title - prefer displayName, but if it looks like a session ID, use nil
+        let title: String?
+        let displayName = info.displayName
+        // If displayName is just the session ID, treat as no title
+        if displayName.hasPrefix("sess_") || displayName == info.sessionId {
+            title = nil
+        } else {
+            title = displayName
+        }
+
+        return CachedSession(
             id: info.sessionId,
             workspaceId: info.workingDirectory ?? "",
             rootEventId: nil,
             headEventId: nil,
-            title: info.displayName,
+            title: title,
             latestModel: info.model,
             workingDirectory: info.workingDirectory ?? "",
             createdAt: info.createdAt,
@@ -177,7 +226,51 @@ extension EventStoreManager {
             cacheReadTokens: info.cacheReadTokens ?? 0,
             cacheCreationTokens: info.cacheCreationTokens ?? 0,
             cost: info.cost ?? 0,
-            isFork: info.isFork
+            isFork: info.isFork,
+            serverOrigin: serverOrigin
+        )
+    }
+
+    /// Merge existing local session data with server info
+    /// Preserves local data that the server might not have (like computed title)
+    func mergeSessionData(existing: CachedSession, serverInfo: SessionInfo, serverOrigin: String) -> CachedSession {
+        // Determine title - prefer existing local title if it's meaningful
+        let title: String?
+        if let existingTitle = existing.title, !existingTitle.isEmpty, !existingTitle.hasPrefix("sess_") {
+            // Keep existing local title
+            title = existingTitle
+        } else {
+            // Check if server displayName is meaningful (not just a session ID)
+            let serverTitle = serverInfo.displayName
+            if !serverTitle.hasPrefix("sess_") && serverTitle != serverInfo.sessionId {
+                title = serverTitle
+            } else {
+                // No good title available
+                title = nil
+            }
+        }
+
+        return CachedSession(
+            id: existing.id,
+            workspaceId: serverInfo.workingDirectory ?? existing.workspaceId,
+            rootEventId: existing.rootEventId,  // Preserve local event tracking
+            headEventId: existing.headEventId,  // Preserve local event tracking
+            title: title,
+            latestModel: serverInfo.model,
+            workingDirectory: serverInfo.workingDirectory ?? existing.workingDirectory,
+            createdAt: serverInfo.createdAt,
+            lastActivityAt: existing.lastActivityAt,  // Preserve local activity tracking
+            endedAt: serverInfo.isActive ? nil : existing.endedAt,
+            eventCount: existing.eventCount,  // Preserve local event count
+            messageCount: max(existing.messageCount, serverInfo.messageCount),
+            inputTokens: serverInfo.inputTokens ?? existing.inputTokens,
+            outputTokens: serverInfo.outputTokens ?? existing.outputTokens,
+            lastTurnInputTokens: serverInfo.lastTurnInputTokens ?? existing.lastTurnInputTokens,
+            cacheReadTokens: serverInfo.cacheReadTokens ?? existing.cacheReadTokens,
+            cacheCreationTokens: serverInfo.cacheCreationTokens ?? existing.cacheCreationTokens,
+            cost: serverInfo.cost ?? existing.cost,
+            isFork: serverInfo.isFork ?? existing.isFork,
+            serverOrigin: serverOrigin  // Always update origin
         )
     }
 

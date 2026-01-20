@@ -464,6 +464,13 @@ struct ChatView: View {
                 }
             }
         }
+        .onChange(of: viewModel.shouldDismiss) { _, shouldDismiss in
+            // Navigate back when session doesn't exist on server
+            if shouldDismiss {
+                logger.info("Session not found on server, navigating back to dashboard", category: .session)
+                dismiss()
+            }
+        }
     }
 
     /// Pre-fetch models for model picker menu

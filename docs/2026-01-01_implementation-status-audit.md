@@ -291,7 +291,7 @@ This document provides a line-by-line audit of the Complete Feature Inventory ag
 
 | Feature | Status | Implementation Details |
 |---------|--------|------------------------|
-| launchd configuration (macOS) | ⚠️ PARTIAL | Sample plist in plan but not packaged with project. Would need `scripts/install-service.sh`. |
+| launchd configuration (macOS) | ✅ IMPLEMENTED | `./prod install` generates and installs launchd plist dynamically. |
 | systemd configuration (Linux) | ⚠️ PARTIAL | Not provided. Would need service unit file. |
 | Auto-restart on crash | ❌ NOT IMPLEMENTED | No supervisor/restart logic in server code. Relies on external process manager. |
 | Graceful shutdown handling | ✅ IMPLEMENTED | Server handles SIGTERM/SIGINT for cleanup. Closes WebSocket connections gracefully. |

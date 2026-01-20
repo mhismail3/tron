@@ -13,6 +13,9 @@ extension EventStoreManager {
     ) throws {
         let now = ISO8601DateFormatter().string(from: Date())
 
+        // CRITICAL: Tag with current server origin for filtering
+        let serverOrigin = rpcClient.serverOrigin
+
         let session = CachedSession(
             id: sessionId,
             workspaceId: workspaceId,
@@ -31,12 +34,13 @@ extension EventStoreManager {
             lastTurnInputTokens: 0,
             cacheReadTokens: 0,
             cacheCreationTokens: 0,
-            cost: 0
+            cost: 0,
+            serverOrigin: serverOrigin
         )
 
         try eventDB.insertSession(session)
         loadSessions()
-        logger.info("Cached new session: \(sessionId)", category: .session)
+        logger.info("Cached new session: \(sessionId) with origin: \(serverOrigin)", category: .session)
     }
 
     /// Delete a session (local + server)

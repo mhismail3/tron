@@ -524,6 +524,9 @@ struct CachedSession: Identifiable, Codable {
     /// Whether this session is a fork of another session
     var isFork: Bool?
 
+    /// Server origin (host:port) this session was synced from
+    var serverOrigin: String?
+
     var totalTokens: Int { inputTokens + outputTokens }
 
     /// Formatted token counts (e.g., "↓1.2k ↑3.4k")

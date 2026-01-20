@@ -12,15 +12,12 @@
     "postinstall": "node-gyp rebuild --release --directory=node_modules/.bun/better-sqlite3@11.10.0/node_modules/better-sqlite3 2>/dev/null || true",
     "setup": "./scripts/setup.sh",
     "build": "./scripts/build-workspace.sh",
-    "build:prod": "./scripts/build.sh prod",
-    "build:public": "./scripts/build.sh public",
     "test": "vitest run && cd packages/chat-web && bun run test",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "lint": "eslint packages/*/src --ext .ts,.tsx",
     "typecheck": "tsc --noEmit",
     "clean": "rm -rf packages/*/dist packages/*/.turbo packages/*/tsconfig*.tsbuildinfo node_modules/.cache node_modules && rm -f bun.lockb",
-    "dev": "./scripts/dev.sh",
     "dev:server": "cd packages/server && bun run dev",
     "dev:tui": "cd packages/tui && bun run dev",
     "dev:chat": "cd packages/chat-web && bun run dev",
@@ -34,9 +31,7 @@
     "tron:deploy": "./scripts/tron deploy",
     "tron:beta": "./scripts/tron beta",
     "tron:install": "./scripts/tron install",
-    "deploy": "./scripts/tron deploy",
-    "release": "./scripts/build.sh public",
-    "manage": "./scripts/tron-manage"
+    "deploy": "./scripts/tron deploy"
   },
   "devDependencies": {
     "@types/node": "^22.10.1",

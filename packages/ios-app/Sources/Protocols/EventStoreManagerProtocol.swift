@@ -28,6 +28,9 @@ protocol EventStoreManagerProtocol: ObservableObject {
     var eventDB: EventDatabase { get }
     var rpcClient: RPCClient { get }
 
+    /// Update the RPC client (e.g., when server settings change)
+    func updateRPCClient(_ client: RPCClient)
+
     // MARK: - Computed Properties
     var sortedSessions: [CachedSession] { get }
     var activeSession: CachedSession? { get }
@@ -57,7 +60,7 @@ protocol EventStoreManagerProtocol: ObservableObject {
     func syncSessionEvents(sessionId: String) async throws
     func fullSyncSession(_ sessionId: String) async throws
     func updateSessionMetadata(sessionId: String) async throws
-    func serverSessionToCached(_ info: SessionInfo) -> CachedSession
+    func serverSessionToCached(_ info: SessionInfo, serverOrigin: String?) -> CachedSession
     func rawEventToSessionEvent(_ raw: RawEvent) -> SessionEvent
 
     // MARK: - Session Operations (from +Operations extension)

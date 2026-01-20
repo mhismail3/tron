@@ -1,8 +1,17 @@
 import SwiftUI
+import Combine
 
 // MARK: - App State
 
 // NOTE: Uses global `logger` from TronLogger.swift (TronLogger.shared)
+
+/// Notification sent when server settings change
+struct ServerSettingsChanged {
+    let host: String
+    let port: String
+    let useTLS: Bool
+    let serverOrigin: String
+}
 
 @MainActor
 class AppState: ObservableObject {
@@ -20,6 +29,9 @@ class AppState: ObservableObject {
 
     private var _rpcClient: RPCClient?
     private var _skillStore: SkillStore?
+
+    /// Publisher for server settings changes
+    let serverSettingsChanged = PassthroughSubject<ServerSettingsChanged, Never>()
 
     var rpcClient: RPCClient {
         if let client = _rpcClient {
@@ -64,6 +76,22 @@ class AppState: ObservableObject {
     }
 
     func updateServerSettings(host: String, port: String, useTLS: Bool) {
+        // Skip if nothing changed
+        guard host != serverHost || port != serverPort || useTLS != self.useTLS else {
+            logger.debug("Server settings unchanged, skipping update", category: .general)
+            return
+        }
+
+        logger.info("Server settings changing: \(serverHost):\(serverPort) -> \(host):\(port)", category: .general)
+
+        // Disconnect old client
+        if let oldClient = _rpcClient {
+            Task {
+                await oldClient.disconnect()
+            }
+        }
+
+        // Update stored settings
         serverHost = host
         serverPort = port
         self.useTLS = useTLS
@@ -74,5 +102,21 @@ class AppState: ObservableObject {
 
         // Update skill store with new client
         _skillStore?.configure(rpcClient: newClient)
+
+        // Notify subscribers of the change
+        let change = ServerSettingsChanged(
+            host: host,
+            port: port,
+            useTLS: useTLS,
+            serverOrigin: newClient.serverOrigin
+        )
+        serverSettingsChanged.send(change)
+
+        logger.info("Server settings updated, new origin: \(newClient.serverOrigin)", category: .general)
+    }
+
+    /// Current server origin string (host:port)
+    var currentServerOrigin: String {
+        "\(serverHost):\(serverPort)"
     }
 }

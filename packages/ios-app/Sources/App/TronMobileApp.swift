@@ -48,6 +48,9 @@ struct TronMobileApp: App {
                     )
                     manager.initialize()
 
+                    // Subscribe to server settings changes for live reconnection
+                    manager.subscribeToServerChanges(appState.serverSettingsChanged, appState: appState)
+
                     // Repair any duplicate events from previous sessions
                     // This fixes the race condition between local caching and server sync
                     manager.repairDuplicates()

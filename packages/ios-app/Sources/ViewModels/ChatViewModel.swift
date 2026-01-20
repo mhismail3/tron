@@ -19,6 +19,8 @@ class ChatViewModel: ObservableObject {
     @Published var showSettings = false
     @Published var errorMessage: String?
     @Published var showError = false
+    /// Set to true when the session doesn't exist on server and view should navigate back
+    @Published var shouldDismiss = false
     @Published var selectedImages: [PhotosPickerItem] = []
     @Published var attachments: [Attachment] = []
     @Published var thinkingText = ""

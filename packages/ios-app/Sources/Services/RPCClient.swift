@@ -75,6 +75,13 @@ class RPCClient: ObservableObject {
 
     private let serverURL: URL
 
+    /// Server origin string (host:port) for tagging sessions
+    var serverOrigin: String {
+        let host = serverURL.host ?? "localhost"
+        let port = serverURL.port ?? 8080
+        return "\(host):\(port)"
+    }
+
     init(serverURL: URL) {
         self.serverURL = serverURL
     }

@@ -143,6 +143,16 @@ class EventDatabase: ObservableObject {
             // Column already exists, ignore
         }
 
+        // Migration: Add server_origin for environment filtering
+        do {
+            try execute("ALTER TABLE sessions ADD COLUMN server_origin TEXT")
+        } catch {
+            // Column already exists, ignore
+        }
+
+        // Index for filtering by origin
+        try execute("CREATE INDEX IF NOT EXISTS idx_sessions_origin ON sessions(server_origin)")
+
         // Migration: Remove provider, status columns; rename model to latest_model
         // Check if we need migration by looking for provider column
         if try columnExists(table: "sessions", column: "provider") {
@@ -611,8 +621,8 @@ class EventDatabase: ObservableObject {
             (id, workspace_id, root_event_id, head_event_id, title, latest_model,
              working_directory, created_at, last_activity_at, ended_at, event_count,
              message_count, input_tokens, output_tokens, last_turn_input_tokens,
-             cache_read_tokens, cache_creation_tokens, cost, is_fork)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             cache_read_tokens, cache_creation_tokens, cost, is_fork, server_origin)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """
 
         var stmt: OpaquePointer?
@@ -640,6 +650,7 @@ class EventDatabase: ObservableObject {
         sqlite3_bind_int(stmt, 17, Int32(session.cacheCreationTokens))
         sqlite3_bind_double(stmt, 18, session.cost)
         sqlite3_bind_int(stmt, 19, Int32(session.isFork == true ? 1 : 0))
+        bindOptionalText(stmt, 20, session.serverOrigin)
 
         guard sqlite3_step(stmt) == SQLITE_DONE else {
             throw EventDatabaseError.insertFailed(errorMessage)
@@ -651,7 +662,7 @@ class EventDatabase: ObservableObject {
             SELECT id, workspace_id, root_event_id, head_event_id, title, latest_model,
                    working_directory, created_at, last_activity_at, ended_at, event_count,
                    message_count, input_tokens, output_tokens, last_turn_input_tokens,
-                   cache_read_tokens, cache_creation_tokens, cost, is_fork
+                   cache_read_tokens, cache_creation_tokens, cost, is_fork, server_origin
             FROM sessions WHERE id = ?
         """
 
@@ -675,7 +686,7 @@ class EventDatabase: ObservableObject {
             SELECT id, workspace_id, root_event_id, head_event_id, title, latest_model,
                    working_directory, created_at, last_activity_at, ended_at, event_count,
                    message_count, input_tokens, output_tokens, last_turn_input_tokens,
-                   cache_read_tokens, cache_creation_tokens, cost, is_fork
+                   cache_read_tokens, cache_creation_tokens, cost, is_fork, server_origin
             FROM sessions ORDER BY last_activity_at DESC
         """
 
@@ -1069,6 +1080,7 @@ class EventDatabase: ObservableObject {
         let cacheCreationTokens = Int(sqlite3_column_int(stmt, 16))
         let cost = sqlite3_column_double(stmt, 17)
         let isFork = sqlite3_column_int(stmt, 18) != 0
+        let serverOrigin = getOptionalText(stmt, 19)
 
         return CachedSession(
             id: id,
@@ -1089,8 +1101,96 @@ class EventDatabase: ObservableObject {
             cacheReadTokens: cacheReadTokens,
             cacheCreationTokens: cacheCreationTokens,
             cost: cost,
-            isFork: isFork
+            isFork: isFork,
+            serverOrigin: serverOrigin
         )
+    }
+
+    /// Get sessions filtered by server origin (STRICT match)
+    /// - Parameter origin: The server origin (host:port) to filter by. If nil, returns all sessions.
+    /// - Returns: Sessions matching the origin exactly. Sessions with NULL or different origin are EXCLUDED.
+    func getSessionsByOrigin(_ origin: String?) throws -> [CachedSession] {
+        let sql: String
+        if origin != nil {
+            // STRICT match: Only sessions from this specific server
+            // Sessions with NULL origin (legacy) or different origin are EXCLUDED
+            // This prevents cross-server session leakage
+            sql = """
+                SELECT id, workspace_id, root_event_id, head_event_id, title, latest_model,
+                       working_directory, created_at, last_activity_at, ended_at, event_count,
+                       message_count, input_tokens, output_tokens, last_turn_input_tokens,
+                       cache_read_tokens, cache_creation_tokens, cost, is_fork, server_origin
+                FROM sessions
+                WHERE server_origin = ?
+                ORDER BY last_activity_at DESC
+            """
+        } else {
+            // No filter - return all sessions (for debugging/admin views)
+            sql = """
+                SELECT id, workspace_id, root_event_id, head_event_id, title, latest_model,
+                       working_directory, created_at, last_activity_at, ended_at, event_count,
+                       message_count, input_tokens, output_tokens, last_turn_input_tokens,
+                       cache_read_tokens, cache_creation_tokens, cost, is_fork, server_origin
+                FROM sessions ORDER BY last_activity_at DESC
+            """
+        }
+
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+            throw EventDatabaseError.prepareFailed(errorMessage)
+        }
+        defer { sqlite3_finalize(stmt) }
+
+        if let origin = origin {
+            sqlite3_bind_text(stmt, 1, origin, -1, SQLITE_TRANSIENT)
+        }
+
+        var sessions: [CachedSession] = []
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            if let session = parseSessionRow(stmt) {
+                sessions.append(session)
+            }
+        }
+
+        return sessions
+    }
+
+    /// Get the server origin for an existing session
+    /// - Parameter sessionId: The session ID to check
+    /// - Returns: The server origin string, or nil if session has NULL origin (legacy) or doesn't exist
+    /// - Note: Use `sessionExists()` first if you need to distinguish between "doesn't exist" and "exists with NULL origin"
+    func getSessionOrigin(_ sessionId: String) throws -> String? {
+        let sql = "SELECT server_origin FROM sessions WHERE id = ?"
+
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+            throw EventDatabaseError.prepareFailed(errorMessage)
+        }
+        defer { sqlite3_finalize(stmt) }
+
+        sqlite3_bind_text(stmt, 1, sessionId, -1, SQLITE_TRANSIENT)
+
+        if sqlite3_step(stmt) == SQLITE_ROW {
+            // Session exists - return origin (may be nil for legacy sessions)
+            return getOptionalText(stmt, 0)
+        }
+        // Session doesn't exist
+        return nil
+    }
+
+    /// Check if a session exists locally
+    func sessionExists(_ sessionId: String) throws -> Bool {
+        let sql = "SELECT 1 FROM sessions WHERE id = ? LIMIT 1"
+
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+            throw EventDatabaseError.prepareFailed(errorMessage)
+        }
+        defer { sqlite3_finalize(stmt) }
+
+        sqlite3_bind_text(stmt, 1, sessionId, -1, SQLITE_TRANSIENT)
+
+        return sqlite3_step(stmt) == SQLITE_ROW
     }
 }
 

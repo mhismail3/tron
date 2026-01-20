@@ -1,10 +1,37 @@
 #!/bin/bash
-# Tron service manager
-# Manages production service (launchd) and queries logs
+# tron - Unified CLI for Tron development and deployment
+#
+# Usage: tron <command> [options]
+#
+# Commands:
+#   dev        Build, test, and start beta development server
+#   deploy     Build, test, and deploy to production
+#   install    Initial production setup (launchd + CLI)
+#   rollback   Restore to last deployed commit
+#   setup      First-time project environment setup
+#   status     Show service status and health
+#   start      Start production service
+#   stop       Stop production service
+#   restart    Restart production service
+#   logs       Query database logs
+#   errors     Show recent errors
+#   uninstall  Remove service (preserves data)
+#   help       Show this help message
+#
+# Examples:
+#   tron dev                  # Build, test, start beta server
+#   tron deploy               # Deploy to production
+#   tron logs -l error -n 20  # Show last 20 errors
+#   tron status               # Check service health
 
 set -e
 
-# Resolve symlinks to get the real script path
+#=============================================================================
+# SECTION 1: CONFIGURATION
+# All constants, paths, and environment defaults
+#=============================================================================
+
+# Resolve symlinks to get the real script location
 SOURCE="${BASH_SOURCE[0]}"
 while [ -L "$SOURCE" ]; do
     DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
@@ -14,20 +41,35 @@ done
 SCRIPT_DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 
-# Service configuration
-PLIST_NAME="com.tron.server"
-PLIST_PATH="$HOME/Library/LaunchAgents/$PLIST_NAME.plist"
+# Data directories
 TRON_HOME="${TRON_DATA_DIR:-$HOME/.tron}"
 INSTALL_DIR="$TRON_HOME/app"
 BIN_DIR="$HOME/.local/bin"
-PROD_LOG_FILE="$INSTALL_DIR/server.log"
-DEPLOYED_COMMIT_FILE="$INSTALL_DIR/deployed-commit"
+
+# Service configuration
+PLIST_NAME="com.tron.server"
+PLIST_PATH="$HOME/Library/LaunchAgents/$PLIST_NAME.plist"
 
 # Port configuration
 PROD_WS_PORT=8080
 PROD_HEALTH_PORT=8081
 BETA_WS_PORT=8082
 BETA_HEALTH_PORT=8083
+
+# Build configuration
+PYTHON_PATH="/opt/homebrew/bin/python3"
+if [ ! -x "$PYTHON_PATH" ]; then
+    PYTHON_PATH="$(which python3 2>/dev/null || echo "/usr/bin/python3")"
+fi
+
+# File paths
+PROD_LOG_FILE="$INSTALL_DIR/server.log"
+DEPLOYED_COMMIT_FILE="$INSTALL_DIR/deployed-commit"
+
+#=============================================================================
+# SECTION 2: UTILITY FUNCTIONS
+# Colors, printing, common helpers
+#=============================================================================
 
 # Colors
 RED='\033[0;31m'
@@ -39,135 +81,321 @@ BOLD='\033[1m'
 DIM='\033[2m'
 NC='\033[0m'
 
-print_status() {
-    echo -e "${BLUE}▸${NC} $1"
+# Print helpers
+print_status()  { echo -e "${BLUE}▸${NC} $1"; }
+print_success() { echo -e "${GREEN}✓${NC} $1"; }
+print_error()   { echo -e "${RED}✗${NC} $1"; }
+print_warning() { echo -e "${YELLOW}!${NC} $1"; }
+print_header()  { echo -e "\n${CYAN}$1${NC}\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"; }
+
+#-----------------------------------------------------------------------------
+# require_project_dir - Verify we're in a valid project directory
+#
+# Checks that PROJECT_DIR contains package.json. Used by commands that
+# need access to the source code (dev, deploy, setup).
+#-----------------------------------------------------------------------------
+require_project_dir() {
+    if [ ! -f "$PROJECT_DIR/package.json" ]; then
+        print_error "Not in project directory: $PROJECT_DIR"
+        exit 1
+    fi
 }
 
-print_success() {
-    echo -e "${GREEN}✓${NC} $1"
+#-----------------------------------------------------------------------------
+# require_installed - Verify production is installed
+#
+# Checks that the launchd plist exists. Used by commands that operate
+# on the production service (deploy, rollback).
+#-----------------------------------------------------------------------------
+require_installed() {
+    if [ ! -f "$PLIST_PATH" ]; then
+        print_error "Tron not installed. Run: tron install"
+        exit 1
+    fi
 }
 
-print_error() {
-    echo -e "${RED}✗${NC} $1"
+#-----------------------------------------------------------------------------
+# confirm_action - Prompt user for y/N confirmation
+#
+# Usage: confirm_action "Are you sure?" || exit 1
+# Returns: 0 if user confirms (y/Y), 1 otherwise
+#-----------------------------------------------------------------------------
+confirm_action() {
+    read -p "$1 (y/N) " -n 1 -r
+    echo
+    [[ $REPLY =~ ^[Yy]$ ]]
 }
 
-print_warning() {
-    echo -e "${YELLOW}!${NC} $1"
+#-----------------------------------------------------------------------------
+# get_node_path - Find the Node.js binary
+#
+# Prefers nvm node if available, falls back to system node.
+# Returns: Path to node binary via stdout
+#-----------------------------------------------------------------------------
+get_node_path() {
+    which node
 }
 
-# Check if production service is running
-is_running() {
+#=============================================================================
+# SECTION 3: BUILD FUNCTIONS
+# Workspace building, production bundling, native module handling
+#=============================================================================
+
+#-----------------------------------------------------------------------------
+# build_workspace - Build all packages in dependency order
+#
+# Builds packages sequentially to respect dependencies:
+#   1. @tron/core (base types and utilities)
+#   2. @tron/server (depends on core)
+#   3. @tron/tui (depends on core)
+#   4. @tron/chat-web (depends on core)
+#
+# Usage: build_workspace
+# Returns: 0 on success, exits on failure
+#-----------------------------------------------------------------------------
+build_workspace() {
+    print_status "Building workspace packages..."
+
+    # Ensure bun is in PATH
+    export PATH="$HOME/.bun/bin:$PATH"
+
+    (cd "$PROJECT_DIR/packages/core" && bun run build) || { print_error "Failed to build @tron/core"; exit 1; }
+    (cd "$PROJECT_DIR/packages/server" && bun run build) || { print_error "Failed to build @tron/server"; exit 1; }
+    (cd "$PROJECT_DIR/packages/tui" && bun run build) || { print_error "Failed to build @tron/tui"; exit 1; }
+    (cd "$PROJECT_DIR/packages/chat-web" && bun run build) || { print_error "Failed to build @tron/chat-web"; exit 1; }
+
+    print_success "Workspace built successfully"
+}
+
+#-----------------------------------------------------------------------------
+# build_production - Create production bundle with esbuild
+#
+# Creates a single bundled JS file with all dependencies. External native
+# modules (better-sqlite3, playwright) are copied to node_modules/.
+#
+# Output:
+#   dist/prod/index.js         - Minified bundle
+#   dist/prod/node_modules/    - Native dependencies
+#   dist/prod/prompts/         - Runtime assets
+#
+# Usage: build_production
+# Returns: 0 on success, exits on failure
+#-----------------------------------------------------------------------------
+build_production() {
+    print_status "Building production bundle..."
+
+    cd "$PROJECT_DIR"
+
+    # Build TypeScript first
+    build_workspace
+
+    # Clean output directory
+    rm -rf dist/prod
+    mkdir -p dist/prod/node_modules
+
+    # Bundle with esbuild
+    # External: native modules that can't be bundled (require .node binaries)
+    local BANNER='const _importMetaUrl = require("url").pathToFileURL(__filename).href;'
+
+    ./node_modules/.bin/esbuild packages/server/dist/index.js \
+        --bundle \
+        --platform=node \
+        --target=node20 \
+        --format=cjs \
+        --outfile=dist/prod/index.js \
+        --external:playwright-core \
+        --external:better-sqlite3 \
+        --metafile=dist/prod/meta.json \
+        --banner:js="$BANNER" \
+        --define:import.meta.url=_importMetaUrl \
+        --minify
+
+    # Copy runtime assets
+    if [ -d "packages/core/dist/providers/prompts" ]; then
+        cp -r packages/core/dist/providers/prompts dist/prod/
+    fi
+
+    # Copy external native dependencies
+    copy_native_dependency "playwright-core"
+    copy_native_dependency "better-sqlite3"
+    copy_native_dependency "bindings"
+    copy_native_dependency "file-uri-to-path"
+
+    # Create minimal package.json
+    cat > dist/prod/package.json << 'EOF'
+{
+  "name": "tron-server-prod",
+  "version": "1.0.0",
+  "main": "index.js"
+}
+EOF
+
+    local bundle_size=$(ls -lh dist/prod/index.js | awk '{print $5}')
+    local total_size=$(du -sh dist/prod | awk '{print $1}')
+    print_success "Production build complete (bundle: $bundle_size, total: $total_size)"
+}
+
+#-----------------------------------------------------------------------------
+# copy_native_dependency - Copy a native dependency to production bundle
+#
+# Searches for the package in node_modules or bun's cache and copies
+# it to the production output directory.
+#
+# Usage: copy_native_dependency "package-name"
+#-----------------------------------------------------------------------------
+copy_native_dependency() {
+    local pkg_name="$1"
+    local pkg_path=""
+
+    if [ -d "node_modules/$pkg_name" ]; then
+        pkg_path="node_modules/$pkg_name"
+    elif [ -d "node_modules/.bun" ]; then
+        pkg_path=$(find node_modules/.bun -type d -name "$pkg_name" | grep "node_modules/$pkg_name$" | head -1)
+    fi
+
+    if [ -n "$pkg_path" ] && [ -d "$pkg_path" ]; then
+        cp -r "$pkg_path" dist/prod/node_modules/
+    fi
+}
+
+#-----------------------------------------------------------------------------
+# check_native_module - Test if better-sqlite3 is compatible
+#
+# Attempts to require better-sqlite3 and checks for NODE_MODULE_VERSION
+# mismatch errors that occur when the native module was compiled for
+# a different Node.js version.
+#
+# Usage: check_native_module
+# Returns: 0 if compatible, 1 if needs rebuild
+#-----------------------------------------------------------------------------
+check_native_module() {
+    cd "$PROJECT_DIR"
+    # Test from packages/core where better-sqlite3 is actually installed
+    if (cd packages/core && node -e "require('better-sqlite3')" 2>&1) | grep -q "NODE_MODULE_VERSION"; then
+        return 1
+    fi
+    (cd packages/core && node -e "require('better-sqlite3')" 2>/dev/null)
+    return $?
+}
+
+#-----------------------------------------------------------------------------
+# rebuild_native_modules - Rebuild better-sqlite3 for target Node.js
+#
+# Rebuilds the native module when there's a NODE_MODULE_VERSION mismatch.
+# This happens when the module was compiled for a different Node.js than
+# what's being used to run it.
+#
+# Usage: rebuild_native_modules [node_path] [install_dir]
+# Args:
+#   node_path   - Path to target Node.js binary (default: current)
+#   install_dir - Directory containing node_modules (default: PROJECT_DIR)
+#-----------------------------------------------------------------------------
+rebuild_native_modules() {
+    local target_node="${1:-$(which node)}"
+    local install_dir="${2:-$PROJECT_DIR}"
+
+    local sqlite_dir="$install_dir/node_modules/better-sqlite3"
+    if [ ! -d "$sqlite_dir" ]; then
+        # Check bun's package cache
+        sqlite_dir="$install_dir/node_modules/.bun/better-sqlite3@"*"/node_modules/better-sqlite3"
+        sqlite_dir=$(echo $sqlite_dir | head -1)
+        if [ ! -d "$sqlite_dir" ]; then
+            return 0  # No better-sqlite3 to rebuild
+        fi
+    fi
+
+    print_status "Rebuilding better-sqlite3 for $(basename "$(dirname "$(dirname "$target_node")")")..."
+
+    local node_bin_dir="$(dirname "$target_node")"
+
+    (
+        cd "$sqlite_dir"
+        rm -rf build 2>/dev/null || true
+        PATH="$node_bin_dir:/opt/homebrew/bin:/usr/bin:/bin" \
+        PYTHON="$PYTHON_PATH" \
+        "$node_bin_dir/npx" node-gyp rebuild --release 2>&1 | tail -5
+    )
+
+    if [ -f "$sqlite_dir/build/Release/better_sqlite3.node" ]; then
+        print_success "Native module rebuilt"
+    else
+        print_error "Failed to rebuild native module"
+        return 1
+    fi
+}
+
+#-----------------------------------------------------------------------------
+# run_tests - Run the test suite
+#
+# Executes bun test and returns the result. Used by dev and deploy
+# to verify code before running/deploying.
+#
+# Usage: run_tests
+# Returns: 0 on success, 1 on failure
+#-----------------------------------------------------------------------------
+run_tests() {
+    print_status "Running tests..."
+    cd "$PROJECT_DIR"
+    if bun run test 2>&1; then
+        print_success "Tests passed"
+        return 0
+    else
+        return 1
+    fi
+}
+
+#=============================================================================
+# SECTION 4: SERVICE FUNCTIONS
+# launchd management, health checks, port detection
+#=============================================================================
+
+#-----------------------------------------------------------------------------
+# service_is_running - Check if production service is running
+#
+# Usage: if service_is_running; then ...
+# Returns: 0 if running, 1 if not
+#-----------------------------------------------------------------------------
+service_is_running() {
     launchctl list 2>/dev/null | grep -q "$PLIST_NAME"
 }
 
-# Get PID of running service (from port listener)
-get_pid() {
+#-----------------------------------------------------------------------------
+# get_service_pid - Get PID of production service from port listener
+#
+# Usage: pid=$(get_service_pid)
+# Returns: PID via stdout, empty if not found
+#-----------------------------------------------------------------------------
+get_service_pid() {
     lsof -t -i :$PROD_WS_PORT -sTCP:LISTEN 2>/dev/null || true
 }
 
-# Check if beta is running (by checking if port is in use)
-is_beta_running() {
-    lsof -i :$BETA_WS_PORT -sTCP:LISTEN >/dev/null 2>&1
-}
-
-# Get beta PID (from port listener)
+#-----------------------------------------------------------------------------
+# get_beta_pid - Get PID of beta server from port listener
+#
+# Usage: pid=$(get_beta_pid)
+# Returns: PID via stdout, empty if not found
+#-----------------------------------------------------------------------------
 get_beta_pid() {
     lsof -t -i :$BETA_WS_PORT -sTCP:LISTEN 2>/dev/null || true
 }
 
-cmd_status() {
-    echo ""
-    echo -e "${CYAN}Tron Service Status${NC}"
-    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-
-    # Production status
-    if is_running; then
-        local pid=$(get_pid)
-        print_success "Production: ${GREEN}RUNNING${NC} (PID: ${pid:-unknown})"
-        echo "  WebSocket: ws://localhost:$PROD_WS_PORT/ws"
-        echo "  Health:    http://localhost:$PROD_HEALTH_PORT/health"
-
-        # Show uptime if we can find the process
-        if [ -n "$pid" ] && [ "$pid" != "-" ]; then
-            local uptime=$(ps -o etime= -p "$pid" 2>/dev/null | tr -d ' ')
-            if [ -n "$uptime" ]; then
-                echo "  Uptime:    $uptime"
-            fi
-        fi
-
-        # Check health endpoint
-        local health_response
-        health_response=$(curl -s -o /dev/null -w "%{http_code}" "http://localhost:$PROD_HEALTH_PORT/health" 2>/dev/null || echo "000")
-        if [ "$health_response" = "200" ]; then
-            echo -e "  Status:    ${GREEN}Healthy${NC}"
-        else
-            echo -e "  Status:    ${YELLOW}Not responding (HTTP $health_response)${NC}"
-        fi
-
-        # Show deployed commit
-        if [ -f "$DEPLOYED_COMMIT_FILE" ]; then
-            local deployed_commit=$(cat "$DEPLOYED_COMMIT_FILE")
-            local commit_msg=$(cd "$PROJECT_DIR" && git log -1 --format="%s" "$deployed_commit" 2>/dev/null | head -c 50)
-            echo "  Deployed:  ${deployed_commit:0:7} - $commit_msg"
-        fi
-
-        # Show install location
-        if [ -d "$INSTALL_DIR" ]; then
-            echo "  Install:   $INSTALL_DIR"
-        fi
-    else
-        print_warning "Production: ${YELLOW}STOPPED${NC}"
-
-        # Still show deployed commit if available
-        if [ -f "$DEPLOYED_COMMIT_FILE" ]; then
-            local deployed_commit=$(cat "$DEPLOYED_COMMIT_FILE")
-            echo "  Last deployed: ${deployed_commit:0:7}"
-        fi
-
-        # Show install location if exists
-        if [ -d "$INSTALL_DIR" ]; then
-            echo "  Install:   $INSTALL_DIR"
-        fi
-    fi
-
-    echo ""
-
-    # Beta status
-    local beta_pid=$(get_beta_pid)
-    if [ -n "$beta_pid" ]; then
-        print_success "Beta: ${GREEN}RUNNING${NC} (PID: $beta_pid)"
-        echo "  WebSocket: ws://localhost:$BETA_WS_PORT/ws"
-        echo "  Health:    http://localhost:$BETA_HEALTH_PORT/health"
-
-        # Check beta health
-        local beta_health
-        beta_health=$(curl -s -o /dev/null -w "%{http_code}" "http://localhost:$BETA_HEALTH_PORT/health" 2>/dev/null || echo "000")
-        if [ "$beta_health" = "200" ]; then
-            echo -e "  Status:    ${GREEN}Healthy${NC}"
-        else
-            echo -e "  Status:    ${YELLOW}Not responding (HTTP $beta_health)${NC}"
-        fi
-    else
-        echo -e "  Beta: not running"
-    fi
-
-    echo ""
-
-    # Show log info
-    echo -e "${DIM}Logs:${NC}"
-    echo -e "  ${DIM}Query: tron logs [-l level] [-q search] [-s session]${NC}"
-    if [ -f "$PROD_LOG_FILE" ]; then
-        echo -e "  ${DIM}File:  $PROD_LOG_FILE${NC}"
-    fi
-    echo ""
+#-----------------------------------------------------------------------------
+# is_beta_running - Check if beta server is running
+#
+# Usage: if is_beta_running; then ...
+# Returns: 0 if running, 1 if not
+#-----------------------------------------------------------------------------
+is_beta_running() {
+    lsof -i :$BETA_WS_PORT -sTCP:LISTEN >/dev/null 2>&1
 }
 
-cmd_start() {
-    if is_running; then
-        print_warning "Production service is already running"
-        return 0
-    fi
-
+#-----------------------------------------------------------------------------
+# service_start - Start the production service via launchctl
+#
+# Usage: service_start
+# Returns: 0 on success, 1 on failure
+#-----------------------------------------------------------------------------
+service_start() {
     if [ ! -f "$PLIST_PATH" ]; then
         print_error "Service not installed. Run: tron install"
         return 1
@@ -177,8 +405,9 @@ cmd_start() {
     launchctl load "$PLIST_PATH"
     sleep 2
 
-    if is_running; then
-        print_success "Production service started"
+    if service_is_running; then
+        local pid=$(get_service_pid)
+        print_success "Production service started (PID: ${pid:-unknown})"
         echo "  WebSocket: ws://localhost:$PROD_WS_PORT/ws"
         echo "  Health:    http://localhost:$PROD_HEALTH_PORT/health"
     else
@@ -187,8 +416,14 @@ cmd_start() {
     fi
 }
 
-cmd_stop() {
-    if ! is_running; then
+#-----------------------------------------------------------------------------
+# service_stop - Stop the production service via launchctl
+#
+# Usage: service_stop
+# Returns: 0 on success, 1 on failure
+#-----------------------------------------------------------------------------
+service_stop() {
+    if ! service_is_running; then
         print_warning "Production service is not running"
         return 0
     fi
@@ -197,7 +432,7 @@ cmd_stop() {
     launchctl unload "$PLIST_PATH"
     sleep 1
 
-    if ! is_running; then
+    if ! service_is_running; then
         print_success "Production service stopped"
     else
         print_error "Failed to stop service"
@@ -205,14 +440,117 @@ cmd_stop() {
     fi
 }
 
-cmd_restart() {
-    print_status "Restarting production service..."
-    cmd_stop 2>/dev/null || true
-    sleep 1
-    cmd_start
+#-----------------------------------------------------------------------------
+# health_check - Check health endpoint and return status
+#
+# Usage: health_check [port]
+# Args:
+#   port - Health port to check (default: PROD_HEALTH_PORT)
+# Returns: 0 if healthy, 1 if not
+#-----------------------------------------------------------------------------
+health_check() {
+    local port="${1:-$PROD_HEALTH_PORT}"
+    local response
+    response=$(curl -s -o /dev/null -w "%{http_code}" "http://localhost:$port/health" 2>/dev/null || echo "000")
+    [ "$response" = "200" ]
 }
 
-cmd_logs() {
+#-----------------------------------------------------------------------------
+# create_launchd_plist - Generate the launchd plist file
+#
+# Creates the plist with proper environment variables, working directory,
+# and restart policies for the production server.
+#
+# Usage: create_launchd_plist
+#-----------------------------------------------------------------------------
+create_launchd_plist() {
+    local node_path=$(get_node_path)
+
+    cat > "$PLIST_PATH" << PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>$PLIST_NAME</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/sh</string>
+        <string>-c</string>
+        <string>exec "$node_path" "$INSTALL_DIR/index.js" >> "$PROD_LOG_FILE" 2>&amp;1</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>$INSTALL_DIR</string>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <key>KeepAlive</key>
+    <dict>
+        <key>SuccessfulExit</key>
+        <false/>
+        <key>Crashed</key>
+        <true/>
+    </dict>
+
+    <key>ThrottleInterval</key>
+    <integer>10</integer>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>NODE_ENV</key>
+        <string>production</string>
+        <key>TRON_BUILD_TIER</key>
+        <string>prod</string>
+        <key>HOME</key>
+        <string>$HOME</string>
+        <key>PATH</key>
+        <string>$(dirname "$node_path"):/usr/local/bin:/usr/bin:/bin</string>
+        <key>TRON_DATA_DIR</key>
+        <string>$TRON_HOME</string>
+        <key>TRON_WS_PORT</key>
+        <string>$PROD_WS_PORT</string>
+        <key>TRON_HEALTH_PORT</key>
+        <string>$PROD_HEALTH_PORT</string>
+        <key>LOG_LEVEL</key>
+        <string>info</string>
+    </dict>
+
+    <key>SoftResourceLimits</key>
+    <dict>
+        <key>NumberOfFiles</key>
+        <integer>4096</integer>
+    </dict>
+</dict>
+</plist>
+PLIST
+}
+
+#=============================================================================
+# SECTION 5: LOG FUNCTIONS
+# Database log queries, file log tailing, error display
+#=============================================================================
+
+#-----------------------------------------------------------------------------
+# query_logs - Query logs from SQLite database
+#
+# Supports filtering by level, session, search text, and pagination.
+# Results can be output to terminal (with colors) or file (plain text).
+#
+# Usage: query_logs [options] [tier]
+# Options:
+#   -l, --level LEVEL    Filter by minimum level (trace/debug/info/warn/error/fatal)
+#   -n, --limit N        Number of logs to show (default: 50)
+#   -o, --output FILE    Write output to file
+#   -s, --session ID     Filter by session ID
+#   -q, --search TEXT    Full-text search on messages
+#   -t, --tail           Tail file logs instead
+# Args:
+#   tier - prod or beta (default: prod)
+#-----------------------------------------------------------------------------
+query_logs() {
     local tier="prod"
     local level=""
     local output=""
@@ -224,34 +562,13 @@ cmd_logs() {
     # Parse arguments
     while [[ $# -gt 0 ]]; do
         case "$1" in
-            -l|--level)
-                level="$2"
-                shift 2
-                ;;
-            -o|--output)
-                output="$2"
-                shift 2
-                ;;
-            -n|--limit)
-                limit="$2"
-                shift 2
-                ;;
-            -t|--tail)
-                tail_mode=true
-                shift
-                ;;
-            -s|--session)
-                session="$2"
-                shift 2
-                ;;
-            -q|--search)
-                search="$2"
-                shift 2
-                ;;
-            beta|prod)
-                tier="$1"
-                shift
-                ;;
+            -l|--level)   level="$2"; shift 2 ;;
+            -o|--output)  output="$2"; shift 2 ;;
+            -n|--limit)   limit="$2"; shift 2 ;;
+            -t|--tail)    tail_mode=true; shift ;;
+            -s|--session) session="$2"; shift 2 ;;
+            -q|--search)  search="$2"; shift 2 ;;
+            beta|prod)    tier="$1"; shift ;;
             -h|--help)
                 echo ""
                 echo -e "${CYAN}tron logs${NC} - Query database logs"
@@ -265,21 +582,17 @@ cmd_logs() {
                 echo "  -s, --session ID     Filter by session ID"
                 echo "  -q, --search TEXT    Search log messages (FTS)"
                 echo "  -t, --tail           Tail file logs instead of querying database"
-                echo "  -h, --help           Show this help"
                 echo ""
                 echo "Examples:"
                 echo "  tron logs                     # Latest 50 logs"
                 echo "  tron logs -l error            # Only errors"
                 echo "  tron logs -l warn -n 100      # Last 100 warnings+"
-                echo "  tron logs -o errors.txt -l error"
                 echo "  tron logs -t                  # Tail file logs"
                 echo "  tron logs beta -l info        # Beta database logs"
                 echo ""
                 return 0
                 ;;
-            *)
-                shift
-                ;;
+            *) shift ;;
         esac
     done
 
@@ -289,7 +602,6 @@ cmd_logs() {
             print_error "Log file not found: $PROD_LOG_FILE"
             return 1
         fi
-
         echo -e "${BLUE}Tailing prod log${NC}"
         echo -e "${DIM}$PROD_LOG_FILE${NC}"
         echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
@@ -297,15 +609,13 @@ cmd_logs() {
         return 0
     fi
 
-    # Database mode - query SQLite
+    # Database mode
     local db_path="$TRON_HOME/db/prod.db"
-    if [ "$tier" = "beta" ]; then
-        db_path="$TRON_HOME/db/beta.db"
-    fi
+    [ "$tier" = "beta" ] && db_path="$TRON_HOME/db/beta.db"
 
     if [ ! -f "$db_path" ]; then
         print_error "Database not found: $db_path"
-        echo "The server may not have been started yet, or no logs have been written."
+        echo "The server may not have been started yet."
         return 1
     fi
 
@@ -314,12 +624,10 @@ cmd_logs() {
     table_exists=$(sqlite3 "$db_path" "SELECT name FROM sqlite_master WHERE type='table' AND name='logs';" 2>/dev/null)
     if [ -z "$table_exists" ]; then
         print_error "Logs table not found in database"
-        echo "The server may need to be restarted with the updated schema."
         return 1
     fi
 
     # Build SQL query
-    local where_clause=""
     local conditions=()
 
     if [ -n "$level" ]; then
@@ -332,25 +640,22 @@ cmd_logs() {
             error) level_num=50 ;;
             fatal) level_num=60 ;;
             *)
-                print_error "Invalid level: $level"
-                echo "Valid levels: trace, debug, info, warn, error, fatal"
+                print_error "Invalid level: $level (valid: trace/debug/info/warn/error/fatal)"
                 return 1
                 ;;
         esac
         conditions+=("level_num >= $level_num")
     fi
 
-    if [ -n "$session" ]; then
-        conditions+=("session_id LIKE '%$session%'")
-    fi
+    [ -n "$session" ] && conditions+=("session_id LIKE '%$session%'")
 
+    local where_clause=""
     if [ ${#conditions[@]} -gt 0 ]; then
         where_clause="WHERE $(IFS=' AND '; echo "${conditions[*]}")"
     fi
 
     local sql
     if [ -n "$search" ]; then
-        # Use FTS search
         sql="SELECT l.timestamp, l.level, l.component, l.message, l.session_id, l.error_message
              FROM logs l
              JOIN logs_fts f ON l.id = f.log_id
@@ -366,7 +671,6 @@ cmd_logs() {
              LIMIT $limit"
     fi
 
-    # Execute query
     local result
     result=$(sqlite3 -separator '|' "$db_path" "$sql" 2>&1)
 
@@ -382,45 +686,30 @@ cmd_logs() {
 
     # Output
     if [ -n "$output" ]; then
-        # Write to file (plain text, no colors)
         echo "$result" | while IFS='|' read -r ts lvl comp msg sess err; do
             local line="${ts} ${lvl} [${comp}] ${msg}"
-            if [ -n "$sess" ]; then
-                line="$line (${sess})"
-            fi
-            if [ -n "$err" ]; then
-                line="$line | Error: $err"
-            fi
+            [ -n "$sess" ] && line="$line (${sess})"
+            [ -n "$err" ] && line="$line | Error: $err"
             echo "$line"
         done > "$output"
         print_success "Wrote $(wc -l < "$output" | tr -d ' ') logs to $output"
     else
-        # Display to terminal with colors
         echo -e "${CYAN}Database Logs ($tier)${NC}"
         echo -e "${DIM}Database: $db_path${NC}"
         echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
         echo "$result" | while IFS='|' read -r ts lvl comp msg sess err; do
             local color=""
             case "$lvl" in
-                trace) color="$DIM" ;;
-                debug) color="$DIM" ;;
+                trace|debug) color="$DIM" ;;
                 info)  color="$GREEN" ;;
                 warn)  color="$YELLOW" ;;
-                error) color="$RED" ;;
-                fatal) color="$RED$BOLD" ;;
+                error|fatal) color="$RED" ;;
             esac
 
-            # Format timestamp (show time only)
             local time_part="${ts:11:8}"
-
-            # Build output line
             local line="${time_part} ${color}${lvl}${NC} [${comp}] ${msg}"
-            if [ -n "$sess" ]; then
-                line="$line ${DIM}(${sess:0:12}...)${NC}"
-            fi
-            if [ -n "$err" ]; then
-                line="$line\n  ${RED}Error: $err${NC}"
-            fi
+            [ -n "$sess" ] && line="$line ${DIM}(${sess:0:12}...)${NC}"
+            [ -n "$err" ] && line="$line\n  ${RED}Error: $err${NC}"
 
             echo -e "$line"
         done
@@ -430,13 +719,644 @@ cmd_logs() {
     fi
 }
 
+#=============================================================================
+# SECTION 6: COMMANDS
+# Each cmd_* function implements one CLI command
+#=============================================================================
+
+#-----------------------------------------------------------------------------
+# cmd_dev - Build, test, and start beta development server
+#
+# Workflow:
+#   1. Check if beta port already in use
+#   2. Build workspace (bun run build)
+#   3. Run tests (prompt to continue on failure)
+#   4. Check/rebuild native modules if needed
+#   5. Start beta server with development environment
+#-----------------------------------------------------------------------------
+cmd_dev() {
+    require_project_dir
+    cd "$PROJECT_DIR"
+
+    print_header "Starting Development Server"
+
+    # Check if beta port is already in use
+    if is_beta_running; then
+        print_error "Beta server already running on port $BETA_WS_PORT"
+        echo "  Kill it first: kill \$(lsof -t -i :$BETA_WS_PORT)"
+        exit 1
+    fi
+
+    # Build workspace
+    build_workspace
+
+    # Run tests
+    if ! run_tests; then
+        print_warning "Tests failed!"
+        echo ""
+        if ! confirm_action "Continue anyway?"; then
+            print_error "Aborted. Fix tests and retry."
+            exit 1
+        fi
+        print_warning "Continuing despite test failure..."
+    fi
+
+    # Check native module compatibility
+    if ! check_native_module; then
+        print_warning "Native module version mismatch detected"
+        rebuild_native_modules
+    fi
+
+    # Start beta server
+    echo ""
+    echo -e "${CYAN}Starting Beta Server${NC}"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo "  WebSocket: ws://localhost:$BETA_WS_PORT/ws"
+    echo "  Health:    http://localhost:$BETA_HEALTH_PORT/health"
+    echo "  Database:  $TRON_HOME/db/beta.db"
+    echo "  Workspace: $PROJECT_DIR"
+    echo ""
+    echo -e "${YELLOW}Press Ctrl+C to stop${NC}"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+    # Set beta environment and run
+    export TRON_WS_PORT=$BETA_WS_PORT
+    export TRON_HEALTH_PORT=$BETA_HEALTH_PORT
+    export TRON_BUILD_TIER=beta
+    export TRON_EVENT_STORE_DB="$TRON_HOME/db/beta.db"
+    export LOG_LEVEL="${LOG_LEVEL:-trace}"
+    export NODE_ENV=development
+
+    exec node packages/server/dist/index.js
+}
+
+#-----------------------------------------------------------------------------
+# cmd_deploy - Build, test, and deploy to production
+#
+# Workflow:
+#   1. Check for uncommitted changes (warn)
+#   2. Run tests (prompt to continue on failure)
+#   3. Build production bundle
+#   4. Stop service
+#   5. Copy to install directory
+#   6. Rebuild native modules for prod Node.js
+#   7. Record deployed commit
+#   8. Start service
+#   9. Verify health
+#-----------------------------------------------------------------------------
+cmd_deploy() {
+    require_project_dir
+    require_installed
+    cd "$PROJECT_DIR"
+
+    print_header "Deploying to Production"
+    echo "  Workspace: $PROJECT_DIR"
+    echo ""
+
+    # Check for uncommitted changes
+    if ! git diff-index --quiet HEAD -- 2>/dev/null; then
+        print_warning "You have uncommitted changes!"
+        echo ""
+        git status --short
+        echo ""
+        if ! confirm_action "Deploy anyway?"; then
+            print_error "Aborted. Commit your changes first."
+            exit 1
+        fi
+    fi
+
+    # Run tests
+    if ! run_tests; then
+        print_warning "Tests failed!"
+        echo ""
+        if ! confirm_action "Continue deployment anyway?"; then
+            print_error "Deployment cancelled."
+            exit 1
+        fi
+        print_warning "Continuing deployment despite test failure..."
+    fi
+
+    # Build production bundle
+    build_production
+
+    # Stop service if running
+    if service_is_running; then
+        print_status "Stopping production service..."
+        launchctl unload "$PLIST_PATH" 2>/dev/null || true
+        sleep 1
+    fi
+
+    # Copy to install directory
+    print_status "Installing to $INSTALL_DIR..."
+    rm -rf "$INSTALL_DIR"/*
+    cp -r "$PROJECT_DIR/dist/prod/"* "$INSTALL_DIR/"
+    print_success "Installed to: $INSTALL_DIR"
+
+    # Rebuild native modules for launchd's Node.js
+    local plist_node_path
+    plist_node_path=$(grep 'exec "' "$PLIST_PATH" 2>/dev/null | sed 's/.*exec "\([^"]*\)".*/\1/' | head -1)
+    [ -z "$plist_node_path" ] || [ ! -x "$plist_node_path" ] && plist_node_path=$(get_node_path)
+    rebuild_native_modules "$plist_node_path" "$INSTALL_DIR"
+
+    # Record deployed commit
+    local current_commit=$(git rev-parse HEAD)
+    echo "$current_commit" > "$DEPLOYED_COMMIT_FILE"
+    print_success "Recorded deploy: ${current_commit:0:7}"
+
+    # Start service
+    print_status "Starting production service..."
+    launchctl load "$PLIST_PATH"
+    sleep 3
+
+    if service_is_running; then
+        local pid=$(get_service_pid)
+        print_success "Production service started (PID: ${pid:-unknown})"
+    else
+        print_error "Failed to start service. Check: tron logs"
+        exit 1
+    fi
+
+    echo ""
+    print_success "Deploy complete!"
+    echo ""
+}
+
+#-----------------------------------------------------------------------------
+# cmd_install - Initial production setup
+#
+# Workflow:
+#   1. Build production bundle
+#   2. Create install directory
+#   3. Copy bundle
+#   4. Create launchd plist
+#   5. Install CLI symlink
+#   6. Load service
+#   7. Verify health
+#-----------------------------------------------------------------------------
+cmd_install() {
+    require_project_dir
+    cd "$PROJECT_DIR"
+
+    print_header "Installing Tron Service"
+    echo "  Workspace: $PROJECT_DIR"
+    echo ""
+
+    # Ensure directories exist
+    mkdir -p "$BIN_DIR"
+    mkdir -p "$TRON_HOME"
+    mkdir -p "$INSTALL_DIR"
+    mkdir -p "$HOME/Library/LaunchAgents"
+
+    # Build production bundle
+    if [ ! -f "$PROJECT_DIR/dist/prod/index.js" ]; then
+        build_production
+    fi
+
+    # Get node path
+    local node_path=$(get_node_path)
+
+    # Copy production bundle
+    print_status "Installing to $INSTALL_DIR..."
+    rm -rf "$INSTALL_DIR"/*
+    cp -r "$PROJECT_DIR/dist/prod/"* "$INSTALL_DIR/"
+    print_success "Installed to: $INSTALL_DIR"
+
+    # Rebuild native modules
+    rebuild_native_modules "$node_path" "$INSTALL_DIR"
+
+    # Create launchd plist
+    print_status "Creating launchd service..."
+    create_launchd_plist
+    print_success "Created: $PLIST_PATH"
+
+    # Install CLI symlink
+    print_status "Installing tron CLI..."
+    ln -sf "$SCRIPT_DIR/tron" "$BIN_DIR/tron"
+    print_success "Installed: $BIN_DIR/tron -> $SCRIPT_DIR/tron"
+
+    # Check PATH
+    if [[ ":$PATH:" != *":$BIN_DIR:"* ]]; then
+        print_warning "Add to your shell profile: export PATH=\"\$HOME/.local/bin:\$PATH\""
+    fi
+
+    # Record initial deploy
+    local current_commit=$(git rev-parse HEAD 2>/dev/null || echo "unknown")
+    echo "$current_commit" > "$DEPLOYED_COMMIT_FILE"
+
+    # Start service
+    print_status "Starting service..."
+    launchctl load "$PLIST_PATH"
+    sleep 3
+
+    if service_is_running; then
+        local pid=$(get_service_pid)
+        print_success "Service started! (PID: ${pid:-unknown})"
+    else
+        print_error "Service failed to start. Check: tron errors"
+    fi
+
+    echo ""
+    print_success "Installation complete!"
+    echo ""
+    echo "Locations:"
+    echo "  App:   $INSTALL_DIR"
+    echo "  Data:  $TRON_HOME"
+    echo ""
+    echo "Commands:"
+    echo "  tron status   - Check service status"
+    echo "  tron logs     - Query logs from database"
+    echo "  tron dev      - Run beta server"
+    echo "  tron deploy   - Deploy to production"
+    echo ""
+}
+
+#-----------------------------------------------------------------------------
+# cmd_rollback - Restore to last deployed commit
+#
+# Workflow:
+#   1. Check for deployed commit record
+#   2. Git checkout to that commit
+#   3. Rebuild and redeploy
+#-----------------------------------------------------------------------------
+cmd_rollback() {
+    require_project_dir
+    cd "$PROJECT_DIR"
+
+    print_header "Rolling Back to Last Deployed State"
+
+    if [ ! -f "$DEPLOYED_COMMIT_FILE" ]; then
+        print_error "No deployed commit found. Cannot rollback."
+        echo "  Run 'tron deploy' first to record a deployment."
+        exit 1
+    fi
+
+    local deployed_commit=$(cat "$DEPLOYED_COMMIT_FILE")
+    local deployed_msg=$(git log -1 --format="%s" "$deployed_commit" 2>/dev/null | head -c 60)
+    local current_commit=$(git rev-parse HEAD)
+
+    if [ "$current_commit" = "$deployed_commit" ]; then
+        print_success "Already at deployed commit: ${deployed_commit:0:7}"
+        exit 0
+    fi
+
+    echo "  Current:  ${current_commit:0:7} - $(git log -1 --format='%s' HEAD | head -c 50)"
+    echo "  Deployed: ${deployed_commit:0:7} - $deployed_msg"
+    echo ""
+
+    # Check for uncommitted changes
+    if ! git diff-index --quiet HEAD -- 2>/dev/null; then
+        print_warning "You have uncommitted changes that will be stashed!"
+        echo ""
+        git status --short
+        echo ""
+    fi
+
+    if ! confirm_action "Reset working directory to deployed commit?"; then
+        print_error "Aborted."
+        exit 1
+    fi
+
+    # Stash changes
+    if ! git diff-index --quiet HEAD -- 2>/dev/null; then
+        print_status "Stashing uncommitted changes..."
+        git stash push -m "Auto-stash before rollback to $deployed_commit"
+    fi
+
+    # Reset to deployed commit
+    print_status "Resetting to ${deployed_commit:0:7}..."
+    git checkout "$deployed_commit" -- .
+    git reset HEAD
+    print_success "Working directory restored"
+
+    # Build and redeploy
+    build_production
+
+    print_status "Redeploying..."
+    if service_is_running; then
+        launchctl unload "$PLIST_PATH" 2>/dev/null || true
+        sleep 1
+    fi
+
+    rm -rf "$INSTALL_DIR"/*
+    cp -r "$PROJECT_DIR/dist/prod/"* "$INSTALL_DIR/"
+
+    # Rebuild native modules
+    local plist_node_path
+    plist_node_path=$(grep 'exec "' "$PLIST_PATH" 2>/dev/null | sed 's/.*exec "\([^"]*\)".*/\1/' | head -1)
+    [ -z "$plist_node_path" ] || [ ! -x "$plist_node_path" ] && plist_node_path=$(get_node_path)
+    rebuild_native_modules "$plist_node_path" "$INSTALL_DIR"
+
+    echo "$deployed_commit" > "$DEPLOYED_COMMIT_FILE"
+
+    if [ -f "$PLIST_PATH" ]; then
+        launchctl load "$PLIST_PATH"
+        sleep 3
+        if service_is_running; then
+            print_success "Production service restarted"
+        else
+            print_error "Failed to restart service"
+        fi
+    fi
+
+    echo ""
+    print_success "Rollback complete! Now at: ${deployed_commit:0:7}"
+    echo ""
+}
+
+#-----------------------------------------------------------------------------
+# cmd_setup - First-time project environment setup
+#
+# Workflow:
+#   1. Check prerequisites (node, bun, git)
+#   2. Create directory structure
+#   3. Create config files
+#   4. Install dependencies
+#   5. Build project
+#   6. Create default skills
+#-----------------------------------------------------------------------------
+cmd_setup() {
+    echo ""
+    echo -e "${BLUE}╔═══════════════════════════════════════════════════════════════╗${NC}"
+    echo -e "${BLUE}║                      Tron Agent Setup                        ║${NC}"
+    echo -e "${BLUE}╚═══════════════════════════════════════════════════════════════╝${NC}"
+    echo ""
+
+    # Parse arguments
+    local dev_mode=false
+    while [[ $# -gt 0 ]]; do
+        case $1 in
+            --dev) dev_mode=true; shift ;;
+            -h|--help)
+                echo "Usage: tron setup [--dev]"
+                echo ""
+                echo "Options:"
+                echo "  --dev    Also run tests after setup"
+                exit 0
+                ;;
+            *) shift ;;
+        esac
+    done
+
+    # Check prerequisites
+    print_status "Checking prerequisites..."
+
+    if ! command -v node &> /dev/null; then
+        print_error "Node.js is not installed. Please install Node.js 20+ first."
+        exit 1
+    fi
+
+    local node_version=$(node -v | cut -d'v' -f2 | cut -d'.' -f1)
+    if [ "$node_version" -lt 20 ]; then
+        print_error "Node.js version 20+ is required. Current: $(node -v)"
+        exit 1
+    fi
+    print_success "Node.js $(node -v) found"
+
+    if ! command -v bun &> /dev/null; then
+        print_status "Installing Bun..."
+        curl -fsSL https://bun.sh/install | bash
+        export PATH="$HOME/.bun/bin:$PATH"
+        print_success "Bun installed"
+    else
+        print_success "Bun $(bun --version) found"
+    fi
+
+    command -v git &> /dev/null && print_success "git $(git --version | cut -d' ' -f3) found"
+
+    # Create directory structure
+    print_status "Creating directory structure..."
+    mkdir -p "$TRON_HOME"/{logs,sessions,memory,tasks,notes,inbox,skills,hooks,db}
+    mkdir -p "$TRON_HOME"/memory/{handoffs,learnings}
+    mkdir -p "$TRON_HOME"/inbox/processed
+    print_success "Created $TRON_HOME directory structure"
+
+    # Create default config files
+    print_status "Creating configuration files..."
+
+    if [ ! -f "$TRON_HOME/settings.json" ]; then
+        cat > "$TRON_HOME/settings.json" << 'EOF'
+{
+  "defaultModel": "claude-sonnet-4-20250514",
+  "serverPort": 3847,
+  "logging": { "level": "info", "maxFiles": 10, "maxSize": "10M" },
+  "session": { "idleTimeout": 3600000, "autoSave": true, "autoSaveInterval": 30000 },
+  "memory": { "ledgerAutoSave": true, "handoffOnCompact": true, "retentionDays": 90 },
+  "hooks": { "timeout": 30000, "enabled": true }
+}
+EOF
+        print_success "Created settings.json"
+    else
+        print_warning "settings.json already exists, skipping"
+    fi
+
+    if [ ! -f "$TRON_HOME/AGENTS.md" ]; then
+        cat > "$TRON_HOME/AGENTS.md" << 'EOF'
+# Global Agent Context
+
+This file provides global instructions that apply to all Tron sessions.
+
+## General Guidelines
+
+- Be concise and direct in responses
+- Follow the project's coding conventions
+- Write tests for new functionality
+- Document significant changes
+
+## Memory Usage
+
+- Keep the ledger updated with current focus
+- Generate handoffs before context compaction
+- Record key decisions with reasoning
+EOF
+        print_success "Created AGENTS.md"
+    else
+        print_warning "AGENTS.md already exists, skipping"
+    fi
+
+    # Install dependencies
+    print_status "Installing dependencies..."
+    cd "$PROJECT_DIR"
+    bun install
+    print_success "Dependencies installed"
+
+    # Build project
+    build_workspace
+
+    # Run tests if dev mode
+    if [ "$dev_mode" = true ]; then
+        run_tests || print_warning "Some tests failed (continuing anyway)"
+    fi
+
+    # Create default skills
+    print_status "Creating default skills..."
+
+    mkdir -p "$TRON_HOME/skills/commit"
+    if [ ! -f "$TRON_HOME/skills/commit/SKILL.md" ]; then
+        cat > "$TRON_HOME/skills/commit/SKILL.md" << 'EOF'
+---
+name: commit
+description: Create a git commit with a well-formatted message
+arguments:
+  - name: message
+    description: Optional commit message (will be generated if not provided)
+    required: false
+---
+
+# Commit Skill
+
+Create a git commit following conventional commit format.
+1. Run `git status` to see changes
+2. Run `git diff --staged` to understand what's being committed
+3. Generate a commit message: type(scope): description
+4. Run `git commit -m "..."` with the message
+EOF
+        print_success "Created commit skill"
+    fi
+
+    mkdir -p "$TRON_HOME/skills/handoff"
+    if [ ! -f "$TRON_HOME/skills/handoff/SKILL.md" ]; then
+        cat > "$TRON_HOME/skills/handoff/SKILL.md" << 'EOF'
+---
+name: handoff
+description: Generate a handoff document for session continuity
+arguments: []
+---
+
+# Handoff Skill
+
+Generate a handoff document summarizing the current session.
+1. Review the session's conversation history
+2. Identify: what was accomplished, current state, blockers, next steps
+3. Save to the handoffs directory
+EOF
+        print_success "Created handoff skill"
+    fi
+
+    echo ""
+    echo -e "${GREEN}═══════════════════════════════════════════════════════════════${NC}"
+    echo -e "${GREEN}                    Tron Setup Complete!${NC}"
+    echo -e "${GREEN}═══════════════════════════════════════════════════════════════${NC}"
+    echo ""
+    echo "  Data directory: $TRON_HOME"
+    echo "  Project path:   $PROJECT_DIR"
+    echo ""
+    echo "  Next steps:"
+    echo "    1. Configure authentication:"
+    echo "       - Set ANTHROPIC_API_KEY for API access"
+    echo ""
+    echo "    2. Start development server:"
+    echo "       tron dev"
+    echo ""
+    echo "    3. (Optional) Install as a service:"
+    echo "       tron install"
+    echo ""
+}
+
+#-----------------------------------------------------------------------------
+# cmd_status - Show service status and health
+#-----------------------------------------------------------------------------
+cmd_status() {
+    echo ""
+    echo -e "${CYAN}Tron Service Status${NC}"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+    # Production status
+    if service_is_running; then
+        local pid=$(get_service_pid)
+        print_success "Production: ${GREEN}RUNNING${NC} (PID: ${pid:-unknown})"
+        echo "  WebSocket: ws://localhost:$PROD_WS_PORT/ws"
+        echo "  Health:    http://localhost:$PROD_HEALTH_PORT/health"
+
+        if [ -n "$pid" ] && [ "$pid" != "-" ]; then
+            local uptime=$(ps -o etime= -p "$pid" 2>/dev/null | tr -d ' ')
+            [ -n "$uptime" ] && echo "  Uptime:    $uptime"
+        fi
+
+        if health_check $PROD_HEALTH_PORT; then
+            echo -e "  Status:    ${GREEN}Healthy${NC}"
+        else
+            echo -e "  Status:    ${YELLOW}Not responding${NC}"
+        fi
+
+        if [ -f "$DEPLOYED_COMMIT_FILE" ]; then
+            local deployed_commit=$(cat "$DEPLOYED_COMMIT_FILE")
+            local commit_msg=$(cd "$PROJECT_DIR" 2>/dev/null && git log -1 --format="%s" "$deployed_commit" 2>/dev/null | head -c 50)
+            echo "  Deployed:  ${deployed_commit:0:7} - $commit_msg"
+        fi
+
+        [ -d "$INSTALL_DIR" ] && echo "  Install:   $INSTALL_DIR"
+    else
+        print_warning "Production: ${YELLOW}STOPPED${NC}"
+        [ -f "$DEPLOYED_COMMIT_FILE" ] && echo "  Last deployed: $(cat "$DEPLOYED_COMMIT_FILE" | head -c 7)"
+        [ -d "$INSTALL_DIR" ] && echo "  Install:   $INSTALL_DIR"
+    fi
+
+    echo ""
+
+    # Beta status
+    local beta_pid=$(get_beta_pid)
+    if [ -n "$beta_pid" ]; then
+        print_success "Beta: ${GREEN}RUNNING${NC} (PID: $beta_pid)"
+        echo "  WebSocket: ws://localhost:$BETA_WS_PORT/ws"
+        echo "  Health:    http://localhost:$BETA_HEALTH_PORT/health"
+        if health_check $BETA_HEALTH_PORT; then
+            echo -e "  Status:    ${GREEN}Healthy${NC}"
+        else
+            echo -e "  Status:    ${YELLOW}Not responding${NC}"
+        fi
+    else
+        echo "  Beta: not running"
+    fi
+
+    echo ""
+    echo -e "${DIM}Logs:${NC}"
+    echo -e "  ${DIM}Query: tron logs [-l level] [-q search] [-s session]${NC}"
+    [ -f "$PROD_LOG_FILE" ] && echo -e "  ${DIM}File:  $PROD_LOG_FILE${NC}"
+    echo ""
+}
+
+#-----------------------------------------------------------------------------
+# cmd_start - Start production service
+#-----------------------------------------------------------------------------
+cmd_start() {
+    if service_is_running; then
+        print_warning "Production service is already running"
+        return 0
+    fi
+    service_start
+}
+
+#-----------------------------------------------------------------------------
+# cmd_stop - Stop production service
+#-----------------------------------------------------------------------------
+cmd_stop() {
+    service_stop
+}
+
+#-----------------------------------------------------------------------------
+# cmd_restart - Restart production service
+#-----------------------------------------------------------------------------
+cmd_restart() {
+    print_status "Restarting production service..."
+    service_stop 2>/dev/null || true
+    sleep 1
+    service_start
+}
+
+#-----------------------------------------------------------------------------
+# cmd_logs - Query database logs
+#-----------------------------------------------------------------------------
+cmd_logs() {
+    query_logs "$@"
+}
+
+#-----------------------------------------------------------------------------
+# cmd_errors - Show recent errors
+#-----------------------------------------------------------------------------
 cmd_errors() {
     local tier="${1:-prod}"
-    # Query database for errors
     local db_path="$TRON_HOME/db/prod.db"
-    if [ "$tier" = "beta" ]; then
-        db_path="$TRON_HOME/db/beta.db"
-    fi
+    [ "$tier" = "beta" ] && db_path="$TRON_HOME/db/beta.db"
 
     if [ -f "$db_path" ]; then
         echo -e "${RED}Recent errors from database:${NC}"
@@ -448,7 +1368,6 @@ cmd_errors() {
              LIMIT 20;" 2>/dev/null || echo "  No logs table found"
     fi
 
-    # Also check prod file log
     if [ "$tier" = "prod" ] && [ -f "$PROD_LOG_FILE" ]; then
         echo ""
         echo -e "${RED}Recent errors from file log:${NC}"
@@ -456,12 +1375,13 @@ cmd_errors() {
     fi
 }
 
+#-----------------------------------------------------------------------------
+# cmd_uninstall - Remove service (preserves data)
+#-----------------------------------------------------------------------------
 cmd_uninstall() {
-    echo ""
-    echo -e "${CYAN}Uninstalling Tron Service${NC}"
-    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    print_header "Uninstalling Tron Service"
 
-    if is_running; then
+    if service_is_running; then
         print_status "Stopping service..."
         launchctl unload "$PLIST_PATH" 2>/dev/null || true
         sleep 1
@@ -482,31 +1402,39 @@ cmd_uninstall() {
     echo ""
 }
 
+#-----------------------------------------------------------------------------
+# cmd_help - Show help message
+#-----------------------------------------------------------------------------
 cmd_help() {
     echo ""
     echo -e "${CYAN}Tron - Persistent Coding Agent${NC}"
     echo ""
-    echo "Usage: tron <command>"
+    echo "Usage: tron <command> [options]"
+    echo ""
+    echo "Development Commands:"
+    echo "  dev        Build, test, and start beta development server"
+    echo "  setup      First-time project environment setup"
+    echo ""
+    echo "Production Commands:"
+    echo "  deploy     Build, test, and deploy to production"
+    echo "  install    Initial production setup (launchd + CLI)"
+    echo "  rollback   Restore to last deployed commit"
     echo ""
     echo "Service Commands:"
-    echo "  status      Show service status and health"
-    echo "  start       Start production service"
-    echo "  stop        Stop production service"
-    echo "  restart     Restart production service"
-    echo "  logs        Query database logs (use -h for options)"
-    echo "  errors      Show recent errors from file logs"
-    echo "  uninstall   Remove service (preserves data)"
+    echo "  status     Show service status and health"
+    echo "  start      Start production service"
+    echo "  stop       Stop production service"
+    echo "  restart    Restart production service"
+    echo "  logs       Query database logs (use -h for options)"
+    echo "  errors     Show recent errors"
+    echo "  uninstall  Remove service (preserves data)"
     echo ""
-    echo "Workspace Commands (run from project root):"
-    echo "  ./beta      Run beta server"
-    echo "  ./prod      Deploy/install/rollback production"
-    echo ""
-    echo "Log Examples:"
-    echo "  tron logs                  # Latest 50 database logs"
-    echo "  tron logs -l error         # Errors and fatals only"
-    echo "  tron logs -l warn -n 100   # Last 100 warnings+"
-    echo "  tron logs -t               # Tail file logs (live)"
-    echo "  tron logs -o out.txt       # Write to file"
+    echo "Examples:"
+    echo "  tron dev                  # Build, test, start beta server"
+    echo "  tron deploy               # Deploy current workspace to production"
+    echo "  tron logs -l error        # Show errors only"
+    echo "  tron logs -l warn -n 100  # Last 100 warnings+"
+    echo "  tron logs -t              # Tail file logs (live)"
     echo ""
     echo "Ports:"
     echo "  Production: WS $PROD_WS_PORT, Health $PROD_HEALTH_PORT"
@@ -514,16 +1442,25 @@ cmd_help() {
     echo ""
 }
 
-# Main
-case "${1:-}" in
-    status)     cmd_status ;;
-    start)      cmd_start ;;
-    stop)       cmd_stop ;;
-    restart)    cmd_restart ;;
-    logs)       shift; cmd_logs "$@" ;;
-    errors)     cmd_errors "${2:-}" ;;
-    uninstall)  cmd_uninstall ;;
-    help|--help|-h|"")
+#=============================================================================
+# SECTION 7: MAIN DISPATCH
+# Parse arguments and route to appropriate command
+#=============================================================================
+
+case "${1:-help}" in
+    dev)       shift; cmd_dev "$@" ;;
+    deploy)    cmd_deploy ;;
+    install)   cmd_install ;;
+    rollback)  cmd_rollback ;;
+    setup)     shift; cmd_setup "$@" ;;
+    status)    cmd_status ;;
+    start)     cmd_start ;;
+    stop)      cmd_stop ;;
+    restart)   cmd_restart ;;
+    logs)      shift; cmd_logs "$@" ;;
+    errors)    cmd_errors "${2:-}" ;;
+    uninstall) cmd_uninstall ;;
+    help|--help|-h)
         cmd_help
         ;;
     *)

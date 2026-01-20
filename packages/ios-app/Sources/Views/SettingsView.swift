@@ -10,6 +10,7 @@ struct SettingsView: View {
     #endif
 
     @Environment(\.dismiss) private var dismiss
+    @EnvironmentObject var appState: AppState
     let rpcClient: RPCClient
     @AppStorage("serverHost") private var serverHost = "localhost"
     @AppStorage("serverPort") private var serverPort = SettingsView.defaultPort
@@ -19,9 +20,54 @@ struct SettingsView: View {
     @State private var showingResetAlert = false
     @State private var showLogViewer = false
 
+    /// Derives environment selection from current port
+    private var selectedEnvironment: String {
+        switch serverPort {
+        case "8080": return "prod"
+        case "8082": return "beta"
+        default: return "custom"
+        }
+    }
+
     var body: some View {
         NavigationStack {
             List {
+                // Environment Quick Switch
+                Section {
+                    Picker("Environment", selection: Binding(
+                        get: { selectedEnvironment },
+                        set: { newValue in
+                            let newPort: String
+                            switch newValue {
+                            case "prod": newPort = "8080"
+                            case "beta": newPort = "8082"
+                            default: return // Don't change port for custom
+                            }
+                            // Update via AppState to trigger reconnection
+                            appState.updateServerSettings(
+                                host: serverHost,
+                                port: newPort,
+                                useTLS: useTLS
+                            )
+                            serverPort = newPort
+                        }
+                    )) {
+                        Text("Prod").tag("prod")
+                        Text("Beta").tag("beta")
+                        if selectedEnvironment == "custom" {
+                            Text("Custom").tag("custom")
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .font(TronTypography.subheadline)
+                } header: {
+                    Text("Environment")
+                        .font(TronTypography.caption)
+                } footer: {
+                    Text("Quickly switch between production (8080) and beta (8082) servers.")
+                        .font(TronTypography.caption2)
+                }
+
                 // Server Section
                 Section {
                     TextField("Host", text: $serverHost)
@@ -29,13 +75,22 @@ struct SettingsView: View {
                         .textContentType(.URL)
                         .autocapitalization(.none)
                         .autocorrectionDisabled()
+                        .onSubmit {
+                            appState.updateServerSettings(host: serverHost, port: serverPort, useTLS: useTLS)
+                        }
 
                     TextField("Port", text: $serverPort)
                         .font(TronTypography.subheadline)
                         .keyboardType(.numberPad)
+                        .onSubmit {
+                            appState.updateServerSettings(host: serverHost, port: serverPort, useTLS: useTLS)
+                        }
 
                     Toggle("Use TLS (wss://)", isOn: $useTLS)
                         .font(TronTypography.subheadline)
+                        .onChange(of: useTLS) { _, newValue in
+                            appState.updateServerSettings(host: serverHost, port: serverPort, useTLS: newValue)
+                        }
                 } header: {
                     Text("Server")
                         .font(TronTypography.caption)
@@ -149,10 +204,14 @@ struct SettingsView: View {
     // MARK: - Actions
 
     private func resetToDefaults() {
-        serverHost = "localhost"
+        let defaultHost = "localhost"
+        let defaultTLS = false
+        serverHost = defaultHost
         serverPort = SettingsView.defaultPort
-        useTLS = false
+        useTLS = defaultTLS
         confirmArchive = true
+        // Trigger server reconnection
+        appState.updateServerSettings(host: defaultHost, port: SettingsView.defaultPort, useTLS: defaultTLS)
     }
 }
 

@@ -31,6 +31,14 @@ extension ChatViewModel {
             logger.info("Session resumed successfully", category: .session)
         } catch {
             logger.error("Failed to resume session: \(error.localizedDescription)", category: .session)
+
+            // Check if session doesn't exist on server - signal to dismiss
+            let errorString = error.localizedDescription.lowercased()
+            if errorString.contains("not found") || errorString.contains("does not exist") {
+                logger.warning("Session \(sessionId) not found on server - dismissing view", category: .session)
+                shouldDismiss = true
+            }
+
             showErrorAlert("Failed to resume session: \(error.localizedDescription)")
             return
         }
