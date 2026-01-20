@@ -377,6 +377,17 @@ struct ChatView: View {
                 viewModel.addReasoningLevelChangeNotification(from: previousLevel, to: level)
             }
         }
+        // Handle "Draft a Plan" request: Add plan skill to selection
+        .onReceive(NotificationCenter.default.publisher(for: .draftPlanRequested)) { _ in
+            // Find the "plan" skill and add it to selected skills
+            guard let skillStore = skillStore else { return }
+            if let planSkill = skillStore.skills.first(where: { $0.name.lowercased() == "plan" }) {
+                // Only add if not already selected
+                if !selectedSkills.contains(where: { $0.id == planSkill.id }) {
+                    selectedSkills.append(planSkill)
+                }
+            }
+        }
         .onAppear {
             // Load persisted reasoning level for this session
             if let savedLevel = UserDefaults.standard.string(forKey: reasoningLevelKey) {

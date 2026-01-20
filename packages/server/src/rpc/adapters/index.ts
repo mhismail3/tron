@@ -18,3 +18,4 @@ export { createEventStoreAdapter, getEventSummary, getEventDepth } from './event
 export { createSessionAdapter } from './session.adapter.js';
 export { createSkillAdapter } from './skill.adapter.js';
 export { createAgentAdapter } from './agent.adapter.js';
+export { createPlanAdapter } from './plan.adapter.js';

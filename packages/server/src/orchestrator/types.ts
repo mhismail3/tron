@@ -156,6 +156,12 @@ export interface LoadedSkillContent {
   name: string;
   /** Full SKILL.md content */
   content: string;
+  /** Parsed frontmatter (optional, for plan mode detection) */
+  frontmatter?: {
+    planMode?: boolean;
+    tools?: string[];
+    [key: string]: unknown;
+  };
 }
 
 export interface AgentRunOptions {

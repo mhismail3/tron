@@ -542,13 +542,21 @@ export class EventStoreOrchestrator extends EventEmitter {
 
       // Track skills and load content BEFORE building user content
       // Skill context is now injected as a system block (not user message)
+      // Also pass plan mode callback to enable skill-triggered plan mode
+      const planModeCallback = {
+        enterPlanMode: async (skillName: string, blockedTools: string[]) => {
+          await this.enterPlanMode(active.sessionId, { skillName, blockedTools });
+        },
+        isInPlanMode: () => this.isInPlanMode(active.sessionId),
+      };
       const skillContext = await this.skillLoader.loadSkillContextForPrompt(
         {
           sessionId: active.sessionId,
           skillTracker: active.skillTracker,
           sessionContext: active.sessionContext!,
         },
-        options
+        options,
+        planModeCallback
       );
 
       // Set skill context on agent (will be injected into system prompt)

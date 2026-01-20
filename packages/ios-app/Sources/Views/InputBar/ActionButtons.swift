@@ -203,6 +203,10 @@ struct GlassAttachmentButton: View {
                 Button { NotificationCenter.default.post(name: .attachmentMenuAction, object: "skills") } label: {
                     Label("Add Skill", systemImage: "sparkles")
                 }
+
+                Button { NotificationCenter.default.post(name: .attachmentMenuAction, object: "draftPlan") } label: {
+                    Label("Draft a Plan", systemImage: "list.clipboard")
+                }
             }
         } label: {
             ZStack(alignment: .topTrailing) {
@@ -241,6 +245,9 @@ struct GlassAttachmentButton: View {
                     showSkillMentionPopup = true
                     skillMentionQuery = "" // Start with empty query to show all skills
                 }
+            case "draftPlan":
+                // Post notification for ChatView to handle plan skill selection
+                NotificationCenter.default.post(name: .draftPlanRequested, object: nil)
             default: break
             }
         }

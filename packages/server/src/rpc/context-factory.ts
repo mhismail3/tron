@@ -49,6 +49,7 @@ import { createWorktreeAdapter } from './adapters/worktree.adapter.js';
 import { createContextAdapter } from './adapters/context.adapter.js';
 import { createBrowserAdapter } from './adapters/browser.adapter.js';
 import { createSkillAdapter } from './adapters/skill.adapter.js';
+import { createPlanAdapter } from './adapters/plan.adapter.js';
 
 // Standalone adapters (no orchestrator dependency)
 import { createMemoryAdapter } from './adapters/memory.adapter.js';
@@ -121,6 +122,7 @@ export function createRpcContext(
     context.contextManager = createContextAdapter(deps);
     context.browserManager = createBrowserAdapter(deps);
     context.skillManager = createSkillAdapter(deps);
+    context.planManager = createPlanAdapter(deps);
 
     // Canvas manager is standalone (no orchestrator dependency)
     context.canvasManager = createCanvasAdapter();
@@ -153,6 +155,7 @@ export function isFullRpcContext(
     context.transcriptionManager !== undefined &&
     context.contextManager !== undefined &&
     context.browserManager !== undefined &&
-    context.skillManager !== undefined
+    context.skillManager !== undefined &&
+    context.planManager !== undefined
   );
 }

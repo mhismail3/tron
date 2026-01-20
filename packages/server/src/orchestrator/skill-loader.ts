@@ -11,6 +11,7 @@
 import {
   createLogger,
   buildSkillContext,
+  DEFAULT_PLAN_MODE_BLOCKED_TOOLS,
   type SkillSource,
   type SkillAddMethod,
   type SkillMetadata,
@@ -18,7 +19,7 @@ import {
   type UserContent,
 } from '@tron/core';
 import type { SessionContext } from './session-context.js';
-import type { AgentRunOptions } from './types.js';
+import type { AgentRunOptions, LoadedSkillContent } from './types.js';
 
 const logger = createLogger('skill-loader');
 
@@ -34,6 +35,18 @@ export interface SkillLoadContext {
   sessionId: string;
   skillTracker: SkillTracker;
   sessionContext: SessionContext;
+}
+
+/**
+ * Callback interface for triggering plan mode from skill loader.
+ * Allows the orchestrator to wire up plan mode entry without
+ * creating a circular dependency.
+ */
+export interface PlanModeCallback {
+  /** Enter plan mode with the given skill name and blocked tools */
+  enterPlanMode: (skillName: string, blockedTools: string[]) => Promise<void>;
+  /** Check if already in plan mode */
+  isInPlanMode: () => boolean;
 }
 
 // =============================================================================
@@ -54,10 +67,12 @@ export class SkillLoader {
    * 3. Building removed skills instruction
    * 4. Loading skill content via skillLoader callback
    * 5. Building final skill context string
+   * 6. Detecting planMode skills and triggering plan mode (if callback provided)
    */
   async loadSkillContextForPrompt(
     context: SkillLoadContext,
-    options: AgentRunOptions
+    options: AgentRunOptions,
+    planModeCallback?: PlanModeCallback
   ): Promise<string> {
     const { sessionId, skillTracker } = context;
 
@@ -158,6 +173,9 @@ The user has explicitly removed these skills and expects you to respond WITHOUT 
       return '';
     }
 
+    // Check for planMode skills and trigger plan mode if needed
+    await this.checkAndEnterPlanMode(sessionId, loadedSkills, planModeCallback);
+
     // Build skill context using buildSkillContext
     // Convert LoadedSkillContent to SkillMetadata format for buildSkillContext
     const skillMetadata: SkillMetadata[] = loadedSkills.map((s) => ({
@@ -187,6 +205,67 @@ The user has explicitly removed these skills and expects you to respond WITHOUT 
       return `${removedSkillsInstruction}\n\n${skillContext}`;
     }
     return skillContext;
+  }
+
+  /**
+   * Check loaded skills for planMode flag and enter plan mode if needed.
+   *
+   * Called after skills are loaded. If any skill has planMode: true in its
+   * frontmatter, and we're not already in plan mode, enters plan mode.
+   *
+   * Blocked tools are computed by inverting the skill's tools list (if specified)
+   * or using the default blocked tools (Write, Edit, Bash, NotebookEdit).
+   */
+  private async checkAndEnterPlanMode(
+    sessionId: string,
+    loadedSkills: LoadedSkillContent[],
+    planModeCallback?: PlanModeCallback
+  ): Promise<void> {
+    // No callback means plan mode not supported (e.g., in tests)
+    if (!planModeCallback) {
+      return;
+    }
+
+    // Already in plan mode - don't enter again
+    if (planModeCallback.isInPlanMode()) {
+      logger.debug('[SKILL] Already in plan mode, skipping plan mode check', { sessionId });
+      return;
+    }
+
+    // Find first skill with planMode: true
+    const planModeSkill = loadedSkills.find(skill => skill.frontmatter?.planMode === true);
+
+    if (!planModeSkill) {
+      return;
+    }
+
+    logger.info('[SKILL] Detected planMode skill, entering plan mode', {
+      sessionId,
+      skillName: planModeSkill.name,
+      hasFrontmatter: !!planModeSkill.frontmatter,
+    });
+
+    // Compute blocked tools:
+    // If skill specifies tools, block everything except those tools
+    // Otherwise use default blocked tools
+    let blockedTools = DEFAULT_PLAN_MODE_BLOCKED_TOOLS;
+
+    if (planModeSkill.frontmatter?.tools && planModeSkill.frontmatter.tools.length > 0) {
+      // Skill specifies allowed tools - block everything else
+      // For now, we use default blocked tools and allow what's specified
+      // This is a simplification - in a more complete implementation,
+      // we'd compute the inverse of the allowed tools list
+      const allowedTools = new Set(planModeSkill.frontmatter.tools);
+      blockedTools = DEFAULT_PLAN_MODE_BLOCKED_TOOLS.filter(t => !allowedTools.has(t));
+    }
+
+    await planModeCallback.enterPlanMode(planModeSkill.name, blockedTools);
+
+    logger.info('[SKILL] Plan mode entered via skill', {
+      sessionId,
+      skillName: planModeSkill.name,
+      blockedTools,
+    });
   }
 
   /**

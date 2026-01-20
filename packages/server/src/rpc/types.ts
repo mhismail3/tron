@@ -17,6 +17,7 @@ import type {
   ContextRpcManager,
   BrowserRpcManager,
   SkillRpcManager,
+  PlanRpcManager,
 } from '@tron/core';
 
 // =============================================================================
@@ -83,6 +84,11 @@ export type BrowserManagerAdapter = BrowserRpcManager;
  * Skill manager interface - skill loading and management
  */
 export type SkillManagerAdapter = SkillRpcManager;
+
+/**
+ * Plan manager interface - plan mode operations
+ */
+export type PlanManagerAdapter = PlanRpcManager;
 
 // =============================================================================
 // Helper Types

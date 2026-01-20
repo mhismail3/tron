@@ -493,6 +493,8 @@ extension Notification.Name {
     static let modelPickerAction = Notification.Name("modelPickerAction")
     static let attachmentMenuAction = Notification.Name("attachmentMenuAction")
     static let reasoningLevelAction = Notification.Name("reasoningLevelAction")
+    /// Plan mode: Request to add plan skill and enter planning mode
+    static let draftPlanRequested = Notification.Name("draftPlanRequested")
 }
 
 // MARK: - Preview
