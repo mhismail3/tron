@@ -78,12 +78,15 @@ export interface ContextSection {
   priority: number;
 }
 
+// Internal config type (omits deprecated agentDir)
+type InternalContextLoaderConfig = Required<Omit<ContextLoaderConfig, 'agentDir'>>;
+
 // =============================================================================
 // Context Loader Implementation
 // =============================================================================
 
 export class ContextLoader {
-  private config: Required<ContextLoaderConfig>;
+  private config: InternalContextLoaderConfig;
   private cache: Map<string, LoadedContext> = new Map();
 
   constructor(config: ContextLoaderConfig = {}) {
