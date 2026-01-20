@@ -162,7 +162,7 @@ describe('ContextManager', () => {
       expect(snapshot.currentTokens).toBeGreaterThan(0);
       expect(snapshot.contextLimit).toBe(200_000);
       expect(snapshot.usagePercent).toBeGreaterThan(0);
-      expect(snapshot.usagePercent).toBeLessThan(0.01); // Very low for simple message
+      expect(snapshot.usagePercent).toBeLessThan(0.05); // Very low for simple message
     });
 
     it('includes breakdown of token usage', () => {

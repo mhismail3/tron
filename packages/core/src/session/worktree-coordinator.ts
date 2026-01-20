@@ -79,6 +79,18 @@ interface ActiveSession {
 // Git Helpers
 // =============================================================================
 
+/**
+ * Check if a path exists on the filesystem
+ */
+async function pathExists(p: string): Promise<boolean> {
+  try {
+    await fs.access(p);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 async function execGit(
   args: string[],
   cwd: string,
@@ -261,6 +273,39 @@ export class WorktreeCoordinator {
     });
 
     let finalCommit: string | undefined;
+
+    // Check if the working directory still exists
+    const dirExists = await pathExists(workingDir.path);
+    if (!dirExists) {
+      logger.warn('Working directory no longer exists, cleaning up session state only', {
+        sessionId,
+        path: workingDir.path,
+      });
+
+      // Directory already gone - just clean up internal state
+      this.activeSessions.delete(sessionId as string);
+      if (this.mainDirectoryOwner === (sessionId as string)) {
+        this.mainDirectoryOwner = null;
+      }
+
+      // Emit release event indicating directory was already deleted
+      await this.emitReleasedEvent(sessionId, {
+        finalCommit: undefined,
+        deleted: true,
+        branchPreserved: this.config.preserveBranches,
+      });
+
+      // Prune any stale worktree references if we have a repo root
+      if (this.repoRoot && await pathExists(this.repoRoot)) {
+        try {
+          await execGit(['worktree', 'prune'], this.repoRoot);
+        } catch {
+          // Ignore prune errors
+        }
+      }
+
+      return;
+    }
 
     try {
       // Auto-commit if configured and there are changes
@@ -587,6 +632,22 @@ export class WorktreeCoordinator {
    * Remove a worktree
    */
   private async removeWorktree(worktreePath: string): Promise<void> {
+    // Check if directory exists before trying git operations
+    const dirExists = await pathExists(worktreePath);
+
+    if (!dirExists) {
+      // Directory already gone - just prune stale worktree references
+      logger.debug('Worktree directory already deleted, pruning references', {
+        path: worktreePath,
+      });
+      try {
+        await execGit(['worktree', 'prune'], this.repoRoot!);
+      } catch {
+        // Ignore prune errors
+      }
+      return;
+    }
+
     const result = await execGit(
       ['worktree', 'remove', worktreePath, '--force'],
       this.repoRoot!
@@ -809,6 +870,11 @@ export class WorktreeCoordinator {
 
     const worktreeBase = this.config.worktreeBaseDir || path.join(this.repoRoot, '.worktrees');
 
+    // Check if worktree base directory exists
+    if (!await pathExists(worktreeBase)) {
+      return;
+    }
+
     try {
       const entries = await fs.readdir(worktreeBase, { withFileTypes: true });
 
@@ -823,25 +889,47 @@ export class WorktreeCoordinator {
           continue;
         }
 
+        // Verify directory still exists (might have been deleted externally)
+        if (!await pathExists(worktreePath)) {
+          logger.debug('Orphaned worktree directory no longer exists', { sessionId, path: worktreePath });
+          continue;
+        }
+
         logger.info('Found orphaned worktree', { sessionId, path: worktreePath });
 
-        // Check for uncommitted changes
-        const statusResult = await execGit(['status', '--porcelain'], worktreePath);
-        if (statusResult.stdout) {
-          // Has uncommitted changes - commit them
-          await execGit(['add', '-A'], worktreePath);
-          await execGit(
-            ['commit', '-m', `[RECOVERED] Session ${sessionId}`],
-            worktreePath
-          );
-          logger.info('Committed orphaned changes', { sessionId });
-        }
+        try {
+          // Check for uncommitted changes
+          const statusResult = await execGit(['status', '--porcelain'], worktreePath);
+          if (statusResult.stdout) {
+            // Has uncommitted changes - commit them
+            await execGit(['add', '-A'], worktreePath);
+            await execGit(
+              ['commit', '-m', `[RECOVERED] Session ${sessionId}`],
+              worktreePath
+            );
+            logger.info('Committed orphaned changes', { sessionId });
+          }
 
-        // Optionally clean up
-        if (this.config.deleteWorktreeOnRelease) {
-          await this.removeWorktree(worktreePath);
-          logger.info('Removed orphaned worktree', { sessionId });
+          // Optionally clean up
+          if (this.config.deleteWorktreeOnRelease) {
+            await this.removeWorktree(worktreePath);
+            logger.info('Removed orphaned worktree', { sessionId });
+          }
+        } catch (error) {
+          // Log but continue processing other worktrees
+          logger.warn('Failed to recover orphaned worktree', {
+            sessionId,
+            path: worktreePath,
+            error: error instanceof Error ? error.message : String(error),
+          });
         }
+      }
+
+      // Prune any stale worktree references
+      try {
+        await execGit(['worktree', 'prune'], this.repoRoot);
+      } catch {
+        // Ignore prune errors
       }
     } catch (error) {
       logger.warn('Failed to scan for orphaned worktrees', {
