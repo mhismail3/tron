@@ -53,15 +53,28 @@ struct SettingsView: View {
     var body: some View {
         NavigationStack {
             List {
-                // Environment Toggle (no section container)
+                // Environment Toggle (native iOS 26 segmented picker)
                 Section {
-                    HStack(spacing: 0) {
-                        environmentButton("Prod", tag: "prod")
-                        environmentButton("Beta", tag: "beta")
+                    Picker("Environment", selection: Binding(
+                        get: { selectedEnvironment },
+                        set: { newValue in
+                            let newPort: String
+                            switch newValue {
+                            case "prod": newPort = "8080"
+                            case "beta": newPort = "8082"
+                            default: return
+                            }
+                            serverPort = ""  // Clear custom port
+                            appState.updateServerSettings(host: serverHost, port: newPort, useTLS: false)
+                        }
+                    )) {
+                        Text("Prod")
+                            .tag("prod")
+                        Text("Beta")
+                            .tag("beta")
                     }
-                    .padding(3)
-                    .background(Color.white.opacity(0.05))
-                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    .pickerStyle(.segmented)
+                    .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
                 } header: {
                     EmptyView()
                 }
@@ -189,35 +202,6 @@ struct SettingsView: View {
         .presentationDragIndicator(.hidden)
         .tint(.tronEmerald)
         .preferredColorScheme(.dark)
-    }
-
-    // MARK: - Environment Button
-
-    @ViewBuilder
-    private func environmentButton(_ title: String, tag: String) -> some View {
-        let isSelected = selectedEnvironment == tag
-
-        Button {
-            let newPort: String
-            switch tag {
-            case "prod": newPort = "8080"
-            case "beta": newPort = "8082"
-            default: return
-            }
-            // Clear custom port when selecting standard environment
-            serverPort = ""
-            // Update via AppState to trigger reconnection
-            appState.updateServerSettings(host: serverHost, port: newPort, useTLS: false)
-        } label: {
-            Text(title)
-                .font(TronTypography.mono(size: TronTypography.sizeBody, weight: isSelected ? .semibold : .regular))
-                .foregroundStyle(isSelected ? .tronEmerald : .white.opacity(0.5))
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 10)
-                .background(isSelected ? Color.tronEmerald.opacity(0.15) : Color.clear)
-                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-        }
-        .buttonStyle(.plain)
     }
 
     // MARK: - Computed Properties
