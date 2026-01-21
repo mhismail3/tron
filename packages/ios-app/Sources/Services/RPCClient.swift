@@ -1255,6 +1255,57 @@ class RPCClient: ObservableObject {
         return result.count
     }
 
+    // MARK: - Device Token Methods (Push Notifications)
+
+    /// Register a device token for push notifications
+    func registerDeviceToken(_ deviceToken: String, sessionId: String? = nil, workspaceId: String? = nil) async throws {
+        guard let ws = webSocket else {
+            throw RPCClientError.connectionNotEstablished
+        }
+
+        let effectiveSessionId = sessionId ?? currentSessionId
+
+        let params = DeviceTokenRegisterParams(
+            deviceToken: deviceToken,
+            sessionId: effectiveSessionId,
+            workspaceId: workspaceId,
+            environment: isProductionBuild ? "production" : "sandbox"
+        )
+
+        let result: DeviceTokenRegisterResult = try await ws.send(
+            method: "device.register",
+            params: params
+        )
+
+        logger.info("Device token registered: id=\(result.id), created=\(result.created)", category: .notification)
+    }
+
+    /// Unregister a device token
+    func unregisterDeviceToken(_ deviceToken: String) async throws {
+        guard let ws = webSocket else {
+            throw RPCClientError.connectionNotEstablished
+        }
+
+        let params = DeviceTokenUnregisterParams(deviceToken: deviceToken)
+        let result: DeviceTokenUnregisterResult = try await ws.send(
+            method: "device.unregister",
+            params: params
+        )
+
+        if result.success {
+            logger.info("Device token unregistered", category: .notification)
+        }
+    }
+
+    /// Check if this is a production build (for APNS environment)
+    private var isProductionBuild: Bool {
+        #if DEBUG
+        return false
+        #else
+        return true
+        #endif
+    }
+
     // MARK: - State Accessors
 
     var isConnected: Bool {

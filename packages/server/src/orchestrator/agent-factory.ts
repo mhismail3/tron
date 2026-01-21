@@ -27,6 +27,7 @@ import {
   QuerySubagentTool,
   WaitForSubagentTool,
   TodoWriteTool,
+  NotifyAppTool,
   detectProviderFromModel,
   type AgentConfig,
   type TronTool,
@@ -38,6 +39,7 @@ import {
   type TronEvent,
   type SubAgentTracker,
   type TodoItem,
+  type NotifyAppResult,
 } from '@tron/core';
 
 const logger = createLogger('agent-factory');
@@ -63,6 +65,18 @@ export interface AgentFactoryConfig {
   onTodosUpdated: (sessionId: string, todos: TodoItem[]) => Promise<void>;
   /** Generate unique ID for todos */
   generateTodoId: () => string;
+  /** Callback for sending push notifications (optional) */
+  onNotify?: (
+    sessionId: string,
+    notification: {
+      title: string;
+      body: string;
+      data?: Record<string, string>;
+      priority?: 'high' | 'normal';
+      sound?: string;
+      badge?: number;
+    }
+  ) => Promise<NotifyAppResult>;
   /** Browser service (optional) */
   browserService?: {
     execute: (sessionId: string, action: string, params: any) => Promise<any>;
@@ -143,6 +157,16 @@ export class AgentFactory {
         onTodosUpdated: (todos) => this.config.onTodosUpdated(sessionId, todos),
       }),
     ];
+
+    // Add NotifyApp tool if push notifications are configured
+    if (this.config.onNotify) {
+      tools.push(
+        new NotifyAppTool({
+          sessionId,
+          onNotify: this.config.onNotify,
+        })
+      );
+    }
 
     // Sub-agent tools: Only add SpawnSubagent for top-level agents.
     // Subagents cannot spawn their own subagents to prevent complexity and infinite recursion.

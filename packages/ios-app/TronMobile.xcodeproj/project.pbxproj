@@ -95,6 +95,8 @@
 		8AE3E381E5A906F73A6904A3 /* VoiceNotesListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 192E08DF91426E43F5AFE03F /* VoiceNotesListView.swift */; };
 		8B8940613FB7E2B089DAFE44 /* EventStoreManager+Dashboard.swift in Sources */ = {isa = PBXBuildFile; fileRef = FD89009575AAF815668A8370 /* EventStoreManager+Dashboard.swift */; };
 		8D03520968C046CF0A0C5CC9 /* TronMobileApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = B018ED18CE376F88F9C442F4 /* TronMobileApp.swift */; };
+		ADE483B927D1CEDC99DA0002 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = ADE483B927D1CEDC99DA0001 /* AppDelegate.swift */; };
+		ADFE83B927D1CEDC99DA0004 /* PushNotificationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = ADFE83B927D1CEDC99DA0003 /* PushNotificationService.swift */; };
 		8E47281EC7DDAF43ADA30993 /* ContextTrackingState.swift in Sources */ = {isa = PBXBuildFile; fileRef = EFCC93FE9C92FBEC8986E5C9 /* ContextTrackingState.swift */; };
 		901A2D24F559EC522BF3D175 /* Date+Extensions.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB4071D0B8C943D30748238A /* Date+Extensions.swift */; };
 		901CDFFB6DFC589487695E2B /* SkillStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = F570DBF37434B980ACD0795D /* SkillStore.swift */; };
@@ -301,6 +303,8 @@
 		AAEEEEEE88ECEF3A528F968F /* CameraCaptureSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraCaptureSheet.swift; sourceTree = "<group>"; };
 		AB4071D0B8C943D30748238A /* Date+Extensions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Date+Extensions.swift"; sourceTree = "<group>"; };
 		AD61CD33CD78B1F23CDBABD7 /* LogViewer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LogViewer.swift; sourceTree = "<group>"; };
+		ADE483B927D1CEDC99DA0001 /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
+		ADFE83B927D1CEDC99DA0003 /* PushNotificationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PushNotificationService.swift; sourceTree = "<group>"; };
 		B018ED18CE376F88F9C442F4 /* TronMobileApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TronMobileApp.swift; sourceTree = "<group>"; };
 		B082B6CE011A17ED14F3393B /* RPCTypes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RPCTypes.swift; sourceTree = "<group>"; };
 		B478FD27FC82E5A327E552C0 /* InputTextField.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InputTextField.swift; sourceTree = "<group>"; };
@@ -311,6 +315,7 @@
 		BAAEF1BE9FB1F65365BE6F22 /* ContextAnalyticsViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContextAnalyticsViews.swift; sourceTree = "<group>"; };
 		BC16C3B8D2F7980BFC86839B /* SkillMentionPopup.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SkillMentionPopup.swift; sourceTree = "<group>"; };
 		BCEED7F32F2093400036AFBA /* TronMobileRelease-Prod.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = "TronMobileRelease-Prod.entitlements"; sourceTree = "<group>"; };
+		ENTDEBETA1234567890ABCDEF /* TronMobile.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = TronMobile.entitlements; sourceTree = "<group>"; };
 		C089557976ED02D50EA112A0 /* AskUserQuestionViewer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AskUserQuestionViewer.swift; sourceTree = "<group>"; };
 		C5C26EC0DCF779A0B0550615 /* ConfigPayloads.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConfigPayloads.swift; sourceTree = "<group>"; };
 		C5E09421076542759CF7BB11 /* Debug-Beta.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = "Debug-Beta.xcconfig"; sourceTree = "<group>"; };
@@ -441,6 +446,7 @@
 				D08A7F84A65F541596DED158 /* EventStoreManager+Operations.swift */,
 				9DBD69C34C8538CD6BE89D81 /* EventStoreManager+Sync.swift */,
 				E5C3B6B3DA1A77E2A09976D5 /* InputHistoryStore.swift */,
+				ADFE83B927D1CEDC99DA0003 /* PushNotificationService.swift */,
 				B9DD45A3974192F927E1B73A /* RPCClient.swift */,
 				F570DBF37434B980ACD0795D /* SkillStore.swift */,
 				18C18EEFAB81D6052EB39694 /* TronLogger.swift */,
@@ -539,6 +545,7 @@
 		73D37B19239C31F0B91AF61A = {
 			isa = PBXGroup;
 			children = (
+				ENTDEBETA1234567890ABCDEF /* TronMobile.entitlements */,
 				BCEED7F32F2093400036AFBA /* TronMobileRelease-Prod.entitlements */,
 				35B0DD78CA87252A17E5A6DB /* Configuration */,
 				2415D02CBAD7EC7588F4CA6F /* Sources */,
@@ -669,6 +676,7 @@
 		A330FEB69A6F3221BC858FB4 /* App */ = {
 			isa = PBXGroup;
 			children = (
+				ADE483B927D1CEDC99DA0001 /* AppDelegate.swift */,
 				DB2DE70827D1CEDC99DA04E4 /* AppState.swift */,
 				B018ED18CE376F88F9C442F4 /* TronMobileApp.swift */,
 			);
@@ -1015,6 +1023,8 @@
 				7704175EFC374D5E5425BC6D /* TronIcons.swift in Sources */,
 				3B2F3204C57C790DDCD71A45 /* TronLogger.swift in Sources */,
 				8D03520968C046CF0A0C5CC9 /* TronMobileApp.swift in Sources */,
+				ADE483B927D1CEDC99DA0002 /* AppDelegate.swift in Sources */,
+				ADFE83B927D1CEDC99DA0004 /* PushNotificationService.swift in Sources */,
 				AF995741399CFE0412212FE4 /* TronSpacing.swift in Sources */,
 				5370368B0B9ACE3C1C21123B /* TronTypography.swift in Sources */,
 				5A67663F15BFA1B618FE2263 /* UICanvas.swift in Sources */,
@@ -1157,6 +1167,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = TronMobile.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = MYGKXH6TY4;

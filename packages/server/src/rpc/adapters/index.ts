@@ -20,3 +20,4 @@ export { createSkillAdapter } from './skill.adapter.js';
 export { createAgentAdapter } from './agent.adapter.js';
 export { createPlanAdapter } from './plan.adapter.js';
 export { createTodoAdapter } from './todo.adapter.js';
+export { createDeviceAdapter } from './device.adapter.js';

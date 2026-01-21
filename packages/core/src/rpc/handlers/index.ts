@@ -170,3 +170,9 @@ export {
   handleTodoGetBacklogCount,
   createTodoHandlers,
 } from './todo.handler.js';
+
+export {
+  handleDeviceRegister,
+  handleDeviceUnregister,
+  getDeviceHandlers,
+} from './device.handler.js';

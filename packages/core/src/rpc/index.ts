@@ -29,6 +29,8 @@ export {
   type TodoRpcManager,
   type RpcTodoItem,
   type RpcBackloggedTask,
+  type DeviceTokenRpcManager,
+  type RpcDeviceToken,
 } from './handler.js';
 
 // Registry (new approach)

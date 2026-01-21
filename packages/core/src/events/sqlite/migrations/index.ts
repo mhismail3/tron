@@ -11,6 +11,7 @@ import type { Migration, MigrationResult } from './types.js';
 // Import migrations
 import { migration as v001Initial } from './versions/v001-initial.js';
 import { migration as v002Backlog } from './versions/v002-backlog.js';
+import { migration as v003DeviceTokens } from './versions/v003-device-tokens.js';
 
 /**
  * All registered migrations in order
@@ -18,6 +19,7 @@ import { migration as v002Backlog } from './versions/v002-backlog.js';
 export const migrations: Migration[] = [
   v001Initial,
   v002Backlog,
+  v003DeviceTokens,
 ];
 
 /**

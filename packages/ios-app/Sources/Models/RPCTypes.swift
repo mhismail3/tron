@@ -1242,3 +1242,29 @@ struct TodoGetBacklogCountParams: Encodable {
 struct TodoGetBacklogCountResult: Decodable {
     let count: Int
 }
+
+// MARK: - Device Token Methods (Push Notifications)
+
+/// Parameters for device.register
+struct DeviceTokenRegisterParams: Encodable {
+    let deviceToken: String
+    let sessionId: String?
+    let workspaceId: String?
+    let environment: String
+}
+
+/// Result of device.register
+struct DeviceTokenRegisterResult: Decodable {
+    let id: String
+    let created: Bool
+}
+
+/// Parameters for device.unregister
+struct DeviceTokenUnregisterParams: Encodable {
+    let deviceToken: String
+}
+
+/// Result of device.unregister
+struct DeviceTokenUnregisterResult: Decodable {
+    let success: Bool
+}

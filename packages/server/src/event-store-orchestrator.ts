@@ -90,6 +90,7 @@ import {
   type SubagentQueryType,
   type TodoItem,
   type BackloggedTask,
+  type NotifyAppResult,
   withLoggingContext,
 } from '@tron/core';
 import { BrowserService } from './browser/index.js';
@@ -126,6 +127,11 @@ import {
   AuthProvider,
   createAuthProvider,
 } from './orchestrator/auth-provider.js';
+import {
+  APNSService,
+  createAPNSService,
+  type APNSNotification,
+} from './apns/index.js';
 import {
   type EventStoreOrchestratorConfig,
   type ActiveSession,
@@ -166,6 +172,7 @@ export class EventStoreOrchestrator extends EventEmitter {
   private contextOps: ContextOps;
   private agentFactory: AgentFactory;
   private authProvider: AuthProvider;
+  private apnsService: APNSService | null = null;
   private backlogService: BacklogService | null = null;
   private activeSessions: Map<string, ActiveSession> = new Map();
   private cleanupTimer: ReturnType<typeof setInterval> | null = null;
@@ -251,6 +258,12 @@ export class EventStoreOrchestrator extends EventEmitter {
     // Initialize AuthProvider (delegated module)
     this.authProvider = createAuthProvider();
 
+    // Initialize APNS Service for push notifications (optional)
+    this.apnsService = createAPNSService();
+    if (this.apnsService) {
+      logger.info('APNS service initialized for push notifications');
+    }
+
     // Initialize AgentFactory (delegated module)
     this.agentFactory = createAgentFactory({
       getAuthForProvider: (model) => this.authProvider.getAuthForProvider(model),
@@ -261,6 +274,9 @@ export class EventStoreOrchestrator extends EventEmitter {
       getSubagentTrackerForSession: (sessionId) => this.activeSessions.get(sessionId)?.subagentTracker,
       onTodosUpdated: async (sessionId, todos) => this.handleTodosUpdated(sessionId, todos),
       generateTodoId: () => `todo_${crypto.randomUUID().replace(/-/g, '').slice(0, 12)}`,
+      onNotify: this.apnsService ? async (sessionId, notification) => {
+        return this.sendNotification(sessionId, notification);
+      } : undefined,
       browserService: this.browserService ? {
         execute: (sid, action, params) => this.browserService.execute(sid, action as any, params),
         createSession: async (sid) => { await this.browserService.createSession(sid); },
@@ -1670,6 +1686,87 @@ export class EventStoreOrchestrator extends EventEmitter {
       return 'no tasks';
     }
     return active.todoTracker.buildSummaryString();
+  }
+
+  // ===========================================================================
+  // Push Notifications
+  // ===========================================================================
+
+  /**
+   * Send a push notification to devices registered for a session.
+   * Used by the NotifyApp tool.
+   */
+  private async sendNotification(
+    sessionId: string,
+    notification: {
+      title: string;
+      body: string;
+      data?: Record<string, string>;
+      priority?: 'high' | 'normal';
+      sound?: string;
+      badge?: number;
+    }
+  ): Promise<NotifyAppResult> {
+    if (!this.apnsService) {
+      return { successCount: 0, failureCount: 0, errors: ['APNS not configured'] };
+    }
+
+    // Get device tokens for this session from the database
+    const db = this.eventStore.getDatabase();
+    if (!db) {
+      return { successCount: 0, failureCount: 0, errors: ['Database not available'] };
+    }
+
+    const tokens = db
+      .prepare(`
+        SELECT device_token, environment
+        FROM device_tokens
+        WHERE session_id = ? AND is_active = 1
+      `)
+      .all(sessionId) as Array<{ device_token: string; environment: string }>;
+
+    if (tokens.length === 0) {
+      logger.debug('No device tokens registered for session', { sessionId });
+      return { successCount: 0, failureCount: 0 };
+    }
+
+    // Build APNS notification payload
+    const apnsNotification: APNSNotification = {
+      title: notification.title,
+      body: notification.body,
+      data: {
+        ...notification.data,
+        sessionId, // Always include sessionId for deep linking
+      },
+      priority: notification.priority,
+      sound: notification.sound,
+      badge: notification.badge,
+      threadId: sessionId, // Group notifications by session
+    };
+
+    // Send to all registered devices
+    const deviceTokens = tokens.map((t) => t.device_token);
+    const results = await this.apnsService.sendToMany(deviceTokens, apnsNotification);
+
+    // Handle invalid tokens (APNS 410 = unregistered)
+    for (const result of results) {
+      if (!result.success && result.reason === 'Unregistered') {
+        // Mark token as invalid
+        db.prepare('UPDATE device_tokens SET is_active = 0 WHERE device_token = ?')
+          .run(result.deviceToken);
+        logger.info('Marked unregistered device token as inactive', {
+          deviceToken: result.deviceToken.substring(0, 8) + '...',
+        });
+      }
+    }
+
+    const successCount = results.filter((r) => r.success).length;
+    const failureCount = results.filter((r) => !r.success).length;
+    const errors = results
+      .filter((r) => !r.success && r.error)
+      .map((r) => r.error!);
+
+    return { successCount, failureCount, errors: errors.length > 0 ? errors : undefined };
   }
 
   // ===========================================================================

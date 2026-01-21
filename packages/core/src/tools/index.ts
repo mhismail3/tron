@@ -65,6 +65,15 @@ export {
   type TodoWriteDetails,
 } from './todo-write.js';
 
+// Push notification tool
+export {
+  NotifyAppTool,
+  type NotifyAppToolConfig,
+  type NotifyAppParams,
+  type NotifyAppResult,
+  type NotifyAppCallback,
+} from './notify-app.js';
+
 // Utility functions for token estimation and output truncation
 export {
   estimateTokens,

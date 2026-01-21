@@ -83,6 +83,8 @@ export interface RpcContext {
   planManager?: PlanRpcManager;
   /** Todo manager for task tracking (optional) */
   todoManager?: TodoRpcManager;
+  /** Device token manager for push notifications (optional) */
+  deviceManager?: DeviceTokenRpcManager;
 }
 
 /**
@@ -295,6 +297,46 @@ export interface CanvasRpcManager {
   }>;
 }
 
+/**
+ * Device token info stored in database
+ */
+export interface RpcDeviceToken {
+  id: string;
+  deviceToken: string;
+  sessionId?: string;
+  workspaceId?: string;
+  platform: 'ios';
+  environment: 'sandbox' | 'production';
+  createdAt: string;
+  lastUsedAt: string;
+  isActive: boolean;
+}
+
+/**
+ * Device token manager interface for RPC operations (push notifications)
+ */
+export interface DeviceTokenRpcManager {
+  /** Register or update a device token */
+  registerToken(params: {
+    deviceToken: string;
+    sessionId?: string;
+    workspaceId?: string;
+    environment?: 'sandbox' | 'production';
+  }): Promise<{ id: string; created: boolean }>;
+
+  /** Unregister (deactivate) a device token */
+  unregisterToken(deviceToken: string): Promise<{ success: boolean }>;
+
+  /** Get active tokens for a session */
+  getTokensForSession(sessionId: string): Promise<RpcDeviceToken[]>;
+
+  /** Get active tokens for a workspace */
+  getTokensForWorkspace(workspaceId: string): Promise<RpcDeviceToken[]>;
+
+  /** Mark a token as invalid (e.g., after APNS 410 response) */
+  markTokenInvalid(deviceToken: string): Promise<void>;
+}
+
 // =============================================================================
 // Middleware Types
 // =============================================================================
@@ -331,6 +373,7 @@ import { createVoiceNotesHandlers } from './handlers/voiceNotes.handler.js';
 import { createCanvasHandlers } from './handlers/canvas.handler.js';
 import { createPlanHandlers } from './handlers/plan.handler.js';
 import { createTodoHandlers } from './handlers/todo.handler.js';
+import { getDeviceHandlers } from './handlers/device.handler.js';
 
 export class RpcHandler extends EventEmitter {
   private context: RpcContext;
@@ -365,6 +408,7 @@ export class RpcHandler extends EventEmitter {
     this.registry.registerAll(createCanvasHandlers());
     this.registry.registerAll(createPlanHandlers());
     this.registry.registerAll(createTodoHandlers());
+    this.registry.registerAll(getDeviceHandlers());
 
     logger.debug('RPC handler initialized', {
       registeredMethods: this.registry.list(),
