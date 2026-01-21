@@ -115,16 +115,13 @@ struct NewSessionFlow: View {
                             showCloneSheet = true
                         } label: {
                             HStack {
-                                Image(systemName: "arrow.down.doc.fill")
-                                    .font(TronTypography.sans(size: TronTypography.sizeBody))
-                                    .foregroundStyle(.tronEmerald)
                                 Text("Clone from GitHub")
                                     .font(TronTypography.messageBody)
                                     .foregroundStyle(.tronEmerald)
                                 Spacer()
-                                Image(systemName: "chevron.right")
-                                    .font(TronTypography.sans(size: TronTypography.sizeCaption))
-                                    .foregroundStyle(.tronEmerald.opacity(0.4))
+                                Image(systemName: "arrow.down.doc.fill")
+                                    .font(TronTypography.sans(size: TronTypography.sizeBody))
+                                    .foregroundStyle(.tronEmerald)
                             }
                             .padding(.horizontal, 16)
                             .padding(.vertical, 14)
@@ -138,6 +135,7 @@ struct NewSessionFlow: View {
                     }
 
                     // Model section - dynamically loaded from server
+                    // Extra spacing above to visually separate from workspace/clone group
                     VStack(alignment: .leading, spacing: 10) {
                         Text("Model")
                             .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
@@ -161,9 +159,9 @@ struct NewSessionFlow: View {
 
                                 Spacer()
 
-                                Image(systemName: "chevron.up.chevron.down")
-                                    .font(TronTypography.sans(size: TronTypography.sizeCaption))
-                                    .foregroundStyle(.tronEmerald.opacity(0.5))
+                                Image(systemName: "cpu.fill")
+                                    .font(TronTypography.sans(size: TronTypography.sizeBody))
+                                    .foregroundStyle(.tronEmerald)
                             }
                             .padding(.horizontal, 16)
                             .padding(.vertical, 14)
@@ -179,25 +177,12 @@ struct NewSessionFlow: View {
                             .font(TronTypography.codeCaption)
                             .foregroundStyle(.white.opacity(0.4))
                     }
-
-                    // Divider (only show if we have remote sessions to display)
-                    if !filteredRecentSessions.isEmpty || isLoadingServerSessions {
-                        HStack(spacing: 12) {
-                            Rectangle()
-                                .fill(.white.opacity(0.15))
-                                .frame(height: 1)
-                            Text("OR")
-                                .font(TronTypography.pillValue)
-                                .foregroundStyle(.white.opacity(0.3))
-                                .fixedSize()
-                            Rectangle()
-                                .fill(.white.opacity(0.15))
-                                .frame(height: 1)
-                        }
-                    }
+                    .padding(.top, 8)
 
                     // Recent Sessions section (at the bottom)
+                    // Extra spacing above to visually separate from model section
                     recentSessionsSection
+                        .padding(.top, 8)
 
                     // Error message
                     if let error = errorMessage {
