@@ -11,50 +11,19 @@ struct NotifyAppDetailSheet: View {
 
     var body: some View {
         NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 16) {
-                    // Notification title (header)
-                    Text(data.title)
-                        .font(TronTypography.mono(size: TronTypography.sizeLargeTitle, weight: .semibold))
-                        .foregroundStyle(.tronEmerald)
-
-                    // Notification body
-                    Text(data.body)
-                        .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .regular))
-                        .foregroundStyle(.tronTextPrimary)
-
-                    // Sheet content (markdown)
-                    if let sheetContent = data.sheetContent, !sheetContent.isEmpty {
-                        Divider()
-                            .background(Color.tronBorder)
-
-                        // Render markdown content
-                        Text(LocalizedStringKey(sheetContent))
-                            .font(TronTypography.mono(size: TronTypography.sizeBody3, weight: .regular))
-                            .foregroundStyle(.tronTextSecondary)
-                            .textSelection(.enabled)
-                    }
-
-                    // Delivery status
-                    if data.status == .sent || data.status == .failed {
-                        Divider()
-                            .background(Color.tronBorder)
-
-                        deliveryStatusView
-                    }
-                }
-                .padding()
+            ZStack {
+                contentView
             }
-            .background(Color.tronBackground)
             .navigationBarTitleDisplayMode(.inline)
             .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
             .toolbar {
                 ToolbarItem(placement: .principal) {
                     HStack(spacing: 6) {
                         Image(systemName: "bell.badge.fill")
+                            .font(.system(size: 14))
                             .foregroundStyle(.tronEmerald)
                         Text("Notification")
-                            .font(TronTypography.mono(size: TronTypography.sizeTitle, weight: .medium))
+                            .font(TronTypography.mono(size: TronTypography.sizeTitle, weight: .semibold))
                             .foregroundStyle(.tronEmerald)
                     }
                 }
@@ -73,25 +42,109 @@ struct NotifyAppDetailSheet: View {
         .preferredColorScheme(.dark)
     }
 
+    // MARK: - Content View
+
     @ViewBuilder
-    private var deliveryStatusView: some View {
-        HStack(spacing: 8) {
-            if data.status == .sent {
-                Image(systemName: "checkmark.circle.fill")
-                    .foregroundStyle(.tronSuccess)
-                if let count = data.successCount {
-                    Text("Delivered to \(count) device\(count == 1 ? "" : "s")")
-                } else {
-                    Text("Delivered")
+    private var contentView: some View {
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 24) {
+                // Notification Header Section
+                notificationHeaderSection
+
+                // Sheet Content Section (markdown)
+                if let sheetContent = data.sheetContent, !sheetContent.isEmpty {
+                    sheetContentSection(sheetContent)
                 }
-            } else {
-                Image(systemName: "xmark.circle.fill")
-                    .foregroundStyle(.tronError)
-                Text(data.errorMessage ?? "Failed to deliver")
+
+                // Delivery Status Section
+                if data.status == .sent || data.status == .failed {
+                    deliveryStatusSection
+                }
             }
+            .padding(.horizontal, 20)
+            .padding(.vertical, 16)
         }
-        .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .regular))
-        .foregroundStyle(.tronTextMuted)
+    }
+
+    // MARK: - Sections
+
+    @ViewBuilder
+    private var notificationHeaderSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            // Section Header
+            HStack(spacing: 8) {
+                Image(systemName: "bell.fill")
+                    .font(.system(size: 12))
+                    .foregroundStyle(.tronEmerald)
+                Text("NOTIFICATION")
+                    .font(TronTypography.mono(size: TronTypography.sizeBody3, weight: .semibold))
+                    .foregroundStyle(.tronTextMuted)
+                Spacer()
+            }
+
+            // Title
+            Text(data.title)
+                .font(TronTypography.mono(size: TronTypography.sizeLargeTitle, weight: .semibold))
+                .foregroundStyle(.tronTextPrimary)
+
+            // Body
+            Text(data.body)
+                .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .regular))
+                .foregroundStyle(.tronTextSecondary)
+        }
+    }
+
+    @ViewBuilder
+    private func sheetContentSection(_ content: String) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            // Section Header
+            HStack(spacing: 8) {
+                Image(systemName: "doc.text")
+                    .font(.system(size: 12))
+                    .foregroundStyle(.tronSlate)
+                Text("DETAILS")
+                    .font(TronTypography.mono(size: TronTypography.sizeBody3, weight: .semibold))
+                    .foregroundStyle(.tronTextMuted)
+                Spacer()
+            }
+
+            // Markdown content
+            Text(LocalizedStringKey(content))
+                .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .regular))
+                .foregroundStyle(.tronTextSecondary)
+                .textSelection(.enabled)
+        }
+    }
+
+    @ViewBuilder
+    private var deliveryStatusSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            // Section Header
+            HStack(spacing: 8) {
+                Image(systemName: data.status == .sent ? "checkmark.circle.fill" : "xmark.circle.fill")
+                    .font(.system(size: 12))
+                    .foregroundStyle(data.status == .sent ? .tronSuccess : .tronError)
+                Text("DELIVERY STATUS")
+                    .font(TronTypography.mono(size: TronTypography.sizeBody3, weight: .semibold))
+                    .foregroundStyle(.tronTextMuted)
+                Spacer()
+            }
+
+            // Status message
+            HStack(spacing: 8) {
+                if data.status == .sent {
+                    if let count = data.successCount {
+                        Text("Delivered to \(count) device\(count == 1 ? "" : "s")")
+                    } else {
+                        Text("Delivered successfully")
+                    }
+                } else {
+                    Text(data.errorMessage ?? "Failed to deliver notification")
+                }
+            }
+            .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .regular))
+            .foregroundStyle(data.status == .sent ? .tronSuccess : .tronError)
+        }
     }
 }
 
@@ -106,22 +159,19 @@ struct NotifyAppDetailSheetFallback: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
-                    // Notification title (header)
+                    // Title
                     Text(data.title)
                         .font(TronTypography.mono(size: TronTypography.sizeLargeTitle, weight: .semibold))
-                        .foregroundStyle(.tronEmerald)
+                        .foregroundStyle(.tronTextPrimary)
 
-                    // Notification body
+                    // Body
                     Text(data.body)
                         .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .regular))
-                        .foregroundStyle(.tronTextPrimary)
+                        .foregroundStyle(.tronTextSecondary)
 
                     // Sheet content (markdown)
                     if let sheetContent = data.sheetContent, !sheetContent.isEmpty {
                         Divider()
-                            .background(Color.tronBorder)
-
-                        // Render markdown content
                         Text(LocalizedStringKey(sheetContent))
                             .font(TronTypography.mono(size: TronTypography.sizeBody3, weight: .regular))
                             .foregroundStyle(.tronTextSecondary)
@@ -131,14 +181,26 @@ struct NotifyAppDetailSheetFallback: View {
                     // Delivery status
                     if data.status == .sent || data.status == .failed {
                         Divider()
-                            .background(Color.tronBorder)
-
-                        deliveryStatusView
+                        HStack(spacing: 8) {
+                            Image(systemName: data.status == .sent ? "checkmark.circle.fill" : "xmark.circle.fill")
+                                .foregroundStyle(data.status == .sent ? .green : .red)
+                            if data.status == .sent {
+                                if let count = data.successCount {
+                                    Text("Delivered to \(count) device\(count == 1 ? "" : "s")")
+                                } else {
+                                    Text("Delivered")
+                                }
+                            } else {
+                                Text(data.errorMessage ?? "Failed to deliver")
+                            }
+                        }
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
                     }
                 }
                 .padding()
             }
-            .background(Color.tronBackground)
+            .background(Color.black)
             .navigationTitle("Notification")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -150,27 +212,6 @@ struct NotifyAppDetailSheetFallback: View {
             }
         }
         .preferredColorScheme(.dark)
-    }
-
-    @ViewBuilder
-    private var deliveryStatusView: some View {
-        HStack(spacing: 8) {
-            if data.status == .sent {
-                Image(systemName: "checkmark.circle.fill")
-                    .foregroundStyle(.tronSuccess)
-                if let count = data.successCount {
-                    Text("Delivered to \(count) device\(count == 1 ? "" : "s")")
-                } else {
-                    Text("Delivered")
-                }
-            } else {
-                Image(systemName: "xmark.circle.fill")
-                    .foregroundStyle(.tronError)
-                Text(data.errorMessage ?? "Failed to deliver")
-            }
-        }
-        .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .regular))
-        .foregroundStyle(.tronTextMuted)
     }
 }
 
