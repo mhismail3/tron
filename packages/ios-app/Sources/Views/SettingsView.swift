@@ -11,6 +11,7 @@ struct SettingsView: View {
 
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject var appState: AppState
+    @EnvironmentObject var eventStoreManager: EventStoreManager
     let rpcClient: RPCClient
     @AppStorage("serverHost") private var serverHost = "localhost"
     @AppStorage("serverPort") private var serverPort = ""
@@ -18,6 +19,8 @@ struct SettingsView: View {
 
     @State private var showingResetAlert = false
     @State private var showLogViewer = false
+    @State private var showArchiveAllConfirmation = false
+    @State private var isArchivingAll = false
 
     /// Derives environment selection from current port (or custom port override)
     private var selectedEnvironment: String {
@@ -133,6 +136,32 @@ struct SettingsView: View {
                         .font(TronTypography.caption)
                 }
 
+                // Data Section
+                Section {
+                    Button(role: .destructive) {
+                        showArchiveAllConfirmation = true
+                    } label: {
+                        HStack {
+                            Label("Archive All Sessions", systemImage: "archivebox")
+                                .font(TronTypography.subheadline)
+                                .foregroundStyle(.red)
+                            Spacer()
+                            if isArchivingAll {
+                                ProgressView()
+                                    .tint(.red)
+                            }
+                        }
+                    }
+                    .disabled(eventStoreManager.sessions.isEmpty || isArchivingAll)
+                } header: {
+                    Text("Data")
+                        .font(TronTypography.caption)
+                } footer: {
+                    Text("Removes all sessions from your device. Session data on the server will remain.")
+                        .font(TronTypography.caption2)
+                }
+                .listSectionSpacing(24)
+
                 // Footer
                 Section {
                     EmptyView()
@@ -190,6 +219,14 @@ struct SettingsView: View {
             } message: {
                 Text("This will reset all settings to their default values.")
             }
+            .alert("Archive All Sessions?", isPresented: $showArchiveAllConfirmation) {
+                Button("Cancel", role: .cancel) {}
+                Button("Archive All", role: .destructive) {
+                    archiveAllSessions()
+                }
+            } message: {
+                Text("This will remove \(eventStoreManager.sessions.count) session\(eventStoreManager.sessions.count == 1 ? "" : "s") from your device. Session data on the server will remain.")
+            }
         }
         .presentationDetents([.medium, .large])
         .presentationDragIndicator(.hidden)
@@ -211,6 +248,14 @@ struct SettingsView: View {
         confirmArchive = true
         // Trigger server reconnection with Beta port
         appState.updateServerSettings(host: "localhost", port: "8082", useTLS: false)
+    }
+
+    private func archiveAllSessions() {
+        isArchivingAll = true
+        Task {
+            await eventStoreManager.archiveAllSessions()
+            isArchivingAll = false
+        }
     }
 }
 

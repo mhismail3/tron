@@ -65,6 +65,37 @@ extension EventStoreManager {
         logger.info("Deleted session: \(sessionId)", category: .session)
     }
 
+    /// Archive all sessions (delete locally, optionally notify server)
+    func archiveAllSessions() async {
+        let sessionsToArchive = sessions
+
+        guard !sessionsToArchive.isEmpty else {
+            logger.info("No sessions to archive", category: .session)
+            return
+        }
+
+        logger.info("Archiving \(sessionsToArchive.count) sessions...", category: .session)
+
+        for session in sessionsToArchive {
+            do {
+                try eventDB.deleteSession(session.id)
+                try eventDB.deleteEventsBySession(session.id)
+
+                do {
+                    _ = try await rpcClient.deleteSession(session.id)
+                } catch {
+                    logger.warning("Server delete failed for \(session.id) (continuing): \(error.localizedDescription)", category: .session)
+                }
+            } catch {
+                logger.error("Failed to archive session \(session.id): \(error.localizedDescription)", category: .session)
+            }
+        }
+
+        setActiveSession(nil)
+        loadSessions()
+        logger.info("Archived \(sessionsToArchive.count) sessions", category: .session)
+    }
+
     /// Update session token counts and cost (called when streaming accumulates tokens)
     /// - Parameters:
     ///   - sessionId: The session to update
