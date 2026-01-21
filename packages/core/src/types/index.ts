@@ -67,6 +67,7 @@ export type {
   ToolCallEndEvent,
   DoneEvent,
   ErrorEvent,
+  SafetyBlockEvent,
   BaseTronEvent,
   TronEvent,
   TronEventType,

@@ -38,6 +38,18 @@ struct ModelPickerMenuContent<Label: View>: View {
             .sorted { codexVersionPriority($0) > codexVersionPriority($1) }
     }
 
+    /// Gemini 3 models (latest Google models) - sorted: Pro → Flash → Flash Lite
+    private var gemini3Models: [ModelInfo] {
+        models.filter { $0.isGemini && $0.isGemini3 }
+            .sorted { geminiTierPriority($0) < geminiTierPriority($1) }
+    }
+
+    /// Legacy Gemini models (2.x)
+    private var geminiLegacyModels: [ModelInfo] {
+        models.filter { $0.isGemini && !$0.isGemini3 }
+            .sorted { geminiTierPriority($0) < geminiTierPriority($1) }
+    }
+
     /// Legacy Anthropic models (non-4.5) - sorted: Opus → Sonnet
     private var legacyModels: [ModelInfo] {
         models.filter { $0.isAnthropic && !$0.is45Model }
@@ -53,6 +65,16 @@ struct ModelPickerMenuContent<Label: View>: View {
         return 0
     }
 
+    /// Sort Gemini models: Pro first, then Flash, then Flash Lite
+    private func geminiTierPriority(_ model: ModelInfo) -> Int {
+        switch model.geminiTier {
+        case "pro": return 0
+        case "flash": return 1
+        case "flash-lite": return 2
+        default: return 3
+        }
+    }
+
     // MARK: - Body
 
     var body: some View {
@@ -65,7 +87,15 @@ struct ModelPickerMenuContent<Label: View>: View {
                     modelButton(model: model, systemImage: "sparkles")
                 }
 
-                // Divider before Codex models
+                // Gemini 3 models (latest Google models)
+                if !gemini3Models.isEmpty {
+                    Divider()
+                    ForEach(gemini3Models) { model in
+                        modelButton(model: model, systemImage: "atom")
+                    }
+                }
+
+                // OpenAI Codex models
                 if !codexModels.isEmpty {
                     Divider()
                     ForEach(codexModels) { model in
@@ -73,10 +103,18 @@ struct ModelPickerMenuContent<Label: View>: View {
                     }
                 }
 
-                // Divider before legacy models
+                // Legacy Anthropic models
                 if !legacyModels.isEmpty {
                     Divider()
                     ForEach(legacyModels) { model in
+                        modelButton(model: model, systemImage: "clock")
+                    }
+                }
+
+                // Legacy Gemini models (2.x)
+                if !geminiLegacyModels.isEmpty {
+                    Divider()
+                    ForEach(geminiLegacyModels) { model in
                         modelButton(model: model, systemImage: "clock")
                     }
                 }

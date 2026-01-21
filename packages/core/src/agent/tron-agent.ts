@@ -29,6 +29,7 @@ import {
   type ProviderType,
   type UnifiedAuth,
 } from '../providers/index.js';
+import type { GoogleOAuthEndpoint } from '../auth/index.js';
 import { HookEngine } from '../hooks/engine.js';
 import { ContextManager, createContextManager } from '../context/context-manager.js';
 import type { Summarizer } from '../context/summarizer.js';
@@ -96,6 +97,7 @@ export class TronAgent {
       baseURL: config.provider.baseURL,
       thinkingBudget: config.provider.thinkingBudget ?? config.thinkingBudget,
       organization: config.provider.organization,
+      googleEndpoint: config.provider.googleEndpoint,
     });
 
     this.tools = new Map();
@@ -210,8 +212,9 @@ export class TronAgent {
 
   /**
    * Switch to a different model (preserves session context)
+   * For Google models, auth may include endpoint and projectId fields.
    */
-  switchModel(model: string, providerType?: ProviderType, auth?: UnifiedAuth): void {
+  switchModel(model: string, providerType?: ProviderType, auth?: UnifiedAuth & { endpoint?: GoogleOAuthEndpoint }): void {
     if (this.isRunning) {
       throw new Error('Cannot switch model while agent is running');
     }
@@ -227,6 +230,9 @@ export class TronAgent {
     const newProviderType = providerType ?? detectProviderFromModel(model);
     const effectiveAuth = auth ?? this.config.provider.auth;
 
+    // Extract Google-specific endpoint if present in auth
+    const googleEndpoint = auth?.endpoint ?? this.config.provider.googleEndpoint;
+
     // Create new provider
     this.provider = createProvider({
       type: newProviderType,
@@ -237,6 +243,7 @@ export class TronAgent {
       baseURL: this.config.provider.baseURL,
       thinkingBudget: this.config.provider.thinkingBudget ?? this.config.thinkingBudget,
       organization: this.config.provider.organization,
+      googleEndpoint,
     });
 
     this.providerType = newProviderType;

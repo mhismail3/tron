@@ -15,6 +15,7 @@ import type {
 import type { RpcContext } from '../handler.js';
 import { MethodRegistry, type MethodRegistration, type MethodHandler } from '../registry.js';
 import { ANTHROPIC_MODELS, OPENAI_CODEX_MODELS } from '../../providers/models.js';
+import { GEMINI_MODELS } from '../../providers/google.js';
 
 // =============================================================================
 // Handler Implementations
@@ -42,7 +43,8 @@ export async function handleModelSwitch(
   // Validate model exists (check all providers)
   const anthropicModel = ANTHROPIC_MODELS.find((m) => m.id === params.model);
   const codexModel = OPENAI_CODEX_MODELS.find((m) => m.id === params.model);
-  if (!anthropicModel && !codexModel) {
+  const geminiModel = params.model in GEMINI_MODELS ? GEMINI_MODELS[params.model] : undefined;
+  if (!anthropicModel && !codexModel && !geminiModel) {
     return MethodRegistry.errorResponse(request.id, 'INVALID_PARAMS', `Unknown model: ${params.model}`);
   }
 
@@ -86,6 +88,20 @@ export async function handleModelList(
       defaultReasoningLevel: m.defaultReasoningLevel,
       tier: m.tier,
       isLegacy: false,
+    })),
+    // Google Gemini models
+    ...Object.entries(GEMINI_MODELS).map(([id, m]) => ({
+      id,
+      name: m.shortName,
+      provider: 'google',
+      contextWindow: m.contextWindow,
+      supportsThinking: m.supportsThinking,
+      supportsImages: true, // Gemini supports images
+      tier: m.tier,
+      isLegacy: false,
+      isPreview: m.preview ?? false,
+      thinkingLevel: m.defaultThinkingLevel,
+      supportedThinkingLevels: m.supportedThinkingLevels,
     })),
   ];
 

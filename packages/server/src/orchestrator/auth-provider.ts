@@ -11,9 +11,11 @@
 import {
   createLogger,
   loadServerAuth,
+  loadGoogleServerAuth,
   getProviderAuthSync,
   detectProviderFromModel,
   type ServerAuth,
+  type GoogleAuth,
 } from '@tron/core';
 
 const logger = createLogger('auth-provider');
@@ -75,8 +77,9 @@ export class AuthProvider {
    * Get authentication credentials for a given model.
    * Handles Codex OAuth tokens separately from standard auth.
    * Refreshes cached auth if OAuth tokens are expired.
+   * Returns GoogleAuth for Google models (includes endpoint and projectId).
    */
-  async getAuthForProvider(model: string): Promise<ServerAuth> {
+  async getAuthForProvider(model: string): Promise<ServerAuth | GoogleAuth> {
     const providerType = detectProviderFromModel(model);
 
     if (providerType === 'openai-codex') {
@@ -91,6 +94,20 @@ export class AuthProvider {
         refreshToken: codexTokens.refreshToken,
         expiresAt: codexTokens.expiresAt,
       };
+    }
+
+    if (providerType === 'google') {
+      // Load Google-specific auth (OAuth or API key)
+      const googleAuth = await loadGoogleServerAuth();
+      if (!googleAuth) {
+        throw new Error('Google not authenticated. Run `tron login --provider google` or set GOOGLE_API_KEY.');
+      }
+      logger.info('Loaded Google auth', {
+        type: googleAuth.type,
+        endpoint: googleAuth.endpoint ?? 'standard',
+        hasProjectId: !!googleAuth.projectId,
+      });
+      return googleAuth;
     }
 
     // Use cached auth from ~/.tron/auth.json (supports Claude Max OAuth)

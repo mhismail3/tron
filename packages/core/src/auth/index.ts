@@ -17,6 +17,28 @@ export {
   type StoredAuth,
 } from './oauth.js';
 
+// Google OAuth functions
+export {
+  generateGooglePKCE,
+  getGoogleAuthorizationUrl,
+  exchangeGoogleCodeForTokens,
+  refreshGoogleOAuthToken,
+  shouldRefreshGoogleTokens,
+  isGoogleOAuthToken,
+  loadGoogleServerAuth,
+  saveGoogleOAuthTokens,
+  discoverGoogleProject,
+  getGeminiApiUrl,
+  getGeminiApiHeaders,
+  GoogleOAuthError,
+  CLOUD_CODE_ASSIST_CONFIG,
+  ANTIGRAVITY_CONFIG,
+  type GooglePKCEPair,
+  type GoogleOAuthEndpoint,
+  type GoogleOAuthConfig,
+  type GoogleAuth,
+} from './google-oauth.js';
+
 // Unified auth types
 export type {
   OAuthTokens,

@@ -12,6 +12,7 @@ import type {
   TokenUsage,
 } from '../types/index.js';
 import type { ProviderType, UnifiedAuth } from '../providers/index.js';
+import type { GoogleOAuthEndpoint } from '../auth/index.js';
 
 // =============================================================================
 // Agent Configuration
@@ -29,6 +30,8 @@ export interface AgentProviderConfig {
   thinkingBudget?: number;
   // OpenAI-specific
   organization?: string;
+  // Google/Gemini-specific
+  googleEndpoint?: GoogleOAuthEndpoint;
 }
 
 /**

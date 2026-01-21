@@ -112,6 +112,18 @@ export interface RetryEvent {
 }
 
 /**
+ * Safety block event - emitted when response is blocked by safety filters
+ * (Specific to Gemini/Google provider)
+ */
+export interface SafetyBlockEvent {
+  type: 'safety_block';
+  /** Categories that triggered the safety block */
+  blockedCategories: string[];
+  /** Error describing the safety block */
+  error: Error;
+}
+
+/**
  * Union of all LLM stream events
  */
 export type StreamEvent =
@@ -127,7 +139,8 @@ export type StreamEvent =
   | ToolCallEndEvent
   | DoneEvent
   | ErrorEvent
-  | RetryEvent;
+  | RetryEvent
+  | SafetyBlockEvent;
 
 // =============================================================================
 // Tron Agent Events

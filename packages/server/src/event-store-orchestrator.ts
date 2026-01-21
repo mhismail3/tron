@@ -1025,7 +1025,8 @@ export class EventStoreOrchestrator extends EventEmitter {
       active.model = model;
       // CRITICAL: Use agent's switchModel() to preserve conversation history
       // Pass the new auth to ensure correct credentials for the new provider
-      active.agent.switchModel(model, undefined, newAuth);
+      // Cast is safe - GoogleAuth is compatible with UnifiedAuth & { endpoint? }
+      active.agent.switchModel(model, undefined, newAuth as any);
       logger.debug('[MODEL_SWITCH] Agent model switched (preserving messages)', { sessionId, model });
     }
 

@@ -32,6 +32,11 @@ enum ModelNameFormatter {
             return formatCodexModel(modelId, style: style)
         }
 
+        // Check for Gemini models
+        if lowered.contains("gemini") {
+            return formatGeminiModel(modelId, style: style)
+        }
+
         // Detect Claude tier
         let tier: Tier?
         if lowered.contains("opus") {
@@ -121,6 +126,62 @@ enum ModelNameFormatter {
                 return "OpenAI Codex\(suffix)"
             }
             return "OpenAI GPT-\(version) Codex\(suffix)"
+        }
+    }
+
+    /// Format Gemini model IDs
+    /// e.g., "gemini-3-pro-preview" -> "Gemini 3 Pro"
+    ///       "gemini-3-flash-preview" -> "Gemini 3 Flash"
+    ///       "gemini-2.5-pro" -> "Gemini 2.5 Pro"
+    private static func formatGeminiModel(_ modelId: String, style: Style) -> String {
+        let lowered = modelId.lowercased()
+
+        // Extract version
+        var version = ""
+        if lowered.contains("gemini-3") {
+            version = "3"
+        } else if lowered.contains("gemini-2.5") || lowered.contains("2-5") {
+            version = "2.5"
+        } else if lowered.contains("gemini-2") {
+            version = "2"
+        }
+
+        // Extract tier
+        var tier = ""
+        if lowered.contains("flash-lite") {
+            tier = "Flash Lite"
+        } else if lowered.contains("flash") {
+            tier = "Flash"
+        } else if lowered.contains("pro") {
+            tier = "Pro"
+        }
+
+        switch style {
+        case .tierOnly:
+            // Return version + tier for Gemini (e.g., "3 Flash", "3 Pro")
+            if !version.isEmpty && !tier.isEmpty {
+                return "\(version) \(tier)"
+            } else if !tier.isEmpty {
+                return tier
+            }
+            return "Gemini"
+        case .short:
+            // Return "Gemini 3 Flash", "Gemini 3 Pro"
+            var parts = ["Gemini"]
+            if !version.isEmpty { parts.append(version) }
+            if !tier.isEmpty { parts.append(tier) }
+            return parts.joined(separator: " ")
+        case .compact:
+            var parts = ["gemini"]
+            if !version.isEmpty { parts.append(version) }
+            if !tier.isEmpty { parts.append(tier.lowercased().replacingOccurrences(of: " ", with: "-")) }
+            return parts.joined(separator: "-")
+        case .full:
+            // Same as short for Gemini (no "Google" prefix needed)
+            var parts = ["Gemini"]
+            if !version.isEmpty { parts.append(version) }
+            if !tier.isEmpty { parts.append(tier) }
+            return parts.joined(separator: " ")
         }
     }
 

@@ -33,6 +33,7 @@ import {
   type TronTool,
   type SessionId,
   type ServerAuth,
+  type GoogleAuth,
   type BrowserDelegate,
   type SpawnSubagentParams,
   type SubagentQueryType,
@@ -40,17 +41,46 @@ import {
   type SubAgentTracker,
   type TodoItem,
   type NotifyAppResult,
+  type UnifiedAuth,
 } from '@tron/core';
 
 const logger = createLogger('agent-factory');
+
+// =============================================================================
+// Helpers
+// =============================================================================
+
+/**
+ * Normalize auth to UnifiedAuth format for provider factory.
+ * GoogleAuth has optional fields, but UnifiedAuth requires specific shapes.
+ */
+function normalizeToUnifiedAuth(auth: ServerAuth | GoogleAuth): UnifiedAuth {
+  if (auth.type === 'api_key') {
+    // For API key auth, use apiKey from GoogleAuth or ServerAuth
+    const apiKey = 'apiKey' in auth ? auth.apiKey : undefined;
+    if (!apiKey) {
+      throw new Error('API key auth missing apiKey');
+    }
+    return { type: 'api_key', apiKey };
+  } else {
+    // For OAuth auth, use accessToken/refreshToken/expiresAt
+    const accessToken = 'accessToken' in auth ? auth.accessToken : undefined;
+    const refreshToken = 'refreshToken' in auth ? auth.refreshToken : undefined;
+    const expiresAt = 'expiresAt' in auth ? auth.expiresAt : undefined;
+    if (!accessToken || !refreshToken || expiresAt === undefined) {
+      throw new Error('OAuth auth missing required fields');
+    }
+    return { type: 'oauth', accessToken, refreshToken, expiresAt };
+  }
+}
 
 // =============================================================================
 // Types
 // =============================================================================
 
 export interface AgentFactoryConfig {
-  /** Get authentication for a model */
-  getAuthForProvider: (model: string) => Promise<ServerAuth>;
+  /** Get authentication for a model (returns GoogleAuth for Google models) */
+  getAuthForProvider: (model: string) => Promise<ServerAuth | GoogleAuth>;
   /** Spawn subsession callback - toolCallId included for event correlation */
   spawnSubsession: (parentId: string, params: SpawnSubagentParams, toolCallId?: string) => Promise<any>;
   /** Query subagent callback */
@@ -204,6 +234,11 @@ export class AgentFactory {
     // will use TRON_CORE_PROMPT with provider-specific adaptations
     const prompt = systemPrompt; // May be undefined - that's fine
 
+    // Extract Google-specific fields from auth if present
+    const googleEndpoint = 'endpoint' in auth
+      ? (auth as GoogleAuth).endpoint
+      : undefined;
+
     logger.info('Creating agent with tools', {
       sessionId,
       workingDirectory,
@@ -211,12 +246,17 @@ export class AgentFactory {
       authType: auth.type,
       isOAuth: auth.type === 'oauth',
       providerType,
+      googleEndpoint,
     });
+
+    // Normalize auth to UnifiedAuth format for provider factory
+    const normalizedAuth = normalizeToUnifiedAuth(auth);
 
     const agentConfig: AgentConfig = {
       provider: {
         model,
-        auth, // Use OAuth from Codex tokens or auth.json
+        auth: normalizedAuth,
+        googleEndpoint,
       },
       tools,
       systemPrompt: prompt,

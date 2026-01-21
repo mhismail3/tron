@@ -33,7 +33,8 @@ describe('ContextManager', () => {
 
     it('initializes with Gemini context limit', () => {
       const cm = createContextManager({ model: 'gemini-2.5-pro' });
-      expect(cm.getContextLimit()).toBe(1_000_000);
+      // Gemini 2.5 Pro has 2M context window
+      expect(cm.getContextLimit()).toBe(2_097_152);
     });
 
     it('starts with empty messages', () => {

@@ -108,12 +108,20 @@ export const OPENAI_PRICING: Record<string, PricingTier> = {
 };
 
 export const GOOGLE_PRICING: Record<string, PricingTier> = {
-  'gemini-2.0-flash': {
-    inputPerMillion: 0.1,
-    outputPerMillion: 0.4,
+  // Gemini 3 models (preview)
+  'gemini-3-pro-preview': {
+    inputPerMillion: 1.25,
+    outputPerMillion: 5,
     cacheWriteMultiplier: 1,
     cacheReadMultiplier: 0.25,
   },
+  'gemini-3-flash-preview': {
+    inputPerMillion: 0.075,
+    outputPerMillion: 0.3,
+    cacheWriteMultiplier: 1,
+    cacheReadMultiplier: 0.25,
+  },
+  // Gemini 2.5 models
   'gemini-2.5-pro': {
     inputPerMillion: 1.25,
     outputPerMillion: 5,
@@ -123,6 +131,13 @@ export const GOOGLE_PRICING: Record<string, PricingTier> = {
   'gemini-2.5-flash': {
     inputPerMillion: 0.075,
     outputPerMillion: 0.3,
+    cacheWriteMultiplier: 1,
+    cacheReadMultiplier: 0.25,
+  },
+  // Gemini 2.0 models
+  'gemini-2.0-flash': {
+    inputPerMillion: 0.1,
+    outputPerMillion: 0.4,
     cacheWriteMultiplier: 1,
     cacheReadMultiplier: 0.25,
   },
@@ -369,10 +384,13 @@ export const CONTEXT_LIMITS: Record<string, number> = {
   'gpt-4o': 128_000,
   'gpt-4o-mini': 128_000,
   'gpt-4-turbo': 128_000,
-  // Google
-  'gemini-2.5-pro': 1_000_000,
-  'gemini-2.5-flash': 1_000_000,
-  'gemini-2.0-flash': 1_000_000,
+  // Google Gemini 3 (1M context)
+  'gemini-3-pro-preview': 1_048_576,
+  'gemini-3-flash-preview': 1_048_576,
+  // Google Gemini 2.5
+  'gemini-2.5-pro': 2_097_152,
+  'gemini-2.5-flash': 1_048_576,
+  'gemini-2.0-flash': 1_048_576,
 };
 
 /**

@@ -96,7 +96,9 @@ final class ModelInfoTests: XCTestCase {
             isLegacy: nil,
             supportsReasoning: nil,
             reasoningLevels: nil,
-            defaultReasoningLevel: nil
+            defaultReasoningLevel: nil,
+            thinkingLevel: nil,
+            supportedThinkingLevels: nil
         )
     }
 }

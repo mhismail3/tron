@@ -8,7 +8,17 @@
 import type { Context, StreamEvent } from '../types/index.js';
 import { AnthropicProvider, type AnthropicConfig, type StreamOptions } from './anthropic.js';
 import { OpenAIProvider, type OpenAIConfig, type OpenAIStreamOptions } from './openai.js';
-import { GoogleProvider, type GoogleConfig, type GoogleStreamOptions } from './google.js';
+import {
+  GoogleProvider,
+  type GoogleConfig,
+  type GoogleStreamOptions,
+  type GeminiThinkingLevel,
+  type SafetySetting,
+  type GoogleProviderAuth,
+  type GoogleOAuthAuth,
+  type GoogleApiKeyAuth,
+} from './google.js';
+import type { GoogleOAuthEndpoint } from '../auth/google-oauth.js';
 import {
   OpenAICodexProvider,
   type OpenAICodexConfig,
@@ -52,6 +62,15 @@ export interface ProviderConfig {
   organization?: string;
   // OpenAI Codex-specific
   reasoningEffort?: ReasoningEffort;
+  // Google/Gemini-specific
+  /** Thinking level for Gemini 3 models (minimal/low/medium/high) */
+  thinkingLevel?: GeminiThinkingLevel;
+  /** Thinking budget for Gemini 2.5 models (0-32768 tokens) */
+  geminiThinkingBudget?: number;
+  /** Safety settings for Gemini (defaults to OFF) */
+  safetySettings?: SafetySetting[];
+  /** Google OAuth endpoint (cloud-code-assist or antigravity) */
+  googleEndpoint?: GoogleOAuthEndpoint;
 }
 
 /**
@@ -77,8 +96,12 @@ export interface ProviderStreamOptions {
   topP?: number;
   frequencyPenalty?: number;
   presencePenalty?: number;
-  // Google-specific
+  // Google/Gemini-specific
   topK?: number;
+  /** Thinking level for Gemini 3 models */
+  thinkingLevel?: GeminiThinkingLevel;
+  /** Thinking budget for Gemini 2.5 models */
+  geminiThinkingBudget?: number;
   // OpenAI Codex-specific
   reasoningEffort?: ReasoningEffort;
 }
@@ -245,18 +268,40 @@ function createOpenAIProvider(config: ProviderConfig): Provider {
 
 /**
  * Create Google provider
+ *
+ * Supports both OAuth (Cloud Code Assist / Antigravity) and API key authentication.
+ * OAuth is ALWAYS preferred when available.
  */
 function createGoogleProvider(config: ProviderConfig): Provider {
-  if (config.auth.type !== 'api_key') {
-    throw new Error('Google only supports API key authentication');
+  // Build Google-specific auth from unified auth
+  let googleAuth: GoogleProviderAuth;
+
+  if (config.auth.type === 'oauth') {
+    // OAuth authentication - PREFERRED
+    googleAuth = {
+      type: 'oauth',
+      accessToken: config.auth.accessToken,
+      refreshToken: config.auth.refreshToken,
+      expiresAt: config.auth.expiresAt,
+      endpoint: (config as any).googleEndpoint as GoogleOAuthEndpoint | undefined,
+    } as GoogleOAuthAuth;
+  } else {
+    // API key authentication - fallback
+    googleAuth = {
+      type: 'api_key',
+      apiKey: config.auth.apiKey,
+    } as GoogleApiKeyAuth;
   }
 
   const googleConfig: GoogleConfig = {
     model: config.model,
-    apiKey: config.auth.apiKey,
+    auth: googleAuth,
     maxTokens: config.maxTokens,
     temperature: config.temperature,
     baseURL: config.baseURL,
+    thinkingLevel: config.thinkingLevel,
+    thinkingBudget: config.geminiThinkingBudget,
+    safetySettings: config.safetySettings,
   };
 
   const provider = new GoogleProvider(googleConfig);
@@ -271,6 +316,8 @@ function createGoogleProvider(config: ProviderConfig): Provider {
         topP: options?.topP,
         topK: options?.topK,
         stopSequences: options?.stopSequences,
+        thinkingLevel: options?.thinkingLevel,
+        thinkingBudget: options?.geminiThinkingBudget,
       };
       yield* provider.stream(context, opts);
     },

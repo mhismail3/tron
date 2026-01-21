@@ -185,4 +185,97 @@ describe('Model Handlers', () => {
       expect(response.result).toHaveProperty('models');
     });
   });
+
+  // ===========================================================================
+  // Gemini Model Validation Tests
+  // ===========================================================================
+
+  describe('Gemini Model Validation', () => {
+    it('should accept gemini-3-pro-preview as valid model', async () => {
+      const request: RpcRequest = {
+        id: '1',
+        method: 'model.switch',
+        params: { sessionId: 'sess-123', model: 'gemini-3-pro-preview' },
+      };
+
+      const response = await handleModelSwitch(request, mockContext);
+
+      expect(response.success).toBe(true);
+      expect(mockSwitchModel).toHaveBeenCalledWith('sess-123', 'gemini-3-pro-preview');
+    });
+
+    it('should accept gemini-3-flash-preview as valid model', async () => {
+      const request: RpcRequest = {
+        id: '1',
+        method: 'model.switch',
+        params: { sessionId: 'sess-123', model: 'gemini-3-flash-preview' },
+      };
+
+      const response = await handleModelSwitch(request, mockContext);
+
+      expect(response.success).toBe(true);
+      expect(mockSwitchModel).toHaveBeenCalledWith('sess-123', 'gemini-3-flash-preview');
+    });
+
+    it('should include Gemini models in model.list response', async () => {
+      const request: RpcRequest = {
+        id: '1',
+        method: 'model.list',
+      };
+
+      const response = await handleModelList(request, mockContext);
+
+      expect(response.success).toBe(true);
+      const result = response.result as { models: any[] };
+
+      // Should have Google/Gemini models
+      const geminiModels = result.models.filter(m => m.provider === 'google');
+      expect(geminiModels.length).toBeGreaterThan(0);
+
+      // Should include Gemini 3 Pro
+      const gemini3Pro = geminiModels.find(m => m.id === 'gemini-3-pro-preview');
+      expect(gemini3Pro).toBeDefined();
+      expect(gemini3Pro?.contextWindow).toBe(1048576);
+      expect(gemini3Pro?.supportsThinking).toBe(true);
+      expect(gemini3Pro?.tier).toBe('pro');
+
+      // Should include Gemini 3 Flash
+      const gemini3Flash = geminiModels.find(m => m.id === 'gemini-3-flash-preview');
+      expect(gemini3Flash).toBeDefined();
+      expect(gemini3Flash?.contextWindow).toBe(1048576);
+      expect(gemini3Flash?.supportsThinking).toBe(true);
+      expect(gemini3Flash?.tier).toBe('flash');
+    });
+
+    it('should include preview flag for Gemini 3 models', async () => {
+      const request: RpcRequest = {
+        id: '1',
+        method: 'model.list',
+      };
+
+      const response = await handleModelList(request, mockContext);
+
+      const result = response.result as { models: any[] };
+      const gemini3Pro = result.models.find(m => m.id === 'gemini-3-pro-preview');
+      const gemini3Flash = result.models.find(m => m.id === 'gemini-3-flash-preview');
+
+      expect(gemini3Pro?.isPreview).toBe(true);
+      expect(gemini3Flash?.isPreview).toBe(true);
+    });
+
+    it('should include thinking level information for Gemini models', async () => {
+      const request: RpcRequest = {
+        id: '1',
+        method: 'model.list',
+      };
+
+      const response = await handleModelList(request, mockContext);
+
+      const result = response.result as { models: any[] };
+      const gemini3Pro = result.models.find(m => m.id === 'gemini-3-pro-preview');
+
+      expect(gemini3Pro?.thinkingLevel).toBeDefined();
+      expect(gemini3Pro?.supportedThinkingLevels).toBeDefined();
+    });
+  });
 });

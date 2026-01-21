@@ -214,7 +214,9 @@ struct InlineReasoningControl: View {
             isLegacy: false,
             supportsReasoning: true,
             reasoningLevels: ["low", "medium", "high", "xhigh"],
-            defaultReasoningLevel: "medium"
+            defaultReasoningLevel: "medium",
+            thinkingLevel: nil,
+            supportedThinkingLevels: nil
         )
 
         ReasoningLevelPicker(

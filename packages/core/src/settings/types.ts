@@ -52,11 +52,44 @@ export interface OpenAICodexApiSettings {
 }
 
 /**
+ * Google/Gemini OAuth configuration
+ *
+ * Supports two OAuth backends:
+ * 1. Cloud Code Assist (production): cloudcode-pa.googleapis.com
+ * 2. Antigravity (sandbox/free tier): daily-cloudcode-pa.sandbox.googleapis.com
+ *
+ * OAuth is ALWAYS preferred over API key when both are available.
+ */
+export interface GoogleApiSettings {
+  /** OAuth authorization URL */
+  authUrl: string;
+  /** OAuth token exchange URL */
+  tokenUrl: string;
+  /** OAuth client ID (Gemini CLI client) */
+  clientId: string;
+  /** OAuth client secret (public for device flow) */
+  clientSecret?: string;
+  /** OAuth scopes */
+  scopes: string[];
+  /** OAuth redirect URI (local callback server) */
+  redirectUri: string;
+  /** Token expiry buffer in seconds (refresh before actual expiry) */
+  tokenExpiryBufferSeconds: number;
+  /** API endpoint for Gemini requests */
+  apiEndpoint: string;
+  /** API version path */
+  apiVersion: string;
+  /** Default OAuth endpoint type */
+  defaultEndpoint: 'cloud-code-assist' | 'antigravity';
+}
+
+/**
  * API settings container
  */
 export interface ApiSettings {
   anthropic: AnthropicApiSettings;
   openaiCodex?: OpenAICodexApiSettings;
+  google?: GoogleApiSettings;
 }
 
 // =============================================================================

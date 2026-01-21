@@ -296,10 +296,17 @@ struct ModelSwitcher: View {
         // Separate models by provider
         let anthropicModels = models.filter { $0.isAnthropic }
         let codexModels = models.filter { $0.isCodex }
+        let geminiModels = models.filter { $0.isGemini }
 
         // Further separate Anthropic: 4.5 models (latest) from legacy models
         let latestAnthropicModels = anthropicModels.filter { is45Model($0) }
         let legacyAnthropicModels = anthropicModels.filter { !is45Model($0) }
+
+        // Separate Gemini: 3.x (latest) from 2.x (legacy)
+        let gemini3Models = geminiModels.filter { $0.isGemini3 }
+            .sorted { geminiTierPriority($0) < geminiTierPriority($1) }
+        let geminiLegacyModels = geminiModels.filter { !$0.isGemini3 }
+            .sorted { geminiTierPriority($0) < geminiTierPriority($1) }
 
         var groups: [ModelGroup] = []
 
@@ -310,6 +317,16 @@ struct ModelSwitcher: View {
 
         if !orderedLatest.isEmpty {
             groups.append(ModelGroup(tier: "Anthropic (Latest)", models: orderedLatest))
+        }
+
+        // Gemini 3 models (latest Google models)
+        if !gemini3Models.isEmpty {
+            groups.append(ModelGroup(tier: "Gemini 3", models: gemini3Models))
+        }
+
+        // OpenAI Codex models
+        if !codexModels.isEmpty {
+            groups.append(ModelGroup(tier: "OpenAI Codex", models: codexModels))
         }
 
         // Legacy Anthropic models grouped by tier
@@ -324,12 +341,22 @@ struct ModelSwitcher: View {
             }
         }
 
-        // OpenAI Codex models
-        if !codexModels.isEmpty {
-            groups.append(ModelGroup(tier: "OpenAI Codex", models: codexModels))
+        // Legacy Gemini models (2.x)
+        if !geminiLegacyModels.isEmpty {
+            groups.append(ModelGroup(tier: "Gemini 2.x", models: geminiLegacyModels))
         }
 
         return groups
+    }
+
+    /// Sort Gemini models: Pro first, then Flash, then Flash Lite
+    private func geminiTierPriority(_ model: ModelInfo) -> Int {
+        switch model.geminiTier {
+        case "pro": return 0
+        case "flash": return 1
+        case "flash-lite": return 2
+        default: return 3
+        }
     }
 
     private func is45Model(_ model: ModelInfo) -> Bool {
@@ -441,6 +468,17 @@ struct ModelRow: View {
                             .padding(.horizontal, 6)
                             .padding(.vertical, 2)
                             .background(Color.tronTextMuted.opacity(0.2))
+                            .clipShape(Capsule())
+                    }
+
+                    // Preview badge for Gemini preview models
+                    if model.isPreview {
+                        Text("Preview")
+                            .font(TronTypography.caption2)
+                            .foregroundStyle(.orange)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(Color.orange.opacity(0.15))
                             .clipShape(Capsule())
                     }
                 }

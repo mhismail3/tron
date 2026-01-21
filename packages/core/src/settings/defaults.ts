@@ -93,6 +93,27 @@ export const DEFAULT_SETTINGS: TronSettings = {
       tokenExpiryBufferSeconds: 300,
       defaultReasoningEffort: 'medium',
     },
+    // Google/Gemini OAuth configuration (for Cloud Code Assist / Antigravity access)
+    // Uses Gemini CLI OAuth credentials - public client for device authorization flow
+    // Based on: https://github.com/GoogleCloudPlatform/generative-ai-gemini-cli
+    google: {
+      authUrl: 'https://accounts.google.com/o/oauth2/v2/auth',
+      tokenUrl: 'https://oauth2.googleapis.com/token',
+      // Gemini CLI OAuth client (public credentials)
+      clientId: '',
+      clientSecret: '',
+      scopes: [
+        'https://www.googleapis.com/auth/cloud-platform',
+        'https://www.googleapis.com/auth/userinfo.email',
+        'openid',
+      ],
+      redirectUri: 'http://localhost:45289',
+      tokenExpiryBufferSeconds: 300,
+      // Production Cloud Code Assist endpoint
+      apiEndpoint: 'https://cloudcode-pa.googleapis.com',
+      apiVersion: 'v1internal',
+      defaultEndpoint: 'cloud-code-assist',
+    },
   },
 
   // Model Configuration
