@@ -13,6 +13,7 @@ import {
   type SkillTracker,
   type RulesTracker,
   type SubAgentTracker,
+  type TodoTracker,
 } from '@tron/core';
 import type { SessionContext } from './session-context.js';
 
@@ -126,6 +127,12 @@ export interface ActiveSession {
    * Reconstructed from events on session resume/fork.
    */
   subagentTracker: SubAgentTracker;
+  /**
+   * Tracks todos/tasks for this session.
+   * Reconstructed from events on session resume/fork.
+   * Cleared on context clear (incomplete tasks -> backlog).
+   */
+  todoTracker: TodoTracker;
 }
 
 // =============================================================================

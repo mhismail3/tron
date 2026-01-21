@@ -401,6 +401,15 @@ export class AnthropicProvider {
         });
       }
 
+      // Block 6: Todo context (ephemeral, shows current task list)
+      // NOT cached - this is dynamic per-turn content that changes frequently
+      if (context.todoContext) {
+        systemBlocks.push({
+          type: 'text',
+          text: `<current-todos>\n${context.todoContext}\n</current-todos>`,
+        });
+      }
+
       // =======================================================================
       // PROMPT CACHING FOR OAUTH
       // =======================================================================
@@ -440,13 +449,14 @@ export class AnthropicProvider {
 
       systemParam = systemBlocks;
     } else {
-      // API key: Combine system prompt, rules, skill context, and subagent results into single string
+      // API key: Combine system prompt, rules, skill context, subagent results, and todo context into single string
       // (No caching for API key auth - only OAuth supports prompt caching)
       const parts: string[] = [];
       if (context.systemPrompt) parts.push(context.systemPrompt);
       if (context.rulesContent) parts.push(`# Project Rules\n\n${context.rulesContent}`);
       if (context.skillContext) parts.push(context.skillContext);
       if (context.subagentResultsContext) parts.push(context.subagentResultsContext);
+      if (context.todoContext) parts.push(`<current-todos>\n${context.todoContext}\n</current-todos>`);
       systemParam = parts.length > 0 ? parts.join('\n\n') : undefined;
     }
 

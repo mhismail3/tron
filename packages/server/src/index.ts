@@ -257,6 +257,19 @@ export class TronServer {
       });
     });
 
+    // Forward todo update events
+    this.orchestrator.on('todos_updated', (data) => {
+      this.wsServer?.broadcastEvent({
+        type: 'agent.todos_updated',
+        sessionId: data.sessionId,
+        timestamp: new Date().toISOString(),
+        data: {
+          todos: data.todos,
+          restoredCount: data.restoredCount,
+        },
+      });
+    });
+
     this.isRunning = true;
 
     logger.info('Tron server started', {

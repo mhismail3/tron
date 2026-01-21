@@ -47,6 +47,9 @@ extension ChatViewModel {
         // This must happen BEFORE loading messages so isProcessing flag is set correctly
         await checkAndResumeAgentState()
 
+        // Fetch current todos for this session
+        await fetchTodosOnResume()
+
         logger.debug("Session resumed, using local EventDatabase for message history", category: .session)
     }
 
@@ -83,6 +86,21 @@ extension ChatViewModel {
 
         // Check if agent is running and catch up on any missed content
         await checkAndResumeAgentState()
+
+        // Refresh todos in case they changed while disconnected
+        await fetchTodosOnResume()
+    }
+
+    /// Fetch current todos when resuming a session
+    private func fetchTodosOnResume() async {
+        do {
+            let result = try await rpcClient.listTodos(sessionId: sessionId)
+            todoState.updateTodos(result.todos, summary: result.summary)
+            logger.debug("Fetched \(result.todos.count) todos on session resume", category: .session)
+        } catch {
+            // Non-fatal - todos just won't show until next update
+            logger.warning("Failed to fetch todos on resume: \(error.localizedDescription)", category: .session)
+        }
     }
 
     /// Check agent state and set up streaming if agent is currently running

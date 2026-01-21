@@ -111,7 +111,9 @@ export type EventType =
   | 'subagent.spawned'
   | 'subagent.status_update'
   | 'subagent.completed'
-  | 'subagent.failed';
+  | 'subagent.failed'
+  // Todo tracking
+  | 'todo.write';
 
 // =============================================================================
 // Base Event Structure
@@ -721,6 +723,8 @@ export type SessionEvent =
   | SubagentStatusUpdateEvent
   | SubagentCompletedEvent
   | SubagentFailedEvent
+  // Todos
+  | TodoWriteEvent
   // Errors
   | ErrorAgentEvent
   | ErrorToolEvent
@@ -844,6 +848,14 @@ export function isSubagentFailedEvent(event: SessionEvent): event is SubagentFai
 
 export function isSubagentEvent(event: SessionEvent): event is SubagentSpawnedEvent | SubagentStatusUpdateEvent | SubagentCompletedEvent | SubagentFailedEvent {
   return event.type.startsWith('subagent.');
+}
+
+export function isTodoWriteEvent(event: SessionEvent): event is TodoWriteEvent {
+  return event.type === 'todo.write';
+}
+
+export function isTodoEvent(event: SessionEvent): event is TodoWriteEvent {
+  return event.type.startsWith('todo.');
 }
 
 // =============================================================================
@@ -1212,5 +1224,35 @@ export interface SubagentFailedEvent extends BaseEvent {
     failedAtTurn?: number;
     /** Duration until failure in milliseconds */
     duration?: number;
+  };
+}
+
+// =============================================================================
+// Todo Events
+// =============================================================================
+
+/** Todo item for event payloads */
+export interface TodoItemPayload {
+  id: string;
+  content: string;
+  activeForm: string;
+  status: 'pending' | 'in_progress' | 'completed';
+  source: 'agent' | 'user' | 'skill';
+  createdAt: string;
+  completedAt?: string;
+  metadata?: Record<string, unknown>;
+}
+
+/**
+ * Todo write event - captures complete todo list state snapshot.
+ * Uses snapshot approach (not diffs) for simple reconstruction.
+ */
+export interface TodoWriteEvent extends BaseEvent {
+  type: 'todo.write';
+  payload: {
+    /** Complete current todo list */
+    todos: TodoItemPayload[];
+    /** What triggered this write */
+    trigger: 'tool' | 'command' | 'skill' | 'restore';
   };
 }

@@ -68,6 +68,9 @@ class RPCClient: ObservableObject {
     var onUIRenderError: ((UIRenderErrorEvent) -> Void)?
     var onUIRenderRetry: ((UIRenderRetryEvent) -> Void)?
 
+    // Todo event callbacks
+    var onTodosUpdated: ((TodosUpdatedEvent) -> Void)?
+
     // Global event callbacks (for ALL sessions - used by dashboard)
     var onGlobalComplete: ((String) -> Void)?  // sessionId
     var onGlobalError: ((String, String) -> Void)?  // sessionId, message
@@ -294,6 +297,10 @@ class RPCClient: ObservableObject {
         case .uiRenderRetry(let e):
             guard checkSession(e.sessionId) else { return }
             onUIRenderRetry?(e)
+
+        case .todosUpdated(let e):
+            guard checkSession(e.sessionId) else { return }
+            onTodosUpdated?(e)
 
         case .unknown(let type):
             logger.debug("Unknown event type: \(type)", category: .events)
@@ -1189,6 +1196,63 @@ class RPCClient: ObservableObject {
         let params = ReadFileParams(path: path)
         let result: ReadFileResult = try await ws.send(method: "file.read", params: params)
         return result.content
+    }
+
+    // MARK: - Todo Methods
+
+    /// Get todos for a session
+    func listTodos(sessionId: String? = nil) async throws -> TodoListResult {
+        guard let ws = webSocket else {
+            throw RPCClientError.connectionNotEstablished
+        }
+
+        let effectiveSessionId = sessionId ?? currentSessionId
+        guard let sid = effectiveSessionId else {
+            throw RPCClientError.noActiveSession
+        }
+
+        let params = TodoListParams(sessionId: sid)
+        return try await ws.send(method: "todo.list", params: params)
+    }
+
+    /// Get backlogged tasks for a workspace
+    func getBacklog(workspaceId: String, includeRestored: Bool? = nil, limit: Int? = nil) async throws -> TodoGetBacklogResult {
+        guard let ws = webSocket else {
+            throw RPCClientError.connectionNotEstablished
+        }
+
+        let params = TodoGetBacklogParams(
+            workspaceId: workspaceId,
+            includeRestored: includeRestored,
+            limit: limit
+        )
+        return try await ws.send(method: "todo.getBacklog", params: params)
+    }
+
+    /// Restore tasks from backlog to a session
+    func restoreFromBacklog(sessionId: String? = nil, taskIds: [String]) async throws -> TodoRestoreResult {
+        guard let ws = webSocket else {
+            throw RPCClientError.connectionNotEstablished
+        }
+
+        let effectiveSessionId = sessionId ?? currentSessionId
+        guard let sid = effectiveSessionId else {
+            throw RPCClientError.noActiveSession
+        }
+
+        let params = TodoRestoreParams(sessionId: sid, taskIds: taskIds)
+        return try await ws.send(method: "todo.restore", params: params)
+    }
+
+    /// Get count of unrestored backlogged tasks for a workspace
+    func getBacklogCount(workspaceId: String) async throws -> Int {
+        guard let ws = webSocket else {
+            throw RPCClientError.connectionNotEstablished
+        }
+
+        let params = TodoGetBacklogCountParams(workspaceId: workspaceId)
+        let result: TodoGetBacklogCountResult = try await ws.send(method: "todo.getBacklogCount", params: params)
+        return result.count
     }
 
     // MARK: - State Accessors

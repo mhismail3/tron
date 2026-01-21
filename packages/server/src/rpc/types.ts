@@ -18,6 +18,7 @@ import type {
   BrowserRpcManager,
   SkillRpcManager,
   PlanRpcManager,
+  TodoRpcManager,
 } from '@tron/core';
 
 // =============================================================================
@@ -89,6 +90,11 @@ export type SkillManagerAdapter = SkillRpcManager;
  * Plan manager interface - plan mode operations
  */
 export type PlanManagerAdapter = PlanRpcManager;
+
+/**
+ * Todo manager interface - task tracking operations
+ */
+export type TodoManagerAdapter = TodoRpcManager;
 
 // =============================================================================
 // Helper Types

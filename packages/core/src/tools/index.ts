@@ -57,6 +57,14 @@ export {
   type WaitForSubagentCallback,
 } from './wait-for-subagent.js';
 
+// Todo management tool
+export {
+  TodoWriteTool,
+  type TodoWriteToolConfig,
+  type TodoWriteParams,
+  type TodoWriteDetails,
+} from './todo-write.js';
+
 // Utility functions for token estimation and output truncation
 export {
   estimateTokens,

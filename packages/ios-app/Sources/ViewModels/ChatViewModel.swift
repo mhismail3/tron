@@ -59,6 +59,8 @@ class ChatViewModel: ObservableObject {
     let subagentState = SubagentState()
     /// UI canvas state (for RenderAppUI tool)
     let uiCanvasState = UICanvasState()
+    /// Todo state (for task tracking)
+    let todoState = TodoState()
 
     // MARK: - Browser State (Proxies for backward compatibility)
 
@@ -483,6 +485,11 @@ class ChatViewModel: ObservableObject {
 
         rpcClient.onUIRenderRetry = { [weak self] event in
             self?.handleUIRenderRetry(event)
+        }
+
+        // Todo event handler
+        rpcClient.onTodosUpdated = { [weak self] event in
+            self?.handleTodosUpdated(event)
         }
     }
 

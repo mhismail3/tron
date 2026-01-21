@@ -26,6 +26,7 @@ import {
   SpawnSubagentTool,
   QuerySubagentTool,
   WaitForSubagentTool,
+  TodoWriteTool,
   detectProviderFromModel,
   type AgentConfig,
   type TronTool,
@@ -36,6 +37,7 @@ import {
   type SubagentQueryType,
   type TronEvent,
   type SubAgentTracker,
+  type TodoItem,
 } from '@tron/core';
 
 const logger = createLogger('agent-factory');
@@ -57,6 +59,10 @@ export interface AgentFactoryConfig {
   forwardAgentEvent: (sessionId: SessionId, event: TronEvent) => void;
   /** Get SubAgentTracker for a session (for blocking SpawnSubagent) */
   getSubagentTrackerForSession: (sessionId: string) => SubAgentTracker | undefined;
+  /** Callback when todos are updated via TodoWrite tool */
+  onTodosUpdated: (sessionId: string, todos: TodoItem[]) => Promise<void>;
+  /** Generate unique ID for todos */
+  generateTodoId: () => string;
   /** Browser service (optional) */
   browserService?: {
     execute: (sessionId: string, action: string, params: any) => Promise<any>;
@@ -132,6 +138,10 @@ export class AgentFactory {
       new OpenBrowserTool({ workingDirectory }),
       new AstGrepTool({ workingDirectory }),
       new RenderAppUITool({ workingDirectory }),
+      new TodoWriteTool({
+        generateId: () => this.config.generateTodoId(),
+        onTodosUpdated: (todos) => this.config.onTodosUpdated(sessionId, todos),
+      }),
     ];
 
     // Sub-agent tools: Only add SpawnSubagent for top-level agents.

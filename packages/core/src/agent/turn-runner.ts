@@ -67,7 +67,7 @@ export class AgentTurnRunner implements ITurnRunner {
    */
   async execute(options: TurnOptions): Promise<TurnResult> {
     const turnStartTime = Date.now();
-    const { turn, reasoningLevel, skillContext, subagentResultsContext } = options;
+    const { turn, reasoningLevel, skillContext, subagentResultsContext, todoContext } = options;
 
     // Reset streaming content for new turn
     this.streamProcessor.resetStreamingContent();
@@ -94,7 +94,7 @@ export class AgentTurnRunner implements ITurnRunner {
 
     try {
       // Build context for provider
-      const context = this.buildContext(skillContext, subagentResultsContext);
+      const context = this.buildContext(skillContext, subagentResultsContext, todoContext);
 
       // Log context being sent
       logger.info('[AGENT] Building context for turn', {
@@ -259,7 +259,7 @@ export class AgentTurnRunner implements ITurnRunner {
   /**
    * Build context for the provider
    */
-  private buildContext(skillContext?: string, subagentResultsContext?: string): Context {
+  private buildContext(skillContext?: string, subagentResultsContext?: string, todoContext?: string): Context {
     const messages = this.contextManager.getMessages();
 
     return {
@@ -274,6 +274,7 @@ export class AgentTurnRunner implements ITurnRunner {
       rulesContent: this.contextManager.getRulesContent(),
       skillContext,
       subagentResultsContext,
+      todoContext,
     };
   }
 

@@ -161,3 +161,12 @@ export {
   handlePlanGetState,
   createPlanHandlers,
 } from './plan.handler.js';
+
+export {
+  handleTodoList,
+  handleTodoGetSummary,
+  handleTodoGetBacklog,
+  handleTodoRestore,
+  handleTodoGetBacklogCount,
+  createTodoHandlers,
+} from './todo.handler.js';

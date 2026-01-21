@@ -69,6 +69,8 @@ export class TronAgent {
   private currentSkillContext: string | undefined;
   /** Subagent results context to inject for current run */
   private currentSubagentResults: string | undefined;
+  /** Todo context to inject for current run */
+  private currentTodoContext: string | undefined;
 
   // Extracted modules
   private eventEmitter: AgentEventEmitter;
@@ -323,6 +325,14 @@ export class TronAgent {
   }
 
   /**
+   * Set todo context to inject for the next run.
+   * This shows the agent's current task list for tracking progress.
+   */
+  setTodoContext(todoContext: string | undefined): void {
+    this.currentTodoContext = todoContext;
+  }
+
+  /**
    * Set rules content from AGENTS.md / CLAUDE.md hierarchy.
    */
   setRulesContent(rulesContent: string | undefined): void {
@@ -484,6 +494,7 @@ export class TronAgent {
       reasoningLevel: this.currentReasoningLevel,
       skillContext: this.currentSkillContext,
       subagentResultsContext: this.currentSubagentResults,
+      todoContext: this.currentTodoContext,
     });
 
     // Clear subagent results after consuming (one-time injection)

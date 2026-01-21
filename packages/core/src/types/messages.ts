@@ -163,6 +163,8 @@ export interface Context {
   skillContext?: string;
   /** Sub-agent results context to inform agent of completed sub-agent tasks */
   subagentResultsContext?: string;
+  /** Todo context showing current task list (ephemeral, updated per-turn) */
+  todoContext?: string;
 }
 
 // Tool and ToolInputSchema are re-exported from ./tools.js

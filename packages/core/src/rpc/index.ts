@@ -26,6 +26,9 @@ export {
   type ToolCallTrackerManager,
   type CanvasRpcManager,
   type PlanRpcManager,
+  type TodoRpcManager,
+  type RpcTodoItem,
+  type RpcBackloggedTask,
 } from './handler.js';
 
 // Registry (new approach)

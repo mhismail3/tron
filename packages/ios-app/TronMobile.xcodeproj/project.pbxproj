@@ -118,6 +118,8 @@
 		A8BB863D2AE3097293DEE450 /* ContentComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = E753AE65FE87C59B71FC0FDD /* ContentComponents.swift */; };
 		AA0AC5B4C07C617F0612C7FA /* View+Extensions.swift in Sources */ = {isa = PBXBuildFile; fileRef = B4B65C803EB12E8C7004E843 /* View+Extensions.swift */; };
 		AAEC2BAEF5C0067DBF72CBA5 /* UICanvasState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 05D5E47403A5C9642D8D6598 /* UICanvasState.swift */; };
+		TD0DETB18F8A9B2C3D4E5F6A /* TodoDetailSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = TD0DET51F8A9B2C3D4E5F6A7 /* TodoDetailSheet.swift */; };
+		TD0STAB18F9B2C3D4E5F6A7B /* TodoState.swift in Sources */ = {isa = PBXBuildFile; fileRef = TD0S1ATE8F9B2C3D4E5F6A7B /* TodoState.swift */; };
 		AB572EB35C683B3E98C1CE75 /* StreamingPayloads.swift in Sources */ = {isa = PBXBuildFile; fileRef = 12D4005085E6F37ECCF3AC12 /* StreamingPayloads.swift */; };
 		AC62556A9211A870D2814060 /* UICanvasParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = 12D668775EB6DF67F6736724 /* UICanvasParser.swift */; };
 		AF3B529E1C78A0EF05AB96E4 /* MessageWindowManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1DEF36B366C643A8B6C2BFC9 /* MessageWindowManager.swift */; };
@@ -191,6 +193,8 @@
 		0123F7482F532CD8FBA61F0E /* UnifiedEventTransformerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UnifiedEventTransformerTests.swift; sourceTree = "<group>"; };
 		01E1022262C210A860B1851B /* InteractiveComponents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InteractiveComponents.swift; sourceTree = "<group>"; };
 		05D5E47403A5C9642D8D6598 /* UICanvasState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UICanvasState.swift; sourceTree = "<group>"; };
+		TD0DET51F8A9B2C3D4E5F6A7 /* TodoDetailSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TodoDetailSheet.swift; sourceTree = "<group>"; };
+		TD0S1ATE8F9B2C3D4E5F6A7B /* TodoState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TodoState.swift; sourceTree = "<group>"; };
 		088BDE03F59D94AD1C60E382 /* TronFontLoader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TronFontLoader.swift; sourceTree = "<group>"; };
 		0BA5810A34C92084B89C6EA4 /* TronColors.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TronColors.swift; sourceTree = "<group>"; };
 		0C697B4D1B8F6C85A423EAF5 /* EventTypes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EventTypes.swift; sourceTree = "<group>"; };
@@ -585,6 +589,7 @@
 				BC16C3B8D2F7980BFC86839B /* SkillMentionPopup.swift */,
 				DF69778E3C7E0198042860BC /* SubagentChip.swift */,
 				50A9B3356F199C0BBFA66E71 /* SubagentDetailSheet.swift */,
+				TD0DET51F8A9B2C3D4E5F6A7 /* TodoDetailSheet.swift */,
 				FC777FA4471FD3723C469037 /* UICanvasSheet.swift */,
 				CCA283B41E28CEFFCD4639EE /* VoiceNoteDetailSheet.swift */,
 				192E08DF91426E43F5AFE03F /* VoiceNotesListView.swift */,
@@ -736,6 +741,7 @@
 				EFCC93FE9C92FBEC8986E5C9 /* ContextTrackingState.swift */,
 				7F6868DDC1D5CE1C366F5E74 /* PlanModeState.swift */,
 				4D17CD4EBC001BB37F3F9378 /* SubagentState.swift */,
+				TD0S1ATE8F9B2C3D4E5F6A7B /* TodoState.swift */,
 				05D5E47403A5C9642D8D6598 /* UICanvasState.swift */,
 			);
 			path = State;
@@ -1007,6 +1013,8 @@
 				5370368B0B9ACE3C1C21123B /* TronTypography.swift in Sources */,
 				5A67663F15BFA1B618FE2263 /* UICanvas.swift in Sources */,
 				AC62556A9211A870D2814060 /* UICanvasParser.swift in Sources */,
+				TD0DETB18F8A9B2C3D4E5F6A /* TodoDetailSheet.swift in Sources */,
+				TD0STAB18F9B2C3D4E5F6A7B /* TodoState.swift in Sources */,
 				A5547D1C1744E59A0C6E78AE /* UICanvasSheet.swift in Sources */,
 				AAEC2BAEF5C0067DBF72CBA5 /* UICanvasState.swift in Sources */,
 				8A2DBD201C3303E3852FAD3F /* UIComponentView.swift in Sources */,

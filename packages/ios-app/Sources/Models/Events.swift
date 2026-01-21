@@ -696,6 +696,22 @@ struct UIRenderRetryEvent: Decodable {
     var errors: String { data.errors }
 }
 
+/// Todos Updated Event - todo list was modified
+struct TodosUpdatedEvent: Decodable {
+    let type: String
+    let sessionId: String?
+    let timestamp: String?
+    let data: TodosUpdatedData
+
+    struct TodosUpdatedData: Decodable {
+        let todos: [RpcTodoItem]
+        let restoredCount: Int?
+    }
+
+    var todos: [RpcTodoItem] { data.todos }
+    var restoredCount: Int { data.restoredCount ?? 0 }
+}
+
 // MARK: - Event Type Constants
 
 enum EventType: String {
@@ -730,6 +746,8 @@ enum EventType: String {
     case uiRenderComplete = "agent.ui_render_complete"
     case uiRenderError = "agent.ui_render_error"
     case uiRenderRetry = "agent.ui_render_retry"
+    // Todo events
+    case todosUpdated = "agent.todos_updated"
 }
 
 // MARK: - Event Parsing
@@ -765,6 +783,8 @@ enum ParsedEvent {
     case uiRenderComplete(UIRenderCompleteEvent)
     case uiRenderError(UIRenderErrorEvent)
     case uiRenderRetry(UIRenderRetryEvent)
+    // Todo events
+    case todosUpdated(TodosUpdatedEvent)
     case unknown(String)
 
     static func parse(from data: Data) -> ParsedEvent? {
@@ -915,6 +935,11 @@ enum ParsedEvent {
                 let event = try decoder.decode(UIRenderRetryEvent.self, from: data)
                 logger.info("UI render retry: \(event.canvasId) attempt \(event.attempt)", category: .events)
                 return .uiRenderRetry(event)
+
+            case EventType.todosUpdated.rawValue:
+                let event = try decoder.decode(TodosUpdatedEvent.self, from: data)
+                logger.debug("Todos updated: \(event.todos.count) todos", category: .events)
+                return .todosUpdated(event)
 
             default:
                 logger.debug("Unknown event type: \(type)", category: .events)

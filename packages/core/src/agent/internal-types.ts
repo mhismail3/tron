@@ -230,6 +230,8 @@ export interface TurnOptions {
   skillContext?: string;
   /** Context about completed sub-agents and their results */
   subagentResultsContext?: string;
+  /** Todo context showing current task list */
+  todoContext?: string;
 }
 
 /**

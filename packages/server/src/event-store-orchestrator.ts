@@ -57,6 +57,7 @@
  * agent messages would chain from a stale head.
  */
 import { EventEmitter } from 'events';
+import * as crypto from 'crypto';
 import * as path from 'path';
 import * as os from 'os';
 import {
@@ -67,6 +68,8 @@ import {
   createWorktreeCoordinator,
   loadServerAuth,
   SubAgentTracker,
+  BacklogService,
+  createBacklogService,
   type TurnResult,
   type TronEvent,
   type EventMessage,
@@ -85,6 +88,8 @@ import {
   type SpawnSubagentParams,
   type SpawnTmuxAgentParams,
   type SubagentQueryType,
+  type TodoItem,
+  type BackloggedTask,
   withLoggingContext,
 } from '@tron/core';
 import { BrowserService } from './browser/index.js';
@@ -161,6 +166,7 @@ export class EventStoreOrchestrator extends EventEmitter {
   private contextOps: ContextOps;
   private agentFactory: AgentFactory;
   private authProvider: AuthProvider;
+  private backlogService: BacklogService | null = null;
   private activeSessions: Map<string, ActiveSession> = new Map();
   private cleanupTimer: ReturnType<typeof setInterval> | null = null;
   private initialized = false;
@@ -253,6 +259,8 @@ export class EventStoreOrchestrator extends EventEmitter {
       waitForSubagents: (sessionIds, mode, timeout) => this.waitForSubagents(sessionIds, mode, timeout),
       forwardAgentEvent: (sessionId, event) => this.forwardAgentEvent(sessionId, event),
       getSubagentTrackerForSession: (sessionId) => this.activeSessions.get(sessionId)?.subagentTracker,
+      onTodosUpdated: async (sessionId, todos) => this.handleTodosUpdated(sessionId, todos),
+      generateTodoId: () => `todo_${crypto.randomUUID().replace(/-/g, '').slice(0, 12)}`,
       browserService: this.browserService ? {
         execute: (sid, action, params) => this.browserService.execute(sid, action as any, params),
         createSession: async (sid) => { await this.browserService.createSession(sid); },
@@ -291,6 +299,10 @@ export class EventStoreOrchestrator extends EventEmitter {
     }
 
     await this.eventStore.initialize();
+
+    // Initialize BacklogService for todo backlog persistence (must be after eventStore.initialize())
+    this.backlogService = createBacklogService(this.eventStore.getDatabase());
+
     this.startCleanupTimer();
     this.initialized = true;
     logger.info('EventStore orchestrator initialized');
@@ -323,6 +335,13 @@ export class EventStoreOrchestrator extends EventEmitter {
   // ===========================================================================
   // EventStore Access
   // ===========================================================================
+
+  private getBacklogService(): BacklogService {
+    if (!this.backlogService) {
+      throw new Error('BacklogService not initialized. Call initialize() first.');
+    }
+    return this.backlogService;
+  }
 
   getEventStore(): EventStore {
     return this.eventStore;
@@ -587,6 +606,20 @@ export class EventStoreOrchestrator extends EventEmitter {
         active.agent.setSubagentResultsContext(subagentResultsContext);
       } else {
         active.agent.setSubagentResultsContext(undefined);
+      }
+
+      // Build and inject todo context if tasks exist
+      const todoContext = active.todoTracker.buildContextString();
+      if (todoContext) {
+        logger.info('[TODO] Injecting todo context', {
+          sessionId: active.sessionId,
+          contextLength: todoContext.length,
+          todoCount: active.todoTracker.count,
+          summary: active.todoTracker.buildSummaryString(),
+        });
+        active.agent.setTodoContext(todoContext);
+      } else {
+        active.agent.setTodoContext(undefined);
       }
 
       // Build user content from prompt and any attachments
@@ -1570,6 +1603,168 @@ export class EventStoreOrchestrator extends EventEmitter {
       reason: options.reason,
       planPath: options.planPath,
     });
+  }
+
+  // ===========================================================================
+  // Todo Operations
+  // ===========================================================================
+
+  /**
+   * Handle todos being updated via the TodoWrite tool.
+   * Updates the tracker and persists a todo.write event.
+   */
+  private async handleTodosUpdated(sessionId: string, todos: TodoItem[]): Promise<void> {
+    const active = this.activeSessions.get(sessionId);
+    if (!active) {
+      throw new Error(`Session not found: ${sessionId}`);
+    }
+
+    // Persist todo.write event (linearized via SessionContext)
+    const event = await active.sessionContext!.appendEvent('todo.write', {
+      todos,
+      trigger: 'tool',
+    });
+
+    // Update the tracker
+    if (event) {
+      active.todoTracker.setTodos(todos, event.id);
+    }
+
+    logger.debug('Todos updated', {
+      sessionId,
+      todoCount: todos.length,
+      eventId: event?.id,
+    });
+
+    // Emit event for UI updates
+    this.emit('todos_updated', {
+      sessionId,
+      todos,
+    });
+  }
+
+  /**
+   * Get current todos for a session.
+   * Used by RPC handlers.
+   */
+  getTodos(sessionId: string): TodoItem[] {
+    const active = this.activeSessions.get(sessionId);
+    if (!active) {
+      return [];
+    }
+    return active.todoTracker.getAllTodos();
+  }
+
+  /**
+   * Get todo summary for a session.
+   */
+  getTodoSummary(sessionId: string): string {
+    const active = this.activeSessions.get(sessionId);
+    if (!active) {
+      return 'no tasks';
+    }
+    return active.todoTracker.buildSummaryString();
+  }
+
+  // ===========================================================================
+  // Backlog Operations
+  // ===========================================================================
+
+  /**
+   * Get backlogged tasks for a workspace.
+   * Used by RPC handlers for iOS task visibility.
+   */
+  getBacklog(workspaceId: string, options?: { includeRestored?: boolean; limit?: number }): BackloggedTask[] {
+    return this.getBacklogService().getBacklog(workspaceId, options);
+  }
+
+  /**
+   * Get count of unrestored backlogged tasks for a workspace.
+   */
+  getBacklogCount(workspaceId: string): number {
+    return this.getBacklogService().getUnrestoredCount(workspaceId);
+  }
+
+  /**
+   * Restore tasks from backlog to a session.
+   * Creates new TodoItems in the session and records a todo.write event.
+   */
+  async restoreFromBacklog(sessionId: string, taskIds: string[]): Promise<TodoItem[]> {
+    const active = this.activeSessions.get(sessionId);
+    if (!active) {
+      throw new Error('Session not active');
+    }
+
+    // Generate IDs for restored tasks
+    const generateId = () => `todo_${crypto.randomUUID().slice(0, 8)}`;
+
+    // Restore tasks from backlog (marks them as restored in DB)
+    const restoredTodos = this.getBacklogService().restoreTasks(taskIds, sessionId, generateId);
+
+    if (restoredTodos.length === 0) {
+      return [];
+    }
+
+    // Merge with existing todos
+    const existingTodos = active.todoTracker.getAllTodos();
+    const newTodoList = [...existingTodos, ...restoredTodos];
+
+    // Record todo.write event with merged list
+    const event = await active.sessionContext!.appendEvent('todo.write', {
+      todos: newTodoList,
+      trigger: 'restore',
+    });
+
+    if (event) {
+      active.todoTracker.setTodos(newTodoList, event.id);
+    }
+
+    // Emit event for WebSocket broadcast
+    this.emit('todos_updated', {
+      sessionId,
+      todos: newTodoList,
+      restoredCount: restoredTodos.length,
+    });
+
+    logger.info('Tasks restored from backlog', {
+      sessionId,
+      requestedCount: taskIds.length,
+      restoredCount: restoredTodos.length,
+      totalTodos: newTodoList.length,
+    });
+
+    return restoredTodos;
+  }
+
+  /**
+   * Move incomplete todos to backlog for a session.
+   * Called internally when context is cleared.
+   */
+  async backlogIncompleteTodos(
+    sessionId: string,
+    workspaceId: string,
+    reason: 'session_clear' | 'context_compact' | 'session_end'
+  ): Promise<number> {
+    const active = this.activeSessions.get(sessionId);
+    if (!active) {
+      return 0;
+    }
+
+    const incompleteTodos = active.todoTracker.getIncomplete();
+    if (incompleteTodos.length === 0) {
+      return 0;
+    }
+
+    this.getBacklogService().backlogTasks(incompleteTodos, sessionId, workspaceId, reason);
+
+    logger.info('Incomplete todos backlogged', {
+      sessionId,
+      workspaceId,
+      reason,
+      count: incompleteTodos.length,
+    });
+
+    return incompleteTodos.length;
   }
 
 }

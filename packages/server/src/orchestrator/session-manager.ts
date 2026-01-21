@@ -20,6 +20,8 @@ import {
   createSubAgentTracker,
   RulesTracker,
   createRulesTracker,
+  TodoTracker,
+  createTodoTracker,
   ContextLoader,
   TronAgent,
   type SessionId,
@@ -31,6 +33,7 @@ import {
   type SkillTrackingEvent,
   type RulesTrackingEvent,
   type SubagentTrackingEvent,
+  type TodoTrackingEvent,
   isPlanModeEnteredEvent,
   isPlanModeExitedEvent,
 } from '@tron/core';
@@ -229,6 +232,8 @@ export class SessionManager {
       sessionContext,
       // Initialize empty subagent tracker (new sessions have no subagents)
       subagentTracker: createSubAgentTracker(),
+      // Initialize empty todo tracker (new sessions have no todos)
+      todoTracker: createTodoTracker(),
     };
 
     this.config.setActiveSession(sessionId, activeSession);
@@ -329,6 +334,14 @@ export class SessionManager {
       activeSubagents: subagentTracker.activeCount,
     });
 
+    const todoTracker = TodoTracker.fromEvents(events as TodoTrackingEvent[]);
+
+    logger.info('Todo tracker reconstructed from events', {
+      sessionId,
+      todoCount: todoTracker.count,
+      incompleteTasks: todoTracker.hasIncompleteTasks,
+    });
+
     // Reconstruct plan mode state from event history
     const planMode = this.reconstructPlanModeFromEvents(events as TronSessionEvent[]);
     if (planMode.isActive) {
@@ -388,6 +401,7 @@ export class SessionManager {
       rulesTracker,
       sessionContext,
       subagentTracker,
+      todoTracker,
     };
 
     this.config.setActiveSession(sessionId, activeSession);

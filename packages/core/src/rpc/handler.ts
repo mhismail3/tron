@@ -81,6 +81,8 @@ export interface RpcContext {
   canvasManager?: CanvasRpcManager;
   /** Plan mode manager for plan mode operations (optional) */
   planManager?: PlanRpcManager;
+  /** Todo manager for task tracking (optional) */
+  todoManager?: TodoRpcManager;
 }
 
 /**
@@ -140,6 +142,54 @@ export interface PlanRpcManager {
   exitPlanMode(sessionId: string, reason: 'approved' | 'cancelled', planPath?: string): Promise<{ success: boolean }>;
   /** Get plan mode state for a session */
   getPlanModeState(sessionId: string): { isActive: boolean; skillName?: string; blockedTools: string[] };
+}
+
+/**
+ * Todo item for RPC responses
+ */
+export interface RpcTodoItem {
+  id: string;
+  content: string;
+  activeForm: string;
+  status: 'pending' | 'in_progress' | 'completed';
+  source: 'agent' | 'user' | 'skill';
+  createdAt: string;
+  completedAt?: string;
+  metadata?: Record<string, unknown>;
+}
+
+/**
+ * Backlogged todo item for RPC responses
+ */
+export interface RpcBackloggedTask extends RpcTodoItem {
+  /** When moved to backlog */
+  backloggedAt: string;
+  /** Why it was backlogged */
+  backlogReason: 'session_clear' | 'context_compact' | 'session_end';
+  /** Session it came from */
+  sourceSessionId: string;
+  /** Workspace for scoping */
+  workspaceId: string;
+  /** Session ID if restored */
+  restoredToSessionId?: string;
+  /** When restored */
+  restoredAt?: string;
+}
+
+/**
+ * Todo manager interface for RPC operations
+ */
+export interface TodoRpcManager {
+  /** Get todos for a session */
+  getTodos(sessionId: string): RpcTodoItem[];
+  /** Get todo summary string for a session */
+  getTodoSummary(sessionId: string): string;
+  /** Get backlogged tasks for a workspace */
+  getBacklog(workspaceId: string, options?: { includeRestored?: boolean; limit?: number }): RpcBackloggedTask[];
+  /** Restore tasks from backlog to a session */
+  restoreFromBacklog(sessionId: string, taskIds: string[]): Promise<RpcTodoItem[]>;
+  /** Get count of unrestored backlogged tasks for a workspace */
+  getBacklogCount(workspaceId: string): number;
 }
 
 // EventStore manager interface (implemented by EventStoreOrchestrator)
@@ -280,6 +330,7 @@ import { createToolHandlers } from './handlers/tool.handler.js';
 import { createVoiceNotesHandlers } from './handlers/voiceNotes.handler.js';
 import { createCanvasHandlers } from './handlers/canvas.handler.js';
 import { createPlanHandlers } from './handlers/plan.handler.js';
+import { createTodoHandlers } from './handlers/todo.handler.js';
 
 export class RpcHandler extends EventEmitter {
   private context: RpcContext;
@@ -313,6 +364,7 @@ export class RpcHandler extends EventEmitter {
     this.registry.registerAll(createVoiceNotesHandlers());
     this.registry.registerAll(createCanvasHandlers());
     this.registry.registerAll(createPlanHandlers());
+    this.registry.registerAll(createTodoHandlers());
 
     logger.debug('RPC handler initialized', {
       registeredMethods: this.registry.list(),

@@ -239,6 +239,11 @@ struct ChatView: View {
                         Button { NotificationCenter.default.post(name: .chatMenuAction, object: "context") } label: {
                             Label("Context Manager", systemImage: "brain")
                         }
+                        if viewModel.todoState.hasTodos {
+                            Button { NotificationCenter.default.post(name: .chatMenuAction, object: "tasks") } label: {
+                                Label("Tasks (\(viewModel.todoState.incompleteCount))", systemImage: "checklist")
+                            }
+                        }
                         Divider()
                         Button { NotificationCenter.default.post(name: .chatMenuAction, object: "settings") } label: {
                             Label("Settings", systemImage: "gearshape")
@@ -346,6 +351,26 @@ struct ChatView: View {
                 UICanvasSheetFallback(state: viewModel.uiCanvasState)
             }
         }
+        .sheet(isPresented: Binding(
+            get: { viewModel.todoState.showSheet },
+            set: { viewModel.todoState.showSheet = $0 }
+        )) {
+            if #available(iOS 26.0, *) {
+                TodoDetailSheet(
+                    rpcClient: rpcClient,
+                    sessionId: sessionId,
+                    workspaceId: viewModel.workspaceId,
+                    todoState: viewModel.todoState
+                )
+            } else {
+                TodoDetailSheetLegacy(
+                    rpcClient: rpcClient,
+                    sessionId: sessionId,
+                    workspaceId: viewModel.workspaceId,
+                    todoState: viewModel.todoState
+                )
+            }
+        }
         .alert("Error", isPresented: $viewModel.showError) {
             Button("OK") { viewModel.clearError() }
         } message: {
@@ -357,6 +382,7 @@ struct ChatView: View {
             switch action {
             case "history": showSessionHistory = true
             case "context": showContextAudit = true
+            case "tasks": viewModel.todoState.showSheet = true
             case "settings": viewModel.showSettings = true
             default: break
             }

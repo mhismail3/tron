@@ -50,6 +50,7 @@ import { createContextAdapter } from './adapters/context.adapter.js';
 import { createBrowserAdapter } from './adapters/browser.adapter.js';
 import { createSkillAdapter } from './adapters/skill.adapter.js';
 import { createPlanAdapter } from './adapters/plan.adapter.js';
+import { createTodoAdapter } from './adapters/todo.adapter.js';
 
 // Standalone adapters (no orchestrator dependency)
 import { createMemoryAdapter } from './adapters/memory.adapter.js';
@@ -123,6 +124,7 @@ export function createRpcContext(
     context.browserManager = createBrowserAdapter(deps);
     context.skillManager = createSkillAdapter(deps);
     context.planManager = createPlanAdapter(deps);
+    context.todoManager = createTodoAdapter(deps);
 
     // Canvas manager is standalone (no orchestrator dependency)
     context.canvasManager = createCanvasAdapter();

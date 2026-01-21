@@ -64,6 +64,9 @@ export * from './subagents/index.js';
 // Re-export events (Event Sourcing system)
 export * from './events/index.js';
 
+// Re-export todos (Task management)
+export * from './todos/index.js';
+
 // Re-export guardrails
 export * from './guardrails/index.js';
 

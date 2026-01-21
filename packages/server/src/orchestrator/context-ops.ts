@@ -275,11 +275,14 @@ export class ContextOps {
    * Clear all messages from context.
    * Unlike compaction, no summary is preserved - messages are just cleared.
    * Stores a context.cleared event in EventStore.
+   *
+   * Returns incomplete todos that were cleared (for backlogging by caller).
    */
   async clearContext(sessionId: string): Promise<{
     success: boolean;
     tokensBefore: number;
     tokensAfter: number;
+    clearedTodos: Array<{ id: string; content: string; status: string; source: string }>;
   }> {
     const active = this.config.getActiveSession(sessionId);
     if (!active) {
@@ -295,6 +298,15 @@ export class ContextOps {
     // Clear skill tracker (skills don't survive context clear)
     active.skillTracker.clear();
 
+    // Clear todo tracker and get incomplete tasks for backlogging
+    const incompleteTodos = active.todoTracker.clear();
+    const clearedTodos = incompleteTodos.map(t => ({
+      id: t.id,
+      content: t.content,
+      status: t.status,
+      source: t.source,
+    }));
+
     const tokensAfter = cm.getCurrentTokens();
 
     // Store context.cleared event in EventStore (linearized via SessionContext)
@@ -309,6 +321,7 @@ export class ContextOps {
       tokensBefore,
       tokensAfter,
       tokensFreed: tokensBefore - tokensAfter,
+      clearedTodosCount: clearedTodos.length,
     });
 
     // Emit context_cleared event for WebSocket broadcast
@@ -316,12 +329,14 @@ export class ContextOps {
       sessionId,
       tokensBefore,
       tokensAfter,
+      clearedTodos,
     });
 
     return {
       success: true,
       tokensBefore,
       tokensAfter,
+      clearedTodos,
     };
   }
 

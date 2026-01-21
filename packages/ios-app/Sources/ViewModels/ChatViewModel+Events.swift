@@ -940,4 +940,13 @@ extension ChatViewModel {
             errors: event.errors
         )
     }
+
+    // MARK: - Todo Event Handlers
+
+    func handleTodosUpdated(_ event: TodosUpdatedEvent) {
+        logger.debug("Todos updated: count=\(event.todos.count)", category: .events)
+
+        // Update todo state from server event
+        todoState.handleTodosUpdated(event)
+    }
 }
