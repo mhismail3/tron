@@ -64,7 +64,6 @@ function formatModelShort(model: string): string {
   // Google models
   if (model.includes('gemini-2.5-pro')) return 'Gemini 2.5 Pro';
   if (model.includes('gemini-2.5-flash')) return 'Gemini 2.5 Flash';
-  if (model.includes('gemini-2.0-flash')) return 'Gemini 2.0 Flash';
   if (model.includes('gemini')) return 'Gemini';
   // Fallback to truncated model ID
   return model.slice(0, 15);

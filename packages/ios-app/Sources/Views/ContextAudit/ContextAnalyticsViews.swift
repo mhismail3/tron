@@ -784,7 +784,7 @@ struct ConsolidatedAnalytics {
         if model.contains("gemini-2.5-pro") {
             return ModelPricing(inputPerMillion: 1.25, outputPerMillion: 10.0, cacheWriteMultiplier: 1.0, cacheReadMultiplier: 0.25)
         }
-        if model.contains("gemini-2.5-flash") || model.contains("gemini-2.0-flash") {
+        if model.contains("gemini-2.5-flash") {
             return ModelPricing(inputPerMillion: 0.15, outputPerMillion: 0.60, cacheWriteMultiplier: 1.0, cacheReadMultiplier: 0.25)
         }
 

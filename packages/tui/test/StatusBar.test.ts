@@ -42,7 +42,6 @@ describe('StatusBar', () => {
       // Google models
       if (model.includes('gemini-2.5-pro')) return 'Gemini 2.5 Pro';
       if (model.includes('gemini-2.5-flash')) return 'Gemini 2.5 Flash';
-      if (model.includes('gemini-2.0-flash')) return 'Gemini 2.0 Flash';
       if (model.includes('gemini')) return 'Gemini';
       // Fallback to truncated model ID
       return model.slice(0, 15);
@@ -111,10 +110,6 @@ describe('StatusBar', () => {
 
       it('should format gemini-2.5-flash as "Gemini 2.5 Flash"', () => {
         expect(formatModelShort('gemini-2.5-flash')).toBe('Gemini 2.5 Flash');
-      });
-
-      it('should format gemini-2.0-flash as "Gemini 2.0 Flash"', () => {
-        expect(formatModelShort('gemini-2.0-flash')).toBe('Gemini 2.0 Flash');
       });
     });
 

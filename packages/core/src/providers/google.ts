@@ -276,29 +276,6 @@ export const GEMINI_MODELS: Record<string, GeminiModelInfo> = {
     inputCostPer1k: 0.0000375,
     outputCostPer1k: 0.00015,
   },
-  // Gemini 2.0 series
-  'gemini-2.0-flash': {
-    name: 'Gemini 2.0 Flash',
-    shortName: 'Gemini 2.0 Flash',
-    contextWindow: 1048576,
-    maxOutput: 8192,
-    supportsTools: true,
-    supportsThinking: false,
-    tier: 'flash',
-    inputCostPer1k: 0.000075,
-    outputCostPer1k: 0.0003,
-  },
-  'gemini-2.0-flash-lite': {
-    name: 'Gemini 2.0 Flash Lite',
-    shortName: 'Gemini 2.0 Flash Lite',
-    contextWindow: 1048576,
-    maxOutput: 8192,
-    supportsTools: true,
-    supportsThinking: false,
-    tier: 'flash-lite',
-    inputCostPer1k: 0.0000375,
-    outputCostPer1k: 0.00015,
-  },
 };
 
 export type GeminiModelId = keyof typeof GEMINI_MODELS;

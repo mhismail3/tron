@@ -117,10 +117,6 @@ describe('Google Gemini Provider', () => {
       expect(GEMINI_MODELS['gemini-2.5-flash'].contextWindow).toBe(1048576);
     });
 
-    it('should define Gemini 2.0 models', () => {
-      expect(GEMINI_MODELS['gemini-2.0-flash']).toBeDefined();
-    });
-
     it('should define Gemini 2.5 Flash Lite', () => {
       expect(GEMINI_MODELS['gemini-2.5-flash-lite']).toBeDefined();
     });

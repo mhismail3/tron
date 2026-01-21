@@ -302,6 +302,10 @@ struct ModelSwitcher: View {
         let latestAnthropicModels = anthropicModels.filter { is45Model($0) }
         let legacyAnthropicModels = anthropicModels.filter { !is45Model($0) }
 
+        // Separate Codex: 5.2 (latest) from 5.1 (legacy)
+        let latestCodexModels = codexModels.filter { $0.id.lowercased().contains("5.2") }
+        let legacyCodexModels = codexModels.filter { !$0.id.lowercased().contains("5.2") }
+
         // Separate Gemini: 3.x (latest) from 2.x (legacy)
         let gemini3Models = geminiModels.filter { $0.isGemini3 }
             .sorted { geminiTierPriority($0) < geminiTierPriority($1) }
@@ -319,31 +323,33 @@ struct ModelSwitcher: View {
             groups.append(ModelGroup(tier: "Anthropic (Latest)", models: orderedLatest))
         }
 
+        // Latest OpenAI Codex models (5.2)
+        if !latestCodexModels.isEmpty {
+            groups.append(ModelGroup(tier: "OpenAI Codex (Latest)", models: latestCodexModels))
+        }
+
         // Gemini 3 models (latest Google models)
         if !gemini3Models.isEmpty {
             groups.append(ModelGroup(tier: "Gemini 3", models: gemini3Models))
         }
 
-        // OpenAI Codex models
-        if !codexModels.isEmpty {
-            groups.append(ModelGroup(tier: "OpenAI Codex", models: codexModels))
+        // Combined Legacy section
+        var allLegacyModels: [ModelInfo] = []
+
+        // Legacy Anthropic models - sorted by tier
+        let sortedLegacyAnthropic = legacyAnthropicModels.sorted { m1, m2 in
+            tierPriority(m1) < tierPriority(m2)
         }
+        allLegacyModels.append(contentsOf: sortedLegacyAnthropic)
 
-        // Legacy Anthropic models grouped by tier
-        let tiers = ["opus", "sonnet", "haiku"]
-        for tier in tiers {
-            let tierModels = legacyAnthropicModels.filter { model in
-                model.id.lowercased().contains(tier)
-            }.sorted { $0.id > $1.id }
+        // Legacy Codex models (5.1)
+        allLegacyModels.append(contentsOf: legacyCodexModels)
 
-            if !tierModels.isEmpty {
-                groups.append(ModelGroup(tier: "\(tier.capitalized) (Legacy)", models: tierModels))
-            }
-        }
+        // Legacy Gemini models (2.5)
+        allLegacyModels.append(contentsOf: geminiLegacyModels)
 
-        // Legacy Gemini models (2.x)
-        if !geminiLegacyModels.isEmpty {
-            groups.append(ModelGroup(tier: "Gemini 2.x", models: geminiLegacyModels))
+        if !allLegacyModels.isEmpty {
+            groups.append(ModelGroup(tier: "Legacy", models: allLegacyModels))
         }
 
         return groups

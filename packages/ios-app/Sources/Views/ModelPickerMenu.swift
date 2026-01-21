@@ -32,10 +32,9 @@ struct ModelPickerMenuContent<Label: View>: View {
             .sortedByTier()
     }
 
-    /// OpenAI Codex models - sorted by version descending (5.2 before 5.1)
-    private var codexModels: [ModelInfo] {
-        models.filter { $0.isCodex }
-            .sorted { codexVersionPriority($0) > codexVersionPriority($1) }
+    /// Latest OpenAI Codex models (5.2 only) - sorted by tier
+    private var latestCodexModels: [ModelInfo] {
+        models.filter { $0.isCodex && $0.id.lowercased().contains("5.2") }
     }
 
     /// Gemini 3 models (latest Google models) - sorted: Pro → Flash → Flash Lite
@@ -44,25 +43,15 @@ struct ModelPickerMenuContent<Label: View>: View {
             .sorted { geminiTierPriority($0) < geminiTierPriority($1) }
     }
 
-    /// Legacy Gemini models (2.x)
-    private var geminiLegacyModels: [ModelInfo] {
-        models.filter { $0.isGemini && !$0.isGemini3 }
-            .sorted { geminiTierPriority($0) < geminiTierPriority($1) }
-    }
-
-    /// Legacy Anthropic models (non-4.5) - sorted: Opus → Sonnet
+    /// Legacy models: legacy Anthropic (non-4.5) + Codex 5.1 + Gemini 2.5
     private var legacyModels: [ModelInfo] {
-        models.filter { $0.isAnthropic && !$0.is45Model }
+        let legacyAnthropic = models.filter { $0.isAnthropic && !$0.is45Model }
             .uniqueByFormattedName()
             .sortedByTier()
-    }
-
-    private func codexVersionPriority(_ model: ModelInfo) -> Int {
-        let id = model.id.lowercased()
-        if id.contains("5.2") { return 52 }
-        if id.contains("5.1") { return 51 }
-        if id.contains("5.0") || id.contains("-5-") { return 50 }
-        return 0
+        let legacyCodex = models.filter { $0.isCodex && !$0.id.lowercased().contains("5.2") }
+        let legacyGemini = models.filter { $0.isGemini && !$0.isGemini3 }
+            .sorted { geminiTierPriority($0) < geminiTierPriority($1) }
+        return legacyAnthropic + legacyCodex + legacyGemini
     }
 
     /// Sort Gemini models: Pro first, then Flash, then Flash Lite
@@ -87,6 +76,14 @@ struct ModelPickerMenuContent<Label: View>: View {
                     modelButton(model: model, systemImage: "sparkles")
                 }
 
+                // Latest OpenAI Codex models (5.2)
+                if !latestCodexModels.isEmpty {
+                    Divider()
+                    ForEach(latestCodexModels) { model in
+                        modelButton(model: model, systemImage: "bolt")
+                    }
+                }
+
                 // Gemini 3 models (latest Google models)
                 if !gemini3Models.isEmpty {
                     Divider()
@@ -95,26 +92,10 @@ struct ModelPickerMenuContent<Label: View>: View {
                     }
                 }
 
-                // OpenAI Codex models
-                if !codexModels.isEmpty {
-                    Divider()
-                    ForEach(codexModels) { model in
-                        modelButton(model: model, systemImage: "bolt")
-                    }
-                }
-
-                // Legacy Anthropic models
+                // Legacy models (legacy Anthropic + Codex 5.1 + Gemini 2.5)
                 if !legacyModels.isEmpty {
                     Divider()
                     ForEach(legacyModels) { model in
-                        modelButton(model: model, systemImage: "clock")
-                    }
-                }
-
-                // Legacy Gemini models (2.x)
-                if !geminiLegacyModels.isEmpty {
-                    Divider()
-                    ForEach(geminiLegacyModels) { model in
                         modelButton(model: model, systemImage: "clock")
                     }
                 }

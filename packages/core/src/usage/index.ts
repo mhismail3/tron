@@ -134,13 +134,6 @@ export const GOOGLE_PRICING: Record<string, PricingTier> = {
     cacheWriteMultiplier: 1,
     cacheReadMultiplier: 0.25,
   },
-  // Gemini 2.0 models
-  'gemini-2.0-flash': {
-    inputPerMillion: 0.1,
-    outputPerMillion: 0.4,
-    cacheWriteMultiplier: 1,
-    cacheReadMultiplier: 0.25,
-  },
 };
 
 // =============================================================================
@@ -390,7 +383,6 @@ export const CONTEXT_LIMITS: Record<string, number> = {
   // Google Gemini 2.5
   'gemini-2.5-pro': 2_097_152,
   'gemini-2.5-flash': 1_048_576,
-  'gemini-2.0-flash': 1_048_576,
 };
 
 /**
