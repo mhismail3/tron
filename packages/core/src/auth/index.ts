@@ -39,6 +39,13 @@ export {
   type GoogleAuth,
 } from './google-oauth.js';
 
+// OpenAI/Codex auth functions
+export {
+  loadOpenAIServerAuth,
+  loadOpenAIServerAuthSync,
+  refreshOpenAIToken,
+} from './openai-auth.js';
+
 // Unified auth types
 export type {
   OAuthTokens,

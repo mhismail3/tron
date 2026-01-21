@@ -12,7 +12,7 @@ import {
   createLogger,
   loadServerAuth,
   loadGoogleServerAuth,
-  getProviderAuthSync,
+  loadOpenAIServerAuth,
   detectProviderFromModel,
   type ServerAuth,
   type GoogleAuth,
@@ -55,25 +55,6 @@ export class AuthProvider {
   }
 
   /**
-   * Load Codex OAuth tokens from unified auth storage
-   */
-  loadCodexTokens(): { accessToken: string; refreshToken: string; expiresAt: number } | null {
-    try {
-      const codexAuth = getProviderAuthSync('openai-codex');
-      if (codexAuth?.oauth) {
-        return {
-          accessToken: codexAuth.oauth.accessToken,
-          refreshToken: codexAuth.oauth.refreshToken,
-          expiresAt: codexAuth.oauth.expiresAt,
-        };
-      }
-    } catch (error) {
-      logger.warn('Failed to load Codex tokens', { error });
-    }
-    return null;
-  }
-
-  /**
    * Get authentication credentials for a given model.
    * Handles Codex OAuth tokens separately from standard auth.
    * Refreshes cached auth if OAuth tokens are expired.
@@ -83,17 +64,13 @@ export class AuthProvider {
     const providerType = detectProviderFromModel(model);
 
     if (providerType === 'openai-codex') {
-      // Load Codex-specific OAuth tokens
-      const codexTokens = this.loadCodexTokens();
-      if (!codexTokens) {
-        throw new Error('OpenAI Codex not authenticated. Sign in via the iOS app or use a different model.');
+      // Load Codex-specific auth (OAuth or API key)
+      const codexAuth = await loadOpenAIServerAuth();
+      if (!codexAuth) {
+        throw new Error('OpenAI Codex not authenticated. Sign in via the iOS app, set OPENAI_API_KEY, or add apiKey to auth.json.');
       }
-      return {
-        type: 'oauth',
-        accessToken: codexTokens.accessToken,
-        refreshToken: codexTokens.refreshToken,
-        expiresAt: codexTokens.expiresAt,
-      };
+      logger.info('Loaded OpenAI Codex auth', { type: codexAuth.type });
+      return codexAuth;
     }
 
     if (providerType === 'google') {
