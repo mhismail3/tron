@@ -16,7 +16,7 @@ struct ModelChangeNotificationView: View {
                 .font(TronTypography.codeCaption)
                 .foregroundStyle(.tronTextMuted)
 
-            Text(from.shortModelName)
+            Text(from)
                 .font(TronTypography.mono(size: TronTypography.sizeBody2, weight: .medium))
                 .foregroundStyle(.tronTextSecondary)
 
@@ -24,7 +24,7 @@ struct ModelChangeNotificationView: View {
                 .font(TronTypography.pill)
                 .foregroundStyle(.tronTextMuted)
 
-            Text(to.shortModelName)
+            Text(to)
                 .font(TronTypography.mono(size: TronTypography.sizeBody2, weight: .medium))
                 .foregroundStyle(.tronEmerald)
         }

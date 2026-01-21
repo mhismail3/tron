@@ -37,8 +37,8 @@ func formatModelDisplayName(_ modelId: String) -> String {
         return displayName
     }
 
-    // Fallback: truncate long model IDs
-    return modelId.count > 15 ? String(modelId.prefix(15)) + "…" : modelId
+    // Use ModelNameFormatter for all other models (Gemini, Codex, etc.)
+    return modelId.shortModelName
 }
 
 // MARK: - Chat Message Model
