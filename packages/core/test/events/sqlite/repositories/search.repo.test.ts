@@ -133,8 +133,8 @@ describe('SearchRepository', () => {
         },
       ];
 
+      // FTS triggers auto-index on insert
       await eventRepo.insertBatch(events);
-      searchRepo.indexBatch(events);
 
       expect(searchRepo.countBySession(testSessionId)).toBe(2);
     });
@@ -351,8 +351,8 @@ describe('SearchRepository', () => {
         },
       ];
 
+      // FTS triggers auto-index on insert
       await eventRepo.insertBatch(events);
-      searchRepo.indexBatch(events);
       expect(searchRepo.countBySession(testSessionId)).toBe(2);
 
       const removed = searchRepo.removeBySession(testSessionId);
@@ -379,8 +379,8 @@ describe('SearchRepository', () => {
         payload: { content: 'indexed content' },
       };
 
+      // FTS triggers auto-index on insert
       await eventRepo.insert(event);
-      searchRepo.index(event);
 
       expect(searchRepo.isIndexed(eventId)).toBe(true);
     });
@@ -415,8 +415,8 @@ describe('SearchRepository', () => {
         },
       ];
 
+      // FTS triggers auto-index on insert
       await eventRepo.insertBatch(events);
-      searchRepo.indexBatch(events);
 
       expect(searchRepo.countBySession(testSessionId)).toBe(2);
     });
@@ -447,11 +447,12 @@ describe('SearchRepository', () => {
         },
       ];
 
-      // Insert events but don't index them initially
+      // Insert events - they are now auto-indexed via FTS triggers
       await eventRepo.insertBatch(events);
-      expect(searchRepo.countBySession(testSessionId)).toBe(0);
+      // FTS triggers auto-insert on event insert
+      expect(searchRepo.countBySession(testSessionId)).toBe(2);
 
-      // Rebuild index
+      // Rebuild index should clear and re-index (same count)
       const indexed = searchRepo.rebuildSessionIndex(testSessionId);
       expect(indexed).toBe(2);
       expect(searchRepo.countBySession(testSessionId)).toBe(2);
@@ -473,11 +474,12 @@ describe('SearchRepository', () => {
         payload: { content: 'original content' },
       };
 
+      // Insert event - now auto-indexed via FTS trigger
       await eventRepo.insert(event);
-      searchRepo.index(event);
+      // FTS trigger auto-inserts, so count is 1
       expect(searchRepo.countBySession(testSessionId)).toBe(1);
 
-      // Rebuild should clear and re-index
+      // Rebuild should clear and re-index (still 1 entry)
       const indexed = searchRepo.rebuildSessionIndex(testSessionId);
       expect(indexed).toBe(1);
       expect(searchRepo.countBySession(testSessionId)).toBe(1);

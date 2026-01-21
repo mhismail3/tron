@@ -68,6 +68,12 @@ export class DatabaseConnection {
    */
   close(): void {
     if (this.state.db) {
+      // Run optimize to update query planner statistics before closing
+      try {
+        this.state.db.pragma('optimize');
+      } catch {
+        // Ignore errors during optimize (database might be in unexpected state)
+      }
       this.state.db.close();
       this.state.db = null;
       this.state.initialized = false;
@@ -122,6 +128,8 @@ export class DatabaseConnection {
     // WAL mode for better concurrent access
     if (enableWAL) {
       db.pragma('journal_mode = WAL');
+      // Better write batching for WAL mode
+      db.pragma('wal_autocheckpoint = 2000');
     }
 
     // Busy timeout for handling locked database
@@ -135,6 +143,12 @@ export class DatabaseConnection {
 
     // Set cache size (negative = KB, positive = pages)
     db.pragma(`cache_size = -${cacheSize}`);
+
+    // Store temp tables in memory for better performance
+    db.pragma('temp_store = MEMORY');
+
+    // Enable memory-mapped I/O (256MB) for faster reads
+    db.pragma('mmap_size = 268435456');
   }
 
   /**

@@ -568,8 +568,8 @@ describe('SQLiteBackend', () => {
         payload: { content: 'How do I implement authentication?', turn: 1 },
       };
 
+      // FTS triggers auto-index on insert
       await backend.insertEvent(event);
-      await backend.indexEventForSearch(event);
 
       const results = await backend.searchEvents('authentication');
 
@@ -606,10 +606,9 @@ describe('SQLiteBackend', () => {
         },
       };
 
+      // FTS triggers auto-index on insert
       await backend.insertEvent(event1);
       await backend.insertEvent(event2);
-      await backend.indexEventForSearch(event1);
-      await backend.indexEventForSearch(event2);
 
       const results = await backend.searchEvents('OAuth');
 
@@ -647,10 +646,9 @@ describe('SQLiteBackend', () => {
         payload: { content: 'Database queries there', turn: 1 },
       };
 
+      // FTS triggers auto-index on insert
       await backend.insertEvent(event1);
       await backend.insertEvent(event2);
-      await backend.indexEventForSearch(event1);
-      await backend.indexEventForSearch(event2);
 
       const results = await backend.searchEvents('database', { workspaceId });
 

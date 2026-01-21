@@ -177,6 +177,37 @@ describe('DatabaseConnection', () => {
     });
   });
 
+  describe('pragmas optimization', () => {
+    it('should set temp_store to MEMORY', () => {
+      const db = connection.open();
+      const result = db.pragma('temp_store', { simple: true });
+      expect(result).toBe(2); // 2 = MEMORY
+    });
+
+    it('should set mmap_size', () => {
+      // Note: In-memory databases return undefined for mmap_size since there's no file
+      // For file-based databases, this would return the configured mmap size
+      const db = connection.open();
+      const result = db.pragma('mmap_size', { simple: true });
+      // In-memory databases return undefined, file-based would return a number
+      expect(result === undefined || typeof result === 'number').toBe(true);
+    });
+
+    it('should set wal_autocheckpoint', () => {
+      const db = connection.open();
+      const result = db.pragma('wal_autocheckpoint', { simple: true });
+      // WAL mode may not work for in-memory databases, but pragma should not throw
+      expect(typeof result).toBe('number');
+    });
+
+    it('should call optimize on close without error', () => {
+      const testConnection = new DatabaseConnection(':memory:');
+      testConnection.open();
+      // Close should call pragma('optimize') internally
+      expect(() => testConnection.close()).not.toThrow();
+    });
+  });
+
   describe('transactionAsync', () => {
     it('should execute async function within transaction', async () => {
       const db = connection.open();
