@@ -1,4 +1,5 @@
 import SwiftUI
+import UserNotifications
 
 @main
 struct TronMobileApp: App {
@@ -98,6 +99,17 @@ struct TronMobileApp: App {
                 appState.rpcClient.setBackgroundState(isBackground)
                 eventStoreManager?.setBackgroundState(isBackground)
                 TronLogger.shared.info("Scene phase changed: \(oldPhase) -> \(newPhase), background=\(isBackground)", category: .session)
+
+                // Clear badge count when app becomes active
+                if newPhase == .active {
+                    Task {
+                        do {
+                            try await UNUserNotificationCenter.current().setBadgeCount(0)
+                        } catch {
+                            TronLogger.shared.debug("Failed to clear badge: \(error)", category: .notification)
+                        }
+                    }
+                }
             }
         }
     }

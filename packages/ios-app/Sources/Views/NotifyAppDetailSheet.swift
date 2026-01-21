@@ -71,17 +71,6 @@ struct NotifyAppDetailSheet: View {
     @ViewBuilder
     private var notificationHeaderSection: some View {
         VStack(alignment: .leading, spacing: 12) {
-            // Section Header
-            HStack(spacing: 8) {
-                Image(systemName: "bell.fill")
-                    .font(.system(size: 12))
-                    .foregroundStyle(.tronEmerald)
-                Text("NOTIFICATION")
-                    .font(TronTypography.mono(size: TronTypography.sizeBody3, weight: .semibold))
-                    .foregroundStyle(.tronTextMuted)
-                Spacer()
-            }
-
             // Title
             Text(data.title)
                 .font(TronTypography.mono(size: TronTypography.sizeLargeTitle, weight: .semibold))

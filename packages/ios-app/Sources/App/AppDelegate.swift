@@ -63,8 +63,9 @@ extension AppDelegate: UNUserNotificationCenterDelegate {
         let userInfo = notification.request.content.userInfo
         TronLogger.shared.debug("Received notification in foreground: \(userInfo)", category: .notification)
 
-        // Show banner, sound, and badge even when app is in foreground
-        completionHandler([.banner, .sound, .badge])
+        // Show banner and sound when app is in foreground, but NOT badge
+        // (user is already in the app, no need to increment badge)
+        completionHandler([.banner, .sound])
     }
 
     /// Handle notification tap
