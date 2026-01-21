@@ -64,6 +64,8 @@ struct ChatView: View {
     @State private var showCompactionDetail = false
     /// Data for compaction detail sheet (tokensBefore, tokensAfter, reason, summary)
     @State private var compactionDetailData: (tokensBefore: Int, tokensAfter: Int, reason: String, summary: String?)?
+    /// Data for NotifyApp detail sheet
+    @State private var notifyAppSheetData: NotifyAppChipData?
 
     /// UserDefaults key for storing reasoning level per session
     private var reasoningLevelKey: String { "tron.reasoningLevel.\(sessionId)" }
@@ -371,6 +373,13 @@ struct ChatView: View {
                 )
             }
         }
+        .sheet(item: $notifyAppSheetData) { data in
+            if #available(iOS 26.0, *) {
+                NotifyAppDetailSheet(data: data)
+            } else {
+                NotifyAppDetailSheetFallback(data: data)
+            }
+        }
         .alert("Error", isPresented: $viewModel.showError) {
             Button("OK") { viewModel.clearError() }
         } message: {
@@ -626,6 +635,9 @@ struct ChatView: View {
                                     },
                                     onTodoWriteTap: {
                                         viewModel.todoState.showSheet = true
+                                    },
+                                    onNotifyAppTap: { data in
+                                        notifyAppSheetData = data
                                     }
                                 )
                                 .id(message.id)

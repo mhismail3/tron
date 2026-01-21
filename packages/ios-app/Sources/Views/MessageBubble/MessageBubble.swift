@@ -10,6 +10,7 @@ struct MessageBubble: View {
     var onSubagentTap: ((SubagentToolData) -> Void)?
     var onRenderAppUITap: ((RenderAppUIChipData) -> Void)?
     var onTodoWriteTap: (() -> Void)?
+    var onNotifyAppTap: ((NotifyAppChipData) -> Void)?
 
     private var isUserMessage: Bool {
         message.role == .user
@@ -142,6 +143,22 @@ struct MessageBubble: View {
                     } else {
                         TodoWriteChipFallback(data: chipData) {
                             onTodoWriteTap?()
+                        }
+                    }
+                } else {
+                    // Fallback to regular tool view if parsing fails
+                    ToolResultRouter(tool: tool)
+                }
+            case "notifyapp":
+                // Show NotifyApp as compact chip with notification status
+                if let chipData = createNotifyAppChipData(from: tool) {
+                    if #available(iOS 26.0, *) {
+                        NotifyAppChip(data: chipData) {
+                            onNotifyAppTap?(chipData)
+                        }
+                    } else {
+                        NotifyAppChipFallback(data: chipData) {
+                            onNotifyAppTap?(chipData)
                         }
                     }
                 } else {
@@ -522,6 +539,92 @@ struct MessageBubble: View {
             doneCount: completed,
             totalCount: totalCount
         )
+    }
+
+    // MARK: - NotifyApp Tool Parsing
+
+    /// Parse NotifyApp tool to create NotifyAppChipData for chip display
+    private func createNotifyAppChipData(from tool: ToolUseData) -> NotifyAppChipData? {
+        // Extract title and body from arguments
+        guard let title = extractNotifyAppTitle(from: tool.arguments),
+              let body = extractNotifyAppBody(from: tool.arguments) else {
+            return nil
+        }
+
+        // Extract optional sheetContent
+        let sheetContent = extractNotifyAppSheetContent(from: tool.arguments)
+
+        // Determine status based on tool status
+        let status: NotifyAppStatus
+        switch tool.status {
+        case .running:
+            status = .sending
+        case .success:
+            status = .sent
+        case .error:
+            status = .failed
+        }
+
+        // Parse result for success/failure counts
+        var successCount: Int?
+        var failureCount: Int?
+        var errorMessage: String?
+
+        if let result = tool.result {
+            // Extract counts from result like "Notification sent successfully to 1 device."
+            if let match = result.firstMatch(of: /to\s+(\d+)\s+device/) {
+                successCount = Int(match.1)
+            }
+            // Extract failure count if present
+            if let match = result.firstMatch(of: /failed\s+for\s+(\d+)/) {
+                failureCount = Int(match.1)
+            }
+            // For errors, use the result as error message
+            if status == .failed {
+                errorMessage = result
+            }
+        }
+
+        return NotifyAppChipData(
+            toolCallId: tool.toolCallId,
+            title: title,
+            body: body,
+            sheetContent: sheetContent,
+            status: status,
+            successCount: successCount,
+            failureCount: failureCount,
+            errorMessage: errorMessage
+        )
+    }
+
+    private func extractNotifyAppTitle(from args: String) -> String? {
+        // Try to extract "title" field from JSON arguments
+        if let match = args.firstMatch(of: /"title"\s*:\s*"((?:[^"\\]|\\.)*)"/) {
+            return String(match.1)
+                .replacingOccurrences(of: "\\n", with: "\n")
+                .replacingOccurrences(of: "\\\"", with: "\"")
+        }
+        return nil
+    }
+
+    private func extractNotifyAppBody(from args: String) -> String? {
+        // Try to extract "body" field from JSON arguments
+        if let match = args.firstMatch(of: /"body"\s*:\s*"((?:[^"\\]|\\.)*)"/) {
+            return String(match.1)
+                .replacingOccurrences(of: "\\n", with: "\n")
+                .replacingOccurrences(of: "\\\"", with: "\"")
+        }
+        return nil
+    }
+
+    private func extractNotifyAppSheetContent(from args: String) -> String? {
+        // Try to extract "sheetContent" field from JSON arguments
+        if let match = args.firstMatch(of: /"sheetContent"\s*:\s*"((?:[^"\\]|\\.)*)"/) {
+            return String(match.1)
+                .replacingOccurrences(of: "\\n", with: "\n")
+                .replacingOccurrences(of: "\\\"", with: "\"")
+        }
+        return nil
     }
 }
 

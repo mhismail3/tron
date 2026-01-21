@@ -178,6 +178,8 @@
 		TD0DETB18F8A9B2C3D4E5F6A /* TodoDetailSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = TD0DET51F8A9B2C3D4E5F6A7 /* TodoDetailSheet.swift */; };
 		TD0STAB18F9B2C3D4E5F6A7B /* TodoState.swift in Sources */ = {isa = PBXBuildFile; fileRef = TD0S1ATE8F9B2C3D4E5F6A7B /* TodoState.swift */; };
 		TDWR1TE5C8D2F1A7B3C4E5F6 /* TodoWriteChip.swift in Sources */ = {isa = PBXBuildFile; fileRef = TWC9B8A7D6E5F4C3B2A1F098 /* TodoWriteChip.swift */; };
+		NTFY1CH1P5C8D2F1A7B3C4E5 /* NotifyAppChip.swift in Sources */ = {isa = PBXBuildFile; fileRef = NTFYCHP1F8A9B2C3D4E5F6A7 /* NotifyAppChip.swift */; };
+		NTFY1SHT5C8D2F1A7B3C4E6 /* NotifyAppDetailSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = NTFYSHT1F8A9B2C3D4E5F6A8 /* NotifyAppDetailSheet.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -371,6 +373,8 @@
 		TD0DET51F8A9B2C3D4E5F6A7 /* TodoDetailSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TodoDetailSheet.swift; sourceTree = "<group>"; };
 		TD0S1ATE8F9B2C3D4E5F6A7B /* TodoState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TodoState.swift; sourceTree = "<group>"; };
 		TWC9B8A7D6E5F4C3B2A1F098 /* TodoWriteChip.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TodoWriteChip.swift; sourceTree = "<group>"; };
+		NTFYCHP1F8A9B2C3D4E5F6A7 /* NotifyAppChip.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotifyAppChip.swift; sourceTree = "<group>"; };
+		NTFYSHT1F8A9B2C3D4E5F6A8 /* NotifyAppDetailSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotifyAppDetailSheet.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXGroup section */
@@ -602,6 +606,8 @@
 				50A9B3356F199C0BBFA66E71 /* SubagentDetailSheet.swift */,
 				TD0DET51F8A9B2C3D4E5F6A7 /* TodoDetailSheet.swift */,
 				TWC9B8A7D6E5F4C3B2A1F098 /* TodoWriteChip.swift */,
+				NTFYCHP1F8A9B2C3D4E5F6A7 /* NotifyAppChip.swift */,
+				NTFYSHT1F8A9B2C3D4E5F6A8 /* NotifyAppDetailSheet.swift */,
 				FC777FA4471FD3723C469037 /* UICanvasSheet.swift */,
 				CCA283B41E28CEFFCD4639EE /* VoiceNoteDetailSheet.swift */,
 				192E08DF91426E43F5AFE03F /* VoiceNotesListView.swift */,
@@ -1009,6 +1015,8 @@
 				0752A9C5CB7DDD0E3630ABE0 /* StructuralComponents.swift in Sources */,
 				BB378A9B74DB1C2D32BBAD10 /* SubagentChip.swift in Sources */,
 				TDWR1TE5C8D2F1A7B3C4E5F6 /* TodoWriteChip.swift in Sources */,
+				NTFY1CH1P5C8D2F1A7B3C4E5 /* NotifyAppChip.swift in Sources */,
+				NTFY1SHT5C8D2F1A7B3C4E6 /* NotifyAppDetailSheet.swift in Sources */,
 				CF2ED7C753FB3123122A026E /* SubagentDetailSheet.swift in Sources */,
 				FCCC23923C20919D0D38197E /* SubagentState.swift in Sources */,
 				92ACA2A5BB42F349E463117D /* TextContentView.swift in Sources */,

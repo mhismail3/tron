@@ -25,6 +25,10 @@ export interface NotifyAppParams {
   title: string;
   /** Notification body (max 200 characters recommended) */
   body: string;
+  /** Markdown-formatted rich content for the detail sheet in the iOS app.
+   * This content is NOT sent via APNS push - it's stored with the tool call
+   * and rendered when the user taps the notification chip in the chat. */
+  sheetContent?: string;
   /** Custom data to include with the notification */
   data?: Record<string, string>;
   /** Notification priority */
@@ -118,6 +122,11 @@ export class NotifyAppTool implements TronTool<NotifyAppParams, NotifyAppResult>
         type: 'string' as const,
         description: 'Notification body (max 200 chars recommended)',
         maxLength: 200,
+      },
+      sheetContent: {
+        type: 'string' as const,
+        description:
+          'Markdown-formatted rich content for the detail sheet. Shown when user taps notification chip in chat. Use for detailed info that does not fit in push notification.',
       },
       data: {
         type: 'object' as const,
