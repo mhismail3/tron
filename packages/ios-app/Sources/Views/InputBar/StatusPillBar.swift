@@ -113,10 +113,9 @@ struct StatusPillsColumn: View {
             .sortedByTier()
     }
 
-    /// OpenAI Codex models
-    private var codexModels: [ModelInfo] {
-        cachedModels.filter { $0.isCodex }
-            .sorted { codexVersionPriority($0) > codexVersionPriority($1) }
+    /// Latest OpenAI Codex models (5.2 only)
+    private var latestCodexModels: [ModelInfo] {
+        cachedModels.filter { $0.isCodex && $0.id.lowercased().contains("5.2") }
     }
 
     /// Gemini 3 models (latest Google)
@@ -125,25 +124,15 @@ struct StatusPillsColumn: View {
             .sorted { geminiTierPriority($0) < geminiTierPriority($1) }
     }
 
-    /// Legacy Gemini models (2.x)
-    private var geminiLegacyModels: [ModelInfo] {
-        cachedModels.filter { $0.isGemini && !$0.isGemini3 }
-            .sorted { geminiTierPriority($0) < geminiTierPriority($1) }
-    }
-
-    /// Legacy Anthropic models (non-4.5)
-    private var legacyAnthropicModels: [ModelInfo] {
-        cachedModels.filter { $0.isAnthropic && !$0.is45Model }
+    /// Legacy models: legacy Anthropic (non-4.5) + Codex 5.1 + Gemini 2.5
+    private var legacyModels: [ModelInfo] {
+        let legacyAnthropic = cachedModels.filter { $0.isAnthropic && !$0.is45Model }
             .uniqueByFormattedName()
             .sortedByTier()
-    }
-
-    private func codexVersionPriority(_ model: ModelInfo) -> Int {
-        let id = model.id.lowercased()
-        if id.contains("5.2") { return 52 }
-        if id.contains("5.1") { return 51 }
-        if id.contains("5.0") || id.contains("-5-") { return 50 }
-        return 0
+        let legacyCodex = cachedModels.filter { $0.isCodex && !$0.id.lowercased().contains("5.2") }
+        let legacyGemini = cachedModels.filter { $0.isGemini && !$0.isGemini3 }
+            .sorted { geminiTierPriority($0) < geminiTierPriority($1) }
+        return legacyAnthropic + legacyCodex + legacyGemini
     }
 
     private func geminiTierPriority(_ model: ModelInfo) -> Int {
@@ -184,117 +173,119 @@ struct StatusPillsColumn: View {
     // MARK: - Model Picker Menu
 
     private var modelPickerMenu: some View {
-        Menu {
-            // Latest Anthropic models (4.5)
-            ForEach(latestAnthropicModels) { model in
-                Button {
-                    NotificationCenter.default.post(name: .modelPickerAction, object: model)
-                } label: {
-                    Label(model.formattedModelName, systemImage: "sparkles")
-                }
+        // Separate visual (glass pill) from interaction (invisible Menu overlay)
+        // This avoids the iOS 26 Menu + glassEffect transition bug
+        HStack(spacing: 4) {
+            Image(systemName: "cpu")
+                .font(TronTypography.pill)
+            Text(modelName.shortModelName)
+                .font(TronTypography.pillValue)
+            if !readOnly {
+                Image(systemName: "chevron.up.chevron.down")
+                    .font(TronTypography.labelSM)
             }
-
-            // Gemini 3 models
-            if !gemini3Models.isEmpty {
-                Divider()
-                ForEach(gemini3Models) { model in
-                    Button {
-                        NotificationCenter.default.post(name: .modelPickerAction, object: model)
-                    } label: {
-                        Label(model.formattedModelName, systemImage: "atom")
-                    }
-                }
-            }
-
-            // OpenAI Codex models
-            if !codexModels.isEmpty {
-                Divider()
-                ForEach(codexModels) { model in
-                    Button {
-                        NotificationCenter.default.post(name: .modelPickerAction, object: model)
-                    } label: {
-                        Label(model.formattedModelName, systemImage: "bolt")
-                    }
-                }
-            }
-
-            // Legacy Anthropic models
-            if !legacyAnthropicModels.isEmpty {
-                Divider()
-                ForEach(legacyAnthropicModels) { model in
-                    Button {
-                        NotificationCenter.default.post(name: .modelPickerAction, object: model)
-                    } label: {
-                        Label(model.formattedModelName, systemImage: "clock")
-                    }
-                }
-            }
-
-            // Legacy Gemini models
-            if !geminiLegacyModels.isEmpty {
-                Divider()
-                ForEach(geminiLegacyModels) { model in
-                    Button {
-                        NotificationCenter.default.post(name: .modelPickerAction, object: model)
-                    } label: {
-                        Label(model.formattedModelName, systemImage: "clock")
-                    }
-                }
-            }
-        } label: {
-            HStack(spacing: 4) {
-                Image(systemName: "cpu")
-                    .font(TronTypography.pill)
-                Text(modelName.shortModelName)
-                    .font(TronTypography.pillValue)
-                if !readOnly {
-                    Image(systemName: "chevron.up.chevron.down")
-                        .font(TronTypography.labelSM)
-                }
-            }
-            .foregroundStyle(readOnly ? .tronEmerald.opacity(0.5) : .tronEmerald)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 5)
-            .contentShape(Capsule())
         }
-        .disabled(readOnly)
+        .foregroundStyle(readOnly ? .tronEmerald.opacity(0.5) : .tronEmerald)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 5)
         .glassEffect(.regular.tint(Color.tronPhthaloGreen.opacity(0.35)).interactive(), in: .capsule)
+        .opacity(readOnly ? 0.5 : 1.0)
+        .overlay {
+            // Invisible Menu overlay handles interaction only
+            Menu {
+                // Latest Anthropic models (4.5)
+                ForEach(latestAnthropicModels) { model in
+                    Button {
+                        NotificationCenter.default.post(name: .modelPickerAction, object: model)
+                    } label: {
+                        Label(model.formattedModelName, systemImage: "sparkles")
+                    }
+                }
+
+                // Latest OpenAI Codex models (5.2)
+                if !latestCodexModels.isEmpty {
+                    Divider()
+                    ForEach(latestCodexModels) { model in
+                        Button {
+                            NotificationCenter.default.post(name: .modelPickerAction, object: model)
+                        } label: {
+                            Label(model.formattedModelName, systemImage: "bolt")
+                        }
+                    }
+                }
+
+                // Gemini 3 models
+                if !gemini3Models.isEmpty {
+                    Divider()
+                    ForEach(gemini3Models) { model in
+                        Button {
+                            NotificationCenter.default.post(name: .modelPickerAction, object: model)
+                        } label: {
+                            Label(model.formattedModelName, systemImage: "atom")
+                        }
+                    }
+                }
+
+                // Legacy models (legacy Anthropic + Codex 5.1 + Gemini 2.5)
+                if !legacyModels.isEmpty {
+                    Divider()
+                    ForEach(legacyModels) { model in
+                        Button {
+                            NotificationCenter.default.post(name: .modelPickerAction, object: model)
+                        } label: {
+                            Label(model.formattedModelName, systemImage: "clock")
+                        }
+                    }
+                }
+            } label: {
+                Color.clear
+                    .contentShape(Capsule())
+            }
+            .disabled(readOnly)
+        }
     }
 
     // MARK: - Reasoning Level Menu
 
     private var reasoningLevelMenu: some View {
-        Menu {
-            Button { NotificationCenter.default.post(name: .reasoningLevelAction, object: "low") } label: {
-                Label("Low", systemImage: "hare")
+        // Separate visual (glass pill) from interaction (invisible Menu overlay)
+        // This avoids the iOS 26 Menu + glassEffect transition bug
+        HStack(spacing: 4) {
+            Image(systemName: reasoningLevelIcon(reasoningLevel))
+                .font(TronTypography.pill)
+            Text(reasoningLevelLabel(reasoningLevel))
+                .font(TronTypography.pillValue)
+            if !readOnly {
+                Image(systemName: "chevron.up.chevron.down")
+                    .font(TronTypography.labelSM)
             }
-            Button { NotificationCenter.default.post(name: .reasoningLevelAction, object: "medium") } label: {
-                Label("Medium", systemImage: "brain")
-            }
-            Button { NotificationCenter.default.post(name: .reasoningLevelAction, object: "high") } label: {
-                Label("High", systemImage: "brain.head.profile")
-            }
-            Button { NotificationCenter.default.post(name: .reasoningLevelAction, object: "xhigh") } label: {
-                Label("Max", systemImage: "sparkles")
-            }
-        } label: {
-            HStack(spacing: 4) {
-                Image(systemName: reasoningLevelIcon(reasoningLevel))
-                    .font(TronTypography.pill)
-                Text(reasoningLevelLabel(reasoningLevel))
-                    .font(TronTypography.pillValue)
-                if !readOnly {
-                    Image(systemName: "chevron.up.chevron.down")
-                        .font(TronTypography.labelSM)
-                }
-            }
-            .foregroundStyle(readOnly ? reasoningLevelColor(reasoningLevel).opacity(0.5) : reasoningLevelColor(reasoningLevel))
-            .padding(.horizontal, 10)
-            .padding(.vertical, 5)
-            .contentShape(Capsule())
         }
-        .disabled(readOnly)
+        .foregroundStyle(readOnly ? reasoningLevelColor(reasoningLevel).opacity(0.5) : reasoningLevelColor(reasoningLevel))
+        .padding(.horizontal, 10)
+        .padding(.vertical, 5)
         .glassEffect(.regular.tint(Color.tronPhthaloGreen.opacity(0.35)).interactive(), in: .capsule)
+        .opacity(readOnly ? 0.5 : 1.0)
+        .overlay {
+            // Invisible Menu overlay handles interaction only
+            Menu {
+                Button { NotificationCenter.default.post(name: .reasoningLevelAction, object: "low") } label: {
+                    Label("Low", systemImage: "hare")
+                }
+                Button { NotificationCenter.default.post(name: .reasoningLevelAction, object: "medium") } label: {
+                    Label("Medium", systemImage: "brain")
+                }
+                Button { NotificationCenter.default.post(name: .reasoningLevelAction, object: "high") } label: {
+                    Label("High", systemImage: "brain.head.profile")
+                }
+                Button { NotificationCenter.default.post(name: .reasoningLevelAction, object: "xhigh") } label: {
+                    Label("Max", systemImage: "sparkles")
+                }
+            } label: {
+                Color.clear
+                    .contentShape(Capsule())
+            }
+            .disabled(readOnly)
+        }
         .matchedGeometryEffect(id: "reasoningPillMorph", in: reasoningPillNamespace)
         .transition(.asymmetric(
             insertion: .scale(scale: 0.6, anchor: .leading).combined(with: .opacity),

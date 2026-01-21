@@ -165,6 +165,29 @@ struct MicButtonDock: View {
     }
 }
 
+// MARK: - Glass Circle Button Style (iOS 26.1 Menu fix)
+
+/// Custom ButtonStyle that applies glassEffect internally - fixes Menu morphing animation glitch
+/// See: https://juniperphoton.substack.com/p/adopting-liquid-glass-experiences
+@available(iOS 26.0, *)
+struct GlassCircleButtonStyle: ButtonStyle {
+    let size: CGFloat
+    let tint: Color
+    let isDisabled: Bool
+
+    func makeBody(configuration: Configuration) -> some View {
+        // Use explicit Circle as base to ensure correct bounds during Menu transitions
+        Circle()
+            .fill(.clear)
+            .frame(width: size, height: size)
+            .overlay {
+                configuration.label
+            }
+            .glassEffect(.regular.tint(tint).interactive(), in: .circle)
+            .opacity(isDisabled ? 0.5 : 1.0)
+    }
+}
+
 // MARK: - Glass Attachment Button
 
 @available(iOS 26.0, *)
@@ -182,57 +205,47 @@ struct GlassAttachmentButton: View {
     @Binding var skillMentionQuery: String
 
     var body: some View {
-        Menu {
-            // iOS 26 fix: Use NotificationCenter to decouple button action from state mutation
-            Button { NotificationCenter.default.post(name: .attachmentMenuAction, object: "camera") } label: {
-                Label("Take Photo", systemImage: "camera")
-            }
-
-            Button { NotificationCenter.default.post(name: .attachmentMenuAction, object: "photos") } label: {
-                Label("Photo Library", systemImage: "photo.on.rectangle")
-            }
-
-            Button { NotificationCenter.default.post(name: .attachmentMenuAction, object: "files") } label: {
-                Label("Choose File", systemImage: "folder")
-            }
-
-            // Skills section (only show if skillStore is configured)
-            if skillStore != nil {
-                Divider()
-
-                Button { NotificationCenter.default.post(name: .attachmentMenuAction, object: "skills") } label: {
-                    Label("Add Skill", systemImage: "sparkles")
-                }
-
-                Button { NotificationCenter.default.post(name: .attachmentMenuAction, object: "draftPlan") } label: {
-                    Label("Draft a Plan", systemImage: "list.clipboard")
-                }
-            }
-        } label: {
-            ZStack(alignment: .topTrailing) {
-                Image(systemName: "plus")
-                    .font(TronTypography.buttonSM)
-                    .foregroundStyle(isProcessing ? Color.tronEmerald.opacity(0.3) : Color.tronEmerald)
-                    .frame(width: buttonSize, height: buttonSize)
-                    .background {
-                        Circle()
-                            .fill(.clear)
-                            .glassEffect(.regular.tint(Color.tronPhthaloGreen.opacity(0.35)).interactive(), in: .circle)
+        // Separate visual (glass button) from interaction (invisible Menu overlay)
+        // This avoids the iOS 26 Menu + glassEffect transition bug
+        Image(systemName: "plus")
+            .font(TronTypography.buttonSM)
+            .foregroundStyle(isProcessing ? Color.tronEmerald.opacity(0.3) : Color.tronEmerald)
+            .frame(width: buttonSize, height: buttonSize)
+            .glassEffect(.regular.tint(Color.tronPhthaloGreen.opacity(0.35)).interactive(), in: .circle)
+            .opacity(isProcessing ? 0.5 : 1.0)
+            .overlay {
+                // Invisible Menu overlay handles interaction only
+                Menu {
+                    Button { NotificationCenter.default.post(name: .attachmentMenuAction, object: "camera") } label: {
+                        Label("Take Photo", systemImage: "camera")
                     }
-                    .contentShape(Circle())
 
-                // Skills available indicator - small sparkles badge
-                if hasSkillsAvailable && !isProcessing {
-                    Image(systemName: "sparkle")
-                        .font(TronTypography.badge)
-                        .foregroundStyle(.tronCyan)
-                        .offset(x: 2, y: -2)
-                        .transition(.scale.combined(with: .opacity))
+                    Button { NotificationCenter.default.post(name: .attachmentMenuAction, object: "photos") } label: {
+                        Label("Photo Library", systemImage: "photo.on.rectangle")
+                    }
+
+                    Button { NotificationCenter.default.post(name: .attachmentMenuAction, object: "files") } label: {
+                        Label("Choose File", systemImage: "folder")
+                    }
+
+                    if skillStore != nil {
+                        Divider()
+
+                        Button { NotificationCenter.default.post(name: .attachmentMenuAction, object: "skills") } label: {
+                            Label("Add Skill", systemImage: "sparkles")
+                        }
+
+                        Button { NotificationCenter.default.post(name: .attachmentMenuAction, object: "draftPlan") } label: {
+                            Label("Draft a Plan", systemImage: "list.clipboard")
+                        }
+                    }
+                } label: {
+                    Color.clear
+                        .frame(width: buttonSize, height: buttonSize)
+                        .contentShape(Circle())
                 }
+                .disabled(isProcessing)
             }
-        }
-        .disabled(isProcessing)
-        // iOS 26 Menu workaround: Handle attachment actions via NotificationCenter
         .onReceive(NotificationCenter.default.publisher(for: .attachmentMenuAction)) { notification in
             guard let action = notification.object as? String else { return }
             switch action {
