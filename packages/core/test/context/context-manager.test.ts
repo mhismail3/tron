@@ -320,7 +320,8 @@ describe('ContextManager', () => {
       // 75% of 200k = 150k tokens
       const session = simulator.generateAtUtilization(75, 200_000);
 
-      const cm = createContextManager({ model: 'claude-sonnet-4-20250514' });
+      // Use empty systemPrompt to avoid loading real ~/.tron/rules/SYSTEM.md
+      const cm = createContextManager({ model: 'claude-sonnet-4-20250514', systemPrompt: '' });
       cm.setMessages(session.messages);
 
       // At 75% of 200k, should be "alert"
@@ -338,7 +339,8 @@ describe('ContextManager', () => {
       // 88% of 128k = ~113k tokens (use 88% to stay safely in critical zone)
       const session = simulator.generateAtUtilization(88, 128_000);
 
-      const cm = createContextManager({ model: 'gpt-4o' });
+      // Use empty systemPrompt to avoid loading real ~/.tron/rules/SYSTEM.md
+      const cm = createContextManager({ model: 'gpt-4o', systemPrompt: '' });
       cm.setMessages(session.messages);
 
       // At 88% of 128k, should be "critical" (85-95%)
@@ -355,7 +357,8 @@ describe('ContextManager', () => {
       const simulator = createContextSimulator({ targetTokens: 1000 });
       const session = simulator.generateAtUtilization(75, 200_000);
 
-      const cm = createContextManager({ model: 'claude-sonnet-4-20250514' });
+      // Use empty systemPrompt to avoid loading real ~/.tron/rules/SYSTEM.md
+      const cm = createContextManager({ model: 'claude-sonnet-4-20250514', systemPrompt: '' });
       cm.setMessages(session.messages);
 
       const callback = vi.fn();

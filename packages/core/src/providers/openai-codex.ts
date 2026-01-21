@@ -22,6 +22,7 @@ import type {
 } from '../types/index.js';
 import { createLogger } from '../logging/logger.js';
 import { getSettings } from '../settings/index.js';
+import { saveProviderOAuthTokens, type OAuthTokens } from '../auth/index.js';
 import { withProviderRetry, type StreamRetryConfig } from './base/index.js';
 
 const logger = createLogger('openai-codex');
@@ -316,7 +317,7 @@ export class OpenAICodexProvider {
   /**
    * Refresh OAuth tokens
    */
-  private async refreshTokens(): Promise<{ accessToken: string; expiresAt: number }> {
+  private async refreshTokens(): Promise<OAuthTokens> {
     const codexSettings = getCodexSettings();
     const tokenUrl = codexSettings?.tokenUrl ?? 'https://auth.openai.com/oauth/token';
     const clientId = codexSettings?.clientId ?? 'app_EMoamEEZ73f0CkXaXp7hrann';
@@ -338,11 +339,23 @@ export class OpenAICodexProvider {
       throw new Error(`Token refresh failed: ${response.status} - ${error}`);
     }
 
-    const data = await response.json() as { access_token: string; expires_in: number };
-    return {
+    const data = await response.json() as {
+      access_token: string;
+      refresh_token: string;
+      expires_in: number;
+    };
+
+    const newTokens: OAuthTokens = {
       accessToken: data.access_token,
+      refreshToken: data.refresh_token,
       expiresAt: Date.now() + data.expires_in * 1000,
     };
+
+    // Persist refreshed tokens to disk
+    await saveProviderOAuthTokens('openai-codex', newTokens);
+    logger.info('Persisted refreshed Codex OAuth tokens');
+
+    return newTokens;
   }
 
   /**
@@ -352,6 +365,7 @@ export class OpenAICodexProvider {
     if (this.shouldRefreshTokens()) {
       const newTokens = await this.refreshTokens();
       this.config.auth.accessToken = newTokens.accessToken;
+      this.config.auth.refreshToken = newTokens.refreshToken;
       this.config.auth.expiresAt = newTokens.expiresAt;
     }
   }
