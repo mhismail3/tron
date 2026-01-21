@@ -104,6 +104,57 @@ struct StatusPillsColumn: View {
         !modelName.isEmpty
     }
 
+    // MARK: - Model Categorization
+
+    /// Anthropic 4.5 models (latest)
+    private var latestAnthropicModels: [ModelInfo] {
+        cachedModels.filter { $0.isAnthropic && $0.is45Model }
+            .uniqueByFormattedName()
+            .sortedByTier()
+    }
+
+    /// OpenAI Codex models
+    private var codexModels: [ModelInfo] {
+        cachedModels.filter { $0.isCodex }
+            .sorted { codexVersionPriority($0) > codexVersionPriority($1) }
+    }
+
+    /// Gemini 3 models (latest Google)
+    private var gemini3Models: [ModelInfo] {
+        cachedModels.filter { $0.isGemini && $0.isGemini3 }
+            .sorted { geminiTierPriority($0) < geminiTierPriority($1) }
+    }
+
+    /// Legacy Gemini models (2.x)
+    private var geminiLegacyModels: [ModelInfo] {
+        cachedModels.filter { $0.isGemini && !$0.isGemini3 }
+            .sorted { geminiTierPriority($0) < geminiTierPriority($1) }
+    }
+
+    /// Legacy Anthropic models (non-4.5)
+    private var legacyAnthropicModels: [ModelInfo] {
+        cachedModels.filter { $0.isAnthropic && !$0.is45Model }
+            .uniqueByFormattedName()
+            .sortedByTier()
+    }
+
+    private func codexVersionPriority(_ model: ModelInfo) -> Int {
+        let id = model.id.lowercased()
+        if id.contains("5.2") { return 52 }
+        if id.contains("5.1") { return 51 }
+        if id.contains("5.0") || id.contains("-5-") { return 50 }
+        return 0
+    }
+
+    private func geminiTierPriority(_ model: ModelInfo) -> Int {
+        switch model.geminiTier {
+        case "pro": return 0
+        case "flash": return 1
+        case "flash-lite": return 2
+        default: return 3
+        }
+    }
+
     // MARK: - Body
 
     var body: some View {
@@ -133,16 +184,69 @@ struct StatusPillsColumn: View {
     // MARK: - Model Picker Menu
 
     private var modelPickerMenu: some View {
-        ModelPickerMenuContent(
-            models: cachedModels,
-            notificationName: .modelPickerAction
-        ) {
+        Menu {
+            // Latest Anthropic models (4.5)
+            ForEach(latestAnthropicModels) { model in
+                Button {
+                    NotificationCenter.default.post(name: .modelPickerAction, object: model)
+                } label: {
+                    Label(model.formattedModelName, systemImage: "sparkles")
+                }
+            }
+
+            // Gemini 3 models
+            if !gemini3Models.isEmpty {
+                Divider()
+                ForEach(gemini3Models) { model in
+                    Button {
+                        NotificationCenter.default.post(name: .modelPickerAction, object: model)
+                    } label: {
+                        Label(model.formattedModelName, systemImage: "atom")
+                    }
+                }
+            }
+
+            // OpenAI Codex models
+            if !codexModels.isEmpty {
+                Divider()
+                ForEach(codexModels) { model in
+                    Button {
+                        NotificationCenter.default.post(name: .modelPickerAction, object: model)
+                    } label: {
+                        Label(model.formattedModelName, systemImage: "bolt")
+                    }
+                }
+            }
+
+            // Legacy Anthropic models
+            if !legacyAnthropicModels.isEmpty {
+                Divider()
+                ForEach(legacyAnthropicModels) { model in
+                    Button {
+                        NotificationCenter.default.post(name: .modelPickerAction, object: model)
+                    } label: {
+                        Label(model.formattedModelName, systemImage: "clock")
+                    }
+                }
+            }
+
+            // Legacy Gemini models
+            if !geminiLegacyModels.isEmpty {
+                Divider()
+                ForEach(geminiLegacyModels) { model in
+                    Button {
+                        NotificationCenter.default.post(name: .modelPickerAction, object: model)
+                    } label: {
+                        Label(model.formattedModelName, systemImage: "clock")
+                    }
+                }
+            }
+        } label: {
             HStack(spacing: 4) {
                 Image(systemName: "cpu")
                     .font(TronTypography.pill)
                 Text(modelName.shortModelName)
                     .font(TronTypography.pillValue)
-                    .contentTransition(.interpolate)
                 if !readOnly {
                     Image(systemName: "chevron.up.chevron.down")
                         .font(TronTypography.labelSM)
@@ -151,16 +255,10 @@ struct StatusPillsColumn: View {
             .foregroundStyle(readOnly ? .tronEmerald.opacity(0.5) : .tronEmerald)
             .padding(.horizontal, 10)
             .padding(.vertical, 5)
-            .background {
-                Capsule()
-                    .fill(.clear)
-                    .glassEffect(.regular.tint(Color.tronPhthaloGreen.opacity(0.35)), in: .capsule)
-            }
             .contentShape(Capsule())
-            .geometryGroup()
-            .animation(.spring(response: 0.3, dampingFraction: 0.8), value: modelName)
         }
         .disabled(readOnly)
+        .glassEffect(.regular.tint(Color.tronPhthaloGreen.opacity(0.35)).interactive(), in: .capsule)
     }
 
     // MARK: - Reasoning Level Menu
@@ -193,14 +291,10 @@ struct StatusPillsColumn: View {
             .foregroundStyle(readOnly ? reasoningLevelColor(reasoningLevel).opacity(0.5) : reasoningLevelColor(reasoningLevel))
             .padding(.horizontal, 10)
             .padding(.vertical, 5)
-            .background {
-                Capsule()
-                    .fill(.clear)
-                    .glassEffect(.regular.tint(Color.tronPhthaloGreen.opacity(0.35)), in: .capsule)
-            }
             .contentShape(Capsule())
         }
         .disabled(readOnly)
+        .glassEffect(.regular.tint(Color.tronPhthaloGreen.opacity(0.35)).interactive(), in: .capsule)
         .matchedGeometryEffect(id: "reasoningPillMorph", in: reasoningPillNamespace)
         .transition(.asymmetric(
             insertion: .scale(scale: 0.6, anchor: .leading).combined(with: .opacity),
