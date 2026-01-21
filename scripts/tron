@@ -4,7 +4,8 @@
 # Usage: tron <command> [options]
 #
 # Commands:
-#   dev        Build, test, and start beta development server
+#   dev        Start beta server (-b to build, -t to tail)
+#   build      Build workspace and run tests
 #   deploy     Build, test, and deploy to production
 #   install    Initial production setup (launchd + CLI)
 #   rollback   Restore to last deployed commit
@@ -19,7 +20,9 @@
 #   help       Show this help message
 #
 # Examples:
-#   tron dev                  # Build, test, start beta server
+#   tron dev                  # Start beta server in background
+#   tron dev -bt              # Build, test, start in foreground
+#   tron build                # Build and test only
 #   tron deploy               # Deploy to production
 #   tron logs -l error -n 20  # Show last 20 errors
 #   tron status               # Check service health
@@ -725,61 +728,96 @@ query_logs() {
 #=============================================================================
 
 #-----------------------------------------------------------------------------
-# cmd_dev - Build, test, and start beta development server
+# cmd_build - Build workspace and run tests
 #
-# Workflow:
-#   1. Check if beta port already in use
-#   2. Build workspace (bun run build)
-#   3. Run tests (prompt to continue on failure)
-#   4. Check/rebuild native modules if needed
-#   5. Start beta server with development environment
+# Runs build and tests without starting a server. Useful for CI or
+# verifying changes before starting dev server.
+#-----------------------------------------------------------------------------
+cmd_build() {
+    require_project_dir
+    cd "$PROJECT_DIR"
+
+    print_header "Building and Testing"
+
+    build_workspace
+
+    if ! run_tests; then
+        print_warning "Tests failed!"
+        exit 1
+    fi
+
+    print_success "Build and tests complete"
+}
+
+#-----------------------------------------------------------------------------
+# cmd_dev - Start beta development server
+#
+# Options:
+#   -b, --build   Build and test before starting
+#   -t, --tail    Run in foreground (tail logs)
+#
+# Default behavior: Start server in background without build
 #-----------------------------------------------------------------------------
 cmd_dev() {
     require_project_dir
     cd "$PROJECT_DIR"
 
-    print_header "Starting Development Server"
+    # Parse flags
+    local do_build=false
+    local do_tail=false
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            -b|--build) do_build=true; shift ;;
+            -t|--tail)  do_tail=true; shift ;;
+            -bt|-tb)    do_build=true; do_tail=true; shift ;;
+            -h|--help)
+                echo ""
+                echo -e "${CYAN}tron dev${NC} - Start beta development server"
+                echo ""
+                echo "Usage: tron dev [options]"
+                echo ""
+                echo "Options:"
+                echo "  -b, --build   Build and test before starting"
+                echo "  -t, --tail    Run in foreground (tail logs)"
+                echo ""
+                echo "Examples:"
+                echo "  tron dev       # Start server in background"
+                echo "  tron dev -t    # Start server in foreground"
+                echo "  tron dev -b    # Build, test, then start in background"
+                echo "  tron dev -bt   # Build, test, then start in foreground"
+                echo ""
+                return 0
+                ;;
+            *) shift ;;
+        esac
+    done
 
     # Check if beta port is already in use
     if is_beta_running; then
         print_error "Beta server already running on port $BETA_WS_PORT"
-        echo "  Kill it first: kill \$(lsof -t -i :$BETA_WS_PORT)"
+        echo "  Kill it: kill \$(lsof -t -i :$BETA_WS_PORT)"
         exit 1
     fi
 
-    # Build workspace
-    build_workspace
+    # Optional build step
+    if [ "$do_build" = true ]; then
+        print_header "Building and Testing"
+        build_workspace
 
-    # Run tests
-    if ! run_tests; then
-        print_warning "Tests failed!"
-        echo ""
-        if ! confirm_action "Continue anyway?"; then
-            print_error "Aborted. Fix tests and retry."
-            exit 1
+        if ! run_tests; then
+            print_warning "Tests failed!"
+            if ! confirm_action "Continue anyway?"; then
+                exit 1
+            fi
         fi
-        print_warning "Continuing despite test failure..."
+
+        if ! check_native_module; then
+            rebuild_native_modules
+        fi
     fi
 
-    # Check native module compatibility
-    if ! check_native_module; then
-        print_warning "Native module version mismatch detected"
-        rebuild_native_modules
-    fi
-
-    # Start beta server
-    echo ""
-    echo -e "${CYAN}Starting Beta Server${NC}"
-    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-    echo "  WebSocket: ws://localhost:$BETA_WS_PORT/ws"
-    echo "  Health:    http://localhost:$BETA_HEALTH_PORT/health"
-    echo "  Database:  $TRON_HOME/db/beta.db"
-    echo "  Workspace: $PROJECT_DIR"
-    echo ""
-    echo -e "${YELLOW}Press Ctrl+C to stop${NC}"
-    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-
-    # Set beta environment and run
+    # Set beta environment
     export TRON_WS_PORT=$BETA_WS_PORT
     export TRON_HEALTH_PORT=$BETA_HEALTH_PORT
     export TRON_BUILD_TIER=beta
@@ -787,7 +825,39 @@ cmd_dev() {
     export LOG_LEVEL="${LOG_LEVEL:-trace}"
     export NODE_ENV=development
 
-    exec node packages/server/dist/index.js
+    if [ "$do_tail" = true ]; then
+        # Foreground mode (tail logs)
+        echo ""
+        echo -e "${CYAN}Starting Beta Server (foreground)${NC}"
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        echo "  WebSocket: ws://localhost:$BETA_WS_PORT/ws"
+        echo "  Health:    http://localhost:$BETA_HEALTH_PORT/health"
+        echo ""
+        echo -e "${YELLOW}Press Ctrl+C to stop${NC}"
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        exec node packages/server/dist/index.js
+    else
+        # Background mode (default)
+        echo ""
+        echo -e "${CYAN}Starting Beta Server (background)${NC}"
+
+        node packages/server/dist/index.js &
+        local pid=$!
+
+        sleep 2
+
+        if kill -0 $pid 2>/dev/null; then
+            print_success "Beta server started (PID: $pid)"
+            echo "  WebSocket: ws://localhost:$BETA_WS_PORT/ws"
+            echo "  Health:    http://localhost:$BETA_HEALTH_PORT/health"
+            echo ""
+            echo "  Stop with: kill $pid"
+            echo "  Tail logs: tron dev -t (after killing current)"
+        else
+            print_error "Server failed to start"
+            exit 1
+        fi
+    fi
 }
 
 #-----------------------------------------------------------------------------
@@ -1412,7 +1482,8 @@ cmd_help() {
     echo "Usage: tron <command> [options]"
     echo ""
     echo "Development Commands:"
-    echo "  dev        Build, test, and start beta development server"
+    echo "  dev        Start beta server (-b to build, -t to tail)"
+    echo "  build      Build workspace and run tests"
     echo "  setup      First-time project environment setup"
     echo ""
     echo "Production Commands:"
@@ -1430,7 +1501,9 @@ cmd_help() {
     echo "  uninstall  Remove service (preserves data)"
     echo ""
     echo "Examples:"
-    echo "  tron dev                  # Build, test, start beta server"
+    echo "  tron dev                  # Start beta server in background"
+    echo "  tron dev -bt              # Build, test, start in foreground"
+    echo "  tron build                # Build and test only (no server)"
     echo "  tron deploy               # Deploy current workspace to production"
     echo "  tron logs -l error        # Show errors only"
     echo "  tron logs -l warn -n 100  # Last 100 warnings+"
@@ -1449,6 +1522,7 @@ cmd_help() {
 
 case "${1:-help}" in
     dev)       shift; cmd_dev "$@" ;;
+    build)     cmd_build ;;
     deploy)    cmd_deploy ;;
     install)   cmd_install ;;
     rollback)  cmd_rollback ;;
