@@ -11,6 +11,7 @@
  * prompts or via the tool.result RPC method.
  */
 
+import { randomUUID } from 'crypto';
 import type { TronTool, TronToolResult } from '../types/index.js';
 import type { RenderAppUIParams } from '../ui/components.js';
 import { validateRenderAppUIParams } from '../ui/validators.js';
@@ -18,6 +19,31 @@ import { UI_COMPONENT_SCHEMA } from '../ui/schema.js';
 import { createLogger } from '../logging/logger.js';
 
 const logger = createLogger('tool:render-app-ui');
+
+/**
+ * Generate a unique canvas ID based on title or root component type.
+ * Format: <descriptive-slug>-<8-char-random>
+ */
+function generateCanvasId(title?: string, ui?: { $tag?: string }): string {
+  const suffix = randomUUID().replace(/-/g, '').slice(0, 8);
+
+  // Extract words from title if available
+  if (title) {
+    const words = title
+      .toLowerCase()
+      .replace(/[^a-z0-9\s]/g, '')
+      .split(/\s+/)
+      .filter(w => w.length > 0)
+      .slice(0, 3);
+    if (words.length > 0) {
+      return `${words.join('-')}-${suffix}`;
+    }
+  }
+
+  // Fall back to root component type
+  const rootTag = ui?.$tag?.toLowerCase() || 'canvas';
+  return `canvas-${rootTag}-${suffix}`;
+}
 
 /**
  * Configuration for RenderAppUI tool
@@ -79,7 +105,7 @@ presented to the user, and their response will come back as a new message.`;
     properties: {
       canvasId: {
         type: 'string' as const,
-        description: 'Unique identifier for this canvas (use for updates)',
+        description: 'Unique identifier for this canvas. Auto-generated if not provided. Provide the same canvasId to update an existing canvas.',
       },
       title: {
         type: 'string' as const,
@@ -94,7 +120,7 @@ presented to the user, and their response will come back as a new message.`;
         description: 'Initial state values for bound controls (keys are bindingIds)',
       },
     },
-    required: ['canvasId', 'ui'] as string[],
+    required: ['ui'] as string[],
   };
 
   readonly label = 'Render App UI';
@@ -114,6 +140,11 @@ presented to the user, and their response will come back as a new message.`;
     }
   ): Promise<TronToolResult> {
     const params = args as unknown as RenderAppUIParams;
+
+    // Auto-generate canvasId if not provided
+    if (!params.canvasId) {
+      params.canvasId = generateCanvasId(params.title, params.ui as { $tag?: string });
+    }
 
     // Validate parameters
     const validation = validateRenderAppUIParams(params);

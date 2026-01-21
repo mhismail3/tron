@@ -233,9 +233,9 @@ export function validateRenderAppUIParams(params: unknown): UIValidationResult {
 
   const p = params as Record<string, unknown>;
 
-  // Validate canvasId
-  if (!p.canvasId || typeof p.canvasId !== 'string') {
-    errors.push('canvasId is required and must be a string');
+  // Validate canvasId (optional, but if provided must be a string)
+  if (p.canvasId !== undefined && typeof p.canvasId !== 'string') {
+    errors.push('canvasId must be a string if provided');
   }
 
   // Validate title (optional)

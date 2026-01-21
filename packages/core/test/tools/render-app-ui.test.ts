@@ -21,14 +21,79 @@ describe('RenderAppUITool', () => {
       expect(tool.name).toBe('RenderAppUI');
     });
 
-    it('should require canvasId and ui parameters', () => {
-      expect(tool.parameters.required).toContain('canvasId');
+    it('should require only ui parameter (canvasId is optional)', () => {
+      expect(tool.parameters.required).not.toContain('canvasId');
       expect(tool.parameters.required).toContain('ui');
     });
 
     it('should have label and category', () => {
       expect(tool.label).toBe('Render App UI');
       expect(tool.category).toBe('custom');
+    });
+  });
+
+  describe('canvasId auto-generation', () => {
+    it('should auto-generate canvasId when not provided', async () => {
+      const result = await tool.execute({
+        ui: { $tag: 'VStack', $children: [{ $tag: 'Text', $children: 'Hello' }] },
+      });
+
+      expect(result.isError).toBe(false);
+      expect(result.stopTurn).toBe(true);
+      expect(result.details?.canvasId).toBeDefined();
+      expect(typeof result.details?.canvasId).toBe('string');
+      // Should have format: canvas-vstack-<8-char-random>
+      expect(result.details?.canvasId).toMatch(/^canvas-vstack-[a-f0-9]{8}$/);
+    });
+
+    it('should use title for canvasId generation', async () => {
+      const result = await tool.execute({
+        title: 'Settings Panel',
+        ui: { $tag: 'VStack', $children: [] },
+      });
+
+      expect(result.details?.canvasId).toBeDefined();
+      // Should have format: settings-panel-<8-char-random>
+      expect(result.details?.canvasId).toMatch(/^settings-panel-[a-f0-9]{8}$/);
+    });
+
+    it('should handle multi-word titles', async () => {
+      const result = await tool.execute({
+        title: 'User Registration Form',
+        ui: { $tag: 'VStack', $children: [] },
+      });
+
+      // Should only use first 3 words: user-registration-form-<8-char-random>
+      expect(result.details?.canvasId).toMatch(/^user-registration-form-[a-f0-9]{8}$/);
+    });
+
+    it('should strip special characters from title', async () => {
+      const result = await tool.execute({
+        title: 'My App!!! @#$%',
+        ui: { $tag: 'VStack', $children: [] },
+      });
+
+      expect(result.details?.canvasId).toMatch(/^my-app-[a-f0-9]{8}$/);
+    });
+
+    it('should preserve provided canvasId', async () => {
+      const result = await tool.execute({
+        canvasId: 'my-custom-id',
+        ui: { $tag: 'VStack', $children: [] },
+      });
+
+      expect(result.details?.canvasId).toBe('my-custom-id');
+    });
+
+    it('should generate unique IDs for each call', async () => {
+      const result1 = await tool.execute({
+        ui: { $tag: 'Text', $children: 'Hello' },
+      });
+      const result2 = await tool.execute({
+        ui: { $tag: 'Text', $children: 'World' },
+      });
+
+      expect(result1.details?.canvasId).not.toBe(result2.details?.canvasId);
     });
   });
 

@@ -368,8 +368,8 @@ export interface CardComponent {
  * Parameters for the RenderAppUI tool
  */
 export interface RenderAppUIParams {
-  /** Unique canvas identifier for updates */
-  canvasId: string;
+  /** Unique canvas identifier for updates (auto-generated if not provided) */
+  canvasId?: string;
   /** Optional sheet title (shown in toolbar) */
   title?: string;
   /** Root UI component tree */

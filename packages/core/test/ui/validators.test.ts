@@ -21,9 +21,17 @@ describe('UI Validators', () => {
       expect(result.errors).toHaveLength(0);
     });
 
-    it('should require canvasId', () => {
+    it('should not require canvasId (optional with auto-generation)', () => {
       const result = validateRenderAppUIParams({
-        ui: { $tag: 'Text' },
+        ui: { $tag: 'Text', $children: 'Hello' },
+      });
+      expect(result.valid).toBe(true);
+    });
+
+    it('should reject invalid canvasId if provided', () => {
+      const result = validateRenderAppUIParams({
+        canvasId: 123, // Invalid - not a string
+        ui: { $tag: 'Text', $children: 'Hello' },
       });
       expect(result.valid).toBe(false);
       expect(result.errors.some((e) => e.toLowerCase().includes('canvasid'))).toBe(true);
