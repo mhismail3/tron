@@ -228,7 +228,8 @@ export class ContextManager {
     };
 
     // Load system prompt with priority: programmatic > file-based > hardcoded
-    if (config.systemPrompt) {
+    // Note: Check for undefined, not truthiness, so empty string '' is honored
+    if (config.systemPrompt !== undefined) {
       // Explicit programmatic override takes highest priority
       this.customSystemPrompt = config.systemPrompt;
     } else {
