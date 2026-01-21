@@ -357,7 +357,7 @@ describe('BrowserService', () => {
       expect(mockBrowserManager.startScreencast).toHaveBeenCalled();
     });
 
-    it('should return success if already streaming', async () => {
+    it('should restart streaming when called while already streaming', async () => {
       await service.createSession('test-session');
       await service.startScreencast('test-session');
 
@@ -365,10 +365,16 @@ describe('BrowserService', () => {
       const session = service.getSession('test-session');
       if (session) session.isStreaming = true;
 
+      // Clear mock calls to track the restart behavior
+      mockBrowserManager.stopScreencast.mockClear();
+      mockBrowserManager.startScreencast.mockClear();
+
       const result = await service.startScreencast('test-session');
 
       expect(result.success).toBe(true);
-      expect(result.data?.message).toContain('Already streaming');
+      // Should have stopped first, then restarted
+      expect(mockBrowserManager.stopScreencast).toHaveBeenCalled();
+      expect(mockBrowserManager.startScreencast).toHaveBeenCalled();
     });
 
     it('should stop screencast', async () => {

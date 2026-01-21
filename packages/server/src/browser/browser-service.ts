@@ -612,6 +612,7 @@ export class BrowserService extends EventEmitter {
 
   /**
    * Start screencast using agent-browser's CDP screencast
+   * If already streaming, restarts with a fresh callback to handle reconnection
    */
   async startScreencast(sessionId: string, options: ScreencastOptions = {}): Promise<ActionResult> {
     const session = this.sessions.get(sessionId);
@@ -619,8 +620,15 @@ export class BrowserService extends EventEmitter {
       return { success: false, error: 'Session not found' };
     }
 
+    // If already streaming, stop first to ensure clean restart with fresh callback
+    // This handles the case where iOS closes/reopens the sheet
     if (session.isStreaming) {
-      return { success: true, data: { message: 'Already streaming' } };
+      try {
+        await session.manager.stopScreencast();
+      } catch {
+        // Ignore errors when stopping - may already be stopped
+      }
+      session.isStreaming = false;
     }
 
     try {

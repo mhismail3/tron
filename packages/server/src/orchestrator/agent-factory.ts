@@ -133,7 +133,7 @@ export class AgentFactory {
       new GrepTool({ workingDirectory }),
       new FindTool({ workingDirectory }),
       new LsTool({ workingDirectory }),
-      new AgentWebBrowserTool({ workingDirectory, delegate: browserDelegate }),
+      new AgentWebBrowserTool({ workingDirectory, delegate: browserDelegate, sessionId }),
       new AskUserQuestionTool({ workingDirectory }),
       new OpenBrowserTool({ workingDirectory }),
       new AstGrepTool({ workingDirectory }),

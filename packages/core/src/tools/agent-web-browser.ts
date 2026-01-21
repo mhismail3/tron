@@ -7,6 +7,8 @@ import type { TronTool, TronToolResult, ToolResultContentType } from '../types/i
 export interface AgentWebBrowserToolConfig {
   workingDirectory?: string;
   delegate?: BrowserDelegate;
+  /** Tron session ID - used to key browser sessions so iOS can control them */
+  sessionId?: string;
 }
 
 /**
@@ -182,9 +184,11 @@ The browser runs headless by default and streams frames to the iOS app.`;
 
   private delegate?: BrowserDelegate;
   private session?: BrowserSession;
+  private configuredSessionId?: string;
 
   constructor(config: AgentWebBrowserToolConfig = {}) {
     this.delegate = config.delegate;
+    this.configuredSessionId = config.sessionId;
   }
 
   async execute(params: Record<string, unknown>): Promise<TronToolResult> {
@@ -265,10 +269,13 @@ The browser runs headless by default and streams frames to the iOS app.`;
 
   /**
    * Ensure browser session exists
+   * Uses configuredSessionId (Tron session ID) if available, allowing iOS to
+   * control the browser session via RPC methods like browser.startStream
    */
   private async ensureSession(): Promise<void> {
     if (!this.session) {
-      const sessionId = `browser-${Date.now()}`;
+      // Use Tron session ID if configured, otherwise generate a fallback
+      const sessionId = this.configuredSessionId ?? `browser-${Date.now()}`;
       this.session = {
         sessionId,
         elementRefs: new Map(),
