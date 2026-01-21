@@ -79,6 +79,26 @@ The agent has access to these tools:
 | `bash` | Execute shell commands |
 | `grep` | Search file contents |
 | `find` | Find files by pattern |
+| `NotifyApp` | Send push notification to iOS app |
+
+### NotifyApp (Push Notifications)
+
+The agent can send push notifications to alert you when:
+- Long-running tasks complete
+- Important results need attention
+- Input is required while app is backgrounded
+
+**Requirements:**
+- iOS app installed and connected to server
+- Push notifications authorized in iOS Settings
+- APNS configured on server (see [development.md](./development.md#push-notifications-apns))
+
+**Behavior:**
+- Notifications sent to ALL registered devices
+- Works from any agent/session
+- Includes deep link back to the sending session
+- Foreground: Shows banner notification
+- Background/Closed: System notification appears
 
 ## Skills
 

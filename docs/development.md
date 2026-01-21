@@ -153,5 +153,91 @@ source ~/.zshrc
 | `~/.tron/db/` | SQLite databases |
 | `~/.tron/skills/` | Global skills |
 | `~/.tron/rules/` | Global context |
+| `~/.tron/mods/apns/` | Push notification credentials |
 | `.claude/skills/` | Project skills |
 | `.claude/AGENTS.md` | Project context |
+
+## Push Notifications (APNS)
+
+Push notifications allow the agent to alert the iOS app when tasks complete or need attention.
+
+### Apple Developer Setup
+
+1. **Create App ID with Push Capability**
+   - Go to [developer.apple.com/account](https://developer.apple.com/account) → Certificates, Identifiers & Profiles
+   - Identifiers → Click **+** → App IDs → App
+   - Bundle ID: `com.yourteam.TronMobile` (must match Xcode)
+   - Enable **Push Notifications** capability
+   - Register
+
+2. **Create APNS Key**
+   - Go to **Keys** → Click **+**
+   - Name: `TronAPNS`
+   - Enable **Apple Push Notifications service (APNs)**
+   - Download the `.p8` file (one-time download!)
+   - Note the **Key ID** (e.g., `ABC123DEFG`)
+
+3. **Get Team ID**
+   - Membership Details → Copy **Team ID**
+
+4. **Store Credentials**
+   ```bash
+   mkdir -p ~/.tron/mods/apns
+   mv ~/Downloads/AuthKey_ABC123DEFG.p8 ~/.tron/mods/apns/
+   chmod 600 ~/.tron/mods/apns/AuthKey_*.p8
+
+   cat > ~/.tron/mods/apns/config.json << 'EOF'
+   {
+     "keyId": "ABC123DEFG",
+     "teamId": "XYZ789TEAM",
+     "bundleId": "com.yourteam.TronMobile",
+     "environment": "sandbox"
+   }
+   EOF
+   ```
+
+5. **Xcode Setup**
+   - Open `TronMobile.xcodeproj`
+   - Target → Signing & Capabilities → **+ Capability** → **Push Notifications**
+   - Xcode regenerates provisioning profile automatically
+
+### Configuration
+
+| Field | Description |
+|-------|-------------|
+| `keyId` | From Apple Developer Keys page |
+| `teamId` | From Membership Details |
+| `bundleId` | Must match Xcode target |
+| `environment` | `sandbox` for dev, `production` for App Store |
+
+### Production Release
+
+When releasing to App Store:
+1. Change `config.json`: `"environment": "production"`
+2. Build with Release-Prod configuration (uses production entitlements)
+
+### Troubleshooting
+
+| Error | Cause | Fix |
+|-------|-------|-----|
+| `BadDeviceToken` | Environment mismatch | Match config environment to build type |
+| `InvalidProviderToken` | Wrong credentials | Verify keyId, teamId, bundleId |
+| `no valid aps-environment` | Missing entitlements | Add Push Notifications capability in Xcode |
+| `Unregistered` | Token expired | App re-registers automatically on next connect |
+
+### Architecture
+
+```
+iOS App                          Server
+   │                               │
+   ├─► Register device token ─────►│ Store in device_tokens table
+   │                               │
+   │   Agent calls NotifyApp ◄─────┤
+   │                               │
+   │◄── APNS push notification ◄───┤ HTTP/2 to api.push.apple.com
+   │                               │
+```
+
+- Device tokens registered globally (any session can notify)
+- Multiple agents can send notifications in parallel
+- Tokens auto-invalidated on APNS 410 response
