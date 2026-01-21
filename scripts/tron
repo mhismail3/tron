@@ -755,6 +755,7 @@ cmd_build() {
 # Options:
 #   -b, --build   Build and test before starting
 #   -t, --tail    Run in foreground (tail logs)
+#   -k, --kill    Kill running beta server
 #
 # Default behavior: Start server in background without build
 #-----------------------------------------------------------------------------
@@ -765,11 +766,13 @@ cmd_dev() {
     # Parse flags
     local do_build=false
     local do_tail=false
+    local do_kill=false
 
     while [[ $# -gt 0 ]]; do
         case "$1" in
             -b|--build) do_build=true; shift ;;
             -t|--tail)  do_tail=true; shift ;;
+            -k|--kill)  do_kill=true; shift ;;
             -bt|-tb)    do_build=true; do_tail=true; shift ;;
             -h|--help)
                 echo ""
@@ -780,12 +783,14 @@ cmd_dev() {
                 echo "Options:"
                 echo "  -b, --build   Build and test before starting"
                 echo "  -t, --tail    Run in foreground (tail logs)"
+                echo "  -k, --kill    Kill running beta server"
                 echo ""
                 echo "Examples:"
                 echo "  tron dev       # Start server in background"
                 echo "  tron dev -t    # Start server in foreground"
                 echo "  tron dev -b    # Build, test, then start in background"
                 echo "  tron dev -bt   # Build, test, then start in foreground"
+                echo "  tron dev -k    # Kill running beta server"
                 echo ""
                 return 0
                 ;;
@@ -793,10 +798,22 @@ cmd_dev() {
         esac
     done
 
+    # Kill mode - just kill and exit
+    if [ "$do_kill" = true ]; then
+        local beta_pid=$(get_beta_pid)
+        if [ -n "$beta_pid" ]; then
+            kill "$beta_pid" 2>/dev/null
+            print_success "Killed beta server (PID: $beta_pid)"
+        else
+            print_warning "No beta server running"
+        fi
+        return 0
+    fi
+
     # Check if beta port is already in use
     if is_beta_running; then
         print_error "Beta server already running on port $BETA_WS_PORT"
-        echo "  Kill it: kill \$(lsof -t -i :$BETA_WS_PORT)"
+        echo "  Kill it: tron dev -k"
         exit 1
     fi
 
@@ -841,7 +858,7 @@ cmd_dev() {
         echo ""
         echo -e "${CYAN}Starting Beta Server (background)${NC}"
 
-        node packages/server/dist/index.js &
+        node packages/server/dist/index.js >/dev/null 2>&1 &
         local pid=$!
 
         sleep 2
