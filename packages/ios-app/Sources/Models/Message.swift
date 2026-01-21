@@ -130,10 +130,10 @@ struct ChatMessage: Identifiable, Equatable {
         }
     }
 
-    /// Short model name (e.g., "claude-sonnet-4-20250514" -> "sonnet-4")
+    /// Short model name (e.g., "claude-sonnet-4-20250514" -> "Sonnet 4")
     var shortModelName: String? {
         guard let model = model else { return nil }
-        return model.compactModelName
+        return model.shortModelName
     }
 
     /// Whether this message can be deleted.
