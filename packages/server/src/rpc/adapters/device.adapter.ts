@@ -198,6 +198,35 @@ export function createDeviceAdapter(deps: AdapterDependencies): DeviceTokenRpcMa
         deviceToken: deviceToken.substring(0, 8) + '...',
       });
     },
+
+    /**
+     * Get all active device tokens (for global notifications)
+     * Any agent/session can send notifications to all registered devices
+     */
+    async getAllActiveTokens(): Promise<RpcDeviceToken[]> {
+      const db = getDb();
+
+      const rows = db
+        .prepare(`
+          SELECT id, device_token, session_id, workspace_id, platform,
+                 environment, created_at, last_used_at, is_active
+          FROM device_tokens
+          WHERE is_active = 1
+        `)
+        .all() as Array<{
+          id: string;
+          device_token: string;
+          session_id: string | null;
+          workspace_id: string | null;
+          platform: string;
+          environment: string;
+          created_at: string;
+          last_used_at: string;
+          is_active: number;
+        }>;
+
+      return rows.map(mapRowToToken);
+    },
   };
 }
 

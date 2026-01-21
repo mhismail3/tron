@@ -1693,7 +1693,8 @@ export class EventStoreOrchestrator extends EventEmitter {
   // ===========================================================================
 
   /**
-   * Send a push notification to devices registered for a session.
+   * Send a push notification to all registered devices.
+   * Any agent/session can trigger notifications globally.
    * Used by the NotifyApp tool.
    */
   private async sendNotification(
@@ -1711,7 +1712,7 @@ export class EventStoreOrchestrator extends EventEmitter {
       return { successCount: 0, failureCount: 0, errors: ['APNS not configured'] };
     }
 
-    // Get device tokens for this session from the database
+    // Get ALL active device tokens (global notification)
     const db = this.eventStore.getDatabase();
     if (!db) {
       return { successCount: 0, failureCount: 0, errors: ['Database not available'] };
@@ -1721,12 +1722,12 @@ export class EventStoreOrchestrator extends EventEmitter {
       .prepare(`
         SELECT device_token, environment
         FROM device_tokens
-        WHERE session_id = ? AND is_active = 1
+        WHERE is_active = 1
       `)
-      .all(sessionId) as Array<{ device_token: string; environment: string }>;
+      .all() as Array<{ device_token: string; environment: string }>;
 
     if (tokens.length === 0) {
-      logger.debug('No device tokens registered for session', { sessionId });
+      logger.debug('No device tokens registered');
       return { successCount: 0, failureCount: 0 };
     }
 
@@ -1736,7 +1737,7 @@ export class EventStoreOrchestrator extends EventEmitter {
       body: notification.body,
       data: {
         ...notification.data,
-        sessionId, // Always include sessionId for deep linking
+        sessionId, // Include sessionId for deep linking to the sending session
       },
       priority: notification.priority,
       sound: notification.sound,

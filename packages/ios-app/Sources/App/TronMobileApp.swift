@@ -64,17 +64,25 @@ struct TronMobileApp: App {
                         eventStoreManager = manager
                     }
 
-                    logger.info("Event store initialized with \(manager.sessions.count) sessions", category: .session)
+                    TronLogger.shared.info("Event store initialized with \(manager.sessions.count) sessions", category: .session)
 
-                    // Request push notification authorization and register token
+                    // Request push notification authorization
                     await setupPushNotifications()
                 } catch {
-                    logger.error("Failed to initialize event store: \(error)", category: .session)
+                    TronLogger.shared.error("Failed to initialize event store: \(error)", category: .session)
                 }
             }
             .onReceive(NotificationCenter.default.publisher(for: .deviceTokenDidUpdate)) { notification in
-                // When device token updates, register with server
+                // When device token updates, register with server immediately
                 guard let token = notification.userInfo?["token"] as? String else { return }
+                Task {
+                    await registerDeviceToken(token)
+                }
+            }
+            .onReceive(appState.rpcClient.$connectionState) { state in
+                // When connection is established, register pending device token
+                guard state.isConnected else { return }
+                guard let token = pushNotificationService.deviceToken else { return }
                 Task {
                     await registerDeviceToken(token)
                 }
@@ -82,14 +90,14 @@ struct TronMobileApp: App {
             .onReceive(NotificationCenter.default.publisher(for: .navigateToSession)) { notification in
                 // Handle deep link from push notification
                 guard let sessionId = notification.userInfo?["sessionId"] as? String else { return }
-                logger.info("Deep linking to session: \(sessionId)", category: .notification)
+                TronLogger.shared.info("Deep linking to session: \(sessionId)", category: .notification)
                 // TODO: Navigate to session (requires passing sessionId to ContentView)
             }
             .onChange(of: scenePhase) { oldPhase, newPhase in
                 let isBackground = newPhase != .active
                 appState.rpcClient.setBackgroundState(isBackground)
                 eventStoreManager?.setBackgroundState(isBackground)
-                logger.info("Scene phase changed: \(oldPhase) -> \(newPhase), background=\(isBackground)", category: .session)
+                TronLogger.shared.info("Scene phase changed: \(oldPhase) -> \(newPhase), background=\(isBackground)", category: .session)
             }
         }
     }
@@ -102,34 +110,30 @@ struct TronMobileApp: App {
         let authorized = await pushNotificationService.requestAuthorization()
 
         if authorized {
-            logger.info("Push notifications authorized", category: .notification)
+            TronLogger.shared.info("Push notifications authorized", category: .notification)
 
-            // If we already have a token (from previous session), register it
+            // If we already have a token and are connected, register it
             if let token = pushNotificationService.deviceToken {
                 await registerDeviceToken(token)
             }
         } else {
-            logger.info("Push notifications not authorized", category: .notification)
+            TronLogger.shared.info("Push notifications not authorized", category: .notification)
         }
     }
 
-    /// Register device token with the server
+    /// Register device token with the server (global registration, no session required)
     private func registerDeviceToken(_ token: String) async {
         guard appState.rpcClient.isConnected else {
-            logger.debug("Not connected, will register token when connected", category: .notification)
-            return
-        }
-
-        guard let sessionId = appState.rpcClient.currentSessionId else {
-            logger.debug("No active session, skipping token registration", category: .notification)
+            TronLogger.shared.debug("Not connected, will register token when connected", category: .notification)
             return
         }
 
         do {
-            try await appState.rpcClient.registerDeviceToken(token, sessionId: sessionId)
-            logger.info("Device token registered with server", category: .notification)
+            // Register globally - any agent/session can send notifications
+            try await appState.rpcClient.registerDeviceToken(token)
+            TronLogger.shared.info("Device token registered with server", category: .notification)
         } catch {
-            logger.error("Failed to register device token: \(error.localizedDescription)", category: .notification)
+            TronLogger.shared.error("Failed to register device token: \(error.localizedDescription)", category: .notification)
         }
     }
 }

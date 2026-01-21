@@ -333,6 +333,9 @@ export interface DeviceTokenRpcManager {
   /** Get active tokens for a workspace */
   getTokensForWorkspace(workspaceId: string): Promise<RpcDeviceToken[]>;
 
+  /** Get all active device tokens (for global notifications) */
+  getAllActiveTokens(): Promise<RpcDeviceToken[]>;
+
   /** Mark a token as invalid (e.g., after APNS 410 response) */
   markTokenInvalid(deviceToken: string): Promise<void>;
 }
