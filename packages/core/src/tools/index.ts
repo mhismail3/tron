@@ -9,7 +9,7 @@ export { BashTool, type BashToolConfig } from './bash.js';
 export { GrepTool, type GrepToolConfig } from './grep.js';
 export { FindTool, type FindToolConfig } from './find.js';
 export { LsTool, type LsToolConfig } from './ls.js';
-export { BrowserTool, type BrowserToolConfig, type BrowserDelegate } from './browser.js';
+export { AgentWebBrowserTool, type AgentWebBrowserToolConfig, type BrowserDelegate } from './agent-web-browser.js';
 export {
   AskUserQuestionTool,
   type AskUserQuestionConfig,

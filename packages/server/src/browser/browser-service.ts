@@ -1,9 +1,9 @@
 /**
- * @fileoverview Browser automation service using Playwright
+ * @fileoverview Browser automation service using agent-browser library
  */
 
 import { EventEmitter } from 'node:events';
-import { chromium, type Browser, type Page, type CDPSession } from 'playwright-core';
+import { BrowserManager, type ScreencastFrame } from 'agent-browser/dist/browser.js';
 
 export interface BrowserConfig {
   headless?: boolean;
@@ -14,9 +14,7 @@ export interface BrowserConfig {
 }
 
 export interface BrowserSession {
-  browser: Browser;
-  page: Page;
-  cdpSession?: CDPSession;
+  manager: BrowserManager;
   isStreaming: boolean;
   elementRefs: Map<string, string>;
   lastSnapshot?: any;
@@ -52,7 +50,7 @@ export interface BrowserFrame {
 }
 
 /**
- * BrowserService manages browser sessions with Playwright and CDP screencast
+ * BrowserService manages browser sessions using agent-browser library
  */
 export class BrowserService extends EventEmitter {
   private sessions = new Map<string, BrowserSession>();
@@ -75,17 +73,16 @@ export class BrowserService extends EventEmitter {
     }
 
     try {
-      const browser = await chromium.launch({
+      const manager = new BrowserManager();
+      await manager.launch({
+        action: 'launch',
+        id: `launch-${sessionId}`,
         headless: this.config.headless,
       });
-
-      const page = await browser.newPage({
-        viewport: this.config.viewport,
-      });
+      await manager.setViewport(this.config.viewport.width, this.config.viewport.height);
 
       this.sessions.set(sessionId, {
-        browser,
-        page,
+        manager,
         isStreaming: false,
         elementRefs: new Map(),
       });
@@ -123,11 +120,11 @@ export class BrowserService extends EventEmitter {
     }
 
     try {
-      if (session.isStreaming && session.cdpSession) {
-        await session.cdpSession.send('Page.stopScreencast').catch(() => {});
+      if (session.isStreaming) {
+        await session.manager.stopScreencast().catch(() => {});
       }
 
-      await session.browser.close();
+      await session.manager.close();
       this.sessions.delete(sessionId);
       this.emit('browser.closed', sessionId);
 
@@ -166,13 +163,29 @@ export class BrowserService extends EventEmitter {
         case 'select':
           return await this.select(session, params);
         case 'screenshot':
-          return await this.screenshot(session, params);
+          return await this.screenshot(session);
         case 'snapshot':
           return await this.snapshot(session);
         case 'wait':
           return await this.wait(session, params);
         case 'scroll':
           return await this.scroll(session, params);
+        case 'goBack':
+          return await this.goBack(session);
+        case 'goForward':
+          return await this.goForward(session);
+        case 'reload':
+          return await this.reload(session);
+        case 'hover':
+          return await this.hover(session, params);
+        case 'pressKey':
+          return await this.pressKey(session, params);
+        case 'getText':
+          return await this.getText(session, params);
+        case 'getAttribute':
+          return await this.getAttribute(session, params);
+        case 'pdf':
+          return await this.pdf(session, params);
         case 'close':
           return await this.closeSession(sessionId);
         default:
@@ -196,7 +209,8 @@ export class BrowserService extends EventEmitter {
     }
 
     try {
-      await session.page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
+      const page = session.manager.getPage();
+      await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
       return { success: true, data: { url } };
     } catch (error) {
       return {
@@ -210,13 +224,14 @@ export class BrowserService extends EventEmitter {
    * Click an element
    */
   private async click(session: BrowserSession, params: Record<string, unknown>): Promise<ActionResult> {
-    const selector = this.resolveSelector(session, params.selector as string);
+    const selector = params.selector as string;
     if (!selector) {
       return { success: false, error: 'Selector is required' };
     }
 
     try {
-      await session.page.click(selector, { timeout: 10000 });
+      const locator = this.getLocator(session, selector);
+      await locator.click({ timeout: 10000 });
       return { success: true, data: { selector } };
     } catch (error) {
       return {
@@ -230,7 +245,7 @@ export class BrowserService extends EventEmitter {
    * Fill an input field
    */
   private async fill(session: BrowserSession, params: Record<string, unknown>): Promise<ActionResult> {
-    const selector = this.resolveSelector(session, params.selector as string);
+    const selector = params.selector as string;
     const value = params.value as string;
 
     if (!selector || value === undefined) {
@@ -238,7 +253,8 @@ export class BrowserService extends EventEmitter {
     }
 
     try {
-      await session.page.fill(selector, value, { timeout: 10000 });
+      const locator = this.getLocator(session, selector);
+      await locator.fill(value, { timeout: 10000 });
       return { success: true, data: { selector, value } };
     } catch (error) {
       return {
@@ -252,7 +268,7 @@ export class BrowserService extends EventEmitter {
    * Type text (character by character, triggers JS events)
    */
   private async type(session: BrowserSession, params: Record<string, unknown>): Promise<ActionResult> {
-    const selector = this.resolveSelector(session, params.selector as string);
+    const selector = params.selector as string;
     const text = params.text as string;
 
     if (!selector || !text) {
@@ -260,7 +276,8 @@ export class BrowserService extends EventEmitter {
     }
 
     try {
-      await session.page.type(selector, text, { timeout: 10000 });
+      const locator = this.getLocator(session, selector);
+      await locator.pressSequentially(text, { timeout: 10000 });
       return { success: true, data: { selector, text } };
     } catch (error) {
       return {
@@ -274,7 +291,7 @@ export class BrowserService extends EventEmitter {
    * Select a dropdown option
    */
   private async select(session: BrowserSession, params: Record<string, unknown>): Promise<ActionResult> {
-    const selector = this.resolveSelector(session, params.selector as string);
+    const selector = params.selector as string;
     const value = params.value as string | string[];
 
     if (!selector || !value) {
@@ -282,8 +299,9 @@ export class BrowserService extends EventEmitter {
     }
 
     try {
+      const locator = this.getLocator(session, selector);
       const values = Array.isArray(value) ? value : [value];
-      await session.page.selectOption(selector, values, { timeout: 10000 });
+      await locator.selectOption(values, { timeout: 10000 });
       return { success: true, data: { selector, value } };
     } catch (error) {
       return {
@@ -297,13 +315,12 @@ export class BrowserService extends EventEmitter {
    * Take a screenshot
    * Always captures viewport-only to ensure consistent dimensions for iOS display
    */
-  private async screenshot(session: BrowserSession, _params: Record<string, unknown>): Promise<ActionResult> {
+  private async screenshot(session: BrowserSession): Promise<ActionResult> {
     try {
-      // Always capture viewport only (not full page) to ensure consistent dimensions
-      // The viewport is fixed at 1280x800, so all screenshots will be the same size
-      const screenshot = await session.page.screenshot({
+      const page = session.manager.getPage();
+      const screenshot = await page.screenshot({
         type: 'png',
-        fullPage: false, // Always viewport-only for consistent sizing
+        fullPage: false,
       });
 
       return {
@@ -324,61 +341,41 @@ export class BrowserService extends EventEmitter {
   }
 
   /**
-   * Get accessibility snapshot with element references
+   * Get accessibility snapshot with element references using agent-browser
    */
   private async snapshot(session: BrowserSession): Promise<ActionResult> {
     try {
-      // Wait for page to be ready - accessibility API may not be available immediately
-      await session.page.waitForLoadState('domcontentloaded', { timeout: 5000 }).catch(() => {});
+      const page = session.manager.getPage();
 
-      // Small delay to ensure accessibility tree is populated
-      await session.page.waitForTimeout(100);
+      // Wait for page to be ready
+      await page.waitForLoadState('domcontentloaded', { timeout: 5000 }).catch(() => {});
+      await page.waitForTimeout(100);
 
-      const accessibility = (session.page as any).accessibility;
-      if (!accessibility) {
-        return {
-          success: false,
-          error: 'Accessibility API not available on this page',
-        };
-      }
+      // Use agent-browser's getSnapshot method which provides enhanced snapshot with refs
+      const enhancedSnapshot = await session.manager.getSnapshot({
+        interactive: false,
+        compact: true,
+      });
 
-      const snapshot = await accessibility.snapshot();
-      if (!snapshot) {
-        return {
-          success: false,
-          error: 'Failed to capture accessibility snapshot - page may not be fully loaded',
-        };
-      }
+      // Get the ref map from agent-browser
+      const refMap = session.manager.getRefMap();
 
-      // Generate element references
+      // Update our session's element refs from agent-browser's ref map
       session.elementRefs.clear();
-      let refIndex = 1;
+      for (const ref of Object.keys(refMap)) {
+        // Store the ref with its selector for later use
+        session.elementRefs.set(ref, ref);
+      }
 
-      const processNode = (node: any): any => {
-        if (!node) return null;
-
-        const ref = `e${refIndex++}`;
-        if (node.role) {
-          session.elementRefs.set(ref, node.name || node.role);
-        }
-
-        return {
-          ...node,
-          ref,
-          children: node.children?.map(processNode).filter(Boolean),
-        };
-      };
-
-      const processedSnapshot = processNode(snapshot);
-      session.lastSnapshot = processedSnapshot;
+      session.lastSnapshot = enhancedSnapshot;
 
       return {
         success: true,
         data: {
-          snapshot: processedSnapshot,
-          elementRefs: Array.from(session.elementRefs.entries()).map(([ref, selector]) => ({
+          snapshot: enhancedSnapshot,
+          elementRefs: Array.from(session.elementRefs.entries()).map(([ref]) => ({
             ref,
-            selector,
+            selector: ref, // agent-browser refs are used directly
           })),
         },
       };
@@ -395,14 +392,16 @@ export class BrowserService extends EventEmitter {
    */
   private async wait(session: BrowserSession, params: Record<string, unknown>): Promise<ActionResult> {
     try {
+      const page = session.manager.getPage();
+
       if (params.selector) {
         const selector = this.resolveSelector(session, params.selector as string);
-        await session.page.waitForSelector(selector, {
+        await page.waitForSelector(selector, {
           timeout: (params.timeout as number) ?? 10000,
         });
         return { success: true, data: { selector } };
       } else if (params.timeout) {
-        await session.page.waitForTimeout(params.timeout as number);
+        await page.waitForTimeout(params.timeout as number);
         return { success: true, data: { timeout: params.timeout } };
       } else {
         return { success: false, error: 'Either selector or timeout is required' };
@@ -420,6 +419,7 @@ export class BrowserService extends EventEmitter {
    */
   private async scroll(session: BrowserSession, params: Record<string, unknown>): Promise<ActionResult> {
     try {
+      const page = session.manager.getPage();
       const direction = params.direction as 'up' | 'down' | 'left' | 'right';
       const amount = (params.amount as number) ?? 100;
 
@@ -437,11 +437,11 @@ export class BrowserService extends EventEmitter {
 
       if (params.selector) {
         const selector = this.resolveSelector(session, params.selector as string);
-        await session.page.evaluate(
+        await page.evaluate(
           `document.querySelector('${selector}')?.scrollBy(${scroll.x}, ${scroll.y})`
         );
       } else {
-        await session.page.evaluate(`window.scrollBy(${scroll.x}, ${scroll.y})`);
+        await page.evaluate(`window.scrollBy(${scroll.x}, ${scroll.y})`);
       }
 
       return { success: true, data: { direction, amount } };
@@ -454,7 +454,164 @@ export class BrowserService extends EventEmitter {
   }
 
   /**
-   * Start CDP screencast
+   * Navigate back in browser history
+   */
+  private async goBack(session: BrowserSession): Promise<ActionResult> {
+    try {
+      const page = session.manager.getPage();
+      await page.goBack({ timeout: 10000 });
+      return { success: true, data: {} };
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Go back failed',
+      };
+    }
+  }
+
+  /**
+   * Navigate forward in browser history
+   */
+  private async goForward(session: BrowserSession): Promise<ActionResult> {
+    try {
+      const page = session.manager.getPage();
+      await page.goForward({ timeout: 10000 });
+      return { success: true, data: {} };
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Go forward failed',
+      };
+    }
+  }
+
+  /**
+   * Reload the current page
+   */
+  private async reload(session: BrowserSession): Promise<ActionResult> {
+    try {
+      const page = session.manager.getPage();
+      await page.reload({ timeout: 30000 });
+      return { success: true, data: {} };
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Reload failed',
+      };
+    }
+  }
+
+  /**
+   * Hover over an element
+   */
+  private async hover(session: BrowserSession, params: Record<string, unknown>): Promise<ActionResult> {
+    const selector = params.selector as string;
+    if (!selector) {
+      return { success: false, error: 'Selector is required' };
+    }
+
+    try {
+      const locator = this.getLocator(session, selector);
+      await locator.hover({ timeout: 10000 });
+      return { success: true, data: { selector } };
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Hover failed',
+      };
+    }
+  }
+
+  /**
+   * Press a keyboard key
+   */
+  private async pressKey(session: BrowserSession, params: Record<string, unknown>): Promise<ActionResult> {
+    const key = params.key as string;
+    if (!key) {
+      return { success: false, error: 'Key is required' };
+    }
+
+    try {
+      const page = session.manager.getPage();
+      await page.keyboard.press(key);
+      return { success: true, data: { key } };
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Press key failed',
+      };
+    }
+  }
+
+  /**
+   * Get text content from an element
+   */
+  private async getText(session: BrowserSession, params: Record<string, unknown>): Promise<ActionResult> {
+    const selector = params.selector as string;
+    if (!selector) {
+      return { success: false, error: 'Selector is required' };
+    }
+
+    try {
+      const locator = this.getLocator(session, selector);
+      const text = await locator.innerText({ timeout: 10000 });
+      return { success: true, data: { selector, text } };
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Get text failed',
+      };
+    }
+  }
+
+  /**
+   * Get an attribute value from an element
+   */
+  private async getAttribute(session: BrowserSession, params: Record<string, unknown>): Promise<ActionResult> {
+    const selector = params.selector as string;
+    const attribute = params.attribute as string;
+
+    if (!selector || !attribute) {
+      return { success: false, error: 'Selector and attribute are required' };
+    }
+
+    try {
+      const locator = this.getLocator(session, selector);
+      const value = await locator.getAttribute(attribute, { timeout: 10000 });
+      return { success: true, data: { selector, attribute, value } };
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Get attribute failed',
+      };
+    }
+  }
+
+  /**
+   * Generate a PDF of the current page
+   */
+  private async pdf(session: BrowserSession, params: Record<string, unknown>): Promise<ActionResult> {
+    try {
+      const page = session.manager.getPage();
+      const path = params.path as string | undefined;
+
+      if (path) {
+        await page.pdf({ path });
+        return { success: true, data: { path } };
+      } else {
+        const pdfBuffer = await page.pdf();
+        return { success: true, data: { pdf: pdfBuffer.toString('base64') } };
+      }
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'PDF generation failed',
+      };
+    }
+  }
+
+  /**
+   * Start screencast using agent-browser's CDP screencast
    */
   async startScreencast(sessionId: string, options: ScreencastOptions = {}): Promise<ActionResult> {
     const session = this.sessions.get(sessionId);
@@ -467,34 +624,35 @@ export class BrowserService extends EventEmitter {
     }
 
     try {
-      if (!session.cdpSession) {
-        session.cdpSession = await session.page.context().newCDPSession(session.page);
-      }
+      // Use agent-browser's startScreencast which handles CDP internally
+      await session.manager.startScreencast(
+        (frame: ScreencastFrame) => {
+          // Transform agent-browser frame to Tron frame format
+          const browserFrame: BrowserFrame = {
+            sessionId,                    // Tron session ID (string)
+            data: frame.data,             // base64 JPEG
+            frameId: frame.sessionId,     // CDP session ID (number)
+            timestamp: frame.metadata?.timestamp ?? Date.now(),
+            metadata: {
+              offsetTop: frame.metadata?.offsetTop,
+              pageScaleFactor: frame.metadata?.pageScaleFactor,
+              deviceWidth: frame.metadata?.deviceWidth,
+              deviceHeight: frame.metadata?.deviceHeight,
+              scrollOffsetX: frame.metadata?.scrollOffsetX,
+              scrollOffsetY: frame.metadata?.scrollOffsetY,
+            },
+          };
 
-      const cdp = session.cdpSession;
-
-      cdp.on('Page.screencastFrame', async (frame: any) => {
-        const browserFrame: BrowserFrame = {
-          sessionId,
-          data: frame.data,
-          frameId: frame.sessionId,
-          timestamp: Date.now(),
-          metadata: frame.metadata,
-        };
-
-        this.emit('browser.frame', browserFrame);
-
-        // Acknowledge frame to CDP
-        await cdp.send('Page.screencastFrameAck', { sessionId: frame.sessionId }).catch(() => {});
-      });
-
-      await cdp.send('Page.startScreencast', {
-        format: options.format ?? 'jpeg',
-        quality: options.quality ?? 60,
-        maxWidth: options.maxWidth ?? this.config.viewport.width,
-        maxHeight: options.maxHeight ?? this.config.viewport.height,
-        everyNthFrame: options.everyNthFrame ?? 1,
-      });
+          this.emit('browser.frame', browserFrame);
+        },
+        {
+          format: options.format ?? 'jpeg',
+          quality: options.quality ?? 60,
+          maxWidth: options.maxWidth ?? this.config.viewport.width,
+          maxHeight: options.maxHeight ?? this.config.viewport.height,
+          everyNthFrame: options.everyNthFrame ?? 1,
+        }
+      );
 
       session.isStreaming = true;
 
@@ -508,7 +666,7 @@ export class BrowserService extends EventEmitter {
   }
 
   /**
-   * Stop CDP screencast
+   * Stop screencast
    */
   async stopScreencast(sessionId: string): Promise<ActionResult> {
     const session = this.sessions.get(sessionId);
@@ -521,10 +679,7 @@ export class BrowserService extends EventEmitter {
     }
 
     try {
-      if (session.cdpSession) {
-        await session.cdpSession.send('Page.stopScreencast');
-      }
-
+      await session.manager.stopScreencast();
       session.isStreaming = false;
 
       return { success: true, data: { streaming: false } };
@@ -537,12 +692,30 @@ export class BrowserService extends EventEmitter {
   }
 
   /**
+   * Get a locator for a selector, supporting both refs and CSS selectors
+   */
+  private getLocator(session: BrowserSession, selectorOrRef: string) {
+    // Check if it's a ref (e1, e2, etc.)
+    if (session.manager.isRef(selectorOrRef)) {
+      const locator = session.manager.getLocatorFromRef(selectorOrRef);
+      if (locator) {
+        return locator;
+      }
+    }
+
+    // Otherwise use as CSS selector
+    const page = session.manager.getPage();
+    const resolved = this.resolveSelector(session, selectorOrRef);
+    return page.locator(resolved);
+  }
+
+  /**
    * Convert jQuery-style selectors to Playwright equivalents
    */
   private resolveSelector(session: BrowserSession, selector: string): string {
     if (!selector) return '';
 
-    // Check if it's an element reference (e1, e2, etc.)
+    // Check if it's an element reference from our own tracking (legacy support)
     if (/^e\d+$/.test(selector) && session.elementRefs.has(selector)) {
       return session.elementRefs.get(selector)!;
     }

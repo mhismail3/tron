@@ -1,13 +1,13 @@
 /**
- * @fileoverview BrowserTool unit tests (mocked, fast)
+ * @fileoverview AgentWebBrowserTool unit tests (mocked, fast)
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { BrowserTool, type BrowserDelegate } from '../../src/tools/browser.js';
+import { AgentWebBrowserTool, type BrowserDelegate } from '../../src/tools/agent-web-browser.js';
 
-describe('BrowserTool', () => {
+describe('AgentWebBrowserTool', () => {
   let mockDelegate: BrowserDelegate;
-  let tool: BrowserTool;
+  let tool: AgentWebBrowserTool;
 
   beforeEach(() => {
     mockDelegate = {
@@ -15,12 +15,12 @@ describe('BrowserTool', () => {
       ensureSession: vi.fn(),
       hasSession: vi.fn(),
     };
-    tool = new BrowserTool({ delegate: mockDelegate });
+    tool = new AgentWebBrowserTool({ delegate: mockDelegate });
   });
 
   describe('tool definition', () => {
     it('should have correct name and description', () => {
-      expect(tool.name).toBe('Browser');
+      expect(tool.name).toBe('AgentWebBrowser');
       expect(tool.description).toContain('Control a web browser');
     });
 
@@ -39,7 +39,7 @@ describe('BrowserTool', () => {
 
   describe('execute - no delegate', () => {
     it('should return error when delegate not configured', async () => {
-      const toolWithoutDelegate = new BrowserTool({});
+      const toolWithoutDelegate = new AgentWebBrowserTool({});
       const result = await toolWithoutDelegate.execute({ action: 'navigate', url: 'https://example.com' });
 
       expect(result.content).toBeDefined();
@@ -155,6 +155,134 @@ describe('BrowserTool', () => {
       expect(result.content).toBeDefined();
       const content = result.content as any[];
       expect(content[0].text).toContain('Snapshot');
+    });
+
+    it('should execute goBack action', async () => {
+      vi.mocked(mockDelegate.hasSession).mockReturnValue(false);
+      vi.mocked(mockDelegate.execute).mockResolvedValue({ success: true, data: {} });
+
+      const result = await tool.execute({ action: 'goBack' });
+
+      expect(mockDelegate.execute).toHaveBeenCalledWith(
+        expect.any(String),
+        'goBack',
+        expect.objectContaining({ action: 'goBack' })
+      );
+      expect(result.content).toBeDefined();
+      const content = result.content as any[];
+      expect(content[0].text).toContain('back');
+    });
+
+    it('should execute goForward action', async () => {
+      vi.mocked(mockDelegate.hasSession).mockReturnValue(false);
+      vi.mocked(mockDelegate.execute).mockResolvedValue({ success: true, data: {} });
+
+      const result = await tool.execute({ action: 'goForward' });
+
+      expect(mockDelegate.execute).toHaveBeenCalledWith(
+        expect.any(String),
+        'goForward',
+        expect.objectContaining({ action: 'goForward' })
+      );
+      expect(result.content).toBeDefined();
+      const content = result.content as any[];
+      expect(content[0].text).toContain('forward');
+    });
+
+    it('should execute reload action', async () => {
+      vi.mocked(mockDelegate.hasSession).mockReturnValue(false);
+      vi.mocked(mockDelegate.execute).mockResolvedValue({ success: true, data: {} });
+
+      const result = await tool.execute({ action: 'reload' });
+
+      expect(mockDelegate.execute).toHaveBeenCalledWith(
+        expect.any(String),
+        'reload',
+        expect.objectContaining({ action: 'reload' })
+      );
+      expect(result.content).toBeDefined();
+      const content = result.content as any[];
+      expect(content[0].text).toContain('reload');
+    });
+
+    it('should execute hover action', async () => {
+      vi.mocked(mockDelegate.hasSession).mockReturnValue(false);
+      vi.mocked(mockDelegate.execute).mockResolvedValue({ success: true, data: { selector: 'button' } });
+
+      const result = await tool.execute({ action: 'hover', selector: 'button' });
+
+      expect(mockDelegate.execute).toHaveBeenCalledWith(
+        expect.any(String),
+        'hover',
+        expect.objectContaining({ action: 'hover', selector: 'button' })
+      );
+      expect(result.content).toBeDefined();
+      const content = result.content as any[];
+      expect(content[0].text).toContain('Hover');
+    });
+
+    it('should execute pressKey action', async () => {
+      vi.mocked(mockDelegate.hasSession).mockReturnValue(false);
+      vi.mocked(mockDelegate.execute).mockResolvedValue({ success: true, data: { key: 'Enter' } });
+
+      const result = await tool.execute({ action: 'pressKey', key: 'Enter' });
+
+      expect(mockDelegate.execute).toHaveBeenCalledWith(
+        expect.any(String),
+        'pressKey',
+        expect.objectContaining({ action: 'pressKey', key: 'Enter' })
+      );
+      expect(result.content).toBeDefined();
+      const content = result.content as any[];
+      expect(content[0].text).toContain('Pressed');
+    });
+
+    it('should execute getText action', async () => {
+      vi.mocked(mockDelegate.hasSession).mockReturnValue(false);
+      vi.mocked(mockDelegate.execute).mockResolvedValue({ success: true, data: { selector: '.content', text: 'Hello World' } });
+
+      const result = await tool.execute({ action: 'getText', selector: '.content' });
+
+      expect(mockDelegate.execute).toHaveBeenCalledWith(
+        expect.any(String),
+        'getText',
+        expect.objectContaining({ action: 'getText', selector: '.content' })
+      );
+      expect(result.content).toBeDefined();
+      const content = result.content as any[];
+      expect(content[0].text).toContain('Text content');
+    });
+
+    it('should execute getAttribute action', async () => {
+      vi.mocked(mockDelegate.hasSession).mockReturnValue(false);
+      vi.mocked(mockDelegate.execute).mockResolvedValue({ success: true, data: { selector: 'a', attribute: 'href', value: 'https://example.com' } });
+
+      const result = await tool.execute({ action: 'getAttribute', selector: 'a', attribute: 'href' });
+
+      expect(mockDelegate.execute).toHaveBeenCalledWith(
+        expect.any(String),
+        'getAttribute',
+        expect.objectContaining({ action: 'getAttribute', selector: 'a', attribute: 'href' })
+      );
+      expect(result.content).toBeDefined();
+      const content = result.content as any[];
+      expect(content[0].text).toContain('Attribute');
+    });
+
+    it('should execute pdf action', async () => {
+      vi.mocked(mockDelegate.hasSession).mockReturnValue(false);
+      vi.mocked(mockDelegate.execute).mockResolvedValue({ success: true, data: { path: '/tmp/page.pdf' } });
+
+      const result = await tool.execute({ action: 'pdf', path: '/tmp/page.pdf' });
+
+      expect(mockDelegate.execute).toHaveBeenCalledWith(
+        expect.any(String),
+        'pdf',
+        expect.objectContaining({ action: 'pdf', path: '/tmp/page.pdf' })
+      );
+      expect(result.content).toBeDefined();
+      const content = result.content as any[];
+      expect(content[0].text).toContain('PDF');
     });
 
     it('should return error when delegate execution fails', async () => {

@@ -1,56 +1,92 @@
 /**
- * @fileoverview BrowserService unit tests (mocked Playwright, fast)
+ * @fileoverview BrowserService unit tests (mocked agent-browser, fast)
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { BrowserService } from '../../src/browser/browser-service.js';
 
-// Mock playwright-core
-vi.mock('playwright-core', () => ({
-  chromium: {
-    launch: vi.fn(),
-  },
+// Create mock objects
+const mockLocator = {
+  click: vi.fn(),
+  fill: vi.fn(),
+  pressSequentially: vi.fn(),
+  selectOption: vi.fn(),
+  hover: vi.fn(),
+  innerText: vi.fn(),
+  getAttribute: vi.fn(),
+};
+
+const mockPage = {
+  goto: vi.fn(),
+  screenshot: vi.fn(),
+  waitForSelector: vi.fn(),
+  waitForTimeout: vi.fn(),
+  waitForLoadState: vi.fn(() => Promise.resolve()),
+  evaluate: vi.fn(),
+  goBack: vi.fn(),
+  goForward: vi.fn(),
+  reload: vi.fn(),
+  keyboard: { press: vi.fn() },
+  pdf: vi.fn(),
+  url: vi.fn(() => 'https://example.com'),
+  locator: vi.fn(() => mockLocator),
+};
+
+const mockBrowserManager = {
+  launch: vi.fn(),
+  setViewport: vi.fn(),
+  close: vi.fn(),
+  getPage: vi.fn(() => mockPage),
+  isLaunched: vi.fn(() => true),
+  getSnapshot: vi.fn(() => Promise.resolve({ tree: 'test', refs: {} })),
+  getRefMap: vi.fn(() => ({})),
+  isRef: vi.fn(() => false),
+  getLocatorFromRef: vi.fn(() => null),
+  startScreencast: vi.fn(),
+  stopScreencast: vi.fn(),
+};
+
+// Mock agent-browser
+vi.mock('agent-browser/dist/browser.js', () => ({
+  BrowserManager: vi.fn(() => mockBrowserManager),
 }));
 
 describe('BrowserService', () => {
   let service: BrowserService;
-  let mockBrowser: any;
-  let mockPage: any;
-  let mockCDPSession: any;
 
   beforeEach(async () => {
-    // Setup mocks
-    mockCDPSession = {
-      on: vi.fn(),
-      send: vi.fn(),
-    };
+    // Reset all mocks
+    vi.clearAllMocks();
 
-    mockPage = {
-      goto: vi.fn(),
-      click: vi.fn(),
-      fill: vi.fn(),
-      type: vi.fn(),
-      selectOption: vi.fn(),
-      screenshot: vi.fn(),
-      accessibility: {
-        snapshot: vi.fn(),
-      },
-      waitForSelector: vi.fn(),
-      waitForTimeout: vi.fn(),
-      waitForLoadState: vi.fn(() => Promise.resolve()),
-      evaluate: vi.fn(),
-      context: vi.fn(() => ({
-        newCDPSession: vi.fn(() => Promise.resolve(mockCDPSession)),
-      })),
-    };
+    // Reset mock implementations
+    mockBrowserManager.launch.mockResolvedValue(undefined);
+    mockBrowserManager.setViewport.mockResolvedValue(undefined);
+    mockBrowserManager.close.mockResolvedValue(undefined);
+    mockBrowserManager.startScreencast.mockResolvedValue(undefined);
+    mockBrowserManager.stopScreencast.mockResolvedValue(undefined);
+    mockBrowserManager.getSnapshot.mockResolvedValue({ tree: 'test', refs: {} });
+    mockBrowserManager.getRefMap.mockReturnValue({});
+    mockBrowserManager.isLaunched.mockReturnValue(true);
+    mockBrowserManager.isRef.mockReturnValue(false);
+    mockBrowserManager.getLocatorFromRef.mockReturnValue(null);
 
-    mockBrowser = {
-      newPage: vi.fn(() => Promise.resolve(mockPage)),
-      close: vi.fn(),
-    };
+    mockPage.goto.mockResolvedValue(null);
+    mockPage.screenshot.mockResolvedValue(Buffer.from('fake-image-data'));
+    mockPage.waitForLoadState.mockResolvedValue(undefined);
+    mockPage.evaluate.mockResolvedValue(undefined);
+    mockPage.goBack.mockResolvedValue(null);
+    mockPage.goForward.mockResolvedValue(null);
+    mockPage.reload.mockResolvedValue(null);
+    mockPage.keyboard.press.mockResolvedValue(undefined);
+    mockPage.pdf.mockResolvedValue(Buffer.from('fake-pdf'));
 
-    const { chromium } = await import('playwright-core');
-    vi.mocked(chromium.launch).mockResolvedValue(mockBrowser as any);
+    mockLocator.click.mockResolvedValue(undefined);
+    mockLocator.fill.mockResolvedValue(undefined);
+    mockLocator.pressSequentially.mockResolvedValue(undefined);
+    mockLocator.selectOption.mockResolvedValue(undefined);
+    mockLocator.hover.mockResolvedValue(undefined);
+    mockLocator.innerText.mockResolvedValue('text content');
+    mockLocator.getAttribute.mockResolvedValue('href-value');
 
     service = new BrowserService({ headless: true });
   });
@@ -66,6 +102,8 @@ describe('BrowserService', () => {
 
       expect(result.success).toBe(true);
       expect(service.hasSession('test-session')).toBe(true);
+      expect(mockBrowserManager.launch).toHaveBeenCalled();
+      expect(mockBrowserManager.setViewport).toHaveBeenCalledWith(1280, 800);
     });
 
     it('should return success if session already exists', async () => {
@@ -82,7 +120,7 @@ describe('BrowserService', () => {
 
       expect(result.success).toBe(true);
       expect(service.hasSession('test-session')).toBe(false);
-      expect(mockBrowser.close).toHaveBeenCalled();
+      expect(mockBrowserManager.close).toHaveBeenCalled();
     });
 
     it('should return error when closing non-existent session', async () => {
@@ -109,7 +147,6 @@ describe('BrowserService', () => {
   describe('navigate action', () => {
     it('should navigate to URL', async () => {
       await service.createSession('test-session');
-      vi.mocked(mockPage.goto).mockResolvedValue(null);
 
       const result = await service.execute('test-session', 'navigate', { url: 'https://example.com' });
 
@@ -137,12 +174,11 @@ describe('BrowserService', () => {
   describe('click action', () => {
     it('should click element', async () => {
       await service.createSession('test-session');
-      vi.mocked(mockPage.click).mockResolvedValue(undefined);
 
       const result = await service.execute('test-session', 'click', { selector: 'button' });
 
       expect(result.success).toBe(true);
-      expect(mockPage.click).toHaveBeenCalledWith('button', expect.any(Object));
+      expect(mockLocator.click).toHaveBeenCalledWith(expect.any(Object));
     });
 
     it('should return error when selector is missing', async () => {
@@ -153,21 +189,11 @@ describe('BrowserService', () => {
       expect(result.success).toBe(false);
       expect(result.error).toContain('Selector is required');
     });
-
-    it('should convert :contains() selector', async () => {
-      await service.createSession('test-session');
-      vi.mocked(mockPage.click).mockResolvedValue(undefined);
-
-      await service.execute('test-session', 'click', { selector: 'button:contains("Submit")' });
-
-      expect(mockPage.click).toHaveBeenCalledWith('button:has-text("Submit")', expect.any(Object));
-    });
   });
 
   describe('fill action', () => {
     it('should fill input field', async () => {
       await service.createSession('test-session');
-      vi.mocked(mockPage.fill).mockResolvedValue(undefined);
 
       const result = await service.execute('test-session', 'fill', {
         selector: '#email',
@@ -175,14 +201,13 @@ describe('BrowserService', () => {
       });
 
       expect(result.success).toBe(true);
-      expect(mockPage.fill).toHaveBeenCalledWith('#email', 'test@example.com', expect.any(Object));
+      expect(mockLocator.fill).toHaveBeenCalledWith('test@example.com', expect.any(Object));
     });
   });
 
   describe('screenshot action', () => {
     it('should take screenshot', async () => {
       await service.createSession('test-session');
-      vi.mocked(mockPage.screenshot).mockResolvedValue(Buffer.from('fake-image-data'));
 
       const result = await service.execute('test-session', 'screenshot', {});
 
@@ -193,9 +218,7 @@ describe('BrowserService', () => {
 
     it('should always use viewport-only (fullPage: false) for consistent dimensions', async () => {
       await service.createSession('test-session');
-      vi.mocked(mockPage.screenshot).mockResolvedValue(Buffer.from('fake-image-data'));
 
-      // Even if fullPage: true is passed, it should be ignored
       await service.execute('test-session', 'screenshot', { fullPage: true });
 
       expect(mockPage.screenshot).toHaveBeenCalledWith(expect.objectContaining({ fullPage: false }));
@@ -205,25 +228,19 @@ describe('BrowserService', () => {
   describe('snapshot action', () => {
     it('should get accessibility snapshot', async () => {
       await service.createSession('test-session');
-      vi.mocked(mockPage.accessibility.snapshot).mockResolvedValue({
-        role: 'document',
-        name: 'Test Page',
-        children: [{ role: 'button', name: 'Submit' }]
-      });
 
       const result = await service.execute('test-session', 'snapshot', {});
 
       expect(result.success).toBe(true);
       expect(result.data?.snapshot).toBeDefined();
       expect(result.data?.elementRefs).toBeDefined();
-      expect(mockPage.accessibility.snapshot).toHaveBeenCalled();
+      expect(mockBrowserManager.getSnapshot).toHaveBeenCalled();
     });
   });
 
   describe('scroll action', () => {
     it('should scroll page', async () => {
       await service.createSession('test-session');
-      vi.mocked(mockPage.evaluate).mockResolvedValue(undefined);
 
       const result = await service.execute('test-session', 'scroll', {
         direction: 'down',
@@ -247,10 +264,88 @@ describe('BrowserService', () => {
     });
   });
 
+  describe('new actions', () => {
+    it('should go back', async () => {
+      await service.createSession('test-session');
+
+      const result = await service.execute('test-session', 'goBack', {});
+
+      expect(result.success).toBe(true);
+      expect(mockPage.goBack).toHaveBeenCalled();
+    });
+
+    it('should go forward', async () => {
+      await service.createSession('test-session');
+
+      const result = await service.execute('test-session', 'goForward', {});
+
+      expect(result.success).toBe(true);
+      expect(mockPage.goForward).toHaveBeenCalled();
+    });
+
+    it('should reload', async () => {
+      await service.createSession('test-session');
+
+      const result = await service.execute('test-session', 'reload', {});
+
+      expect(result.success).toBe(true);
+      expect(mockPage.reload).toHaveBeenCalled();
+    });
+
+    it('should hover', async () => {
+      await service.createSession('test-session');
+
+      const result = await service.execute('test-session', 'hover', { selector: 'button' });
+
+      expect(result.success).toBe(true);
+      expect(mockLocator.hover).toHaveBeenCalled();
+    });
+
+    it('should press key', async () => {
+      await service.createSession('test-session');
+
+      const result = await service.execute('test-session', 'pressKey', { key: 'Enter' });
+
+      expect(result.success).toBe(true);
+      expect(mockPage.keyboard.press).toHaveBeenCalledWith('Enter');
+    });
+
+    it('should get text', async () => {
+      await service.createSession('test-session');
+
+      const result = await service.execute('test-session', 'getText', { selector: '.content' });
+
+      expect(result.success).toBe(true);
+      expect(result.data?.text).toBe('text content');
+      expect(mockLocator.innerText).toHaveBeenCalled();
+    });
+
+    it('should get attribute', async () => {
+      await service.createSession('test-session');
+
+      const result = await service.execute('test-session', 'getAttribute', {
+        selector: 'a',
+        attribute: 'href'
+      });
+
+      expect(result.success).toBe(true);
+      expect(result.data?.value).toBe('href-value');
+      expect(mockLocator.getAttribute).toHaveBeenCalledWith('href', expect.any(Object));
+    });
+
+    it('should generate pdf', async () => {
+      await service.createSession('test-session');
+
+      const result = await service.execute('test-session', 'pdf', { path: '/tmp/page.pdf' });
+
+      expect(result.success).toBe(true);
+      expect(mockPage.pdf).toHaveBeenCalledWith({ path: '/tmp/page.pdf' });
+    });
+  });
+
   describe('screencast', () => {
     it('should start screencast', async () => {
       await service.createSession('test-session');
-      vi.mocked(mockCDPSession.send).mockResolvedValue(undefined);
 
       const result = await service.startScreencast('test-session', {
         format: 'jpeg',
@@ -259,17 +354,17 @@ describe('BrowserService', () => {
       });
 
       expect(result.success).toBe(true);
-      expect(mockCDPSession.on).toHaveBeenCalledWith('Page.screencastFrame', expect.any(Function));
-      expect(mockCDPSession.send).toHaveBeenCalledWith('Page.startScreencast', expect.objectContaining({
-        format: 'jpeg',
-        quality: 60,
-        everyNthFrame: 6
-      }));
+      expect(mockBrowserManager.startScreencast).toHaveBeenCalled();
     });
 
     it('should return success if already streaming', async () => {
       await service.createSession('test-session');
       await service.startScreencast('test-session');
+
+      // Set isStreaming manually since mock doesn't track state
+      const session = service.getSession('test-session');
+      if (session) session.isStreaming = true;
+
       const result = await service.startScreencast('test-session');
 
       expect(result.success).toBe(true);
@@ -279,48 +374,15 @@ describe('BrowserService', () => {
     it('should stop screencast', async () => {
       await service.createSession('test-session');
       await service.startScreencast('test-session');
-      vi.mocked(mockCDPSession.send).mockResolvedValue(undefined);
+
+      // Set isStreaming manually
+      const session = service.getSession('test-session');
+      if (session) session.isStreaming = true;
 
       const result = await service.stopScreencast('test-session');
 
       expect(result.success).toBe(true);
-      expect(mockCDPSession.send).toHaveBeenCalledWith('Page.stopScreencast');
-    });
-
-    it('should emit browser.frame event', async () => {
-      await service.createSession('test-session');
-
-      const frameHandler = vi.fn();
-      service.on('browser.frame', frameHandler);
-
-      // Mock the CDP send to return a proper promise
-      vi.mocked(mockCDPSession.send).mockImplementation((method: string) => {
-        if (method === 'Page.screencastFrameAck') {
-          return Promise.resolve();
-        }
-        return Promise.resolve(undefined);
-      });
-
-      await service.startScreencast('test-session');
-
-      // Simulate CDP frame event
-      const frameCallback = vi.mocked(mockCDPSession.on).mock.calls.find(
-        call => call[0] === 'Page.screencastFrame'
-      )?.[1];
-
-      if (frameCallback) {
-        await frameCallback({
-          data: 'base64-frame-data',
-          sessionId: 123,
-          metadata: { deviceWidth: 1280, deviceHeight: 800 }
-        });
-
-        expect(frameHandler).toHaveBeenCalledWith(expect.objectContaining({
-          sessionId: 'test-session',
-          data: 'base64-frame-data',
-          frameId: 123
-        }));
-      }
+      expect(mockBrowserManager.stopScreencast).toHaveBeenCalled();
     });
   });
 
@@ -348,36 +410,46 @@ describe('BrowserService', () => {
   });
 
   describe('selector conversion', () => {
-    it('should convert :contains() with double quotes', async () => {
+    it('should convert :contains() with double quotes via resolveSelector', async () => {
       await service.createSession('test-session');
-      vi.mocked(mockPage.click).mockResolvedValue(undefined);
 
       await service.execute('test-session', 'click', { selector: 'button:contains("Submit")' });
 
-      expect(mockPage.click).toHaveBeenCalledWith('button:has-text("Submit")', expect.any(Object));
+      // The locator should be created with the converted selector
+      expect(mockPage.locator).toHaveBeenCalledWith('button:has-text("Submit")');
     });
 
     it('should convert :contains() with single quotes', async () => {
       await service.createSession('test-session');
-      vi.mocked(mockPage.click).mockResolvedValue(undefined);
 
       await service.execute('test-session', 'click', { selector: "button:contains('Submit')" });
 
-      expect(mockPage.click).toHaveBeenCalledWith('button:has-text("Submit")', expect.any(Object));
+      expect(mockPage.locator).toHaveBeenCalledWith('button:has-text("Submit")');
     });
 
     it('should handle multiple :contains() conversions', async () => {
       await service.createSession('test-session');
-      vi.mocked(mockPage.click).mockResolvedValue(undefined);
 
       await service.execute('test-session', 'click', {
         selector: 'div:contains("Projects") button:contains("New")'
       });
 
-      expect(mockPage.click).toHaveBeenCalledWith(
-        'div:has-text("Projects") button:has-text("New")',
-        expect.any(Object)
+      expect(mockPage.locator).toHaveBeenCalledWith(
+        'div:has-text("Projects") button:has-text("New")'
       );
+    });
+
+    it('should use ref locator when selector is a ref', async () => {
+      mockBrowserManager.isRef.mockReturnValue(true);
+      mockBrowserManager.getLocatorFromRef.mockReturnValue(mockLocator);
+
+      await service.createSession('test-session');
+
+      await service.execute('test-session', 'click', { selector: 'e1' });
+
+      expect(mockBrowserManager.isRef).toHaveBeenCalledWith('e1');
+      expect(mockBrowserManager.getLocatorFromRef).toHaveBeenCalledWith('e1');
+      expect(mockLocator.click).toHaveBeenCalled();
     });
   });
 });

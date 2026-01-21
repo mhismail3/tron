@@ -1473,10 +1473,16 @@ export class EventStoreOrchestrator extends EventEmitter {
     }
 
     const session = this.browserService.getSession(sessionId);
+    let currentUrl: string | undefined;
+    try {
+      currentUrl = session?.manager?.isLaunched() ? session.manager.getPage().url() : undefined;
+    } catch {
+      // Browser not ready
+    }
     return {
       hasBrowser: true,
       isStreaming: session?.isStreaming ?? false,
-      currentUrl: session?.page?.url(),
+      currentUrl,
     };
   }
 

@@ -1,16 +1,16 @@
 /**
- * @fileoverview Browser automation tool using Playwright
+ * @fileoverview AgentWebBrowser tool using agent-browser library
  */
 
 import type { TronTool, TronToolResult, ToolResultContentType } from '../types/index.js';
 
-export interface BrowserToolConfig {
+export interface AgentWebBrowserToolConfig {
   workingDirectory?: string;
   delegate?: BrowserDelegate;
 }
 
 /**
- * Delegate interface for BrowserTool to interact with BrowserService
+ * Delegate interface for AgentWebBrowserTool to interact with BrowserService
  */
 export interface BrowserDelegate {
   execute(
@@ -33,16 +33,16 @@ interface BrowserSession {
 }
 
 /**
- * Browser automation tool for controlling browsers via Playwright
+ * Browser automation tool using agent-browser library
  *
  * NOTE: The description is intentionally verbose to ensure total tool + system
  * tokens exceed ~4096 for Anthropic prompt caching. Opus 4.5 requires this
  * minimum threshold. Shortening descriptions may break caching.
  * See anthropic.ts for caching implementation details.
  */
-export class BrowserTool implements TronTool {
-  readonly name = 'Browser';
-  readonly description = `Control a web browser with automation capabilities.
+export class AgentWebBrowserTool implements TronTool {
+  readonly name = 'AgentWebBrowser';
+  readonly description = `Control a web browser with automation capabilities using agent-browser.
 
 IMPORTANT: Execute browser actions ONE AT A TIME sequentially - wait for each action to complete before starting the next. Do NOT call multiple browser tools in parallel as this causes race conditions.
 
@@ -90,6 +90,35 @@ Actions:
   Optional: amount (number in pixels), selector (string)
   Example: { "action": "scroll", "direction": "down", "amount": 500 }
 
+- goBack: Navigate back in browser history
+  Example: { "action": "goBack" }
+
+- goForward: Navigate forward in browser history
+  Example: { "action": "goForward" }
+
+- reload: Reload the current page
+  Example: { "action": "reload" }
+
+- hover: Hover over an element (triggers hover states/tooltips)
+  Required: selector (string)
+  Example: { "action": "hover", "selector": "button.menu" }
+
+- pressKey: Press a keyboard key
+  Required: key (string) - key name (e.g., "Enter", "Tab", "Escape", "ArrowDown")
+  Example: { "action": "pressKey", "key": "Enter" }
+
+- getText: Get text content from an element
+  Required: selector (string)
+  Example: { "action": "getText", "selector": ".article-content" }
+
+- getAttribute: Get an attribute value from an element
+  Required: selector (string), attribute (string)
+  Example: { "action": "getAttribute", "selector": "a.link", "attribute": "href" }
+
+- pdf: Generate a PDF of the current page
+  Optional: path (string) - file path to save PDF
+  Example: { "action": "pdf", "path": "/tmp/page.pdf" }
+
 - close: Close the browser session
   Example: { "action": "close" }
 
@@ -105,7 +134,7 @@ The browser runs headless by default and streams frames to the iOS app.`;
     properties: {
       action: {
         type: 'string' as const,
-        description: 'The browser action to perform (navigate, click, fill, type, select, screenshot, snapshot, wait, scroll, close)',
+        description: 'The browser action to perform (navigate, click, fill, type, select, screenshot, snapshot, wait, scroll, goBack, goForward, reload, hover, pressKey, getText, getAttribute, pdf, close)',
       },
       url: {
         type: 'string' as const,
@@ -113,7 +142,7 @@ The browser runs headless by default and streams frames to the iOS app.`;
       },
       selector: {
         type: 'string' as const,
-        description: 'CSS selector or element reference (e.g., "e1") for click, fill, type, select actions',
+        description: 'CSS selector or element reference (e.g., "e1") for click, fill, type, select, hover, getText, getAttribute actions',
       },
       value: {
         type: 'string' as const,
@@ -135,6 +164,18 @@ The browser runs headless by default and streams frames to the iOS app.`;
         type: 'number' as const,
         description: 'Timeout in milliseconds for wait action',
       },
+      key: {
+        type: 'string' as const,
+        description: 'Key name for pressKey action (e.g., "Enter", "Tab", "Escape")',
+      },
+      attribute: {
+        type: 'string' as const,
+        description: 'Attribute name for getAttribute action',
+      },
+      path: {
+        type: 'string' as const,
+        description: 'File path for pdf action',
+      },
     },
     required: ['action'],
   };
@@ -142,7 +183,7 @@ The browser runs headless by default and streams frames to the iOS app.`;
   private delegate?: BrowserDelegate;
   private session?: BrowserSession;
 
-  constructor(config: BrowserToolConfig = {}) {
+  constructor(config: AgentWebBrowserToolConfig = {}) {
     this.delegate = config.delegate;
   }
 
@@ -360,6 +401,70 @@ The browser runs headless by default and streams frames to the iOS app.`;
           {
             type: 'text',
             text: `Scrolled ${data.direction}: ${data.amount}px`,
+          },
+        ];
+
+      case 'goBack':
+        return [
+          {
+            type: 'text',
+            text: 'Navigated back in history',
+          },
+        ];
+
+      case 'goForward':
+        return [
+          {
+            type: 'text',
+            text: 'Navigated forward in history',
+          },
+        ];
+
+      case 'reload':
+        return [
+          {
+            type: 'text',
+            text: 'Page reloaded',
+          },
+        ];
+
+      case 'hover':
+        return [
+          {
+            type: 'text',
+            text: `Hovered over: ${data.selector}`,
+          },
+        ];
+
+      case 'pressKey':
+        return [
+          {
+            type: 'text',
+            text: `Pressed key: ${data.key}`,
+          },
+        ];
+
+      case 'getText':
+        return [
+          {
+            type: 'text',
+            text: `Text content: ${data.text}`,
+          },
+        ];
+
+      case 'getAttribute':
+        return [
+          {
+            type: 'text',
+            text: `Attribute ${data.attribute}: ${data.value}`,
+          },
+        ];
+
+      case 'pdf':
+        return [
+          {
+            type: 'text',
+            text: data.path ? `PDF saved to: ${data.path}` : 'PDF generated',
           },
         ];
 
