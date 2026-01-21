@@ -118,8 +118,6 @@
 		A8BB863D2AE3097293DEE450 /* ContentComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = E753AE65FE87C59B71FC0FDD /* ContentComponents.swift */; };
 		AA0AC5B4C07C617F0612C7FA /* View+Extensions.swift in Sources */ = {isa = PBXBuildFile; fileRef = B4B65C803EB12E8C7004E843 /* View+Extensions.swift */; };
 		AAEC2BAEF5C0067DBF72CBA5 /* UICanvasState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 05D5E47403A5C9642D8D6598 /* UICanvasState.swift */; };
-		TD0DETB18F8A9B2C3D4E5F6A /* TodoDetailSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = TD0DET51F8A9B2C3D4E5F6A7 /* TodoDetailSheet.swift */; };
-		TD0STAB18F9B2C3D4E5F6A7B /* TodoState.swift in Sources */ = {isa = PBXBuildFile; fileRef = TD0S1ATE8F9B2C3D4E5F6A7B /* TodoState.swift */; };
 		AB572EB35C683B3E98C1CE75 /* StreamingPayloads.swift in Sources */ = {isa = PBXBuildFile; fileRef = 12D4005085E6F37ECCF3AC12 /* StreamingPayloads.swift */; };
 		AC62556A9211A870D2814060 /* UICanvasParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = 12D668775EB6DF67F6736724 /* UICanvasParser.swift */; };
 		AF3B529E1C78A0EF05AB96E4 /* MessageWindowManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1DEF36B366C643A8B6C2BFC9 /* MessageWindowManager.swift */; };
@@ -175,6 +173,9 @@
 		FCCC23923C20919D0D38197E /* SubagentState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4D17CD4EBC001BB37F3F9378 /* SubagentState.swift */; };
 		FE3D89D152521876D2DDF464 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 8347F0B7D54B1F1EAA6C762C /* Assets.xcassets */; };
 		FF5C309C2498A33DA03B2729 /* BrowserSheetView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 775326BB52ED6318F8D57E4D /* BrowserSheetView.swift */; };
+		TD0DETB18F8A9B2C3D4E5F6A /* TodoDetailSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = TD0DET51F8A9B2C3D4E5F6A7 /* TodoDetailSheet.swift */; };
+		TD0STAB18F9B2C3D4E5F6A7B /* TodoState.swift in Sources */ = {isa = PBXBuildFile; fileRef = TD0S1ATE8F9B2C3D4E5F6A7B /* TodoState.swift */; };
+		TDWR1TE5C8D2F1A7B3C4E5F6 /* TodoWriteChip.swift in Sources */ = {isa = PBXBuildFile; fileRef = TWC9B8A7D6E5F4C3B2A1F098 /* TodoWriteChip.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -193,8 +194,6 @@
 		0123F7482F532CD8FBA61F0E /* UnifiedEventTransformerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UnifiedEventTransformerTests.swift; sourceTree = "<group>"; };
 		01E1022262C210A860B1851B /* InteractiveComponents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InteractiveComponents.swift; sourceTree = "<group>"; };
 		05D5E47403A5C9642D8D6598 /* UICanvasState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UICanvasState.swift; sourceTree = "<group>"; };
-		TD0DET51F8A9B2C3D4E5F6A7 /* TodoDetailSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TodoDetailSheet.swift; sourceTree = "<group>"; };
-		TD0S1ATE8F9B2C3D4E5F6A7B /* TodoState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TodoState.swift; sourceTree = "<group>"; };
 		088BDE03F59D94AD1C60E382 /* TronFontLoader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TronFontLoader.swift; sourceTree = "<group>"; };
 		0BA5810A34C92084B89C6EA4 /* TronColors.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TronColors.swift; sourceTree = "<group>"; };
 		0C697B4D1B8F6C85A423EAF5 /* EventTypes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EventTypes.swift; sourceTree = "<group>"; };
@@ -311,6 +310,7 @@
 		B9DD45A3974192F927E1B73A /* RPCClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RPCClient.swift; sourceTree = "<group>"; };
 		BAAEF1BE9FB1F65365BE6F22 /* ContextAnalyticsViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContextAnalyticsViews.swift; sourceTree = "<group>"; };
 		BC16C3B8D2F7980BFC86839B /* SkillMentionPopup.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SkillMentionPopup.swift; sourceTree = "<group>"; };
+		BCEED7F32F2093400036AFBA /* TronMobileRelease-Prod.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = "TronMobileRelease-Prod.entitlements"; sourceTree = "<group>"; };
 		C089557976ED02D50EA112A0 /* AskUserQuestionViewer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AskUserQuestionViewer.swift; sourceTree = "<group>"; };
 		C5C26EC0DCF779A0B0550615 /* ConfigPayloads.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConfigPayloads.swift; sourceTree = "<group>"; };
 		C5E09421076542759CF7BB11 /* Debug-Beta.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = "Debug-Beta.xcconfig"; sourceTree = "<group>"; };
@@ -363,6 +363,9 @@
 		FD89009575AAF815668A8370 /* EventStoreManager+Dashboard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "EventStoreManager+Dashboard.swift"; sourceTree = "<group>"; };
 		FF47AB510527898053F52C7F /* UIComponentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UIComponentView.swift; sourceTree = "<group>"; };
 		FFEA9A5CBCE731DD8A47130C /* BrowserState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrowserState.swift; sourceTree = "<group>"; };
+		TD0DET51F8A9B2C3D4E5F6A7 /* TodoDetailSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TodoDetailSheet.swift; sourceTree = "<group>"; };
+		TD0S1ATE8F9B2C3D4E5F6A7B /* TodoState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TodoState.swift; sourceTree = "<group>"; };
+		TWC9B8A7D6E5F4C3B2A1F098 /* TodoWriteChip.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TodoWriteChip.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXGroup section */
@@ -536,6 +539,7 @@
 		73D37B19239C31F0B91AF61A = {
 			isa = PBXGroup;
 			children = (
+				BCEED7F32F2093400036AFBA /* TronMobileRelease-Prod.entitlements */,
 				35B0DD78CA87252A17E5A6DB /* Configuration */,
 				2415D02CBAD7EC7588F4CA6F /* Sources */,
 				161F8AEF8FBE5C9C772B5263 /* Tests */,
@@ -590,6 +594,7 @@
 				DF69778E3C7E0198042860BC /* SubagentChip.swift */,
 				50A9B3356F199C0BBFA66E71 /* SubagentDetailSheet.swift */,
 				TD0DET51F8A9B2C3D4E5F6A7 /* TodoDetailSheet.swift */,
+				TWC9B8A7D6E5F4C3B2A1F098 /* TodoWriteChip.swift */,
 				FC777FA4471FD3723C469037 /* UICanvasSheet.swift */,
 				CCA283B41E28CEFFCD4639EE /* VoiceNoteDetailSheet.swift */,
 				192E08DF91426E43F5AFE03F /* VoiceNotesListView.swift */,
@@ -995,6 +1000,7 @@
 				490E7266613F29CD1E3F69F3 /* String+Extensions.swift in Sources */,
 				0752A9C5CB7DDD0E3630ABE0 /* StructuralComponents.swift in Sources */,
 				BB378A9B74DB1C2D32BBAD10 /* SubagentChip.swift in Sources */,
+				TDWR1TE5C8D2F1A7B3C4E5F6 /* TodoWriteChip.swift in Sources */,
 				CF2ED7C753FB3123122A026E /* SubagentDetailSheet.swift in Sources */,
 				FCCC23923C20919D0D38197E /* SubagentState.swift in Sources */,
 				92ACA2A5BB42F349E463117D /* TextContentView.swift in Sources */,
@@ -1130,6 +1136,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = "TronMobileRelease-Prod.entitlements";
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = MYGKXH6TY4;

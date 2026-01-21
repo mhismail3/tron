@@ -9,6 +9,7 @@ struct MessageBubble: View {
     var onCompactionTap: ((Int, Int, String, String?) -> Void)?
     var onSubagentTap: ((SubagentToolData) -> Void)?
     var onRenderAppUITap: ((RenderAppUIChipData) -> Void)?
+    var onTodoWriteTap: (() -> Void)?
 
     private var isUserMessage: Bool {
         message.role == .user
@@ -125,6 +126,22 @@ struct MessageBubble: View {
                     } else {
                         RenderAppUIChipFallback(data: chipData) {
                             onRenderAppUITap?(chipData)
+                        }
+                    }
+                } else {
+                    // Fallback to regular tool view if parsing fails
+                    ToolResultRouter(tool: tool)
+                }
+            case "todowrite":
+                // Show TodoWrite as compact chip with task counts
+                if let chipData = createTodoWriteChipData(from: tool) {
+                    if #available(iOS 26.0, *) {
+                        TodoWriteChip(data: chipData) {
+                            onTodoWriteTap?()
+                        }
+                    } else {
+                        TodoWriteChipFallback(data: chipData) {
+                            onTodoWriteTap?()
                         }
                     }
                 } else {
@@ -474,6 +491,37 @@ struct MessageBubble: View {
                 .replacingOccurrences(of: "\\\"", with: "\"")
         }
         return nil
+    }
+
+    // MARK: - TodoWrite Tool Parsing
+
+    /// Parse TodoWrite tool result to create TodoWriteChipData for chip display
+    private func createTodoWriteChipData(from tool: ToolUseData) -> TodoWriteChipData? {
+        // Parse the last line of the result which has format:
+        // "X completed, Y in progress, Z pending"
+        guard let result = tool.result else { return nil }
+
+        // Extract counts using regex pattern
+        var completed = 0
+        var inProgress = 0
+        var pending = 0
+
+        // Match pattern: "X completed, Y in progress, Z pending"
+        if let match = result.firstMatch(of: /(\d+)\s+completed,\s+(\d+)\s+in\s+progress,\s+(\d+)\s+pending/) {
+            completed = Int(match.1) ?? 0
+            inProgress = Int(match.2) ?? 0
+            pending = Int(match.3) ?? 0
+        }
+
+        let totalCount = completed + inProgress + pending
+        let newCount = inProgress + pending
+
+        return TodoWriteChipData(
+            toolCallId: tool.toolCallId,
+            newCount: newCount,
+            doneCount: completed,
+            totalCount: totalCount
+        )
     }
 }
 

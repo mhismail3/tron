@@ -623,6 +623,9 @@ struct ChatView: View {
                                                 viewModel.showErrorAlert("Canvas not found")
                                             }
                                         }
+                                    },
+                                    onTodoWriteTap: {
+                                        viewModel.todoState.showSheet = true
                                     }
                                 )
                                 .id(message.id)
