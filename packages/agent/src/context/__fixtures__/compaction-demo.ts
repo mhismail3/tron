@@ -5,7 +5,7 @@
  * Run with: npx tsx packages/agent/test/context/compaction-demo.ts
  */
 
-import { createContextManager } from '../../src/context/context-manager.js';
+import { createContextManager } from '../context-manager.js';
 import { ContextSimulator } from './context-simulator.js';
 import { createMockSummarizer } from './mock-summarizer.js';
 

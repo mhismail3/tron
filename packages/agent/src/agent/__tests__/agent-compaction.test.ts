@@ -18,8 +18,8 @@ import type { AgentConfig } from '../types.js';
 const tempDir = `/tmp/tron-test-${Date.now()}`;
 
 // Mock only getTronDataDir
-vi.mock('../../src/settings/loader.js', async (importOriginal) => {
-  const original = await importOriginal<typeof import('../../src/settings/loader.js')>();
+vi.mock('../../settings/loader.js', async (importOriginal) => {
+  const original = await importOriginal<typeof import('../../settings/loader.js')>();
   return {
     ...original,
     getTronDataDir: () => tempDir,

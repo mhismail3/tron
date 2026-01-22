@@ -16,7 +16,7 @@
  * creating tool.call events (at first tool_execution_start).
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { EventStore, SessionId, type TronSessionEvent } from '../../index.js';
+import { EventStore, SessionId, type TronSessionEvent } from '../../events/event-store.js';
 import path from 'path';
 import os from 'os';
 import fs from 'fs';
