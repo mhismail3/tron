@@ -2,6 +2,9 @@
  * @fileoverview Public type exports for @tron/core
  */
 
+// Memory types
+export * from './memory.js';
+
 // Messages
 export type {
   TextContent,

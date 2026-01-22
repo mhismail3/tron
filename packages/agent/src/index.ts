@@ -27,8 +27,7 @@ export * from './providers/index.js';
 // Re-export tools
 export * from './tools/index.js';
 
-// Re-export memory
-export * from './memory/index.js';
+// Memory types are now exported through types module
 
 // Re-export hooks
 export * from './hooks/index.js';
