@@ -76,6 +76,91 @@ export type AssistantContent = TextContent | ThinkingContent | ToolCall;
 export type ToolResultContent = TextContent | ImageContent;
 
 // =============================================================================
+// API-Format Types (for persistence and wire format)
+// =============================================================================
+
+/**
+ * API-format tool_use content block.
+ * Uses 'input' instead of 'arguments' to match Anthropic API wire format.
+ * Used in persisted events and when sending messages to the API.
+ */
+export interface ApiToolUseBlock {
+  type: 'tool_use';
+  id: string;
+  name: string;
+  input: Record<string, unknown>;
+}
+
+/**
+ * API-format tool_result content block.
+ * Used in persisted events and when sending tool results to the API.
+ */
+export interface ApiToolResultBlock {
+  type: 'tool_result';
+  tool_use_id: string;
+  content: string;
+  is_error?: boolean;
+}
+
+// =============================================================================
+// Conversion Utilities (internal ↔ API format)
+// =============================================================================
+
+/**
+ * Convert internal ToolCall to API-format tool_use block.
+ * This converts 'arguments' → 'input' for API compatibility.
+ */
+export function toApiToolUse(toolCall: ToolCall): ApiToolUseBlock {
+  return {
+    type: 'tool_use',
+    id: toolCall.id,
+    name: toolCall.name,
+    input: toolCall.arguments,
+  };
+}
+
+/**
+ * Convert API-format tool_use block to internal ToolCall.
+ * This converts 'input' → 'arguments' for internal use.
+ */
+export function fromApiToolUse(apiBlock: { id: string; name: string; input: Record<string, unknown> }): ToolCall {
+  return {
+    type: 'tool_use',
+    id: apiBlock.id,
+    name: apiBlock.name,
+    arguments: apiBlock.input,
+  };
+}
+
+/**
+ * Normalize tool input/arguments - handles both API ('input') and internal ('arguments') naming.
+ * Returns the arguments regardless of which field name was used.
+ */
+export function normalizeToolArguments(
+  block: { input?: Record<string, unknown>; arguments?: Record<string, unknown> }
+): Record<string, unknown> {
+  return block.input ?? block.arguments ?? {};
+}
+
+/**
+ * Normalize tool result ID - handles both API ('tool_use_id') and internal ('toolCallId') naming.
+ */
+export function normalizeToolResultId(
+  block: { tool_use_id?: string; toolCallId?: string }
+): string {
+  return block.tool_use_id ?? block.toolCallId ?? '';
+}
+
+/**
+ * Normalize error flag - handles both API ('is_error') and internal ('isError') naming.
+ */
+export function normalizeIsError(
+  block: { is_error?: boolean; isError?: boolean }
+): boolean {
+  return block.is_error ?? block.isError ?? false;
+}
+
+// =============================================================================
 // Token and Cost Tracking
 // =============================================================================
 
@@ -205,6 +290,25 @@ export function isImageContent(
 
 export function isThinkingContent(content: AssistantContent): content is ThinkingContent {
   return content.type === 'thinking';
+}
+
+export function isApiToolResultBlock(block: unknown): block is ApiToolResultBlock {
+  return (
+    typeof block === 'object' &&
+    block !== null &&
+    (block as ApiToolResultBlock).type === 'tool_result' &&
+    typeof (block as ApiToolResultBlock).tool_use_id === 'string'
+  );
+}
+
+export function isApiToolUseBlock(block: unknown): block is ApiToolUseBlock {
+  return (
+    typeof block === 'object' &&
+    block !== null &&
+    (block as ApiToolUseBlock).type === 'tool_use' &&
+    typeof (block as ApiToolUseBlock).id === 'string' &&
+    'input' in (block as ApiToolUseBlock)
+  );
 }
 
 // =============================================================================

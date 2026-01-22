@@ -32,7 +32,14 @@
  * turnManager.onAgentEnd();
  * ```
  */
-import { createLogger } from '@tron/core';
+import {
+  createLogger,
+  type TextContent,
+  type ThinkingContent,
+  type ApiToolUseBlock,
+  type ApiToolResultBlock,
+  type TokenUsage as CoreTokenUsage,
+} from '@tron/core';
 import {
   TurnContentTracker,
   type AccumulatedContent,
@@ -43,42 +50,43 @@ import {
 const logger = createLogger('turn-manager');
 
 // =============================================================================
-// Types
+// Types (re-exported from @tron/core with aliases for backward compatibility)
 // =============================================================================
 
-export interface TokenUsage {
-  inputTokens: number;
-  outputTokens: number;
-  cacheReadTokens?: number;
-  cacheCreationTokens?: number;
-}
+/**
+ * Token usage information.
+ * Re-exported from @tron/core for backward compatibility.
+ */
+export type TokenUsage = CoreTokenUsage;
 
-/** Content block for message.assistant */
-export interface TextContentBlock {
-  type: 'text';
-  text: string;
-}
+/**
+ * Text content block for message.assistant.
+ * Alias to TextContent from @tron/core.
+ */
+export type TextContentBlock = TextContent;
 
-export interface ThinkingContentBlock {
-  type: 'thinking';
-  thinking: string;
-  signature?: string; // Required by API when sending thinking back
-}
+/**
+ * Thinking content block for message.assistant.
+ * Alias to ThinkingContent from @tron/core.
+ */
+export type ThinkingContentBlock = ThinkingContent;
 
-export interface ToolUseContentBlock {
-  type: 'tool_use';
-  id: string;
-  name: string;
-  input: Record<string, unknown>;
-}
+/**
+ * Tool use content block in API format (uses 'input' not 'arguments').
+ * Alias to ApiToolUseBlock from @tron/core.
+ */
+export type ToolUseContentBlock = ApiToolUseBlock;
 
+/**
+ * Union of all assistant content block types.
+ */
 export type AssistantContentBlock = TextContentBlock | ThinkingContentBlock | ToolUseContentBlock;
 
-/** Tool result block */
-export interface ToolResultBlock {
-  type: 'tool_result';
-  tool_use_id: string;
-  content: string;
+/**
+ * Tool result block in API format.
+ * Extends ApiToolResultBlock to require is_error (not optional).
+ */
+export interface ToolResultBlock extends Omit<ApiToolResultBlock, 'is_error'> {
   is_error: boolean;
 }
 

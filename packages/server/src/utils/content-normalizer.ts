@@ -5,7 +5,12 @@
  * Handles tool_use, tool_result, text, and thinking block types with appropriate
  * truncation for large content.
  */
-import { createLogger } from '@tron/core';
+import {
+  createLogger,
+  normalizeToolArguments,
+  normalizeToolResultId,
+  normalizeIsError,
+} from '@tron/core';
 
 const logger = createLogger('content-normalizer');
 
@@ -59,17 +64,14 @@ export function normalizeContentBlock(block: unknown): Record<string, unknown> |
     case 'tool_use': {
       const toolName = typeof b.name === 'string' ? b.name : String(b.name ?? 'unknown');
 
-      // IMPORTANT: The Anthropic API uses 'input', but our internal ToolCall type uses 'arguments'
-      // We need to check for BOTH to handle both sources correctly
-      const rawInput = b.input ?? b.arguments;
-      const hasInputKey = 'input' in b;
-      const hasArgumentsKey = 'arguments' in b;
+      // Use core utility to handle both 'input' (API) and 'arguments' (internal) naming
+      const rawInput = normalizeToolArguments(b as { input?: Record<string, unknown>; arguments?: Record<string, unknown> });
 
       logger.debug('Normalizing tool_use block', {
         toolName,
         blockKeys: Object.keys(b),
-        hasInputKey,
-        hasArgumentsKey,
+        hasInputKey: 'input' in b,
+        hasArgumentsKey: 'arguments' in b,
         inputType: typeof rawInput,
         inputIsObject: rawInput !== null && typeof rawInput === 'object',
         inputKeys: rawInput && typeof rawInput === 'object' ? Object.keys(rawInput as object) : [],
@@ -77,8 +79,9 @@ export function normalizeContentBlock(block: unknown): Record<string, unknown> |
       });
 
       // Preserve the full input object with potential truncation for very large inputs
-      let input = rawInput;
-      if (input && typeof input === 'object') {
+      // normalizeToolArguments() always returns an object (never undefined/null)
+      let input: Record<string, unknown> = rawInput;
+      if (Object.keys(input).length > 0) {
         // Deep clone to avoid mutating original and ensure it serializes correctly
         try {
           const inputStr = JSON.stringify(input);
@@ -97,10 +100,9 @@ export function normalizeContentBlock(block: unknown): Record<string, unknown> |
           logger.warn('Failed to serialize tool input', { toolName, error: String(e) });
           input = { _serializationError: true };
         }
-      } else if (input === undefined || input === null) {
-        // Explicitly log when input is missing
-        logger.warn('Tool use block has no input', { toolName, hasInputKey, hasArgumentsKey });
-        input = {};
+      } else {
+        // Explicitly log when input is missing (empty object from normalizeToolArguments)
+        logger.warn('Tool use block has no input', { toolName });
       }
 
       const result = {
@@ -120,14 +122,11 @@ export function normalizeContentBlock(block: unknown): Record<string, unknown> |
     }
 
     case 'tool_result': {
-      // IMPORTANT: Anthropic API uses 'tool_use_id', but our internal ToolResultMessage uses 'toolCallId'
-      // We need to check for BOTH to handle both sources correctly
-      const toolUseId = typeof b.tool_use_id === 'string' ? b.tool_use_id :
-                        typeof b.toolCallId === 'string' ? b.toolCallId :
-                        String(b.tool_use_id ?? b.toolCallId ?? '');
+      // Use core utilities to handle both API and internal naming conventions
+      const toolUseId = normalizeToolResultId(b as { tool_use_id?: string; toolCallId?: string });
       const blockKeys = Object.keys(b);
       const rawContent = b.content;
-      const isError = b.is_error === true || b.isError === true;
+      const isError = normalizeIsError(b as { is_error?: boolean; isError?: boolean });
 
       logger.debug('Normalizing tool_result block', {
         toolUseId: toolUseId.slice(0, 20) + '...',

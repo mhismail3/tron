@@ -20,6 +20,9 @@ export type {
   Message,
   Context,
   Tool,
+  // API-format types for persistence and wire format
+  ApiToolUseBlock,
+  ApiToolResultBlock,
 } from './messages.js';
 
 export {
@@ -30,8 +33,16 @@ export {
   isTextContent,
   isImageContent,
   isThinkingContent,
+  isApiToolResultBlock,
+  isApiToolUseBlock,
   extractText,
   extractToolCalls,
+  // Conversion utilities for internal ↔ API format
+  toApiToolUse,
+  fromApiToolUse,
+  normalizeToolArguments,
+  normalizeToolResultId,
+  normalizeIsError,
 } from './messages.js';
 
 // Tools

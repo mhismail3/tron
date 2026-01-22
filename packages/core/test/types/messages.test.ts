@@ -19,6 +19,17 @@ import type {
   TokenUsage,
   Cost,
   StopReason,
+  ApiToolUseBlock,
+  ApiToolResultBlock,
+} from '../../src/types/messages.js';
+import {
+  toApiToolUse,
+  fromApiToolUse,
+  normalizeToolArguments,
+  normalizeToolResultId,
+  normalizeIsError,
+  isApiToolResultBlock,
+  isApiToolUseBlock,
 } from '../../src/types/messages.js';
 
 describe('Message Types', () => {
@@ -207,6 +218,224 @@ describe('Message Types', () => {
       expect(messages[0]?.role).toBe('user');
       expect(messages[1]?.role).toBe('assistant');
       expect(messages[2]?.role).toBe('toolResult');
+    });
+  });
+
+  describe('API Format Conversion Utilities', () => {
+    describe('toApiToolUse', () => {
+      it('should convert ToolCall to ApiToolUseBlock', () => {
+        const toolCall: ToolCall = {
+          type: 'tool_use',
+          id: 'call_123',
+          name: 'read_file',
+          arguments: { path: '/test.txt', encoding: 'utf-8' },
+        };
+
+        const apiBlock = toApiToolUse(toolCall);
+
+        expect(apiBlock.type).toBe('tool_use');
+        expect(apiBlock.id).toBe('call_123');
+        expect(apiBlock.name).toBe('read_file');
+        expect(apiBlock.input).toEqual({ path: '/test.txt', encoding: 'utf-8' });
+        // Verify 'arguments' is not present (should be 'input')
+        expect('arguments' in apiBlock).toBe(false);
+      });
+
+      it('should handle empty arguments', () => {
+        const toolCall: ToolCall = {
+          type: 'tool_use',
+          id: 'call_456',
+          name: 'list_files',
+          arguments: {},
+        };
+
+        const apiBlock = toApiToolUse(toolCall);
+
+        expect(apiBlock.input).toEqual({});
+      });
+    });
+
+    describe('fromApiToolUse', () => {
+      it('should convert ApiToolUseBlock to ToolCall', () => {
+        const apiBlock = {
+          id: 'call_789',
+          name: 'write_file',
+          input: { path: '/output.txt', content: 'Hello' },
+        };
+
+        const toolCall = fromApiToolUse(apiBlock);
+
+        expect(toolCall.type).toBe('tool_use');
+        expect(toolCall.id).toBe('call_789');
+        expect(toolCall.name).toBe('write_file');
+        expect(toolCall.arguments).toEqual({ path: '/output.txt', content: 'Hello' });
+        // Verify 'input' is not present (should be 'arguments')
+        expect('input' in toolCall).toBe(false);
+      });
+    });
+
+    describe('normalizeToolArguments', () => {
+      it('should return input when present', () => {
+        const args = normalizeToolArguments({ input: { foo: 'bar' } });
+        expect(args).toEqual({ foo: 'bar' });
+      });
+
+      it('should return arguments when input is missing', () => {
+        const args = normalizeToolArguments({ arguments: { baz: 'qux' } });
+        expect(args).toEqual({ baz: 'qux' });
+      });
+
+      it('should prefer input over arguments', () => {
+        const args = normalizeToolArguments({
+          input: { fromInput: true },
+          arguments: { fromArgs: true },
+        });
+        expect(args).toEqual({ fromInput: true });
+      });
+
+      it('should return empty object when neither present', () => {
+        const args = normalizeToolArguments({});
+        expect(args).toEqual({});
+      });
+    });
+
+    describe('normalizeToolResultId', () => {
+      it('should return tool_use_id when present', () => {
+        const id = normalizeToolResultId({ tool_use_id: 'api_id' });
+        expect(id).toBe('api_id');
+      });
+
+      it('should return toolCallId when tool_use_id is missing', () => {
+        const id = normalizeToolResultId({ toolCallId: 'internal_id' });
+        expect(id).toBe('internal_id');
+      });
+
+      it('should prefer tool_use_id over toolCallId', () => {
+        const id = normalizeToolResultId({
+          tool_use_id: 'api_id',
+          toolCallId: 'internal_id',
+        });
+        expect(id).toBe('api_id');
+      });
+
+      it('should return empty string when neither present', () => {
+        const id = normalizeToolResultId({});
+        expect(id).toBe('');
+      });
+    });
+
+    describe('normalizeIsError', () => {
+      it('should return is_error when present', () => {
+        expect(normalizeIsError({ is_error: true })).toBe(true);
+        expect(normalizeIsError({ is_error: false })).toBe(false);
+      });
+
+      it('should return isError when is_error is missing', () => {
+        expect(normalizeIsError({ isError: true })).toBe(true);
+        expect(normalizeIsError({ isError: false })).toBe(false);
+      });
+
+      it('should prefer is_error over isError', () => {
+        expect(normalizeIsError({ is_error: true, isError: false })).toBe(true);
+        expect(normalizeIsError({ is_error: false, isError: true })).toBe(false);
+      });
+
+      it('should return false when neither present', () => {
+        expect(normalizeIsError({})).toBe(false);
+      });
+    });
+  });
+
+  describe('API Format Type Guards', () => {
+    describe('isApiToolResultBlock', () => {
+      it('should return true for valid ApiToolResultBlock', () => {
+        const block: ApiToolResultBlock = {
+          type: 'tool_result',
+          tool_use_id: 'call_123',
+          content: 'result content',
+        };
+
+        expect(isApiToolResultBlock(block)).toBe(true);
+      });
+
+      it('should return true when is_error is present', () => {
+        const block = {
+          type: 'tool_result',
+          tool_use_id: 'call_123',
+          content: 'error message',
+          is_error: true,
+        };
+
+        expect(isApiToolResultBlock(block)).toBe(true);
+      });
+
+      it('should return false for non-object', () => {
+        expect(isApiToolResultBlock(null)).toBe(false);
+        expect(isApiToolResultBlock('string')).toBe(false);
+        expect(isApiToolResultBlock(123)).toBe(false);
+      });
+
+      it('should return false for wrong type', () => {
+        expect(isApiToolResultBlock({ type: 'text', text: 'foo' })).toBe(false);
+        expect(isApiToolResultBlock({ type: 'tool_use', id: '1', name: 'test', input: {} })).toBe(false);
+      });
+
+      it('should return false when tool_use_id is missing', () => {
+        expect(isApiToolResultBlock({ type: 'tool_result', content: 'test' })).toBe(false);
+      });
+    });
+
+    describe('isApiToolUseBlock', () => {
+      it('should return true for valid ApiToolUseBlock', () => {
+        const block: ApiToolUseBlock = {
+          type: 'tool_use',
+          id: 'call_123',
+          name: 'test_tool',
+          input: { arg: 'value' },
+        };
+
+        expect(isApiToolUseBlock(block)).toBe(true);
+      });
+
+      it('should return true for empty input', () => {
+        const block = {
+          type: 'tool_use',
+          id: 'call_456',
+          name: 'no_args_tool',
+          input: {},
+        };
+
+        expect(isApiToolUseBlock(block)).toBe(true);
+      });
+
+      it('should return false for non-object', () => {
+        expect(isApiToolUseBlock(null)).toBe(false);
+        expect(isApiToolUseBlock('string')).toBe(false);
+      });
+
+      it('should return false for wrong type', () => {
+        expect(isApiToolUseBlock({ type: 'text', text: 'foo' })).toBe(false);
+        expect(isApiToolUseBlock({ type: 'tool_result', tool_use_id: '1', content: '' })).toBe(false);
+      });
+
+      it('should return false when id is missing', () => {
+        expect(isApiToolUseBlock({ type: 'tool_use', name: 'test', input: {} })).toBe(false);
+      });
+
+      it('should return false when input is missing', () => {
+        expect(isApiToolUseBlock({ type: 'tool_use', id: '1', name: 'test' })).toBe(false);
+      });
+
+      it('should return false for internal format with arguments instead of input', () => {
+        const internalFormat = {
+          type: 'tool_use',
+          id: 'call_123',
+          name: 'test_tool',
+          arguments: { arg: 'value' },
+        };
+
+        expect(isApiToolUseBlock(internalFormat)).toBe(false);
+      });
     });
   });
 });
