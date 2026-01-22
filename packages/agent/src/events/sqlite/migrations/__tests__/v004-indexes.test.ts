@@ -4,7 +4,7 @@
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import Database from 'better-sqlite3';
-import { runMigrations } from '../../../../src/events/sqlite/migrations/index.js';
+import { runMigrations } from '../index.js';
 
 describe('v004 migration - indexes', () => {
   let db: Database.Database;

@@ -3,7 +3,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { BrowserService } from '../../src/external/browser/browser-service.js';
+import { BrowserService } from './browser-service.js';
 
 // Create mock objects
 const mockLocator = {

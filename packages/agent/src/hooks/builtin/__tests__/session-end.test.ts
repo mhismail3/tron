@@ -5,7 +5,7 @@ import { describe, it, expect } from 'vitest';
 import {
   createSessionEndHook,
   type SessionEndContext,
-} from '../../../src/hooks/builtin/session-end.js';
+} from '../session-end.js';
 
 describe('SessionEnd Hook', () => {
   const createContext = (overrides: Partial<SessionEndContext> = {}): SessionEndContext => ({

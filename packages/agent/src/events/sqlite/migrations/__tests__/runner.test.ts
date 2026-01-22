@@ -4,8 +4,8 @@
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import Database from 'better-sqlite3';
-import { MigrationRunner, createMigrationRunner } from '../../../../src/events/sqlite/migrations/runner.js';
-import type { Migration } from '../../../../src/events/sqlite/migrations/types.js';
+import { MigrationRunner, createMigrationRunner } from '../runner.js';
+import type { Migration } from '../types.js';
 
 describe('MigrationRunner', () => {
   let db: Database.Database;

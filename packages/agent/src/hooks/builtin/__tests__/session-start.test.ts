@@ -2,8 +2,8 @@
  * @fileoverview Tests for SessionStart built-in hook
  */
 import { describe, it, expect } from 'vitest';
-import { createSessionStartHook } from '../../../src/hooks/builtin/session-start.js';
-import type { SessionStartHookContext } from '../../../src/hooks/types.js';
+import { createSessionStartHook } from '../session-start.js';
+import type { SessionStartHookContext } from '../../types.js';
 
 describe('SessionStart Hook', () => {
   const createContext = (overrides: Partial<SessionStartHookContext> = {}): SessionStartHookContext => ({
