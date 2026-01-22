@@ -799,10 +799,11 @@ class EventDatabase: ObservableObject {
     ///   - previewOnly: If true, only returns preview data (for listing). If false, loads full content.
     /// - Returns: Array of ThinkingBlock objects for UI display
     func getThinkingEvents(sessionId: String, previewOnly: Bool = true) throws -> [ThinkingBlock] {
+        // Query message.assistant events which contain thinking in content blocks
         let sql = """
             SELECT id, parent_id, session_id, workspace_id, type, timestamp, sequence, payload
             FROM events
-            WHERE session_id = ? AND type = 'stream.thinking_complete'
+            WHERE session_id = ? AND type = 'message.assistant'
             ORDER BY sequence ASC
         """
 
@@ -818,31 +819,113 @@ class EventDatabase: ObservableObject {
         while sqlite3_step(stmt) == SQLITE_ROW {
             do {
                 let event = try parseEventRow(stmt)
-                let payload = ThinkingCompletePayload(from: event.payload)
-                let block = ThinkingBlock(from: payload, eventId: event.id)
-                blocks.append(block)
+
+                // Extract thinking from content blocks
+                guard let contentArray = event.payload["content"]?.value as? [[String: Any]] else {
+                    continue
+                }
+
+                // Find thinking block in content array
+                for (blockIndex, block) in contentArray.enumerated() {
+                    guard let blockType = block["type"] as? String,
+                          blockType == "thinking",
+                          let thinkingText = block["thinking"] as? String,
+                          !thinkingText.isEmpty else {
+                        continue
+                    }
+
+                    // Extract turn number from payload
+                    let turnNumber = event.payload["turn"]?.value as? Int ?? 1
+
+                    // Create preview (first 3 lines, max 120 chars)
+                    let preview = extractThinkingPreview(from: thinkingText)
+
+                    // Create block with composite ID (eventId:blockIndex) for lazy loading
+                    let thinkingBlock = ThinkingBlock(
+                        eventId: "\(event.id):\(blockIndex)",
+                        turnNumber: turnNumber,
+                        preview: preview,
+                        characterCount: thinkingText.count,
+                        model: event.payload["model"]?.value as? String,
+                        timestamp: ISO8601DateFormatter().date(from: event.timestamp) ?? Date()
+                    )
+                    blocks.append(thinkingBlock)
+                }
             } catch {
-                logger.warning("Failed to parse thinking event: \(error.localizedDescription)", category: .session)
+                logger.warning("Failed to parse assistant message for thinking: \(error.localizedDescription)", category: .session)
             }
         }
 
         return blocks
     }
 
+    /// Extract preview (first 3 lines) from thinking content
+    private func extractThinkingPreview(from content: String, maxLines: Int = 3) -> String {
+        let lines = content.components(separatedBy: .newlines)
+            .filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
+            .prefix(maxLines)
+        let preview = lines.joined(separator: " ")
+        if preview.count > 120 {
+            return String(preview.prefix(117)) + "..."
+        }
+        return preview
+    }
+
     /// Get full thinking content for a specific event ID (for lazy loading in sheet)
-    /// - Parameter eventId: The event ID to load full content from
+    /// - Parameter eventId: Composite ID in format "eventId:blockIndex" or plain event ID
     /// - Returns: The full thinking content string, or nil if not found
     func getThinkingContent(eventId: String) throws -> String? {
-        guard let event = try getEvent(eventId) else {
+        // Parse composite ID format: "eventId:blockIndex"
+        let components = eventId.split(separator: ":")
+        let actualEventId: String
+        let blockIndex: Int
+
+        if components.count >= 2,
+           let lastComponent = components.last,
+           let index = Int(lastComponent) {
+            // Composite ID: everything except last component is the event ID
+            actualEventId = components.dropLast().joined(separator: ":")
+            blockIndex = index
+        } else {
+            // Plain event ID (legacy format)
+            actualEventId = eventId
+            blockIndex = 0
+        }
+
+        guard let event = try getEvent(actualEventId) else {
             return nil
         }
 
-        guard event.type == "stream.thinking_complete" else {
-            logger.warning("Event \(eventId) is not a thinking_complete event (type: \(event.type))", category: .session)
+        // Handle message.assistant events with thinking in content blocks
+        if event.type == "message.assistant" {
+            guard let contentArray = event.payload["content"]?.value as? [[String: Any]] else {
+                return nil
+            }
+
+            // Find thinking block at the specified index
+            var thinkingIndex = 0
+            for block in contentArray {
+                guard let blockType = block["type"] as? String,
+                      blockType == "thinking",
+                      let thinkingText = block["thinking"] as? String else {
+                    continue
+                }
+
+                if thinkingIndex == blockIndex {
+                    return thinkingText
+                }
+                thinkingIndex += 1
+            }
             return nil
         }
 
-        return event.payload.string("content")
+        // Legacy: stream.thinking_complete events
+        if event.type == "stream.thinking_complete" {
+            return event.payload.string("content")
+        }
+
+        logger.warning("Event \(eventId) does not contain thinking content (type: \(event.type))", category: .session)
+        return nil
     }
 
     // MARK: - Tree Visualization

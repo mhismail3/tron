@@ -609,6 +609,9 @@ struct ChatView: View {
                                     onAskUserQuestionTap: { data in
                                         viewModel.openAskUserQuestionSheet(for: data)
                                     },
+                                    onThinkingTap: {
+                                        viewModel.thinkingState.showSheet = true
+                                    },
                                     onCompactionTap: { tokensBefore, tokensAfter, reason, summary in
                                         compactionDetailData = (tokensBefore, tokensAfter, reason, summary)
                                         showCompactionDetail = true

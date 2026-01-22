@@ -5,12 +5,14 @@ import SwiftUI
 struct ThinkingContentView: View {
     let content: String
     let isExpanded: Bool
+    var onTap: (() -> Void)?
 
     @State private var expanded: Bool
 
-    init(content: String, isExpanded: Bool) {
+    init(content: String, isExpanded: Bool, onTap: (() -> Void)? = nil) {
         self.content = content
         self.isExpanded = isExpanded
+        self.onTap = onTap
         self._expanded = State(initialValue: isExpanded)
     }
 
@@ -71,7 +73,11 @@ struct ThinkingContentView: View {
         )
         .contentShape(Rectangle())
         .onTapGesture {
-            if hasMoreContent {
+            // If there's an onTap handler (for opening sheet), use that
+            if let onTap = onTap {
+                onTap()
+            } else if hasMoreContent {
+                // Fallback to inline expansion
                 withAnimation(.tronStandard) {
                     expanded.toggle()
                 }
