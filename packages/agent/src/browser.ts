@@ -110,4 +110,4 @@ export {
 } from './providers/models.js';
 
 // Re-export feature flags types
-export type { FeatureFlags } from './features/index.js';
+export type { FeatureFlags } from './settings/feature-flags.js';

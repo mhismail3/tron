@@ -3,6 +3,7 @@
  *
  * Centralized configuration system for Tron.
  * Settings are loaded from ~/.tron/settings.json with sensible defaults.
+ * Also includes feature flags system for controlling availability of features.
  *
  * @example
  * ```typescript
@@ -16,6 +17,9 @@
  * const timeout = getSetting<number>('tools.bash.defaultTimeoutMs');
  * ```
  */
+
+// Re-export feature flags
+export * from './feature-flags.js';
 
 // Re-export types
 export type {
