@@ -43,7 +43,7 @@ struct ChatView: View {
     @EnvironmentObject var eventStoreManager: EventStoreManager
     @StateObject private var viewModel: ChatViewModel
     @StateObject private var inputHistory = InputHistoryStore()
-    @State private var scrollProxy: ScrollViewProxy?
+    @StateObject private var scrollCoordinator = ScrollStateCoordinator()
     @State private var showContextAudit = false
     @State private var showSessionHistory = false
     /// Cached models for model picker menu
@@ -70,16 +70,9 @@ struct ChatView: View {
     /// UserDefaults key for storing reasoning level per session
     private var reasoningLevelKey: String { "tron.reasoningLevel.\(sessionId)" }
 
-    // MARK: - Smart Auto-Scroll State
-    /// Whether to auto-scroll to bottom on new content
-    /// Set to false when user scrolls up, true when they tap button or send message
-    @State private var autoScrollEnabled = true
-    /// Track if there's new content while user is scrolled up
-    @State private var hasUnreadContent = false
-    /// Grace period after explicit user actions (button tap, send) to prevent gesture detection
-    @State private var autoScrollGraceUntil: Date = .distantPast
-    /// Track the last known bottom distance to detect when user scrolls back to bottom
-    @State private var lastBottomDistance: CGFloat = 0
+    // MARK: - Legacy Scroll State (for ScrollViewProxy compatibility)
+    /// Scroll proxy for ScrollViewReader-based scrolling during transition to ScrollPosition
+    @State private var scrollProxy: ScrollViewProxy?
 
     // MARK: - Entry Morph Animation (from left)
     @State private var showEntryContent = false
@@ -136,11 +129,18 @@ struct ChatView: View {
                         selectedImages: $viewModel.selectedImages,
                         onSend: {
                             inputHistory.addToHistory(viewModel.inputText)
-                            // Reset auto-scroll when user sends a message
-                            autoScrollEnabled = true
-                            hasUnreadContent = false
-                            // Grace period to prevent gesture detection during initial scroll animation
-                            autoScrollGraceUntil = Date().addingTimeInterval(0.8)
+                            // Notify coordinator that user is sending a message
+                            scrollCoordinator.userSentMessage()
+
+                            // CRITICAL: Dismiss keyboard BEFORE processing starts
+                            // This ensures safe area insets update correctly before TextField is disabled
+                            // If we wait until after isProcessing=true, the disabled TextField
+                            // doesn't properly trigger keyboard dismiss animations
+                            UIApplication.shared.sendAction(
+                                #selector(UIResponder.resignFirstResponder),
+                                to: nil, from: nil, for: nil
+                            )
+
                             // Pass selected skills and clear them after sending
                             let skillsToSend = selectedSkills
                             selectedSkills = []
@@ -148,7 +148,6 @@ struct ChatView: View {
                                 reasoningLevel: currentModelInfo?.supportsReasoning == true ? reasoningLevel : nil,
                                 skills: skillsToSend.isEmpty ? nil : skillsToSend
                             )
-                            // Note: Keyboard dismissal is handled in InputBar via isProcessing onChange
                         },
                         onAbort: viewModel.abortAgent,
                         onMicTap: viewModel.toggleRecording,
@@ -581,9 +580,6 @@ struct ChatView: View {
 
     // MARK: - Messages Scroll View
 
-    /// Distance to consider "at bottom" for re-enabling auto-scroll when processing ends
-    private let atBottomThreshold: CGFloat = 50
-
     private var messagesScrollView: some View {
         GeometryReader { containerGeo in
             let containerHeight = containerGeo.size.height
@@ -680,48 +676,46 @@ struct ChatView: View {
                     .defaultScrollAnchor(.bottom)  // Start at bottom - no visible scroll on load
                     .coordinateSpace(name: "scrollContainer")
                     .scrollDismissesKeyboard(.interactively)
-                    // Track distance from bottom to re-enable auto-scroll when user scrolls back
+                    // Track distance from bottom via coordinator
                     .onPreferenceChange(ScrollOffsetPreferenceKey.self) { distanceFromBottom in
                         // Don't process scroll position during initial load
                         guard initialLoadComplete else { return }
-
-                        lastBottomDistance = distanceFromBottom
-
-                        // Re-enable auto-scroll ONLY when:
-                        // 1. User has scrolled back to bottom (or very close)
-                        // 2. NOT currently processing (to prevent snap-back during streaming)
-                        // During processing, only the button can re-enable
-                        if !viewModel.isProcessing && distanceFromBottom > -atBottomThreshold && !autoScrollEnabled {
-                            logger.verbose("User scrolled to bottom - re-enabling auto-scroll", category: .ui)
-                            autoScrollEnabled = true
-                            hasUnreadContent = false
-                        }
+                        scrollCoordinator.userScrolled(distanceFromBottom: distanceFromBottom, isProcessing: viewModel.isProcessing)
                     }
                     .onAppear {
                         scrollProxy = proxy
                     }
+                    // Consolidated onChange handlers via ScrollStateCoordinator
                     .onChange(of: viewModel.messages.count) { oldCount, newCount in
                         // Don't auto-scroll during initial load - defaultScrollAnchor handles it
                         guard initialLoadComplete else { return }
+                        guard newCount != oldCount else { return }
 
-                        if autoScrollEnabled {
-                            withAnimation(.tronFast) {
-                                proxy.scrollTo("bottom", anchor: .bottom)
+                        // Determine mutation type based on whether we're loading history
+                        if viewModel.isLoadingMoreMessages {
+                            scrollCoordinator.didMutateContent(.prependHistory)
+                        } else {
+                            // Use proxy for scrolling since ScrollPosition bidirectional binding
+                            // doesn't work well with LazyVStack in iOS 17
+                            scrollCoordinator.didMutateContent(.appendNew)
+                            if scrollCoordinator.autoScrollEnabled {
+                                withAnimation(.tronFast) {
+                                    proxy.scrollTo("bottom", anchor: .bottom)
+                                }
                             }
-                        } else if newCount > oldCount {
-                            hasUnreadContent = true
                         }
                     }
                     .onChange(of: viewModel.messages.last?.content) { _, _ in
                         // Don't auto-scroll during initial load - defaultScrollAnchor handles it
                         guard initialLoadComplete else { return }
 
-                        // Only auto-scroll during streaming if user hasn't scrolled up
-                        if autoScrollEnabled {
-                            proxy.scrollTo("bottom", anchor: .bottom)
-                        } else if viewModel.isProcessing {
-                            // New content while scrolled up during processing
-                            hasUnreadContent = true
+                        // Streaming content update
+                        if viewModel.isProcessing {
+                            if scrollCoordinator.autoScrollEnabled {
+                                proxy.scrollTo("bottom", anchor: .bottom)
+                            } else {
+                                scrollCoordinator.didMutateContent(.updateExisting)
+                            }
                         }
                     }
                     .onChange(of: viewModel.isProcessing) { wasProcessing, isProcessing in
@@ -729,29 +723,26 @@ struct ChatView: View {
                         guard initialLoadComplete else { return }
 
                         if wasProcessing && !isProcessing {
-                            // Processing ended
-                            if autoScrollEnabled {
-                                // Was following - ensure at bottom
+                            // Processing ended - notify coordinator
+                            scrollCoordinator.processingEnded()
+                            if scrollCoordinator.autoScrollEnabled {
                                 withAnimation(.tronFast) {
                                     proxy.scrollTo("bottom", anchor: .bottom)
                                 }
                             }
-                            // Clear unread content when processing ends
-                            // (user will see the final state regardless of position)
-                            hasUnreadContent = false
                         }
                     }
                 }
 
                 // Floating "New Messages" button - show when user has scrolled up during streaming
-                if !autoScrollEnabled && hasUnreadContent {
+                if scrollCoordinator.shouldShowScrollToBottomButton {
                     scrollToBottomButton
                         .transition(.asymmetric(
                             insertion: .opacity.combined(with: .scale(scale: 0.8)).combined(with: .move(edge: .bottom)),
                             removal: .opacity.combined(with: .scale(scale: 0.9))
                         ))
                         .padding(.bottom, 16)
-                        .animation(.tronStandard, value: hasUnreadContent)
+                        .animation(.tronStandard, value: scrollCoordinator.hasUnreadContent)
                 }
 
             }
@@ -762,12 +753,9 @@ struct ChatView: View {
 
     private var scrollToBottomButton: some View {
         Button {
-            // Re-enable auto-scroll first so the scroll animation isn't blocked
-            autoScrollEnabled = true
-            hasUnreadContent = false
-            // Grace period to prevent gesture detection during scroll animation
-            autoScrollGraceUntil = Date().addingTimeInterval(0.8)
-
+            // Use coordinator for state management
+            scrollCoordinator.userTappedScrollToBottom()
+            // Also scroll via proxy for reliability
             withAnimation(.tronStandard) {
                 scrollProxy?.scrollTo("bottom", anchor: .bottom)
             }
@@ -775,13 +763,13 @@ struct ChatView: View {
             HStack(spacing: 6) {
                 Image(systemName: "arrow.down")
                     .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
-                if hasUnreadContent {
+                if scrollCoordinator.hasUnreadContent {
                     Text("New content")
                         .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
                 }
             }
             .foregroundStyle(.white)
-            .padding(.horizontal, hasUnreadContent ? 14 : 10)
+            .padding(.horizontal, scrollCoordinator.hasUnreadContent ? 14 : 10)
             .padding(.vertical, 10)
             .background(.tronEmerald.opacity(0.9))
             .clipShape(Capsule())
@@ -793,6 +781,8 @@ struct ChatView: View {
 
     private var loadMoreButton: some View {
         Button {
+            // Notify coordinator before prepending history
+            scrollCoordinator.willMutateContent(.prependHistory, firstVisibleId: viewModel.messages.first?.id)
             viewModel.loadMoreMessages()
         } label: {
             HStack(spacing: 8) {

@@ -219,7 +219,18 @@ struct InputBar: View {
         }
         .animation(nil, value: isFocused)
         .onChange(of: isProcessing) { wasProcessing, isNowProcessing in
-            if wasProcessing && !isNowProcessing {
+            if !wasProcessing && isNowProcessing {
+                // Processing started - dismiss keyboard IMMEDIATELY using both methods
+                // 1. SwiftUI FocusState - updates focus binding
+                isFocused = false
+                // 2. UIKit endEditing - ensures keyboard frame updates for safe area calculations
+                // This is critical for Menu positioning after keyboard dismiss
+                UIApplication.shared.sendAction(
+                    #selector(UIResponder.resignFirstResponder),
+                    to: nil, from: nil, for: nil
+                )
+            } else if wasProcessing && !isNowProcessing {
+                // Processing ended - ensure keyboard stays dismissed and block refocus briefly
                 isFocused = false
                 blockFocusUntil = Date().addingTimeInterval(0.5)
             }

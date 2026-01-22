@@ -204,15 +204,23 @@ struct GlassAttachmentButton: View {
     @Binding var showSkillMentionPopup: Bool
     @Binding var skillMentionQuery: String
 
+    // Keyboard observer to prevent Menu opening during keyboard animation
+    @ObservedObject private var keyboardObserver = KeyboardObserver.shared
+
+    /// Disable Menu during keyboard animation to prevent mispositioned popups
+    private var isMenuDisabled: Bool {
+        isProcessing || keyboardObserver.isAnimating
+    }
+
     var body: some View {
         // Separate visual (glass button) from interaction (invisible Menu overlay)
         // This avoids the iOS 26 Menu + glassEffect transition bug
         Image(systemName: "plus")
             .font(TronTypography.buttonSM)
-            .foregroundStyle(isProcessing ? Color.tronEmerald.opacity(0.3) : Color.tronEmerald)
+            .foregroundStyle(isMenuDisabled ? Color.tronEmerald.opacity(0.3) : Color.tronEmerald)
             .frame(width: buttonSize, height: buttonSize)
             .glassEffect(.regular.tint(Color.tronPhthaloGreen.opacity(0.35)).interactive(), in: .circle)
-            .opacity(isProcessing ? 0.5 : 1.0)
+            .opacity(isMenuDisabled ? 0.5 : 1.0)
             .overlay {
                 // Invisible Menu overlay handles interaction only
                 Menu {
@@ -244,7 +252,7 @@ struct GlassAttachmentButton: View {
                         .frame(width: buttonSize, height: buttonSize)
                         .contentShape(Circle())
                 }
-                .disabled(isProcessing)
+                .disabled(isMenuDisabled)
             }
         .onReceive(NotificationCenter.default.publisher(for: .attachmentMenuAction)) { notification in
             guard let action = notification.object as? String else { return }
