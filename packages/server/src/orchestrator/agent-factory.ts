@@ -29,6 +29,7 @@ import {
   TodoWriteTool,
   NotifyAppTool,
   detectProviderFromModel,
+  getModelCapabilities,
   type AgentConfig,
   type TronTool,
   type SessionId,
@@ -252,6 +253,14 @@ export class AgentFactory {
     // Normalize auth to UnifiedAuth format for provider factory
     const normalizedAuth = normalizeToUnifiedAuth(auth);
 
+    // Check model capabilities for thinking support
+    const capabilities = getModelCapabilities(providerType, model);
+    const enableThinking = capabilities.supportsThinking;
+
+    if (enableThinking) {
+      logger.info('Enabling thinking for model', { model, providerType });
+    }
+
     const agentConfig: AgentConfig = {
       provider: {
         model,
@@ -261,6 +270,7 @@ export class AgentFactory {
       tools,
       systemPrompt: prompt,
       maxTurns: 50,
+      enableThinking,
     };
 
     const agent = new TronAgent(agentConfig, {

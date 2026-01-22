@@ -97,6 +97,7 @@ export interface StreamResult {
   message: AssistantMessage;
   toolCalls: ToolCall[];
   accumulatedText: string;
+  accumulatedThinking?: string;
   stopReason?: string;
 }
 
@@ -105,6 +106,7 @@ export interface StreamResult {
  */
 export interface StreamProcessorCallbacks {
   onTextDelta?: (delta: string) => void;
+  onThinkingDelta?: (delta: string) => void;
   onToolCallEnd?: (toolCall: ToolCall) => void;
   onRetry?: (event: StreamEvent & { type: 'retry' }) => void;
 }

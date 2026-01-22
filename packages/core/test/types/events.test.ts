@@ -203,5 +203,65 @@ describe('Event Types', () => {
         expect(event.timestamp).toBeDefined();
       });
     });
+
+    describe('Thinking events (agent-level)', () => {
+      it('should define thinking_start event with session context', () => {
+        const event: TronEvent = {
+          type: 'thinking_start',
+          sessionId: 'sess_123',
+          timestamp: new Date().toISOString(),
+        };
+
+        expect(event.type).toBe('thinking_start');
+        expect(event.sessionId).toBe('sess_123');
+        expect(event.timestamp).toBeDefined();
+      });
+
+      it('should define thinking_delta event with delta content', () => {
+        const event: TronEvent = {
+          type: 'thinking_delta',
+          sessionId: 'sess_123',
+          timestamp: new Date().toISOString(),
+          delta: 'Let me analyze this...',
+        };
+
+        expect(event.type).toBe('thinking_delta');
+        expect((event as { delta: string }).delta).toBe('Let me analyze this...');
+      });
+
+      it('should define thinking_end event with full thinking content', () => {
+        const event: TronEvent = {
+          type: 'thinking_end',
+          sessionId: 'sess_123',
+          timestamp: new Date().toISOString(),
+          thinking: 'Complete chain of thought reasoning',
+        };
+
+        expect(event.type).toBe('thinking_end');
+        expect((event as { thinking: string }).thinking).toBe('Complete chain of thought reasoning');
+      });
+
+      it('should distinguish Tron thinking events from stream thinking events', () => {
+        // Stream events are simpler, no sessionId/timestamp
+        const streamThinkingDelta: StreamEvent = {
+          type: 'thinking_delta',
+          delta: 'Stream level delta',
+        };
+
+        // Tron events have sessionId and timestamp
+        const tronThinkingDelta: TronEvent = {
+          type: 'thinking_delta',
+          sessionId: 'sess_123',
+          timestamp: new Date().toISOString(),
+          delta: 'Agent level delta',
+        };
+
+        expect(streamThinkingDelta.type).toBe('thinking_delta');
+        expect('sessionId' in streamThinkingDelta).toBe(false);
+
+        expect(tronThinkingDelta.type).toBe('thinking_delta');
+        expect(tronThinkingDelta.sessionId).toBe('sess_123');
+      });
+    });
   });
 });

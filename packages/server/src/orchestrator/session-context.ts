@@ -58,6 +58,7 @@ import {
   createTurnManager,
   type TokenUsage,
   type EndTurnResult,
+  type AssistantContentBlock,
 } from './turn-manager.js';
 import {
   PlanModeHandler,
@@ -301,6 +302,14 @@ export class SessionContext {
   }
 
   /**
+   * Add a thinking delta.
+   * Thinking content is accumulated separately and prepended to the message.
+   */
+  addThinkingDelta(thinking: string): void {
+    this.turnManager.addThinkingDelta(thinking);
+  }
+
+  /**
    * Register ALL tool intents from tool_use_batch event.
    * Called BEFORE any tool execution starts to enable linear event ordering.
    */
@@ -364,7 +373,7 @@ export class SessionContext {
    * Flush accumulated content BEFORE first tool execution.
    * Returns content blocks or null if nothing to flush.
    */
-  flushPreToolContent(): Array<{ type: 'text'; text: string } | { type: 'tool_use'; id: string; name: string; input: Record<string, unknown> }> | null {
+  flushPreToolContent(): AssistantContentBlock[] | null {
     return this.turnManager.flushPreToolContent();
   }
 

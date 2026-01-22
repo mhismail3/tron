@@ -59,6 +59,11 @@ export interface TextContentBlock {
   text: string;
 }
 
+export interface ThinkingContentBlock {
+  type: 'thinking';
+  thinking: string;
+}
+
 export interface ToolUseContentBlock {
   type: 'tool_use';
   id: string;
@@ -66,7 +71,7 @@ export interface ToolUseContentBlock {
   input: Record<string, unknown>;
 }
 
-export type AssistantContentBlock = TextContentBlock | ToolUseContentBlock;
+export type AssistantContentBlock = TextContentBlock | ThinkingContentBlock | ToolUseContentBlock;
 
 /** Tool result block */
 export interface ToolResultBlock {
@@ -166,6 +171,14 @@ export class TurnManager {
    */
   addTextDelta(text: string): void {
     this.tracker.addTextDelta(text);
+  }
+
+  /**
+   * Add a thinking delta to the current turn.
+   * Thinking content is accumulated separately and prepended to the message.
+   */
+  addThinkingDelta(thinking: string): void {
+    this.tracker.addThinkingDelta(thinking);
   }
 
   /**
@@ -310,10 +323,19 @@ export class TurnManager {
     const content: AssistantContentBlock[] = [];
     const toolResults: ToolResultBlock[] = [];
 
+    // Thinking content comes first (Anthropic API convention)
+    // This ensures proper ordering in persisted message.assistant events
+    if (turnContent.thinking) {
+      content.push({ type: 'thinking', thinking: turnContent.thinking });
+    }
+
     // Build content from sequence to preserve interleaving
     for (const item of turnContent.sequence) {
       if (item.type === 'text' && item.text) {
         content.push({ type: 'text', text: item.text });
+      } else if (item.type === 'thinking' && item.thinking) {
+        // Thinking from sequence (shouldn't happen with current design, but handle it)
+        content.push({ type: 'thinking', thinking: item.thinking });
       } else if (item.type === 'tool_ref') {
         const toolCall = turnContent.toolCalls.get(item.toolCallId);
         if (toolCall) {

@@ -477,6 +477,34 @@ export type InstagramEvent =
   | InstagramProductDiscoveredEvent
   | InstagramAnalyticsUpdateEvent;
 
+// =============================================================================
+// Tron Thinking Events (agent-level with session context)
+// Note: These are different from StreamEvent thinking types which are simpler
+// =============================================================================
+
+/**
+ * Tron thinking started event (agent-level)
+ */
+export interface TronThinkingStartEvent extends BaseTronEvent {
+  type: 'thinking_start';
+}
+
+/**
+ * Tron thinking delta event (agent-level)
+ */
+export interface TronThinkingDeltaEvent extends BaseTronEvent {
+  type: 'thinking_delta';
+  delta: string;
+}
+
+/**
+ * Tron thinking ended event (agent-level)
+ */
+export interface TronThinkingEndEvent extends BaseTronEvent {
+  type: 'thinking_end';
+  thinking: string;
+}
+
 /**
  * Union of all Tron agent events
  */
@@ -501,7 +529,10 @@ export type TronEvent =
   | CompactionCompleteEvent
   | TronErrorEvent
   | TronRetryEvent
-  | InstagramEvent;
+  | InstagramEvent
+  | TronThinkingStartEvent
+  | TronThinkingDeltaEvent
+  | TronThinkingEndEvent;
 
 /**
  * All Tron event types as a union

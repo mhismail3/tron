@@ -30,9 +30,10 @@ const logger = createLogger('turn-content-tracker');
 // Types
 // =============================================================================
 
-/** Content sequence item - either text or a reference to a tool call */
+/** Content sequence item - text, thinking, or a reference to a tool call */
 export type ContentSequenceItem =
   | { type: 'text'; text: string }
+  | { type: 'thinking'; thinking: string }
   | { type: 'tool_ref'; toolCallId: string };
 
 /** Tool call data for tracking */
@@ -50,6 +51,7 @@ export interface ToolCallData {
 /** Accumulated content for client catch-up */
 export interface AccumulatedContent {
   text: string;
+  thinking: string;
   toolCalls: CurrentTurnToolCall[];
   sequence: ContentSequenceItem[];
 }
@@ -58,6 +60,7 @@ export interface AccumulatedContent {
 export interface TurnContent {
   sequence: ContentSequenceItem[];
   toolCalls: Map<string, ToolCallData>;
+  thinking: string;
 }
 
 /** Metadata for tool_use blocks in interrupted content */
@@ -77,8 +80,9 @@ export interface ToolResultMeta {
 /** Interrupted content for persistence */
 export interface InterruptedContent {
   assistantContent: Array<{
-    type: 'text' | 'tool_use';
+    type: 'text' | 'tool_use' | 'thinking';
     text?: string;
+    thinking?: string;
     id?: string;
     name?: string;
     input?: Record<string, unknown>;
@@ -111,6 +115,7 @@ export class TurnContentTracker {
   // Accumulated state (across ALL turns for catch-up)
   // =========================================================================
   private accumulatedText: string = '';
+  private accumulatedThinking: string = '';
   private accumulatedToolCalls: ToolCallData[] = [];
   private accumulatedSequence: ContentSequenceItem[] = [];
 
@@ -119,6 +124,7 @@ export class TurnContentTracker {
   // =========================================================================
   private thisTurnSequence: ContentSequenceItem[] = [];
   private thisTurnToolCalls: Map<string, ToolCallData> = new Map();
+  private thisTurnThinking: string = '';
 
   // =========================================================================
   // Pre-tool flush tracking (for linear event ordering)
@@ -164,6 +170,23 @@ export class TurnContentTracker {
     } else {
       this.thisTurnSequence.push({ type: 'text', text });
     }
+  }
+
+  /**
+   * Add a thinking delta to both accumulated and per-turn tracking.
+   * Thinking is accumulated separately from text for proper content block ordering.
+   * Note: Thinking should appear FIRST in assistant messages (Anthropic API convention).
+   */
+  addThinkingDelta(thinking: string): void {
+    // Update accumulated thinking
+    this.accumulatedThinking += thinking;
+
+    // Update per-turn thinking
+    this.thisTurnThinking += thinking;
+
+    // Note: We don't add to sequence here because thinking blocks should be
+    // prepended to the content at turn end, not interleaved with text/tools.
+    // This matches the Anthropic API response format where thinking comes first.
   }
 
   /**
@@ -309,6 +332,7 @@ export class TurnContentTracker {
     // Clear per-turn tracking for the new turn
     this.thisTurnSequence = [];
     this.thisTurnToolCalls = new Map();
+    this.thisTurnThinking = '';
 
     // Reset pre-tool flush flag for new turn
     this.preToolContentFlushed = false;
@@ -341,16 +365,19 @@ export class TurnContentTracker {
     const content: TurnContent = {
       sequence: [...this.thisTurnSequence],
       toolCalls: new Map(this.thisTurnToolCalls),
+      thinking: this.thisTurnThinking,
     };
 
     // Clear per-turn tracking (accumulated persists for catch-up)
     this.thisTurnSequence = [];
     this.thisTurnToolCalls = new Map();
+    this.thisTurnThinking = '';
 
     logger.debug('Turn ended', {
       turn: this.currentTurn,
       sequenceLength: content.sequence.length,
       toolCallCount: content.toolCalls.size,
+      hasThinking: !!content.thinking,
     });
 
     return content;
@@ -363,6 +390,7 @@ export class TurnContentTracker {
   onAgentStart(): void {
     // Clear accumulated state
     this.accumulatedText = '';
+    this.accumulatedThinking = '';
     this.accumulatedToolCalls = [];
     this.accumulatedSequence = [];
     this.lastTurnTokenUsage = undefined;
@@ -388,12 +416,14 @@ export class TurnContentTracker {
   onAgentEnd(): void {
     // Clear accumulated state
     this.accumulatedText = '';
+    this.accumulatedThinking = '';
     this.accumulatedToolCalls = [];
     this.accumulatedSequence = [];
 
     // Clear per-turn state
     this.thisTurnSequence = [];
     this.thisTurnToolCalls = new Map();
+    this.thisTurnThinking = '';
 
     logger.debug('Agent run ended, all tracking cleared');
   }
@@ -409,6 +439,7 @@ export class TurnContentTracker {
   getAccumulatedContent(): AccumulatedContent {
     return {
       text: this.accumulatedText,
+      thinking: this.accumulatedThinking,
       toolCalls: this.accumulatedToolCalls.map(tc => ({
         toolCallId: tc.toolCallId,
         toolName: tc.toolName,
@@ -430,6 +461,7 @@ export class TurnContentTracker {
     return {
       sequence: [...this.thisTurnSequence],
       toolCalls: new Map(this.thisTurnToolCalls),
+      thinking: this.thisTurnThinking,
     };
   }
 
@@ -458,14 +490,14 @@ export class TurnContentTracker {
    * Check if there's any accumulated content (for catch-up).
    */
   hasAccumulatedContent(): boolean {
-    return this.accumulatedText.length > 0 || this.accumulatedToolCalls.length > 0;
+    return this.accumulatedText.length > 0 || this.accumulatedThinking.length > 0 || this.accumulatedToolCalls.length > 0;
   }
 
   /**
    * Check if this turn has any content.
    */
   hasThisTurnContent(): boolean {
-    return this.thisTurnSequence.length > 0;
+    return this.thisTurnSequence.length > 0 || this.thisTurnThinking.length > 0;
   }
 
   // =========================================================================
@@ -631,11 +663,19 @@ export class TurnContentTracker {
       }
     };
 
+    // Add thinking content first (Anthropic API puts thinking before text/tools)
+    if (this.accumulatedThinking) {
+      assistantContent.push({ type: 'thinking', thinking: this.accumulatedThinking });
+    }
+
     // Build content from sequence to preserve interleaving order
     if (this.accumulatedSequence.length > 0) {
       for (const item of this.accumulatedSequence) {
         if (item.type === 'text' && item.text) {
           assistantContent.push({ type: 'text', text: item.text });
+        } else if (item.type === 'thinking' && item.thinking) {
+          // Thinking from sequence (if tracked there)
+          assistantContent.push({ type: 'thinking', thinking: item.thinking });
         } else if (item.type === 'tool_ref') {
           const tc = toolCallMap.get(item.toolCallId);
           if (tc) {

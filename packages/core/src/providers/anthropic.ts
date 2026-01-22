@@ -917,20 +917,28 @@ export class AnthropicProvider {
         }
 
         if (msg.role === 'assistant') {
-          const content = msg.content.map((c) => {
-            if (c.type === 'text') return { type: 'text' as const, text: c.text };
-            if (c.type === 'tool_use') {
-              // Handle both 'arguments' (in-memory ToolCall type) and 'input' (persisted event format)
-              const input = c.arguments ?? (c as any).input ?? {};
-              return {
-                type: 'tool_use' as const,
-                id: idMapping.get(c.id) ?? c.id,
-                name: c.name,
-                input,
-              };
-            }
-            return { type: 'text' as const, text: '' };
-          });
+          // Map content blocks, filtering out thinking blocks
+          // CRITICAL: Anthropic API requires that thinking content NOT be sent back
+          // in subsequent turns - thinking is ephemeral per-turn only
+          const content = msg.content
+            .map((c) => {
+              if (c.type === 'text') return { type: 'text' as const, text: c.text };
+              if (c.type === 'tool_use') {
+                // Handle both 'arguments' (in-memory ToolCall type) and 'input' (persisted event format)
+                const input = c.arguments ?? (c as any).input ?? {};
+                return {
+                  type: 'tool_use' as const,
+                  id: idMapping.get(c.id) ?? c.id,
+                  name: c.name,
+                  input,
+                };
+              }
+              // Skip thinking blocks - they must NOT be sent back to the API
+              if (c.type === 'thinking') return null;
+              // Unknown content type - skip rather than create empty text
+              return null;
+            })
+            .filter((c): c is NonNullable<typeof c> => c !== null);
           return { role: 'assistant' as const, content };
         }
 
@@ -999,14 +1007,23 @@ export class AnthropicProvider {
     // Handle case where content might not be iterable
     const blocks = Array.isArray(response.content) ? response.content : [];
     for (const block of blocks) {
-      if (block.type === 'text') {
-        content.push({ type: 'text', text: block.text });
-      } else if (block.type === 'tool_use') {
+      // Cast to unknown first to handle thinking blocks which aren't in the base SDK types
+      const blockType = (block as { type: string }).type;
+      if (blockType === 'text') {
+        content.push({ type: 'text', text: (block as { text: string }).text });
+      } else if (blockType === 'thinking') {
+        // Extract thinking content from extended thinking response
+        content.push({
+          type: 'thinking',
+          thinking: (block as unknown as { thinking: string }).thinking,
+        });
+      } else if (blockType === 'tool_use') {
+        const toolBlock = block as { id: string; name: string; input: unknown };
         content.push({
           type: 'tool_use',
-          id: block.id,
-          name: block.name,
-          arguments: block.input as Record<string, unknown>,
+          id: toolBlock.id,
+          name: toolBlock.name,
+          arguments: toolBlock.input as Record<string, unknown>,
         });
       }
     }

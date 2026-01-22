@@ -220,4 +220,135 @@ describe('TurnContentTracker', () => {
       expect(tracker.flushPreToolContent()).toBeNull();
     });
   });
+
+  describe('thinking support', () => {
+    it('should accumulate thinking deltas', () => {
+      tracker.onAgentStart();
+      tracker.onTurnStart(1);
+
+      tracker.addThinkingDelta('Let me ');
+      tracker.addThinkingDelta('think about this...');
+
+      const content = tracker.getThisTurnContent();
+      expect(content.thinking).toBe('Let me think about this...');
+    });
+
+    it('should preserve thinking separately from text', () => {
+      tracker.onAgentStart();
+      tracker.onTurnStart(1);
+
+      tracker.addThinkingDelta('Internal reasoning');
+      tracker.addTextDelta('External response');
+
+      const content = tracker.getThisTurnContent();
+      expect(content.thinking).toBe('Internal reasoning');
+      // Text is stored in the sequence, not a direct property
+      const textItem = content.sequence.find(s => s.type === 'text');
+      expect(textItem).toBeDefined();
+      expect(textItem?.type === 'text' && textItem.text).toBe('External response');
+    });
+
+    it('should include thinking in turn end content', () => {
+      tracker.onAgentStart();
+      tracker.onTurnStart(1);
+
+      tracker.addThinkingDelta('Deep thoughts');
+      tracker.addTextDelta('My answer');
+
+      const turnContent = tracker.onTurnEnd();
+      expect(turnContent.thinking).toBe('Deep thoughts');
+    });
+
+    it('should clear thinking on turn start', () => {
+      tracker.onAgentStart();
+      tracker.onTurnStart(1);
+      tracker.addThinkingDelta('Turn 1 thinking');
+      tracker.onTurnEnd();
+
+      tracker.onTurnStart(2);
+      const content = tracker.getThisTurnContent();
+      expect(content.thinking).toBe('');
+    });
+
+    it('should clear thinking on agent start', () => {
+      tracker.onAgentStart();
+      tracker.onTurnStart(1);
+      tracker.addThinkingDelta('Some thinking');
+      tracker.onTurnEnd();
+
+      tracker.onAgentStart();
+      expect(tracker.getAccumulatedContent().thinking).toBe('');
+    });
+
+    it('should accumulate thinking across turns', () => {
+      tracker.onAgentStart();
+
+      // Turn 1
+      tracker.onTurnStart(1);
+      tracker.addThinkingDelta('Turn 1 thoughts');
+      tracker.onTurnEnd();
+
+      // Turn 2
+      tracker.onTurnStart(2);
+      tracker.addThinkingDelta('Turn 2 thoughts');
+      tracker.onTurnEnd();
+
+      const accumulated = tracker.getAccumulatedContent();
+      expect(accumulated.thinking).toContain('Turn 1 thoughts');
+      expect(accumulated.thinking).toContain('Turn 2 thoughts');
+    });
+
+    it('should include thinking in interrupted content', () => {
+      tracker.onAgentStart();
+      tracker.onTurnStart(1);
+      tracker.addThinkingDelta('Interrupted thinking');
+      tracker.addTextDelta('Interrupted text');
+      tracker.startToolCall('tc_1', 'Bash', { command: 'sleep 100' }, '2024-01-01T00:00:00Z');
+      // Tool not ended - simulates interruption
+
+      const interrupted = tracker.buildInterruptedContent();
+
+      // Thinking should come first in the content
+      expect(interrupted.assistantContent.length).toBeGreaterThan(0);
+      expect(interrupted.assistantContent[0]).toMatchObject({
+        type: 'thinking',
+        thinking: 'Interrupted thinking',
+      });
+    });
+
+    it('should handle thinking with tool calls', () => {
+      tracker.onAgentStart();
+      tracker.onTurnStart(1);
+
+      tracker.addThinkingDelta('Let me analyze this');
+      tracker.addTextDelta('I will read the file');
+      tracker.registerToolIntents([
+        { id: 'tc_1', name: 'Read', arguments: { file_path: 'test.ts' } },
+      ]);
+      tracker.startToolCall('tc_1', 'Read', { file_path: 'test.ts' }, '2024-01-01T00:00:00Z');
+      tracker.endToolCall('tc_1', 'file contents', false, '2024-01-01T00:00:01Z');
+
+      const turnContent = tracker.onTurnEnd();
+      expect(turnContent.thinking).toBe('Let me analyze this');
+      expect(turnContent.sequence.length).toBeGreaterThan(0);
+    });
+
+    it('should not include thinking in pre-tool flush (thinking goes in final message)', () => {
+      tracker.onAgentStart();
+      tracker.onTurnStart(1);
+
+      tracker.addThinkingDelta('Internal reasoning');
+      tracker.addTextDelta('Let me read files');
+      tracker.registerToolIntents([
+        { id: 'tc_1', name: 'Read', arguments: { file_path: 'a.ts' } },
+      ]);
+      tracker.startToolCall('tc_1', 'Read', { file_path: 'a.ts' }, '2024-01-01T00:00:00Z');
+
+      const flushed = tracker.flushPreToolContent();
+      expect(flushed).not.toBeNull();
+      // Pre-tool flush should have text and tool_use only (not thinking)
+      const hasThinking = flushed!.some(b => b.type === 'thinking');
+      expect(hasThinking).toBe(false);
+    });
+  });
 });

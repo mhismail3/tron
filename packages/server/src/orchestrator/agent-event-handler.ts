@@ -149,6 +149,18 @@ export class AgentEventHandler {
       case 'toolcall_delta':
         this.handleToolCallDelta(sessionId, event, timestamp);
         break;
+
+      case 'thinking_start':
+        this.handleThinkingStart(sessionId, timestamp);
+        break;
+
+      case 'thinking_delta':
+        this.handleThinkingDelta(sessionId, event, timestamp, active);
+        break;
+
+      case 'thinking_end':
+        this.handleThinkingEnd(sessionId, event, timestamp);
+        break;
     }
   }
 
@@ -1000,6 +1012,72 @@ export class AgentEventHandler {
       });
       this.activeUIRenders.clear();
     }
+  }
+
+  // ===========================================================================
+  // Thinking Event Handlers
+  // ===========================================================================
+
+  private handleThinkingStart(
+    sessionId: SessionId,
+    timestamp: string
+  ): void {
+    logger.debug('Received thinking_start', { sessionId });
+
+    // Emit WebSocket event for real-time UI streaming
+    this.config.emit('agent_event', {
+      type: 'agent.thinking_start',
+      sessionId,
+      timestamp,
+    });
+  }
+
+  private handleThinkingDelta(
+    sessionId: SessionId,
+    event: TronEvent,
+    timestamp: string,
+    active: ActiveSession | undefined
+  ): void {
+    // Cast to access thinking_delta specific properties
+    const delta = event as { delta: string };
+
+    // Accumulate thinking content in TurnContentTracker for persistence
+    // This ensures thinking is included in the message.assistant event at turn end
+    if (active) {
+      active.sessionContext!.addThinkingDelta(delta.delta);
+    }
+
+    // Emit WebSocket event for real-time UI streaming
+    // Thinking deltas are NOT persisted individually (like text deltas)
+    // They're accumulated and persisted as part of message.assistant at turn end
+    this.config.emit('agent_event', {
+      type: 'agent.thinking_delta',
+      sessionId,
+      timestamp,
+      data: { delta: delta.delta },
+    });
+  }
+
+  private handleThinkingEnd(
+    sessionId: SessionId,
+    event: TronEvent,
+    timestamp: string
+  ): void {
+    // Cast to access thinking_end specific properties
+    const thinkingEnd = event as { thinking: string };
+
+    logger.debug('Received thinking_end', {
+      sessionId,
+      thinkingLength: thinkingEnd.thinking.length,
+    });
+
+    // Emit WebSocket event
+    this.config.emit('agent_event', {
+      type: 'agent.thinking_end',
+      sessionId,
+      timestamp,
+      data: { thinking: thinkingEnd.thinking },
+    });
   }
 }
 

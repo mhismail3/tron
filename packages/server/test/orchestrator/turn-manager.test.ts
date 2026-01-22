@@ -393,4 +393,131 @@ describe('TurnManager', () => {
       expect(result.turn).toBe(0);
     });
   });
+
+  describe('Thinking support', () => {
+    it('should accumulate thinking deltas', () => {
+      turnManager.startTurn(1);
+      turnManager.addThinkingDelta('Let me ');
+      turnManager.addThinkingDelta('think...');
+
+      const result = turnManager.endTurn();
+
+      // Thinking should be the first content block
+      expect(result.content.length).toBeGreaterThanOrEqual(1);
+      expect(result.content[0]).toMatchObject({
+        type: 'thinking',
+        thinking: 'Let me think...',
+      });
+    });
+
+    it('should place thinking before text in content blocks', () => {
+      turnManager.startTurn(1);
+      turnManager.addThinkingDelta('Internal reasoning');
+      turnManager.addTextDelta('External response');
+
+      const result = turnManager.endTurn();
+
+      // Thinking should come first
+      expect(result.content.length).toBe(2);
+      expect(result.content[0]).toMatchObject({ type: 'thinking' });
+      expect(result.content[1]).toMatchObject({ type: 'text' });
+    });
+
+    it('should preserve thinking with tool calls', () => {
+      turnManager.startTurn(1);
+      turnManager.addThinkingDelta('Analyzing the request');
+      turnManager.addTextDelta('Let me read that file');
+      turnManager.startToolCall('tc_1', 'Read', { file_path: '/test.ts' });
+      turnManager.endToolCall('tc_1', 'file contents', false);
+
+      const result = turnManager.endTurn();
+
+      // Order should be: thinking, text, tool_use
+      expect(result.content.length).toBe(3);
+      expect(result.content[0]).toMatchObject({ type: 'thinking' });
+      expect(result.content[1]).toMatchObject({ type: 'text' });
+      expect(result.content[2]).toMatchObject({ type: 'tool_use' });
+    });
+
+    it('should clear thinking on new turn', () => {
+      turnManager.startTurn(1);
+      turnManager.addThinkingDelta('Turn 1 thinking');
+      turnManager.endTurn();
+
+      turnManager.startTurn(2);
+      turnManager.addTextDelta('Turn 2 text only');
+
+      const result = turnManager.endTurn();
+
+      // Turn 2 should not have thinking from Turn 1
+      expect(result.content.length).toBe(1);
+      expect(result.content[0]).toMatchObject({ type: 'text' });
+    });
+
+    it('should include thinking in accumulated content', () => {
+      turnManager.startTurn(1);
+      turnManager.addThinkingDelta('First turn thinking');
+      turnManager.addTextDelta('First turn text');
+      turnManager.endTurn();
+
+      turnManager.startTurn(2);
+      turnManager.addThinkingDelta('Second turn thinking');
+      turnManager.addTextDelta('Second turn text');
+      turnManager.endTurn();
+
+      const accumulated = turnManager.getAccumulatedContent();
+      expect(accumulated.thinking).toContain('First turn thinking');
+      expect(accumulated.thinking).toContain('Second turn thinking');
+    });
+
+    it('should include thinking in interrupted content', () => {
+      turnManager.startTurn(1);
+      turnManager.addThinkingDelta('Interrupted thoughts');
+      turnManager.addTextDelta('Working on it...');
+      turnManager.startToolCall('tc_1', 'Bash', { command: 'long-task' });
+      // Tool not ended - interruption
+
+      const interrupted = turnManager.buildInterruptedContent();
+
+      // Thinking should be first in assistant content
+      expect(interrupted.assistantContent.length).toBeGreaterThan(0);
+      expect(interrupted.assistantContent[0]).toMatchObject({
+        type: 'thinking',
+        thinking: 'Interrupted thoughts',
+      });
+    });
+
+    it('should handle turn with only thinking (no text)', () => {
+      turnManager.startTurn(1);
+      turnManager.addThinkingDelta('Just thinking, no response yet');
+
+      const result = turnManager.endTurn();
+
+      expect(result.content.length).toBe(1);
+      expect(result.content[0]).toMatchObject({
+        type: 'thinking',
+        thinking: 'Just thinking, no response yet',
+      });
+    });
+
+    it('should clear thinking on agent start', () => {
+      turnManager.startTurn(1);
+      turnManager.addThinkingDelta('Some thinking');
+      turnManager.endTurn();
+
+      turnManager.onAgentStart();
+
+      expect(turnManager.hasAccumulatedContent()).toBe(false);
+    });
+
+    it('should clear thinking on agent end', () => {
+      turnManager.startTurn(1);
+      turnManager.addThinkingDelta('Some thinking');
+      turnManager.endTurn();
+
+      turnManager.onAgentEnd();
+
+      expect(turnManager.hasAccumulatedContent()).toBe(false);
+    });
+  });
 });

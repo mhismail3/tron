@@ -228,6 +228,160 @@ describe('AgentStreamProcessor', () => {
       expect(result.stopReason).toBe('max_tokens');
     });
   });
+
+  describe('thinking support', () => {
+    it('should accumulate thinking deltas', async () => {
+      const stream = createMockStream([
+        { type: 'thinking_start' },
+        { type: 'thinking_delta', delta: 'Let me ' },
+        { type: 'thinking_delta', delta: 'think about this...' },
+        { type: 'thinking_end', thinking: 'Let me think about this...' },
+        { type: 'text_delta', delta: 'Here is my response' },
+        { type: 'done', message: createMockMessage('Here is my response'), stopReason: 'end_turn' },
+      ]);
+
+      const result = await processor.process(stream);
+
+      expect(result.accumulatedThinking).toBe('Let me think about this...');
+      expect(result.accumulatedText).toBe('Here is my response');
+    });
+
+    it('should emit thinking_start event', async () => {
+      const listener = vi.fn();
+      eventEmitter.addListener(listener);
+
+      const stream = createMockStream([
+        { type: 'thinking_start' },
+        { type: 'thinking_delta', delta: 'Thinking...' },
+        { type: 'thinking_end', thinking: 'Thinking...' },
+        { type: 'done', message: createMockMessage(''), stopReason: 'end_turn' },
+      ]);
+
+      await processor.process(stream);
+
+      expect(listener).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: 'thinking_start',
+          sessionId: 'sess_test',
+        })
+      );
+    });
+
+    it('should emit thinking_delta events', async () => {
+      const listener = vi.fn();
+      eventEmitter.addListener(listener);
+
+      const stream = createMockStream([
+        { type: 'thinking_start' },
+        { type: 'thinking_delta', delta: 'First thought' },
+        { type: 'thinking_delta', delta: 'Second thought' },
+        { type: 'thinking_end', thinking: 'First thoughtSecond thought' },
+        { type: 'done', message: createMockMessage(''), stopReason: 'end_turn' },
+      ]);
+
+      await processor.process(stream);
+
+      expect(listener).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: 'thinking_delta',
+          delta: 'First thought',
+        })
+      );
+      expect(listener).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: 'thinking_delta',
+          delta: 'Second thought',
+        })
+      );
+    });
+
+    it('should emit thinking_end event with full thinking content', async () => {
+      const listener = vi.fn();
+      eventEmitter.addListener(listener);
+
+      const stream = createMockStream([
+        { type: 'thinking_start' },
+        { type: 'thinking_delta', delta: 'Complete thinking content' },
+        { type: 'thinking_end', thinking: 'Complete thinking content' },
+        { type: 'done', message: createMockMessage(''), stopReason: 'end_turn' },
+      ]);
+
+      await processor.process(stream);
+
+      expect(listener).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: 'thinking_end',
+          thinking: 'Complete thinking content',
+        })
+      );
+    });
+
+    it('should call onThinkingDelta callback', async () => {
+      const onThinkingDelta = vi.fn();
+
+      const stream = createMockStream([
+        { type: 'thinking_start' },
+        { type: 'thinking_delta', delta: 'Think 1' },
+        { type: 'thinking_delta', delta: 'Think 2' },
+        { type: 'thinking_end', thinking: 'Think 1Think 2' },
+        { type: 'done', message: createMockMessage(''), stopReason: 'end_turn' },
+      ]);
+
+      await processor.process(stream, { onThinkingDelta });
+
+      expect(onThinkingDelta).toHaveBeenCalledWith('Think 1');
+      expect(onThinkingDelta).toHaveBeenCalledWith('Think 2');
+      expect(onThinkingDelta).toHaveBeenCalledTimes(2);
+    });
+
+    it('should handle thinking before text response', async () => {
+      const stream = createMockStream([
+        { type: 'thinking_start' },
+        { type: 'thinking_delta', delta: 'Internal reasoning' },
+        { type: 'thinking_end', thinking: 'Internal reasoning' },
+        { type: 'text_start' },
+        { type: 'text_delta', delta: 'External response' },
+        { type: 'text_end', text: 'External response' },
+        { type: 'done', message: createMockMessage('External response'), stopReason: 'end_turn' },
+      ]);
+
+      const result = await processor.process(stream);
+
+      expect(result.accumulatedThinking).toBe('Internal reasoning');
+      expect(result.accumulatedText).toBe('External response');
+    });
+
+    it('should handle empty thinking content', async () => {
+      const stream = createMockStream([
+        { type: 'thinking_start' },
+        { type: 'thinking_end', thinking: '' },
+        { type: 'text_delta', delta: 'Response' },
+        { type: 'done', message: createMockMessage('Response'), stopReason: 'end_turn' },
+      ]);
+
+      const result = await processor.process(stream);
+
+      // When thinking is empty, it returns undefined (not empty string)
+      expect(result.accumulatedThinking).toBeUndefined();
+      expect(result.accumulatedText).toBe('Response');
+    });
+
+    it('should reset thinking content on resetStreamingContent', async () => {
+      const stream = createMockStream([
+        { type: 'thinking_start' },
+        { type: 'thinking_delta', delta: 'Some thinking' },
+        { type: 'thinking_end', thinking: 'Some thinking' },
+        { type: 'text_delta', delta: 'Response' },
+        { type: 'done', message: createMockMessage('Response'), stopReason: 'end_turn' },
+      ]);
+
+      const result = await processor.process(stream);
+      expect(result.accumulatedThinking).toBe('Some thinking');
+
+      processor.resetStreamingContent();
+      expect(processor.getStreamingContent()).toBe('');
+    });
+  });
 });
 
 // Helper functions

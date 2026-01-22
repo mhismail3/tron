@@ -10,7 +10,7 @@ import type {
   AnthropicConfig,
   StreamOptions,
 } from '../../src/providers/anthropic.js';
-import type { Context, Message, StreamEvent } from '../../src/types/index.js';
+import type { Context, Message, StreamEvent, ThinkingContent, TextContent, ToolCall } from '../../src/types/index.js';
 
 // Mock the Anthropic SDK
 vi.mock('@anthropic-ai/sdk', () => ({
@@ -93,6 +93,98 @@ describe('Anthropic Provider', () => {
 
       expect(options.maxTokens).toBe(4096);
       expect(options.enableThinking).toBe(true);
+    });
+
+    it('should support thinking configuration', () => {
+      const optionsWithThinking: StreamOptions = {
+        enableThinking: true,
+        thinkingBudget: 4096,
+      };
+
+      expect(optionsWithThinking.enableThinking).toBe(true);
+      expect(optionsWithThinking.thinkingBudget).toBe(4096);
+    });
+
+    it('should allow disabling thinking', () => {
+      const optionsWithoutThinking: StreamOptions = {
+        enableThinking: false,
+      };
+
+      expect(optionsWithoutThinking.enableThinking).toBe(false);
+      expect(optionsWithoutThinking.thinkingBudget).toBeUndefined();
+    });
+  });
+
+  describe('Thinking Support', () => {
+    describe('Message Content Types', () => {
+      it('should support thinking content in messages', () => {
+        const message: Message = {
+          role: 'assistant',
+          content: [
+            { type: 'thinking', thinking: 'Let me analyze this request' },
+            { type: 'text', text: 'Here is my response' },
+          ],
+        };
+
+        expect(message.content).toHaveLength(2);
+        expect(message.content[0]).toMatchObject({ type: 'thinking' });
+        expect(message.content[1]).toMatchObject({ type: 'text' });
+      });
+
+      it('should support thinking with tool calls', () => {
+        const message: Message = {
+          role: 'assistant',
+          content: [
+            { type: 'thinking', thinking: 'I need to read the file first' },
+            { type: 'text', text: 'Let me check that file' },
+            {
+              type: 'tool_use',
+              id: 'toolu_123',
+              name: 'Read',
+              arguments: { file_path: '/test.ts' },
+            },
+          ],
+        };
+
+        expect(message.content).toHaveLength(3);
+        expect(message.content[0]).toMatchObject({ type: 'thinking' });
+        expect(message.content[1]).toMatchObject({ type: 'text' });
+        expect(message.content[2]).toMatchObject({ type: 'tool_use' });
+      });
+    });
+
+    describe('Model thinking support', () => {
+      it('should identify models that support thinking', () => {
+        // These models support thinking
+        const thinkingModels = [
+          'claude-opus-4-5-20251101',
+          'claude-sonnet-4-5-20250929',
+          'claude-haiku-4-5-20251001',
+          'claude-opus-4-1-20250805',
+          'claude-opus-4-20250514',
+          'claude-sonnet-4-20250514',
+          'claude-3-7-sonnet-20250219',
+        ];
+
+        for (const modelId of thinkingModels) {
+          const config: AnthropicConfig = {
+            model: modelId,
+            auth: { type: 'api_key', apiKey: 'test' },
+            thinkingBudget: 2048,
+          };
+          expect(config.thinkingBudget).toBe(2048);
+        }
+      });
+
+      it('should configure thinking budget appropriately', () => {
+        const config: AnthropicConfig = {
+          model: 'claude-opus-4-5-20251101',
+          auth: { type: 'api_key', apiKey: 'test' },
+          thinkingBudget: 10000,
+        };
+
+        expect(config.thinkingBudget).toBe(10000);
+      });
     });
   });
 });

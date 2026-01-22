@@ -10,6 +10,7 @@ import type {
   AssistantMessage,
   ToolCall,
   TextContent,
+  ThinkingContent,
   StreamEvent,
 } from '../types/index.js';
 import type {
@@ -33,6 +34,9 @@ export class AgentStreamProcessor implements IStreamProcessor {
 
   private streamingContent: string = '';
 
+  /** Track accumulated thinking content */
+  private accumulatedThinking: string = '';
+
   /** Track active tool calls for toolcall_delta events */
   private activeToolCalls: Map<string, string> = new Map(); // toolCallId -> toolName
 
@@ -54,6 +58,7 @@ export class AgentStreamProcessor implements IStreamProcessor {
    */
   resetStreamingContent(): void {
     this.streamingContent = '';
+    this.accumulatedThinking = '';
   }
 
   /**
@@ -126,6 +131,39 @@ export class AgentStreamProcessor implements IStreamProcessor {
           callbacks?.onToolCallEnd?.(event.toolCall);
           break;
 
+        case 'thinking_start':
+          // Emit thinking_start event for UI
+          this.eventEmitter.emit({
+            type: 'thinking_start',
+            sessionId: this.sessionId,
+            timestamp: new Date().toISOString(),
+          });
+          break;
+
+        case 'thinking_delta':
+          this.accumulatedThinking += event.delta;
+
+          // Emit thinking_delta event for real-time UI streaming
+          this.eventEmitter.emit({
+            type: 'thinking_delta',
+            sessionId: this.sessionId,
+            timestamp: new Date().toISOString(),
+            delta: event.delta,
+          });
+
+          callbacks?.onThinkingDelta?.(event.delta);
+          break;
+
+        case 'thinking_end':
+          // Emit thinking_end event with complete thinking content
+          this.eventEmitter.emit({
+            type: 'thinking_end',
+            sessionId: this.sessionId,
+            timestamp: new Date().toISOString(),
+            thinking: event.thinking,
+          });
+          break;
+
         case 'done':
           assistantMessage = event.message;
           stopReason = event.stopReason;
@@ -173,8 +211,12 @@ export class AgentStreamProcessor implements IStreamProcessor {
     }
 
     // Rebuild assistant message content if empty but we have accumulated data
-    if (assistantMessage.content.length === 0 && (accumulatedText || toolCalls.length > 0)) {
-      const rebuiltContent: (TextContent | ToolCall)[] = [];
+    if (assistantMessage.content.length === 0 && (accumulatedText || toolCalls.length > 0 || this.accumulatedThinking)) {
+      const rebuiltContent: (TextContent | ThinkingContent | ToolCall)[] = [];
+      // Add thinking content first (follows Anthropic's response ordering)
+      if (this.accumulatedThinking) {
+        rebuiltContent.push({ type: 'thinking', thinking: this.accumulatedThinking });
+      }
       if (accumulatedText) {
         rebuiltContent.push({ type: 'text', text: accumulatedText });
       }
@@ -192,6 +234,7 @@ export class AgentStreamProcessor implements IStreamProcessor {
       message: assistantMessage,
       toolCalls,
       accumulatedText,
+      accumulatedThinking: this.accumulatedThinking || undefined,
       stopReason,
     };
   }

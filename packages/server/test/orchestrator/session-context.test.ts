@@ -363,4 +363,129 @@ describe('SessionContext', () => {
       expect(context2.getBlockedTools()).toEqual(['Edit']);
     });
   });
+
+  describe('Thinking support', () => {
+    it('should accumulate thinking deltas through turn manager', () => {
+      const context = createSessionContext({
+        sessionId,
+        eventStore,
+        initialHeadEventId,
+        model: 'claude-sonnet-4-20250514',
+        workingDirectory: '/test/project',
+      });
+
+      context.startTurn(1);
+      context.addThinkingDelta('Let me ');
+      context.addThinkingDelta('analyze this...');
+      context.addTextDelta('Here is my response');
+
+      const result = context.endTurn({ inputTokens: 100, outputTokens: 50 });
+
+      // Thinking should come first
+      expect(result.content.length).toBe(2);
+      expect(result.content[0]).toMatchObject({
+        type: 'thinking',
+        thinking: 'Let me analyze this...',
+      });
+      expect(result.content[1]).toMatchObject({
+        type: 'text',
+        text: 'Here is my response',
+      });
+    });
+
+    it('should include thinking in interrupted content', () => {
+      const context = createSessionContext({
+        sessionId,
+        eventStore,
+        initialHeadEventId,
+        model: 'claude-sonnet-4-20250514',
+        workingDirectory: '/test/project',
+      });
+
+      context.startTurn(1);
+      context.addThinkingDelta('Deep analysis in progress');
+      context.addTextDelta('Working on it...');
+      context.startToolCall('tc_1', 'Bash', { command: 'long-running' });
+      // Tool not ended - simulates interruption
+
+      const interrupted = context.buildInterruptedContent();
+
+      // Thinking should be first
+      expect(interrupted.assistantContent.length).toBeGreaterThan(0);
+      expect(interrupted.assistantContent[0]).toMatchObject({
+        type: 'thinking',
+        thinking: 'Deep analysis in progress',
+      });
+    });
+
+    it('should preserve thinking with tool calls', () => {
+      const context = createSessionContext({
+        sessionId,
+        eventStore,
+        initialHeadEventId,
+        model: 'claude-sonnet-4-20250514',
+        workingDirectory: '/test/project',
+      });
+
+      context.startTurn(1);
+      context.addThinkingDelta('I need to read the file first');
+      context.addTextDelta('Let me check the file');
+      context.startToolCall('tc_1', 'Read', { file_path: '/test.ts' });
+      context.endToolCall('tc_1', 'file contents', false);
+
+      const result = context.endTurn();
+
+      // Order: thinking, text, tool_use
+      expect(result.content.length).toBe(3);
+      expect(result.content[0].type).toBe('thinking');
+      expect(result.content[1].type).toBe('text');
+      expect(result.content[2].type).toBe('tool_use');
+      expect(result.toolResults.length).toBe(1);
+    });
+
+    it('should include thinking in accumulated content', () => {
+      const context = createSessionContext({
+        sessionId,
+        eventStore,
+        initialHeadEventId,
+        model: 'claude-sonnet-4-20250514',
+        workingDirectory: '/test/project',
+      });
+
+      context.startTurn(1);
+      context.addThinkingDelta('Turn 1 thinking');
+      context.addTextDelta('Turn 1 response');
+      context.endTurn();
+
+      context.startTurn(2);
+      context.addThinkingDelta('Turn 2 thinking');
+      context.addTextDelta('Turn 2 response');
+
+      const accumulated = context.getAccumulatedContent();
+      expect(accumulated.thinking).toContain('Turn 1 thinking');
+      expect(accumulated.thinking).toContain('Turn 2 thinking');
+    });
+
+    it('should clear thinking on agent lifecycle', () => {
+      const context = createSessionContext({
+        sessionId,
+        eventStore,
+        initialHeadEventId,
+        model: 'claude-sonnet-4-20250514',
+        workingDirectory: '/test/project',
+      });
+
+      // Build up state
+      context.startTurn(1);
+      context.addThinkingDelta('Some thinking');
+      context.addTextDelta('Some text');
+      context.endTurn();
+
+      // Start new agent run
+      context.onAgentStart();
+
+      expect(context.getCurrentTurn()).toBe(0);
+      expect(context.hasAccumulatedContent()).toBe(false);
+    });
+  });
 });
