@@ -5,7 +5,7 @@
  * Tools are functions that the agent can call to interact with the environment.
  */
 
-import type { TextContent, ImageContent } from './messages.js';
+import type { TextContent, ImageContent } from './content.js';
 
 // =============================================================================
 // Tool Schema Types

@@ -2,6 +2,9 @@
  * @fileoverview Public type exports for @tron/core
  */
 
+// Basic content types (used by both messages and tools)
+export * from './content.js';
+
 // Memory types
 export * from './memory.js';
 

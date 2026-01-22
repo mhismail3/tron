@@ -5,12 +5,12 @@
  * Handles tool_use, tool_result, text, and thinking block types with appropriate
  * truncation for large content.
  */
+import { createLogger } from '../logging/logger.js';
 import {
-  createLogger,
   normalizeToolArguments,
   normalizeToolResultId,
   normalizeIsError,
-} from '../index.js';
+} from '../types/messages.js';
 
 const logger = createLogger('content-normalizer');
 
