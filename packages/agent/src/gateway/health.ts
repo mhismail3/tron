@@ -4,13 +4,13 @@
  * Simple HTTP server for health checks, metrics, and API endpoints.
  */
 import * as http from 'http';
+import { createLogger } from '../logging/logger.js';
 import {
-  createLogger,
   getProviderAuthSync,
   saveProviderAuthSync,
   loadAuthStorageSync,
   saveAuthStorageSync,
-} from '../index.js';
+} from '../auth/unified.js';
 import type { EventStoreOrchestrator } from '../orchestrator/event-store-orchestrator.js';
 
 const logger = createLogger('health');

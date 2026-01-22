@@ -11,7 +11,7 @@
 import type { RpcRequest, RpcResponse, SystemPingResult, SystemGetInfoResult } from '../types.js';
 import type { RpcContext } from '../handler.js';
 import { MethodRegistry, type MethodRegistration, type MethodHandler } from '../registry.js';
-import { VERSION } from '../../index.js';
+import { VERSION } from '../../constants.js';
 
 // Module-level start time for uptime calculation
 const startTime = Date.now();
