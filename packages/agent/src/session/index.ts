@@ -6,9 +6,22 @@
  * - WorktreeCoordinator: Orchestrates session ↔ worktree lifecycle
  * - WorkingDirectory: Abstraction for session's working directory
  * - WorktreeManager: Low-level git worktree operations (legacy, use Coordinator)
+ * - TmuxManager: Terminal multiplexer integration for agent sessions
  */
 
 export * from './types.js';
+
+// Tmux integration
+export {
+  TmuxManager,
+  createTmuxManager,
+  type TmuxManagerConfig,
+  type TmuxSession,
+  type TmuxWindow,
+  type TmuxPane,
+  type SpawnOptions,
+  type SendKeysOptions,
+} from './tmux-manager.js';
 
 // New event-integrated worktree system
 export {

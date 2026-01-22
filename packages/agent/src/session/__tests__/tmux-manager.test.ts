@@ -3,7 +3,7 @@
  */
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { TmuxManager, type TmuxManagerConfig } from '../manager.js';
+import { TmuxManager, type TmuxManagerConfig } from '../tmux-manager.js';
 
 describe('TmuxManager', () => {
   let manager: TmuxManager;

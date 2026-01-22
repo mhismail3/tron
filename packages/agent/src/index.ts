@@ -47,8 +47,7 @@ export * from './productivity/index.js';
 // Re-export commands
 export * from './commands/index.js';
 
-// Re-export tmux support
-export * from './tmux/index.js';
+// Tmux support is now exported through session module
 
 // Re-export context loading
 export * from './context/index.js';
