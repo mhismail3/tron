@@ -268,7 +268,9 @@ class EventStoreManager: ObservableObject {
         let events = try eventDB.getAncestors(headEventId)
         logger.info("[RECONSTRUCT] Got \(events.count) ancestor events", category: .session)
 
-        let state = UnifiedEventTransformer.reconstructSessionState(from: events)
+        // Pass presorted: true because getAncestors returns events in correct chain order.
+        // This is critical for forked sessions where sequence numbers reset per-session.
+        let state = UnifiedEventTransformer.reconstructSessionState(from: events, presorted: true)
         logger.info("[RECONSTRUCT] Transformed to \(state.messages.count) messages", category: .session)
         return state
     }

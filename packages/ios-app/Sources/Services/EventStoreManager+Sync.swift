@@ -96,6 +96,28 @@ extension EventStoreManager {
             // Convert server events
             var events = result.events.map { rawEventToSessionEvent($0) }
 
+            // Check if any event references a parent not in local DB (fork boundary)
+            // This handles the case where a forked session's ancestors weren't synced
+            for event in events {
+                if let parentId = event.parentId {
+                    let parentExists = try eventDB.eventExists(parentId)
+                    let parentInNewEvents = events.contains(where: { $0.id == parentId })
+                    if !parentExists && !parentInNewEvents {
+                        // Fetch and store ancestors
+                        logger.info("[SYNC] Event references missing parent \(parentId.prefix(12)), fetching ancestors", category: .session)
+                        do {
+                            let ancestorEvents = try await rpcClient.getAncestors(parentId)
+                            let ancestorSessionEvents = ancestorEvents.map { rawEventToSessionEvent($0) }
+                            let insertedCount = try eventDB.insertEventsIgnoringDuplicates(ancestorSessionEvents)
+                            logger.info("[SYNC] Inserted \(insertedCount) ancestor events", category: .session)
+                        } catch {
+                            logger.warning("[SYNC] Failed to fetch ancestors: \(error.localizedDescription)", category: .session)
+                        }
+                        break // Only need to fetch ancestors once
+                    }
+                }
+            }
+
             // Enrich events with cached tool content from agent.turn
             events = try enrichEventsWithCachedContent(events: events, sessionId: sessionId)
 
@@ -148,6 +170,25 @@ extension EventStoreManager {
         // Log the first event (should be fork/session.start) to verify parent_id
         if let firstEvent = sessionEvents.first {
             logger.info("[FULL-SYNC] First event: id=\(firstEvent.id.prefix(12)), type=\(firstEvent.type), parentId=\(firstEvent.parentId?.prefix(12) ?? "nil")", category: .session)
+        }
+
+        // Check if first event has a parentId pointing to another session (fork indicator)
+        // If so, fetch and store ancestor events to enable proper message reconstruction
+        if let firstEvent = sessionEvents.first,
+           let parentId = firstEvent.parentId,
+           !sessionEvents.contains(where: { $0.id == parentId }) {
+            logger.info("[FULL-SYNC] Session appears forked, fetching ancestor events from \(parentId.prefix(12))", category: .session)
+
+            do {
+                let ancestorEvents = try await rpcClient.getAncestors(parentId)
+                let ancestorSessionEvents = ancestorEvents.map { rawEventToSessionEvent($0) }
+
+                // Insert ancestor events (they may belong to parent session)
+                let insertedCount = try eventDB.insertEventsIgnoringDuplicates(ancestorSessionEvents)
+                logger.info("[FULL-SYNC] Inserted \(insertedCount) ancestor events", category: .session)
+            } catch {
+                logger.warning("[FULL-SYNC] Failed to fetch ancestors: \(error.localizedDescription)", category: .session)
+            }
         }
 
         try eventDB.insertEvents(sessionEvents)

@@ -1593,12 +1593,18 @@ extension UnifiedEventTransformer {
     /// behavior where tool calls show their results inline.
     ///
     /// - Parameter events: All events for the session
+    /// - Parameter presorted: If true, events are already in correct chain order from getAncestors
+    ///                        and should NOT be re-sorted. This is critical for forked sessions
+    ///                        where sequence numbers reset and sorting by sequence would interleave
+    ///                        parent and forked session events incorrectly.
     /// - Returns: Fully reconstructed session state
-    static func reconstructSessionState(from events: [RawEvent]) -> ReconstructedState {
+    static func reconstructSessionState(from events: [RawEvent], presorted: Bool = false) -> ReconstructedState {
         var state = ReconstructedState()
 
-        // Sort by turn number, then timestamp, then sequence
-        let sorted = sortEventsByTurn(events)
+        // Only sort if events are not pre-sorted (from getAncestors)
+        // For forked sessions, sequence numbers reset per-session, so sorting by sequence
+        // would incorrectly interleave parent and forked events
+        let sorted = presorted ? events : sortEventsByTurn(events)
 
         // PASS 1: Collect deleted event IDs, config state, tool maps, and turn token usage
         // Two-pass reconstruction ensures deletions that occur later are properly filtered
@@ -1871,12 +1877,18 @@ extension UnifiedEventTransformer {
     /// behavior where tool calls show their results inline.
     ///
     /// - Parameter events: SessionEvents from EventDatabase (should be from getAncestors)
+    /// - Parameter presorted: If true, events are already in correct chain order from getAncestors
+    ///                        and should NOT be re-sorted. This is critical for forked sessions
+    ///                        where sequence numbers reset and sorting by sequence would interleave
+    ///                        parent and forked session events incorrectly.
     /// - Returns: Fully reconstructed session state
-    static func reconstructSessionState(from events: [SessionEvent]) -> ReconstructedState {
+    static func reconstructSessionState(from events: [SessionEvent], presorted: Bool = false) -> ReconstructedState {
         var state = ReconstructedState()
 
-        // Sort by turn number, then timestamp, then sequence
-        let sorted = sortEventsByTurn(events)
+        // Only sort if events are not pre-sorted (from getAncestors)
+        // For forked sessions, sequence numbers reset per-session, so sorting by sequence
+        // would incorrectly interleave parent and forked events
+        let sorted = presorted ? events : sortEventsByTurn(events)
 
         // PASS 1: Collect deleted event IDs, config state, tool maps, and turn token usage
         // Two-pass reconstruction ensures deletions that occur later are properly filtered
