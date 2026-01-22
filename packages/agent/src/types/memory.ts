@@ -5,7 +5,7 @@
  * Complex episodic/pattern/lesson memory has been removed for simplicity.
  */
 
-import type { Message, ToolCall } from '../types/index.js';
+import type { Message, ToolCall } from './messages.js';
 
 // =============================================================================
 // Session Memory (simple, in-memory during session)
