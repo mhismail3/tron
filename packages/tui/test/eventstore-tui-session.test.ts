@@ -19,7 +19,7 @@ import {
   type EventMessage,
   type EventSessionState,
   type TronSessionEvent,
-} from '@tron/core';
+} from '@tron/agent';
 
 // Import the class we'll create
 import { EventStoreTuiSession, type EventStoreTuiSessionConfig } from '../src/session/eventstore-tui-session.js';

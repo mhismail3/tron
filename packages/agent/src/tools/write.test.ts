@@ -7,7 +7,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import * as fs from 'fs/promises';
 import * as path from 'path';
-import { WriteTool } from '../../src/tools/write.js';
+import { WriteTool } from './write.js';
 
 // Mock fs/promises
 vi.mock('fs/promises');

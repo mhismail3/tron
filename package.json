@@ -19,7 +19,7 @@
     "typecheck": "tsc --noEmit",
     "clean": "rm -rf packages/*/dist packages/*/.turbo packages/*/tsconfig*.tsbuildinfo node_modules/.cache dist && rm -f bun.lockb",
     "dev": "./scripts/tron dev",
-    "dev:server": "cd packages/server && bun run dev",
+    "dev:server": "cd packages/agent && bun run dev",
     "dev:tui": "cd packages/tui && bun run dev",
     "dev:chat": "cd packages/chat-web && bun run dev",
     "login": "cd packages/tui && bun run login",

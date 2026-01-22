@@ -6,7 +6,7 @@
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import * as fs from 'fs/promises';
-import { LsTool } from '../../src/tools/ls.js';
+import { LsTool } from './ls.js';
 
 // Mock fs/promises
 vi.mock('fs/promises');

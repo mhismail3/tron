@@ -70,49 +70,6 @@
         "vitest": "^3.0.0",
       },
     },
-    "packages/core": {
-      "name": "@tron/core",
-      "version": "0.1.0",
-      "dependencies": {
-        "@anthropic-ai/sdk": "^0.71.2",
-        "@sinclair/typebox": "^0.34.12",
-        "ajv": "^8.17.1",
-        "better-sqlite3": "^11.10.0",
-        "pino": "^9.6.0",
-        "pino-pretty": "^13.0.0",
-        "zod": "^3.24.1",
-      },
-      "devDependencies": {
-        "@types/better-sqlite3": "^7.6.13",
-        "@types/node": "^22.10.1",
-        "playwright-core": "^1.57.0",
-        "typescript": "^5.7.2",
-        "vitest": "^3.0.0",
-      },
-      "peerDependencies": {
-        "playwright-core": ">=1.40.0",
-        "typescript": ">=5.0.0",
-      },
-      "optionalPeers": [
-        "playwright-core",
-      ],
-    },
-    "packages/server": {
-      "name": "@tron/server",
-      "version": "0.1.0",
-      "dependencies": {
-        "@tron/core": "workspace:*",
-        "agent-browser": "^0.6.0",
-        "playwright-core": "^1.57.0",
-        "ws": "^8.18.0",
-      },
-      "devDependencies": {
-        "@types/ws": "^8.5.10",
-        "tsx": "^4.7.0",
-        "typescript": "^5.8.3",
-        "vitest": "^3.1.4",
-      },
-    },
     "packages/tui": {
       "name": "@tron/tui",
       "version": "0.1.0",
@@ -358,10 +315,6 @@
     "@tron/agent": ["@tron/agent@workspace:packages/agent"],
 
     "@tron/chat-web": ["@tron/chat-web@workspace:packages/chat-web"],
-
-    "@tron/core": ["@tron/core@workspace:packages/core"],
-
-    "@tron/server": ["@tron/server@workspace:packages/server"],
 
     "@tron/tui": ["@tron/tui@workspace:packages/tui"],
 

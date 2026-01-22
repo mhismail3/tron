@@ -6,9 +6,9 @@ AUDIENCE: Developers working on the Tron codebase.
 
 AGENT MAINTENANCE:
 - Update diagrams if package structure changes
-- Update event types when new ones added to packages/core/src/events/types.ts
+- Update event types when new ones added to packages/agent/src/events/types.ts
 - Verify schemas match actual SQLite tables
-- Last verified: 2026-01-20
+- Last verified: 2026-01-22
 -->
 
 ## System Overview
@@ -54,23 +54,24 @@ AGENT MAINTENANCE:
 
 | Package | Purpose | Entry |
 |---------|---------|-------|
-| `@tron/core` | Agent logic, tools, events, context | `packages/core/src/` |
-| `@tron/server` | WebSocket server, orchestration | `packages/server/src/` |
+| `@tron/agent` | Agent logic, tools, events, context, server | `packages/agent/src/` |
 | `@tron/tui` | Terminal UI (React/Ink) | `packages/tui/src/` |
 | `@tron/chat-web` | Web chat (React SPA) | `packages/chat-web/src/` |
 | `@tron/ios-app` | iOS app (SwiftUI) | `packages/ios-app/Sources/` |
 
-### Core Package Structure
+### Agent Package Structure
 
 ```
-packages/core/src/
+packages/agent/src/
 ├── agent/           # TronAgent, turn execution
 ├── providers/       # Anthropic, OpenAI, Google
 ├── tools/           # read, write, edit, bash, grep, find
 ├── events/          # Event store, SQLite backend
 ├── context/         # AGENTS.md loader, system prompts
 ├── skills/          # Skill loader, registry
-└── subagents/       # Sub-agent spawning and tracking
+├── subagents/       # Sub-agent spawning and tracking
+├── gateway/         # WebSocket server, RPC adapters
+└── server.ts        # Server entry point
 ```
 
 ## Event Sourcing

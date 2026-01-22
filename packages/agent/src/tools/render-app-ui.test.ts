@@ -7,7 +7,7 @@
  */
 
 import { describe, it, expect, beforeEach } from 'vitest';
-import { RenderAppUITool } from '../../src/tools/render-app-ui.js';
+import { RenderAppUITool } from './render-app-ui.js';
 
 describe('RenderAppUITool', () => {
   let tool: RenderAppUITool;

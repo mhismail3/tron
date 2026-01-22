@@ -24,8 +24,7 @@
     "baseUrl": "."
   },
   "references": [
-    { "path": "packages/core" },
-    { "path": "packages/server" },
+    { "path": "packages/agent" },
     { "path": "packages/tui" },
     { "path": "packages/chat-web" }
   ],

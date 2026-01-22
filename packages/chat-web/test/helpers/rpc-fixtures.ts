@@ -28,7 +28,7 @@ import type {
   WorktreeCommitResult,
   WorktreeMergeResult,
   WorktreeListResult,
-} from '@tron/core';
+} from '@tron/agent';
 
 // =============================================================================
 // Response Factories

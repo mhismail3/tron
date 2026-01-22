@@ -2,7 +2,7 @@
 /**
  * Compaction Demo - Test the ContextManager compaction flow without burning tokens
  *
- * Run with: npx tsx packages/core/test/context/compaction-demo.ts
+ * Run with: npx tsx packages/agent/test/context/compaction-demo.ts
  */
 
 import { createContextManager } from '../../src/context/context-manager.js';

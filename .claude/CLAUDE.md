@@ -39,21 +39,21 @@ When adding a new tool, you MUST handle all of the following to prevent breaking
 
 ### The Tool Lifecycle
 
-1. **Tool Definition** (`packages/core/src/tools/`)
+1. **Tool Definition** (`packages/agent/src/tools/`)
 2. **Tool Call Event** (`tool.call`) - recorded when agent invokes tool
 3. **Tool Result Event** (`tool.result`) - recorded when execution completes
 4. **Message Content** (`message.assistant`) - contains `tool_use` blocks
-5. **Content Normalization** (`packages/server/src/utils/content-normalizer.ts`)
-6. **State Reconstruction** (`packages/core/src/events/event-store.ts`)
+5. **Content Normalization** (`packages/agent/src/utils/content-normalizer.ts`)
+6. **State Reconstruction** (`packages/agent/src/events/event-store.ts`)
 
 ### Files to Update
 
 | File | Check |
 |------|-------|
-| `packages/core/src/events/event-store.ts` | `getMessagesAt()` reconstructs tool_use/tool_result |
-| `packages/server/src/utils/content-normalizer.ts` | `normalizeContentBlock()` handles tool input format |
-| `packages/server/src/orchestrator/agent-event-handler.ts` | Events properly recorded |
-| `packages/core/src/types/events.ts` | Event payload types if new fields needed |
+| `packages/agent/src/events/event-store.ts` | `getMessagesAt()` reconstructs tool_use/tool_result |
+| `packages/agent/src/utils/content-normalizer.ts` | `normalizeContentBlock()` handles tool input format |
+| `packages/agent/src/orchestrator/agent-event-handler.ts` | Events properly recorded |
+| `packages/agent/src/types/events.ts` | Event payload types if new fields needed |
 
 ### Known Pitfalls
 
@@ -87,8 +87,8 @@ Reconstruction:
 
 | File | Purpose |
 |------|---------|
-| `packages/core/src/subagents/subagent-tracker.ts` | Tracks sub-agents, manages pending results |
-| `packages/core/src/tools/spawn-subsession.ts` | In-process spawning |
-| `packages/core/src/tools/spawn-tmux-agent.ts` | Out-of-process spawning |
-| `packages/core/src/tools/query-subagent.ts` | Query sub-agent state |
-| `packages/server/src/event-store-orchestrator.ts` | Orchestrates lifecycle |
+| `packages/agent/src/subagents/subagent-tracker.ts` | Tracks sub-agents, manages pending results |
+| `packages/agent/src/tools/spawn-subsession.ts` | In-process spawning |
+| `packages/agent/src/tools/spawn-tmux-agent.ts` | Out-of-process spawning |
+| `packages/agent/src/tools/query-subagent.ts` | Query sub-agent state |
+| `packages/agent/src/event-store-orchestrator.ts` | Orchestrates lifecycle |

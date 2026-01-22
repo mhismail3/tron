@@ -264,13 +264,13 @@ bun run clean         # Clean build artifacts
 
 ```bash
 # Build a specific package
-cd packages/core && bun run build
+cd packages/agent && bun run build
 
 # Run dev for a specific package
 cd packages/tui && bun run dev
 
 # Install a dependency to a specific package
-bun add some-package --cwd packages/server
+bun add some-package --cwd packages/agent
 ```
 
 ### Bun Performance Benefits

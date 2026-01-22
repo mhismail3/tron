@@ -148,10 +148,9 @@ get_node_path() {
 # build_workspace - Build all packages in dependency order
 #
 # Builds packages sequentially to respect dependencies:
-#   1. @tron/core (base types and utilities)
-#   2. @tron/server (depends on core)
-#   3. @tron/tui (depends on core)
-#   4. @tron/chat-web (depends on core)
+#   1. @tron/agent (unified package with all core logic and server)
+#   2. @tron/tui (depends on agent)
+#   3. @tron/chat-web (depends on agent)
 #
 # Usage: build_workspace
 # Returns: 0 on success, exits on failure
@@ -162,8 +161,7 @@ build_workspace() {
     # Ensure bun is in PATH
     export PATH="$HOME/.bun/bin:$PATH"
 
-    (cd "$PROJECT_DIR/packages/core" && bun run build) || { print_error "Failed to build @tron/core"; exit 1; }
-    (cd "$PROJECT_DIR/packages/server" && bun run build) || { print_error "Failed to build @tron/server"; exit 1; }
+    (cd "$PROJECT_DIR/packages/agent" && bun run build) || { print_error "Failed to build @tron/agent"; exit 1; }
     (cd "$PROJECT_DIR/packages/tui" && bun run build) || { print_error "Failed to build @tron/tui"; exit 1; }
     (cd "$PROJECT_DIR/packages/chat-web" && bun run build) || { print_error "Failed to build @tron/chat-web"; exit 1; }
 
@@ -200,7 +198,7 @@ build_production() {
     # External: native modules that can't be bundled (require .node binaries)
     local BANNER='const _importMetaUrl = require("url").pathToFileURL(__filename).href;'
 
-    ./node_modules/.bin/esbuild packages/server/dist/index.js \
+    ./node_modules/.bin/esbuild packages/agent/dist/server.js \
         --bundle \
         --platform=node \
         --target=node20 \
@@ -214,8 +212,8 @@ build_production() {
         --minify
 
     # Copy runtime assets
-    if [ -d "packages/core/dist/providers/prompts" ]; then
-        cp -r packages/core/dist/providers/prompts dist/prod/
+    if [ -d "packages/agent/dist/providers/prompts" ]; then
+        cp -r packages/agent/dist/providers/prompts dist/prod/
     fi
 
     # Copy external native dependencies
@@ -273,11 +271,11 @@ copy_native_dependency() {
 #-----------------------------------------------------------------------------
 check_native_module() {
     cd "$PROJECT_DIR"
-    # Test from packages/core where better-sqlite3 is actually installed
-    if (cd packages/core && node -e "require('better-sqlite3')" 2>&1) | grep -q "NODE_MODULE_VERSION"; then
+    # Test from packages/agent where better-sqlite3 is actually installed
+    if (cd packages/agent && node -e "require('better-sqlite3')" 2>&1) | grep -q "NODE_MODULE_VERSION"; then
         return 1
     fi
-    (cd packages/core && node -e "require('better-sqlite3')" 2>/dev/null)
+    (cd packages/agent && node -e "require('better-sqlite3')" 2>/dev/null)
     return $?
 }
 
@@ -852,13 +850,13 @@ cmd_dev() {
         echo ""
         echo -e "${YELLOW}Press Ctrl+C to stop${NC}"
         echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-        exec node packages/server/dist/index.js
+        exec node packages/agent/dist/server.js
     else
         # Background mode (default)
         echo ""
         echo -e "${CYAN}Starting Beta Server (background)${NC}"
 
-        node packages/server/dist/index.js >/dev/null 2>&1 &
+        node packages/agent/dist/server.js >/dev/null 2>&1 &
         local pid=$!
 
         sleep 2

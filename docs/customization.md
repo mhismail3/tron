@@ -5,10 +5,10 @@ PURPOSE: How to configure Tron's behavior via settings, skills, and system promp
 AUDIENCE: Users customizing Tron for their workflow.
 
 AGENT MAINTENANCE:
-- Update settings when new options added to packages/core/src/settings/
+- Update settings when new options added to packages/agent/src/settings/
 - Update skill frontmatter fields if schema changes
 - Verify file locations match actual loader behavior
-- Last verified: 2026-01-20
+- Last verified: 2026-01-22
 -->
 
 ## Settings

@@ -279,7 +279,7 @@ async function runInteractive(config: CliConfig): Promise<void> {
   process.on('exit', disableKittyKeyboard);
 
   // Suppress pino logs unless in debug mode
-  // This must be set BEFORE any @tron/core imports that create loggers
+  // This must be set BEFORE any @tron/agent imports that create loggers
   if (!config.debug) {
     process.env.LOG_LEVEL = 'silent';
   }

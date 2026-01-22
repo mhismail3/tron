@@ -26,9 +26,9 @@ The existing event system (`agent.tool_start`) already forwards tool calls to iO
 
 ## Step-by-Step Implementation
 
-### 1. Create Tool in Core Package
+### 1. Create Tool in Agent Package
 
-**File**: `packages/core/src/tools/{tool-name}.ts`
+**File**: `packages/agent/src/tools/{tool-name}.ts`
 
 ```typescript
 import type { TronTool, TronToolResult } from '../types/index.js';
@@ -109,7 +109,7 @@ Examples:
 
 ### 2. Export Tool from Index
 
-**File**: `packages/core/src/tools/index.ts`
+**File**: `packages/agent/src/tools/index.ts`
 
 Add export:
 ```typescript
@@ -118,7 +118,7 @@ export { {ToolName}Tool, type {ToolName}Config } from './{tool-name}.js';
 
 ### 3. Register Tool in Server
 
-**File**: `packages/server/src/event-store-orchestrator.ts`
+**File**: `packages/agent/src/event-store-orchestrator.ts`
 
 Add to imports (around line 75):
 ```typescript
@@ -249,7 +249,7 @@ Use a unique ID pattern like `TOOLNAME00000000100001` and `TOOLNAME0000000020000
 
 ### 9. Add Unit Tests
 
-**File**: `packages/core/test/tools/{tool-name}.test.ts`
+**File**: `packages/agent/test/tools/{tool-name}.test.ts`
 
 ```typescript
 import { describe, it, expect, beforeEach } from 'vitest';
@@ -290,9 +290,8 @@ describe('{ToolName}Tool', () => {
 
 ## Verification Checklist
 
-- [ ] Tool builds: `cd packages/core && bun run build`
-- [ ] Server builds: `cd packages/server && bun run build`
-- [ ] Tests pass: `cd packages/core && bun test test/tools/{tool-name}.test.ts`
+- [ ] Tool builds: `cd packages/agent && bun run build`
+- [ ] Tests pass: `cd packages/agent && bun test test/tools/{tool-name}.test.ts`
 - [ ] iOS builds in Xcode (Cmd+B)
 - [ ] Manual test: Start server, use iOS app, trigger tool via agent
 
@@ -339,15 +338,15 @@ describe('{ToolName}Tool', () => {
 
 | Purpose | File Path |
 |---------|-----------|
-| Tool implementation | `packages/core/src/tools/{tool-name}.ts` |
-| Tool exports | `packages/core/src/tools/index.ts` |
-| Tool registration | `packages/server/src/event-store-orchestrator.ts` |
+| Tool implementation | `packages/agent/src/tools/{tool-name}.ts` |
+| Tool exports | `packages/agent/src/tools/index.ts` |
+| Tool registration | `packages/agent/src/event-store-orchestrator.ts` |
 | iOS event handling | `packages/ios-app/Sources/ViewModels/ChatViewModel+Events.swift` |
 | iOS state | `packages/ios-app/Sources/ViewModels/ChatViewModel.swift` |
 | iOS presentation | `packages/ios-app/Sources/Views/ChatView.swift` |
 | iOS view component | `packages/ios-app/Sources/Views/{ToolName}View.swift` |
 | Xcode project | `packages/ios-app/TronMobile.xcodeproj/project.pbxproj` |
-| Unit tests | `packages/core/test/tools/{tool-name}.test.ts` |
+| Unit tests | `packages/agent/test/tools/{tool-name}.test.ts` |
 
 ## Tips
 

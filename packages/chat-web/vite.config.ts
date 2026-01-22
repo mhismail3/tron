@@ -27,12 +27,12 @@ export default defineConfig({
     alias: {
       '@': resolve(__dirname, 'src'),
       // Resolve workspace packages - point to built dist directories
-      '@tron/core': resolve(__dirname, '../core/dist'),
-      '@tron/core/browser': resolve(__dirname, '../core/dist/browser.js'),
+      '@tron/agent': resolve(__dirname, '../agent/dist'),
+      '@tron/agent/browser': resolve(__dirname, '../agent/dist/browser.js'),
     },
   },
   // Ensure Vite can resolve workspace dependencies
   optimizeDeps: {
-    include: ['@tron/core'],
+    include: ['@tron/agent'],
   },
 });

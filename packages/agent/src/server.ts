@@ -322,3 +322,65 @@ export class TronServer {
     return this.orchestrator;
   }
 }
+
+// =============================================================================
+// CLI Entry Point
+// =============================================================================
+
+import { getSettings } from './settings/loader.js';
+
+function getServerSettings() {
+  return getSettings().server;
+}
+
+async function main(): Promise<void> {
+  const settings = getServerSettings();
+
+  const config: TronServerConfig = {
+    wsPort: parseInt(process.env.TRON_WS_PORT ?? String(settings.wsPort), 10),
+    healthPort: parseInt(process.env.TRON_HEALTH_PORT ?? String(settings.healthPort), 10),
+    host: process.env.TRON_HOST ?? settings.host,
+    eventStoreDbPath: process.env.TRON_EVENT_STORE_DB,
+    defaultModel: process.env.TRON_DEFAULT_MODEL ?? settings.defaultModel,
+    defaultProvider: process.env.TRON_DEFAULT_PROVIDER ?? settings.defaultProvider,
+    maxConcurrentSessions: process.env.TRON_MAX_SESSIONS
+      ? parseInt(process.env.TRON_MAX_SESSIONS, 10)
+      : settings.maxConcurrentSessions,
+    heartbeatInterval: process.env.TRON_HEARTBEAT_INTERVAL
+      ? parseInt(process.env.TRON_HEARTBEAT_INTERVAL, 10)
+      : settings.heartbeatIntervalMs,
+  };
+
+  const server = new TronServer(config);
+
+  const shutdown = async (signal: string) => {
+    logger.info(`Received ${signal}, shutting down...`);
+    await server.stop();
+    process.exit(0);
+  };
+
+  process.on('SIGINT', () => shutdown('SIGINT'));
+  process.on('SIGTERM', () => shutdown('SIGTERM'));
+
+  process.on('uncaughtException', (error) => {
+    logger.error('Uncaught exception', error);
+    process.exit(1);
+  });
+
+  process.on('unhandledRejection', (reason) => {
+    logger.error('Unhandled rejection', { reason });
+    process.exit(1);
+  });
+
+  await server.start();
+
+  logger.info('Server ready. Press Ctrl+C to stop.');
+}
+
+const isMain = process.argv[1]?.endsWith('server.js') || process.argv[1]?.endsWith('server.ts');
+if (isMain) {
+  main().catch((error) => {
+    logger.error('Failed to start server', error);
+    process.exit(1);
+  });
+}

@@ -8,7 +8,7 @@ import type {
   RpcRequest,
   RpcResponse,
   RpcEvent,
-} from '@tron/core';
+} from '@tron/agent';
 
 // =============================================================================
 // Types
