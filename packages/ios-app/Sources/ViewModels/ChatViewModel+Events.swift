@@ -44,7 +44,7 @@ extension ChatViewModel {
 
         // Create thinking message on first delta (so it appears BEFORE the text response)
         if thinkingMessageId == nil {
-            let thinkingMessage = ChatMessage.thinking(thinkingText)
+            let thinkingMessage = ChatMessage.thinking(thinkingText, isStreaming: true)
             messages.append(thinkingMessage)
             thinkingMessageId = thinkingMessage.id
             messageWindowManager.appendMessage(thinkingMessage)
@@ -52,7 +52,7 @@ extension ChatViewModel {
         } else if let id = thinkingMessageId,
                   let index = messages.firstIndex(where: { $0.id == id }) {
             // Update existing thinking message with accumulated content
-            messages[index].content = .thinking(visible: thinkingText, isExpanded: false)
+            messages[index].content = .thinking(visible: thinkingText, isExpanded: false, isStreaming: true)
         }
 
         // Also route to ThinkingState for sheet/history functionality

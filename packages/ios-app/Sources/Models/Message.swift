@@ -179,7 +179,7 @@ enum MessageRole: String, Codable, Equatable {
 enum MessageContent: Equatable {
     case text(String)
     case streaming(String)
-    case thinking(visible: String, isExpanded: Bool)
+    case thinking(visible: String, isExpanded: Bool, isStreaming: Bool)
     case toolUse(ToolUseData)
     case toolResult(ToolResultData)
     case error(String)
@@ -225,7 +225,7 @@ enum MessageContent: Equatable {
         switch self {
         case .text(let text), .streaming(let text):
             return text
-        case .thinking(let visible, _):
+        case .thinking(let visible, _, _):
             return visible
         case .toolUse(let tool):
             return "[\(tool.toolName)]"
@@ -518,8 +518,8 @@ extension ChatMessage {
     }
 
     /// Thinking block message (appears before the text response)
-    static func thinking(_ text: String, isExpanded: Bool = false) -> ChatMessage {
-        ChatMessage(role: .assistant, content: .thinking(visible: text, isExpanded: isExpanded))
+    static func thinking(_ text: String, isExpanded: Bool = false, isStreaming: Bool = false) -> ChatMessage {
+        ChatMessage(role: .assistant, content: .thinking(visible: text, isExpanded: isExpanded, isStreaming: isStreaming))
     }
 }
 

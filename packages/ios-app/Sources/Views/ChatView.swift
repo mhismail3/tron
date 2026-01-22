@@ -66,6 +66,8 @@ struct ChatView: View {
     @State private var compactionDetailData: (tokensBefore: Int, tokensAfter: Int, reason: String, summary: String?)?
     /// Data for NotifyApp detail sheet
     @State private var notifyAppSheetData: NotifyAppChipData?
+    /// Content for thinking detail sheet (when a thinking block is tapped)
+    @State private var thinkingSheetContent: String?
 
     /// UserDefaults key for storing reasoning level per session
     private var reasoningLevelKey: String { "tron.reasoningLevel.\(sessionId)" }
@@ -375,13 +377,15 @@ struct ChatView: View {
             }
         }
         .sheet(isPresented: Binding(
-            get: { viewModel.thinkingState.showSheet },
-            set: { viewModel.thinkingState.showSheet = $0 }
+            get: { thinkingSheetContent != nil },
+            set: { if !$0 { thinkingSheetContent = nil } }
         )) {
-            if #available(iOS 26.0, *) {
-                ThinkingDetailSheet(thinkingState: viewModel.thinkingState)
-            } else {
-                ThinkingDetailSheetFallback(thinkingState: viewModel.thinkingState)
+            if let content = thinkingSheetContent {
+                if #available(iOS 26.0, *) {
+                    ThinkingDetailSheet(content: content)
+                } else {
+                    ThinkingDetailSheetFallback(content: content)
+                }
             }
         }
         .alert("Error", isPresented: $viewModel.showError) {
@@ -609,8 +613,8 @@ struct ChatView: View {
                                     onAskUserQuestionTap: { data in
                                         viewModel.openAskUserQuestionSheet(for: data)
                                     },
-                                    onThinkingTap: {
-                                        viewModel.thinkingState.showSheet = true
+                                    onThinkingTap: { content in
+                                        thinkingSheetContent = content
                                     },
                                     onCompactionTap: { tokensBefore, tokensAfter, reason, summary in
                                         compactionDetailData = (tokensBefore, tokensAfter, reason, summary)

@@ -354,10 +354,10 @@ struct UnifiedEventTransformer {
 
             if blockType == "thinking", let thinkingText = block["thinking"] as? String, !thinkingText.isEmpty {
                 // Create thinking message - appears before text response
-                let preview = extractThinkingPreview(from: thinkingText)
+                // Store full content; ThinkingContentView computes its own preview
                 messages.append(ChatMessage(
                     role: .assistant,
-                    content: .thinking(visible: preview, isExpanded: false),
+                    content: .thinking(visible: thinkingText, isExpanded: false, isStreaming: false),
                     timestamp: timestamp
                 ))
             } else if blockType == "text", let text = block["text"] as? String, !text.isEmpty {
@@ -723,10 +723,10 @@ struct UnifiedEventTransformer {
 
             if blockType == "thinking", let thinkingText = block["thinking"] as? String, !thinkingText.isEmpty {
                 // Create thinking message - appears before text response
-                let preview = extractThinkingPreview(from: thinkingText)
+                // Store full content; ThinkingContentView computes its own preview
                 messages.append(ChatMessage(
                     role: .assistant,
-                    content: .thinking(visible: preview, isExpanded: false),
+                    content: .thinking(visible: thinkingText, isExpanded: false, isStreaming: false),
                     timestamp: timestamp
                 ))
             } else if blockType == "text", let text = block["text"] as? String, !text.isEmpty {
@@ -1116,7 +1116,7 @@ struct UnifiedEventTransformer {
 
         return ChatMessage(
             role: .assistant,
-            content: .thinking(visible: displayText, isExpanded: false),
+            content: .thinking(visible: displayText, isExpanded: false, isStreaming: false),
             timestamp: timestamp
         )
     }
@@ -1326,98 +1326,38 @@ struct UnifiedEventTransformer {
     // MARK: - Helpers
     // =========================================================================
 
-    /// Sort events by timestamp (generation time), then by turn, then by sequence.
+    /// Sort events by sequence number (primary), which is the authoritative order from the database.
     ///
-    /// This preserves the streaming order where events are recorded as they occur
-    /// during Claude's response generation.
+    /// Sequence number is always reliable and represents the actual event order.
+    /// Thinking blocks within message.assistant content are already in correct order
+    /// and are handled by transformAssistantMessageInterleaved.
     private static func sortEventsByTurn(_ events: [RawEvent]) -> [RawEvent] {
         events.sorted { a, b in
-            // Primary sort: by turn number from payload
-            let turnA = extractTurn(from: a.type, payload: a.payload)
-            let turnB = extractTurn(from: b.type, payload: b.payload)
-            if turnA != turnB {
-                return turnA < turnB
+            // Primary sort: by sequence number (authoritative order)
+            if a.sequence != b.sequence {
+                return a.sequence < b.sequence
             }
 
-            // Secondary sort: by event type priority within turn
-            // This ensures thinking appears before assistant text
-            let priorityA = eventTypePriority(for: a.type)
-            let priorityB = eventTypePriority(for: b.type)
-            if priorityA != priorityB {
-                return priorityA < priorityB
-            }
-
-            // Tertiary sort: by timestamp
+            // Secondary sort: by timestamp (for events with same sequence, if any)
             let tsA = parseTimestamp(a.timestamp)
             let tsB = parseTimestamp(b.timestamp)
-            if tsA != tsB {
-                return tsA < tsB
-            }
-
-            // Final sort: by sequence
-            return a.sequence < b.sequence
+            return tsA < tsB
         }
     }
 
-    /// Sort SessionEvents by turn, then type priority (thinking before text), then timestamp.
+    /// Sort SessionEvents by sequence number (primary), which is the authoritative order.
     private static func sortEventsByTurn(_ events: [SessionEvent]) -> [SessionEvent] {
         events.sorted { a, b in
-            // Primary sort: by turn number from payload
-            let turnA = extractTurn(from: a.type, payload: a.payload)
-            let turnB = extractTurn(from: b.type, payload: b.payload)
-            if turnA != turnB {
-                return turnA < turnB
+            // Primary sort: by sequence number (authoritative order)
+            if a.sequence != b.sequence {
+                return a.sequence < b.sequence
             }
 
-            // Secondary sort: by event type priority within turn
-            // This ensures thinking appears before assistant text
-            let priorityA = eventTypePriority(for: a.type)
-            let priorityB = eventTypePriority(for: b.type)
-            if priorityA != priorityB {
-                return priorityA < priorityB
-            }
-
-            // Tertiary sort: by timestamp
+            // Secondary sort: by timestamp (for events with same sequence, if any)
             let tsA = parseTimestamp(a.timestamp)
             let tsB = parseTimestamp(b.timestamp)
-            if tsA != tsB {
-                return tsA < tsB
-            }
-
-            // Final sort: by sequence
-            return a.sequence < b.sequence
+            return tsA < tsB
         }
-    }
-
-    /// Extract turn number from event payload based on event type.
-    private static func extractTurn(from type: String, payload: [String: AnyCodable]) -> Int {
-        // User messages, assistant messages, and tool calls have turn in payload
-        if type == PersistedEventType.messageUser.rawValue ||
-           type == PersistedEventType.messageAssistant.rawValue ||
-           type == PersistedEventType.toolCall.rawValue {
-            return payload["turn"]?.value as? Int ?? 0
-        }
-
-        // stream.thinking_complete has turnNumber in payload
-        if type == PersistedEventType.streamThinkingComplete.rawValue {
-            return payload["turnNumber"]?.value as? Int ?? 0
-        }
-
-        // Tool results are linked to tool calls via toolCallId, use sequence-based ordering
-        // Other events don't have turns, use 0 to sort them early
-        return 0
-    }
-
-    /// Event type priority for sorting within the same turn.
-    /// Lower values sort first. Thinking should appear before assistant text.
-    private static func eventTypePriority(for type: String) -> Int {
-        if type == PersistedEventType.streamThinkingComplete.rawValue {
-            return 0  // Thinking comes first
-        }
-        if type == PersistedEventType.messageAssistant.rawValue {
-            return 1  // Text response comes after thinking
-        }
-        return 2  // Other events come last
     }
 
     /// Extract preview (first 3 lines) from thinking content for display

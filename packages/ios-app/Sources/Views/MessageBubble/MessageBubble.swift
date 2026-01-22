@@ -6,7 +6,7 @@ struct MessageBubble: View {
     let message: ChatMessage
     var onSkillTap: ((Skill) -> Void)?
     var onAskUserQuestionTap: ((AskUserQuestionToolData) -> Void)?
-    var onThinkingTap: (() -> Void)?
+    var onThinkingTap: ((String) -> Void)?
     var onCompactionTap: ((Int, Int, String, String?) -> Void)?
     var onSubagentTap: ((SubagentToolData) -> Void)?
     var onRenderAppUITap: ((RenderAppUIChipData) -> Void)?
@@ -80,8 +80,10 @@ struct MessageBubble: View {
         case .streaming(let text):
             StreamingContentView(text: text)
 
-        case .thinking(let visible, let isExpanded):
-            ThinkingContentView(content: visible, isExpanded: isExpanded, onTap: onThinkingTap)
+        case .thinking(let visible, let isExpanded, let isStreaming):
+            ThinkingContentView(content: visible, isExpanded: isExpanded, isStreaming: isStreaming) {
+                onThinkingTap?(visible)
+            }
 
         case .toolUse(let tool):
             // Handle subagent tools specially
