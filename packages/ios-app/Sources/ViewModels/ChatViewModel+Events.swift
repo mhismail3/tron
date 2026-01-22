@@ -39,12 +39,26 @@ extension ChatViewModel {
     }
 
     func handleThinkingDelta(_ delta: String) {
-        // Route to ThinkingState for new caption-style display
+        // Accumulate thinking text
+        thinkingText += delta
+
+        // Create thinking message on first delta (so it appears BEFORE the text response)
+        if thinkingMessageId == nil {
+            let thinkingMessage = ChatMessage.thinking(thinkingText)
+            messages.append(thinkingMessage)
+            thinkingMessageId = thinkingMessage.id
+            messageWindowManager.appendMessage(thinkingMessage)
+            logger.debug("Created thinking message: \(thinkingMessage.id)", category: .events)
+        } else if let id = thinkingMessageId,
+                  let index = messages.firstIndex(where: { $0.id == id }) {
+            // Update existing thinking message with accumulated content
+            messages[index].content = .thinking(visible: thinkingText, isExpanded: false)
+        }
+
+        // Also route to ThinkingState for sheet/history functionality
         thinkingState.handleThinkingDelta(delta)
 
-        // Keep legacy property in sync for backward compatibility
-        thinkingText += delta
-        logger.verbose("Thinking delta: +\(delta.count) chars", category: .events)
+        logger.verbose("Thinking delta: +\(delta.count) chars, total: \(thinkingText.count)", category: .events)
     }
 
     func handleToolStart(_ event: ToolStartEvent) {
@@ -367,7 +381,11 @@ extension ChatViewModel {
             streamingText = ""
         }
 
-        // Notify ThinkingState of new turn (clears previous turn's thinking)
+        // Clear thinking state for the new turn
+        thinkingMessageId = nil
+        thinkingText = ""
+
+        // Notify ThinkingState of new turn (clears previous turn's thinking for sheet)
         thinkingState.startTurn(event.turnNumber, model: currentModel)
 
         // Clear tool tracking for the new turn
@@ -613,8 +631,8 @@ extension ChatViewModel {
         finalizeStreamingMessage()
         thinkingText = ""
 
-        // Clear ThinkingState streaming (caption should disappear)
-        thinkingState.clearCurrentStreaming()
+        // NOTE: Do NOT clear ThinkingState here - thinking caption should persist
+        // until the user sends a new message (cleared by startTurn on next turn)
 
         // Reset browser dismiss flag for next turn
         userDismissedBrowserThisTurn = false
@@ -755,8 +773,8 @@ extension ChatViewModel {
         messages.append(.error(message))
         thinkingText = ""
 
-        // Clear ThinkingState streaming on error
-        thinkingState.clearCurrentStreaming()
+        // NOTE: Do NOT clear ThinkingState here - thinking caption should persist
+        // so user can see what was happening before the error (cleared on next turn)
 
         // Close browser session on error
         closeBrowserSession()

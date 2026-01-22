@@ -112,14 +112,8 @@ struct ChatView: View {
             .safeAreaInset(edge: .bottom, spacing: 0) {
                 // Floating input area - iOS 26 liquid glass, no backgrounds
                 VStack(spacing: 8) {
-                    // Thinking caption (new caption-style, tappable to open sheet)
-                    if viewModel.thinkingState.shouldShowCaption && currentModelInfo?.supportsThinking == true {
-                        ThinkingCaption(thinkingState: viewModel.thinkingState)
-                            .transition(.asymmetric(
-                                insertion: .opacity.combined(with: .move(edge: .bottom)),
-                                removal: .opacity
-                            ))
-                    }
+                    // Note: ThinkingCaption is now inline with messages (in messagesScrollView)
+                    // so that the response appears below/after the thinking block
 
                     // Input area with integrated status pills and model picker
                     InputBar(
@@ -656,11 +650,15 @@ struct ChatView: View {
                             .animation(.easeOut(duration: 0.3), value: showEntryContent)
                             .animation(.easeOut(duration: 0.25), value: viewModel.messages.count)
 
+                            // Note: Thinking is now rendered as a message in the ForEach above
+                            // (ChatMessage with .thinking content type) so it appears in linear history
+
                             // Show processing indicator only when:
                             // 1. Processing is happening
-                            // 2. Last message is not streaming
+                            // 2. Last message is not streaming text
                             // 3. No subagent is blocking (subagent chip shows its own spinner)
-                            if viewModel.isProcessing && viewModel.messages.last?.isStreaming != true && !viewModel.subagentState.hasRunningSubagents {
+                            // 4. No thinking message is active (thinking message has its own visual)
+                            if viewModel.isProcessing && viewModel.messages.last?.isStreaming != true && !viewModel.subagentState.hasRunningSubagents && viewModel.thinkingMessageId == nil {
                                 ProcessingIndicator()
                                     .id("processing")
                             }

@@ -138,6 +138,8 @@ class ChatViewModel: ObservableObject {
     var cancellables = Set<AnyCancellable>()
     var streamingMessageId: UUID?
     var streamingText = ""
+    /// ID of the thinking message for the current turn (thinking appears before text response)
+    var thinkingMessageId: UUID?
     /// ID of the catching-up notification message (removed on turn_end/complete)
     var catchingUpMessageId: UUID?
 

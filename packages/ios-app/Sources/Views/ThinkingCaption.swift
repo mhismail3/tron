@@ -12,14 +12,14 @@ struct ThinkingCaption: View {
         } label: {
             HStack(spacing: 8) {
                 // Rotating thinking icon
-                RotatingIcon(icon: .thinking, size: 14, color: .tronPurple)
+                RotatingIcon(icon: .thinking, size: 14, color: Color.secondary.opacity(0.7))
 
                 // Preview text (max 3 lines worth)
                 Text(thinkingState.captionText)
                     .lineLimit(3)
                     .font(TronTypography.caption)
                     .italic()
-                    .foregroundStyle(.tronPurple.opacity(0.9))
+                    .foregroundStyle(Color.secondary.opacity(0.8))
                     .multilineTextAlignment(.leading)
 
                 Spacer(minLength: 4)
@@ -27,11 +27,11 @@ struct ThinkingCaption: View {
                 // Expand indicator
                 Image(systemName: "chevron.up.circle.fill")
                     .font(TronTypography.sans(size: TronTypography.sizeBody3, weight: .medium))
-                    .foregroundStyle(.tronPurple.opacity(0.7))
+                    .foregroundStyle(Color.secondary.opacity(0.6))
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 10)
-            .glassEffect()
+            .glassEffect(.regular.interactive())
         }
         .buttonStyle(.plain)
         .padding(.horizontal)
@@ -47,28 +47,28 @@ struct ThinkingCaptionFallback: View {
             thinkingState.showSheet = true
         } label: {
             HStack(spacing: 8) {
-                RotatingIcon(icon: .thinking, size: 14, color: .tronPurple)
+                RotatingIcon(icon: .thinking, size: 14, color: Color.secondary.opacity(0.7))
 
                 Text(thinkingState.captionText)
                     .lineLimit(3)
                     .font(TronTypography.caption)
                     .italic()
-                    .foregroundStyle(.tronPurple.opacity(0.9))
+                    .foregroundStyle(Color.secondary.opacity(0.8))
                     .multilineTextAlignment(.leading)
 
                 Spacer(minLength: 4)
 
                 Image(systemName: "chevron.up.circle.fill")
                     .font(TronTypography.sans(size: TronTypography.sizeBody3, weight: .medium))
-                    .foregroundStyle(.tronPurple.opacity(0.7))
+                    .foregroundStyle(Color.secondary.opacity(0.6))
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 10)
             .background(Color.tronSurface)
-            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
             .overlay(
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .stroke(Color.tronPurple.opacity(0.3), lineWidth: 0.5)
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .stroke(Color.secondary.opacity(0.2), lineWidth: 0.5)
             )
         }
         .buttonStyle(.plain)

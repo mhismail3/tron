@@ -516,6 +516,11 @@ extension ChatMessage {
     static func catchingUp() -> ChatMessage {
         ChatMessage(role: .system, content: .catchingUp)
     }
+
+    /// Thinking block message (appears before the text response)
+    static func thinking(_ text: String, isExpanded: Bool = false) -> ChatMessage {
+        ChatMessage(role: .assistant, content: .thinking(visible: text, isExpanded: isExpanded))
+    }
 }
 
 // MARK: - RenderAppUI Types

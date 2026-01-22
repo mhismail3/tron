@@ -246,8 +246,9 @@ final class ThinkingState {
     }
 
     /// Whether the thinking caption should be shown
+    /// Shows while streaming AND persists after turn ends (until cleared by next user message)
     var shouldShowCaption: Bool {
-        !currentText.isEmpty && isStreaming
+        !currentText.isEmpty
     }
 
     /// Whether there's any thinking content (streaming or history)
