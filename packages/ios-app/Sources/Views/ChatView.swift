@@ -112,12 +112,13 @@ struct ChatView: View {
             .safeAreaInset(edge: .bottom, spacing: 0) {
                 // Floating input area - iOS 26 liquid glass, no backgrounds
                 VStack(spacing: 8) {
-                    // Thinking indicator
-                    if !viewModel.thinkingText.isEmpty {
-                        ThinkingBanner(
-                            text: viewModel.thinkingText,
-                            isExpanded: $viewModel.isThinkingExpanded
-                        )
+                    // Thinking caption (new caption-style, tappable to open sheet)
+                    if viewModel.thinkingState.shouldShowCaption && currentModelInfo?.supportsThinking == true {
+                        ThinkingCaption(thinkingState: viewModel.thinkingState)
+                            .transition(.asymmetric(
+                                insertion: .opacity.combined(with: .move(edge: .bottom)),
+                                removal: .opacity
+                            ))
                     }
 
                     // Input area with integrated status pills and model picker
@@ -377,6 +378,16 @@ struct ChatView: View {
                 NotifyAppDetailSheet(data: data)
             } else {
                 NotifyAppDetailSheetFallback(data: data)
+            }
+        }
+        .sheet(isPresented: Binding(
+            get: { viewModel.thinkingState.showSheet },
+            set: { viewModel.thinkingState.showSheet = $0 }
+        )) {
+            if #available(iOS 26.0, *) {
+                ThinkingDetailSheet(thinkingState: viewModel.thinkingState)
+            } else {
+                ThinkingDetailSheetFallback(thinkingState: viewModel.thinkingState)
             }
         }
         .alert("Error", isPresented: $viewModel.showError) {

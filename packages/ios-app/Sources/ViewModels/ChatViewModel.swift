@@ -61,6 +61,8 @@ class ChatViewModel: ObservableObject {
     let uiCanvasState = UICanvasState()
     /// Todo state (for task tracking)
     let todoState = TodoState()
+    /// Thinking state (for extended thinking display)
+    let thinkingState = ThinkingState()
 
     // MARK: - Browser State (Proxies for backward compatibility)
 

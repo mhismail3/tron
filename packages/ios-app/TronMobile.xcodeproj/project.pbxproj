@@ -182,6 +182,10 @@
 		TDWR1TE5C8D2F1A7B3C4E5F6 /* TodoWriteChip.swift in Sources */ = {isa = PBXBuildFile; fileRef = TWC9B8A7D6E5F4C3B2A1F098 /* TodoWriteChip.swift */; };
 		NTFY1CH1P5C8D2F1A7B3C4E5 /* NotifyAppChip.swift in Sources */ = {isa = PBXBuildFile; fileRef = NTFYCHP1F8A9B2C3D4E5F6A7 /* NotifyAppChip.swift */; };
 		NTFY1SHT5C8D2F1A7B3C4E6 /* NotifyAppDetailSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = NTFYSHT1F8A9B2C3D4E5F6A8 /* NotifyAppDetailSheet.swift */; };
+		THNK1STATE5C8D2F1A7B3C4 /* ThinkingState.swift in Sources */ = {isa = PBXBuildFile; fileRef = THNKSTATEREF1A7B3C4E5F6 /* ThinkingState.swift */; };
+		THNK2BLOCK5C8D2F1A7B3C5 /* ThinkingBlock.swift in Sources */ = {isa = PBXBuildFile; fileRef = THNKBLOCKREF1A7B3C4E5F7 /* ThinkingBlock.swift */; };
+		THNK3CAPTN5C8D2F1A7B3C6 /* ThinkingCaption.swift in Sources */ = {isa = PBXBuildFile; fileRef = THNKCAPTNREF1A7B3C4E5F8 /* ThinkingCaption.swift */; };
+		THNK4SHEET5C8D2F1A7B3C7 /* ThinkingDetailSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = THNKSHEETREF1A7B3C4E5F9 /* ThinkingDetailSheet.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -376,6 +380,10 @@
 		FFEA9A5CBCE731DD8A47130C /* BrowserState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrowserState.swift; sourceTree = "<group>"; };
 		TD0DET51F8A9B2C3D4E5F6A7 /* TodoDetailSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TodoDetailSheet.swift; sourceTree = "<group>"; };
 		TD0S1ATE8F9B2C3D4E5F6A7B /* TodoState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TodoState.swift; sourceTree = "<group>"; };
+		THNKSTATEREF1A7B3C4E5F6 /* ThinkingState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThinkingState.swift; sourceTree = "<group>"; };
+		THNKBLOCKREF1A7B3C4E5F7 /* ThinkingBlock.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThinkingBlock.swift; sourceTree = "<group>"; };
+		THNKCAPTNREF1A7B3C4E5F8 /* ThinkingCaption.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThinkingCaption.swift; sourceTree = "<group>"; };
+		THNKSHEETREF1A7B3C4E5F9 /* ThinkingDetailSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThinkingDetailSheet.swift; sourceTree = "<group>"; };
 		TWC9B8A7D6E5F4C3B2A1F098 /* TodoWriteChip.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TodoWriteChip.swift; sourceTree = "<group>"; };
 		NTFYCHP1F8A9B2C3D4E5F6A7 /* NotifyAppChip.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotifyAppChip.swift; sourceTree = "<group>"; };
 		NTFYSHT1F8A9B2C3D4E5F6A8 /* NotifyAppDetailSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotifyAppDetailSheet.swift; sourceTree = "<group>"; };
@@ -609,6 +617,8 @@
 				609B55B9CB51C37B8C9ED63E /* SkillDetailSheet.swift */,
 				BC16C3B8D2F7980BFC86839B /* SkillMentionPopup.swift */,
 				DF69778E3C7E0198042860BC /* SubagentChip.swift */,
+				THNKCAPTNREF1A7B3C4E5F8 /* ThinkingCaption.swift */,
+				THNKSHEETREF1A7B3C4E5F9 /* ThinkingDetailSheet.swift */,
 				50A9B3356F199C0BBFA66E71 /* SubagentDetailSheet.swift */,
 				TD0DET51F8A9B2C3D4E5F6A7 /* TodoDetailSheet.swift */,
 				TWC9B8A7D6E5F4C3B2A1F098 /* TodoWriteChip.swift */,
@@ -766,6 +776,7 @@
 				EFCC93FE9C92FBEC8986E5C9 /* ContextTrackingState.swift */,
 				7F6868DDC1D5CE1C366F5E74 /* PlanModeState.swift */,
 				4D17CD4EBC001BB37F3F9378 /* SubagentState.swift */,
+				THNKSTATEREF1A7B3C4E5F6 /* ThinkingState.swift */,
 				TD0S1ATE8F9B2C3D4E5F6A7B /* TodoState.swift */,
 				05D5E47403A5C9642D8D6598 /* UICanvasState.swift */,
 			);
@@ -783,6 +794,7 @@
 				B082B6CE011A17ED14F3393B /* RPCTypes.swift */,
 				EBE831F49A028C0325D5391D /* Rules.swift */,
 				7420CAC58E7D403E0BEDEBC5 /* Skill.swift */,
+				THNKBLOCKREF1A7B3C4E5F7 /* ThinkingBlock.swift */,
 				3850594C8DC4BB3131E13D13 /* UICanvas.swift */,
 				D8570EA3731FBC504D7AB252 /* UnifiedEventTransformer.swift */,
 				5968571F13D0263D95DDF1E3 /* Payloads */,
@@ -1047,6 +1059,10 @@
 				AC62556A9211A870D2814060 /* UICanvasParser.swift in Sources */,
 				TD0DETB18F8A9B2C3D4E5F6A /* TodoDetailSheet.swift in Sources */,
 				TD0STAB18F9B2C3D4E5F6A7B /* TodoState.swift in Sources */,
+				THNK1STATE5C8D2F1A7B3C4 /* ThinkingState.swift in Sources */,
+				THNK2BLOCK5C8D2F1A7B3C5 /* ThinkingBlock.swift in Sources */,
+				THNK3CAPTN5C8D2F1A7B3C6 /* ThinkingCaption.swift in Sources */,
+				THNK4SHEET5C8D2F1A7B3C7 /* ThinkingDetailSheet.swift in Sources */,
 				A5547D1C1744E59A0C6E78AE /* UICanvasSheet.swift in Sources */,
 				AAEC2BAEF5C0067DBF72CBA5 /* UICanvasState.swift in Sources */,
 				8A2DBD201C3303E3852FAD3F /* UIComponentView.swift in Sources */,

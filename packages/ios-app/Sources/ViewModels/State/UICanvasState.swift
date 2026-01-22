@@ -224,6 +224,11 @@ final class UICanvasState {
         return canvases[canvasId]
     }
 
+    /// Check if a canvas exists in memory
+    func hasCanvas(_ canvasId: String) -> Bool {
+        canvases[canvasId] != nil
+    }
+
     // MARK: - Server Loading
 
     /// Load a persisted canvas artifact from the server.

@@ -232,7 +232,7 @@ struct SessionEvent: Identifiable, Codable {
             }
             return "File edited"
 
-        case .streamTextDelta, .streamThinkingDelta:
+        case .streamTextDelta, .streamThinkingDelta, .streamThinkingComplete:
             return "Streaming..."
 
         case .unknown:
@@ -442,6 +442,7 @@ enum SessionEventType: String, Codable {
 
     case streamTextDelta = "stream.text_delta"
     case streamThinkingDelta = "stream.thinking_delta"
+    case streamThinkingComplete = "stream.thinking_complete"
     case streamTurnStart = "stream.turn_start"
     case streamTurnEnd = "stream.turn_end"
 

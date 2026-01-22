@@ -25,6 +25,9 @@ extension ChatViewModel {
 
         // Set up MessageWindowManager with self as data source for virtual scrolling
         setupMessageWindowManager()
+
+        // Set up ThinkingState with database reference for persistence
+        thinkingState.setEventDatabase(manager.eventDB, sessionId: sessionId)
     }
 
     /// Sync events from server and load persisted messages
@@ -48,6 +51,9 @@ extension ChatViewModel {
         // This shows whatever we have locally without waiting for network
         await loadPersistedMessagesAsync()
         hasInitiallyLoaded = true
+
+        // Load thinking history for display in sheet
+        await thinkingState.loadHistory(sessionId: sessionId)
 
         let initialMessageCount = messages.count
         logger.info("Loaded \(initialMessageCount) cached messages - now syncing from server", category: .session)

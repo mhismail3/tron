@@ -28,6 +28,7 @@ enum PersistedEventType: String, CaseIterable {
     // Streaming (for real-time reconstruction)
     case streamTextDelta = "stream.text_delta"
     case streamThinkingDelta = "stream.thinking_delta"
+    case streamThinkingComplete = "stream.thinking_complete"
     case streamTurnStart = "stream.turn_start"
     case streamTurnEnd = "stream.turn_end"
 
@@ -112,7 +113,7 @@ enum PersistedEventType: String, CaseIterable {
     /// Whether this is a streaming-related event (real-time reconstruction)
     var isStreamingEvent: Bool {
         switch self {
-        case .streamTextDelta, .streamThinkingDelta, .streamTurnStart, .streamTurnEnd:
+        case .streamTextDelta, .streamThinkingDelta, .streamThinkingComplete, .streamTurnStart, .streamTurnEnd:
             return true
         default:
             return false
@@ -126,7 +127,7 @@ enum PersistedEventType: String, CaseIterable {
              .compactBoundary, .compactSummary,
              .metadataUpdate, .metadataTag,
              .worktreeAcquired, .worktreeReleased, .worktreeCommit, .worktreeMerged,
-             .streamTextDelta, .streamThinkingDelta, .streamTurnStart, .streamTurnEnd,
+             .streamTextDelta, .streamThinkingDelta, .streamThinkingComplete, .streamTurnStart, .streamTurnEnd,
              .configPromptUpdate,
              .messageDeleted,
              .fileRead, .fileWrite, .fileEdit:
@@ -150,6 +151,7 @@ enum PersistedEventType: String, CaseIterable {
         case .toolResult: return "Tool result"
         case .streamTextDelta: return "Text delta"
         case .streamThinkingDelta: return "Thinking delta"
+        case .streamThinkingComplete: return "Thinking complete"
         case .streamTurnStart: return "Turn started"
         case .streamTurnEnd: return "Turn ended"
         case .configModelSwitch: return "Model switched"

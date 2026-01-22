@@ -791,6 +791,60 @@ class EventDatabase: ObservableObject {
         }
     }
 
+    // MARK: - Thinking Events
+
+    /// Get thinking complete events for a session
+    /// - Parameters:
+    ///   - sessionId: The session to query
+    ///   - previewOnly: If true, only returns preview data (for listing). If false, loads full content.
+    /// - Returns: Array of ThinkingBlock objects for UI display
+    func getThinkingEvents(sessionId: String, previewOnly: Bool = true) throws -> [ThinkingBlock] {
+        let sql = """
+            SELECT id, parent_id, session_id, workspace_id, type, timestamp, sequence, payload
+            FROM events
+            WHERE session_id = ? AND type = 'stream.thinking_complete'
+            ORDER BY sequence ASC
+        """
+
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+            throw EventDatabaseError.prepareFailed(errorMessage)
+        }
+        defer { sqlite3_finalize(stmt) }
+
+        sqlite3_bind_text(stmt, 1, sessionId, -1, SQLITE_TRANSIENT)
+
+        var blocks: [ThinkingBlock] = []
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            do {
+                let event = try parseEventRow(stmt)
+                let payload = ThinkingCompletePayload(from: event.payload)
+                let block = ThinkingBlock(from: payload, eventId: event.id)
+                blocks.append(block)
+            } catch {
+                logger.warning("Failed to parse thinking event: \(error.localizedDescription)", category: .session)
+            }
+        }
+
+        return blocks
+    }
+
+    /// Get full thinking content for a specific event ID (for lazy loading in sheet)
+    /// - Parameter eventId: The event ID to load full content from
+    /// - Returns: The full thinking content string, or nil if not found
+    func getThinkingContent(eventId: String) throws -> String? {
+        guard let event = try getEvent(eventId) else {
+            return nil
+        }
+
+        guard event.type == "stream.thinking_complete" else {
+            logger.warning("Event \(eventId) is not a thinking_complete event (type: \(event.type))", category: .session)
+            return nil
+        }
+
+        return event.payload.string("content")
+    }
+
     // MARK: - Tree Visualization
 
     func buildTreeVisualization(_ sessionId: String) throws -> [EventTreeNode] {

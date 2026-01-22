@@ -39,6 +39,10 @@ extension ChatViewModel {
     }
 
     func handleThinkingDelta(_ delta: String) {
+        // Route to ThinkingState for new caption-style display
+        thinkingState.handleThinkingDelta(delta)
+
+        // Keep legacy property in sync for backward compatibility
         thinkingText += delta
         logger.verbose("Thinking delta: +\(delta.count) chars", category: .events)
     }
@@ -363,6 +367,9 @@ extension ChatViewModel {
             streamingText = ""
         }
 
+        // Notify ThinkingState of new turn (clears previous turn's thinking)
+        thinkingState.startTurn(event.turnNumber, model: currentModel)
+
         // Clear tool tracking for the new turn
         if !currentTurnToolCalls.isEmpty {
             logger.debug("Starting Turn \(event.turnNumber), clearing \(currentTurnToolCalls.count) completed tool records from previous turn", category: .events)
@@ -390,6 +397,11 @@ extension ChatViewModel {
 
     func handleTurnEnd(_ event: TurnEndEvent) {
         logger.info("Turn ended, tokens: in=\(event.tokenUsage?.inputTokens ?? 0) out=\(event.tokenUsage?.outputTokens ?? 0)", category: .events)
+
+        // Persist thinking content for this turn (before clearing state)
+        Task {
+            await thinkingState.endTurn()
+        }
 
         // Find the message to update with metadata
         // Priority: streaming message > first text message of turn > fallback search
@@ -601,6 +613,9 @@ extension ChatViewModel {
         finalizeStreamingMessage()
         thinkingText = ""
 
+        // Clear ThinkingState streaming (caption should disappear)
+        thinkingState.clearCurrentStreaming()
+
         // Reset browser dismiss flag for next turn
         userDismissedBrowserThisTurn = false
 
@@ -740,6 +755,9 @@ extension ChatViewModel {
         messages.append(.error(message))
         thinkingText = ""
 
+        // Clear ThinkingState streaming on error
+        thinkingState.clearCurrentStreaming()
+
         // Close browser session on error
         closeBrowserSession()
     }
@@ -842,6 +860,22 @@ extension ChatViewModel {
             )
         }
 
+        // FIX: Ensure canvas exists even if chip was created by tool_start
+        // This handles the race condition where tool_start arrives before ui_render_chunk.
+        // tool_start creates the chip but doesn't call startRender(), so the canvas
+        // won't exist when updateRender() is called. This check ensures we create
+        // the canvas state before attempting to update it.
+        if !uiCanvasState.hasCanvas(event.canvasId) {
+            let title = extractTitleFromAccumulated(event.accumulated)
+            let toolCallId = getToolCallIdForCanvas(event.canvasId) ?? "pending_\(event.canvasId)"
+            uiCanvasState.startRender(
+                canvasId: event.canvasId,
+                title: title,
+                toolCallId: toolCallId
+            )
+            logger.info("Created canvas state for existing chip: \(event.canvasId)", category: .events)
+        }
+
         // Update the canvas with the new chunk
         uiCanvasState.updateRender(
             canvasId: event.canvasId,
@@ -863,6 +897,16 @@ extension ChatViewModel {
         return String(accumulated[range])
             .replacingOccurrences(of: "\\n", with: "\n")
             .replacingOccurrences(of: "\\\"", with: "\"")
+    }
+
+    /// Get the toolCallId for an existing RenderAppUI chip
+    private func getToolCallIdForCanvas(_ canvasId: String) -> String? {
+        guard let messageId = renderAppUIChipMessageIds[canvasId],
+              let message = messages.first(where: { $0.id == messageId }),
+              case .renderAppUI(let data) = message.content else {
+            return nil
+        }
+        return data.toolCallId
     }
 
     func handleUIRenderComplete(_ event: UIRenderCompleteEvent) {
