@@ -94,14 +94,12 @@ export const DEFAULT_SETTINGS: TronSettings = {
       defaultReasoningEffort: 'medium',
     },
     // Google/Gemini OAuth configuration (for Cloud Code Assist / Antigravity access)
-    // Uses Gemini CLI OAuth credentials - public client for device authorization flow
-    // Based on: https://github.com/GoogleCloudPlatform/generative-ai-gemini-cli
+    // Client credentials (clientId/clientSecret) are loaded from ~/.tron/auth.json
+    // See docs/google-oauth-setup.md for setup instructions
     google: {
       authUrl: 'https://accounts.google.com/o/oauth2/v2/auth',
       tokenUrl: 'https://oauth2.googleapis.com/token',
-      // Gemini CLI OAuth client (public credentials)
-      clientId: '',
-      clientSecret: '',
+      // clientId and clientSecret are loaded from ~/.tron/auth.json providers.google
       scopes: [
         'https://www.googleapis.com/auth/cloud-platform',
         'https://www.googleapis.com/auth/userinfo.email',

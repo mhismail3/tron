@@ -28,6 +28,21 @@ export interface ProviderAuth {
 }
 
 /**
+ * Google-specific authentication data
+ * Extends ProviderAuth with OAuth client credentials and endpoint configuration
+ */
+export interface GoogleProviderAuth extends ProviderAuth {
+  /** OAuth client ID (loaded from auth.json or defaults) */
+  clientId?: string;
+  /** OAuth client secret (loaded from auth.json or defaults) */
+  clientSecret?: string;
+  /** Which OAuth endpoint to use */
+  endpoint?: 'cloud-code-assist' | 'antigravity';
+  /** Project ID for x-goog-user-project header */
+  projectId?: string;
+}
+
+/**
  * Known provider identifiers
  * Extensible - new providers can be added as string keys
  */

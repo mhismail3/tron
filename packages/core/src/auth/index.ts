@@ -30,6 +30,9 @@ export {
   discoverGoogleProject,
   getGeminiApiUrl,
   getGeminiApiHeaders,
+  getGoogleOAuthCredentials,
+  saveGoogleOAuthCredentials,
+  getGoogleOAuthConfig,
   GoogleOAuthError,
   CLOUD_CODE_ASSIST_CONFIG,
   ANTIGRAVITY_CONFIG,
@@ -50,6 +53,7 @@ export {
 export type {
   OAuthTokens,
   ProviderAuth,
+  GoogleProviderAuth,
   ProviderId,
   AuthStorage,
   ServerAuth,

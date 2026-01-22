@@ -65,10 +65,6 @@ export interface GoogleApiSettings {
   authUrl: string;
   /** OAuth token exchange URL */
   tokenUrl: string;
-  /** OAuth client ID (Gemini CLI client) */
-  clientId: string;
-  /** OAuth client secret (public for device flow) */
-  clientSecret?: string;
   /** OAuth scopes */
   scopes: string[];
   /** OAuth redirect URI (local callback server) */
@@ -81,6 +77,7 @@ export interface GoogleApiSettings {
   apiVersion: string;
   /** Default OAuth endpoint type */
   defaultEndpoint: 'cloud-code-assist' | 'antigravity';
+  // Note: clientId and clientSecret are loaded from ~/.tron/auth.json, not from settings
 }
 
 /**

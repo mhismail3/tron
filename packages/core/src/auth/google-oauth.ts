@@ -12,8 +12,8 @@
 import crypto from 'crypto';
 import { createLogger } from '../logging/logger.js';
 import { getSettings } from '../settings/index.js';
-import { loadAuthStorage, saveProviderOAuthTokens, getProviderAuth } from './unified.js';
-import type { OAuthTokens } from './types.js';
+import { loadAuthStorage, saveProviderOAuthTokens, getProviderAuth, saveProviderAuth } from './unified.js';
+import type { OAuthTokens, GoogleProviderAuth } from './types.js';
 
 const logger = createLogger('google-oauth');
 
@@ -66,19 +66,19 @@ export class GoogleOAuthError extends Error {
 }
 
 // =============================================================================
-// Constants - OAuth Credentials
+// Constants - OAuth Configuration (URLs, scopes - NOT secrets)
 // =============================================================================
 
 /**
- * Cloud Code Assist OAuth credentials (used by Gemini CLI)
- * These are public OAuth client credentials for device authorization flow.
+ * Cloud Code Assist OAuth configuration (used by Gemini CLI)
+ * Client credentials are loaded from ~/.tron/auth.json
  */
 export const CLOUD_CODE_ASSIST_CONFIG: GoogleOAuthConfig = {
   authUrl: 'https://accounts.google.com/o/oauth2/v2/auth',
   tokenUrl: 'https://oauth2.googleapis.com/token',
-  // Gemini CLI OAuth client
-  clientId: '',
-  clientSecret: '',
+  // clientId and clientSecret are loaded from auth.json - see getGoogleOAuthCredentials()
+  clientId: '', // Loaded at runtime from auth.json
+  clientSecret: '', // Loaded at runtime from auth.json
   scopes: [
     'https://www.googleapis.com/auth/cloud-platform',
     'https://www.googleapis.com/auth/userinfo.email',
@@ -91,20 +91,16 @@ export const CLOUD_CODE_ASSIST_CONFIG: GoogleOAuthConfig = {
 };
 
 /**
- * Antigravity (sandbox) OAuth credentials
+ * Antigravity (sandbox) OAuth configuration
  * Provides free tier access to Gemini 3 models.
- *
- * Note: Antigravity uses a DIFFERENT OAuth client ID than Gemini CLI!
- * This client ID is from the Antigravity IDE and grants access to the
- * daily-cloudcode-pa.sandbox endpoint.
+ * Client credentials are loaded from ~/.tron/auth.json
  */
 export const ANTIGRAVITY_CONFIG: GoogleOAuthConfig = {
   authUrl: 'https://accounts.google.com/o/oauth2/v2/auth',
   tokenUrl: 'https://oauth2.googleapis.com/token',
-  // Antigravity-specific OAuth client (different from Gemini CLI!)
-  clientId: '',
-  // Antigravity client secret (from antigravity-auth project)
-  clientSecret: '',
+  // clientId and clientSecret are loaded from auth.json - see getGoogleOAuthCredentials()
+  clientId: '', // Loaded at runtime from auth.json
+  clientSecret: '', // Loaded at runtime from auth.json
   scopes: [
     'https://www.googleapis.com/auth/cloud-platform',
     'https://www.googleapis.com/auth/userinfo.email',
@@ -121,32 +117,126 @@ export const ANTIGRAVITY_CONFIG: GoogleOAuthConfig = {
 };
 
 // =============================================================================
+// Credential Loading from auth.json
+// =============================================================================
+
+/**
+ * Load Google OAuth credentials from auth.json
+ *
+ * Credentials must be configured in ~/.tron/auth.json under providers.google:
+ * {
+ *   "providers": {
+ *     "google": {
+ *       "clientId": "your-client-id.apps.googleusercontent.com",
+ *       "clientSecret": "GOCSPX-your-client-secret",
+ *       "endpoint": "cloud-code-assist" | "antigravity"
+ *     }
+ *   }
+ * }
+ *
+ * You can use the public Gemini CLI credentials (see docs/google-oauth-setup.md)
+ * or register your own OAuth application.
+ *
+ * @param endpoint - Which endpoint to get credentials for
+ * @returns Client credentials or null if not configured
+ */
+export async function getGoogleOAuthCredentials(
+  _endpoint: GoogleOAuthEndpoint = 'cloud-code-assist'
+): Promise<{ clientId: string; clientSecret: string } | null> {
+  const googleAuth = await getProviderAuth('google') as GoogleProviderAuth | undefined;
+
+  if (!googleAuth?.clientId || !googleAuth?.clientSecret) {
+    return null;
+  }
+
+  // For now, we use the same credentials for both endpoints
+  // In the future, we could support endpoint-specific credentials via _endpoint
+  return {
+    clientId: googleAuth.clientId,
+    clientSecret: googleAuth.clientSecret,
+  };
+}
+
+/**
+ * Save Google OAuth client credentials to auth.json
+ *
+ * @param clientId - OAuth client ID
+ * @param clientSecret - OAuth client secret
+ * @param endpoint - Which endpoint these credentials are for
+ */
+export async function saveGoogleOAuthCredentials(
+  clientId: string,
+  clientSecret: string,
+  endpoint: GoogleOAuthEndpoint = 'cloud-code-assist'
+): Promise<void> {
+  const existingAuth = await getProviderAuth('google') as GoogleProviderAuth | undefined;
+
+  const newAuth: GoogleProviderAuth = {
+    ...existingAuth,
+    clientId,
+    clientSecret,
+    endpoint,
+  };
+
+  await saveProviderAuth('google', newAuth);
+
+  logger.info('Saved Google OAuth credentials', { endpoint, clientIdPrefix: clientId.slice(0, 20) });
+}
+
+// =============================================================================
 // Settings Accessors
 // =============================================================================
 
 /**
- * Get Google OAuth settings from Tron settings
- * Falls back to Cloud Code Assist defaults if not configured.
+ * Get Google OAuth settings from Tron settings (synchronous, for URL/scope config only)
+ * NOTE: clientId and clientSecret are NOT populated here - use getGoogleOAuthConfig() instead.
  */
 function getGoogleOAuthSettings(): GoogleOAuthConfig {
   const settings = getSettings();
   const googleSettings = settings.api.google;
 
   if (!googleSettings) {
-    // Default to Cloud Code Assist config
     return CLOUD_CODE_ASSIST_CONFIG;
   }
 
   return {
     authUrl: googleSettings.authUrl ?? CLOUD_CODE_ASSIST_CONFIG.authUrl,
     tokenUrl: googleSettings.tokenUrl ?? CLOUD_CODE_ASSIST_CONFIG.tokenUrl,
-    clientId: googleSettings.clientId ?? CLOUD_CODE_ASSIST_CONFIG.clientId,
-    clientSecret: googleSettings.clientSecret ?? CLOUD_CODE_ASSIST_CONFIG.clientSecret,
+    // Credentials must be loaded from auth.json via getGoogleOAuthConfig()
+    clientId: '',
+    clientSecret: '',
     scopes: googleSettings.scopes ?? CLOUD_CODE_ASSIST_CONFIG.scopes,
     redirectUri: googleSettings.redirectUri ?? CLOUD_CODE_ASSIST_CONFIG.redirectUri,
     tokenExpiryBufferSeconds: googleSettings.tokenExpiryBufferSeconds ?? CLOUD_CODE_ASSIST_CONFIG.tokenExpiryBufferSeconds,
     apiEndpoint: googleSettings.apiEndpoint ?? CLOUD_CODE_ASSIST_CONFIG.apiEndpoint,
     apiVersion: googleSettings.apiVersion ?? CLOUD_CODE_ASSIST_CONFIG.apiVersion,
+  };
+}
+
+/**
+ * Get complete Google OAuth config with credentials loaded from auth.json
+ *
+ * @param endpoint - Which endpoint to get config for
+ * @returns Complete config with credentials, or throws if credentials not configured
+ */
+export async function getGoogleOAuthConfig(
+  endpoint: GoogleOAuthEndpoint = 'cloud-code-assist'
+): Promise<GoogleOAuthConfig> {
+  const baseConfig = endpoint === 'antigravity' ? ANTIGRAVITY_CONFIG : getGoogleOAuthSettings();
+  const credentials = await getGoogleOAuthCredentials(endpoint);
+
+  if (!credentials) {
+    throw new GoogleOAuthError(
+      'Google OAuth credentials not configured. Please add clientId and clientSecret to ~/.tron/auth.json under providers.google. ' +
+      'You can use the public Gemini CLI credentials - see docs/google-oauth-setup.md for details.',
+      'credentials_not_configured'
+    );
+  }
+
+  return {
+    ...baseConfig,
+    clientId: credentials.clientId,
+    clientSecret: credentials.clientSecret,
   };
 }
 
@@ -187,12 +277,13 @@ export function generateGooglePKCE(): GooglePKCEPair {
  * @param challenge - PKCE challenge (from generateGooglePKCE)
  * @param endpoint - Which endpoint to use (cloud-code-assist or antigravity)
  * @returns Full authorization URL to open in browser
+ * @throws GoogleOAuthError if credentials are not configured
  */
-export function getGoogleAuthorizationUrl(
+export async function getGoogleAuthorizationUrl(
   challenge: string,
   endpoint: GoogleOAuthEndpoint = 'cloud-code-assist'
-): string {
-  const config = endpoint === 'antigravity' ? ANTIGRAVITY_CONFIG : getGoogleOAuthSettings();
+): Promise<string> {
+  const config = await getGoogleOAuthConfig(endpoint);
 
   const params = new URLSearchParams({
     client_id: config.clientId,
@@ -229,7 +320,7 @@ export function getGoogleAuthorizationUrl(
  * @param verifier - PKCE verifier (from generateGooglePKCE)
  * @param endpoint - Which endpoint was used for authorization
  * @returns OAuth tokens
- * @throws GoogleOAuthError if exchange fails
+ * @throws GoogleOAuthError if exchange fails or credentials not configured
  */
 export async function exchangeGoogleCodeForTokens(
   code: string,
@@ -238,7 +329,7 @@ export async function exchangeGoogleCodeForTokens(
 ): Promise<OAuthTokens> {
   logger.info('Exchanging Google authorization code for tokens', { endpoint });
 
-  const config = endpoint === 'antigravity' ? ANTIGRAVITY_CONFIG : getGoogleOAuthSettings();
+  const config = await getGoogleOAuthConfig(endpoint);
 
   const body: Record<string, string> = {
     grant_type: 'authorization_code',
@@ -309,7 +400,7 @@ export async function exchangeGoogleCodeForTokens(
  * @param refreshToken - Valid refresh token
  * @param endpoint - Which endpoint was used for original authorization
  * @returns New OAuth tokens
- * @throws GoogleOAuthError if refresh fails
+ * @throws GoogleOAuthError if refresh fails or credentials not configured
  */
 export async function refreshGoogleOAuthToken(
   refreshToken: string,
@@ -317,7 +408,7 @@ export async function refreshGoogleOAuthToken(
 ): Promise<OAuthTokens> {
   logger.info('Refreshing Google OAuth token', { endpoint });
 
-  const config = endpoint === 'antigravity' ? ANTIGRAVITY_CONFIG : getGoogleOAuthSettings();
+  const config = await getGoogleOAuthConfig(endpoint);
 
   const body: Record<string, string> = {
     grant_type: 'refresh_token',
