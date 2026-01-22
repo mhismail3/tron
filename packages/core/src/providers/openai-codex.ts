@@ -18,6 +18,7 @@ import type {
   Context,
   StreamEvent,
   TextContent,
+  ThinkingContent,
   ToolCall,
 } from '../types/index.js';
 import { createLogger } from '../logging/logger.js';
@@ -103,16 +104,20 @@ interface ResponsesTool {
  */
 interface ResponsesStreamEvent {
   type: string;
-  // For response.output_text.delta
+  // For response.output_text.delta and response.reasoning_summary_text.delta
   delta?: string;
+  // For reasoning_summary_text.delta and reasoning_text.delta
+  summary_index?: number;
+  content_index?: number;
   // For response.output_item.added
   item?: {
-    type: string;
+    type: string;  // 'function_call' | 'message' | 'reasoning'
     id?: string;
     call_id?: string;
     name?: string;
     arguments?: string;
     content?: Array<{ type: string; text?: string }>;
+    summary?: Array<{ type: string; text?: string }>;  // For reasoning items
   };
   // For response.function_call_arguments.delta
   call_id?: string;
@@ -126,6 +131,7 @@ interface ResponsesStreamEvent {
       name?: string;
       arguments?: string;
       content?: Array<{ type: string; text?: string }>;
+      summary?: Array<{ type: string; text?: string }>;  // For reasoning items
     }>;
     usage?: {
       input_tokens: number;
@@ -148,6 +154,7 @@ export const OPENAI_CODEX_MODELS = {
     maxOutput: 16384,
     supportsTools: true,
     supportsReasoning: true,
+    supportsThinking: true,
     reasoningLevels: ['low', 'medium', 'high', 'xhigh'] as ReasoningEffort[],
     defaultReasoningLevel: 'medium' as ReasoningEffort,
     inputCostPerMillion: 0,
@@ -163,6 +170,7 @@ export const OPENAI_CODEX_MODELS = {
     maxOutput: 16384,
     supportsTools: true,
     supportsReasoning: true,
+    supportsThinking: true,
     reasoningLevels: ['low', 'medium', 'high', 'xhigh'] as ReasoningEffort[],
     defaultReasoningLevel: 'high' as ReasoningEffort,
     inputCostPerMillion: 0,
@@ -178,6 +186,7 @@ export const OPENAI_CODEX_MODELS = {
     maxOutput: 16384,
     supportsTools: true,
     supportsReasoning: true,
+    supportsThinking: true,
     reasoningLevels: ['low', 'medium', 'high'] as ReasoningEffort[],
     defaultReasoningLevel: 'low' as ReasoningEffort,
     inputCostPerMillion: 0,
@@ -529,10 +538,12 @@ export class OpenAICodexProvider {
       const decoder = new TextDecoder();
       let buffer = '';
       let accumulatedText = '';
+      let accumulatedThinking = '';
       const toolCalls: Map<string, { id: string; name: string; args: string }> = new Map();
       let inputTokens = 0;
       let outputTokens = 0;
       let textStarted = false;
+      let thinkingStarted = false;
 
       while (true) {
         const { done, value } = await reader.read();
@@ -598,6 +609,32 @@ export class OpenAICodexProvider {
                     toolCallId: callId,
                     name: event.item.name,
                   };
+                } else if (event.item?.type === 'reasoning') {
+                  // Reasoning item added - start thinking if not already started
+                  if (!thinkingStarted) {
+                    thinkingStarted = true;
+                    yield { type: 'thinking_start' };
+                  }
+                }
+                break;
+
+              case 'response.reasoning_summary_part.added':
+                // A new reasoning summary part is being added
+                if (!thinkingStarted) {
+                  thinkingStarted = true;
+                  yield { type: 'thinking_start' };
+                }
+                break;
+
+              case 'response.reasoning_summary_text.delta':
+                // Delta for reasoning summary text
+                if (event.delta) {
+                  if (!thinkingStarted) {
+                    thinkingStarted = true;
+                    yield { type: 'thinking_start' };
+                  }
+                  accumulatedThinking += event.delta;
+                  yield { type: 'thinking_delta', delta: event.delta };
                 }
                 break;
 
@@ -653,6 +690,20 @@ export class OpenAICodexProvider {
                           }
                         }
                       }
+                    } else if (item.type === 'reasoning' && item.summary) {
+                      // Handle reasoning item from completed response
+                      for (const summaryItem of item.summary) {
+                        if (summaryItem.type === 'summary_text' && summaryItem.text) {
+                          if (!thinkingStarted) {
+                            thinkingStarted = true;
+                            yield { type: 'thinking_start' };
+                          }
+                          // Only set accumulated thinking if we didn't get it via deltas
+                          if (!accumulatedThinking) {
+                            accumulatedThinking = summaryItem.text;
+                          }
+                        }
+                      }
                     } else if (item.type === 'function_call' && item.call_id) {
                       logger.debug('Tool call in completed response', {
                         callId: item.call_id,
@@ -686,6 +737,11 @@ export class OpenAICodexProvider {
                     }
                   }
 
+                  // Emit thinking_end if we had thinking
+                  if (thinkingStarted) {
+                    yield { type: 'thinking_end', thinking: accumulatedThinking };
+                  }
+
                   // Emit text_end if we had text
                   if (textStarted) {
                     yield { type: 'text_end', text: accumulatedText };
@@ -717,7 +773,10 @@ export class OpenAICodexProvider {
                   }
 
                   // Build final message
-                  const content: (TextContent | ToolCall)[] = [];
+                  const content: (TextContent | ThinkingContent | ToolCall)[] = [];
+                  if (accumulatedThinking) {
+                    content.push({ type: 'thinking', thinking: accumulatedThinking });
+                  }
                   if (accumulatedText) {
                     content.push({ type: 'text', text: accumulatedText });
                   }

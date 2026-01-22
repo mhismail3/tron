@@ -310,6 +310,15 @@ export class SessionContext {
   }
 
   /**
+   * Set the signature for the current thinking block.
+   * Called when thinking_end event is received with the complete signature.
+   * IMPORTANT: API requires signature when sending thinking blocks back.
+   */
+  setThinkingSignature(signature: string): void {
+    this.turnManager.setThinkingSignature(signature);
+  }
+
+  /**
    * Register ALL tool intents from tool_use_batch event.
    * Called BEFORE any tool execution starts to enable linear event ordering.
    */

@@ -526,6 +526,7 @@ export class AnthropicProvider {
         let currentToolName: string | null = null;
         let accumulatedText = '';
         let accumulatedThinking = '';
+        let accumulatedSignature = '';
         let accumulatedArgs = '';
 
         // Track usage from streaming events (more reliable than finalMessage)
@@ -609,6 +610,9 @@ export class AnthropicProvider {
               } else if (event.delta.type === 'thinking_delta') {
                 accumulatedThinking += event.delta.thinking;
                 yield { type: 'thinking_delta', delta: event.delta.thinking };
+              } else if (event.delta.type === 'signature_delta') {
+                // Signature comes at end of thinking block - accumulate it
+                accumulatedSignature += (event.delta as { signature: string }).signature;
               } else if (event.delta.type === 'input_json_delta') {
                 accumulatedArgs += event.delta.partial_json;
                 yield {
@@ -624,8 +628,9 @@ export class AnthropicProvider {
                 yield { type: 'text_end', text: accumulatedText };
                 accumulatedText = '';
               } else if (currentBlockType === 'thinking') {
-                yield { type: 'thinking_end', thinking: accumulatedThinking };
+                yield { type: 'thinking_end', thinking: accumulatedThinking, signature: accumulatedSignature };
                 accumulatedThinking = '';
+                accumulatedSignature = '';
               } else if (currentBlockType === 'tool_use') {
                 const toolCall: ToolCall = {
                   type: 'tool_use',
@@ -697,24 +702,29 @@ export class AnthropicProvider {
         attempt++;
         const parsed = parseError(error);
 
-        // Trace log full error details for debugging
+        // Log error details for debugging API errors
+        const anthropicError = error as {
+          status?: number;
+          error?: { type?: string; message?: string };
+        };
+
+        // Trace log full error for debugging
         logger.trace('Anthropic stream error - full details', {
           errorCategory: parsed.category,
           errorMessage: parsed.message,
           isRetryable: parsed.isRetryable,
           attempt,
           hasYieldedData,
+          statusCode: anthropicError.status,
+          apiErrorType: anthropicError.error?.type,
+          apiErrorMessage: anthropicError.error?.message,
           fullError: error instanceof Error ? {
             name: error.name,
             message: error.message,
-            stack: error.stack,
             cause: error.cause,
           } : error,
-          requestContext: {
-            model: this.config.model,
-            messageCount: context.messages.length,
-            hasTools: !!context.tools?.length,
-          },
+          model: this.config.model,
+          messageCount: messages.length,
         });
 
         // If we've already yielded data, we can't retry (partial stream)
@@ -917,9 +927,10 @@ export class AnthropicProvider {
         }
 
         if (msg.role === 'assistant') {
-          // Map content blocks, filtering out thinking blocks
-          // CRITICAL: Anthropic API requires that thinking content NOT be sent back
-          // in subsequent turns - thinking is ephemeral per-turn only
+          // Map content blocks - thinking blocks MUST be preserved
+          // When thinking is enabled, the API requires assistant messages to include
+          // their thinking blocks. Without them, we get:
+          // "Expected `thinking` or `redacted_thinking`, but found `tool_use`"
           const content = msg.content
             .map((c) => {
               if (c.type === 'text') return { type: 'text' as const, text: c.text };
@@ -933,12 +944,32 @@ export class AnthropicProvider {
                   input,
                 };
               }
-              // Skip thinking blocks - they must NOT be sent back to the API
-              if (c.type === 'thinking') return null;
+              // Thinking blocks must be included - API requires them when thinking is enabled
+              if (c.type === 'thinking') {
+                // SDK requires signature field for thinking blocks
+                if (!c.signature) {
+                  logger.warn('Thinking block missing signature - may cause API error');
+                }
+                return {
+                  type: 'thinking' as const,
+                  thinking: c.thinking,
+                  signature: c.signature ?? '', // Fallback empty string if somehow missing
+                };
+              }
               // Unknown content type - skip rather than create empty text
+              logger.warn('Unknown assistant content type, skipping', { type: (c as { type: string }).type });
               return null;
             })
             .filter((c): c is NonNullable<typeof c> => c !== null);
+
+          // Warn if assistant message ends up with empty content (likely a bug)
+          if (content.length === 0) {
+            logger.error('Assistant message has empty content after conversion', {
+              originalContentCount: msg.content.length,
+              originalTypes: msg.content.map(c => c.type),
+            });
+          }
+
           return { role: 'assistant' as const, content };
         }
 
@@ -1013,9 +1044,12 @@ export class AnthropicProvider {
         content.push({ type: 'text', text: (block as { text: string }).text });
       } else if (blockType === 'thinking') {
         // Extract thinking content from extended thinking response
+        // IMPORTANT: Must capture signature - API requires it when sending back
+        const thinkingBlock = block as unknown as { thinking: string; signature: string };
         content.push({
           type: 'thinking',
-          thinking: (block as unknown as { thinking: string }).thinking,
+          thinking: thinkingBlock.thinking,
+          signature: thinkingBlock.signature,
         });
       } else if (blockType === 'tool_use') {
         const toolBlock = block as { id: string; name: string; input: unknown };

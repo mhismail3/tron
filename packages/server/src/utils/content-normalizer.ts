@@ -184,9 +184,11 @@ export function normalizeContentBlock(block: unknown): Record<string, unknown> |
     }
 
     case 'thinking':
+      // IMPORTANT: Must preserve signature - API requires it when sending thinking back
       return {
         type: 'thinking',
         thinking: typeof b.thinking === 'string' ? b.thinking : String(b.thinking ?? ''),
+        signature: typeof b.signature === 'string' ? b.signature : undefined,
       };
 
     default:

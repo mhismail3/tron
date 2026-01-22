@@ -9,6 +9,10 @@ struct ContentView: View {
     @EnvironmentObject var eventDatabase: EventDatabase
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
 
+    // Deep link navigation from TronMobileApp
+    @Binding var deepLinkSessionId: String?
+    @Binding var deepLinkScrollTarget: ScrollTarget?
+
     @State private var selectedSessionId: String?
     @State private var columnVisibility: NavigationSplitViewVisibility = .automatic
     @State private var showNewSessionSheet = false
@@ -27,170 +31,249 @@ struct ContentView: View {
     // Navigation mode (Agents vs Voice Notes)
     @State private var navigationMode: NavigationMode = .agents
 
+    // Scroll target for deep link navigation (passed to ChatView)
+    @State private var currentScrollTarget: ScrollTarget?
+
     var body: some View {
-        Group {
-            // On iPhone with no sessions, show WelcomePage or VoiceNotesListView
-            if horizontalSizeClass == .compact && eventStoreManager.sessions.isEmpty && navigationMode == .agents {
-                WelcomePage(
-                    onNewSession: { showNewSessionSheet = true },
-                    onSettings: { showSettings = true },
-                    onVoiceNote: { showVoiceNotesRecording = true },
-                    onNavigationModeChange: { mode in
-                        navigationMode = mode
+        mainContent
+            .tint(.tronEmerald)
+            .sheet(isPresented: $showNewSessionSheet) {
+                newSessionFlowSheet
+            }
+            .sheet(isPresented: $showSettings) {
+                SettingsView(rpcClient: appState.rpcClient)
+            }
+            .sheet(isPresented: $showVoiceNotesRecording) {
+                voiceNotesRecordingSheet
+            }
+            .alert("Archive Session?", isPresented: $showArchiveConfirmation) {
+                Button("Cancel", role: .cancel) {
+                    sessionToArchive = nil
+                }
+                Button("Archive", role: .destructive) {
+                    if let sessionId = sessionToArchive {
+                        deleteSession(sessionId)
                     }
-                )
-            } else if horizontalSizeClass == .compact && navigationMode == .voiceNotes {
-                NavigationStack {
-                    VoiceNotesListView(
-                        rpcClient: appState.rpcClient,
-                        onVoiceNote: { showVoiceNotesRecording = true },
-                        onSettings: { showSettings = true },
-                        onNavigationModeChange: { mode in
-                            navigationMode = mode
-                        }
+                    sessionToArchive = nil
+                }
+            } message: {
+                Text("This will remove the session from your device. The session data on the server will remain.")
+            }
+            .onAppear {
+                // Restore last active session
+                if let activeId = eventStoreManager.activeSessionId,
+                   eventStoreManager.sessionExists(activeId) {
+                    selectedSessionId = activeId
+                }
+                // Start polling for session processing states when dashboard is visible
+                eventStoreManager.startDashboardPolling()
+            }
+            .onDisappear {
+                // Stop polling when leaving the dashboard
+                eventStoreManager.stopDashboardPolling()
+            }
+            .onChange(of: selectedSessionId) { oldValue, newValue in
+                handleSessionSelection(newValue)
+            }
+            .onChange(of: deepLinkSessionId) { _, newSessionId in
+                handleDeepLink(sessionId: newSessionId)
+            }
+    }
+
+    // MARK: - Main Content
+
+    @ViewBuilder
+    private var mainContent: some View {
+        // On iPhone with no sessions, show WelcomePage or VoiceNotesListView
+        if horizontalSizeClass == .compact && eventStoreManager.sessions.isEmpty && navigationMode == .agents {
+            compactWelcomePage
+        } else if horizontalSizeClass == .compact && navigationMode == .voiceNotes {
+            compactVoiceNotesList
+        } else {
+            splitViewContent
+        }
+    }
+
+    @ViewBuilder
+    private var compactWelcomePage: some View {
+        WelcomePage(
+            onNewSession: { showNewSessionSheet = true },
+            onSettings: { showSettings = true },
+            onVoiceNote: { showVoiceNotesRecording = true },
+            onNavigationModeChange: { mode in
+                navigationMode = mode
+            }
+        )
+    }
+
+    @ViewBuilder
+    private var compactVoiceNotesList: some View {
+        NavigationStack {
+            VoiceNotesListView(
+                rpcClient: appState.rpcClient,
+                onVoiceNote: { showVoiceNotesRecording = true },
+                onSettings: { showSettings = true },
+                onNavigationModeChange: { mode in
+                    navigationMode = mode
+                }
+            )
+        }
+    }
+
+    @ViewBuilder
+    private var splitViewContent: some View {
+        NavigationSplitView(columnVisibility: $columnVisibility) {
+            sidebarContent
+        } detail: {
+            detailContent
+        }
+        .navigationSplitViewStyle(.balanced)
+        .scrollContentBackground(.hidden)
+    }
+
+    @ViewBuilder
+    private var sidebarContent: some View {
+        if navigationMode == .agents {
+            SessionSidebar(
+                selectedSessionId: $selectedSessionId,
+                onNewSession: { showNewSessionSheet = true },
+                onDeleteSession: { sessionId in
+                    if confirmArchive {
+                        sessionToArchive = sessionId
+                        showArchiveConfirmation = true
+                    } else {
+                        deleteSession(sessionId)
+                    }
+                },
+                onSettings: { showSettings = true },
+                onVoiceNote: { showVoiceNotesRecording = true },
+                onNavigationModeChange: { mode in
+                    navigationMode = mode
+                }
+            )
+        } else {
+            VoiceNotesListView(
+                rpcClient: appState.rpcClient,
+                onVoiceNote: { showVoiceNotesRecording = true },
+                onSettings: { showSettings = true },
+                onNavigationModeChange: { mode in
+                    navigationMode = mode
+                }
+            )
+        }
+    }
+
+    @ViewBuilder
+    private var detailContent: some View {
+        if let sessionId = selectedSessionId,
+           eventStoreManager.sessionExists(sessionId) {
+            let scrollBinding = $currentScrollTarget
+            ChatView(
+                rpcClient: appState.rpcClient,
+                sessionId: sessionId,
+                skillStore: appState.skillStore,
+                workspaceDeleted: workspaceDeletedForSession[sessionId] ?? false,
+                scrollTarget: scrollBinding
+            )
+        } else if eventStoreManager.sessions.isEmpty {
+            WelcomePage(
+                onNewSession: { showNewSessionSheet = true },
+                onSettings: { showSettings = true },
+                onVoiceNote: { showVoiceNotesRecording = true }
+            )
+        } else {
+            selectSessionPrompt
+        }
+    }
+
+    // MARK: - Sheet Content
+
+    private var newSessionFlowSheet: some View {
+        NewSessionFlow(
+            rpcClient: appState.rpcClient,
+            defaultModel: appState.defaultModel,
+            eventStoreManager: eventStoreManager,
+            onSessionCreated: { sessionId, workspaceId, model, workingDirectory in
+                do {
+                    try eventStoreManager.cacheNewSession(
+                        sessionId: sessionId,
+                        workspaceId: workspaceId,
+                        model: model,
+                        workingDirectory: workingDirectory
                     )
+                } catch {
+                    logger.error("Failed to cache new session: \(error)", category: .session)
                 }
-            } else {
-                NavigationSplitView(columnVisibility: $columnVisibility) {
-                    // Sidebar - conditionally show Agents or Voice Notes
-                    if navigationMode == .agents {
-                        SessionSidebar(
-                            selectedSessionId: $selectedSessionId,
-                            onNewSession: { showNewSessionSheet = true },
-                            onDeleteSession: { sessionId in
-                                if confirmArchive {
-                                    sessionToArchive = sessionId
-                                    showArchiveConfirmation = true
-                                } else {
-                                    deleteSession(sessionId)
-                                }
-                            },
-                            onSettings: { showSettings = true },
-                            onVoiceNote: { showVoiceNotesRecording = true },
-                            onNavigationModeChange: { mode in
-                                navigationMode = mode
-                            }
-                        )
-                    } else {
-                        VoiceNotesListView(
-                            rpcClient: appState.rpcClient,
-                            onVoiceNote: { showVoiceNotesRecording = true },
-                            onSettings: { showSettings = true },
-                            onNavigationModeChange: { mode in
-                                navigationMode = mode
-                            }
-                        )
-                    }
-                } detail: {
-                    // Main content
-                    if let sessionId = selectedSessionId,
-                       eventStoreManager.sessionExists(sessionId) {
-                        ChatView(
-                            rpcClient: appState.rpcClient,
-                            sessionId: sessionId,
-                            skillStore: appState.skillStore,
-                            workspaceDeleted: workspaceDeletedForSession[sessionId] ?? false
-                        )
-                    } else if eventStoreManager.sessions.isEmpty {
-                        WelcomePage(
-                            onNewSession: { showNewSessionSheet = true },
-                            onSettings: { showSettings = true },
-                            onVoiceNote: { showVoiceNotesRecording = true }
-                        )
-                    } else {
-                        selectSessionPrompt
-                    }
-                }
-                .navigationSplitViewStyle(.balanced)
-                .scrollContentBackground(.hidden)
+                selectedSessionId = sessionId
+                showNewSessionSheet = false
+            },
+            onSessionForked: { newSessionId in
+                selectedSessionId = newSessionId
+                showNewSessionSheet = false
             }
-        }
-        .tint(.tronEmerald)
-        .sheet(isPresented: $showNewSessionSheet) {
-            NewSessionFlow(
-                rpcClient: appState.rpcClient,
-                defaultModel: appState.defaultModel,
-                eventStoreManager: eventStoreManager,
-                onSessionCreated: { sessionId, workspaceId, model, workingDirectory in
-                    // Cache the new session in EventStoreManager
-                    do {
-                        try eventStoreManager.cacheNewSession(
-                            sessionId: sessionId,
-                            workspaceId: workspaceId,
-                            model: model,
-                            workingDirectory: workingDirectory
-                        )
-                    } catch {
-                        logger.error("Failed to cache new session: \(error)", category: .session)
-                    }
-                    selectedSessionId = sessionId
-                    showNewSessionSheet = false
-                },
-                onSessionForked: { newSessionId in
-                    // Forked session is already synced by EventStoreManager
-                    selectedSessionId = newSessionId
-                    showNewSessionSheet = false
-                }
-            )
-        }
-        .sheet(isPresented: $showSettings) {
-            SettingsView(rpcClient: appState.rpcClient)
-        }
-        .sheet(isPresented: $showVoiceNotesRecording) {
-            VoiceNotesRecordingSheet(
-                rpcClient: appState.rpcClient,
-                onComplete: { _ in
-                    showVoiceNotesRecording = false
-                    // If we're in voice notes mode, the list will auto-refresh
-                },
-                onCancel: {
-                    showVoiceNotesRecording = false
-                }
-            )
-        }
-        .alert("Archive Session?", isPresented: $showArchiveConfirmation) {
-            Button("Cancel", role: .cancel) {
-                sessionToArchive = nil
-            }
-            Button("Archive", role: .destructive) {
-                if let sessionId = sessionToArchive {
-                    deleteSession(sessionId)
-                }
-                sessionToArchive = nil
-            }
-        } message: {
-            Text("This will remove the session from your device. The session data on the server will remain.")
-        }
-        .onAppear {
-            // Restore last active session
-            if let activeId = eventStoreManager.activeSessionId,
-               eventStoreManager.sessionExists(activeId) {
-                selectedSessionId = activeId
-            }
-            // Start polling for session processing states when dashboard is visible
-            eventStoreManager.startDashboardPolling()
-        }
-        .onDisappear {
-            // Stop polling when leaving the dashboard
-            eventStoreManager.stopDashboardPolling()
-        }
-        .onChange(of: selectedSessionId) { oldValue, newValue in
-            guard let id = newValue else { return }
+        )
+    }
 
-            // Find the session to validate
-            guard let session = eventStoreManager.sessions.first(where: { $0.id == id }) else {
-                eventStoreManager.setActiveSession(id)
-                return
+    private var voiceNotesRecordingSheet: some View {
+        VoiceNotesRecordingSheet(
+            rpcClient: appState.rpcClient,
+            onComplete: { _ in
+                showVoiceNotesRecording = false
+            },
+            onCancel: {
+                showVoiceNotesRecording = false
             }
+        )
+    }
 
-            // Always allow selection, but validate workspace path
+    // MARK: - Event Handlers
+
+    private func handleSessionSelection(_ newValue: String?) {
+        guard let id = newValue else { return }
+
+        guard let session = eventStoreManager.sessions.first(where: { $0.id == id }) else {
             eventStoreManager.setActiveSession(id)
+            return
+        }
 
+        eventStoreManager.setActiveSession(id)
+
+        // Capture the manager before Task to avoid EnvironmentObject issues
+        let manager = eventStoreManager
+        let workingDir = session.workingDirectory
+        Task {
+            isValidatingWorkspace = true
+            let pathExists = await manager.validateWorkspacePath(workingDir)
+            isValidatingWorkspace = false
+            workspaceDeletedForSession[id] = !pathExists
+        }
+    }
+
+    private func handleDeepLink(sessionId: String?) {
+        guard let sessionId = sessionId else { return }
+
+        defer { deepLinkSessionId = nil }
+
+        if eventStoreManager.sessionExists(sessionId) {
+            selectedSessionId = sessionId
+            currentScrollTarget = deepLinkScrollTarget
+            deepLinkScrollTarget = nil
+        } else {
+            // Session not cached locally - sync from server first
+            // Capture the manager before Task to avoid EnvironmentObject issues
+            let manager = eventStoreManager
+            let scrollTarget = deepLinkScrollTarget
             Task {
-                isValidatingWorkspace = true
-                let pathExists = await eventStoreManager.validateWorkspacePath(session.workingDirectory)
-                isValidatingWorkspace = false
-                workspaceDeletedForSession[id] = !pathExists
+                do {
+                    try await manager.syncSessionEvents(sessionId: sessionId)
+                    await MainActor.run {
+                        selectedSessionId = sessionId
+                        currentScrollTarget = scrollTarget
+                        deepLinkScrollTarget = nil
+                    }
+                } catch {
+                    TronLogger.shared.error("Failed to sync session for deep link: \(error)", category: .notification)
+                }
             }
         }
     }

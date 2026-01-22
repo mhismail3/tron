@@ -85,16 +85,21 @@ struct ChatView: View {
     /// Whether initial message load is complete (prevents auto-scroll during initial render)
     @State private var initialLoadComplete = false
 
+    // MARK: - Deep Link Scroll Target
+    /// Scroll target from deep link navigation (binding to parent)
+    @Binding var scrollTarget: ScrollTarget?
+
     private let sessionId: String
     private let rpcClient: RPCClient
     private let skillStore: SkillStore?
     let workspaceDeleted: Bool
 
-    init(rpcClient: RPCClient, sessionId: String, skillStore: SkillStore? = nil, workspaceDeleted: Bool = false) {
+    init(rpcClient: RPCClient, sessionId: String, skillStore: SkillStore? = nil, workspaceDeleted: Bool = false, scrollTarget: Binding<ScrollTarget?> = .constant(nil)) {
         self.sessionId = sessionId
         self.rpcClient = rpcClient
         self.skillStore = skillStore
         self.workspaceDeleted = workspaceDeleted
+        self._scrollTarget = scrollTarget
         _viewModel = StateObject(wrappedValue: ChatViewModel(rpcClient: rpcClient, sessionId: sessionId))
     }
 
@@ -514,6 +519,42 @@ struct ChatView: View {
                 dismiss()
             }
         }
+        .onChange(of: scrollTarget) { _, target in
+            // Handle deep link scroll target
+            guard let target = target else { return }
+
+            // Wait for initial load to complete before scrolling
+            guard initialLoadComplete else {
+                // If not loaded yet, the target will be handled by the task below
+                return
+            }
+
+            // Find and scroll to the target message
+            performDeepLinkScroll(to: target)
+        }
+        .task(id: scrollTarget) {
+            // Handle scroll target that was set before initial load completed
+            guard let target = scrollTarget, initialLoadComplete else { return }
+
+            // Brief delay for layout to settle
+            try? await Task.sleep(nanoseconds: 150_000_000)
+
+            await MainActor.run {
+                performDeepLinkScroll(to: target)
+            }
+        }
+    }
+
+    /// Perform scroll to deep link target
+    private func performDeepLinkScroll(to target: ScrollTarget) {
+        if let messageId = viewModel.findMessageId(for: target) {
+            scrollCoordinator.scrollToDeepLinkTarget(messageId: messageId, using: scrollProxy)
+            logger.info("Deep link scroll to message: \(messageId)", category: .notification)
+        } else {
+            logger.warning("Deep link target not found: \(target)", category: .notification)
+        }
+        // Clear the scroll target after processing
+        scrollTarget = nil
     }
 
     /// Pre-fetch models for model picker menu

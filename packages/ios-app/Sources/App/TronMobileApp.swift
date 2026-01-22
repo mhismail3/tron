@@ -9,10 +9,15 @@ struct TronMobileApp: App {
     @StateObject private var appState = AppState()
     @StateObject private var eventDatabase = EventDatabase()
     @StateObject private var pushNotificationService = PushNotificationService()
+    @StateObject private var deepLinkRouter = DeepLinkRouter()
     @Environment(\.scenePhase) private var scenePhase
 
     // EventStoreManager is created lazily since it needs appState.rpcClient
     @State private var eventStoreManager: EventStoreManager?
+
+    // Deep link navigation state
+    @State private var deepLinkSessionId: String?
+    @State private var deepLinkScrollTarget: ScrollTarget?
 
     init() {
         TronFontLoader.registerFonts()
@@ -23,7 +28,10 @@ struct TronMobileApp: App {
             Group {
                 if #available(iOS 26.0, *) {
                     if let manager = eventStoreManager {
-                        ContentView()
+                        ContentView(
+                            deepLinkSessionId: $deepLinkSessionId,
+                            deepLinkScrollTarget: $deepLinkScrollTarget
+                        )
                             .environmentObject(appState)
                             .environmentObject(manager)
                             .environmentObject(eventDatabase)
@@ -89,10 +97,29 @@ struct TronMobileApp: App {
                 }
             }
             .onReceive(NotificationCenter.default.publisher(for: .navigateToSession)) { notification in
-                // Handle deep link from push notification
-                guard let sessionId = notification.userInfo?["sessionId"] as? String else { return }
-                TronLogger.shared.info("Deep linking to session: \(sessionId)", category: .notification)
-                // TODO: Navigate to session (requires passing sessionId to ContentView)
+                // Handle deep link from push notification via DeepLinkRouter
+                guard let userInfo = notification.userInfo else { return }
+                deepLinkRouter.handle(notificationPayload: userInfo)
+            }
+            .onOpenURL { url in
+                // Handle URL scheme deep links
+                _ = deepLinkRouter.handle(url: url)
+            }
+            .onChange(of: deepLinkRouter.pendingIntent) { _, _ in
+                // Process pending deep link intent
+                guard let intent = deepLinkRouter.consumeIntent() else { return }
+                switch intent {
+                case .session(let sessionId, let scrollTo):
+                    deepLinkSessionId = sessionId
+                    deepLinkScrollTarget = scrollTo
+                    TronLogger.shared.info("Deep linking to session: \(sessionId), scrollTo: \(String(describing: scrollTo))", category: .notification)
+                case .settings:
+                    // TODO: Navigate to settings
+                    TronLogger.shared.info("Deep link to settings", category: .notification)
+                case .voiceNotes:
+                    // TODO: Navigate to voice notes
+                    TronLogger.shared.info("Deep link to voice notes", category: .notification)
+                }
             }
             .onChange(of: scenePhase) { oldPhase, newPhase in
                 let isBackground = newPhase != .active

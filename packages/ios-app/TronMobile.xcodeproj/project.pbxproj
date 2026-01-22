@@ -97,6 +97,7 @@
 		8D03520968C046CF0A0C5CC9 /* TronMobileApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = B018ED18CE376F88F9C442F4 /* TronMobileApp.swift */; };
 		ADE483B927D1CEDC99DA0002 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = ADE483B927D1CEDC99DA0001 /* AppDelegate.swift */; };
 		ADFE83B927D1CEDC99DA0004 /* PushNotificationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = ADFE83B927D1CEDC99DA0003 /* PushNotificationService.swift */; };
+		AEFE83B927D1CEDC99DA0006 /* DeepLinkRouter.swift in Sources */ = {isa = PBXBuildFile; fileRef = AEFE83B927D1CEDC99DA0005 /* DeepLinkRouter.swift */; };
 		8E47281EC7DDAF43ADA30993 /* ContextTrackingState.swift in Sources */ = {isa = PBXBuildFile; fileRef = EFCC93FE9C92FBEC8986E5C9 /* ContextTrackingState.swift */; };
 		901A2D24F559EC522BF3D175 /* Date+Extensions.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB4071D0B8C943D30748238A /* Date+Extensions.swift */; };
 		901CDFFB6DFC589487695E2B /* SkillStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = F570DBF37434B980ACD0795D /* SkillStore.swift */; };
@@ -314,6 +315,7 @@
 		AD61CD33CD78B1F23CDBABD7 /* LogViewer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LogViewer.swift; sourceTree = "<group>"; };
 		ADE483B927D1CEDC99DA0001 /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
 		ADFE83B927D1CEDC99DA0003 /* PushNotificationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PushNotificationService.swift; sourceTree = "<group>"; };
+		AEFE83B927D1CEDC99DA0005 /* DeepLinkRouter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeepLinkRouter.swift; sourceTree = "<group>"; };
 		B018ED18CE376F88F9C442F4 /* TronMobileApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TronMobileApp.swift; sourceTree = "<group>"; };
 		B082B6CE011A17ED14F3393B /* RPCTypes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RPCTypes.swift; sourceTree = "<group>"; };
 		B478FD27FC82E5A327E552C0 /* InputTextField.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InputTextField.swift; sourceTree = "<group>"; };
@@ -464,6 +466,7 @@
 				9DBD69C34C8538CD6BE89D81 /* EventStoreManager+Sync.swift */,
 				E5C3B6B3DA1A77E2A09976D5 /* InputHistoryStore.swift */,
 				ADFE83B927D1CEDC99DA0003 /* PushNotificationService.swift */,
+				AEFE83B927D1CEDC99DA0005 /* DeepLinkRouter.swift */,
 				B9DD45A3974192F927E1B73A /* RPCClient.swift */,
 				F570DBF37434B980ACD0795D /* SkillStore.swift */,
 				18C18EEFAB81D6052EB39694 /* TronLogger.swift */,
@@ -1053,6 +1056,7 @@
 				8D03520968C046CF0A0C5CC9 /* TronMobileApp.swift in Sources */,
 				ADE483B927D1CEDC99DA0002 /* AppDelegate.swift in Sources */,
 				ADFE83B927D1CEDC99DA0004 /* PushNotificationService.swift in Sources */,
+				AEFE83B927D1CEDC99DA0006 /* DeepLinkRouter.swift in Sources */,
 				AF995741399CFE0412212FE4 /* TronSpacing.swift in Sources */,
 				5370368B0B9ACE3C1C21123B /* TronTypography.swift in Sources */,
 				5A67663F15BFA1B618FE2263 /* UICanvas.swift in Sources */,

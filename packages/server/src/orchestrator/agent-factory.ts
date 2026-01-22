@@ -106,7 +106,9 @@ export interface AgentFactoryConfig {
       priority?: 'high' | 'normal';
       sound?: string;
       badge?: number;
-    }
+    },
+    /** The tool call ID - used for deep linking so iOS can scroll to the notification */
+    toolCallId: string
   ) => Promise<NotifyAppResult>;
   /** Browser service (optional) */
   browserService?: {

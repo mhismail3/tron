@@ -49,7 +49,7 @@
     "clean": "rm -rf dist .turbo"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.35.0",
+    "@anthropic-ai/sdk": "^0.71.2",
     "@sinclair/typebox": "^0.34.12",
     "ajv": "^8.17.1",
     "better-sqlite3": "^11.10.0",

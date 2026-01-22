@@ -52,6 +52,7 @@ export interface ToolCallData {
 export interface AccumulatedContent {
   text: string;
   thinking: string;
+  thinkingSignature?: string; // Signature for thinking block verification (API requires this)
   toolCalls: CurrentTurnToolCall[];
   sequence: ContentSequenceItem[];
 }
@@ -61,6 +62,7 @@ export interface TurnContent {
   sequence: ContentSequenceItem[];
   toolCalls: Map<string, ToolCallData>;
   thinking: string;
+  thinkingSignature?: string; // Signature for thinking block verification (API requires this)
 }
 
 /** Metadata for tool_use blocks in interrupted content */
@@ -83,6 +85,7 @@ export interface InterruptedContent {
     type: 'text' | 'tool_use' | 'thinking';
     text?: string;
     thinking?: string;
+    signature?: string; // Signature for thinking blocks (API requires this)
     id?: string;
     name?: string;
     input?: Record<string, unknown>;
@@ -116,6 +119,7 @@ export class TurnContentTracker {
   // =========================================================================
   private accumulatedText: string = '';
   private accumulatedThinking: string = '';
+  private accumulatedThinkingSignature: string = '';
   private accumulatedToolCalls: ToolCallData[] = [];
   private accumulatedSequence: ContentSequenceItem[] = [];
 
@@ -125,6 +129,7 @@ export class TurnContentTracker {
   private thisTurnSequence: ContentSequenceItem[] = [];
   private thisTurnToolCalls: Map<string, ToolCallData> = new Map();
   private thisTurnThinking: string = '';
+  private thisTurnThinkingSignature: string = '';
 
   // =========================================================================
   // Pre-tool flush tracking (for linear event ordering)
@@ -187,6 +192,16 @@ export class TurnContentTracker {
     // Note: We don't add to sequence here because thinking blocks should be
     // prepended to the content at turn end, not interleaved with text/tools.
     // This matches the Anthropic API response format where thinking comes first.
+  }
+
+  /**
+   * Set the signature for the thinking block.
+   * Called when thinking_end event is received with the complete signature.
+   * The signature is required by the Anthropic API when sending thinking blocks back.
+   */
+  setThinkingSignature(signature: string): void {
+    this.accumulatedThinkingSignature = signature;
+    this.thisTurnThinkingSignature = signature;
   }
 
   /**
@@ -333,6 +348,7 @@ export class TurnContentTracker {
     this.thisTurnSequence = [];
     this.thisTurnToolCalls = new Map();
     this.thisTurnThinking = '';
+    this.thisTurnThinkingSignature = '';
 
     // Reset pre-tool flush flag for new turn
     this.preToolContentFlushed = false;
@@ -366,18 +382,21 @@ export class TurnContentTracker {
       sequence: [...this.thisTurnSequence],
       toolCalls: new Map(this.thisTurnToolCalls),
       thinking: this.thisTurnThinking,
+      thinkingSignature: this.thisTurnThinkingSignature || undefined,
     };
 
     // Clear per-turn tracking (accumulated persists for catch-up)
     this.thisTurnSequence = [];
     this.thisTurnToolCalls = new Map();
     this.thisTurnThinking = '';
+    this.thisTurnThinkingSignature = '';
 
     logger.debug('Turn ended', {
       turn: this.currentTurn,
       sequenceLength: content.sequence.length,
       toolCallCount: content.toolCalls.size,
       hasThinking: !!content.thinking,
+      hasThinkingSignature: !!content.thinkingSignature,
     });
 
     return content;
@@ -391,6 +410,7 @@ export class TurnContentTracker {
     // Clear accumulated state
     this.accumulatedText = '';
     this.accumulatedThinking = '';
+    this.accumulatedThinkingSignature = '';
     this.accumulatedToolCalls = [];
     this.accumulatedSequence = [];
     this.lastTurnTokenUsage = undefined;
@@ -398,6 +418,8 @@ export class TurnContentTracker {
     // Clear per-turn state
     this.thisTurnSequence = [];
     this.thisTurnToolCalls = new Map();
+    this.thisTurnThinking = '';
+    this.thisTurnThinkingSignature = '';
 
     // Reset pre-tool flush flag
     this.preToolContentFlushed = false;
@@ -417,6 +439,7 @@ export class TurnContentTracker {
     // Clear accumulated state
     this.accumulatedText = '';
     this.accumulatedThinking = '';
+    this.accumulatedThinkingSignature = '';
     this.accumulatedToolCalls = [];
     this.accumulatedSequence = [];
 
@@ -424,6 +447,7 @@ export class TurnContentTracker {
     this.thisTurnSequence = [];
     this.thisTurnToolCalls = new Map();
     this.thisTurnThinking = '';
+    this.thisTurnThinkingSignature = '';
 
     logger.debug('Agent run ended, all tracking cleared');
   }
@@ -440,6 +464,7 @@ export class TurnContentTracker {
     return {
       text: this.accumulatedText,
       thinking: this.accumulatedThinking,
+      thinkingSignature: this.accumulatedThinkingSignature || undefined,
       toolCalls: this.accumulatedToolCalls.map(tc => ({
         toolCallId: tc.toolCallId,
         toolName: tc.toolName,
@@ -462,6 +487,7 @@ export class TurnContentTracker {
       sequence: [...this.thisTurnSequence],
       toolCalls: new Map(this.thisTurnToolCalls),
       thinking: this.thisTurnThinking,
+      thinkingSignature: this.thisTurnThinkingSignature || undefined,
     };
   }
 
@@ -664,8 +690,13 @@ export class TurnContentTracker {
     };
 
     // Add thinking content first (Anthropic API puts thinking before text/tools)
+    // IMPORTANT: Must include signature - API requires it when sending thinking back
     if (this.accumulatedThinking) {
-      assistantContent.push({ type: 'thinking', thinking: this.accumulatedThinking });
+      assistantContent.push({
+        type: 'thinking',
+        thinking: this.accumulatedThinking,
+        ...(this.accumulatedThinkingSignature && { signature: this.accumulatedThinkingSignature }),
+      });
     }
 
     // Build content from sequence to preserve interleaving order

@@ -274,8 +274,8 @@ export class EventStoreOrchestrator extends EventEmitter {
       getSubagentTrackerForSession: (sessionId) => this.activeSessions.get(sessionId)?.subagentTracker,
       onTodosUpdated: async (sessionId, todos) => this.handleTodosUpdated(sessionId, todos),
       generateTodoId: () => `todo_${crypto.randomUUID().replace(/-/g, '').slice(0, 12)}`,
-      onNotify: this.apnsService ? async (sessionId, notification) => {
-        return this.sendNotification(sessionId, notification);
+      onNotify: this.apnsService ? async (sessionId, notification, toolCallId) => {
+        return this.sendNotification(sessionId, notification, toolCallId);
       } : undefined,
       browserService: this.browserService ? {
         execute: (sid, action, params) => this.browserService.execute(sid, action as any, params),
@@ -1707,7 +1707,8 @@ export class EventStoreOrchestrator extends EventEmitter {
       priority?: 'high' | 'normal';
       sound?: string;
       badge?: number;
-    }
+    },
+    toolCallId: string
   ): Promise<NotifyAppResult> {
     if (!this.apnsService) {
       return { successCount: 0, failureCount: 0, errors: ['APNS not configured'] };
@@ -1739,6 +1740,7 @@ export class EventStoreOrchestrator extends EventEmitter {
       data: {
         ...notification.data,
         sessionId, // Include sessionId for deep linking to the sending session
+        toolCallId, // Include toolCallId so iOS can scroll to the notification chip
       },
       priority: notification.priority,
       sound: notification.sound,

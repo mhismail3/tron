@@ -63,7 +63,9 @@ export type NotifyAppCallback = (
     priority?: 'high' | 'normal';
     sound?: string;
     badge?: number;
-  }
+  },
+  /** The tool call ID - used for deep linking so iOS can scroll to the notification */
+  toolCallId: string
 ) => Promise<NotifyAppResult>;
 
 /**
@@ -158,7 +160,11 @@ export class NotifyAppTool implements TronTool<NotifyAppParams, NotifyAppResult>
     this.config = config;
   }
 
-  async execute(args: Record<string, unknown>): Promise<TronToolResult<NotifyAppResult>> {
+  async execute(
+    toolCallId: string,
+    args: Record<string, unknown>,
+    _signal: AbortSignal
+  ): Promise<TronToolResult<NotifyAppResult>> {
     // Validate required parameters
     const title = args.title as string | undefined;
     const body = args.body as string | undefined;
@@ -230,14 +236,18 @@ export class NotifyAppTool implements TronTool<NotifyAppParams, NotifyAppResult>
     });
 
     try {
-      const result = await this.config.onNotify(this.config.sessionId, {
-        title: truncatedTitle,
-        body: truncatedBody,
-        data,
-        priority,
-        sound,
-        badge,
-      });
+      const result = await this.config.onNotify(
+        this.config.sessionId,
+        {
+          title: truncatedTitle,
+          body: truncatedBody,
+          data,
+          priority,
+          sound,
+          badge,
+        },
+        toolCallId
+      );
 
       // Build response message
       let message: string;

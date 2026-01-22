@@ -1063,20 +1063,28 @@ export class AgentEventHandler {
     event: TronEvent,
     timestamp: string
   ): void {
-    // Cast to access thinking_end specific properties
-    const thinkingEnd = event as { thinking: string };
+    // Cast to access thinking_end specific properties (including signature)
+    const thinkingEnd = event as { thinking: string; signature?: string };
 
     logger.debug('Received thinking_end', {
       sessionId,
       thinkingLength: thinkingEnd.thinking.length,
+      hasSignature: !!thinkingEnd.signature,
     });
+
+    // Store the signature in TurnContentTracker for persistence
+    // IMPORTANT: API requires signature when sending thinking blocks back
+    const active = this.config.getActiveSession(sessionId);
+    if (active && thinkingEnd.signature) {
+      active.sessionContext!.setThinkingSignature(thinkingEnd.signature);
+    }
 
     // Emit WebSocket event
     this.config.emit('agent_event', {
       type: 'agent.thinking_end',
       sessionId,
       timestamp,
-      data: { thinking: thinkingEnd.thinking },
+      data: { thinking: thinkingEnd.thinking, signature: thinkingEnd.signature },
     });
   }
 }

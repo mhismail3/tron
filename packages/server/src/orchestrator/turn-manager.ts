@@ -62,6 +62,7 @@ export interface TextContentBlock {
 export interface ThinkingContentBlock {
   type: 'thinking';
   thinking: string;
+  signature?: string; // Required by API when sending thinking back
 }
 
 export interface ToolUseContentBlock {
@@ -179,6 +180,15 @@ export class TurnManager {
    */
   addThinkingDelta(thinking: string): void {
     this.tracker.addThinkingDelta(thinking);
+  }
+
+  /**
+   * Set the signature for the current thinking block.
+   * Called when thinking_end event is received.
+   * IMPORTANT: API requires signature when sending thinking blocks back.
+   */
+  setThinkingSignature(signature: string): void {
+    this.tracker.setThinkingSignature(signature);
   }
 
   /**
@@ -325,8 +335,13 @@ export class TurnManager {
 
     // Thinking content comes first (Anthropic API convention)
     // This ensures proper ordering in persisted message.assistant events
+    // IMPORTANT: Must include signature - API requires it when sending thinking back
     if (turnContent.thinking) {
-      content.push({ type: 'thinking', thinking: turnContent.thinking });
+      content.push({
+        type: 'thinking',
+        thinking: turnContent.thinking,
+        ...(turnContent.thinkingSignature && { signature: turnContent.thinkingSignature }),
+      });
     }
 
     // Build content from sequence to preserve interleaving

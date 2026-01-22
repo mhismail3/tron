@@ -124,6 +124,23 @@ final class ScrollStateCoordinator: ObservableObject {
         }
     }
 
+    /// Scroll to a deep link target (tool call or event).
+    /// Sets mode to reviewing to prevent auto-scroll from interfering.
+    /// - Parameters:
+    ///   - messageId: The UUID of the message to scroll to
+    ///   - proxy: Optional ScrollViewProxy for proxy-based scrolling
+    func scrollToDeepLinkTarget(messageId: UUID, using proxy: ScrollViewProxy?) {
+        // Set mode to reviewing (user initiated navigation, not auto-follow)
+        mode = .reviewing
+        hasUnreadContent = false
+        graceUntil = Date().addingTimeInterval(gracePeriod)
+
+        // Scroll with animation, centering the target message
+        withAnimation(.tronStandard) {
+            proxy?.scrollTo(messageId, anchor: .center)
+        }
+    }
+
     /// Call from scroll position tracking
     /// - Parameters:
     ///   - distanceFromBottom: Negative when above bottom, positive when at/below bottom
