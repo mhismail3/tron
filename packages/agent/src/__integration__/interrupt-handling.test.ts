@@ -13,7 +13,7 @@ import { EventStore, SessionId, EventId } from '../index.js';
 import path from 'path';
 import os from 'os';
 import fs from 'fs';
-import { EventStoreOrchestrator } from '../event-store-orchestrator.js';
+import { EventStoreOrchestrator } from '../orchestrator/event-store-orchestrator.js';
 
 // Mock TronAgent for controlled interrupt testing
 const mockTronAgent = (options: {

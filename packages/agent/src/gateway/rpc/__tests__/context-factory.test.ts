@@ -10,7 +10,7 @@ import {
   createMinimalRpcContext,
   isFullRpcContext,
 } from '../context-factory.js';
-import type { EventStoreOrchestrator } from '../../event-store-orchestrator.js';
+import type { EventStoreOrchestrator } from '../../../orchestrator/event-store-orchestrator.js';
 
 // Mock all adapter modules
 vi.mock('../adapters/session.adapter.js', () => ({

@@ -7,7 +7,7 @@
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { createSkillAdapter } from '../skill.adapter.js';
-import type { EventStoreOrchestrator } from '../../../../event-store-orchestrator.js';
+import type { EventStoreOrchestrator } from '../../../../orchestrator/event-store-orchestrator.js';
 
 // Mock the SkillRegistry
 vi.mock('../../../../index.js', async () => {

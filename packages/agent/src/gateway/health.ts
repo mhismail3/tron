@@ -11,7 +11,7 @@ import {
   loadAuthStorageSync,
   saveAuthStorageSync,
 } from '../index.js';
-import type { EventStoreOrchestrator } from '../event-store-orchestrator.js';
+import type { EventStoreOrchestrator } from '../orchestrator/event-store-orchestrator.js';
 
 const logger = createLogger('health');
 

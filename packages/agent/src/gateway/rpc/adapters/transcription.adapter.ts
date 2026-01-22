@@ -8,7 +8,7 @@
  * already matches the expected interface.
  */
 
-import { transcribeAudio, listTranscriptionModels } from '../../../transcription-client.js';
+import { transcribeAudio, listTranscriptionModels } from '../../../transcription/client.js';
 import type { TranscriptionManagerAdapter } from '../types.js';
 
 /**

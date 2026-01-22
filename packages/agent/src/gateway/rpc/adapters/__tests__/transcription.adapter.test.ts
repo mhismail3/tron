@@ -8,13 +8,13 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 // Mock the transcription client module
-vi.mock('../../../../transcription-client.js', () => ({
+vi.mock('../../../../transcription/client.js', () => ({
   transcribeAudio: vi.fn(),
   listTranscriptionModels: vi.fn(),
 }));
 
 // Import after mocking
-import { transcribeAudio, listTranscriptionModels } from '../../../../transcription-client.js';
+import { transcribeAudio, listTranscriptionModels } from '../../../../transcription/client.js';
 import { createTranscriptionAdapter } from '../transcription.adapter.js';
 
 describe('TranscriptionAdapter', () => {

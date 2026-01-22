@@ -4,7 +4,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import * as http from 'http';
 import { HealthServer } from '../gateway/health.js';
-import type { EventStoreOrchestrator } from '../event-store-orchestrator.js';
+import type { EventStoreOrchestrator } from '../orchestrator/event-store-orchestrator.js';
 
 // Mock http module
 vi.mock('http', () => ({

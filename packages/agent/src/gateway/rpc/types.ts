@@ -9,7 +9,7 @@
  * - RpcContext interface (public contract)
  */
 
-import type { EventStoreOrchestrator } from '../../event-store-orchestrator.js';
+import type { EventStoreOrchestrator } from '../../orchestrator/event-store-orchestrator.js';
 import type {
   RpcContext,
   EventStoreManager,

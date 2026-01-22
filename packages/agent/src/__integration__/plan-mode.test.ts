@@ -417,7 +417,7 @@ describe('Plan Mode Enforcement', () => {
 // =============================================================================
 
 import { EventStore, SessionId } from '../index.js';
-import { EventStoreOrchestrator } from '../event-store-orchestrator.js';
+import { EventStoreOrchestrator } from '../orchestrator/event-store-orchestrator.js';
 import path from 'path';
 import os from 'os';
 import fs from 'fs';

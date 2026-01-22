@@ -3,13 +3,13 @@
  *
  * Sends audio to the local transcription sidecar and returns the result.
  */
-import { createLogger, getSettings } from './index.js';
+import { createLogger, getSettings } from '../index.js';
 import type {
   TranscribeAudioParams,
   TranscribeAudioResult,
   TranscribeListModelsResult,
   TranscriptionModelInfo,
-} from './index.js';
+} from '../index.js';
 
 const logger = createLogger('transcription');
 

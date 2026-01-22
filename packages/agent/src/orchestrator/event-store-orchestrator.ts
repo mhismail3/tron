@@ -96,46 +96,46 @@ import {
   type BackloggedTask,
   type NotifyAppResult,
   withLoggingContext,
-} from './index.js';
-import { BrowserService } from './external/browser/index.js';
-import { normalizeContentBlocks } from './utils/content-normalizer.js';
+} from '../index.js';
+import { BrowserService } from '../external/browser/index.js';
+import { normalizeContentBlocks } from '../utils/content-normalizer.js';
 import {
   buildWorktreeInfoWithStatus,
   commitWorkingDirectory,
-} from './orchestrator/worktree-ops.js';
+} from './worktree-ops.js';
 import {
   SubagentOperations,
   createSubagentOperations,
-} from './orchestrator/subagent-ops.js';
+} from './subagent-ops.js';
 import {
   AgentEventHandler,
   createAgentEventHandler,
-} from './orchestrator/agent-event-handler.js';
+} from './agent-event-handler.js';
 import {
   SkillLoader,
   createSkillLoader,
-} from './orchestrator/skill-loader.js';
+} from './skill-loader.js';
 import {
   SessionManager,
   createSessionManager,
-} from './orchestrator/session-manager.js';
+} from './session-manager.js';
 import {
   ContextOps,
   createContextOps,
-} from './orchestrator/context-ops.js';
+} from './context-ops.js';
 import {
   AgentFactory,
   createAgentFactory,
-} from './orchestrator/agent-factory.js';
+} from './agent-factory.js';
 import {
   AuthProvider,
   createAuthProvider,
-} from './orchestrator/auth-provider.js';
+} from './auth-provider.js';
 import {
   APNSService,
   createAPNSService,
   type APNSNotification,
-} from './external/apns/index.js';
+} from '../external/apns/index.js';
 import {
   type EventStoreOrchestratorConfig,
   type ActiveSession,
@@ -145,7 +145,7 @@ import {
   type SessionInfo,
   type ForkResult,
   type WorktreeInfo,
-} from './orchestrator/types.js';
+} from './types.js';
 
 // Re-export types for consumers
 export type {

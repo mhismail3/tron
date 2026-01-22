@@ -6,7 +6,7 @@
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { EventStore, SessionId, type Message } from '../index.js';
-import { EventStoreOrchestrator } from '../event-store-orchestrator.js';
+import { EventStoreOrchestrator } from '../orchestrator/event-store-orchestrator.js';
 import path from 'path';
 import os from 'os';
 import fs from 'fs';

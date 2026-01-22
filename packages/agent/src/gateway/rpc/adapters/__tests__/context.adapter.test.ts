@@ -7,7 +7,7 @@
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { createContextAdapter } from '../context.adapter.js';
-import type { EventStoreOrchestrator } from '../../../event-store-orchestrator.js';
+import type { EventStoreOrchestrator } from '../../../../orchestrator/event-store-orchestrator.js';
 
 describe('ContextAdapter', () => {
   let mockOrchestrator: Partial<EventStoreOrchestrator>;

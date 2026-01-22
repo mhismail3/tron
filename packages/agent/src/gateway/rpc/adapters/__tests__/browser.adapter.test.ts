@@ -7,7 +7,7 @@
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { createBrowserAdapter } from '../browser.adapter.js';
-import type { EventStoreOrchestrator } from '../../../event-store-orchestrator.js';
+import type { EventStoreOrchestrator } from '../../../../orchestrator/event-store-orchestrator.js';
 
 describe('BrowserAdapter', () => {
   let mockOrchestrator: Partial<EventStoreOrchestrator>;
