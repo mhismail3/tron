@@ -111,6 +111,12 @@ export {
   type SearchOptions as EventSearchOptions,
 } from './event-store.js';
 
+// Message reconstruction (internal utility, exposed for testing)
+export {
+  reconstructFromEvents,
+  type ReconstructionResult,
+} from './message-reconstructor.js';
+
 // SQLite Backend (for advanced use cases)
 // Now using modular facade instead of legacy monolithic backend
 export {
