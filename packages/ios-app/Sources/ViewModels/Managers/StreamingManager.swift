@@ -1,7 +1,10 @@
 import Foundation
+import QuartzCore
+import UIKit
 
 // MARK: - Streaming Manager
-// Manages text delta batching, thinking content, and backpressure
+// Manages text delta batching using CADisplayLink for efficient, battery-friendly updates.
+// Replaces Task.sleep-based batching which caused perpetual deferral during rapid deltas.
 
 @MainActor @Observable
 final class StreamingManager {
@@ -9,12 +12,12 @@ final class StreamingManager {
     // MARK: - Configuration
 
     struct Config {
-        /// Batch interval for text updates (100ms)
-        static let textBatchIntervalNanos: UInt64 = 100_000_000
         /// Maximum streaming text size to prevent memory exhaustion (10MB)
         static let maxStreamingTextSize = 10_000_000
         /// Thinking text size limit (1MB)
         static let maxThinkingTextSize = 1_000_000
+        /// Target updates per second (30fps for smooth text appearance)
+        static let targetUpdatesPerSecond: Int = 30
     }
 
     // MARK: - Streaming State
@@ -26,10 +29,8 @@ final class StreamingManager {
     private(set) var streamingText: String = ""
 
     /// Pending text delta (not yet flushed to UI)
+    @ObservationIgnored
     private var pendingTextDelta: String = ""
-
-    /// Batch update task
-    private var textUpdateTask: Task<Void, Never>?
 
     /// Accumulated thinking text
     private(set) var thinkingText: String = ""
@@ -39,19 +40,101 @@ final class StreamingManager {
         streamingMessageId != nil
     }
 
+    // MARK: - Display Link Timer
+
+    /// Display link wrapper that manages its own lifecycle
+    @ObservationIgnored
+    private var displayLinkWrapper: DisplayLinkWrapper?
+
+    /// Frame counter for throttling to ~30fps
+    @ObservationIgnored
+    private var frameCounter: Int = 0
+
+    /// Number of frames to skip between updates (60fps / 30 target = 2)
+    private let framesPerUpdate: Int = 2
+
     // MARK: - Callbacks
 
     /// Called when streaming text should be updated in UI
+    @ObservationIgnored
     var onTextUpdate: ((UUID, String) -> Void)?
 
     /// Called when a new streaming message should be created
+    @ObservationIgnored
     var onCreateStreamingMessage: (() -> UUID)?
 
     /// Called when streaming message should be finalized
+    @ObservationIgnored
     var onFinalizeMessage: ((UUID, String) -> Void)?
 
     /// Called when thinking text updates
+    @ObservationIgnored
     var onThinkingUpdate: ((String) -> Void)?
+
+    // MARK: - Lifecycle
+
+    init() {
+        setupDisplayLink()
+        setupBackgroundObservers()
+    }
+
+    private func setupDisplayLink() {
+        displayLinkWrapper = DisplayLinkWrapper { [weak self] in
+            self?.displayLinkFired()
+        }
+    }
+
+    private func setupBackgroundObservers() {
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(appDidEnterBackground),
+            name: UIApplication.didEnterBackgroundNotification,
+            object: nil
+        )
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(appWillEnterForeground),
+            name: UIApplication.willEnterForegroundNotification,
+            object: nil
+        )
+    }
+
+    @objc private func appDidEnterBackground() {
+        // Pause display link to save battery when backgrounded
+        displayLinkWrapper?.isPaused = true
+    }
+
+    @objc private func appWillEnterForeground() {
+        // Resume only if we have pending content to display
+        if !pendingTextDelta.isEmpty && streamingMessageId != nil {
+            displayLinkWrapper?.isPaused = false
+        }
+    }
+
+    /// Called by display link at screen refresh rate
+    private func displayLinkFired() {
+        frameCounter += 1
+
+        // Only flush every N frames (throttle to ~30 updates/sec)
+        guard frameCounter >= framesPerUpdate else { return }
+        frameCounter = 0
+
+        flushPendingTextIfNeeded()
+    }
+
+    private func flushPendingTextIfNeeded() {
+        guard !pendingTextDelta.isEmpty,
+              let messageId = streamingMessageId else {
+            // Nothing to flush - pause the display link to save battery
+            if pendingTextDelta.isEmpty {
+                displayLinkWrapper?.isPaused = true
+            }
+            return
+        }
+
+        onTextUpdate?(messageId, streamingText)
+        pendingTextDelta = ""
+    }
 
     // MARK: - Text Delta Handling
 
@@ -71,39 +154,16 @@ final class StreamingManager {
             }
         }
 
-        // Accumulate delta
+        // Accumulate delta (efficient - no timer churn)
         pendingTextDelta += delta
         streamingText += delta
 
-        // Schedule batched update
-        scheduleBatchUpdate()
+        // Ensure display link is running
+        if displayLinkWrapper?.isPaused == true {
+            displayLinkWrapper?.isPaused = false
+        }
 
         return true
-    }
-
-    /// Schedule a batched UI update
-    private func scheduleBatchUpdate() {
-        // Cancel any pending update
-        textUpdateTask?.cancel()
-
-        textUpdateTask = Task { @MainActor in
-            try? await Task.sleep(nanoseconds: Config.textBatchIntervalNanos)
-            guard !Task.isCancelled else { return }
-
-            flushPendingText()
-        }
-    }
-
-    /// Flush pending text to UI immediately
-    func flushPendingText() {
-        textUpdateTask?.cancel()
-        textUpdateTask = nil
-
-        guard !pendingTextDelta.isEmpty,
-              let messageId = streamingMessageId else { return }
-
-        onTextUpdate?(messageId, streamingText)
-        pendingTextDelta = ""
     }
 
     // MARK: - Thinking Text
@@ -128,13 +188,25 @@ final class StreamingManager {
         onThinkingUpdate?("")
     }
 
-    // MARK: - Message Finalization
+    // MARK: - Flush and Finalize
+
+    /// Flush pending text to UI immediately
+    func flushPendingText() {
+        guard !pendingTextDelta.isEmpty,
+              let messageId = streamingMessageId else { return }
+
+        onTextUpdate?(messageId, streamingText)
+        pendingTextDelta = ""
+    }
 
     /// Finalize the current streaming message
     /// Returns the final text content
     func finalizeStreamingMessage() -> String {
         // Flush any pending updates first
         flushPendingText()
+
+        // Pause display link since we're done streaming
+        displayLinkWrapper?.isPaused = true
 
         guard let messageId = streamingMessageId else { return "" }
 
@@ -153,8 +225,7 @@ final class StreamingManager {
 
     /// Cancel current streaming without finalizing
     func cancelStreaming() {
-        textUpdateTask?.cancel()
-        textUpdateTask = nil
+        displayLinkWrapper?.isPaused = true
 
         streamingMessageId = nil
         streamingText = ""
@@ -195,12 +266,61 @@ final class StreamingManager {
 
     /// Reset all streaming state
     func reset() {
-        textUpdateTask?.cancel()
-        textUpdateTask = nil
+        displayLinkWrapper?.isPaused = true
 
         streamingMessageId = nil
         streamingText = ""
         pendingTextDelta = ""
         thinkingText = ""
+    }
+}
+
+// MARK: - Display Link Wrapper
+
+/// Wrapper class that owns the CADisplayLink and handles its lifecycle
+/// This class is not @MainActor so deinit can properly invalidate the display link
+private final class DisplayLinkWrapper {
+    private var displayLink: CADisplayLink?
+    private let handler: @MainActor () -> Void
+
+    var isPaused: Bool {
+        get { displayLink?.isPaused ?? true }
+        set { displayLink?.isPaused = newValue }
+    }
+
+    @MainActor
+    init(handler: @escaping @MainActor () -> Void) {
+        self.handler = handler
+        setupDisplayLink()
+    }
+
+    deinit {
+        displayLink?.invalidate()
+    }
+
+    @MainActor
+    private func setupDisplayLink() {
+        displayLink = CADisplayLink(target: self, selector: #selector(tick))
+
+        // Configure for smooth 60fps with ability to drop to 30fps
+        displayLink?.preferredFrameRateRange = CAFrameRateRange(
+            minimum: 30,
+            maximum: 60,
+            preferred: 60
+        )
+
+        // Add to main run loop in common mode (works during scrolling)
+        displayLink?.add(to: .main, forMode: .common)
+
+        // Start paused to save battery - will activate on first delta
+        displayLink?.isPaused = true
+    }
+
+    @objc private func tick() {
+        // We're on main thread (display link always fires on main), safe to call handler
+        let handler = self.handler
+        MainActor.assumeIsolated {
+            handler()
+        }
     }
 }

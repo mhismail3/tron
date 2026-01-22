@@ -49,6 +49,8 @@ struct ChatMessage: Identifiable, Equatable {
     var content: MessageContent
     let timestamp: Date
     var isStreaming: Bool
+    /// Version counter for streaming updates (triggers SwiftUI onChange reliably)
+    var streamingVersion: Int = 0
     var tokenUsage: TokenUsage?
     /// Incremental token usage (delta from previous turn) for display purposes
     var incrementalTokens: TokenUsage?
@@ -84,6 +86,7 @@ struct ChatMessage: Identifiable, Equatable {
         content: MessageContent,
         timestamp: Date = Date(),
         isStreaming: Bool = false,
+        streamingVersion: Int = 0,
         tokenUsage: TokenUsage? = nil,
         incrementalTokens: TokenUsage? = nil,
         attachments: [Attachment]? = nil,
@@ -100,6 +103,7 @@ struct ChatMessage: Identifiable, Equatable {
         self.content = content
         self.timestamp = timestamp
         self.isStreaming = isStreaming
+        self.streamingVersion = streamingVersion
         self.tokenUsage = tokenUsage
         self.incrementalTokens = incrementalTokens
         self.attachments = attachments

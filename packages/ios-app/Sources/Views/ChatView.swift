@@ -705,15 +705,16 @@ struct ChatView: View {
                             }
                         }
                     }
-                    .onChange(of: viewModel.messages.last?.content) { _, _ in
+                    .onChange(of: viewModel.messages.last?.streamingVersion) { _, _ in
                         // Don't auto-scroll during initial load - defaultScrollAnchor handles it
                         guard initialLoadComplete else { return }
 
-                        // Streaming content update
+                        // Streaming content update (version-based detection is more reliable)
+                        // Use debounced scroll to prevent jitter during rapid updates
                         if viewModel.isProcessing {
-                            if scrollCoordinator.autoScrollEnabled {
+                            if scrollCoordinator.shouldAutoScrollWithDebounce() {
                                 proxy.scrollTo("bottom", anchor: .bottom)
-                            } else {
+                            } else if !scrollCoordinator.autoScrollEnabled {
                                 scrollCoordinator.didMutateContent(.updateExisting)
                             }
                         }

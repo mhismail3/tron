@@ -205,12 +205,7 @@ class ChatViewModel: ObservableObject {
     let maxRecordingDuration: TimeInterval = 120
 
     // MARK: - Performance Optimization: Batched Updates
-
-    var pendingTextDelta = ""
-    var textUpdateTask: Task<Void, Never>?
-    let textUpdateInterval: UInt64 = 100_000_000 // 100ms in nanoseconds - balances smooth UI with reduced updates
-    /// Maximum streaming text size to prevent memory exhaustion (10MB)
-    static let maxStreamingTextSize = 10_000_000
+    // Note: Batching state moved to StreamingManager which uses CADisplayLink for efficient updates
 
     // MARK: - Event Store Reference
 
@@ -283,6 +278,8 @@ class ChatViewModel: ObservableObject {
             // Find and update the streaming message
             if let index = self.messages.firstIndex(where: { $0.id == messageId }) {
                 self.messages[index].content = .streaming(text)
+                // Increment version to trigger SwiftUI onChange reliably
+                self.messages[index].streamingVersion += 1
                 // Sync to MessageWindowManager
                 self.messageWindowManager.updateMessage(self.messages[index])
             }
@@ -542,13 +539,8 @@ class ChatViewModel: ObservableObject {
 
     /// Force flush any pending text updates (called before completion)
     func flushPendingTextUpdates() {
-        // Use StreamingManager for flushing
+        // Delegate to StreamingManager for flushing
         streamingManager.flushPendingText()
-
-        // Legacy cleanup
-        textUpdateTask?.cancel()
-        textUpdateTask = nil
-        pendingTextDelta = ""
     }
 
     // MARK: - Error Handling

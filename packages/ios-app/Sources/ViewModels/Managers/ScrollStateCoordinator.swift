@@ -1,4 +1,5 @@
 import SwiftUI
+import QuartzCore
 
 /// Unified scroll state machine for ChatView
 /// Replaces fragmented scroll state (@State vars) with explicit state machine
@@ -46,6 +47,14 @@ final class ScrollStateCoordinator: ObservableObject {
 
     /// Grace period duration after user actions
     private let gracePeriod: TimeInterval = 0.8
+
+    // MARK: - Scroll Debouncing
+
+    /// Last time a scroll command was issued (for debouncing)
+    private var lastScrollTime: CFTimeInterval = 0
+
+    /// Minimum interval between scroll commands (~30fps matches display link)
+    private let scrollDebounceInterval: CFTimeInterval = 1.0 / 30.0
 
     // MARK: - Content Mutation Protocol
 
@@ -156,5 +165,19 @@ final class ScrollStateCoordinator: ObservableObject {
     /// Whether auto-scroll is enabled (for compatibility during transition)
     var autoScrollEnabled: Bool {
         mode == .following
+    }
+
+    /// Check if we should auto-scroll with debouncing
+    /// Returns true only if in following mode AND debounce interval has passed
+    /// Use this to prevent scroll jitter during rapid streaming updates
+    func shouldAutoScrollWithDebounce() -> Bool {
+        guard mode == .following else { return false }
+
+        let now = CACurrentMediaTime()
+        if now - lastScrollTime < scrollDebounceInterval {
+            return false
+        }
+        lastScrollTime = now
+        return true
     }
 }
