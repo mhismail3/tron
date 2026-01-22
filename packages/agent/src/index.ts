@@ -73,9 +73,6 @@ export * from './guardrails/index.js';
 // Re-export UI (RenderAppUI component types and schema)
 export * from './ui/index.js';
 
-// Re-export artifacts (canvas persistence)
-export * from './artifacts/index.js';
-
 // Re-export utilities (error handling, clipboard, etc.)
 export * from './utils/index.js';
 
