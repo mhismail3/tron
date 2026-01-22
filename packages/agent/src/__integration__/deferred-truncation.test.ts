@@ -17,14 +17,7 @@
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { EventEmitter } from 'events';
-
-// =============================================================================
-// Constants
-// =============================================================================
-
-// These should match the actual constants from content-normalizer.ts
-const MAX_TOOL_RESULT_SIZE = 10 * 1024; // 10KB
-const MAX_TOOL_INPUT_SIZE = 5 * 1024;   // 5KB
+import { MAX_TOOL_RESULT_SIZE, MAX_TOOL_INPUT_SIZE } from '../utils/content-normalizer.js';
 
 // Generate test data of specific sizes
 function generateBase64Data(sizeInBytes: number): string {
