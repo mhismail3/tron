@@ -3,8 +3,8 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import * as http from 'http';
-import { HealthServer } from '../src/gateway/health.js';
-import type { EventStoreOrchestrator } from '../src/event-store-orchestrator.js';
+import { HealthServer } from '../gateway/health.js';
+import type { EventStoreOrchestrator } from '../event-store-orchestrator.js';
 
 // Mock http module
 vi.mock('http', () => ({

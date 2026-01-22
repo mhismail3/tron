@@ -8,7 +8,7 @@
  * - Phase 4: Turn boundary events (stream.turn_start, stream.turn_end)
  */
 import { describe, it, expect, beforeEach, afterEach, vi, type Mock } from 'vitest';
-import { EventStore, EventId, SessionId, type TronSessionEvent } from '../src/index.js';
+import { EventStore, EventId, SessionId, type TronSessionEvent } from '../index.js';
 import path from 'path';
 import os from 'os';
 import fs from 'fs';

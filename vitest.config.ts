@@ -6,9 +6,7 @@ export default defineConfig({
     globals: true,
     environment: 'node',
     include: [
-      'packages/*/src/**/*.test.ts',      // NEW: co-located tests
-      'packages/*/test/**/*.test.ts',     // OLD: parallel tests (temporary)
-      'packages/*/__integration__/**/*.test.ts',  // Integration tests
+      'packages/*/src/**/*.test.ts',      // Co-located tests
     ],
     exclude: ['**/node_modules/**', '**/dist/**', 'packages/chat-web/**'],
     coverage: {

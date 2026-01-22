@@ -9,8 +9,8 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { AskUserQuestionTool } from '../src/index.js';
-import type { AskUserQuestionParams } from '../src/index.js';
+import { AskUserQuestionTool } from '../index.js';
+import type { AskUserQuestionParams } from '../index.js';
 
 describe('AskUserQuestion Tool (Async Model)', () => {
   let tool: AskUserQuestionTool;

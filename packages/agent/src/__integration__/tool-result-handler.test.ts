@@ -6,7 +6,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import type { ToolResultParams, ToolResultResult } from '../src/index.js';
+import type { ToolResultParams, ToolResultResult } from '../index.js';
 
 // Mock pending tool call tracker - will be implemented
 interface PendingToolCall {

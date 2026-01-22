@@ -16,7 +16,7 @@
  * - Explicit parentId passed to eventStore.append()
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { EventStore, EventId, SessionId, type TronSessionEvent } from '../src/index.js';
+import { EventStore, EventId, SessionId, type TronSessionEvent } from '../index.js';
 import path from 'path';
 import os from 'os';
 import fs from 'fs';

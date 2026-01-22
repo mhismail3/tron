@@ -19,7 +19,7 @@ import {
   WorktreeCoordinator,
   createWorktreeCoordinator,
   type SessionId,
-} from '../src/index.js';
+} from '../index.js';
 
 // =============================================================================
 // Test Helpers

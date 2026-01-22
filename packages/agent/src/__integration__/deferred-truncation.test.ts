@@ -69,7 +69,7 @@ function getOriginalSizeFromTruncationNotice(content: string): number | null {
 describe('AgentWebBrowserTool - Full Screenshot Data', () => {
   it('should return concise text content but include full screenshot in details', async () => {
     // Import dynamically to allow mocking
-    const { AgentWebBrowserTool } = await import('../src/tools/agent-web-browser.js');
+    const { AgentWebBrowserTool } = await import('../tools/agent-web-browser.js');
 
     const fullScreenshot = generateLargeScreenshot();
 
@@ -104,7 +104,7 @@ describe('AgentWebBrowserTool - Full Screenshot Data', () => {
   });
 
   it('should include full screenshot in result.details for separate access', async () => {
-    const { AgentWebBrowserTool } = await import('../src/tools/agent-web-browser.js');
+    const { AgentWebBrowserTool } = await import('../tools/agent-web-browser.js');
 
     const fullScreenshot = generateLargeScreenshot();
 
@@ -127,7 +127,7 @@ describe('AgentWebBrowserTool - Full Screenshot Data', () => {
   });
 
   it('should NOT include details for non-screenshot actions', async () => {
-    const { AgentWebBrowserTool } = await import('../src/tools/agent-web-browser.js');
+    const { AgentWebBrowserTool } = await import('../tools/agent-web-browser.js');
 
     const mockDelegate = {
       execute: vi.fn().mockResolvedValue({
@@ -155,7 +155,7 @@ describe('Content Normalizer - Truncation for Persistence', () => {
   let truncateString: (str: string, maxLength: number) => string;
 
   beforeEach(async () => {
-    const module = await import('../src/utils/content-normalizer.js');
+    const module = await import('../utils/content-normalizer.js');
     normalizeContentBlock = module.normalizeContentBlock;
     truncateString = module.truncateString;
   });

@@ -18,7 +18,7 @@
  * ]
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { EventStore, SessionId } from '../src/index.js';
+import { EventStore, SessionId } from '../index.js';
 import path from 'path';
 import os from 'os';
 import fs from 'fs';

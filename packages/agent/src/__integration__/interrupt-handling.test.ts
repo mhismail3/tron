@@ -9,11 +9,11 @@
  * - Content can be recovered after session resume
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { EventStore, SessionId, EventId } from '../src/index.js';
+import { EventStore, SessionId, EventId } from '../index.js';
 import path from 'path';
 import os from 'os';
 import fs from 'fs';
-import { EventStoreOrchestrator } from '../src/event-store-orchestrator.js';
+import { EventStoreOrchestrator } from '../event-store-orchestrator.js';
 
 // Mock TronAgent for controlled interrupt testing
 const mockTronAgent = (options: {
