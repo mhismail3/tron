@@ -86,7 +86,8 @@ enum PersistedEventType: String, CaseIterable {
              .toolCall, .toolResult,
              .notificationInterrupted, .configModelSwitch, .configReasoningLevel,
              .contextCleared, .compactBoundary, .skillRemoved, .rulesLoaded,
-             .errorAgent, .errorTool, .errorProvider:
+             .errorAgent, .errorTool, .errorProvider,
+             .streamThinkingComplete:
             return true
         default:
             return false
@@ -127,7 +128,7 @@ enum PersistedEventType: String, CaseIterable {
              .compactBoundary, .compactSummary,
              .metadataUpdate, .metadataTag,
              .worktreeAcquired, .worktreeReleased, .worktreeCommit, .worktreeMerged,
-             .streamTextDelta, .streamThinkingDelta, .streamThinkingComplete, .streamTurnStart, .streamTurnEnd,
+             .streamTextDelta, .streamThinkingDelta, .streamTurnStart, .streamTurnEnd,
              .configPromptUpdate,
              .messageDeleted,
              .fileRead, .fileWrite, .fileEdit:

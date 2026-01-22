@@ -228,6 +228,8 @@ struct UnifiedEventTransformer {
             return transformSkillRemoved(payload, timestamp: ts)
         case .rulesLoaded:
             return transformRulesLoaded(payload, timestamp: ts)
+        case .streamThinkingComplete:
+            return transformThinkingComplete(payload, timestamp: ts)
         default:
             return nil
         }
@@ -350,7 +352,15 @@ struct UnifiedEventTransformer {
                 continue
             }
 
-            if blockType == "text", let text = block["text"] as? String, !text.isEmpty {
+            if blockType == "thinking", let thinkingText = block["thinking"] as? String, !thinkingText.isEmpty {
+                // Create thinking message - appears before text response
+                let preview = extractThinkingPreview(from: thinkingText)
+                messages.append(ChatMessage(
+                    role: .assistant,
+                    content: .thinking(visible: preview, isExpanded: false),
+                    timestamp: timestamp
+                ))
+            } else if blockType == "text", let text = block["text"] as? String, !text.isEmpty {
                 // Create text message - only text responses show token stats
                 messages.append(ChatMessage(
                     role: .assistant,
@@ -440,7 +450,7 @@ struct UnifiedEventTransformer {
                     stopReason: nil
                 ))
             }
-            // Skip thinking blocks and other types - they're handled elsewhere
+            // Other block types (redacted, etc.) are skipped
         }
 
         return messages
@@ -711,7 +721,15 @@ struct UnifiedEventTransformer {
                 continue
             }
 
-            if blockType == "text", let text = block["text"] as? String, !text.isEmpty {
+            if blockType == "thinking", let thinkingText = block["thinking"] as? String, !thinkingText.isEmpty {
+                // Create thinking message - appears before text response
+                let preview = extractThinkingPreview(from: thinkingText)
+                messages.append(ChatMessage(
+                    role: .assistant,
+                    content: .thinking(visible: preview, isExpanded: false),
+                    timestamp: timestamp
+                ))
+            } else if blockType == "text", let text = block["text"] as? String, !text.isEmpty {
                 messages.append(ChatMessage(
                     role: .assistant,
                     content: .text(text),
@@ -1087,6 +1105,22 @@ struct UnifiedEventTransformer {
         )
     }
 
+    private static func transformThinkingComplete(
+        _ payload: [String: AnyCodable],
+        timestamp: Date
+    ) -> ChatMessage? {
+        let parsed = ThinkingCompletePayload(from: payload)
+
+        // Use preview for initial display; full content loaded lazily on tap
+        let displayText = parsed.preview.isEmpty ? parsed.content : parsed.preview
+
+        return ChatMessage(
+            role: .assistant,
+            content: .thinking(visible: displayText, isExpanded: false),
+            timestamp: timestamp
+        )
+    }
+
     // =========================================================================
     // MARK: - Streaming Event Transformation
     // =========================================================================
@@ -1298,43 +1332,59 @@ struct UnifiedEventTransformer {
     /// during Claude's response generation.
     private static func sortEventsByTurn(_ events: [RawEvent]) -> [RawEvent] {
         events.sorted { a, b in
-            // Primary sort: by timestamp (reflects actual generation/streaming order)
-            let tsA = parseTimestamp(a.timestamp)
-            let tsB = parseTimestamp(b.timestamp)
-            if tsA != tsB {
-                return tsA < tsB
-            }
-
-            // Secondary sort: by turn number from payload
+            // Primary sort: by turn number from payload
             let turnA = extractTurn(from: a.type, payload: a.payload)
             let turnB = extractTurn(from: b.type, payload: b.payload)
             if turnA != turnB {
                 return turnA < turnB
             }
 
-            // Tertiary sort: by sequence
+            // Secondary sort: by event type priority within turn
+            // This ensures thinking appears before assistant text
+            let priorityA = eventTypePriority(for: a.type)
+            let priorityB = eventTypePriority(for: b.type)
+            if priorityA != priorityB {
+                return priorityA < priorityB
+            }
+
+            // Tertiary sort: by timestamp
+            let tsA = parseTimestamp(a.timestamp)
+            let tsB = parseTimestamp(b.timestamp)
+            if tsA != tsB {
+                return tsA < tsB
+            }
+
+            // Final sort: by sequence
             return a.sequence < b.sequence
         }
     }
 
-    /// Sort SessionEvents by timestamp (generation time), then by turn, then by sequence.
+    /// Sort SessionEvents by turn, then type priority (thinking before text), then timestamp.
     private static func sortEventsByTurn(_ events: [SessionEvent]) -> [SessionEvent] {
         events.sorted { a, b in
-            // Primary sort: by timestamp (reflects actual generation/streaming order)
-            let tsA = parseTimestamp(a.timestamp)
-            let tsB = parseTimestamp(b.timestamp)
-            if tsA != tsB {
-                return tsA < tsB
-            }
-
-            // Secondary sort: by turn number from payload
+            // Primary sort: by turn number from payload
             let turnA = extractTurn(from: a.type, payload: a.payload)
             let turnB = extractTurn(from: b.type, payload: b.payload)
             if turnA != turnB {
                 return turnA < turnB
             }
 
-            // Tertiary sort: by sequence
+            // Secondary sort: by event type priority within turn
+            // This ensures thinking appears before assistant text
+            let priorityA = eventTypePriority(for: a.type)
+            let priorityB = eventTypePriority(for: b.type)
+            if priorityA != priorityB {
+                return priorityA < priorityB
+            }
+
+            // Tertiary sort: by timestamp
+            let tsA = parseTimestamp(a.timestamp)
+            let tsB = parseTimestamp(b.timestamp)
+            if tsA != tsB {
+                return tsA < tsB
+            }
+
+            // Final sort: by sequence
             return a.sequence < b.sequence
         }
     }
@@ -1348,9 +1398,38 @@ struct UnifiedEventTransformer {
             return payload["turn"]?.value as? Int ?? 0
         }
 
+        // stream.thinking_complete has turnNumber in payload
+        if type == PersistedEventType.streamThinkingComplete.rawValue {
+            return payload["turnNumber"]?.value as? Int ?? 0
+        }
+
         // Tool results are linked to tool calls via toolCallId, use sequence-based ordering
         // Other events don't have turns, use 0 to sort them early
         return 0
+    }
+
+    /// Event type priority for sorting within the same turn.
+    /// Lower values sort first. Thinking should appear before assistant text.
+    private static func eventTypePriority(for type: String) -> Int {
+        if type == PersistedEventType.streamThinkingComplete.rawValue {
+            return 0  // Thinking comes first
+        }
+        if type == PersistedEventType.messageAssistant.rawValue {
+            return 1  // Text response comes after thinking
+        }
+        return 2  // Other events come last
+    }
+
+    /// Extract preview (first 3 lines) from thinking content for display
+    private static func extractThinkingPreview(from content: String, maxLines: Int = 3) -> String {
+        let lines = content.components(separatedBy: .newlines)
+            .filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
+            .prefix(maxLines)
+        let preview = lines.joined(separator: " ")
+        if preview.count > 120 {
+            return String(preview.prefix(117)) + "..."
+        }
+        return preview
     }
 
     private static func parseTimestamp(_ isoString: String) -> Date {
@@ -1674,7 +1753,8 @@ extension UnifiedEventTransformer {
             case .messageUser, .messageSystem,
                  .notificationInterrupted, .configModelSwitch, .configReasoningLevel,
                  .contextCleared, .skillRemoved, .rulesLoaded,
-                 .errorAgent, .errorTool, .errorProvider:
+                 .errorAgent, .errorTool, .errorProvider,
+                 .streamThinkingComplete:
                 // Debug: Log skill.removed events being processed (RawEvent version)
                 if eventType == .skillRemoved {
                     logger.info("[RECONSTRUCT-RAW] Processing skill.removed event: \(event.id)", category: .events)
@@ -1952,7 +2032,8 @@ extension UnifiedEventTransformer {
             case .messageUser, .messageSystem,
                  .notificationInterrupted, .configModelSwitch, .configReasoningLevel,
                  .contextCleared, .skillRemoved, .rulesLoaded,
-                 .errorAgent, .errorTool, .errorProvider:
+                 .errorAgent, .errorTool, .errorProvider,
+                 .streamThinkingComplete:
                 // Add chat message using the SessionEvent overload
                 if var message = transformPersistedEvent(event) {
                     // Set eventId for message deletion tracking (user messages only)
