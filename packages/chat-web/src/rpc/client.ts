@@ -47,7 +47,7 @@ import type {
   WorktreeMergeResult,
   WorktreeListParams,
   WorktreeListResult,
-} from '@tron/core/browser';
+} from '@tron/agent/browser';
 
 // =============================================================================
 // Types

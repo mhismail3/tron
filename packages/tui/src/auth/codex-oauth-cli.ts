@@ -10,7 +10,7 @@ import {
   getProviderAuth,
   saveProviderAuth,
   clearProviderAuth,
-} from '@tron/core';
+} from '@tron/agent';
 
 // =============================================================================
 // Types

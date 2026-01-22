@@ -9,7 +9,7 @@
  * Call preloadSettings() at app startup for best performance.
  */
 import chalk from 'chalk';
-import { getSettings, type UiSettings } from '@tron/core';
+import { getSettings, type UiSettings } from '@tron/agent';
 
 // =============================================================================
 // Unified Settings Cache (single load, all UI settings)

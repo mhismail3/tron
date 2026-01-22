@@ -11,7 +11,7 @@ import type {
   WorktreeGetStatusResult,
   WorktreeCommitResult,
   WorktreeMergeResult,
-} from '@tron/core/browser';
+} from '@tron/agent/browser';
 
 // =============================================================================
 // Types

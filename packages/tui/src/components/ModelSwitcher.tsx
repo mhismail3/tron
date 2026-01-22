@@ -15,7 +15,7 @@ import {
   getTierIcon,
   formatContextWindow,
   type ModelInfo,
-} from '@tron/core';
+} from '@tron/agent';
 import { inkColors } from '../theme.js';
 
 // =============================================================================

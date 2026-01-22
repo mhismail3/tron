@@ -6,14 +6,14 @@
  */
 import { randomBytes } from 'crypto';
 import * as readline from 'readline';
-import type { AnthropicAuth } from '@tron/core';
+import type { AnthropicAuth } from '@tron/agent';
 import {
   getProviderAuth,
   saveProviderAuth,
   clearProviderAuth,
   type OAuthTokens,
   type ProviderAuth,
-} from '@tron/core';
+} from '@tron/agent';
 
 // =============================================================================
 // Configuration

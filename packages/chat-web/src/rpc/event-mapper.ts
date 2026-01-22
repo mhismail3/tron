@@ -12,7 +12,7 @@ import type {
   AgentToolStartEvent,
   AgentToolEndEvent,
   AgentCompleteEvent,
-} from '@tron/core/browser';
+} from '@tron/agent/browser';
 import type { AppAction, DisplayMessage } from '../store/types.js';
 
 // =============================================================================

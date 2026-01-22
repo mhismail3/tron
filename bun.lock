@@ -15,11 +15,42 @@
         "vitest": "^3.0.0",
       },
     },
+    "packages/agent": {
+      "name": "@tron/agent",
+      "version": "0.1.0",
+      "dependencies": {
+        "@anthropic-ai/sdk": "^0.71.2",
+        "@sinclair/typebox": "^0.34.12",
+        "agent-browser": "^0.6.0",
+        "ajv": "^8.17.1",
+        "better-sqlite3": "^11.10.0",
+        "pino": "^9.6.0",
+        "pino-pretty": "^13.0.0",
+        "playwright-core": "^1.57.0",
+        "ws": "^8.18.0",
+        "zod": "^3.24.1",
+      },
+      "devDependencies": {
+        "@types/better-sqlite3": "^7.6.13",
+        "@types/node": "^22.10.1",
+        "@types/ws": "^8.5.10",
+        "tsx": "^4.7.0",
+        "typescript": "^5.8.3",
+        "vitest": "^3.1.4",
+      },
+      "peerDependencies": {
+        "playwright-core": ">=1.40.0",
+        "typescript": ">=5.0.0",
+      },
+      "optionalPeers": [
+        "playwright-core",
+      ],
+    },
     "packages/chat-web": {
       "name": "@tron/chat-web",
       "version": "0.1.0",
       "dependencies": {
-        "@tron/core": "workspace:*",
+        "@tron/agent": "workspace:*",
         "react": "^18.3.1",
         "react-dom": "^18.3.1",
         "react-markdown": "^9.0.1",
@@ -89,8 +120,7 @@
         "tron": "./dist/cli.js",
       },
       "dependencies": {
-        "@tron/core": "workspace:*",
-        "@tron/server": "workspace:*",
+        "@tron/agent": "workspace:*",
         "chalk": "^5.4.1",
         "ink": "^5.1.0",
         "ink-text-input": "^6.0.0",
@@ -324,6 +354,8 @@
     "@testing-library/jest-dom": ["@testing-library/jest-dom@6.9.1", "", { "dependencies": { "@adobe/css-tools": "^4.4.0", "aria-query": "^5.0.0", "css.escape": "^1.5.1", "dom-accessibility-api": "^0.6.3", "picocolors": "^1.1.1", "redent": "^3.0.0" } }, "sha512-zIcONa+hVtVSSep9UT3jZ5rizo2BsxgyDYU7WFD5eICBE7no3881HGeb/QkGfsJs6JTkY1aQhT7rIPC7e+0nnA=="],
 
     "@testing-library/react": ["@testing-library/react@16.3.1", "", { "dependencies": { "@babel/runtime": "^7.12.5" }, "peerDependencies": { "@testing-library/dom": "^10.0.0", "@types/react": "^18.0.0 || ^19.0.0", "@types/react-dom": "^18.0.0 || ^19.0.0", "react": "^18.0.0 || ^19.0.0", "react-dom": "^18.0.0 || ^19.0.0" }, "optionalPeers": ["@types/react", "@types/react-dom"] }, "sha512-gr4KtAWqIOQoucWYD/f6ki+j5chXfcPc74Col/6poTyqTmn7zRmodWahWRCp8tYd+GMqBonw6hstNzqjbs6gjw=="],
+
+    "@tron/agent": ["@tron/agent@workspace:packages/agent"],
 
     "@tron/chat-web": ["@tron/chat-web@workspace:packages/chat-web"],
 

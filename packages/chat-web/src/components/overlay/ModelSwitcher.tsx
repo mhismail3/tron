@@ -11,7 +11,7 @@ import {
   getTierIcon,
   formatContextWindow,
   type ModelInfo,
-} from '@tron/core/browser';
+} from '@tron/agent/browser';
 import './ModelSwitcher.css';
 
 // =============================================================================

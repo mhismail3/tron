@@ -15,7 +15,7 @@ import { useRpc } from './hooks/useRpc.js';
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts.js';
 import { useSessionPersistence } from './hooks/useSessionPersistence.js';
 import { useEventStore } from './hooks/useEventStore.js';
-import type { RpcEvent, ModelInfo } from '@tron/core/browser';
+import type { RpcEvent, ModelInfo } from '@tron/agent/browser';
 import type { Command } from './commands/index.js';
 import type { DisplayMessage, SessionSummary as StoreSessionSummary } from './store/types.js';
 
@@ -64,7 +64,7 @@ function AppContent() {
     () =>
       client
         ? <T,>(method: string, params?: unknown): Promise<T> =>
-            client.request<T>(method as import('@tron/core').RpcMethod, params)
+            client.request<T>(method as import('@tron/agent').RpcMethod, params)
         : undefined,
     [client]
   );

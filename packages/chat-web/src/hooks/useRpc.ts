@@ -6,7 +6,7 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { RpcClient } from '../rpc/client.js';
-import type { RpcEvent, SessionListResult, ModelListResult } from '@tron/core/browser';
+import type { RpcEvent, SessionListResult, ModelListResult } from '@tron/agent/browser';
 
 // =============================================================================
 // Types

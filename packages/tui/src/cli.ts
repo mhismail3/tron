@@ -11,7 +11,7 @@ import { App } from './app.js';
 import type { CliConfig } from './types.js';
 import { getAuth, login, logout } from './auth/index.js';
 import { initializeDebug, debugLog } from './debug/index.js';
-import { DEFAULT_MODEL, preloadSettings } from '@tron/core';
+import { DEFAULT_MODEL, preloadSettings } from '@tron/agent';
 
 // Start settings preload immediately (runs in parallel with arg parsing)
 const settingsPromise = preloadSettings();
@@ -328,7 +328,7 @@ async function runNonInteractive(config: CliConfig): Promise<void> {
     EditTool,
     BashTool,
     AstGrepTool,
-  } = await import('@tron/core');
+  } = await import('@tron/agent');
 
   // Create tools
   const tools = [
@@ -384,7 +384,7 @@ async function runNonInteractive(config: CliConfig): Promise<void> {
 
 async function runServerMode(config: CliConfig): Promise<void> {
   // Dynamic import to avoid loading server in interactive mode
-  const { TronServer } = await import('@tron/server');
+  const { TronServer } = await import('@tron/agent');
 
   // Respect env vars for ports and DB path (used by tron beta/prod scripts)
   const wsPort = config.wsPort

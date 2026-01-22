@@ -3,7 +3,7 @@
  *
  * Type definitions for the terminal user interface.
  */
-import type { AnthropicAuth } from '@tron/core';
+import type { AnthropicAuth } from '@tron/agent';
 
 // =============================================================================
 // CLI Configuration

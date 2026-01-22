@@ -26,8 +26,7 @@
     "clean": "rm -rf dist .turbo"
   },
   "dependencies": {
-    "@tron/core": "workspace:*",
-    "@tron/server": "workspace:*",
+    "@tron/agent": "workspace:*",
     "chalk": "^5.4.1",
     "ink": "^5.1.0",
     "ink-text-input": "^6.0.0",

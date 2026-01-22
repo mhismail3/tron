@@ -8,7 +8,7 @@
  */
 import React, { useState, useMemo } from 'react';
 import { Box, Text, useInput } from 'ink';
-import type { ContextAuditData } from '@tron/core';
+import type { ContextAuditData } from '@tron/agent';
 import { inkColors } from '../theme.js';
 
 interface ContextViewerProps {

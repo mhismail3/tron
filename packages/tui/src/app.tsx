@@ -46,7 +46,7 @@ import {
   type TronEvent,
   type Message,
   type ModelInfo,
-} from '@tron/core';
+} from '@tron/agent';
 import { debugLog } from './debug/index.js';
 import { inkColors } from './theme.js';
 import { formatToolOutput } from './utils/tool-output-formatter.js';

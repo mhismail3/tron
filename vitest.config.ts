@@ -37,6 +37,8 @@ export default defineConfig({
     alias: {
       '@tron/core': resolve(__dirname, 'packages/core/src'),
       '@tron/server': resolve(__dirname, 'packages/server/src'),
+      '@tron/agent': resolve(__dirname, 'packages/agent/src'),
+      '@tron/agent/browser': resolve(__dirname, 'packages/agent/src/browser.ts'),
       '@tron/tui': resolve(__dirname, 'packages/tui/src')
     }
   },

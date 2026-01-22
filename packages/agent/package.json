@@ -1,0 +1,65 @@
+{
+  "name": "@tron/agent",
+  "version": "0.1.0",
+  "description": "Tron agent: Unified package combining core agent logic and server orchestration",
+  "type": "module",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "browser": "./dist/browser.js",
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    },
+    "./browser": {
+      "import": "./dist/browser.js",
+      "types": "./dist/browser.d.ts"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json && mkdir -p dist/providers && cp -r src/providers/prompts dist/providers/",
+    "dev": "tsc -p tsconfig.build.json --watch",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit",
+    "clean": "rm -rf dist .turbo"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.71.2",
+    "@sinclair/typebox": "^0.34.12",
+    "agent-browser": "^0.6.0",
+    "ajv": "^8.17.1",
+    "better-sqlite3": "^11.10.0",
+    "pino": "^9.6.0",
+    "pino-pretty": "^13.0.0",
+    "playwright-core": "^1.57.0",
+    "ws": "^8.18.0",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/node": "^22.10.1",
+    "@types/ws": "^8.5.10",
+    "tsx": "^4.7.0",
+    "typescript": "^5.8.3",
+    "vitest": "^3.1.4"
+  },
+  "peerDependencies": {
+    "playwright-core": ">=1.40.0",
+    "typescript": ">=5.0.0"
+  },
+  "peerDependenciesMeta": {
+    "playwright-core": {
+      "optional": true
+    }
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "author": "Tron Agent Project",
+  "license": "MIT"
+}

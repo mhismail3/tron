@@ -394,3 +394,9 @@ export type {
 } from './event-store-orchestrator.js';
 export { HealthServer } from './health.js';
 export type { HealthServerConfig, HealthResponse } from './health.js';
+
+// Services with clean interfaces
+export * from './services/index.js';
+
+// Orchestrator modules
+export * from './orchestrator/index.js';

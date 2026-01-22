@@ -6,7 +6,7 @@
  */
 
 import { useState, useEffect, useCallback } from 'react';
-import type { FilesystemListDirResult, FilesystemGetHomeResult } from '@tron/core/browser';
+import type { FilesystemListDirResult, FilesystemGetHomeResult } from '@tron/agent/browser';
 import type { RpcClient } from '../../rpc/client.js';
 import './WorkspaceSelector.css';
 

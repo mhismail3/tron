@@ -11,7 +11,7 @@
   "scripts": {
     "postinstall": "node-gyp rebuild --release --directory=node_modules/.bun/better-sqlite3@11.10.0/node_modules/better-sqlite3 2>/dev/null || true",
     "setup": "./scripts/tron setup",
-    "build": "bun run --cwd packages/core build && bun run --cwd packages/server build && bun run --cwd packages/tui build && bun run --cwd packages/chat-web build",
+    "build": "bun run --cwd packages/agent build && bun run --cwd packages/tui build && bun run --cwd packages/chat-web build",
     "test": "vitest run && cd packages/chat-web && bun run test",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",

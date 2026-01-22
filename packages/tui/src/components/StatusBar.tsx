@@ -14,7 +14,7 @@ import {
   formatCost,
   formatTokens,
   getContextLimit,
-} from '@tron/core';
+} from '@tron/agent';
 
 export interface StatusBarProps {
   status: string;

@@ -7,7 +7,7 @@
 import React from 'react';
 import { Text, Box } from 'ink';
 import { inkColors, icons, palette } from '../theme.js';
-import { formatTokens } from '@tron/core';
+import { formatTokens } from '@tron/agent';
 
 // Display configuration
 const MAX_INPUT_LENGTH = 60;

@@ -46,7 +46,7 @@ import {
   type TronSessionEvent,
   type EventMessage,
   type EventSearchResult,
-} from '@tron/core';
+} from '@tron/agent';
 
 /**
  * Handoff record for session context continuity

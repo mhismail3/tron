@@ -14,11 +14,11 @@ import {
   refreshGoogleOAuthToken,
   saveGoogleOAuthTokens,
   type GoogleOAuthEndpoint,
-} from '@tron/core';
+} from '@tron/agent';
 import {
   getProviderAuth,
   clearProviderAuth,
-} from '@tron/core';
+} from '@tron/agent';
 
 // =============================================================================
 // Types
