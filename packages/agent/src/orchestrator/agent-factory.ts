@@ -8,9 +8,11 @@
  *
  * Phase 7 of orchestrator refactoring.
  */
+// Direct imports to avoid circular dependencies through index.js
+import { createLogger } from '../logging/logger.js';
+import { TronAgent } from '../agent/tron-agent.js';
+import type { AgentConfig } from '../agent/types.js';
 import {
-  createLogger,
-  TronAgent,
   ReadTool,
   WriteTool,
   EditTool,
@@ -28,22 +30,19 @@ import {
   WaitForSubagentTool,
   TodoWriteTool,
   NotifyAppTool,
-  detectProviderFromModel,
-  getModelCapabilities,
-  type AgentConfig,
-  type TronTool,
-  type SessionId,
-  type ServerAuth,
-  type GoogleAuth,
   type BrowserDelegate,
   type SpawnSubagentParams,
   type SubagentQueryType,
-  type TronEvent,
   type SubAgentTracker,
-  type TodoItem,
   type NotifyAppResult,
-  type UnifiedAuth,
-} from '../index.js';
+} from '../tools/index.js';
+import type { TronTool } from '../types/tools.js';
+import type { SessionId } from '../events/types.js';
+import type { TronEvent } from '../types/events.js';
+import type { TodoItem } from '../todos/types.js';
+import { detectProviderFromModel, getModelCapabilities, type UnifiedAuth } from '../providers/factory.js';
+import type { ServerAuth } from '../auth/types.js';
+import type { GoogleAuth } from '../auth/google-oauth.js';
 
 const logger = createLogger('agent-factory');
 

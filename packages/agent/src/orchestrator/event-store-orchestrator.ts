@@ -60,43 +60,46 @@ import { EventEmitter } from 'events';
 import * as crypto from 'crypto';
 import * as path from 'path';
 import * as os from 'os';
+// Direct imports to avoid circular dependencies through index.js
+import { createLogger } from '../logging/logger.js';
+import { withLoggingContext } from '../logging/log-context.js';
+import { TronAgent } from '../agent/tron-agent.js';
+import type { TurnResult } from '../agent/types.js';
+import { EventStore, type AppendEventOptions } from '../events/event-store.js';
 import {
-  createLogger,
-  TronAgent,
-  EventStore,
-  WorktreeCoordinator,
-  createWorktreeCoordinator,
-  loadServerAuth,
-  SubAgentTracker,
-  BacklogService,
-  createBacklogService,
-  type TurnResult,
-  type TronEvent,
-  type EventMessage,
-  type EventSessionState,
-  type TronSessionEvent,
-  type AppendEventOptions,
+  type SessionEvent as TronSessionEvent,
+  type SessionState as EventSessionState,
+  type Message as EventMessage,
   type EventId,
   type SessionId,
   type EventType,
-  type ContextSnapshot,
-  type DetailedContextSnapshot,
-  type PreTurnValidation,
-  type CompactionPreview,
-  type CompactionResult,
-  type UserContent,
-  type SpawnSubagentParams,
-  type SpawnTmuxAgentParams,
-  type SubagentQueryType,
-  type SubagentStatusInfo,
-  type SubagentEventInfo,
-  type SubagentLogInfo,
-  type SubagentResult,
-  type TodoItem,
-  type BackloggedTask,
-  type NotifyAppResult,
-  withLoggingContext,
-} from '../index.js';
+} from '../events/types.js';
+import {
+  WorktreeCoordinator,
+  createWorktreeCoordinator,
+} from '../session/worktree-coordinator.js';
+import { loadServerAuth } from '../auth/oauth.js';
+import { SubAgentTracker, type SubagentResult } from '../tools/subagent-tracker.js';
+import { BacklogService, createBacklogService } from '../todos/backlog-service.js';
+import type { TronEvent } from '../types/events.js';
+import type {
+  ContextSnapshot,
+  DetailedContextSnapshot,
+  PreTurnValidation,
+  CompactionPreview,
+  CompactionResult,
+} from '../context/context-manager.js';
+import type { UserContent } from '../types/messages.js';
+import type { SpawnSubagentParams } from '../tools/spawn-subagent.js';
+import type { SpawnTmuxAgentParams } from '../tools/spawn-tmux-agent.js';
+import type {
+  SubagentQueryType,
+  SubagentStatusInfo,
+  SubagentEventInfo,
+  SubagentLogInfo,
+} from '../tools/query-subagent.js';
+import type { TodoItem, BackloggedTask } from '../todos/types.js';
+import type { NotifyAppResult } from '../tools/notify-app.js';
 import { BrowserService } from '../external/browser/index.js';
 import { normalizeContentBlocks } from '../utils/content-normalizer.js';
 import {

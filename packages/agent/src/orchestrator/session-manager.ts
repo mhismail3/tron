@@ -10,33 +10,27 @@
  */
 import * as path from 'path';
 import * as os from 'os';
+// Direct imports to avoid circular dependencies through index.js
+import { createLogger } from '../logging/logger.js';
+import { EventStore } from '../events/event-store.js';
+import { WorktreeCoordinator } from '../session/worktree-coordinator.js';
+import { SkillTracker, createSkillTracker, type SkillTrackingEvent } from '../skills/skill-tracker.js';
+import { SubAgentTracker, createSubAgentTracker, type SubagentTrackingEvent } from '../tools/subagent-tracker.js';
+import { RulesTracker, createRulesTracker, type RulesTrackingEvent } from '../context/rules-tracker.js';
+import { TodoTracker, createTodoTracker } from '../todos/todo-tracker.js';
+import type { TodoTrackingEvent } from '../todos/types.js';
+import { ContextLoader } from '../context/loader.js';
+import { TronAgent } from '../agent/tron-agent.js';
 import {
-  createLogger,
-  EventStore,
-  WorktreeCoordinator,
-  SkillTracker,
-  createSkillTracker,
-  SubAgentTracker,
-  createSubAgentTracker,
-  RulesTracker,
-  createRulesTracker,
-  TodoTracker,
-  createTodoTracker,
-  ContextLoader,
-  TronAgent,
+  isPlanModeEnteredEvent,
+  isPlanModeExitedEvent,
   type SessionId,
   type EventId,
   type EventType,
-  type WorkingDirectory,
-  type TronSessionEvent,
+  type SessionEvent as TronSessionEvent,
   type RulesLoadedPayload,
-  type SkillTrackingEvent,
-  type RulesTrackingEvent,
-  type SubagentTrackingEvent,
-  type TodoTrackingEvent,
-  isPlanModeEnteredEvent,
-  isPlanModeExitedEvent,
-} from '../index.js';
+} from '../events/types.js';
+import type { WorkingDirectory } from '../session/working-directory.js';
 import { createSessionContext } from './session-context.js';
 import { buildWorktreeInfo } from './worktree-ops.js';
 import type {

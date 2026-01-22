@@ -30,14 +30,15 @@
  * await persister.flush();
  * ```
  */
-import {
-  createLogger,
-  EventStore,
-  type EventType,
-  type EventId,
-  type SessionId,
-  type TronSessionEvent,
-} from '../index.js';
+// Direct imports to avoid circular dependencies through index.js
+import { createLogger } from '../logging/logger.js';
+import { EventStore } from '../events/event-store.js';
+import type {
+  EventType,
+  EventId,
+  SessionId,
+  SessionEvent as TronSessionEvent,
+} from '../events/types.js';
 
 const logger = createLogger('event-persister');
 

@@ -8,16 +8,17 @@
  *
  * Phase 3 of orchestrator refactoring - skill/context loading logic.
  */
-import {
-  createLogger,
-  buildSkillContext,
-  DEFAULT_PLAN_MODE_BLOCKED_TOOLS,
-  type SkillSource,
-  type SkillAddMethod,
-  type SkillMetadata,
-  type SkillTracker,
-  type UserContent,
-} from '../index.js';
+// Direct imports to avoid circular dependencies through index.js
+import { createLogger } from '../logging/logger.js';
+import { buildSkillContext } from '../skills/skill-injector.js';
+import { DEFAULT_PLAN_MODE_BLOCKED_TOOLS } from '../rpc/types.js';
+import type {
+  SkillSource,
+  SkillAddMethod,
+  SkillMetadata,
+} from '../skills/types.js';
+import type { SkillTracker } from '../skills/skill-tracker.js';
+import type { UserContent } from '../types/messages.js';
 import type { SessionContext } from './session-context.js';
 import type { AgentRunOptions, LoadedSkillContent } from './types.js';
 

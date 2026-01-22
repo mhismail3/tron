@@ -40,15 +40,16 @@
  * if (context.isToolBlocked('Edit')) { ... }
  * ```
  */
-import {
-  createLogger,
-  type EventStore,
-  type EventType,
-  type EventId,
-  type SessionId,
-  type TronSessionEvent,
-  type WorkingDirectory,
-} from '../index.js';
+// Direct imports to avoid circular dependencies through index.js
+import { createLogger } from '../logging/logger.js';
+import type { EventStore } from '../events/event-store.js';
+import type {
+  EventType,
+  EventId,
+  SessionId,
+  SessionEvent as TronSessionEvent,
+} from '../events/types.js';
+import type { WorkingDirectory } from '../session/working-directory.js';
 import {
   EventPersister,
   createEventPersister,

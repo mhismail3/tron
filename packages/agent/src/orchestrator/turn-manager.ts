@@ -32,14 +32,14 @@
  * turnManager.onAgentEnd();
  * ```
  */
-import {
-  createLogger,
-  type TextContent,
-  type ThinkingContent,
-  type ApiToolUseBlock,
-  type ApiToolResultBlock,
-  type TokenUsage as CoreTokenUsage,
-} from '../index.js';
+// Direct imports to avoid circular dependencies through index.js
+import { createLogger } from '../logging/logger.js';
+import type { TextContent, ThinkingContent } from '../types/content.js';
+import type {
+  ApiToolUseBlock,
+  ApiToolResultBlock,
+  TokenUsage as CoreTokenUsage,
+} from '../types/messages.js';
 import {
   TurnContentTracker,
   type AccumulatedContent,

@@ -8,15 +8,13 @@
  *
  * Phase 8 of orchestrator refactoring.
  */
-import {
-  createLogger,
-  loadServerAuth,
-  loadGoogleServerAuth,
-  loadOpenAIServerAuth,
-  detectProviderFromModel,
-  type ServerAuth,
-  type GoogleAuth,
-} from '../index.js';
+// Direct imports to avoid circular dependencies through index.js
+import { createLogger } from '../logging/logger.js';
+import { loadServerAuth } from '../auth/oauth.js';
+import { loadGoogleServerAuth, type GoogleAuth } from '../auth/google-oauth.js';
+import { loadOpenAIServerAuth } from '../auth/openai-auth.js';
+import { detectProviderFromModel } from '../providers/factory.js';
+import type { ServerAuth } from '../auth/types.js';
 
 const logger = createLogger('auth-provider');
 

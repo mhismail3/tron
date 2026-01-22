@@ -5,7 +5,8 @@
  * WorkingDirectory abstractions. These are pure functions that don't
  * depend on orchestrator state.
  */
-import type { WorkingDirectory } from '../index.js';
+// Direct import to avoid circular dependencies through index.js
+import type { WorkingDirectory } from '../session/working-directory.js';
 import type { WorktreeInfo } from './types.js';
 
 /**

@@ -22,15 +22,16 @@
  * - Normalizes content blocks before persistence
  * - Handles cost calculation for turn events
  */
-import {
-  createLogger,
-  calculateCost,
-  saveCanvasArtifact,
-  type TronEvent,
-  type SessionId,
-  type EventType,
-  type TronSessionEvent,
-} from '../index.js';
+// Direct imports to avoid circular dependencies through index.js
+import { createLogger } from '../logging/logger.js';
+import { calculateCost } from '../usage/index.js';
+import { saveCanvasArtifact } from '../productivity/canvas-store.js';
+import type { TronEvent } from '../types/events.js';
+import type {
+  SessionId,
+  EventType,
+  SessionEvent as TronSessionEvent,
+} from '../events/types.js';
 import {
   normalizeContentBlocks,
   truncateString,

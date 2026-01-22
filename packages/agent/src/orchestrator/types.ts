@@ -4,17 +4,16 @@
  * Contains all type definitions for the EventStoreOrchestrator including
  * configuration, session state, and result types.
  */
-import {
-  EventStore,
-  TronAgent,
-  type SessionId,
-  type WorkingDirectory,
-  type WorktreeCoordinatorConfig,
-  type SkillTracker,
-  type RulesTracker,
-  type SubAgentTracker,
-  type TodoTracker,
-} from '../index.js';
+// Direct imports to avoid circular dependencies through index.js
+import { EventStore } from '../events/event-store.js';
+import { TronAgent } from '../agent/tron-agent.js';
+import type { SessionId } from '../events/types.js';
+import type { WorkingDirectory } from '../session/working-directory.js';
+import type { WorktreeCoordinatorConfig } from '../session/worktree-coordinator.js';
+import type { SkillTracker } from '../skills/skill-tracker.js';
+import type { RulesTracker } from '../context/rules-tracker.js';
+import type { SubAgentTracker } from '../tools/subagent-tracker.js';
+import type { TodoTracker } from '../todos/todo-tracker.js';
 import type { SessionContext } from './session-context.js';
 
 // =============================================================================
