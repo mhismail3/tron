@@ -57,6 +57,17 @@ export {
   type WaitForSubagentCallback,
 } from './wait-for-subagent.js';
 
+// Subagent tracking
+export {
+  SubAgentTracker,
+  createSubAgentTracker,
+  type TrackedSubagent,
+  type SubagentStatus,
+  type SubagentTrackingEvent,
+  type SubagentResult,
+  type SubagentCompletionCallback,
+} from './subagent-tracker.js';
+
 // Todo management tool
 export {
   TodoWriteTool,
