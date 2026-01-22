@@ -157,6 +157,113 @@ describe('TurnContentTracker', () => {
       expect(flushed).not.toBeNull();
       expect(flushed).toHaveLength(2);
     });
+
+    it('should include thinking block with signature when flushing', () => {
+      tracker.onAgentStart();
+      tracker.onTurnStart(1);
+
+      // Add thinking content with signature
+      tracker.addThinkingDelta('I should read the file first');
+      tracker.setThinkingSignature('sig_abc123');
+
+      // Add text and tools
+      tracker.addTextDelta('Let me read that file.');
+      tracker.registerToolIntents([
+        { id: 'tc_1', name: 'Read', arguments: { file_path: 'test.ts' } },
+      ]);
+
+      const flushed = tracker.flushPreToolContent();
+      expect(flushed).not.toBeNull();
+      expect(flushed).toHaveLength(3); // thinking + text + tool_use
+
+      // CRITICAL: Thinking must be first
+      expect(flushed![0]).toEqual({
+        type: 'thinking',
+        thinking: 'I should read the file first',
+        signature: 'sig_abc123',
+      });
+      expect(flushed![1]).toEqual({ type: 'text', text: 'Let me read that file.' });
+      expect(flushed![2]).toEqual({
+        type: 'tool_use',
+        id: 'tc_1',
+        name: 'Read',
+        input: { file_path: 'test.ts' },
+      });
+    });
+
+    it('should include thinking block without signature when signature not set', () => {
+      tracker.onAgentStart();
+      tracker.onTurnStart(1);
+
+      // Add thinking content WITHOUT signature
+      tracker.addThinkingDelta('I should check the status');
+
+      // Add tool
+      tracker.registerToolIntents([
+        { id: 'tc_1', name: 'Bash', arguments: { command: 'git status' } },
+      ]);
+
+      const flushed = tracker.flushPreToolContent();
+      expect(flushed).not.toBeNull();
+      expect(flushed).toHaveLength(2); // thinking + tool_use
+
+      // Thinking should be included even without signature
+      expect(flushed![0]).toEqual({
+        type: 'thinking',
+        thinking: 'I should check the status',
+        signature: undefined,
+      });
+      expect(flushed![1]).toEqual({
+        type: 'tool_use',
+        id: 'tc_1',
+        name: 'Bash',
+        input: { command: 'git status' },
+      });
+    });
+
+    it('should flush thinking-only content (no text or tools)', () => {
+      tracker.onAgentStart();
+      tracker.onTurnStart(1);
+
+      // Only thinking, no text or tools
+      tracker.addThinkingDelta('Just analyzing the situation');
+      tracker.setThinkingSignature('sig_xyz789');
+
+      const flushed = tracker.flushPreToolContent();
+      expect(flushed).not.toBeNull();
+      expect(flushed).toHaveLength(1); // only thinking
+
+      expect(flushed![0]).toEqual({
+        type: 'thinking',
+        thinking: 'Just analyzing the situation',
+        signature: 'sig_xyz789',
+      });
+    });
+
+    it('should preserve thinking signature across multiple thinking deltas', () => {
+      tracker.onAgentStart();
+      tracker.onTurnStart(1);
+
+      // Multiple thinking deltas (simulating streaming)
+      tracker.addThinkingDelta('I need to ');
+      tracker.addThinkingDelta('read the file ');
+      tracker.addThinkingDelta('to understand the code.');
+      tracker.setThinkingSignature('sig_complete');
+
+      tracker.registerToolIntents([
+        { id: 'tc_1', name: 'Read', arguments: { file_path: 'app.ts' } },
+      ]);
+
+      const flushed = tracker.flushPreToolContent();
+      expect(flushed).not.toBeNull();
+
+      // Thinking should be accumulated
+      expect(flushed![0]).toEqual({
+        type: 'thinking',
+        thinking: 'I need to read the file to understand the code.',
+        signature: 'sig_complete',
+      });
+    });
   });
 
   describe('backward compatibility', () => {
@@ -333,11 +440,12 @@ describe('TurnContentTracker', () => {
       expect(turnContent.sequence.length).toBeGreaterThan(0);
     });
 
-    it('should not include thinking in pre-tool flush (thinking goes in final message)', () => {
+    it('should include thinking in pre-tool flush (for session reconstruction)', () => {
       tracker.onAgentStart();
       tracker.onTurnStart(1);
 
       tracker.addThinkingDelta('Internal reasoning');
+      tracker.setThinkingSignature('sig_test123');
       tracker.addTextDelta('Let me read files');
       tracker.registerToolIntents([
         { id: 'tc_1', name: 'Read', arguments: { file_path: 'a.ts' } },
@@ -346,9 +454,21 @@ describe('TurnContentTracker', () => {
 
       const flushed = tracker.flushPreToolContent();
       expect(flushed).not.toBeNull();
-      // Pre-tool flush should have text and tool_use only (not thinking)
-      const hasThinking = flushed!.some(b => b.type === 'thinking');
-      expect(hasThinking).toBe(false);
+      expect(flushed).toHaveLength(3); // thinking + text + tool_use
+
+      // CRITICAL: Thinking must be FIRST with signature
+      expect(flushed![0]).toEqual({
+        type: 'thinking',
+        thinking: 'Internal reasoning',
+        signature: 'sig_test123',
+      });
+      expect(flushed![1]).toEqual({ type: 'text', text: 'Let me read files' });
+      expect(flushed![2]).toEqual({
+        type: 'tool_use',
+        id: 'tc_1',
+        name: 'Read',
+        input: { file_path: 'a.ts' },
+      });
     });
   });
 });

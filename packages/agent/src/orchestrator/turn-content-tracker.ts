@@ -119,7 +119,7 @@ export class TurnContentTracker {
   // =========================================================================
   private accumulatedText: string = '';
   private accumulatedThinking: string = '';
-  private accumulatedThinkingSignature: string = '';
+  private accumulatedThinkingSignature?: string;
   private accumulatedToolCalls: ToolCallData[] = [];
   private accumulatedSequence: ContentSequenceItem[] = [];
 
@@ -129,7 +129,7 @@ export class TurnContentTracker {
   private thisTurnSequence: ContentSequenceItem[] = [];
   private thisTurnToolCalls: Map<string, ToolCallData> = new Map();
   private thisTurnThinking: string = '';
-  private thisTurnThinkingSignature: string = '';
+  private thisTurnThinkingSignature?: string;
 
   // =========================================================================
   // Pre-tool flush tracking (for linear event ordering)
@@ -389,7 +389,7 @@ export class TurnContentTracker {
     this.thisTurnSequence = [];
     this.thisTurnToolCalls = new Map();
     this.thisTurnThinking = '';
-    this.thisTurnThinkingSignature = '';
+    this.thisTurnThinkingSignature = undefined;
 
     logger.debug('Turn ended', {
       turn: this.currentTurn,
@@ -410,7 +410,7 @@ export class TurnContentTracker {
     // Clear accumulated state
     this.accumulatedText = '';
     this.accumulatedThinking = '';
-    this.accumulatedThinkingSignature = '';
+    this.accumulatedThinkingSignature = undefined;
     this.accumulatedToolCalls = [];
     this.accumulatedSequence = [];
     this.lastTurnTokenUsage = undefined;
@@ -419,7 +419,7 @@ export class TurnContentTracker {
     this.thisTurnSequence = [];
     this.thisTurnToolCalls = new Map();
     this.thisTurnThinking = '';
-    this.thisTurnThinkingSignature = '';
+    this.thisTurnThinkingSignature = undefined;
 
     // Reset pre-tool flush flag
     this.preToolContentFlushed = false;
@@ -439,7 +439,7 @@ export class TurnContentTracker {
     // Clear accumulated state
     this.accumulatedText = '';
     this.accumulatedThinking = '';
-    this.accumulatedThinkingSignature = '';
+    this.accumulatedThinkingSignature = undefined;
     this.accumulatedToolCalls = [];
     this.accumulatedSequence = [];
 
@@ -447,7 +447,7 @@ export class TurnContentTracker {
     this.thisTurnSequence = [];
     this.thisTurnToolCalls = new Map();
     this.thisTurnThinking = '';
-    this.thisTurnThinkingSignature = '';
+    this.thisTurnThinkingSignature = undefined;
 
     logger.debug('Agent run ended, all tracking cleared');
   }
@@ -549,8 +549,10 @@ export class TurnContentTracker {
    * Marks content as flushed to avoid duplicate emission at turn_end.
    */
   flushPreToolContent(): Array<{
-    type: 'text' | 'tool_use';
+    type: 'text' | 'tool_use' | 'thinking';
     text?: string;
+    thinking?: string;
+    signature?: string;
     id?: string;
     name?: string;
     input?: Record<string, unknown>;
@@ -560,20 +562,33 @@ export class TurnContentTracker {
       return null;
     }
 
-    // Check if we have any content to flush
-    if (this.thisTurnSequence.length === 0) {
+    // Check if we have any content to flush (thinking OR sequence content)
+    if (!this.thisTurnThinking && this.thisTurnSequence.length === 0) {
       return null;
     }
 
     // Build content blocks from current turn sequence
     const content: Array<{
-      type: 'text' | 'tool_use';
+      type: 'text' | 'tool_use' | 'thinking';
       text?: string;
+      thinking?: string;
+      signature?: string;
       id?: string;
       name?: string;
       input?: Record<string, unknown>;
     }> = [];
 
+    // CRITICAL: Include thinking block FIRST with signature - API requires it
+    // Thinking blocks must be at the start of assistant content per Anthropic API convention
+    if (this.thisTurnThinking) {
+      content.push({
+        type: 'thinking',
+        thinking: this.thisTurnThinking,
+        ...(this.thisTurnThinkingSignature && { signature: this.thisTurnThinkingSignature }),
+      });
+    }
+
+    // Then add text and tool_use blocks
     for (const item of this.thisTurnSequence) {
       if (item.type === 'text' && item.text) {
         content.push({ type: 'text', text: item.text });
@@ -600,6 +615,8 @@ export class TurnContentTracker {
     logger.debug('Flushed pre-tool content', {
       turn: this.currentTurn,
       contentBlocks: content.length,
+      hasThinking: !!this.thisTurnThinking,
+      hasSignature: !!this.thisTurnThinkingSignature,
     });
 
     return content;

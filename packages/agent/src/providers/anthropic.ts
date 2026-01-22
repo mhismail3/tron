@@ -628,7 +628,12 @@ export class AnthropicProvider {
                 yield { type: 'text_end', text: accumulatedText };
                 accumulatedText = '';
               } else if (currentBlockType === 'thinking') {
-                yield { type: 'thinking_end', thinking: accumulatedThinking, signature: accumulatedSignature };
+                // Only include signature if present (Haiku/Sonnet don't provide signatures)
+                yield {
+                  type: 'thinking_end',
+                  thinking: accumulatedThinking,
+                  ...(accumulatedSignature && { signature: accumulatedSignature }),
+                };
                 accumulatedThinking = '';
                 accumulatedSignature = '';
               } else if (currentBlockType === 'tool_use') {
@@ -944,16 +949,19 @@ export class AnthropicProvider {
                   input,
                 };
               }
-              // Thinking blocks must be included - API requires them when thinking is enabled
+              // Thinking blocks - CRITICAL: Only include if they have signatures
+              // Extended thinking models (Opus 4.5) provide signatures and require them in conversation history
+              // Non-extended thinking models (Haiku, Sonnet) don't provide signatures - these thinking blocks
+              // are display-only and should NOT be sent back to the API
               if (c.type === 'thinking') {
-                // SDK requires signature field for thinking blocks
                 if (!c.signature) {
-                  logger.warn('Thinking block missing signature - may cause API error');
+                  // No signature = display-only thinking block, don't send back to API
+                  return null;
                 }
                 return {
                   type: 'thinking' as const,
                   thinking: c.thinking,
-                  signature: c.signature ?? '', // Fallback empty string if somehow missing
+                  signature: c.signature,
                 };
               }
               // Unknown content type - skip rather than create empty text
@@ -1044,13 +1052,16 @@ export class AnthropicProvider {
         content.push({ type: 'text', text: (block as { text: string }).text });
       } else if (blockType === 'thinking') {
         // Extract thinking content from extended thinking response
-        // IMPORTANT: Must capture signature - API requires it when sending back
-        const thinkingBlock = block as unknown as { thinking: string; signature: string };
-        content.push({
-          type: 'thinking',
-          thinking: thinkingBlock.thinking,
-          signature: thinkingBlock.signature,
-        });
+        // IMPORTANT: Only include if signature is present (extended thinking models only)
+        const thinkingBlock = block as unknown as { thinking: string; signature?: string };
+        if (thinkingBlock.signature) {
+          content.push({
+            type: 'thinking',
+            thinking: thinkingBlock.thinking,
+            signature: thinkingBlock.signature,
+          });
+        }
+        // If no signature, this is display-only thinking from non-extended model - skip it
       } else if (blockType === 'tool_use') {
         const toolBlock = block as { id: string; name: string; input: unknown };
         content.push({

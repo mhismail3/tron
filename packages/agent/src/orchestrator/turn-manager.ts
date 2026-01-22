@@ -277,6 +277,14 @@ export class TurnManager {
     return content.map((block) => {
       if (block.type === 'text') {
         return { type: 'text' as const, text: block.text! };
+      } else if (block.type === 'thinking') {
+        // CRITICAL: Include signature when flushing thinking blocks
+        // The signature is required by Anthropic API when sending thinking back
+        return {
+          type: 'thinking' as const,
+          thinking: block.thinking!,
+          ...(block.signature && { signature: block.signature }),
+        };
       } else {
         return {
           type: 'tool_use' as const,
