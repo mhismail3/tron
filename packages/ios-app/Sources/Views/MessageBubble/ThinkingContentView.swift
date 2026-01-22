@@ -2,7 +2,7 @@ import SwiftUI
 
 // MARK: - Thinking Content View
 
-/// Displays thinking content with a vertical line indicator (like assistant messages)
+/// Displays thinking content with a vertical line indicator (matching TextContentView exactly)
 /// - Only shows spinning brain + "Thinking" label when actively streaming
 /// - Historical (non-streaming) blocks show just the text with vertical line
 struct ThinkingContentView: View {
@@ -21,33 +21,34 @@ struct ThinkingContentView: View {
         self._expanded = State(initialValue: isExpanded)
     }
 
-    /// Preview text (first 3 lines, generous character limit for mobile width)
+    /// Preview text (first 2 lines, compact for minimal footprint)
     private var previewText: String {
         let lines = content.components(separatedBy: .newlines)
             .filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
-            .prefix(3)
+            .prefix(2)
         let preview = lines.joined(separator: " ")
-        // Increase limit to better use available space (mobile screens are ~40-50 chars wide)
-        if preview.count > 200 {
-            return String(preview.prefix(197)) + "..."
+        if preview.count > 140 {
+            return String(preview.prefix(137)) + "..."
         }
         return preview
     }
 
     /// Whether content exceeds the preview
     private var hasMoreContent: Bool {
-        content.count > 200 || content.components(separatedBy: .newlines).count > 3
+        content.count > 140 || content.components(separatedBy: .newlines).count > 2
     }
 
     var body: some View {
-        HStack(alignment: .top, spacing: 8) {
-            // Vertical line indicator (like assistant messages)
+        // Match TextContentView layout exactly
+        HStack(alignment: .top, spacing: 0) {
+            // Vertical line indicator - matches TextContentView (width: 2, trailing padding: 12)
+            // Use muted color for thinking vs green for response
             Rectangle()
                 .fill(Color.tronTextMuted.opacity(0.4))
-                .frame(width: 3)
-                .clipShape(RoundedRectangle(cornerRadius: 1.5))
+                .frame(width: 2)
+                .padding(.trailing, 12)
 
-            VStack(alignment: .leading, spacing: 6) {
+            VStack(alignment: .leading, spacing: 4) {
                 // Header with thinking icon - ONLY shown when actively streaming
                 if isStreaming {
                     HStack(spacing: 6) {
@@ -59,23 +60,20 @@ struct ThinkingContentView: View {
                     }
                 }
 
-                // Content: preview or full
+                // Content: preview or full (compact, smaller text)
                 Text(expanded ? content : previewText)
-                    .font(TronTypography.caption)
-                    .foregroundStyle(Color.secondary.opacity(0.8))
+                    .font(TronTypography.mono(size: 10, weight: .regular))
+                    .foregroundStyle(Color.secondary.opacity(0.6))
                     .italic()
-                    .lineLimit(expanded ? nil : 3)
+                    .lineLimit(expanded ? nil : 2)
+                    .lineSpacing(1)
                     .animation(.tronStandard, value: expanded)
-
-                // Tap hint for non-expanded content with more to show
-                if hasMoreContent && !expanded {
-                    Text("Tap to expand")
-                        .font(TronTypography.sans(size: 10, weight: .medium))
-                        .foregroundStyle(Color.tronPurple.opacity(0.7))
-                }
             }
         }
+        // Match TextContentView padding exactly
         .padding(.vertical, 4)
+        .padding(.horizontal, 4)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .contentShape(Rectangle())
         .onTapGesture {
             // If there's an onTap handler (for opening sheet), use that

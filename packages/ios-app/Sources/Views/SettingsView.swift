@@ -102,42 +102,15 @@ struct SettingsView: View {
                     Text("Default ports: Prod (8080), Beta (8082). Only set custom port if using a non-standard port.")
                         .font(TronTypography.caption2)
                 }
-                .listSectionSpacing(24)
-
-                // Preferences Section
-                Section {
-                    Toggle("Confirm before archiving", isOn: $confirmArchive)
-                        .font(TronTypography.subheadline)
-                } header: {
-                    Text("Preferences")
-                        .font(TronTypography.caption)
-                } footer: {
-                    Text("Show a confirmation dialog when archiving sessions.")
-                        .font(TronTypography.caption2)
-                }
-                .listSectionSpacing(24)
-
-                // Font Style Section
-                if #available(iOS 26.0, *) {
-                    FontStyleSection()
-                }
-
-                // Advanced Section
-                Section {
-                    Button(role: .destructive) {
-                        showingResetAlert = true
-                    } label: {
-                        Label("Reset All Settings", systemImage: "arrow.counterclockwise")
-                            .font(TronTypography.subheadline)
-                            .foregroundStyle(.red)
-                    }
-                } header: {
-                    Text("Advanced")
-                        .font(TronTypography.caption)
-                }
+                .listSectionSpacing(16)
 
                 // Data Section
                 Section {
+                    Toggle(isOn: $confirmArchive) {
+                        Label("Confirm before archiving", systemImage: "questionmark.circle")
+                            .font(TronTypography.subheadline)
+                    }
+
                     Button(role: .destructive) {
                         showArchiveAllConfirmation = true
                     } label: {
@@ -160,7 +133,26 @@ struct SettingsView: View {
                     Text("Removes all sessions from your device. Session data on the server will remain.")
                         .font(TronTypography.caption2)
                 }
-                .listSectionSpacing(24)
+                .listSectionSpacing(16)
+
+                // Font Style Section
+                if #available(iOS 26.0, *) {
+                    FontStyleSection()
+                }
+
+                // Advanced Section
+                Section {
+                    Button(role: .destructive) {
+                        showingResetAlert = true
+                    } label: {
+                        Label("Reset All Settings", systemImage: "arrow.counterclockwise")
+                            .font(TronTypography.subheadline)
+                            .foregroundStyle(.red)
+                    }
+                } header: {
+                    Text("Advanced")
+                        .font(TronTypography.caption)
+                }
 
                 // Footer
                 Section {
@@ -309,6 +301,8 @@ struct FontStyleSection: View {
                 }
 
                 // Native iOS 26 Slider with labels
+                Spacer()
+                    .frame(height: 2)
                 Slider(
                     value: Binding(
                         get: { fontSettings.casualAxis },
@@ -336,7 +330,7 @@ struct FontStyleSection: View {
             Text("Adjust the casual axis of the Recursive font. Linear (0) is precise and geometric, Casual (1) is more playful and hand-drawn.")
                 .font(TronTypography.caption2)
         }
-        .listSectionSpacing(24)
+        .listSectionSpacing(16)
     }
 
     private var casualLabel: String {

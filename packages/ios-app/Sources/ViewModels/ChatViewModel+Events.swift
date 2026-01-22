@@ -421,6 +421,15 @@ extension ChatViewModel {
             await thinkingState.endTurn()
         }
 
+        // Update thinking message to mark streaming as complete
+        // This removes the spinning brain icon and "Thinking" header
+        if let id = thinkingMessageId,
+           let index = messages.firstIndex(where: { $0.id == id }),
+           case .thinking(let visible, let isExpanded, _) = messages[index].content {
+            messages[index].content = .thinking(visible: visible, isExpanded: isExpanded, isStreaming: false)
+            logger.debug("Marked thinking message as no longer streaming", category: .events)
+        }
+
         // Find the message to update with metadata
         // Priority: streaming message > first text message of turn > fallback search
         var targetIndex: Int?
