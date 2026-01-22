@@ -5,7 +5,8 @@
  * Handles APNS device token registration, lookup, and lifecycle management.
  */
 
-import { createLogger, type DeviceTokenRpcManager, type RpcDeviceToken } from '../../../index.js';
+import { createLogger } from '../../../logging/logger.js';
+import type { DeviceTokenRpcManager, RpcDeviceToken } from '../../../rpc/handler.js';
 import type { AdapterDependencies } from '../types.js';
 import { randomUUID } from 'crypto';
 

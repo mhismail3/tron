@@ -32,7 +32,8 @@
  * }
  * ```
  */
-import { createLogger, type EventType } from '../../index.js';
+import { createLogger } from '../../logging/logger.js';
+import type { EventType } from '../../events/types.js';
 
 const logger = createLogger('interrupt-handler');
 

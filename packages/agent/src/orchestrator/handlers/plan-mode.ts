@@ -26,7 +26,8 @@
  * planMode.reconstructFromEvents(events);
  * ```
  */
-import { createLogger, type TronSessionEvent } from '../../index.js';
+import { createLogger } from '../../logging/logger.js';
+import type { SessionEvent as TronSessionEvent } from '../../events/types.js';
 
 const logger = createLogger('plan-mode-handler');
 

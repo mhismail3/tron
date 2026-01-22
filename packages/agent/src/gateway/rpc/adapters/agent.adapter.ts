@@ -6,7 +6,8 @@
  * and state retrieval.
  */
 
-import { SkillRegistry, createLogger } from '../../../index.js';
+import { createLogger } from '../../../logging/logger.js';
+import { SkillRegistry } from '../../../skills/skill-registry.js';
 import type { AdapterDependencies, AgentManagerAdapter } from '../types.js';
 
 const logger = createLogger('agent-adapter');

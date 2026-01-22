@@ -22,7 +22,8 @@
  * This design keeps the EventStore efficient (no high-frequency delta spam) while
  * supporting both real-time streaming UI and session reconstruction.
  */
-import { createLogger, type CurrentTurnToolCall } from '../index.js';
+import { createLogger } from '../logging/logger.js';
+import type { CurrentTurnToolCall } from '../rpc/types.js';
 
 const logger = createLogger('turn-content-tracker');
 
