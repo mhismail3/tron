@@ -381,7 +381,7 @@ struct InputBar: View {
                 }
         }
         .frame(minHeight: actionButtonSize)
-        .glassEffect(.regular.tint(Color.tronPhthaloGreen.opacity(0.35)), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .glassEffect(.regular.tint(Color.tronPhthaloGreen.opacity(0.35)).interactive(), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
         .animation(.tronStandard, value: shouldShowActionButton)
         .animation(.spring(response: 0.32, dampingFraction: 0.86), value: showMicButton)
     }
