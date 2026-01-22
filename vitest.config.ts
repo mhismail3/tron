@@ -5,7 +5,11 @@ export default defineConfig({
   test: {
     globals: true,
     environment: 'node',
-    include: ['packages/*/test/**/*.test.ts'],
+    include: [
+      'packages/*/src/**/*.test.ts',      // NEW: co-located tests
+      'packages/*/test/**/*.test.ts',     // OLD: parallel tests (temporary)
+      'packages/*/__integration__/**/*.test.ts',  // Integration tests
+    ],
     exclude: ['**/node_modules/**', '**/dist/**', 'packages/chat-web/**'],
     coverage: {
       provider: 'v8',
@@ -35,8 +39,6 @@ export default defineConfig({
   },
   resolve: {
     alias: {
-      '@tron/core': resolve(__dirname, 'packages/core/src'),
-      '@tron/server': resolve(__dirname, 'packages/server/src'),
       '@tron/agent': resolve(__dirname, 'packages/agent/src'),
       '@tron/agent/browser': resolve(__dirname, 'packages/agent/src/browser.ts'),
       '@tron/tui': resolve(__dirname, 'packages/tui/src')
