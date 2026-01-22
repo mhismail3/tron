@@ -110,6 +110,7 @@ struct SessionPreviewSheet: View {
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
         }
+        .defaultScrollAnchor(.bottom)
     }
 
     private var sessionInfoHeader: some View {
