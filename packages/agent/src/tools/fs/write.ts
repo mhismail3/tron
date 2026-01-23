@@ -8,6 +8,11 @@ import * as fs from 'fs/promises';
 import * as path from 'path';
 import type { TronTool, TronToolResult } from '../../types/index.js';
 import { createLogger } from '../../logging/logger.js';
+import {
+  resolvePath,
+  validateRequiredString,
+  formatFsError,
+} from '../utils.js';
 
 const logger = createLogger('tool:write');
 
@@ -40,13 +45,10 @@ export class WriteTool implements TronTool {
   }
 
   async execute(args: Record<string, unknown>): Promise<TronToolResult> {
-    // Validate required parameters (defense against truncated tool calls)
-    if (!args.file_path || typeof args.file_path !== 'string') {
-      return {
-        content: 'Missing required parameter: file_path. The tool call may have been truncated.',
-        isError: true,
-      };
-    }
+    // Validate required parameters
+    const pathValidation = validateRequiredString(args, 'file_path', 'the path to write to');
+    if (!pathValidation.valid) return pathValidation.error!;
+
     if (args.content === undefined || args.content === null) {
       return {
         content: 'Missing required parameter: content. The tool call may have been truncated.',
@@ -54,7 +56,7 @@ export class WriteTool implements TronTool {
       };
     }
 
-    const filePath = this.resolvePath(args.file_path);
+    const filePath = resolvePath(args.file_path as string, this.config.workingDirectory);
     const content = args.content as string;
 
     logger.debug('Writing file', { filePath, contentLength: content.length });
@@ -96,29 +98,8 @@ export class WriteTool implements TronTool {
         },
       };
     } catch (error) {
-      const err = error as NodeJS.ErrnoException;
-      logger.error('File write failed', { filePath, error: err.message });
-
-      if (err.code === 'EACCES') {
-        return {
-          content: `Permission denied: ${filePath}`,
-          isError: true,
-          details: { filePath, errorCode: err.code },
-        };
-      }
-
-      return {
-        content: `Error writing file: ${err.message}`,
-        isError: true,
-        details: { filePath, errorCode: err.code },
-      };
+      logger.error('File write failed', { filePath, error: (error as Error).message });
+      return formatFsError(error, filePath, 'writing');
     }
-  }
-
-  private resolvePath(filePath: string): string {
-    if (path.isAbsolute(filePath)) {
-      return filePath;
-    }
-    return path.join(this.config.workingDirectory, filePath);
   }
 }

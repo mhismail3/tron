@@ -5,11 +5,16 @@
  */
 
 import * as fs from 'fs/promises';
-import * as path from 'path';
 import type { TronTool, TronToolResult } from '../../types/index.js';
 import { createLogger } from '../../logging/logger.js';
 import { getSettings } from '../../settings/index.js';
-import { truncateOutput } from '../utils.js';
+import {
+  truncateOutput,
+  resolvePath,
+  validateRequiredString,
+  validatePathNotRoot,
+  formatFsError,
+} from '../utils.js';
 
 const logger = createLogger('tool:read');
 
@@ -51,27 +56,19 @@ export class ReadTool implements TronTool {
   }
 
   async execute(args: Record<string, unknown>): Promise<TronToolResult> {
-    // Validate required parameters (defense against truncated tool calls)
-    if (!args.file_path || typeof args.file_path !== 'string') {
-      return {
-        content: 'Missing required parameter: file_path. Please provide the absolute or relative path to the file you want to read.',
-        isError: true,
-        details: { file_path: args.file_path },
-      };
-    }
+    // Validate required parameters
+    const stringValidation = validateRequiredString(
+      args, 'file_path', 'the path to the file you want to read',
+      '"/path/to/file.txt" or "src/index.ts"'
+    );
+    if (!stringValidation.valid) return stringValidation.error!;
 
-    // Validate file_path is not just "/" or empty-ish
-    const rawPath = args.file_path.trim();
-    if (rawPath === '/' || rawPath === '.' || rawPath === '') {
-      return {
-        content: `Invalid file_path: "${args.file_path}". Please provide a specific file path, not a directory. Example: "/path/to/file.txt" or "src/index.ts"`,
-        isError: true,
-        details: { file_path: args.file_path },
-      };
-    }
+    const rawPath = (args.file_path as string).trim();
+    const pathValidation = validatePathNotRoot(rawPath, 'file_path');
+    if (!pathValidation.valid) return pathValidation.error!;
 
     const settings = getReadSettings();
-    const filePath = this.resolvePath(rawPath);
+    const filePath = resolvePath(rawPath, this.config.workingDirectory);
     const offset = (args.offset as number | undefined) ?? 0;
     const limit = (args.limit as number | undefined) ?? settings.defaultLimitLines;
 
@@ -128,37 +125,8 @@ export class ReadTool implements TronTool {
         },
       };
     } catch (error) {
-      const err = error as NodeJS.ErrnoException;
-      logger.error('File read failed', { filePath, error: err.message });
-
-      if (err.code === 'ENOENT') {
-        return {
-          content: `File not found: ${filePath}`,
-          isError: true,
-          details: { filePath, errorCode: err.code },
-        };
-      }
-
-      if (err.code === 'EACCES') {
-        return {
-          content: `Permission denied: ${filePath}`,
-          isError: true,
-          details: { filePath, errorCode: err.code },
-        };
-      }
-
-      return {
-        content: `Error reading file: ${err.message}`,
-        isError: true,
-        details: { filePath, errorCode: err.code },
-      };
+      logger.error('File read failed', { filePath, error: (error as Error).message });
+      return formatFsError(error, filePath, 'reading');
     }
-  }
-
-  private resolvePath(filePath: string): string {
-    if (path.isAbsolute(filePath)) {
-      return filePath;
-    }
-    return path.join(this.config.workingDirectory, filePath);
   }
 }

@@ -10,7 +10,13 @@ import * as path from 'path';
 import type { TronTool, TronToolResult } from '../../types/index.js';
 import { createLogger } from '../../logging/logger.js';
 import { getSettings } from '../../settings/index.js';
-import { truncateOutput } from '../utils.js';
+import {
+  truncateOutput,
+  resolvePath,
+  validateRequiredString,
+  validateNonEmptyString,
+  formatFsError,
+} from '../utils.js';
 
 const logger = createLogger('tool:grep');
 
@@ -89,26 +95,19 @@ export class GrepTool implements TronTool {
   }
 
   async execute(args: Record<string, unknown>): Promise<TronToolResult> {
-    // Validate required parameters (defense against truncated tool calls)
-    if (!args.pattern || typeof args.pattern !== 'string') {
-      return {
-        content: 'Missing required parameter: pattern. Please provide a regex pattern to search for. Example: "function.*export" or "TODO"',
-        isError: true,
-        details: { pattern: args.pattern },
-      };
-    }
+    // Validate required parameters
+    const patternValidation = validateRequiredString(
+      args, 'pattern', 'a regex pattern to search for',
+      '"function.*export" or "TODO"'
+    );
+    if (!patternValidation.valid) return patternValidation.error!;
 
-    const patternStr = args.pattern.trim();
-    if (patternStr === '') {
-      return {
-        content: 'Invalid pattern: pattern cannot be empty. Please provide a regex pattern to search for.',
-        isError: true,
-        details: { pattern: args.pattern },
-      };
-    }
+    const patternStr = (args.pattern as string).trim();
+    const emptyValidation = validateNonEmptyString(patternStr, 'pattern', '"function.*" or "TODO"');
+    if (!emptyValidation.valid) return emptyValidation.error!;
 
     const settings = getGrepSettings();
-    const searchPath = this.resolvePath((args.path as string) || '.');
+    const searchPath = resolvePath((args.path as string) || '.', this.config.workingDirectory);
     const globPattern = args.glob as string | undefined;
     const ignoreCase = (args.ignoreCase as boolean) ?? false;
     const contextLines = (args.context as number) ?? 0;
@@ -171,22 +170,8 @@ export class GrepTool implements TronTool {
         },
       };
     } catch (error) {
-      const err = error as NodeJS.ErrnoException;
-      logger.error('Grep failed', { searchPath, error: err.message });
-
-      if (err.code === 'ENOENT') {
-        return {
-          content: `Path not found: ${searchPath}`,
-          isError: true,
-          details: { searchPath, errorCode: err.code },
-        };
-      }
-
-      return {
-        content: `Search failed: ${err.message}`,
-        isError: true,
-        details: { searchPath, error: err.message },
-      };
+      logger.error('Grep failed', { searchPath, error: (error as Error).message });
+      return formatFsError(error, searchPath, 'searching');
     }
   }
 
@@ -307,12 +292,5 @@ export class GrepTool implements TronTool {
     }
 
     return lines.join('\n');
-  }
-
-  private resolvePath(filePath: string): string {
-    if (path.isAbsolute(filePath)) {
-      return filePath;
-    }
-    return path.join(this.config.workingDirectory, filePath);
   }
 }

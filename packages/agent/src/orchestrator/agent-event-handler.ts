@@ -25,7 +25,6 @@
 // Direct imports to avoid circular dependencies through index.js
 import { createLogger } from '../logging/logger.js';
 import { calculateCost } from '../usage/index.js';
-import { saveCanvasArtifact } from '../productivity/canvas-store.js';
 import type { TronEvent } from '../types/events.js';
 import type {
   SessionId,
@@ -38,6 +37,12 @@ import {
   MAX_TOOL_RESULT_SIZE,
 } from '../utils/content-normalizer.js';
 import type { ActiveSession } from './types.js';
+import {
+  UIRenderHandler,
+  createUIRenderHandler,
+  type ToolStartArgs,
+  type ToolEndDetails,
+} from './ui-render-handler.js';
 
 const logger = createLogger('agent-event-handler');
 
@@ -76,17 +81,14 @@ export class AgentEventHandler {
   private config: AgentEventHandlerConfig;
 
   /**
-   * Track active RenderAppUI tool calls for progressive streaming.
-   * Maps toolCallId to streaming state.
+   * Handles all RenderAppUI tool-specific event processing.
+   * Extracted to UIRenderHandler to consolidate special handling.
    */
-  private activeUIRenders: Map<string, {
-    canvasId: string | null;
-    accumulatedJson: string;
-    startEmitted: boolean;
-  }> = new Map();
+  private uiRenderHandler: UIRenderHandler;
 
   constructor(config: AgentEventHandlerConfig) {
     this.config = config;
+    this.uiRenderHandler = createUIRenderHandler(config.emit);
   }
 
   /**
@@ -444,36 +446,14 @@ export class AgentEventHandler {
       },
     });
 
-    // Emit UI render start event for RenderAppUI tool (fallback if streaming didn't capture it)
+    // Delegate RenderAppUI handling to UIRenderHandler
     if (toolStartEvent.toolName === 'RenderAppUI' && toolStartEvent.arguments) {
-      const args = toolStartEvent.arguments;
-      const existingRender = this.activeUIRenders.get(toolStartEvent.toolCallId);
-
-      // Only emit ui_render_start if streaming didn't already emit it
-      if (!existingRender?.startEmitted) {
-        this.config.emit('agent_event', {
-          type: 'agent.ui_render_start',
-          sessionId,
-          timestamp,
-          data: {
-            canvasId: args.canvasId as string,
-            title: args.title as string | undefined,
-            toolCallId: toolStartEvent.toolCallId,
-          },
-        });
-
-        logger.debug('Emitted ui_render_start (fallback)', {
-          sessionId,
-          canvasId: args.canvasId,
-          toolCallId: toolStartEvent.toolCallId,
-        });
-      } else {
-        logger.debug('Skipped ui_render_start (already emitted from streaming)', {
-          sessionId,
-          canvasId: args.canvasId,
-          toolCallId: toolStartEvent.toolCallId,
-        });
-      }
+      this.uiRenderHandler.handleToolStart(
+        sessionId,
+        toolStartEvent.toolCallId,
+        toolStartEvent.arguments as ToolStartArgs,
+        timestamp
+      );
     }
 
     // Store discrete tool.call event (linearized)
@@ -554,101 +534,16 @@ export class AgentEventHandler {
       },
     });
 
-    // Emit UI render complete/error/retry event for RenderAppUI tool
+    // Delegate RenderAppUI handling to UIRenderHandler
     if (toolEndEvent.toolName === 'RenderAppUI') {
-      // Get tracking state before cleanup (may have canvasId from streaming)
-      const renderState = this.activeUIRenders.get(toolEndEvent.toolCallId);
-      const canvasIdFromStreaming = renderState?.canvasId;
-
-      // Clean up streaming state
-      this.activeUIRenders.delete(toolEndEvent.toolCallId);
-
-      // Extract details from result
-      const detailsObj = resultDetails as {
-        canvasId?: string;
-        title?: string;
-        ui?: unknown;
-        state?: unknown;
-        needsRetry?: boolean;
-        attempt?: number;
-      } | undefined;
-      const canvasId = detailsObj?.canvasId ?? canvasIdFromStreaming;
-
-      // Check if this is a retry case (validation failed, turn continues)
-      if (detailsObj?.needsRetry && canvasId) {
-        // Emit retry event - iOS should keep sheet open and show retry status
-        this.config.emit('agent_event', {
-          type: 'agent.ui_render_retry',
-          sessionId,
-          timestamp,
-          data: {
-            canvasId,
-            attempt: detailsObj.attempt ?? 1,
-            errors: resultContent,
-          },
-        });
-
-        logger.debug('Emitted ui_render_retry', {
-          sessionId,
-          canvasId,
-          attempt: detailsObj.attempt,
-        });
-        // Don't emit complete or error - turn continues for retry
-      } else if (toolEndEvent.isError) {
-        // Emit error event so iOS can update the sheet
-        if (canvasId) {
-          this.config.emit('agent_event', {
-            type: 'agent.ui_render_error',
-            sessionId,
-            timestamp,
-            data: {
-              canvasId,
-              error: resultContent,
-            },
-          });
-
-          logger.debug('Emitted ui_render_error', {
-            sessionId,
-            canvasId,
-            error: resultContent.substring(0, 200),
-          });
-        }
-      } else {
-        // Emit completion event
-        if (canvasId && detailsObj?.ui) {
-          this.config.emit('agent_event', {
-            type: 'agent.ui_render_complete',
-            sessionId,
-            timestamp,
-            data: {
-              canvasId,
-              ui: detailsObj.ui,
-              state: detailsObj.state,
-            },
-          });
-
-          // Persist canvas artifact to disk for session resumption
-          saveCanvasArtifact({
-            canvasId,
-            sessionId,
-            title: detailsObj.title,
-            ui: detailsObj.ui as Record<string, unknown>,
-            state: detailsObj.state as Record<string, unknown> | undefined,
-            savedAt: timestamp,
-          }).catch(err => {
-            logger.error('Failed to persist canvas artifact', {
-              canvasId,
-              sessionId,
-              error: err instanceof Error ? err.message : String(err),
-            });
-          });
-
-          logger.debug('Emitted ui_render_complete', {
-            sessionId,
-            canvasId,
-          });
-        }
-      }
+      this.uiRenderHandler.handleToolEnd(
+        sessionId,
+        toolEndEvent.toolCallId,
+        resultContent,
+        toolEndEvent.isError ?? false,
+        resultDetails as ToolEndDetails | undefined,
+        timestamp
+      );
     }
 
     // Store discrete tool.result event (linearized)
@@ -710,7 +605,7 @@ export class AgentEventHandler {
     }
 
     // Clean up any orphaned UI render tracking state
-    this.cleanupUIRenders();
+    this.uiRenderHandler.cleanup();
 
     // NOTE: agent.complete is now emitted in runAgent() AFTER all events are persisted
     // This ensures linearized events (message.assistant, tool.call, tool.result)
@@ -889,7 +784,7 @@ export class AgentEventHandler {
 
   /**
    * Handle tool call argument streaming for progressive UI rendering.
-   * Captures RenderAppUI argument chunks and emits ui_render_chunk events.
+   * Delegates RenderAppUI handling to UIRenderHandler.
    */
   private handleToolCallDelta(
     sessionId: SessionId,
@@ -903,116 +798,14 @@ export class AgentEventHandler {
       argumentsDelta: string;
     };
 
-    logger.debug('Received toolcall_delta', {
+    // Delegate to UIRenderHandler which handles RenderAppUI-specific processing
+    this.uiRenderHandler.handleToolCallDelta(
       sessionId,
-      toolCallId: delta.toolCallId,
-      toolName: delta.toolName,
-      deltaLength: delta.argumentsDelta.length,
-    });
-
-    // Check if we're already tracking this tool call
-    const existingRender = this.activeUIRenders.get(delta.toolCallId);
-
-    // If not tracking and we know the tool name, check if it's RenderAppUI
-    if (!existingRender) {
-      // Only start tracking RenderAppUI calls
-      // If toolName is undefined, we can't determine the tool yet - skip
-      // (toolcall_start should have set the name before deltas arrive)
-      if (delta.toolName !== 'RenderAppUI') {
-        logger.debug('Skipping non-RenderAppUI delta', {
-          sessionId,
-          toolCallId: delta.toolCallId,
-          toolName: delta.toolName,
-        });
-        return;
-      }
-
-      // Initialize tracking for this RenderAppUI call
-      logger.info('Started tracking RenderAppUI streaming', {
-        sessionId,
-        toolCallId: delta.toolCallId,
-      });
-      this.activeUIRenders.set(delta.toolCallId, {
-        canvasId: null,
-        accumulatedJson: '',
-        startEmitted: false,
-      });
-    }
-
-    // Get tracking state (now guaranteed to exist for RenderAppUI calls)
-    const render = this.activeUIRenders.get(delta.toolCallId);
-    if (!render) {
-      return; // Safety check
-    }
-
-    // Accumulate the JSON chunk
-    render.accumulatedJson += delta.argumentsDelta;
-
-    // Try to extract canvasId if we don't have it yet
-    if (!render.canvasId) {
-      const match = render.accumulatedJson.match(/"canvasId"\s*:\s*"([^"]+)"/);
-      if (match && match[1]) {
-        render.canvasId = match[1];
-
-        // Emit ui_render_start now that we have canvasId
-        this.config.emit('agent_event', {
-          type: 'agent.ui_render_start',
-          sessionId,
-          timestamp,
-          data: {
-            canvasId: render.canvasId,
-            toolCallId: delta.toolCallId,
-          },
-        });
-        render.startEmitted = true;
-
-        logger.debug('Emitted ui_render_start from streaming', {
-          sessionId,
-          canvasId: render.canvasId,
-          toolCallId: delta.toolCallId,
-        });
-      }
-    }
-
-    // Emit chunk if we have canvasId (can progressively render)
-    if (render.canvasId) {
-      logger.debug('Emitting ui_render_chunk', {
-        sessionId,
-        canvasId: render.canvasId,
-        chunkLength: delta.argumentsDelta.length,
-        accumulatedLength: render.accumulatedJson.length,
-      });
-      this.config.emit('agent_event', {
-        type: 'agent.ui_render_chunk',
-        sessionId,
-        timestamp,
-        data: {
-          canvasId: render.canvasId,
-          chunk: delta.argumentsDelta,
-          accumulated: render.accumulatedJson,
-        },
-      });
-    } else {
-      logger.debug('Waiting for canvasId before emitting chunks', {
-        sessionId,
-        toolCallId: delta.toolCallId,
-        accumulatedLength: render.accumulatedJson.length,
-      });
-    }
-  }
-
-  /**
-   * Clean up any orphaned UI render tracking state.
-   * Called when agent ends or errors to prevent memory leaks.
-   */
-  cleanupUIRenders(): void {
-    if (this.activeUIRenders.size > 0) {
-      logger.debug('Cleaning up orphaned UI renders', {
-        count: this.activeUIRenders.size,
-        toolCallIds: Array.from(this.activeUIRenders.keys()),
-      });
-      this.activeUIRenders.clear();
-    }
+      delta.toolCallId,
+      delta.toolName,
+      delta.argumentsDelta,
+      timestamp
+    );
   }
 
   // ===========================================================================

@@ -6,9 +6,13 @@
  */
 
 import * as fs from 'fs/promises';
-import * as path from 'path';
 import type { TronTool, TronToolResult } from '../../types/index.js';
 import { createLogger } from '../../logging/logger.js';
+import {
+  resolvePath,
+  validateRequiredString,
+  formatFsError,
+} from '../utils.js';
 
 /**
  * Generate a unified diff between old and new strings.
@@ -121,13 +125,10 @@ export class EditTool implements TronTool {
   }
 
   async execute(args: Record<string, unknown>): Promise<TronToolResult> {
-    // Validate required parameters (defense against truncated tool calls)
-    if (!args.file_path || typeof args.file_path !== 'string') {
-      return {
-        content: 'Missing required parameter: file_path. The tool call may have been truncated.',
-        isError: true,
-      };
-    }
+    // Validate required parameters
+    const pathValidation = validateRequiredString(args, 'file_path', 'the path to the file to edit');
+    if (!pathValidation.valid) return pathValidation.error!;
+
     if (args.old_string === undefined || args.old_string === null) {
       return {
         content: 'Missing required parameter: old_string. The tool call may have been truncated.',
@@ -141,7 +142,7 @@ export class EditTool implements TronTool {
       };
     }
 
-    const filePath = this.resolvePath(args.file_path);
+    const filePath = resolvePath(args.file_path as string, this.config.workingDirectory);
     const oldString = args.old_string as string;
     const newString = args.new_string as string;
     const replaceAll = (args.replace_all as boolean) ?? false;
@@ -222,38 +223,9 @@ export class EditTool implements TronTool {
         },
       };
     } catch (error) {
-      const err = error as NodeJS.ErrnoException;
-      logger.error('File edit failed', { filePath, error: err.message });
-
-      if (err.code === 'ENOENT') {
-        return {
-          content: `File not found: ${filePath}`,
-          isError: true,
-          details: { filePath, errorCode: err.code },
-        };
-      }
-
-      if (err.code === 'EACCES') {
-        return {
-          content: `Permission denied: ${filePath}`,
-          isError: true,
-          details: { filePath, errorCode: err.code },
-        };
-      }
-
-      return {
-        content: `Error editing file: ${err.message}`,
-        isError: true,
-        details: { filePath, errorCode: err.code },
-      };
+      logger.error('File edit failed', { filePath, error: (error as Error).message });
+      return formatFsError(error, filePath, 'editing');
     }
-  }
-
-  private resolvePath(filePath: string): string {
-    if (path.isAbsolute(filePath)) {
-      return filePath;
-    }
-    return path.join(this.config.workingDirectory, filePath);
   }
 
   private countOccurrences(str: string, search: string): number {

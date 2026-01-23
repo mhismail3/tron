@@ -10,6 +10,12 @@ import * as path from 'path';
 import type { TronTool, TronToolResult } from '../../types/index.js';
 import { createLogger } from '../../logging/logger.js';
 import { getSettings } from '../../settings/index.js';
+import {
+  resolvePath,
+  validateRequiredString,
+  validateNonEmptyString,
+  formatFsError,
+} from '../utils.js';
 
 const logger = createLogger('tool:find');
 
@@ -82,26 +88,19 @@ export class FindTool implements TronTool {
   }
 
   async execute(args: Record<string, unknown>): Promise<TronToolResult> {
-    // Validate required parameters (defense against truncated tool calls)
-    if (!args.pattern || typeof args.pattern !== 'string') {
-      return {
-        content: 'Missing required parameter: pattern. Please provide a glob pattern to match files. Example: "*.ts", "**/*.js", or "src/**/*.tsx"',
-        isError: true,
-        details: { pattern: args.pattern },
-      };
-    }
+    // Validate required parameters
+    const patternValidation = validateRequiredString(
+      args, 'pattern', 'a glob pattern to match files',
+      '"*.ts", "**/*.js", or "src/**/*.tsx"'
+    );
+    if (!patternValidation.valid) return patternValidation.error!;
 
-    const patternStr = args.pattern.trim();
-    if (patternStr === '') {
-      return {
-        content: 'Invalid pattern: pattern cannot be empty. Please provide a glob pattern like "*.ts" or "**/*.js"',
-        isError: true,
-        details: { pattern: args.pattern },
-      };
-    }
+    const patternStr = (args.pattern as string).trim();
+    const emptyValidation = validateNonEmptyString(patternStr, 'pattern', '"*.ts" or "**/*.js"');
+    if (!emptyValidation.valid) return emptyValidation.error!;
 
     const settings = getFindSettings();
-    const searchPath = this.resolvePath((args.path as string) || '.');
+    const searchPath = resolvePath((args.path as string) || '.', this.config.workingDirectory);
     const typeFilter = (args.type as 'file' | 'directory' | 'all') ?? 'all';
     const maxDepth = (args.maxDepth as number) ?? settings.defaultMaxDepth;
     const excludePatterns = (args.exclude as string[]) ?? [];
@@ -171,22 +170,8 @@ export class FindTool implements TronTool {
         },
       };
     } catch (error) {
-      const err = error as NodeJS.ErrnoException;
-      logger.error('Find failed', { searchPath, error: err.message });
-
-      if (err.code === 'ENOENT') {
-        return {
-          content: `Path not found: ${searchPath}`,
-          isError: true,
-          details: { searchPath, errorCode: err.code },
-        };
-      }
-
-      return {
-        content: `Search failed: ${err.message}`,
-        isError: true,
-        details: { searchPath, error: err.message },
-      };
+      logger.error('Find failed', { searchPath, error: (error as Error).message });
+      return formatFsError(error, searchPath, 'searching');
     }
   }
 
@@ -340,12 +325,5 @@ export class FindTool implements TronTool {
     } else {
       return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)}G`;
     }
-  }
-
-  private resolvePath(filePath: string): string {
-    if (path.isAbsolute(filePath)) {
-      return filePath;
-    }
-    return path.join(this.config.workingDirectory, filePath);
   }
 }

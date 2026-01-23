@@ -10,7 +10,11 @@ import * as path from 'path';
 import type { TronTool, TronToolResult } from '../../types/index.js';
 import { createLogger } from '../../logging/logger.js';
 import { getSettings } from '../../settings/index.js';
-import { truncateOutput } from '../utils.js';
+import {
+  truncateOutput,
+  resolvePath,
+  formatFsError,
+} from '../utils.js';
 
 const logger = createLogger('tool:ls');
 
@@ -71,7 +75,7 @@ export class LsTool implements TronTool {
   }
 
   async execute(args: Record<string, unknown>): Promise<TronToolResult> {
-    // Validate path if provided (defense against malformed tool calls)
+    // Validate path if provided
     const rawPath = args.path as string | undefined;
     if (rawPath !== undefined && typeof rawPath !== 'string') {
       return {
@@ -81,7 +85,7 @@ export class LsTool implements TronTool {
       };
     }
 
-    const listPath = this.resolvePath(rawPath || '.');
+    const listPath = resolvePath(rawPath || '.', this.config.workingDirectory);
     const showAll = (args.all as boolean) ?? false;
     const longFormat = (args.long as boolean) ?? false;
     const humanReadable = (args.humanReadable as boolean) ?? false;
@@ -208,30 +212,8 @@ export class LsTool implements TronTool {
         },
       };
     } catch (error) {
-      const err = error as NodeJS.ErrnoException;
-      logger.error('Ls failed', { listPath, error: err.message });
-
-      if (err.code === 'ENOENT') {
-        return {
-          content: `Path not found: ${listPath}`,
-          isError: true,
-          details: { path: listPath, errorCode: err.code },
-        };
-      }
-
-      if (err.code === 'EACCES') {
-        return {
-          content: `Permission denied: ${listPath}`,
-          isError: true,
-          details: { path: listPath, errorCode: err.code },
-        };
-      }
-
-      return {
-        content: `Error listing directory: ${err.message}`,
-        isError: true,
-        details: { path: listPath, error: err.message },
-      };
+      logger.error('Ls failed', { listPath, error: (error as Error).message });
+      return formatFsError(error, listPath, 'listing');
     }
   }
 
@@ -376,12 +358,5 @@ export class LsTool implements TronTool {
     } else {
       return `${month} ${day}  ${year}`;
     }
-  }
-
-  private resolvePath(filePath: string): string {
-    if (path.isAbsolute(filePath)) {
-      return filePath;
-    }
-    return path.join(this.config.workingDirectory, filePath);
   }
 }
