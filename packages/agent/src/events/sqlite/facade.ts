@@ -10,7 +10,7 @@
  */
 
 import type Database from 'better-sqlite3';
-import { DatabaseConnection, DEFAULT_CONFIG } from './database.js';
+import { DatabaseConnection, getDefaultConfig } from './database.js';
 import { runMigrations, runIncrementalMigrations } from './migrations/index.js';
 import {
   BlobRepository,
@@ -93,9 +93,10 @@ export class SQLiteEventStore {
   private searchRepo!: SearchRepository;
 
   constructor(dbPath: string, config?: Partial<SQLiteBackendConfig>) {
+    const defaults = getDefaultConfig();
     this.connection = new DatabaseConnection(dbPath, {
-      enableWAL: config?.enableWAL ?? DEFAULT_CONFIG.enableWAL,
-      busyTimeout: config?.busyTimeout ?? DEFAULT_CONFIG.busyTimeout,
+      enableWAL: config?.enableWAL ?? defaults.enableWAL,
+      busyTimeout: config?.busyTimeout ?? defaults.busyTimeout,
     });
   }
 

@@ -12,13 +12,37 @@ import Database from 'better-sqlite3';
 import type { DatabaseConfig, DatabaseState } from './types.js';
 
 /**
- * Default database configuration values
+ * Check if running in test environment (Vitest or NODE_ENV=test)
+ */
+function isTestEnvironment(): boolean {
+  return process.env.VITEST === 'true' || process.env.NODE_ENV === 'test';
+}
+
+/**
+ * Default database configuration values (production)
  */
 export const DEFAULT_CONFIG = {
   enableWAL: true,
   busyTimeout: 5000,
   cacheSize: 64000, // 64MB
 } as const;
+
+/**
+ * Test-optimized configuration (minimal memory footprint)
+ * Reduces memory per connection from ~320MB to ~500KB to prevent OOM in Vitest workers
+ */
+export const TEST_CONFIG = {
+  enableWAL: true,
+  busyTimeout: 5000,
+  cacheSize: 500, // 500KB - 128x smaller than production
+} as const;
+
+/**
+ * Get appropriate config based on environment
+ */
+export function getDefaultConfig(): { enableWAL: boolean; busyTimeout: number; cacheSize: number } {
+  return isTestEnvironment() ? TEST_CONFIG : DEFAULT_CONFIG;
+}
 
 /**
  * Manages SQLite database connection lifecycle
@@ -29,14 +53,15 @@ export class DatabaseConnection {
 
   constructor(dbPath: string, config?: Partial<DatabaseConfig>) {
     this.dbPath = dbPath;
+    const defaults = getDefaultConfig();
     this.state = {
       db: null,
       initialized: false,
       config: {
         dbPath,
-        enableWAL: config?.enableWAL ?? DEFAULT_CONFIG.enableWAL,
-        busyTimeout: config?.busyTimeout ?? DEFAULT_CONFIG.busyTimeout,
-        cacheSize: config?.cacheSize ?? DEFAULT_CONFIG.cacheSize,
+        enableWAL: config?.enableWAL ?? defaults.enableWAL,
+        busyTimeout: config?.busyTimeout ?? defaults.busyTimeout,
+        cacheSize: config?.cacheSize ?? defaults.cacheSize,
       },
     };
   }
@@ -144,11 +169,14 @@ export class DatabaseConnection {
     // Set cache size (negative = KB, positive = pages)
     db.pragma(`cache_size = -${cacheSize}`);
 
-    // Store temp tables in memory for better performance
-    db.pragma('temp_store = MEMORY');
-
-    // Enable memory-mapped I/O (256MB) for faster reads
-    db.pragma('mmap_size = 268435456');
+    // Memory settings: minimize for tests to prevent OOM in Vitest workers
+    if (isTestEnvironment()) {
+      db.pragma('temp_store = DEFAULT'); // Use disk for temp tables in tests
+      db.pragma('mmap_size = 0'); // Disable memory-mapped I/O
+    } else {
+      db.pragma('temp_store = MEMORY'); // Store temp tables in memory for production
+      db.pragma('mmap_size = 268435456'); // 256MB memory-mapped I/O for production
+    }
   }
 
   /**

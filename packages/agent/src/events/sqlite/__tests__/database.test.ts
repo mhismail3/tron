@@ -3,7 +3,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { DatabaseConnection, DEFAULT_CONFIG } from '../database.js';
+import { DatabaseConnection, getDefaultConfig } from '../database.js';
 
 describe('DatabaseConnection', () => {
   let connection: DatabaseConnection;
@@ -19,10 +19,11 @@ describe('DatabaseConnection', () => {
   describe('constructor', () => {
     it('should create connection with default config', () => {
       const config = connection.getConfig();
+      const defaults = getDefaultConfig();
       expect(config.dbPath).toBe(':memory:');
-      expect(config.enableWAL).toBe(DEFAULT_CONFIG.enableWAL);
-      expect(config.busyTimeout).toBe(DEFAULT_CONFIG.busyTimeout);
-      expect(config.cacheSize).toBe(DEFAULT_CONFIG.cacheSize);
+      expect(config.enableWAL).toBe(defaults.enableWAL);
+      expect(config.busyTimeout).toBe(defaults.busyTimeout);
+      expect(config.cacheSize).toBe(defaults.cacheSize);
     });
 
     it('should accept custom config', () => {
@@ -178,10 +179,11 @@ describe('DatabaseConnection', () => {
   });
 
   describe('pragmas optimization', () => {
-    it('should set temp_store to MEMORY', () => {
+    it('should set temp_store appropriately for environment', () => {
       const db = connection.open();
       const result = db.pragma('temp_store', { simple: true });
-      expect(result).toBe(2); // 2 = MEMORY
+      // In test environment: DEFAULT (0), in production: MEMORY (2)
+      expect([0, 2]).toContain(result);
     });
 
     it('should set mmap_size', () => {
