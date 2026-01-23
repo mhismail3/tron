@@ -18,13 +18,13 @@ Debug Tron agent behavior by querying the events database. Use this skill when i
 
 ```bash
 # Production database
-DB="$HOME/.tron/events.db"
+DB="$HOME/.tron/db/prod.db"
 
 # Beta database (if using beta channel)
-DB="$HOME/.tron/events-beta.db"
+DB="$HOME/.tron/db/beta.db"
 
 # Check which exists
-ls -la ~/.tron/events*.db
+ls -la ~/.tron/db/*.db
 ```
 
 ## CLI Tool
@@ -401,8 +401,8 @@ SELECT
 ## Quick Reference: sqlite3 Commands
 
 ```bash
-# Open database
-sqlite3 ~/.tron/events.db
+# Open database (use prod.db or beta.db as appropriate)
+sqlite3 ~/.tron/db/prod.db
 
 # Pretty output
 .mode column

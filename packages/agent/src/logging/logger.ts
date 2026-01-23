@@ -55,7 +55,7 @@ let globalSqliteTransport: SQLiteTransport | null = null;
  * Initialize the SQLite transport for log persistence.
  * Call this once at server startup with the database instance.
  *
- * @param db - The better-sqlite3 database instance (same as events.db)
+ * @param db - The better-sqlite3 database instance (the event store database)
  * @param options - Transport configuration options
  */
 export function initializeLogTransport(

@@ -10,7 +10,7 @@
  *
  * @example
  * ```typescript
- * const eventStore = new EventStore('~/.tron/events.db');
+ * const eventStore = new EventStore('~/.tron/db/prod.db');
  * await eventStore.initialize();
  *
  * const session = new EventStoreTuiSession({
