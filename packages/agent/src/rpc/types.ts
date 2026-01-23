@@ -331,6 +331,11 @@ export interface AgentPromptParams {
   reasoningLevel?: 'low' | 'medium' | 'high' | 'xhigh';
   /** Skills explicitly selected by user (via skill sheet or @mention in prompt) */
   skills?: PromptSkillReference[];
+  /**
+   * Spells (ephemeral skills) - injected for one prompt only, not tracked.
+   * Spells are automatically "forgotten" after the turn.
+   */
+  spells?: PromptSkillReference[];
 }
 
 export interface AgentPromptResult {

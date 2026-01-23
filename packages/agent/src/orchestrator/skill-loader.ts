@@ -64,11 +64,12 @@ export class SkillLoader {
    *
    * Handles:
    * 1. Collecting skills from session tracker and new options
-   * 2. Tracking new skills (creates events)
-   * 3. Building removed skills instruction
-   * 4. Loading skill content via skillLoader callback
-   * 5. Building final skill context string
-   * 6. Detecting planMode skills and triggering plan mode (if callback provided)
+   * 2. Collecting spells (ephemeral skills) from options
+   * 3. Tracking new skills (creates events) - but NOT spells
+   * 4. Building removed skills/spells instruction
+   * 5. Loading skill/spell content via skillLoader callback
+   * 6. Building final skill context string
+   * 7. Detecting planMode skills and triggering plan mode (if callback provided)
    */
   async loadSkillContextForPrompt(
     context: SkillLoadContext,
@@ -80,11 +81,21 @@ export class SkillLoader {
     // Get session skills already tracked (persistent across turns)
     const sessionSkills = skillTracker.getAddedSkills();
 
-    // Log incoming skills for debugging
+    // 1. Collect current prompt's spell names FIRST (for conditional exclusion from removal)
+    const currentSpellNames: Set<string> = new Set();
+    if (options.spells && options.spells.length > 0) {
+      for (const spell of options.spells) {
+        currentSpellNames.add(spell.name);
+      }
+    }
+
+    // Log incoming skills and spells for debugging
     logger.info('[SKILL] loadSkillContextForPrompt called', {
       sessionId,
       skillsProvided: options.skills?.length ?? 0,
       skills: options.skills?.map((s) => s.name) ?? [],
+      spellsProvided: options.spells?.length ?? 0,
+      spells: options.spells?.map((s) => s.name) ?? [],
       sessionSkillCount: sessionSkills.length,
       sessionSkills: sessionSkills.map((s) => s.name),
       hasSkillLoader: !!options.skillLoader,
@@ -110,17 +121,51 @@ export class SkillLoader {
     // Track skills FIRST (creates events and updates tracker)
     // This must happen BEFORE checking removed skills, so that re-added skills
     // are properly removed from the removedSkillNames set
+    // NOTE: Spells are NOT tracked here - they don't create events
     if (skillNames.size > 0) {
       await this.trackSkillsForPrompt(context, options);
     }
 
-    // NOW check for removed skills (after tracking, so re-added skills are excluded)
+    // 2. Add spells to skillNames for content loading + track as used
+    // This happens AFTER skill tracking so we can build the removal instruction correctly
+    if (options.spells && options.spells.length > 0) {
+      for (const spell of options.spells) {
+        skillNames.add(spell.name);
+        // Track as used - idempotent (Set handles duplicates)
+        // Note: We DO NOT remove from usedSpellNames when re-using
+        // The spell stays in usedSpellNames forever (until context clear)
+        skillTracker.addUsedSpell(spell.name);
+      }
+      logger.info('[SKILL] Added spells to skill names and tracked as used', {
+        sessionId,
+        spells: options.spells.map((s) => s.name),
+      });
+    }
+
+    // 3. Build removal instruction including:
+    //    - Explicitly removed skills (removedSkillNames)
+    //    - Previously used spells, EXCLUDING any being re-used in current prompt
     const removedSkills = skillTracker.getRemovedSkillNames();
+    const usedSpells = skillTracker.getUsedSpellNames();
+
+    // Collect all removed items for the instruction
+    const allRemoved: string[] = [...removedSkills];
+
+    // Add used spells to removal list, but EXCLUDE spells being re-used in current prompt
+    for (const spellName of usedSpells) {
+      // Only include if NOT being re-used in current prompt
+      // This handles the re-use case: spell is excluded from removal for THIS prompt
+      // but will be back in removal instruction on subsequent prompts
+      if (!currentSpellNames.has(spellName)) {
+        allRemoved.push(spellName);
+      }
+    }
+
     let removedSkillsInstruction = '';
-    if (removedSkills.length > 0) {
-      const skillList = removedSkills.map((s) => `@${s}`).join(', ');
+    if (allRemoved.length > 0) {
+      const skillList = allRemoved.map((s) => `@${s}`).join(', ');
       removedSkillsInstruction = `<removed-skills>
-CRITICAL: The following skills have been REMOVED from this session: ${skillList}
+CRITICAL: The following skills/spells have been REMOVED from this session: ${skillList}
 
 You MUST completely stop applying these skill behaviors starting NOW. This includes:
 - Do NOT use any special speaking styles, tones, or personas from these skills
@@ -130,9 +175,11 @@ You MUST completely stop applying these skill behaviors starting NOW. This inclu
 
 The user has explicitly removed these skills and expects you to respond WITHOUT them.
 </removed-skills>`;
-      logger.info('[SKILL] Including removed skills instruction', {
+      logger.info('[SKILL] Including removed skills/spells instruction', {
         sessionId,
         removedSkills,
+        usedSpellsExcludingCurrent: usedSpells.filter(s => !currentSpellNames.has(s)),
+        allRemoved,
       });
     }
 

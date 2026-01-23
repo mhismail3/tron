@@ -193,6 +193,8 @@ struct AgentPromptParams: Encodable {
     let attachments: [FileAttachment]?
     let reasoningLevel: String?
     let skills: [SkillReferenceParam]?
+    /// Spells (ephemeral skills) - injected for one prompt only, not tracked
+    let spells: [SkillReferenceParam]?
 
     init(
         sessionId: String,
@@ -200,7 +202,8 @@ struct AgentPromptParams: Encodable {
         images: [ImageAttachment]? = nil,
         attachments: [FileAttachment]? = nil,
         reasoningLevel: String? = nil,
-        skills: [Skill]? = nil
+        skills: [Skill]? = nil,
+        spells: [Skill]? = nil
     ) {
         self.sessionId = sessionId
         self.prompt = prompt
@@ -208,6 +211,7 @@ struct AgentPromptParams: Encodable {
         self.attachments = attachments
         self.reasoningLevel = reasoningLevel
         self.skills = skills?.map { SkillReferenceParam(from: $0) }
+        self.spells = spells?.map { SkillReferenceParam(from: $0) }
     }
 }
 

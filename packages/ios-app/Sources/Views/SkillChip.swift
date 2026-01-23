@@ -1,31 +1,40 @@
 import SwiftUI
 
+// MARK: - Chip Mode
+
+/// Mode for chip display: skill (cyan) or spell (pink)
+enum ChipMode {
+    case skill   // Cyan color, sparkles icon (persistent)
+    case spell   // Pink color, wand.and.stars icon (ephemeral)
+}
+
 // MARK: - Skill Chip (iOS 26 Liquid Glass)
 
-/// Compact glassy chip for displaying a skill reference
+/// Compact glassy chip for displaying a skill or spell reference
 /// Used in InputBar (before sending) and MessageBubble (after sending)
 @available(iOS 26.0, *)
 struct SkillChip: View {
     let skill: Skill
+    var mode: ChipMode = .skill
     var showRemoveButton: Bool = false
     var onRemove: (() -> Void)?
     var onTap: (() -> Void)?
 
     var body: some View {
         HStack(spacing: 5) {
-            // Skill icon
-            Image(systemName: skill.autoInject ? "bolt.fill" : "sparkles")
+            // Chip icon based on mode
+            Image(systemName: chipIcon)
                 .font(TronTypography.sans(size: TronTypography.sizeSM, weight: .semibold))
-                .foregroundStyle(skill.autoInject ? .tronAmber : .tronCyan)
+                .foregroundStyle(chipIconColor)
 
-            // Skill name
+            // Skill/spell name
             Text(skill.name)
                 .font(TronTypography.filePath)
                 .foregroundStyle(.white.opacity(0.9))
                 .lineLimit(1)
 
-            // Source indicator (subtle)
-            if skill.source == .project {
+            // Source indicator (subtle) - only for skills
+            if mode == .skill && skill.source == .project {
                 Image(systemName: "folder.fill")
                     .font(TronTypography.sans(size: TronTypography.sizeXXS))
                     .foregroundStyle(.tronEmerald.opacity(0.6))
@@ -64,12 +73,35 @@ struct SkillChip: View {
         }
     }
 
+    private var chipIcon: String {
+        switch mode {
+        case .skill:
+            return skill.autoInject ? "bolt.fill" : "sparkles"
+        case .spell:
+            return "wand.and.stars"
+        }
+    }
+
+    private var chipIconColor: Color {
+        switch mode {
+        case .skill:
+            return skill.autoInject ? .tronAmber : .tronCyan
+        case .spell:
+            return .tronPink
+        }
+    }
+
     private var chipTintColor: Color {
-        skill.autoInject ? .tronAmber : .tronCyan
+        switch mode {
+        case .skill:
+            return skill.autoInject ? .tronAmber : .tronCyan
+        case .spell:
+            return .tronPink
+        }
     }
 
     private var chipBorderColor: Color {
-        skill.autoInject ? .tronAmber : .tronCyan
+        chipTintColor
     }
 }
 
@@ -79,6 +111,7 @@ struct SkillChip: View {
 @available(iOS 26.0, *)
 struct SkillChipRow: View {
     let skills: [Skill]
+    var mode: ChipMode = .skill
     let onRemove: (Skill) -> Void
     let onTap: (Skill) -> Void
 
@@ -88,6 +121,7 @@ struct SkillChipRow: View {
                 ForEach(skills) { skill in
                     SkillChip(
                         skill: skill,
+                        mode: mode,
                         showRemoveButton: true,
                         onRemove: { onRemove(skill) },
                         onTap: { onTap(skill) }
@@ -100,6 +134,25 @@ struct SkillChipRow: View {
     }
 }
 
+// MARK: - Spell Chip Row (for InputBar - ephemeral spells)
+
+/// Horizontal scrollable row of spell chips for display above input bar
+@available(iOS 26.0, *)
+struct SpellChipRow: View {
+    let spells: [Skill]
+    let onRemove: (Skill) -> Void
+    let onTap: (Skill) -> Void
+
+    var body: some View {
+        SkillChipRow(
+            skills: spells,
+            mode: .spell,
+            onRemove: onRemove,
+            onTap: onTap
+        )
+    }
+}
+
 // MARK: - Message Skill Chips (for MessageBubble - read-only)
 
 /// Row of skill chips displayed in sent messages (no remove button)
@@ -107,6 +160,7 @@ struct SkillChipRow: View {
 @available(iOS 26.0, *)
 struct MessageSkillChips: View {
     let skills: [Skill]
+    var mode: ChipMode = .skill
     let onTap: (Skill) -> Void
 
     var body: some View {
@@ -114,11 +168,29 @@ struct MessageSkillChips: View {
             ForEach(skills) { skill in
                 SkillChip(
                     skill: skill,
+                    mode: mode,
                     showRemoveButton: false,
                     onTap: { onTap(skill) }
                 )
             }
         }
+    }
+}
+
+// MARK: - Message Spell Chips (for MessageBubble - read-only)
+
+/// Row of spell chips displayed in sent messages (no remove button)
+@available(iOS 26.0, *)
+struct MessageSpellChips: View {
+    let spells: [Skill]
+    let onTap: (Skill) -> Void
+
+    var body: some View {
+        MessageSkillChips(
+            skills: spells,
+            mode: .spell,
+            onTap: onTap
+        )
     }
 }
 

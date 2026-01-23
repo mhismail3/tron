@@ -42,6 +42,8 @@ extension Color {
     static let tronPurple = Color(hex: "#8B5CF6")
     static let tronBlue = Color(hex: "#3B82F6")
     static let tronCyan = Color(hex: "#06B6D4")
+    static let tronPink = Color(hex: "#EC4899")      // Pink-500 for spells
+    static let tronPinkLight = Color(hex: "#F472B6") // Pink-400 for spell highlights
 
     // Warm colors (Tokens theme) - Earthy/muted palette
     static let tronAmberLight = Color(hex: "#D97706")   // Warm honey amber for Total tokens
@@ -291,6 +293,8 @@ extension ShapeStyle where Self == Color {
     static var tronPurple: Color { .tronPurple }
     static var tronBlue: Color { .tronBlue }
     static var tronCyan: Color { .tronCyan }
+    static var tronPink: Color { .tronPink }
+    static var tronPinkLight: Color { .tronPinkLight }
 
     // Warm colors (Tokens theme)
     static var tronAmberLight: Color { .tronAmberLight }

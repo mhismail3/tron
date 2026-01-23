@@ -190,6 +190,12 @@ export interface AgentRunOptions {
   /** Skills explicitly selected by user (via skill sheet or @mention in prompt) */
   skills?: PromptSkillRef[];
   /**
+   * Spells (ephemeral skills) - injected for one prompt only, not tracked via events.
+   * Spells are automatically "forgotten" after the turn - subsequent prompts will
+   * include them in the "stop following" instruction.
+   */
+  spells?: PromptSkillRef[];
+  /**
    * Callback to load skill content by names.
    * Called after skills are tracked to inject skill content into the prompt.
    */

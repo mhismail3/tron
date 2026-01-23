@@ -47,6 +47,12 @@ export class SkillTracker {
    * These persist until context is cleared/compacted
    */
   private removedSkillNames: Set<string> = new Set();
+  /**
+   * Spells (ephemeral skills) used in this session.
+   * Tracked for "stop following" instruction on subsequent prompts.
+   * Unlike skills, spells are not persisted via events - they're injected once and forgotten.
+   */
+  private usedSpellNames: Set<string> = new Set();
 
   /**
    * Record that a skill has been added to context.
@@ -111,11 +117,29 @@ export class SkillTracker {
   }
 
   /**
-   * Clear all added skills and removed tracking (for context clear/compact)
+   * Record that a spell was used (adds to removal list for subsequent prompts).
+   * Spells are ephemeral - they're injected once and then the model is told
+   * to stop following them. This method is idempotent (Set handles duplicates).
+   */
+  addUsedSpell(spellName: string): void {
+    this.usedSpellNames.add(spellName);
+  }
+
+  /**
+   * Get spell names that were used in this session.
+   * Used to instruct the model to stop following these spells.
+   */
+  getUsedSpellNames(): string[] {
+    return Array.from(this.usedSpellNames);
+  }
+
+  /**
+   * Clear all added skills, removed tracking, and used spells (for context clear/compact)
    */
   clear(): void {
     this.addedSkills.clear();
     this.removedSkillNames.clear();
+    this.usedSpellNames.clear();
   }
 
   /**

@@ -389,6 +389,143 @@ describe('Skill Tracking - Fork Scenarios', () => {
 });
 
 // =============================================================================
+// Spell Tracking Tests
+// =============================================================================
+
+describe('Spell Tracking', () => {
+  let tracker: SkillTracker;
+
+  beforeEach(() => {
+    tracker = new SkillTracker();
+  });
+
+  describe('addUsedSpell', () => {
+    it('adds a spell to usedSpellNames set', () => {
+      tracker.addUsedSpell('my-spell');
+
+      expect(tracker.getUsedSpellNames()).toContain('my-spell');
+    });
+
+    it('is idempotent - adding same spell twice does not duplicate', () => {
+      tracker.addUsedSpell('my-spell');
+      tracker.addUsedSpell('my-spell');
+
+      expect(tracker.getUsedSpellNames()).toHaveLength(1);
+      expect(tracker.getUsedSpellNames()).toContain('my-spell');
+    });
+
+    it('tracks multiple different spells', () => {
+      tracker.addUsedSpell('spell-a');
+      tracker.addUsedSpell('spell-b');
+      tracker.addUsedSpell('spell-c');
+
+      const spells = tracker.getUsedSpellNames();
+      expect(spells).toHaveLength(3);
+      expect(spells).toContain('spell-a');
+      expect(spells).toContain('spell-b');
+      expect(spells).toContain('spell-c');
+    });
+  });
+
+  describe('getUsedSpellNames', () => {
+    it('returns empty array for new tracker', () => {
+      expect(tracker.getUsedSpellNames()).toEqual([]);
+    });
+
+    it('returns array of all used spell names', () => {
+      tracker.addUsedSpell('spell-a');
+      tracker.addUsedSpell('spell-b');
+
+      const spells = tracker.getUsedSpellNames();
+      expect(spells).toHaveLength(2);
+      expect(spells.sort()).toEqual(['spell-a', 'spell-b']);
+    });
+  });
+
+  describe('clear clears used spells', () => {
+    it('clears usedSpellNames along with other state', () => {
+      // Add skills and spells
+      tracker.addSkill('my-skill', 'global', 'mention', 'event-1');
+      tracker.addUsedSpell('my-spell');
+
+      // Verify both are tracked
+      expect(tracker.getAddedSkills()).toHaveLength(1);
+      expect(tracker.getUsedSpellNames()).toHaveLength(1);
+
+      // Clear
+      tracker.clear();
+
+      // Both should be cleared
+      expect(tracker.getAddedSkills()).toHaveLength(0);
+      expect(tracker.getUsedSpellNames()).toHaveLength(0);
+    });
+  });
+
+  describe('spells persist across multiple calls (not removed on re-add)', () => {
+    it('used spells persist even when same spell is re-used', () => {
+      // Use spell in turn 1
+      tracker.addUsedSpell('spell-a');
+      expect(tracker.getUsedSpellNames()).toContain('spell-a');
+
+      // Re-use spell in turn 3 (simulated by calling addUsedSpell again)
+      tracker.addUsedSpell('spell-a');
+
+      // Spell should still be in the set
+      expect(tracker.getUsedSpellNames()).toContain('spell-a');
+      expect(tracker.getUsedSpellNames()).toHaveLength(1);
+    });
+
+    it('spells accumulate over session (never auto-removed)', () => {
+      tracker.addUsedSpell('spell-a');
+      tracker.addUsedSpell('spell-b');
+      tracker.addUsedSpell('spell-a'); // Re-use
+      tracker.addUsedSpell('spell-c');
+
+      const spells = tracker.getUsedSpellNames();
+      expect(spells).toHaveLength(3);
+      expect(spells).toContain('spell-a');
+      expect(spells).toContain('spell-b');
+      expect(spells).toContain('spell-c');
+    });
+  });
+
+  describe('spells are independent from skills', () => {
+    it('adding a skill does not affect spell tracking', () => {
+      tracker.addUsedSpell('my-spell');
+      tracker.addSkill('my-skill', 'global', 'mention', 'event-1');
+
+      expect(tracker.getUsedSpellNames()).toHaveLength(1);
+      expect(tracker.getAddedSkills()).toHaveLength(1);
+    });
+
+    it('removing a skill does not affect spell tracking', () => {
+      tracker.addUsedSpell('my-spell');
+      tracker.addSkill('my-skill', 'global', 'mention', 'event-1');
+      tracker.removeSkill('my-skill');
+
+      // Spell should still be tracked
+      expect(tracker.getUsedSpellNames()).toHaveLength(1);
+      expect(tracker.getUsedSpellNames()).toContain('my-spell');
+    });
+
+    it('spell with same name as skill tracks independently', () => {
+      // Add both a skill and a spell with the same name
+      tracker.addSkill('shared-name', 'global', 'mention', 'event-1');
+      tracker.addUsedSpell('shared-name');
+
+      // Both should be tracked independently
+      expect(tracker.hasSkill('shared-name')).toBe(true);
+      expect(tracker.getUsedSpellNames()).toContain('shared-name');
+
+      // Remove the skill - spell should still be tracked
+      tracker.removeSkill('shared-name');
+      expect(tracker.hasSkill('shared-name')).toBe(false);
+      expect(tracker.getUsedSpellNames()).toContain('shared-name');
+    });
+  });
+});
+
+// =============================================================================
 // Detailed Snapshot Tests
 // =============================================================================
 

@@ -103,13 +103,16 @@ export function createAgentAdapter(deps: AdapterDependencies): AgentManagerAdapt
      * Start an agent prompt (fire-and-forget, response streamed via events)
      */
     async prompt(params) {
-      // Log incoming prompt params for debugging skills
+      // Log incoming prompt params for debugging skills/spells
       logger.info('[RPC] agent.prompt received', {
         sessionId: params.sessionId,
         promptLength: params.prompt?.length ?? 0,
         hasSkills: !!params.skills,
         skillCount: params.skills?.length ?? 0,
         skillNames: params.skills?.map(s => s.name) ?? [],
+        hasSpells: !!params.spells,
+        spellCount: params.spells?.length ?? 0,
+        spellNames: params.spells?.map(s => s.name) ?? [],
       });
 
       // Create a skill loader for this session
@@ -123,6 +126,7 @@ export function createAgentAdapter(deps: AdapterDependencies): AgentManagerAdapt
         images: params.images,
         attachments: params.attachments,
         skills: params.skills,
+        spells: params.spells,
         skillLoader,
       }).catch(err => {
         console.error('Agent run error:', err);

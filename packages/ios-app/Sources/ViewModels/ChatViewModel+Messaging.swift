@@ -5,14 +5,14 @@ import PhotosUI
 
 extension ChatViewModel {
 
-    func sendMessage(reasoningLevel: String? = nil, skills: [Skill]? = nil) {
+    func sendMessage(reasoningLevel: String? = nil, skills: [Skill]? = nil, spells: [Skill]? = nil) {
         let text = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty || !attachments.isEmpty else {
             logger.verbose("sendMessage() called but no text or attachments to send", category: .chat)
             return
         }
 
-        logger.info("Sending message: \"\(text.prefix(100))...\" with \(attachments.count) attachments, \(skills?.count ?? 0) skills, reasoningLevel=\(reasoningLevel ?? "nil")", category: .chat)
+        logger.info("Sending message: \"\(text.prefix(100))...\" with \(attachments.count) attachments, \(skills?.count ?? 0) skills, \(spells?.count ?? 0) spells, reasoningLevel=\(reasoningLevel ?? "nil")", category: .chat)
 
         // Check if this is an AskUserQuestion answer prompt - don't mark as superseded
         let isAnswerPrompt = text.hasPrefix("[Answers to your questions]")
@@ -73,13 +73,14 @@ extension ChatViewModel {
         // Send to server
         Task {
             do {
-                logger.debug("Calling rpcClient.sendPrompt() with \(fileAttachments.count) attachments, \(skills?.count ?? 0) skills...", category: .chat)
+                logger.debug("Calling rpcClient.sendPrompt() with \(fileAttachments.count) attachments, \(skills?.count ?? 0) skills, \(spells?.count ?? 0) spells...", category: .chat)
                 try await rpcClient.sendPrompt(
                     text,
                     images: nil,  // Legacy - no longer used
                     attachments: fileAttachments.isEmpty ? nil : fileAttachments,
                     reasoningLevel: reasoningLevel,
-                    skills: skills
+                    skills: skills,
+                    spells: spells
                 )
                 logger.info("Prompt sent successfully", category: .chat)
             } catch {

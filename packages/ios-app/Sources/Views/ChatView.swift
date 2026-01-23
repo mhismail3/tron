@@ -52,6 +52,8 @@ struct ChatView: View {
     @State private var reasoningLevel: String = "medium"
     /// Selected skills for the current message (shown as chips above input bar)
     @State private var selectedSkills: [Skill] = []
+    /// Selected spells for the current message (ephemeral skills, cleared after send)
+    @State private var selectedSpells: [Skill] = []
     /// Skill to show in detail sheet (when skill chip is tapped in a message)
     @State private var skillForDetailSheet: Skill?
     /// Whether to show the skill detail sheet
@@ -146,12 +148,15 @@ struct ChatView: View {
                                 to: nil, from: nil, for: nil
                             )
 
-                            // Pass selected skills and clear them after sending
+                            // Pass selected skills and spells, then clear them after sending
                             let skillsToSend = selectedSkills
+                            let spellsToSend = selectedSpells
                             selectedSkills = []
+                            selectedSpells = []  // Spells are ephemeral - cleared after send
                             viewModel.sendMessage(
                                 reasoningLevel: currentModelInfo?.supportsReasoning == true ? reasoningLevel : nil,
-                                skills: skillsToSend.isEmpty ? nil : skillsToSend
+                                skills: skillsToSend.isEmpty ? nil : skillsToSend,
+                                spells: spellsToSend.isEmpty ? nil : spellsToSend
                             )
                         },
                         onAbort: viewModel.abortAgent,
@@ -187,6 +192,14 @@ struct ChatView: View {
                             // Skill removed from selection - no additional action needed
                         },
                         onSkillDetailTap: { skill in
+                            skillForDetailSheet = skill
+                            showSkillDetailSheet = true
+                        },
+                        selectedSpells: $selectedSpells,
+                        onSpellRemove: { _ in
+                            // Spell removed from selection - no additional action needed
+                        },
+                        onSpellDetailTap: { skill in
                             skillForDetailSheet = skill
                             showSkillDetailSheet = true
                         },

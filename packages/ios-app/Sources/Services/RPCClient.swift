@@ -454,7 +454,8 @@ class RPCClient: ObservableObject {
         images: [ImageAttachment]? = nil,
         attachments: [FileAttachment]? = nil,
         reasoningLevel: String? = nil,
-        skills: [Skill]? = nil
+        skills: [Skill]? = nil,
+        spells: [Skill]? = nil
     ) async throws {
         guard let ws = webSocket,
               let sessionId = currentSessionId else {
@@ -467,7 +468,8 @@ class RPCClient: ObservableObject {
             images: images,
             attachments: attachments,
             reasoningLevel: reasoningLevel,
-            skills: skills
+            skills: skills,
+            spells: spells
         )
 
         let result: AgentPromptResult = try await ws.send(

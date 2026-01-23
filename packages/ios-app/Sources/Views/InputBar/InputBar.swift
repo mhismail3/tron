@@ -46,6 +46,11 @@ struct InputBar: View {
     var onSkillRemove: ((Skill) -> Void)?
     var onSkillDetailTap: ((Skill) -> Void)?
 
+    // Spells integration (ephemeral skills)
+    @Binding var selectedSpells: [Skill]
+    var onSpellRemove: ((Skill) -> Void)?
+    var onSpellDetailTap: ((Skill) -> Void)?
+
     /// Optional animation coordinator for chained pill morph animations
     var animationCoordinator: AnimationCoordinator?
 
@@ -62,6 +67,8 @@ struct InputBar: View {
     @State private var showFilePicker = false
     @State private var showSkillMentionPopup = false
     @State private var skillMentionQuery = ""
+    @State private var showSpellMentionPopup = false
+    @State private var spellMentionQuery = ""
     @State private var isMicPulsing = false
     @State private var hasAppeared = false
     @State private var showAttachmentButton = false
@@ -121,6 +128,22 @@ struct InputBar: View {
                     },
                     onDismiss: {
                         dismissSkillMentionPopup()
+                    }
+                )
+                .padding(.horizontal, 16)
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+
+            // Spell mention popup (ephemeral skills)
+            if showSpellMentionPopup, let store = skillStore {
+                SpellMentionPopup(
+                    skills: store.skills,
+                    query: spellMentionQuery,
+                    onSelect: { skill in
+                        selectSpellFromMention(skill)
+                    },
+                    onDismiss: {
+                        dismissSpellMentionPopup()
                     }
                 )
                 .padding(.horizontal, 16)
@@ -239,9 +262,10 @@ struct InputBar: View {
         .onChange(of: currentModelInfo?.supportsReasoning) { _, supportsReasoning in
             animationCoordinator?.updateReasoningSupport(supportsReasoning == true)
         }
-        // Skill mention detection
+        // Skill and spell mention detection
         .onChange(of: text) { _, newText in
             detectSkillMention(in: newText)
+            detectSpellMention(in: newText)
         }
         // Sheets
         .sheet(isPresented: $showCamera) {
@@ -321,14 +345,19 @@ struct InputBar: View {
     @ViewBuilder
     private var contentArea: some View {
         HStack(alignment: .bottom, spacing: 12) {
-            if !selectedSkills.isEmpty || !attachments.isEmpty {
+            if !selectedSkills.isEmpty || !selectedSpells.isEmpty || !attachments.isEmpty {
                 ContentAreaView(
                     selectedSkills: selectedSkills,
+                    selectedSpells: selectedSpells,
                     attachments: attachments,
                     onSkillRemove: { skill in
                         removeSelectedSkill(skill)
                     },
                     onSkillDetailTap: onSkillDetailTap,
+                    onSpellRemove: { skill in
+                        removeSelectedSpell(skill)
+                    },
+                    onSpellDetailTap: onSpellDetailTap,
                     onRemoveAttachment: onRemoveAttachment
                 )
             }
@@ -486,6 +515,111 @@ struct InputBar: View {
         onSkillRemove?(skill)
     }
 
+    // MARK: - Spell Mention Detection
+
+    private func detectSpellMention(in newText: String) {
+        guard let store = skillStore else { return }
+
+        // Check for completed %spellname mentions
+        if let completedSpell = detectCompletedSpellMention(in: newText, skills: store.skills) {
+            selectCompletedSpellMention(completedSpell, in: newText)
+            return
+        }
+
+        // Check for in-progress %mention
+        if let query = SpellMentionDetector.detectMention(in: newText) {
+            spellMentionQuery = query
+            if !showSpellMentionPopup {
+                withAnimation(.tronStandard) {
+                    showSpellMentionPopup = true
+                }
+            }
+        } else {
+            if showSpellMentionPopup {
+                withAnimation(.tronStandard) {
+                    showSpellMentionPopup = false
+                    spellMentionQuery = ""
+                }
+            }
+        }
+    }
+
+    private func detectCompletedSpellMention(in text: String, skills: [Skill]) -> Skill? {
+        // Pattern: %skillname followed by space or end of string
+        let pattern = "%([a-zA-Z0-9][a-zA-Z0-9-]*)(?:\\s|$)"
+        guard let regex = try? NSRegularExpression(pattern: pattern, options: []) else {
+            return nil
+        }
+
+        let nsText = text as NSString
+        let range = NSRange(location: 0, length: nsText.length)
+        let matches = regex.matches(in: text, options: [], range: range)
+
+        for match in matches.reversed() {
+            guard match.numberOfRanges > 1 else { continue }
+            let spellNameRange = match.range(at: 1)
+            let spellName = nsText.substring(with: spellNameRange)
+
+            guard !spellName.isEmpty else { continue }
+
+            let percentIndex = match.range.location
+            if percentIndex > 0 {
+                let prevChar = nsText.character(at: percentIndex - 1)
+                let prevCharScalar = Unicode.Scalar(prevChar)!
+                let isWhitespace = CharacterSet.whitespacesAndNewlines.contains(prevCharScalar)
+                guard isWhitespace else { continue }
+            }
+
+            // Check if % is inside backticks (code)
+            let beforePercent = nsText.substring(to: percentIndex)
+            let backtickCount = beforePercent.filter { $0 == "`" }.count
+            if backtickCount % 2 != 0 { continue }
+
+            // Match against skills (spells use the same source)
+            if let skill = skills.first(where: { $0.name.lowercased() == spellName.lowercased() }) {
+                // Don't add if already selected as a spell
+                if !selectedSpells.contains(where: { $0.name.lowercased() == spellName.lowercased() }) {
+                    return skill
+                }
+            }
+        }
+
+        return nil
+    }
+
+    private func selectCompletedSpellMention(_ skill: Skill, in currentText: String) {
+        if !selectedSpells.contains(where: { $0.name == skill.name }) {
+            selectedSpells.append(skill)
+        }
+        dismissSpellMentionPopup()
+    }
+
+    private func selectSpellFromMention(_ skill: Skill) {
+        // Replace the %query with %skillname followed by space
+        if let percentIndex = text.lastIndex(of: "%") {
+            let beforePercent = String(text[..<percentIndex])
+            text = beforePercent + "%" + skill.name + " "
+        }
+
+        if !selectedSpells.contains(where: { $0.name == skill.name }) {
+            selectedSpells.append(skill)
+        }
+
+        dismissSpellMentionPopup()
+    }
+
+    private func dismissSpellMentionPopup() {
+        withAnimation(.tronStandard) {
+            showSpellMentionPopup = false
+            spellMentionQuery = ""
+        }
+    }
+
+    private func removeSelectedSpell(_ skill: Skill) {
+        selectedSpells.removeAll { $0.name == skill.name }
+        onSpellRemove?(skill)
+    }
+
     /// Trigger reasoning pill animation
     func triggerReasoningPillAnimation() {
         animationCoordinator?.updateReasoningSupport(true)
@@ -541,7 +675,10 @@ extension Notification.Name {
             onReasoningLevelChange: nil,
             selectedSkills: .constant([]),
             onSkillRemove: nil,
-            onSkillDetailTap: nil
+            onSkillDetailTap: nil,
+            selectedSpells: .constant([]),
+            onSpellRemove: nil,
+            onSpellDetailTap: nil
         )
     }
     .preferredColorScheme(.dark)
