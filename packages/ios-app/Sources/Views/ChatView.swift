@@ -25,7 +25,11 @@ private struct InteractivePopGestureEnabler: UIViewControllerRepresentable {
 
 // MARK: - Scroll Position Tracking
 
-/// Simple PreferenceKey to track scroll offset for detecting user scroll direction
+/// Tracks scroll state for detecting user scroll vs content growth
+private struct ScrollState: Equatable {
+    let isNearBottom: Bool
+    let offset: CGFloat
+}
 
 // MARK: - Chat View
 
@@ -755,21 +759,31 @@ struct ChatView: View {
                 // because it tries to re-anchor when container size changes.
                 // Instead, we manually scroll to bottom on initial load and when keyboard appears.
                 .scrollDismissesKeyboard(.interactively)
-                .onScrollGeometryChange(for: Bool.self) { geometry in
-                    // Check if we're near the bottom (within 100 points)
+                .onScrollGeometryChange(for: ScrollState.self) { geometry in
+                    // Track both near-bottom status AND scroll offset to detect user scroll vs content growth
                     let distanceFromBottom = geometry.contentSize.height - geometry.contentOffset.y - geometry.containerSize.height
-                    return distanceFromBottom < 100
-                } action: { wasNearBottom, isNearBottom in
+                    let isNearBottom = distanceFromBottom < 100
+                    return ScrollState(isNearBottom: isNearBottom, offset: geometry.contentOffset.y)
+                } action: { oldState, newState in
                     guard initialLoadComplete else { return }
 
-                    // During streaming, if we're in following mode and geometry shows not-near-bottom,
-                    // this is due to content growing, not user scrolling. Don't switch to reviewing.
-                    // The streaming onChange handler will scroll us to bottom.
-                    if viewModel.isProcessing && scrollCoordinator.shouldAutoScroll && !isNearBottom {
+                    // Detect user actively scrolling up: offset DECREASES when scrolling toward top
+                    // Use threshold to avoid noise from minor layout adjustments
+                    let userScrolledUp = newState.offset < oldState.offset - 5
+
+                    if userScrolledUp {
+                        // User is actively scrolling up - switch to reviewing mode
+                        scrollCoordinator.userDidScroll(isNearBottom: false)
                         return
                     }
 
-                    scrollCoordinator.userDidScroll(isNearBottom: isNearBottom)
+                    // During streaming in following mode, if not near bottom but user didn't scroll up,
+                    // this is content growing faster than auto-scroll. Don't switch to reviewing.
+                    if viewModel.isProcessing && scrollCoordinator.shouldAutoScroll && !newState.isNearBottom {
+                        return
+                    }
+
+                    scrollCoordinator.userDidScroll(isNearBottom: newState.isNearBottom)
                 }
                 // Scroll to bottom when keyboard appears (container height shrinks significantly)
                 .onScrollGeometryChange(for: CGFloat.self) { geometry in
@@ -810,6 +824,10 @@ struct ChatView: View {
                         withAnimation(.easeOut(duration: 0.15)) {
                             proxy.scrollTo("bottom", anchor: .bottom)
                         }
+                    } else {
+                        // In reviewing mode - mark that new content is available
+                        // This shows the "New Content" button
+                        scrollCoordinator.contentAdded()
                     }
                 }
                 // Final scroll when processing ends
