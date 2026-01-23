@@ -221,6 +221,10 @@ export interface TurnConfig {
   enableThinking?: boolean;
   thinkingBudget?: number;
   stopSequences?: string[];
+  /** Thinking level for Gemini 3 models (discrete levels) */
+  thinkingLevel?: 'minimal' | 'low' | 'medium' | 'high';
+  /** Thinking budget for Gemini 2.5 models (token count 0-32768) */
+  geminiThinkingBudget?: number;
 }
 
 /**

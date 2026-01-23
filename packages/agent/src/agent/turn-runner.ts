@@ -110,14 +110,19 @@ export class AgentTurnRunner implements ITurnRunner {
       });
 
       // Stream response from provider
+      // Note: thinkingBudget is used by Anthropic, geminiThinkingBudget is for Gemini 2.5
+      // The Google provider expects thinkingBudget, so we pass geminiThinkingBudget as thinkingBudget
+      // when using Gemini (the provider will ignore thinkingBudget if it's an Anthropic provider)
       const streamResult = await this.streamProcessor.process(
         this.provider.stream(context, {
           maxTokens: this.config.maxTokens,
           temperature: this.config.temperature,
           enableThinking: this.config.enableThinking,
-          thinkingBudget: this.config.thinkingBudget,
+          thinkingBudget: this.config.geminiThinkingBudget ?? this.config.thinkingBudget,
           stopSequences: this.config.stopSequences,
           reasoningEffort: reasoningLevel,
+          // Gemini 3 thinking level (discrete levels: minimal/low/medium/high)
+          thinkingLevel: this.config.thinkingLevel,
         } as Parameters<Provider['stream']>[1])
       );
 

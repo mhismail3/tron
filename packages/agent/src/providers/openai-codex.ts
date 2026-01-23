@@ -500,7 +500,8 @@ export class OpenAICodexProvider {
       };
 
       if (reasoningEffort) {
-        body.reasoning = { effort: reasoningEffort };
+        // gpt-5.2-codex only supports 'detailed' summary (not 'concise')
+        body.reasoning = { effort: reasoningEffort, summary: 'detailed' };
       }
 
       if (options.temperature !== undefined) {
@@ -511,10 +512,11 @@ export class OpenAICodexProvider {
         body.tools = tools;
       }
 
-      logger.debug('Codex request body', {
+      logger.trace('Codex request body', {
         model,
         inputCount: input.length,
         toolCount: tools?.length ?? 0,
+        reasoning: body.reasoning,
       });
 
       // POST to Codex responses endpoint
@@ -544,6 +546,8 @@ export class OpenAICodexProvider {
       let outputTokens = 0;
       let textStarted = false;
       let thinkingStarted = false;
+      // Track seen thinking content to prevent duplication across different event types
+      const seenThinkingTexts = new Set<string>();
 
       while (true) {
         const { done, value } = await reader.read();
@@ -563,6 +567,20 @@ export class OpenAICodexProvider {
 
           try {
             const event = JSON.parse(data) as ResponsesStreamEvent;
+
+            // Log SSE events at trace level for debugging reasoning/streaming issues
+            const eventItem = (event as any).item;
+            logger.trace('Codex SSE event received', {
+              type: event.type,
+              hasDelta: !!event.delta,
+              deltaPreview: event.delta?.substring(0, 50),
+              hasItem: !!eventItem,
+              itemType: eventItem?.type,
+              // Capture reasoning summary if present in item
+              hasSummary: !!eventItem?.summary,
+              summaryLength: eventItem?.summary?.length,
+              summaryPreview: eventItem?.summary?.[0]?.text?.substring(0, 100),
+            });
 
             // Log all events for debugging tool call issues
             if (event.type?.includes('function') || event.type?.includes('output_item')) {
@@ -618,6 +636,23 @@ export class OpenAICodexProvider {
                 }
                 break;
 
+              case 'response.output_item.done':
+                // Handle completed reasoning items - summary may be in item.summary
+                if (event.item?.type === 'reasoning' && event.item.summary) {
+                  if (!thinkingStarted) {
+                    thinkingStarted = true;
+                    yield { type: 'thinking_start' };
+                  }
+                  for (const summaryPart of event.item.summary) {
+                    if (summaryPart.type === 'summary_text' && summaryPart.text && !seenThinkingTexts.has(summaryPart.text)) {
+                      seenThinkingTexts.add(summaryPart.text);
+                      accumulatedThinking += summaryPart.text;
+                      yield { type: 'thinking_delta', delta: summaryPart.text };
+                    }
+                  }
+                }
+                break;
+
               case 'response.reasoning_summary_part.added':
                 // A new reasoning summary part is being added
                 if (!thinkingStarted) {
@@ -627,8 +662,9 @@ export class OpenAICodexProvider {
                 break;
 
               case 'response.reasoning_summary_text.delta':
-                // Delta for reasoning summary text
-                if (event.delta) {
+                // Delta for reasoning summary text - skip if we already have this content
+                if (event.delta && !seenThinkingTexts.has(event.delta)) {
+                  seenThinkingTexts.add(event.delta);
                   if (!thinkingStarted) {
                     thinkingStarted = true;
                     yield { type: 'thinking_start' };
@@ -659,10 +695,17 @@ export class OpenAICodexProvider {
 
               case 'response.completed':
                 if (event.response) {
-                  // Log the full response for debugging
-                  logger.debug('Codex response.completed', {
+                  // Log the full response for debugging - include reasoning items
+                  const reasoningItems = event.response.output?.filter((o: any) => o.type === 'reasoning') ?? [];
+                  logger.trace('Codex response.completed', {
                     outputCount: event.response.output?.length ?? 0,
                     outputTypes: event.response.output?.map((o: any) => o.type) ?? [],
+                    reasoningItemCount: reasoningItems.length,
+                    reasoningItems: reasoningItems.map((r: any) => ({
+                      hasSummary: !!r.summary,
+                      summaryLength: r.summary?.length,
+                      summaryTexts: r.summary?.map((s: any) => s.text?.substring(0, 200)),
+                    })),
                     functionCalls: event.response.output?.filter((o: any) => o.type === 'function_call').map((fc: any) => ({
                       name: fc.name,
                       callId: fc.call_id,
@@ -690,18 +733,16 @@ export class OpenAICodexProvider {
                           }
                         }
                       }
-                    } else if (item.type === 'reasoning' && item.summary) {
-                      // Handle reasoning item from completed response
+                    } else if (item.type === 'reasoning' && item.summary && !accumulatedThinking) {
+                      // Handle reasoning item from completed response - only if we didn't get content via deltas
+                      // (deltas come as chunks so Set-based dedup doesn't work here)
                       for (const summaryItem of item.summary) {
                         if (summaryItem.type === 'summary_text' && summaryItem.text) {
                           if (!thinkingStarted) {
                             thinkingStarted = true;
                             yield { type: 'thinking_start' };
                           }
-                          // Only set accumulated thinking if we didn't get it via deltas
-                          if (!accumulatedThinking) {
-                            accumulatedThinking = summaryItem.text;
-                          }
+                          accumulatedThinking = summaryItem.text;
                         }
                       }
                     } else if (item.type === 'function_call' && item.call_id) {

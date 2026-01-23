@@ -94,6 +94,43 @@ describe('OpenAI Codex Provider', () => {
 
       expect(provider).toBeDefined();
     });
+
+    it('should include summary parameter in reasoning config', async () => {
+      const provider = new OpenAICodexProvider({
+        model: 'gpt-5.2-codex',
+        auth: createMockAuth(),
+        reasoningEffort: 'xhigh',
+        retry: false,
+      });
+
+      const mockStreamData = [
+        'data: {"type":"response.completed","response":{"id":"resp-123","output":[],"usage":{"input_tokens":10,"output_tokens":5}}}\n\n',
+      ];
+
+      global.fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        body: createMockStream(mockStreamData),
+      });
+
+      const context = {
+        messages: [{ role: 'user' as const, content: 'Test' }],
+      };
+
+      for await (const _ of provider.stream(context)) {
+        // consume stream
+      }
+
+      // Verify the fetch call included reasoning with summary parameter
+      expect(global.fetch).toHaveBeenCalled();
+      const fetchCall = (global.fetch as any).mock.calls[0];
+      const requestBody = JSON.parse(fetchCall[1].body);
+
+      // The reasoning config MUST include summary: 'detailed' to get reasoning summaries
+      // Note: gpt-5.2-codex only supports 'detailed', not 'concise'
+      expect(requestBody.reasoning).toBeDefined();
+      expect(requestBody.reasoning.effort).toBe('xhigh');
+      expect(requestBody.reasoning.summary).toBe('detailed');
+    });
   });
 
   describe('Model Registry', () => {
@@ -496,6 +533,49 @@ describe('OpenAI Codex Provider', () => {
       const toolCall = doneEvent.message.content.find((c: any) => c.type === 'tool_use');
       expect(toolCall).toBeDefined();
       expect(toolCall.name).toBe('read');
+    });
+
+    it('should deduplicate thinking content across different event types', async () => {
+      const provider = new OpenAICodexProvider({
+        model: 'gpt-5.2-codex',
+        auth: createMockAuth(),
+        retry: false,
+      });
+
+      // Simulate scenario where same thinking content appears in multiple event types
+      const mockStreamData = [
+        // First via output_item.done with summary
+        'data: {"type":"response.output_item.added","item":{"type":"reasoning"}}\n\n',
+        'data: {"type":"response.output_item.done","item":{"type":"reasoning","summary":[{"type":"summary_text","text":"Thinking about this"}]}}\n\n',
+        // Then the same text via delta event (should be skipped)
+        'data: {"type":"response.reasoning_summary_text.delta","delta":"Thinking about this"}\n\n',
+        'data: {"type":"response.output_text.delta","delta":"Hello!"}\n\n',
+        'data: {"type":"response.completed","response":{"id":"resp-123","output":[{"type":"reasoning","summary":[{"type":"summary_text","text":"Thinking about this"}]},{"type":"message","content":[{"type":"output_text","text":"Hello!"}]}],"usage":{"input_tokens":10,"output_tokens":5}}}\n\n',
+      ];
+
+      global.fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        body: createMockStream(mockStreamData),
+      });
+
+      const context = {
+        messages: [{ role: 'user' as const, content: 'Test' }],
+      };
+
+      const events: StreamEvent[] = [];
+      for await (const event of provider.stream(context)) {
+        events.push(event);
+      }
+
+      // Count thinking_delta events - should only have one
+      const thinkingDeltas = events.filter(e => e.type === 'thinking_delta');
+      expect(thinkingDeltas).toHaveLength(1);
+
+      // Verify the done message has thinking only once
+      const doneEvent = events.find(e => e.type === 'done') as any;
+      expect(doneEvent).toBeDefined();
+      const thinkingContent = doneEvent.message.content.find((c: any) => c.type === 'thinking');
+      expect(thinkingContent?.thinking).toBe('Thinking about this');
     });
   });
 

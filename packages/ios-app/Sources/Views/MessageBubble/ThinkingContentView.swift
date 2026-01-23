@@ -61,7 +61,8 @@ struct ThinkingContentView: View {
                 }
 
                 // Content: preview or full (compact, smaller text)
-                Text(expanded ? content : previewText)
+                // Use LocalizedStringKey for markdown rendering (bold, italic, etc.)
+                Text(LocalizedStringKey(expanded ? content : previewText))
                     .font(TronTypography.mono(size: 10, weight: .regular))
                     .foregroundStyle(Color.secondary.opacity(0.6))
                     .italic()

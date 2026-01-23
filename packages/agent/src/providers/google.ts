@@ -20,6 +20,7 @@ import type {
   Context,
   StreamEvent,
   TextContent,
+  ThinkingContent,
   ToolCall,
 } from '../types/index.js';
 import { createLogger } from '../logging/logger.js';
@@ -957,8 +958,11 @@ export class GoogleProvider {
                 yield { type: 'text_end', text: accumulatedText };
               }
 
-              // Build final message
-              const content: (TextContent | ToolCall)[] = [];
+              // Build final message - include thinking content if accumulated
+              const content: (TextContent | ThinkingContent | ToolCall)[] = [];
+              if (accumulatedThinking) {
+                content.push({ type: 'thinking', thinking: accumulatedThinking });
+              }
               if (accumulatedText) {
                 content.push({ type: 'text', text: accumulatedText });
               }

@@ -544,6 +544,68 @@ describe('Google Gemini Provider', () => {
       expect(eventTypes).toContain('thinking_end');
     });
 
+    it('should include ThinkingContent in final message', async () => {
+      const provider = new GoogleProvider({
+        auth: createApiKeyAuth(),
+        model: 'gemini-3-pro-preview',
+        thinkingLevel: 'high',
+      });
+
+      // Mock response with thinking content followed by text
+      const mockStreamData = [
+        'data: {"candidates":[{"content":{"parts":[{"thought":true,"text":"Let me analyze this carefully..."}],"role":"model"}}]}\n\n',
+        'data: {"candidates":[{"content":{"parts":[{"text":"The answer is 42."}],"role":"model"},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":10,"candidatesTokenCount":15,"totalTokenCount":25}}\n\n',
+      ];
+
+      const encoder = new TextEncoder();
+      let dataIndex = 0;
+
+      const mockReadableStream = new ReadableStream({
+        pull(controller) {
+          if (dataIndex < mockStreamData.length) {
+            controller.enqueue(encoder.encode(mockStreamData[dataIndex]));
+            dataIndex++;
+          } else {
+            controller.close();
+          }
+        },
+      });
+
+      global.fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        body: mockReadableStream,
+      });
+
+      const context = {
+        messages: [{ role: 'user' as const, content: 'What is the meaning of life?' }],
+      };
+
+      let doneEvent: any = null;
+      for await (const event of provider.stream(context)) {
+        if (event.type === 'done') {
+          doneEvent = event;
+        }
+      }
+
+      expect(doneEvent).not.toBeNull();
+      expect(doneEvent.message.content).toBeDefined();
+
+      // Should have thinking content FIRST
+      const thinkingContent = doneEvent.message.content.find((c: any) => c.type === 'thinking');
+      expect(thinkingContent).toBeDefined();
+      expect(thinkingContent.thinking).toBe('Let me analyze this carefully...');
+
+      // Should have text content SECOND
+      const textContent = doneEvent.message.content.find((c: any) => c.type === 'text');
+      expect(textContent).toBeDefined();
+      expect(textContent.text).toBe('The answer is 42.');
+
+      // Verify thinking comes before text in the content array
+      const thinkingIndex = doneEvent.message.content.findIndex((c: any) => c.type === 'thinking');
+      const textIndex = doneEvent.message.content.findIndex((c: any) => c.type === 'text');
+      expect(thinkingIndex).toBeLessThan(textIndex);
+    });
+
     it('should enforce temperature=1.0 for Gemini 3', async () => {
       const provider = new GoogleProvider({
         auth: createApiKeyAuth(),
