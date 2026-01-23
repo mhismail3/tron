@@ -56,6 +56,8 @@ struct ChatView: View {
     @State private var selectedSpells: [Skill] = []
     /// Skill to show in detail sheet (when skill chip is tapped in a message)
     @State private var skillForDetailSheet: Skill?
+    /// Mode for skill detail sheet (skill = cyan, spell = pink)
+    @State private var skillDetailMode: ChipMode = .skill
     /// Whether to show the skill detail sheet
     @State private var showSkillDetailSheet = false
     /// Whether to show the compaction detail sheet
@@ -193,14 +195,16 @@ struct ChatView: View {
                         },
                         onSkillDetailTap: { skill in
                             skillForDetailSheet = skill
+                            skillDetailMode = .skill
                             showSkillDetailSheet = true
                         },
                         selectedSpells: $selectedSpells,
                         onSpellRemove: { _ in
                             // Spell removed from selection - no additional action needed
                         },
-                        onSpellDetailTap: { skill in
-                            skillForDetailSheet = skill
+                        onSpellDetailTap: { spell in
+                            skillForDetailSheet = spell
+                            skillDetailMode = .spell
                             showSkillDetailSheet = true
                         },
                         animationCoordinator: viewModel.animationCoordinator,
@@ -317,7 +321,7 @@ struct ChatView: View {
         }
         .sheet(isPresented: $showSkillDetailSheet) {
             if let skill = skillForDetailSheet, let store = skillStore {
-                SkillDetailSheet(skill: skill, skillStore: store)
+                SkillDetailSheet(skill: skill, skillStore: store, mode: skillDetailMode)
             }
         }
         .sheet(isPresented: $showCompactionDetail) {
@@ -686,6 +690,12 @@ struct ChatView: View {
                                 message: message,
                                 onSkillTap: { skill in
                                     skillForDetailSheet = skill
+                                    skillDetailMode = .skill
+                                    showSkillDetailSheet = true
+                                },
+                                onSpellTap: { spell in
+                                    skillForDetailSheet = spell
+                                    skillDetailMode = .spell
                                     showSkillDetailSheet = true
                                 },
                                 onAskUserQuestionTap: { data in

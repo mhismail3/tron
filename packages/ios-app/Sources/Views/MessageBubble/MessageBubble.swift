@@ -5,6 +5,7 @@ import SwiftUI
 struct MessageBubble: View {
     let message: ChatMessage
     var onSkillTap: ((Skill) -> Void)?
+    var onSpellTap: ((Skill) -> Void)?
     var onAskUserQuestionTap: ((AskUserQuestionToolData) -> Void)?
     var onThinkingTap: ((String) -> Void)?
     var onCompactionTap: ((Int, Int, String, String?) -> Void)?
@@ -53,15 +54,15 @@ struct MessageBubble: View {
             // Show spells above text for user messages (pink chips for ephemeral skills)
             if let spells = message.spells, !spells.isEmpty {
                 if #available(iOS 26.0, *) {
-                    MessageSpellChips(spells: spells) { skill in
-                        onSkillTap?(skill)
+                    MessageSpellChips(spells: spells) { spell in
+                        onSpellTap?(spell)
                     }
                 } else {
                     // Fallback for older iOS
                     HStack(spacing: 6) {
-                        ForEach(spells) { skill in
-                            SkillChipFallback(skill: skill, mode: .spell) {
-                                onSkillTap?(skill)
+                        ForEach(spells) { spell in
+                            SkillChipFallback(skill: spell, mode: .spell) {
+                                onSpellTap?(spell)
                             }
                         }
                     }

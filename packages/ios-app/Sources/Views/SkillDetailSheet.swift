@@ -4,15 +4,33 @@ import SwiftUI
 
 /// Full-screen sheet for reading skill content when a skill chip is tapped
 /// Displays the SKILL.md content in a beautiful, readable format
+/// Supports both skill (cyan) and spell (pink) modes
 @available(iOS 26.0, *)
 struct SkillDetailSheet: View {
     let skill: Skill
     let skillStore: SkillStore
+    var mode: ChipMode = .skill
     @Environment(\.dismiss) private var dismiss
 
     @State private var skillMetadata: SkillMetadata?
     @State private var isLoading = true
     @State private var error: String?
+
+    /// Accent color based on mode: cyan for skills, pink for spells
+    private var accentColor: Color {
+        switch mode {
+        case .skill: return .tronCyan
+        case .spell: return .tronPink
+        }
+    }
+
+    /// Icon for the mode: sparkles for skills, wand for spells
+    private var modeIcon: String {
+        switch mode {
+        case .skill: return "sparkles"
+        case .spell: return "wand.and.stars"
+        }
+    }
 
     var body: some View {
         NavigationStack {
@@ -33,13 +51,13 @@ struct SkillDetailSheet: View {
                 ToolbarItem(placement: .principal) {
                     Text(skill.displayName)
                         .font(TronTypography.mono(size: TronTypography.sizeTitle, weight: .semibold))
-                        .foregroundStyle(.tronCyan)
+                        .foregroundStyle(accentColor)
                 }
             }
         }
         .presentationDetents([.medium, .large])
         .presentationDragIndicator(.hidden)
-        .tint(.tronCyan)
+        .tint(accentColor)
         .preferredColorScheme(.dark)
         .task {
             await loadSkillContent()
@@ -51,7 +69,7 @@ struct SkillDetailSheet: View {
     private var loadingView: some View {
         VStack(spacing: 16) {
             ProgressView()
-                .tint(.tronCyan)
+                .tint(accentColor)
                 .scaleEffect(1.2)
 
             Text("Loading skill content...")
@@ -80,10 +98,10 @@ struct SkillDetailSheet: View {
             } label: {
                 Text("Try Again")
                     .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .medium))
-                    .foregroundStyle(.tronCyan)
+                    .foregroundStyle(accentColor)
                     .padding(.horizontal, 20)
                     .padding(.vertical, 10)
-                    .background(Color.tronCyan.opacity(0.15))
+                    .background(accentColor.opacity(0.15))
                     .clipShape(Capsule())
             }
         }
@@ -123,7 +141,7 @@ struct SkillDetailSheet: View {
                 // Description text
                 Text(metadata.description)
                     .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
-                    .foregroundStyle(.tronCyan)
+                    .foregroundStyle(accentColor)
                     .frame(maxWidth: .infinity, alignment: .leading)
 
                 // Metadata row
@@ -180,12 +198,24 @@ struct SkillDetailSheet: View {
                         }
                     }
                 }
+
+                // Ephemeral spell caption (only for spells)
+                if mode == .spell {
+                    HStack(spacing: 6) {
+                        Image(systemName: "clock.arrow.circlepath")
+                            .font(TronTypography.sans(size: TronTypography.sizeCaption))
+                        Text("Spells are ephemeral one-time skills that apply only to a single prompt.")
+                            .font(TronTypography.mono(size: TronTypography.sizeCaption))
+                    }
+                    .foregroundStyle(accentColor.opacity(0.8))
+                    .padding(.top, 4)
+                }
             }
             .padding(14)
             .background {
                 RoundedRectangle(cornerRadius: 12, style: .continuous)
                     .fill(.clear)
-                    .glassEffect(.regular.tint(Color.tronCyan.opacity(0.12)), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .glassEffect(.regular.tint(accentColor.opacity(0.12)), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
             }
         }
     }
@@ -206,7 +236,7 @@ struct SkillDetailSheet: View {
                 } label: {
                     Image(systemName: "doc.on.doc")
                         .font(TronTypography.sans(size: TronTypography.sizeBodySM))
-                        .foregroundStyle(.tronCyan.opacity(0.6))
+                        .foregroundStyle(accentColor.opacity(0.6))
                 }
             }
 
@@ -215,11 +245,11 @@ struct SkillDetailSheet: View {
                 HStack {
                     Image(systemName: "doc.text.fill")
                         .font(TronTypography.sans(size: TronTypography.sizeBody))
-                        .foregroundStyle(.tronCyan)
+                        .foregroundStyle(accentColor)
 
                     Text("Content")
                         .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
-                        .foregroundStyle(.tronCyan)
+                        .foregroundStyle(accentColor)
 
                     Spacer()
                 }
@@ -235,7 +265,7 @@ struct SkillDetailSheet: View {
             .background {
                 RoundedRectangle(cornerRadius: 12, style: .continuous)
                     .fill(.clear)
-                    .glassEffect(.regular.tint(Color.tronCyan.opacity(0.12)), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .glassEffect(.regular.tint(accentColor.opacity(0.12)), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
             }
         }
     }
@@ -260,7 +290,7 @@ struct SkillDetailSheet: View {
                         HStack(spacing: 8) {
                             Image(systemName: fileIcon(for: file))
                                 .font(TronTypography.sans(size: TronTypography.sizeBodySM))
-                                .foregroundStyle(.tronCyan.opacity(0.8))
+                                .foregroundStyle(accentColor.opacity(0.8))
 
                             Text(file)
                                 .font(TronTypography.mono(size: TronTypography.sizeBodySM))
@@ -272,7 +302,7 @@ struct SkillDetailSheet: View {
                         .background {
                             RoundedRectangle(cornerRadius: 8, style: .continuous)
                                 .fill(.clear)
-                                .glassEffect(.regular.tint(Color.tronCyan.opacity(0.15)), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                                .glassEffect(.regular.tint(accentColor.opacity(0.15)), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
                         }
                     }
                 }
@@ -280,7 +310,7 @@ struct SkillDetailSheet: View {
                 .background {
                     RoundedRectangle(cornerRadius: 12, style: .continuous)
                         .fill(.clear)
-                        .glassEffect(.regular.tint(Color.tronCyan.opacity(0.12)), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        .glassEffect(.regular.tint(accentColor.opacity(0.12)), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
                 }
             }
         }
