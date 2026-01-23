@@ -77,6 +77,18 @@ export interface ApiToolResultBlock {
   is_error?: boolean;
 }
 
+/**
+ * Internal-format tool_result content block.
+ * Used when tool results appear as content blocks (e.g., in normalized messages).
+ * This is the counterpart to ApiToolResultBlock, using internal field names.
+ */
+export interface InternalToolResultBlock {
+  type: 'tool_result';
+  toolCallId: string;
+  content: string;
+  isError?: boolean;
+}
+
 // =============================================================================
 // Conversion Utilities (internal ↔ API format)
 // =============================================================================
@@ -274,6 +286,22 @@ export function isApiToolResultBlock(block: unknown): block is ApiToolResultBloc
     (block as ApiToolResultBlock).type === 'tool_result' &&
     typeof (block as ApiToolResultBlock).tool_use_id === 'string'
   );
+}
+
+export function isInternalToolResultBlock(block: unknown): block is InternalToolResultBlock {
+  return (
+    typeof block === 'object' &&
+    block !== null &&
+    (block as InternalToolResultBlock).type === 'tool_result' &&
+    typeof (block as InternalToolResultBlock).toolCallId === 'string'
+  );
+}
+
+/**
+ * Check if block is a tool_result in either API or internal format.
+ */
+export function isAnyToolResultBlock(block: unknown): block is ApiToolResultBlock | InternalToolResultBlock {
+  return isApiToolResultBlock(block) || isInternalToolResultBlock(block);
 }
 
 export function isApiToolUseBlock(block: unknown): block is ApiToolUseBlock {

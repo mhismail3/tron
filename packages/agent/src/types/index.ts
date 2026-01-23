@@ -29,6 +29,8 @@ export type {
   // API-format types for persistence and wire format
   ApiToolUseBlock,
   ApiToolResultBlock,
+  // Internal-format type for tool result content blocks
+  InternalToolResultBlock,
 } from './messages.js';
 
 export {
@@ -41,6 +43,8 @@ export {
   isThinkingContent,
   isApiToolResultBlock,
   isApiToolUseBlock,
+  isInternalToolResultBlock,
+  isAnyToolResultBlock,
   extractText,
   extractToolCalls,
   // Conversion utilities for internal ↔ API format

@@ -502,9 +502,9 @@ describe('Event Ordering - Linear Chain', () => {
       const assistantContent1 = messages[1].content as any[];
       expect(assistantContent1.some(b => b.type === 'tool_use')).toBe(true);
 
-      expect(messages[2].role).toBe('user');
-      const userToolResult = messages[2].content as any[];
-      expect(userToolResult[0].type).toBe('tool_result');
+      expect(messages[2].role).toBe('toolResult');
+      expect((messages[2] as any).toolCallId).toBe('tc_fork');
+      expect((messages[2] as any).content).toBe('File contents');
 
       expect(messages[3].role).toBe('assistant');
       const assistantContent2 = messages[3].content as any[];
@@ -637,11 +637,11 @@ describe('Event Ordering - Linear Chain', () => {
       // Verify messages can be reconstructed
       const messages = await eventStore.getMessagesAtHead(sessionId);
 
-      // user → assistant(tool_use) → user(tool_result) → assistant → user
+      // user → assistant(tool_use) → toolResult → assistant → user
       expect(messages.length).toBe(5);
 
       const roles = messages.map(m => m.role);
-      expect(roles).toEqual(['user', 'assistant', 'user', 'assistant', 'user']);
+      expect(roles).toEqual(['user', 'assistant', 'toolResult', 'assistant', 'user']);
 
       // Verify last message is the new one
       expect(messages[4].content).toBe('Now read file1.txt');
@@ -911,16 +911,16 @@ describe('Event Ordering - Edge Cases', () => {
       const messages1 = await eventStore.getMessagesAtHead(fork1.session.id);
       const messages2 = await eventStore.getMessagesAtHead(fork2.session.id);
 
-      // Both should have: user → assistant(tool_use) → user(tool_result)
+      // Both should have: user → assistant(tool_use) → toolResult
       expect(messages1.length).toBe(3);
       expect(messages2.length).toBe(3);
 
-      // Verify role alternation in both
+      // Verify role sequence in both
       const roles1 = messages1.map(m => m.role);
       const roles2 = messages2.map(m => m.role);
 
-      expect(roles1).toEqual(['user', 'assistant', 'user']);
-      expect(roles2).toEqual(['user', 'assistant', 'user']);
+      expect(roles1).toEqual(['user', 'assistant', 'toolResult']);
+      expect(roles2).toEqual(['user', 'assistant', 'toolResult']);
     });
   });
 });

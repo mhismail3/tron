@@ -128,17 +128,16 @@ describe('Agentic Loop Message Reconstruction', () => {
       expect((messages[1].content as any[])[0].type).toBe('text');
       expect((messages[1].content as any[])[1].type).toBe('tool_use');
 
-      expect(messages[2].role).toBe('user');
-      expect(Array.isArray(messages[2].content)).toBe(true);
-      expect((messages[2].content as any[])[0].type).toBe('tool_result');
-      expect((messages[2].content as any[])[0].tool_use_id).toBe('tc_1');
+      expect(messages[2].role).toBe('toolResult');
+      expect((messages[2] as any).toolCallId).toBe('tc_1');
+      expect((messages[2] as any).content).toBe('Contents of file1');
 
       expect(messages[3].role).toBe('assistant');
       expect((messages[3].content as any[])[1].type).toBe('tool_use');
 
-      expect(messages[4].role).toBe('user');
-      expect((messages[4].content as any[])[0].type).toBe('tool_result');
-      expect((messages[4].content as any[])[0].tool_use_id).toBe('tc_2');
+      expect(messages[4].role).toBe('toolResult');
+      expect((messages[4] as any).toolCallId).toBe('tc_2');
+      expect((messages[4] as any).content).toBe('Contents of file2');
 
       expect(messages[5].role).toBe('assistant');
       expect((messages[5].content as any[])[0].text).toContain('both files');
@@ -189,20 +188,19 @@ describe('Agentic Loop Message Reconstruction', () => {
 
       const messages = await eventStore.getMessagesAtHead(sessionId);
 
-      // Expected: 4 messages
-      // user -> assistant(tool_use x2) -> user(tool_result x2) -> assistant
-      expect(messages.length).toBe(4);
+      // Expected: 5 messages
+      // user -> assistant(tool_use x2) -> toolResult -> toolResult -> assistant
+      expect(messages.length).toBe(5);
 
       expect(messages[0].role).toBe('user');
       expect(messages[1].role).toBe('assistant');
-      expect(messages[2].role).toBe('user');
-      expect(messages[3].role).toBe('assistant');
+      expect(messages[2].role).toBe('toolResult');
+      expect(messages[3].role).toBe('toolResult');
+      expect(messages[4].role).toBe('assistant');
 
-      // Tool results should be combined in one user message
-      const toolResultMsg = messages[2].content as any[];
-      expect(toolResultMsg.length).toBe(2);
-      expect(toolResultMsg[0].tool_use_id).toBe('tc_ls');
-      expect(toolResultMsg[1].tool_use_id).toBe('tc_read');
+      // Each tool result should be a separate toolResult message
+      expect((messages[2] as any).toolCallId).toBe('tc_ls');
+      expect((messages[3] as any).toolCallId).toBe('tc_read');
     });
   });
 
@@ -372,10 +370,10 @@ describe('Agentic Loop Message Reconstruction', () => {
         expect(roles[i]).not.toBe(roles[i + 1]);
       }
 
-      // Verify structure: user, assistant, user(tool_result), assistant, user(tool_result), assistant, user
+      // Verify structure: user, assistant, toolResult, assistant, toolResult, assistant, user
       // Note: The final user message doesn't need tool_result injection because no assistant follows
       expect(messages.length).toBe(7);
-      expect(roles).toEqual(['user', 'assistant', 'user', 'assistant', 'user', 'assistant', 'user']);
+      expect(roles).toEqual(['user', 'assistant', 'toolResult', 'assistant', 'toolResult', 'assistant', 'user']);
     });
 
     it('should handle session with multiple agentic turns properly', async () => {
@@ -436,9 +434,9 @@ describe('Agentic Loop Message Reconstruction', () => {
         expect(roles[i]).not.toBe(roles[i + 1]);
       }
 
-      // Expected: user, assistant, user(tool_result), assistant, user, assistant
+      // Expected: user, assistant, toolResult, assistant, user, assistant
       expect(messages.length).toBe(6);
-      expect(roles).toEqual(['user', 'assistant', 'user', 'assistant', 'user', 'assistant']);
+      expect(roles).toEqual(['user', 'assistant', 'toolResult', 'assistant', 'user', 'assistant']);
     });
   });
 
@@ -484,9 +482,9 @@ describe('Agentic Loop Message Reconstruction', () => {
 
       expect(messages.length).toBe(4);
 
-      // Verify error flag is preserved
-      const toolResultContent = messages[2].content as any[];
-      expect(toolResultContent[0].is_error).toBe(true);
+      // Verify error flag is preserved in toolResult message
+      expect(messages[2].role).toBe('toolResult');
+      expect((messages[2] as any).isError).toBe(true);
     });
 
     it('should handle compaction boundary in agentic session', async () => {
@@ -561,9 +559,9 @@ describe('Agentic Loop Message Reconstruction', () => {
       expect(messages[0].content).toContain('Previous conversation');
       expect((messages[1].content as any[])[0].text).toContain('understand');
 
-      // Verify proper alternation after compaction
+      // Verify proper structure after compaction - tool results are toolResult messages
       const roles = messages.map(m => m.role);
-      expect(roles).toEqual(['user', 'assistant', 'user', 'assistant', 'user', 'assistant']);
+      expect(roles).toEqual(['user', 'assistant', 'user', 'assistant', 'toolResult', 'assistant']);
     });
 
     it('should handle context.cleared in agentic session', async () => {
@@ -658,9 +656,9 @@ describe('Agentic Loop Message Reconstruction', () => {
 
       expect(messages.length).toBe(4);
 
-      // Empty content should still be included
-      const toolResultContent = messages[2].content as any[];
-      expect(toolResultContent[0].content).toBe('');
+      // Empty content should still be included in toolResult message
+      expect(messages[2].role).toBe('toolResult');
+      expect((messages[2] as any).content).toBe('');
     });
   });
 });

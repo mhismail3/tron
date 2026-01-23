@@ -771,10 +771,10 @@ describe('Event Store Enhancements', () => {
         payload: { turn: 1, tokenUsage: { inputTokens: 100, outputTokens: 50 } },
       });
 
-      // Reconstruct messages - tool.result events are NOT reconstructed as separate messages
-      // Tool results are stored in message.user events (at turn end) for proper sequencing
-      // This test only has tool.result events without corresponding message.user events,
-      // so we expect just user + assistant messages
+      // Reconstruct messages - tool.result events are only flushed when the PRECEDING
+      // assistant message has tool_use blocks. In this test, the assistant message
+      // is after tool.result and doesn't have tool_use blocks, so the tool.result
+      // is not associated with any agentic flow and gets discarded.
       const messages = await eventStore.getMessagesAtHead(sessionId);
       expect(messages.length).toBe(2);
       expect(messages[0].role).toBe('user');
@@ -959,9 +959,13 @@ describe('Event Store Enhancements', () => {
       expect(eventCounts['tool.result']).toBe(1);
 
       // Verify messages reconstruction
-      // Tool results are stored in message.user events for proper API sequencing
+      // In this test, there are TWO ways tool results appear:
+      // 1. Discrete tool.result event (becomes toolResult message)
+      // 2. Legacy message.user event with tool_result content (remains as user message)
+      // Both are present in reconstruction for backward compatibility
       const messages = await eventStore.getMessagesAtHead(sessionId);
-      expect(messages.length).toBe(4); // 1 user + 1 assistant + 1 user (tool_result) + 1 assistant
+      // 1 user + 1 assistant(tool_use) + 1 toolResult + 1 user(legacy tool_result) + 1 assistant = 5
+      expect(messages.length).toBe(5);
 
       // Verify state includes correct token totals
       const state = await eventStore.getStateAtHead(sessionId);

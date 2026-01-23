@@ -1525,7 +1525,7 @@ describe('EventStore', () => {
         expect(lastUser[1]!.text).toBe('Fork message');
       });
 
-      it('should include tool.result as user message in getStateAtHead for forked session', async () => {
+      it('should include tool.result as toolResult messages in getStateAtHead for forked session', async () => {
         // Create a session with tool calls (simulating agentic loop)
         await store.append({
           sessionId,
@@ -1547,7 +1547,7 @@ describe('EventStore', () => {
           },
         });
 
-        // Tool results (these should become a user message)
+        // Tool results (these should become toolResult messages)
         await store.append({
           sessionId,
           type: 'tool.result',
@@ -1566,23 +1566,18 @@ describe('EventStore', () => {
         // Get state at head of forked session (this is what resumeSession uses)
         const state = await store.getStateAtHead(forkResult.session.id);
 
-        // Should have: user -> assistant(tool_use) -> user(tool_result)
-        expect(state.messages.length).toBe(3);
+        // Should have: user -> assistant(tool_use) -> toolResult -> toolResult
+        expect(state.messages.length).toBe(4);
         expect(state.messages[0]!.role).toBe('user');
         expect(state.messages[1]!.role).toBe('assistant');
-        expect(state.messages[2]!.role).toBe('user'); // Tool results as user message
+        expect(state.messages[2]!.role).toBe('toolResult');
+        expect(state.messages[3]!.role).toBe('toolResult');
 
         // Verify the tool results are properly formatted
-        const toolResultMsg = state.messages[2]!.content as Array<{
-          type: string;
-          tool_use_id: string;
-          content: string;
-        }>;
-        expect(toolResultMsg.length).toBe(2);
-        expect(toolResultMsg[0]!.type).toBe('tool_result');
-        expect(toolResultMsg[0]!.tool_use_id).toBe('tc_1');
-        expect(toolResultMsg[1]!.type).toBe('tool_result');
-        expect(toolResultMsg[1]!.tool_use_id).toBe('tc_2');
+        expect((state.messages[2] as any).toolCallId).toBe('tc_1');
+        expect((state.messages[2] as any).content).toBe('Content of a.ts');
+        expect((state.messages[3] as any).toolCallId).toBe('tc_2');
+        expect((state.messages[3] as any).content).toBe('Content of b.ts');
       });
 
       it('should handle fork after multi-turn agentic loop with tool calls', async () => {
@@ -1645,24 +1640,22 @@ describe('EventStore', () => {
 
         const state = await store.getStateAtHead(forkResult.session.id);
 
-        // Should have proper alternating structure:
-        // user -> assistant(tool_use) -> user(tool_result) -> assistant(tool_use) -> user(tool_result) -> assistant(final)
+        // Should have proper structure with toolResult messages:
+        // user -> assistant(tool_use) -> toolResult -> assistant(tool_use) -> toolResult -> assistant(final)
         expect(state.messages.length).toBe(6);
         expect(state.messages[0]!.role).toBe('user');
         expect(state.messages[1]!.role).toBe('assistant'); // tool_use tc_1
-        expect(state.messages[2]!.role).toBe('user'); // tool_result tc_1
+        expect(state.messages[2]!.role).toBe('toolResult'); // tool_result tc_1
         expect(state.messages[3]!.role).toBe('assistant'); // tool_use tc_2
-        expect(state.messages[4]!.role).toBe('user'); // tool_result tc_2
+        expect(state.messages[4]!.role).toBe('toolResult'); // tool_result tc_2
         expect(state.messages[5]!.role).toBe('assistant'); // final response
 
-        // Verify tool results are properly included
-        const toolResult1 = state.messages[2]!.content as Array<{ type: string; tool_use_id: string }>;
-        expect(toolResult1[0]!.type).toBe('tool_result');
-        expect(toolResult1[0]!.tool_use_id).toBe('tc_1');
+        // Verify tool results are properly included as toolResult messages
+        expect((state.messages[2] as any).toolCallId).toBe('tc_1');
+        expect((state.messages[2] as any).content).toBe('File X content');
 
-        const toolResult2 = state.messages[4]!.content as Array<{ type: string; tool_use_id: string }>;
-        expect(toolResult2[0]!.type).toBe('tool_result');
-        expect(toolResult2[0]!.tool_use_id).toBe('tc_2');
+        expect((state.messages[4] as any).toolCallId).toBe('tc_2');
+        expect((state.messages[4] as any).content).toBe('File Y content');
       });
     });
   });

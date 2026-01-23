@@ -128,20 +128,20 @@ export function reconstructFromEvents(ancestors: SessionEvent[]): Reconstruction
   // Accumulate tool results to inject as user messages when needed for agentic loops
   let pendingToolResults: Array<{ toolCallId: string; content: string; isError?: boolean }> = [];
 
-  // Helper to flush pending tool results as a user message
+  // Helper to flush pending tool results as proper ToolResultMessage objects
+  // This outputs the canonical internal format (role: 'toolResult', toolCallId, isError)
+  // instead of the legacy format (role: 'user' with tool_result content blocks)
   const flushToolResults = () => {
     if (pendingToolResults.length > 0) {
-      const toolResultContent = pendingToolResults.map((tr) => ({
-        type: 'tool_result' as const,
-        tool_use_id: tr.toolCallId,
-        content: tr.content,
-        is_error: tr.isError,
-      })) as unknown as Message['content'];
-      messages.push({
-        role: 'user',
-        content: toolResultContent,
-      });
-      messageEventIds.push(undefined); // Synthetic message from tool results
+      for (const tr of pendingToolResults) {
+        messages.push({
+          role: 'toolResult',
+          toolCallId: tr.toolCallId,
+          content: tr.content,
+          isError: tr.isError ?? false,
+        });
+        messageEventIds.push(undefined); // Synthetic message from tool results
+      }
       pendingToolResults = [];
     }
   };
