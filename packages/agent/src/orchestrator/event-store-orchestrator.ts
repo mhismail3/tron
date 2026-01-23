@@ -743,12 +743,19 @@ export class EventStoreOrchestrator extends EventEmitter {
       const messageContent = isSimpleTextOnly ? options.prompt : userContent;
 
       // Record user message event (linearized via SessionContext)
-      // Build payload with optional skills for chat history display
-      const userMsgPayload: { content: unknown; skills?: { name: string; source: string }[] } = {
+      // Build payload with optional skills and spells for chat history display
+      const userMsgPayload: {
+        content: unknown;
+        skills?: { name: string; source: string }[];
+        spells?: { name: string; source: string }[];
+      } = {
         content: messageContent,
       };
       if (options.skills && options.skills.length > 0) {
         userMsgPayload.skills = options.skills.map(s => ({ name: s.name, source: s.source }));
+      }
+      if (options.spells && options.spells.length > 0) {
+        userMsgPayload.spells = options.spells.map(s => ({ name: s.name, source: s.source }));
       }
 
       const userMsgEvent = await active.sessionContext!.appendEvent('message.user', userMsgPayload);

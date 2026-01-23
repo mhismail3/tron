@@ -18,8 +18,10 @@ struct UserMessagePayload {
     let isToolResultContext: Bool
     /// Attachments to this message (images, PDFs, documents)
     let attachments: [Attachment]?
-    /// Skills referenced in this message (rendered as chips above the message)
+    /// Skills referenced in this message (rendered as cyan chips above the message)
     let skills: [Skill]?
+    /// Spells referenced in this message (ephemeral skills, rendered as pink chips)
+    let spells: [Skill]?
 
     init?(from payload: [String: AnyCodable]) {
         var extractedAttachments: [Attachment] = []
@@ -128,6 +130,26 @@ struct UserMessagePayload {
             }
         } else {
             self.skills = nil
+        }
+
+        // Parse spells from payload (ephemeral skills)
+        if let spellsArray = payload["spells"]?.value as? [[String: Any]] {
+            self.spells = spellsArray.compactMap { spellDict -> Skill? in
+                guard let name = spellDict["name"] as? String else { return nil }
+                let sourceString = spellDict["source"] as? String ?? "project"
+                let source: SkillSource = sourceString == "global" ? .global : .project
+                let displayName = spellDict["displayName"] as? String ?? name
+                return Skill(
+                    name: name,
+                    displayName: displayName,
+                    description: "",
+                    source: source,
+                    autoInject: false,
+                    tags: nil
+                )
+            }
+        } else {
+            self.spells = nil
         }
     }
 }

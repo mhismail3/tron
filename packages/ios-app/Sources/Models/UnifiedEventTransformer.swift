@@ -273,15 +273,16 @@ struct UnifiedEventTransformer {
             )
         }
 
-        // Skip empty user messages (unless they have attachments or skills)
-        guard !parsed.content.isEmpty || parsed.attachments != nil || parsed.skills != nil else { return nil }
+        // Skip empty user messages (unless they have attachments, skills, or spells)
+        guard !parsed.content.isEmpty || parsed.attachments != nil || parsed.skills != nil || parsed.spells != nil else { return nil }
 
         return ChatMessage(
             role: .user,
             content: .text(parsed.content),
             timestamp: timestamp,
             attachments: parsed.attachments,
-            skills: parsed.skills
+            skills: parsed.skills,
+            spells: parsed.spells
         )
     }
 
