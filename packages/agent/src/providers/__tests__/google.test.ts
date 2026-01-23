@@ -455,6 +455,50 @@ describe('Google Gemini Provider', () => {
       expect(requestBody.generationConfig?.thinkingConfig?.thinkingLevel).toBe('MEDIUM');
     });
 
+    it('should use model defaultThinkingLevel when no explicit level configured', async () => {
+      // Create provider WITHOUT explicit thinkingLevel - should use model default
+      const provider = new GoogleProvider({
+        auth: createApiKeyAuth(),
+        model: 'gemini-3-flash-preview', // defaultThinkingLevel: 'low'
+      });
+
+      const mockStreamData = [
+        'data: {"candidates":[{"content":{"parts":[{"text":"Hello"}],"role":"model"},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":10,"candidatesTokenCount":1,"totalTokenCount":11}}\n\n',
+      ];
+
+      const encoder = new TextEncoder();
+      let dataIndex = 0;
+
+      const mockReadableStream = new ReadableStream({
+        pull(controller) {
+          if (dataIndex < mockStreamData.length) {
+            controller.enqueue(encoder.encode(mockStreamData[dataIndex]));
+            dataIndex++;
+          } else {
+            controller.close();
+          }
+        },
+      });
+
+      global.fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        body: mockReadableStream,
+      });
+
+      const context = {
+        messages: [{ role: 'user' as const, content: 'Hello' }],
+      };
+
+      for await (const _ of provider.stream(context)) {
+        // consume stream
+      }
+
+      const fetchCall = (global.fetch as any).mock.calls[0];
+      const requestBody = JSON.parse(fetchCall[1].body);
+      // Flash default is 'low' -> 'LOW'
+      expect(requestBody.generationConfig?.thinkingConfig?.thinkingLevel).toBe('LOW');
+    });
+
     it('should use thinkingBudget for Gemini 2.5 models', async () => {
       const provider = new GoogleProvider({
         auth: createApiKeyAuth(),

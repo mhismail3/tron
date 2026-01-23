@@ -656,7 +656,8 @@ export class GoogleProvider {
       };
 
       // Add thinking config based on model version
-      const thinkingLevel = options.thinkingLevel ?? this.config.thinkingLevel;
+      const modelInfo = GEMINI_MODELS[model];
+      const thinkingLevel = options.thinkingLevel ?? this.config.thinkingLevel ?? modelInfo?.defaultThinkingLevel;
       const thinkingBudget = options.thinkingBudget ?? this.config.thinkingBudget;
 
       if (isGemini3 && thinkingLevel) {
