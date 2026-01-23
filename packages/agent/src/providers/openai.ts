@@ -572,36 +572,17 @@ export class OpenAIProvider {
     // Convert messages with remapped IDs
     for (const msg of context.messages) {
       if (msg.role === 'user') {
-        // Cast to handle both standard UserContent and legacy tool_result blocks
-        // (message reconstructor outputs tool results as user messages with tool_result content)
-        const contentArray = typeof msg.content === 'string'
-          ? [{ type: 'text' as const, text: msg.content }]
-          : (msg.content as unknown as Array<{ type: string; [key: string]: unknown }>);
+        const content = typeof msg.content === 'string'
+          ? msg.content
+          : msg.content
+              .filter(c => c.type === 'text')
+              .map(c => (c as TextContent).text)
+              .join('\n');
 
-        // Extract text content
-        const textParts = contentArray
-          .filter(c => c.type === 'text')
-          .map(c => c.text as string);
-
-        if (textParts.length > 0) {
+        if (content) {
           messages.push({
             role: 'user',
-            content: textParts.join('\n'),
-          });
-        }
-
-        // Handle tool_result content blocks (from reconstructed messages - legacy format)
-        // This is how message-reconstructor currently outputs tool results:
-        // as user messages with tool_result content blocks
-        const toolResults = contentArray.filter(c => c.type === 'tool_result');
-        for (const tr of toolResults) {
-          // Support both API format (tool_use_id) and internal format (toolCallId)
-          const callId = (tr.tool_use_id ?? tr.toolCallId ?? '') as string;
-
-          messages.push({
-            role: 'tool',
-            tool_call_id: idMapping.get(callId) ?? callId,
-            content: tr.content as string,
+            content,
           });
         }
       } else if (msg.role === 'assistant') {

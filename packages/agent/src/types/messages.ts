@@ -33,6 +33,12 @@ export interface ToolCall {
   id: string;
   name: string;
   arguments: Record<string, unknown>;
+  /**
+   * Thought signature for Gemini 3 models.
+   * Required when replaying function calls back to Gemini.
+   * If missing when converting for Gemini, a skip validator placeholder is used.
+   */
+  thoughtSignature?: string;
 }
 
 /**

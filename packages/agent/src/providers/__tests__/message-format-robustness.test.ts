@@ -1,9 +1,8 @@
 /**
  * @fileoverview Message Format Robustness Tests
  *
- * Tests that all providers correctly handle both message formats:
- * 1. Internal format: role='toolResult' with toolCallId, isError
- * 2. Legacy/API format: role='user' with tool_result content blocks
+ * Tests that all providers correctly handle the internal message format:
+ * - role='toolResult' with toolCallId, isError
  *
  * This is critical for:
  * - Session fork/resume across provider switches
@@ -89,66 +88,6 @@ describe('Message Format Robustness', () => {
       expect(functionOutput.output).toBe('Tool result content');
     });
 
-    it('should handle user messages with tool_result content (legacy/reconstructed format)', () => {
-      // This is how message-reconstructor currently outputs tool results
-      const messages: Message[] = [
-        ...baseMessages,
-        {
-          role: 'user',
-          content: [
-            {
-              type: 'tool_result',
-              tool_use_id: 'call_123',
-              content: 'Tool result content',
-              is_error: false,
-            },
-          ] as any,
-        },
-      ];
-
-      const provider = new OpenAICodexProvider({
-        model: 'gpt-5.2-codex',
-        auth: { type: 'oauth', accessToken: 'test', refreshToken: 'test', expiresAt: Date.now() + 3600000 },
-      });
-
-      const input = (provider as any).convertToResponsesInput(createContext(messages));
-
-      // Should include function_call_output from the tool_result block
-      const functionOutput = input.find((i: any) => i.type === 'function_call_output');
-      expect(functionOutput).toBeDefined();
-      expect(functionOutput.call_id).toBe('call_123');
-      expect(functionOutput.output).toBe('Tool result content');
-    });
-
-    it('should handle internal format toolCallId in user messages', () => {
-      // Mixed format: tool_result with internal naming (toolCallId instead of tool_use_id)
-      const messages: Message[] = [
-        ...baseMessages,
-        {
-          role: 'user',
-          content: [
-            {
-              type: 'tool_result',
-              toolCallId: 'call_123', // Internal format
-              content: 'Tool result content',
-              isError: false, // Internal format
-            },
-          ] as any,
-        },
-      ];
-
-      const provider = new OpenAICodexProvider({
-        model: 'gpt-5.2-codex',
-        auth: { type: 'oauth', accessToken: 'test', refreshToken: 'test', expiresAt: Date.now() + 3600000 },
-      });
-
-      const input = (provider as any).convertToResponsesInput(createContext(messages));
-
-      const functionOutput = input.find((i: any) => i.type === 'function_call_output');
-      expect(functionOutput).toBeDefined();
-      expect(functionOutput.call_id).toBe('call_123');
-    });
-
     it('should handle Anthropic tool call IDs with remapping', () => {
       // Anthropic format tool call ID
       const messages: Message[] = [
@@ -206,13 +145,18 @@ describe('Message Format Robustness', () => {
             { type: 'tool_use', id: 'call_2', name: 'TestTool', arguments: { arg: '2' } },
           ],
         },
-        // Tool results as user message with content array (reconstructed format)
+        // Multiple tool results using internal format
         {
-          role: 'user',
-          content: [
-            { type: 'tool_result', tool_use_id: 'call_1', content: 'Result 1' },
-            { type: 'tool_result', tool_use_id: 'call_2', content: 'Result 2' },
-          ] as any,
+          role: 'toolResult',
+          toolCallId: 'call_1',
+          content: 'Result 1',
+          isError: false,
+        },
+        {
+          role: 'toolResult',
+          toolCallId: 'call_2',
+          content: 'Result 2',
+          isError: false,
         },
       ];
 
@@ -258,35 +202,6 @@ describe('Message Format Robustness', () => {
       expect(toolMessage.content).toBe('Tool result content');
     });
 
-    it('should handle user messages with tool_result content (legacy format)', () => {
-      const messages: Message[] = [
-        ...baseMessages,
-        {
-          role: 'user',
-          content: [
-            {
-              type: 'tool_result',
-              tool_use_id: 'call_123',
-              content: 'Tool result content',
-              is_error: false,
-            },
-          ] as any,
-        },
-      ];
-
-      const provider = new OpenAIProvider({
-        model: 'gpt-4o',
-        apiKey: 'test-key',
-      });
-
-      const converted = (provider as any).convertMessages(createContext(messages));
-
-      // Should convert to tool message
-      const toolMessage = converted.find((m: any) => m.role === 'tool');
-      expect(toolMessage).toBeDefined();
-      expect(toolMessage.tool_call_id).toBe('call_123');
-      expect(toolMessage.content).toBe('Tool result content');
-    });
   });
 
   describe('Google Provider', () => {
@@ -315,34 +230,5 @@ describe('Message Format Robustness', () => {
       expect(userWithFunctionResponse).toBeDefined();
     });
 
-    it('should handle user messages with tool_result content (legacy format)', () => {
-      const messages: Message[] = [
-        ...baseMessages,
-        {
-          role: 'user',
-          content: [
-            {
-              type: 'tool_result',
-              tool_use_id: 'call_123',
-              content: 'Tool result content',
-              is_error: false,
-            },
-          ] as any,
-        },
-      ];
-
-      const provider = new GoogleProvider({
-        model: 'gemini-2.5-pro',
-        auth: { type: 'api_key', apiKey: 'test-key' },
-      });
-
-      const converted = (provider as any).convertMessages(createContext(messages));
-
-      // Should convert to functionResponse
-      const userWithFunctionResponse = converted.find(
-        (c: any) => c.parts?.some((p: any) => p.functionResponse)
-      );
-      expect(userWithFunctionResponse).toBeDefined();
-    });
   });
 });

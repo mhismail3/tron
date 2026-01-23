@@ -145,8 +145,8 @@ interface GeminiContent {
 }
 
 type GeminiPart =
-  | { text: string; thought?: boolean }
-  | { functionCall: { name: string; args: Record<string, unknown> } }
+  | { text: string; thought?: boolean; thoughtSignature?: string }
+  | { functionCall: { name: string; args: Record<string, unknown> }; thoughtSignature?: string }
   | { functionResponse: { name: string; response: Record<string, unknown> } };
 
 interface GeminiTool {
@@ -806,7 +806,7 @@ export class GoogleProvider {
       let buffer = '';
       let accumulatedText = '';
       let accumulatedThinking = '';
-      const toolCalls: Array<{ id: string; name: string; args: Record<string, unknown> }> = [];
+      const toolCalls: Array<{ id: string; name: string; args: Record<string, unknown>; thoughtSignature?: string }> = [];
       let inputTokens = 0;
       let outputTokens = 0;
       let textStarted = false;
@@ -894,6 +894,8 @@ export class GoogleProvider {
               if ('functionCall' in part) {
                 const fc = part.functionCall;
                 const id = `call_${toolCallIndex++}`;
+                // thoughtSignature is at the part level, not inside functionCall
+                const thoughtSig = (part as { thoughtSignature?: string }).thoughtSignature;
 
                 yield {
                   type: 'toolcall_start',
@@ -911,6 +913,8 @@ export class GoogleProvider {
                   id,
                   name: fc.name,
                   args: fc.args,
+                  // Capture thoughtSignature for Gemini 3 multi-turn function calling
+                  thoughtSignature: thoughtSig,
                 });
 
                 const toolCall: ToolCall = {
@@ -918,6 +922,8 @@ export class GoogleProvider {
                   id,
                   name: fc.name,
                   arguments: fc.args,
+                  // Include thoughtSignature so it's preserved in events
+                  thoughtSignature: thoughtSig,
                 };
                 yield { type: 'toolcall_end', toolCall };
               }
@@ -962,6 +968,8 @@ export class GoogleProvider {
                   id: tc.id,
                   name: tc.name,
                   arguments: tc.args,
+                  // Preserve thought_signature for Gemini 3 multi-turn conversations
+                  ...(tc.thoughtSignature && { thoughtSignature: tc.thoughtSignature }),
                 });
               }
 
@@ -1037,46 +1045,20 @@ export class GoogleProvider {
     for (const msg of context.messages) {
       if (msg.role === 'user') {
         const parts: GeminiPart[] = [];
-        const toolResultParts: GeminiPart[] = [];
 
         if (typeof msg.content === 'string') {
           parts.push({ text: msg.content });
         } else {
-          // Cast to handle both standard UserContent and legacy tool_result blocks
-          // (message reconstructor outputs tool results as user messages with tool_result content)
-          const contentArray = msg.content as unknown as Array<{ type: string; [key: string]: unknown }>;
-          for (const c of contentArray) {
+          for (const c of msg.content) {
             if (c.type === 'text') {
-              parts.push({ text: c.text as string });
-            } else if (c.type === 'tool_result') {
-              // Handle tool_result content blocks (from reconstructed messages - legacy format)
-              // This is how message-reconstructor currently outputs tool results:
-              // as user messages with tool_result content blocks
-              // Support both API format (tool_use_id) and internal format (toolCallId)
-              const callId = (c.tool_use_id ?? c.toolCallId ?? '') as string;
-
-              toolResultParts.push({
-                functionResponse: {
-                  name: 'tool_result',
-                  response: {
-                    result: c.content as string,
-                    tool_call_id: idMapping.get(callId) ?? callId,
-                  },
-                },
-              });
+              parts.push({ text: c.text });
             }
             // Note: Image handling would go here for multimodal
           }
         }
 
-        // Add text parts as user message
         if (parts.length > 0) {
           contents.push({ role: 'user', parts });
-        }
-
-        // Add tool results as separate user turn with functionResponse
-        if (toolResultParts.length > 0) {
-          contents.push({ role: 'user', parts: toolResultParts });
         }
       } else if (msg.role === 'assistant') {
         const parts: GeminiPart[] = [];
@@ -1085,12 +1067,17 @@ export class GoogleProvider {
           if (c.type === 'text') {
             parts.push({ text: c.text });
           } else if (c.type === 'tool_use') {
+            // For Gemini 3, function calls require thoughtSignature at the part level.
+            // Use the stored signature if available (from previous Gemini responses),
+            // otherwise use the skip validator for historical function calls from other providers.
+            const thoughtSig = c.thoughtSignature || 'skip_thought_signature_validator';
             parts.push({
               functionCall: {
                 name: c.name,
                 args: c.arguments,
               },
-            });
+              thoughtSignature: thoughtSig,
+            } as GeminiPart);
           }
         }
 
