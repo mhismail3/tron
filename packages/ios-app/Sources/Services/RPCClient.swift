@@ -159,6 +159,46 @@ class RPCClient: ObservableObject {
         webSocket?.setBackgroundState(inBackground)
     }
 
+    /// Verify connection is alive (proxy to WebSocketService).
+    /// Returns true if connection responds to ping, false if dead.
+    func verifyConnection() async -> Bool {
+        guard let ws = webSocket else { return false }
+        return await ws.verifyConnection()
+    }
+
+    /// Force reconnect - cleans up existing connection and creates fresh one.
+    /// Use this when returning to foreground and connection is dead.
+    func forceReconnect() async {
+        logger.info("Force reconnecting...", category: .rpc)
+
+        // Clean up existing connection
+        webSocket?.disconnect()
+        webSocket = nil
+        cancellables.removeAll()
+        connectionState = .disconnected
+
+        // Small delay for cleanup
+        try? await Task.sleep(for: .milliseconds(100))
+
+        // Connect fresh
+        await connect()
+    }
+
+    /// Manual retry triggered from UI - resets backoff and attempts connection immediately.
+    /// Use this when user taps the reconnection pill.
+    func manualRetry() async {
+        logger.info("Manual retry triggered from UI", category: .rpc)
+
+        // If webSocket exists, delegate to its manualRetry (handles cancellation of in-progress reconnection)
+        if let ws = webSocket {
+            await ws.manualRetry()
+        } else {
+            // WebSocket was cleaned up (nil) - create fresh connection
+            // This can happen if disconnect() or forceReconnect() was called
+            await connect()
+        }
+    }
+
     // MARK: - Event Handling
 
     private func handleEventData(_ data: Data) {

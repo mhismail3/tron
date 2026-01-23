@@ -127,13 +127,32 @@ struct TronMobileApp: App {
                 eventStoreManager?.setBackgroundState(isBackground)
                 TronLogger.shared.info("Scene phase changed: \(oldPhase) -> \(newPhase), background=\(isBackground)", category: .session)
 
-                // Clear badge count when app becomes active
-                if newPhase == .active {
+                // When returning to foreground, handle reconnection based on current state
+                if newPhase == .active && oldPhase != .active {
                     Task {
+                        // Clear badge count
                         do {
                             try await UNUserNotificationCenter.current().setBadgeCount(0)
                         } catch {
                             TronLogger.shared.debug("Failed to clear badge: \(error)", category: .notification)
+                        }
+
+                        // Handle reconnection based on current connection state
+                        switch appState.rpcClient.connectionState {
+                        case .connected:
+                            // Verify connection is still alive
+                            let isAlive = await appState.rpcClient.verifyConnection()
+                            if !isAlive {
+                                TronLogger.shared.info("Connection dead on foreground return - reconnecting", category: .rpc)
+                                await appState.rpcClient.forceReconnect()
+                            }
+                        case .disconnected, .failed:
+                            // Trigger reconnection for disconnected/failed states
+                            TronLogger.shared.info("Triggering reconnection on foreground return (state: \(appState.rpcClient.connectionState))", category: .rpc)
+                            await appState.rpcClient.manualRetry()
+                        case .connecting, .reconnecting:
+                            // Already in progress, let it continue
+                            TronLogger.shared.debug("Reconnection already in progress on foreground return", category: .rpc)
                         }
                     }
                 }

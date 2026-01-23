@@ -141,6 +141,7 @@
 		C0629A9C0BD76E3873E8C114 /* EventTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0C697B4D1B8F6C85A423EAF5 /* EventTypes.swift */; };
 		C1EAE1A328D35F1B4F290205 /* ToolResultViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = CF073F6CCB005DB21A21BE2B /* ToolResultViews.swift */; };
 		C4D3F600444E9B277D6FB8B8 /* LineNumberedContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6A728932D4055DD33082C067 /* LineNumberedContentView.swift */; };
+		42A79146E48D851AC01C05D9 /* ConnectionStatusPill.swift in Sources */ = {isa = PBXBuildFile; fileRef = F89471F4347E4C2CD4A2D7D4 /* ConnectionStatusPill.swift */; };
 		C591192B9B46127C61E725EC /* WorktreeStatusView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 33342D92F24E04282ECE2DBA /* WorktreeStatusView.swift */; };
 		C5D9BF6461C33FF5131E7B42 /* ChatViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 25C6E368AD4411B086E35A61 /* ChatViewModel.swift */; };
 		C8D290D02B30EF31D86C253B /* WorkspaceSelector.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3F629B1556A7F9BA7B37205A /* WorkspaceSelector.swift */; };
@@ -266,6 +267,7 @@
 		69F056A4E371328F3B9EE047 /* EventStoreManager+Cache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "EventStoreManager+Cache.swift"; sourceTree = "<group>"; };
 		6A48F76F6C3DEB81551AB398 /* ContextSectionViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContextSectionViews.swift; sourceTree = "<group>"; };
 		6A728932D4055DD33082C067 /* LineNumberedContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LineNumberedContentView.swift; sourceTree = "<group>"; };
+		F89471F4347E4C2CD4A2D7D4 /* ConnectionStatusPill.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectionStatusPill.swift; sourceTree = "<group>"; };
 		6AC377B44A707E319C9A4C25 /* BrowserToolViewer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrowserToolViewer.swift; sourceTree = "<group>"; };
 		6C1612AACC366E0C97BAEB4B /* CloneRepoSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CloneRepoSheet.swift; sourceTree = "<group>"; };
 		6C5819BF31C41F9B52EEE13F /* AudioRecorder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioRecorder.swift; sourceTree = "<group>"; };
@@ -721,6 +723,7 @@
 			isa = PBXGroup;
 			children = (
 				EFB5AFF489C1ABD241AF9C61 /* ContentLineParser.swift */,
+				F89471F4347E4C2CD4A2D7D4 /* ConnectionStatusPill.swift */,
 				6A728932D4055DD33082C067 /* LineNumberedContentView.swift */,
 			);
 			path = Components;
@@ -995,6 +998,7 @@
 				91913D4D67A083554752DE1A /* InputTextField.swift in Sources */,
 				E032020849F9B91546E31278 /* InteractiveComponents.swift in Sources */,
 				740C090CEDFF2ABA31033F5A /* LayoutComponents.swift in Sources */,
+				42A79146E48D851AC01C05D9 /* ConnectionStatusPill.swift in Sources */,
 				C4D3F600444E9B277D6FB8B8 /* LineNumberedContentView.swift in Sources */,
 				7E5E03B3D452DA98E4B6F768 /* LogViewer.swift in Sources */,
 				35E00DB7B38895FF3C3A473E /* Message.swift in Sources */,

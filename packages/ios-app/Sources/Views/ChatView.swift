@@ -39,7 +39,6 @@ private struct ScrollOffsetPreferenceKey: PreferenceKey {
 @available(iOS 26.0, *)
 struct ChatView: View {
     @Environment(\.dismiss) private var dismiss
-    @Environment(\.scenePhase) private var scenePhase
     @EnvironmentObject var eventStoreManager: EventStoreManager
     @StateObject private var viewModel: ChatViewModel
     @StateObject private var inputHistory = InputHistoryStore()
@@ -188,7 +187,7 @@ struct ChatView: View {
                             showSkillDetailSheet = true
                         },
                         animationCoordinator: viewModel.animationCoordinator,
-                        readOnly: workspaceDeleted
+                        readOnly: workspaceDeleted || !viewModel.connectionState.canInteract
                     )
                     .id(sessionId)
                 }
@@ -504,11 +503,11 @@ struct ChatView: View {
             // Note: NO explicit scroll needed here - defaultScrollAnchor(.bottom) handles it
             initialLoadComplete = true
         }
-        .onChange(of: scenePhase) { oldPhase, newPhase in
-            // Reconnect and resume when returning to foreground
-            if oldPhase != .active && newPhase == .active {
+        .onChange(of: viewModel.connectionState) { oldState, newState in
+            // React when connection transitions to connected
+            if newState.isConnected && !oldState.isConnected {
                 Task {
-                    await viewModel.reconnectAndResume()
+                    await viewModel.connectAndResume()
                 }
             }
         }
@@ -716,6 +715,15 @@ struct ChatView: View {
                                 WorkspaceDeletedNotificationView()
                                     .id("workspaceDeleted")
                             }
+
+                            // Connection status pill - appears when not connected
+                            ConnectionStatusPill(
+                                connectionState: viewModel.connectionState,
+                                onRetry: { await rpcClient.manualRetry() }
+                            )
+                            .frame(maxWidth: .infinity)
+                            .padding(.top, 8)
+                            .id("connectionStatusPill")
 
                             // Scroll anchor with position detection for "at bottom" tracking
                             GeometryReader { geo in

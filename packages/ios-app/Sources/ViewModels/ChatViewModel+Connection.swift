@@ -37,9 +37,9 @@ extension ChatViewModel {
             if errorString.contains("not found") || errorString.contains("does not exist") {
                 logger.warning("Session \(sessionId) not found on server - dismissing view", category: .session)
                 shouldDismiss = true
+                showErrorAlert("Session not found on server")
             }
-
-            showErrorAlert("Failed to resume session: \(error.localizedDescription)")
+            // Don't show error alert for connection failures - the reconnection UI handles that
             return
         }
 

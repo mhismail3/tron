@@ -8,10 +8,22 @@ enum ConnectionState: Equatable, Sendable {
     case disconnected
     case connecting
     case connected
-    case reconnecting(attempt: Int)
+    case reconnecting(attempt: Int, nextRetrySeconds: Int)  // Enhanced with countdown
     case failed(reason: String)
 
     var isConnected: Bool {
+        if case .connected = self { return true }
+        return false
+    }
+
+    var isReconnecting: Bool {
+        if case .reconnecting = self { return true }
+        return false
+    }
+
+    /// Whether the user can interact with the session (send messages, etc.)
+    /// Only true when fully connected - reconnecting is read-only mode
+    var canInteract: Bool {
         if case .connected = self { return true }
         return false
     }
@@ -21,7 +33,7 @@ enum ConnectionState: Equatable, Sendable {
         case .disconnected: return "Disconnected"
         case .connecting: return "Connecting..."
         case .connected: return "Connected"
-        case .reconnecting(let attempt): return "Reconnecting (\(attempt))..."
+        case .reconnecting(let attempt, let seconds): return "Reconnecting (\(attempt)) in \(seconds)s..."
         case .failed(let reason): return "Failed: \(reason)"
         }
     }
@@ -61,9 +73,12 @@ final class WebSocketService: ObservableObject {
     private let serverURL: URL
     private var isConnectedFlag = false
     private var reconnectAttempts = 0
-    private let maxReconnectAttempts = 5
-    private let reconnectDelay: TimeInterval = 2.0
+    private let maxReconnectAttempts = 3  // Give up after 3 attempts
+    private let reconnectDelayPerAttempt: TimeInterval = 5.0  // 5 seconds per attempt
     private let requestTimeout: TimeInterval = 30.0
+
+    /// Task for reconnection (can be cancelled for manual retry)
+    private var reconnectTask: Task<Void, Never>?
 
     private var pendingRequests: [String: CheckedContinuation<Data, Error>] = [:]
     private var timeoutTasks: [String: Task<Void, Never>] = [:]
@@ -122,8 +137,10 @@ final class WebSocketService: ObservableObject {
         webSocketTask?.resume()
         logger.verbose("WebSocket task resumed", category: .websocket)
 
+        // Mark as connected optimistically - the receive loop will detect failures quickly
+        // Note: We do NOT reset reconnectAttempts here because we don't know if connection is real yet.
+        // It gets reset after a successful ping verifies the connection, or on manual retry.
         isConnectedFlag = true
-        reconnectAttempts = 0
         connectionState = .connected
         logger.logWebSocketState("Connected", details: "Successfully connected to \(serverURL.host ?? "unknown")")
         logger.info("Connected successfully to \(self.serverURL.absoluteString)", category: .websocket)
@@ -143,10 +160,15 @@ final class WebSocketService: ObservableObject {
         logger.logWebSocketState("Disconnecting")
         logger.info("Disconnecting from server", category: .websocket)
         isConnectedFlag = false
+
+        // Cancel all background tasks
         pingTask?.cancel()
         pingTask = nil
         receiveTask?.cancel()
         receiveTask = nil
+        reconnectTask?.cancel()
+        reconnectTask = nil
+
         webSocketTask?.cancel(with: .goingAway, reason: nil)
         webSocketTask = nil
 
@@ -178,6 +200,37 @@ final class WebSocketService: ObservableObject {
             logger.info("App entering background - pausing heartbeats", category: .websocket)
         } else {
             logger.info("App returning to foreground - resuming heartbeats", category: .websocket)
+        }
+    }
+
+    /// Verify connection is alive by sending a ping.
+    /// Returns true if connection responds, false if dead.
+    /// If dead, cleans up stale state so reconnection can proceed.
+    func verifyConnection() async -> Bool {
+        guard isConnectedFlag, let task = webSocketTask else {
+            return false
+        }
+
+        do {
+            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                task.sendPing { error in
+                    if let error = error {
+                        continuation.resume(throwing: error)
+                    } else {
+                        continuation.resume()
+                    }
+                }
+            }
+            logger.debug("Connection verification: alive", category: .websocket)
+            return true
+        } catch {
+            logger.warning("Connection verification failed: \(error.localizedDescription)", category: .websocket)
+            // Connection is dead - clean up stale state
+            isConnectedFlag = false
+            connectionState = .disconnected
+            webSocketTask?.cancel(with: .abnormalClosure, reason: nil)
+            webSocketTask = nil
+            return false
         }
     }
 
@@ -368,6 +421,12 @@ final class WebSocketService: ObservableObject {
                 }
                 let pingDuration = (CFAbsoluteTimeGetCurrent() - pingStart) * 1000
                 logger.verbose("Ping #\(pingCount) successful (\(String(format: "%.1f", pingDuration))ms)", category: .websocket)
+
+                // Reset reconnect attempts after first successful ping - connection is verified
+                if reconnectAttempts > 0 {
+                    logger.info("Connection verified via ping - resetting reconnect counter", category: .websocket)
+                    reconnectAttempts = 0
+                }
             } catch {
                 logger.warning("Ping #\(pingCount) failed: \(error.localizedDescription)", category: .websocket)
             }
@@ -396,21 +455,78 @@ final class WebSocketService: ObservableObject {
         timeoutTasks.removeAll()
         logger.debug("Cleared \(pendingCount) pending requests and \(timeoutCount) timeout tasks due to disconnect", category: .websocket)
 
-        if reconnectAttempts < maxReconnectAttempts {
-            reconnectAttempts += 1
-            let delay = reconnectDelay * pow(1.5, Double(reconnectAttempts - 1))
-            connectionState = .reconnecting(attempt: reconnectAttempts)
+        // Don't reconnect if in background
+        if isInBackground {
+            connectionState = .disconnected
+            return
+        }
 
-            logger.info("Reconnecting in \(String(format: "%.1f", delay))s (attempt \(reconnectAttempts)/\(maxReconnectAttempts))", category: .websocket)
-            try? await Task.sleep(for: .seconds(delay))
+        // Start persistent reconnection in a tracked task
+        reconnectTask = Task { [weak self] in
+            await self?.startReconnection()
+        }
+    }
 
-            if !isConnectedFlag {
-                logger.info("Starting reconnection attempt \(reconnectAttempts)...", category: .websocket)
-                await connect()
+    /// Limited reconnection - tries maxReconnectAttempts times with reconnectDelayPerAttempt seconds each
+    /// After all attempts exhausted, sets state to .failed for read-only mode
+    private func startReconnection() async {
+        reconnectAttempts += 1
+
+        // Check if we've exhausted all attempts
+        if reconnectAttempts > maxReconnectAttempts {
+            logger.warning("Max reconnection attempts (\(maxReconnectAttempts)) exhausted - entering read-only mode", category: .websocket)
+            connectionState = .failed(reason: "Connection lost - session in read-only mode")
+            return
+        }
+
+        logger.info("Reconnecting in \(Int(reconnectDelayPerAttempt))s (attempt \(reconnectAttempts)/\(maxReconnectAttempts))", category: .websocket)
+
+        // Countdown loop - updates UI every second
+        var remainingSeconds = Int(reconnectDelayPerAttempt)
+        while remainingSeconds > 0 && !isConnectedFlag && !isInBackground && !Task.isCancelled {
+            connectionState = .reconnecting(attempt: reconnectAttempts, nextRetrySeconds: remainingSeconds)
+            try? await Task.sleep(for: .seconds(1))
+            remainingSeconds -= 1
+        }
+
+        // Check if we should continue (cancelled, connected, or in background)
+        guard !isConnectedFlag && !isInBackground && !Task.isCancelled else { return }
+
+        // Update to show 0 seconds remaining / attempting
+        connectionState = .reconnecting(attempt: reconnectAttempts, nextRetrySeconds: 0)
+
+        // Attempt to connect
+        await connect()
+
+        // If connect() didn't succeed (isConnectedFlag still false), try next attempt
+        if !isConnectedFlag && !isInBackground && !Task.isCancelled {
+            await startReconnection()
+        }
+    }
+
+    /// Manual retry triggered from UI - resets attempt counter for fresh backoff
+    func manualRetry() async {
+        guard !isConnectedFlag && !isConnectionInProgress else {
+            logger.debug("Manual retry ignored - already connected or connecting", category: .websocket)
+            return
+        }
+
+        // Cancel any ongoing reconnection task to prevent races
+        reconnectTask?.cancel()
+        reconnectTask = nil
+
+        // Reset attempt counter for fresh backoff
+        reconnectAttempts = 0
+        connectionState = .connecting
+        logger.info("Manual retry triggered", category: .websocket)
+
+        await connect()
+
+        // If connection failed, start persistent reconnection in tracked task
+        if !isConnectedFlag && !isInBackground {
+            reconnectTask = Task { [weak self] in
+                await self?.startReconnection()
             }
-        } else {
-            connectionState = .failed(reason: "Max reconnection attempts reached")
-            logger.error("Max reconnection attempts (\(maxReconnectAttempts)) reached, giving up", category: .websocket)
         }
     }
 }
