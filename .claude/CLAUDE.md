@@ -31,6 +31,18 @@ Do not mark work as complete until both succeed. If tests fail, fix them.
 3. If refactoring, ensure test coverage exists before touching code
 4. Never commit code that introduces test failures
 
+### Documentation Maintenance
+**Keep docs in sync with code.** After making significant changes, update the relevant docs in `docs/`:
+
+| Doc File | Update When |
+|----------|-------------|
+| `docs/architecture.md` | Package structure, event types, database schema, tool organization changes |
+| `docs/development.md` | Test commands, build process, deployment, troubleshooting changes |
+| `docs/customization.md` | Settings, skills, system prompt, file location changes |
+| `docs/user-guide.md` | CLI options, slash commands, keyboard shortcuts, feature changes |
+
+Each doc has an `AGENT MAINTENANCE` comment at the top listing what to verify. Update the `Last verified` date when you review or modify a doc.
+
 ---
 
 ## Adding New Tools
@@ -87,8 +99,9 @@ Reconstruction:
 
 | File | Purpose |
 |------|---------|
-| `packages/agent/src/subagents/subagent-tracker.ts` | Tracks sub-agents, manages pending results |
-| `packages/agent/src/tools/spawn-subsession.ts` | In-process spawning |
-| `packages/agent/src/tools/spawn-tmux-agent.ts` | Out-of-process spawning |
-| `packages/agent/src/tools/query-subagent.ts` | Query sub-agent state |
-| `packages/agent/src/event-store-orchestrator.ts` | Orchestrates lifecycle |
+| `packages/agent/src/tools/subagent/subagent-tracker.ts` | Tracks sub-agents, manages pending results |
+| `packages/agent/src/tools/subagent/spawn-subagent.ts` | In-process spawning |
+| `packages/agent/src/tools/subagent/spawn-tmux-agent.ts` | Out-of-process spawning |
+| `packages/agent/src/tools/subagent/query-subagent.ts` | Query sub-agent state |
+| `packages/agent/src/tools/subagent/wait-for-subagent.ts` | Wait for sub-agent completion |
+| `packages/agent/src/orchestrator/event-store-orchestrator.ts` | Orchestrates session lifecycle |

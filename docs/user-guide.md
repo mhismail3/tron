@@ -8,7 +8,7 @@ AGENT MAINTENANCE:
 - Update when new features are added
 - Update CLI options when they change
 - Keep slash commands current
-- Last verified: 2026-01-20
+- Last verified: 2026-01-22
 -->
 
 ## Quick Start
