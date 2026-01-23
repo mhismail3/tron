@@ -5,6 +5,13 @@ import Combine
 
 // NOTE: Uses global `logger` from TronLogger.swift (TronLogger.shared)
 
+// MARK: - Server Settings Notification
+
+extension Notification.Name {
+    /// Posted when server settings (host, port, TLS) change
+    static let serverSettingsDidChange = Notification.Name("tron.serverSettingsDidChange")
+}
+
 /// Notification sent when server settings change
 struct ServerSettingsChanged {
     let host: String
@@ -108,6 +115,9 @@ class AppState: ObservableObject {
             serverOrigin: newClient.serverOrigin
         )
         serverSettingsChanged.send(change)
+
+        // Also post via NotificationCenter for views that can't directly observe the publisher
+        NotificationCenter.default.post(name: .serverSettingsDidChange, object: nil)
 
         logger.info("Server settings updated, new origin: \(newClient.serverOrigin)", category: .general)
     }

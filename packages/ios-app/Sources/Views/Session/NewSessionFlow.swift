@@ -280,6 +280,18 @@ struct NewSessionFlow: View {
                 await loadServerSessions()
                 await validateWorkspacePaths()
             }
+            .onReceive(rpcClient.$connectionState.receive(on: DispatchQueue.main)) { state in
+                // React when connection transitions to connected
+                if state.isConnected && serverSessionsError != nil {
+                    // Connection established and we had an error - reload data
+                    serverSessionsError = nil
+                    Task {
+                        await loadModels()
+                        await loadServerSessions()
+                        await validateWorkspacePaths()
+                    }
+                }
+            }
             .onAppear {
                 // Don't auto-open workspace selector - let user explicitly tap to select
             }

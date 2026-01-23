@@ -72,6 +72,16 @@ struct ContentView: View {
                 // Stop polling when leaving the dashboard
                 eventStoreManager.stopDashboardPolling()
             }
+            .onReceive(appState.rpcClient.$connectionState.receive(on: DispatchQueue.main)) { state in
+                // When connection is established, trigger dashboard refresh
+                if state.isConnected {
+                    eventStoreManager.startDashboardPolling()
+                }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .serverSettingsDidChange)) { _ in
+                // Server changed - clear workspace deleted states since they may be invalid
+                workspaceDeletedForSession = [:]
+            }
             .onChange(of: selectedSessionId) { oldValue, newValue in
                 handleSessionSelection(newValue)
             }
