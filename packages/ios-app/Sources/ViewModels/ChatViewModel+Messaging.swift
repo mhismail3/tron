@@ -26,9 +26,10 @@ extension ChatViewModel {
         // Reset browser dismiss flag for new prompt - browser can auto-open again
         userDismissedBrowserThisTurn = false
 
-        // Create user message with attachments and skills displayed above text
+        // Create user message with attachments, skills, and spells displayed above text
         let attachmentsToShow = attachments.isEmpty ? nil : attachments
         let skillsToShow = skills?.isEmpty == false ? skills : nil
+        let spellsToShow = spells?.isEmpty == false ? spells : nil
         if !text.isEmpty {
             if isAnswerPrompt {
                 // Show "Answered agent's questions" chip instead of full text
@@ -40,14 +41,14 @@ extension ChatViewModel {
                 appendMessage(answerChip)
                 logger.debug("Added answered questions chip", category: .chat)
             } else {
-                let userMessage = ChatMessage.user(text, attachments: attachmentsToShow, skills: skillsToShow)
+                let userMessage = ChatMessage.user(text, attachments: attachmentsToShow, skills: skillsToShow, spells: spellsToShow)
                 appendMessage(userMessage)
-                logger.debug("Added user text message with \(attachments.count) attachments and \(skills?.count ?? 0) skills", category: .chat)
+                logger.debug("Added user text message with \(attachments.count) attachments, \(skills?.count ?? 0) skills, and \(spells?.count ?? 0) spells", category: .chat)
             }
             currentTurn += 1
         } else if !attachments.isEmpty {
             // If only attachments (no text), still show them in chat
-            let attachmentMessage = ChatMessage(role: .user, content: .attachments(attachments), attachments: attachments, skills: skillsToShow)
+            let attachmentMessage = ChatMessage(role: .user, content: .attachments(attachments), attachments: attachments, skills: skillsToShow, spells: spellsToShow)
             appendMessage(attachmentMessage)
             logger.debug("Added attachment-only message with \(attachments.count) attachments", category: .chat)
         }

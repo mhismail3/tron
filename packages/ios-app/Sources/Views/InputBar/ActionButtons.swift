@@ -203,6 +203,8 @@ struct GlassAttachmentButton: View {
     @Binding var showFilePicker: Bool
     @Binding var showSkillMentionPopup: Bool
     @Binding var skillMentionQuery: String
+    @Binding var showSpellMentionPopup: Bool
+    @Binding var spellMentionQuery: String
 
     // Keyboard observer to prevent Menu opening during keyboard animation
     @ObservedObject private var keyboardObserver = KeyboardObserver.shared
@@ -243,6 +245,10 @@ struct GlassAttachmentButton: View {
                             Label("Add Skill", systemImage: "sparkles")
                         }
 
+                        Button { NotificationCenter.default.post(name: .attachmentMenuAction, object: "spells") } label: {
+                            Label("Add Spell", systemImage: "wand.and.stars")
+                        }
+
                         Button { NotificationCenter.default.post(name: .attachmentMenuAction, object: "draftPlan") } label: {
                             Label("Draft a Plan", systemImage: "list.clipboard")
                         }
@@ -265,6 +271,12 @@ struct GlassAttachmentButton: View {
                 withAnimation(.tronStandard) {
                     showSkillMentionPopup = true
                     skillMentionQuery = "" // Start with empty query to show all skills
+                }
+            case "spells":
+                // Show the non-blocking spell mention popup
+                withAnimation(.tronStandard) {
+                    showSpellMentionPopup = true
+                    spellMentionQuery = "" // Start with empty query to show all skills
                 }
             case "draftPlan":
                 // Post notification for ChatView to handle plan skill selection

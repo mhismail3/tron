@@ -168,7 +168,9 @@ struct InputBar: View {
                         showingImagePicker: $showingImagePicker,
                         showFilePicker: $showFilePicker,
                         showSkillMentionPopup: $showSkillMentionPopup,
-                        skillMentionQuery: $skillMentionQuery
+                        skillMentionQuery: $skillMentionQuery,
+                        showSpellMentionPopup: $showSpellMentionPopup,
+                        spellMentionQuery: $spellMentionQuery
                     )
                     .matchedGeometryEffect(id: "attachmentMorph", in: attachmentButtonNamespace)
                     .transition(.scale(scale: 0.8).combined(with: .opacity))

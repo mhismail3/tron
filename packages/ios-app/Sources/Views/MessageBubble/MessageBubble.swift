@@ -50,6 +50,24 @@ struct MessageBubble: View {
                 }
             }
 
+            // Show spells above text for user messages (pink chips for ephemeral skills)
+            if let spells = message.spells, !spells.isEmpty {
+                if #available(iOS 26.0, *) {
+                    MessageSpellChips(spells: spells) { skill in
+                        onSkillTap?(skill)
+                    }
+                } else {
+                    // Fallback for older iOS
+                    HStack(spacing: 6) {
+                        ForEach(spells) { skill in
+                            SkillChipFallback(skill: skill, mode: .spell) {
+                                onSkillTap?(skill)
+                            }
+                        }
+                    }
+                }
+            }
+
             contentView
 
             // Show enriched metadata badge for assistant messages with metadata

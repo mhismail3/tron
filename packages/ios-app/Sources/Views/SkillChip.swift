@@ -198,18 +198,37 @@ struct MessageSpellChips: View {
 
 struct SkillChipFallback: View {
     let skill: Skill
+    var mode: ChipMode = .skill
     var showRemoveButton: Bool = false
     var onRemove: (() -> Void)?
     var onTap: (() -> Void)?
+
+    private var iconName: String {
+        switch mode {
+        case .skill:
+            return skill.autoInject ? "bolt.fill" : "sparkles"
+        case .spell:
+            return "wand.and.stars"
+        }
+    }
+
+    private var iconColor: Color {
+        switch mode {
+        case .skill:
+            return skill.autoInject ? .orange : .cyan
+        case .spell:
+            return .tronPink
+        }
+    }
 
     var body: some View {
         Button {
             onTap?()
         } label: {
             HStack(spacing: 5) {
-                Image(systemName: skill.autoInject ? "bolt.fill" : "sparkles")
+                Image(systemName: iconName)
                     .font(TronTypography.sans(size: TronTypography.sizeSM, weight: .semibold))
-                    .foregroundStyle(skill.autoInject ? .orange : .cyan)
+                    .foregroundStyle(iconColor)
 
                 Text(skill.name)
                     .font(TronTypography.filePath)
