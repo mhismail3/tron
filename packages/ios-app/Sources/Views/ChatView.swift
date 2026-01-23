@@ -761,6 +761,14 @@ struct ChatView: View {
                     return distanceFromBottom < 100
                 } action: { wasNearBottom, isNearBottom in
                     guard initialLoadComplete else { return }
+
+                    // During streaming, if we're in following mode and geometry shows not-near-bottom,
+                    // this is due to content growing, not user scrolling. Don't switch to reviewing.
+                    // The streaming onChange handler will scroll us to bottom.
+                    if viewModel.isProcessing && scrollCoordinator.shouldAutoScroll && !isNearBottom {
+                        return
+                    }
+
                     scrollCoordinator.userDidScroll(isNearBottom: isNearBottom)
                 }
                 // Scroll to bottom when keyboard appears (container height shrinks significantly)
@@ -798,7 +806,10 @@ struct ChatView: View {
                     guard viewModel.isProcessing else { return }
 
                     if scrollCoordinator.shouldAutoScroll {
-                        proxy.scrollTo("bottom", anchor: .bottom)
+                        // Use animation for smooth scrolling during streaming
+                        withAnimation(.easeOut(duration: 0.15)) {
+                            proxy.scrollTo("bottom", anchor: .bottom)
+                        }
                     }
                 }
                 // Final scroll when processing ends
