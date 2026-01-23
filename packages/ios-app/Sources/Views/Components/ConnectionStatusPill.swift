@@ -1,20 +1,16 @@
 import SwiftUI
 
-/// A robust connection status pill that appears at the bottom of the chat when connection issues occur.
-/// - Only shows after the connection has been lost (not on initial connection)
-/// - Debounces rapid state changes to prevent flickering
-/// - Animates smoothly with iOS 26 liquid glass styling
+/// A connection status pill that appears at the bottom of the chat when connection issues occur.
+/// Uses native iOS 26 liquid glass animations - no custom animation hacks.
 @available(iOS 26.0, *)
 struct ConnectionStatusPill: View {
     let connectionState: ConnectionState
     let onRetry: () async -> Void
-    /// Called when the pill finishes disappearing (for any cleanup)
-    var onDidDisappear: (() -> Void)?
 
     /// Tracks if we've ever seen a non-connected state in this session
     @State private var hasSeenDisconnect = false
 
-    /// The state we're actually displaying (debounced) - also controls visibility
+    /// The state we're actually displaying (debounced)
     /// When nil, pill is hidden. When set, pill is shown.
     @State private var displayedState: ConnectionState?
 
@@ -24,23 +20,22 @@ struct ConnectionStatusPill: View {
     private let debounceDelay: TimeInterval = 0.3
 
     /// Whether the pill should be visible
-    private var isShowing: Bool {
+    private var isVisible: Bool {
         hasSeenDisconnect && displayedState != nil
     }
 
     var body: some View {
-        ZStack {
+        Group {
             if let state = displayedState, hasSeenDisconnect {
                 pillContent(for: state)
+                    // Native iOS transition - scale up/down with fade
+                    .transition(.scale(scale: 0.9).combined(with: .opacity))
             }
         }
-        // Animate everything together - opacity, scale, and implicit height
-        .opacity(isShowing ? 1 : 0)
-        .scaleEffect(isShowing ? 1 : 0.9, anchor: .center)
-        // This is the key: animate the frame to collapse height smoothly
-        .frame(maxHeight: isShowing ? .infinity : 0)
-        .clipped()
-        .animation(.spring(response: 0.4, dampingFraction: 0.85), value: isShowing)
+        // Animation applied to the container, triggered by visibility change
+        .animation(.spring(response: 0.4, dampingFraction: 0.85), value: isVisible)
+        // Also animate internal state changes (e.g., disconnected -> reconnecting -> connected)
+        .animation(.smooth(duration: 0.3), value: displayedState)
         .onChange(of: connectionState) { _, newState in
             handleStateChange(newState)
         }
@@ -73,6 +68,8 @@ struct ConnectionStatusPill: View {
             .foregroundStyle(.white)
             .padding(.horizontal, 16)
             .padding(.vertical, 10)
+            // Smooth transitions for internal content changes
+            .contentTransition(.interpolate)
         }
         .buttonStyle(.plain)
         .disabled(state.isConnected)
@@ -139,14 +136,14 @@ struct ConnectionStatusPill: View {
         guard hasSeenDisconnect else { return }
 
         if newState.isConnected {
-            // Transitioning to connected - debounce to prevent flicker from optimistic connection
+            // Transitioning to connected - debounce to prevent flicker
             debounceTask = Task {
                 try? await Task.sleep(for: .seconds(debounceDelay))
                 guard !Task.isCancelled else { return }
 
                 await MainActor.run {
                     // Only show "Connected" if we were showing a non-connected state
-                    if displayedState != nil && !displayedState!.isConnected {
+                    if let current = displayedState, !current.isConnected {
                         displayedState = newState
 
                         // Schedule disappearance after showing "Connected" briefly
@@ -156,11 +153,6 @@ struct ConnectionStatusPill: View {
                             await MainActor.run {
                                 if connectionState.isConnected {
                                     displayedState = nil
-                                    // Notify after animation completes
-                                    Task {
-                                        try? await Task.sleep(for: .milliseconds(450))
-                                        onDidDisappear?()
-                                    }
                                 }
                             }
                         }
@@ -171,7 +163,7 @@ struct ConnectionStatusPill: View {
                 }
             }
         } else {
-            // Non-connected states - update immediately for reconnecting (countdown needs real-time updates)
+            // Non-connected states - update immediately
             displayedState = newState
         }
     }
