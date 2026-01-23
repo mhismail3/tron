@@ -32,17 +32,16 @@ struct ConnectionStatusPill: View {
                     .transition(.scale(scale: 0.9).combined(with: .opacity))
             }
         }
-        // Animation applied to the container, triggered by visibility change
-        .animation(.spring(response: 0.4, dampingFraction: 0.85), value: isVisible)
-        // Also animate internal state changes (e.g., disconnected -> reconnecting -> connected)
-        .animation(.smooth(duration: 0.3), value: displayedState)
         .onChange(of: connectionState) { _, newState in
             handleStateChange(newState)
         }
         .onAppear {
             if !connectionState.isConnected {
                 hasSeenDisconnect = true
-                displayedState = connectionState
+                // Animate the initial appearance
+                withAnimation(.spring(response: 0.4, dampingFraction: 0.85)) {
+                    displayedState = connectionState
+                }
             }
         }
     }
@@ -144,7 +143,9 @@ struct ConnectionStatusPill: View {
                 await MainActor.run {
                     // Only show "Connected" if we were showing a non-connected state
                     if let current = displayedState, !current.isConnected {
-                        displayedState = newState
+                        withAnimation(.spring(response: 0.4, dampingFraction: 0.85)) {
+                            displayedState = newState
+                        }
 
                         // Schedule disappearance after showing "Connected" briefly
                         debounceTask = Task {
@@ -152,19 +153,25 @@ struct ConnectionStatusPill: View {
                             guard !Task.isCancelled else { return }
                             await MainActor.run {
                                 if connectionState.isConnected {
-                                    displayedState = nil
+                                    withAnimation(.spring(response: 0.4, dampingFraction: 0.85)) {
+                                        displayedState = nil
+                                    }
                                 }
                             }
                         }
                     } else {
                         // Was already nil or already connected - just clear
-                        displayedState = nil
+                        withAnimation(.spring(response: 0.4, dampingFraction: 0.85)) {
+                            displayedState = nil
+                        }
                     }
                 }
             }
         } else {
-            // Non-connected states - update immediately
-            displayedState = newState
+            // Non-connected states - update immediately with animation
+            withAnimation(.spring(response: 0.4, dampingFraction: 0.85)) {
+                displayedState = newState
+            }
         }
     }
 }
