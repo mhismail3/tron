@@ -106,7 +106,7 @@ struct GlassMicButton: View {
             Group {
                 if isTranscribing {
                     ProgressView()
-                        .tint(.white)
+                        .tint(.tronEmerald)
                         .scaleEffect(0.8)
                 } else if isRecording {
                     Image(systemName: "stop.fill")
