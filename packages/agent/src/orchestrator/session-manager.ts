@@ -33,6 +33,7 @@ import {
 import type { WorkingDirectory } from '../session/working-directory.js';
 import { createSessionContext } from './session-context.js';
 import { buildWorktreeInfo } from './worktree-ops.js';
+import { detectProviderFromModel } from '../providers/factory.js';
 import type {
   ActiveSession,
   CreateSessionOptions,
@@ -111,7 +112,8 @@ export class SessionManager {
     }
 
     const model = options.model ?? this.config.defaultModel;
-    const provider = options.provider ?? this.config.defaultProvider;
+    // Infer provider from model if not explicitly provided
+    const provider = options.provider ?? detectProviderFromModel(model);
 
     // Create session in EventStore
     const result = await this.eventStore.createSession({
