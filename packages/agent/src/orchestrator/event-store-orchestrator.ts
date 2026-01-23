@@ -81,7 +81,6 @@ import {
 } from '../session/worktree-coordinator.js';
 import { loadServerAuth } from '../auth/oauth.js';
 import { SubAgentTracker, type SubagentResult } from '../tools/subagent/subagent-tracker.js';
-import { BacklogService, createBacklogService } from '../todos/backlog-service.js';
 import type { TronEvent } from '../types/events.js';
 import type {
   ContextSnapshot,
@@ -100,7 +99,6 @@ import type {
   SubagentLogInfo,
 } from '../tools/subagent/query-subagent.js';
 import type { TodoItem, BackloggedTask } from '../todos/types.js';
-import type { NotifyAppResult } from '../tools/ui/notify-app.js';
 import { BrowserService } from '../external/browser/index.js';
 import { normalizeContentBlocks } from '../utils/content-normalizer.js';
 import {
@@ -143,7 +141,6 @@ import {
 import {
   APNSService,
   createAPNSService,
-  type APNSNotification,
 } from '../external/apns/index.js';
 import {
   type EventStoreOrchestratorConfig,
@@ -155,6 +152,18 @@ import {
   type ForkResult,
   type WorktreeInfo,
 } from './types.js';
+import {
+  PlanModeController,
+  createPlanModeController,
+} from './plan-mode-controller.js';
+import {
+  TodoController,
+  createTodoController,
+} from './todo-controller.js';
+import {
+  NotificationController,
+  createNotificationController,
+} from './notification-controller.js';
 
 // Re-export types for consumers
 export type {
@@ -186,10 +195,14 @@ export class EventStoreOrchestrator extends EventEmitter {
   private agentFactory: AgentFactory;
   private authProvider: AuthProvider;
   private apnsService: APNSService | null = null;
-  private backlogService: BacklogService | null = null;
   private activeSessions: Map<string, ActiveSession> = new Map();
   private cleanupTimer: ReturnType<typeof setInterval> | null = null;
   private initialized = false;
+
+  // Controllers extracted for better separation of concerns
+  private planModeController: PlanModeController;
+  private todoController: TodoController;
+  private notificationController!: NotificationController;
 
   constructor(config: EventStoreOrchestratorConfig) {
     super();
@@ -285,10 +298,10 @@ export class EventStoreOrchestrator extends EventEmitter {
       waitForSubagents: (sessionIds, mode, timeout) => this.waitForSubagents(sessionIds, mode, timeout),
       forwardAgentEvent: (sessionId, event) => this.forwardAgentEvent(sessionId, event),
       getSubagentTrackerForSession: (sessionId) => this.activeSessions.get(sessionId)?.subagentTracker,
-      onTodosUpdated: async (sessionId, todos) => this.handleTodosUpdated(sessionId, todos),
+      onTodosUpdated: async (sessionId, todos) => this.todoController.handleTodosUpdated(sessionId, todos),
       generateTodoId: () => `todo_${crypto.randomUUID().replace(/-/g, '').slice(0, 12)}`,
       onNotify: this.apnsService ? async (sessionId, notification, toolCallId) => {
-        return this.sendNotification(sessionId, notification, toolCallId);
+        return this.notificationController.sendNotification(sessionId, notification, toolCallId);
       } : undefined,
       browserService: this.browserService ? {
         execute: (sid, action, params) => this.browserService.execute(sid, action, params),
@@ -304,6 +317,25 @@ export class EventStoreOrchestrator extends EventEmitter {
     });
     this.browserService.on('browser.closed', (sessionId) => {
       this.emit('browser.closed', sessionId);
+    });
+
+    // Initialize PlanModeController (delegated module)
+    this.planModeController = createPlanModeController({
+      getActiveSession: (sessionId: string) => this.activeSessions.get(sessionId),
+      emit: (event, data) => this.emit(event, data),
+    });
+
+    // Initialize TodoController (delegated module)
+    this.todoController = createTodoController({
+      getActiveSession: (sessionId: string) => this.activeSessions.get(sessionId),
+      eventStore: this.eventStore,
+      emit: (event, data) => this.emit(event, data),
+    });
+
+    // Initialize NotificationController (delegated module)
+    this.notificationController = createNotificationController({
+      apnsService: this.apnsService,
+      eventStore: this.eventStore,
     });
   }
 
@@ -328,9 +360,6 @@ export class EventStoreOrchestrator extends EventEmitter {
     }
 
     await this.eventStore.initialize();
-
-    // Initialize BacklogService for todo backlog persistence (must be after eventStore.initialize())
-    this.backlogService = createBacklogService(this.eventStore.getDatabase());
 
     this.startCleanupTimer();
     this.initialized = true;
@@ -370,13 +399,6 @@ export class EventStoreOrchestrator extends EventEmitter {
   // ===========================================================================
   // EventStore Access
   // ===========================================================================
-
-  private getBacklogService(): BacklogService {
-    if (!this.backlogService) {
-      throw new Error('BacklogService not initialized. Call initialize() first.');
-    }
-    return this.backlogService;
-  }
 
   getEventStore(): EventStore {
     return this.eventStore;
@@ -1565,368 +1587,73 @@ export class EventStoreOrchestrator extends EventEmitter {
   /**
    * Check if a session is in plan mode
    */
+  // ===========================================================================
+  // Plan Mode Operations (delegated to PlanModeController)
+  // ===========================================================================
+
   isInPlanMode(sessionId: string): boolean {
-    const active = this.activeSessions.get(sessionId);
-    if (!active) return false;
-    return active.sessionContext.isInPlanMode();
+    return this.planModeController.isInPlanMode(sessionId);
   }
 
-  /**
-   * Get the list of blocked tools for a session
-   */
   getBlockedTools(sessionId: string): string[] {
-    const active = this.activeSessions.get(sessionId);
-    if (!active) return [];
-    return active.sessionContext.getBlockedTools();
+    return this.planModeController.getBlockedTools(sessionId);
   }
 
-  /**
-   * Check if a specific tool is blocked for a session
-   */
   isToolBlocked(sessionId: string, toolName: string): boolean {
-    const active = this.activeSessions.get(sessionId);
-    if (!active) return false;
-    return active.sessionContext.isToolBlocked(toolName);
+    return this.planModeController.isToolBlocked(sessionId, toolName);
   }
 
-  /**
-   * Get a descriptive error message for blocked tools
-   */
   getPlanModeBlockedToolMessage(toolName: string): string {
-    return `Tool "${toolName}" is blocked during plan mode. ` +
-      `The session is in read-only exploration mode until the plan is approved. ` +
-      `Use AskUserQuestion to present your plan and get user approval.`;
+    return this.planModeController.getBlockedToolMessage(toolName);
   }
 
-  /**
-   * Enter plan mode for a session
-   * @param sessionId - Session ID
-   * @param options - Plan mode options (skill name and blocked tools)
-   */
   async enterPlanMode(
     sessionId: string,
     options: { skillName: string; blockedTools: string[] }
   ): Promise<void> {
-    const active = this.activeSessions.get(sessionId);
-    if (!active) {
-      throw new Error(`Session not found: ${sessionId}`);
-    }
-
-    if (active.sessionContext.isInPlanMode()) {
-      throw new Error(`Session ${sessionId} is already in plan mode`);
-    }
-
-    // Append plan.mode_entered event
-    const event = await active.sessionContext.appendEvent('plan.mode_entered', {
-      skillName: options.skillName,
-      blockedTools: options.blockedTools,
-    });
-
-    // Update plan mode state
-    active.sessionContext.enterPlanMode(options.skillName, options.blockedTools);
-
-    logger.info('Plan mode entered', {
-      sessionId,
-      skillName: options.skillName,
-      blockedTools: options.blockedTools,
-      eventId: event?.id,
-    });
-
-    this.emit('plan.mode_entered', {
-      sessionId,
-      skillName: options.skillName,
-      blockedTools: options.blockedTools,
-    });
+    return this.planModeController.enterPlanMode(sessionId, options);
   }
 
-  /**
-   * Exit plan mode for a session
-   * @param sessionId - Session ID
-   * @param options - Exit options (reason and optional plan path)
-   */
   async exitPlanMode(
     sessionId: string,
     options: { reason: 'approved' | 'cancelled' | 'timeout'; planPath?: string }
   ): Promise<void> {
-    const active = this.activeSessions.get(sessionId);
-    if (!active) {
-      throw new Error(`Session not found: ${sessionId}`);
-    }
-
-    if (!active.sessionContext.isInPlanMode()) {
-      throw new Error(`Session ${sessionId} is not in plan mode`);
-    }
-
-    // Build payload (only include planPath if present)
-    const payload: Record<string, unknown> = { reason: options.reason };
-    if (options.planPath) {
-      payload.planPath = options.planPath;
-    }
-
-    // Append plan.mode_exited event
-    const event = await active.sessionContext.appendEvent('plan.mode_exited', payload);
-
-    // Update plan mode state
-    active.sessionContext.exitPlanMode();
-
-    logger.info('Plan mode exited', {
-      sessionId,
-      reason: options.reason,
-      planPath: options.planPath,
-      eventId: event?.id,
-    });
-
-    this.emit('plan.mode_exited', {
-      sessionId,
-      reason: options.reason,
-      planPath: options.planPath,
-    });
+    return this.planModeController.exitPlanMode(sessionId, options);
   }
 
   // ===========================================================================
-  // Todo Operations
+  // Todo Operations (delegated to TodoController)
   // ===========================================================================
 
-  /**
-   * Handle todos being updated via the TodoWrite tool.
-   * Updates the tracker and persists a todo.write event.
-   */
-  private async handleTodosUpdated(sessionId: string, todos: TodoItem[]): Promise<void> {
-    const active = this.activeSessions.get(sessionId);
-    if (!active) {
-      throw new Error(`Session not found: ${sessionId}`);
-    }
-
-    // Persist todo.write event (linearized via SessionContext)
-    const event = await active.sessionContext!.appendEvent('todo.write', {
-      todos,
-      trigger: 'tool',
-    });
-
-    // Update the tracker
-    if (event) {
-      active.todoTracker.setTodos(todos, event.id);
-    }
-
-    logger.debug('Todos updated', {
-      sessionId,
-      todoCount: todos.length,
-      eventId: event?.id,
-    });
-
-    // Emit event for UI updates
-    this.emit('todos_updated', {
-      sessionId,
-      todos,
-    });
-  }
-
-  /**
-   * Get current todos for a session.
-   * Used by RPC handlers.
-   */
   getTodos(sessionId: string): TodoItem[] {
-    const active = this.activeSessions.get(sessionId);
-    if (!active) {
-      return [];
-    }
-    return active.todoTracker.getAllTodos();
+    return this.todoController.getTodos(sessionId);
   }
 
-  /**
-   * Get todo summary for a session.
-   */
   getTodoSummary(sessionId: string): string {
-    const active = this.activeSessions.get(sessionId);
-    if (!active) {
-      return 'no tasks';
-    }
-    return active.todoTracker.buildSummaryString();
+    return this.todoController.getTodoSummary(sessionId);
   }
 
   // ===========================================================================
-  // Push Notifications
+  // Backlog Operations (delegated to TodoController)
   // ===========================================================================
 
-  /**
-   * Send a push notification to all registered devices.
-   * Any agent/session can trigger notifications globally.
-   * Used by the NotifyApp tool.
-   */
-  private async sendNotification(
-    sessionId: string,
-    notification: {
-      title: string;
-      body: string;
-      data?: Record<string, string>;
-      priority?: 'high' | 'normal';
-      sound?: string;
-      badge?: number;
-    },
-    toolCallId: string
-  ): Promise<NotifyAppResult> {
-    if (!this.apnsService) {
-      return { successCount: 0, failureCount: 0, errors: ['APNS not configured'] };
-    }
-
-    // Get ALL active device tokens (global notification)
-    const db = this.eventStore.getDatabase();
-    if (!db) {
-      return { successCount: 0, failureCount: 0, errors: ['Database not available'] };
-    }
-
-    const tokens = db
-      .prepare(`
-        SELECT device_token, environment
-        FROM device_tokens
-        WHERE is_active = 1
-      `)
-      .all() as Array<{ device_token: string; environment: string }>;
-
-    if (tokens.length === 0) {
-      logger.debug('No device tokens registered');
-      return { successCount: 0, failureCount: 0 };
-    }
-
-    // Build APNS notification payload
-    const apnsNotification: APNSNotification = {
-      title: notification.title,
-      body: notification.body,
-      data: {
-        ...notification.data,
-        sessionId, // Include sessionId for deep linking to the sending session
-        toolCallId, // Include toolCallId so iOS can scroll to the notification chip
-      },
-      priority: notification.priority,
-      sound: notification.sound,
-      badge: notification.badge,
-      threadId: sessionId, // Group notifications by session
-    };
-
-    // Send to all registered devices
-    const deviceTokens = tokens.map((t) => t.device_token);
-    const results = await this.apnsService.sendToMany(deviceTokens, apnsNotification);
-
-    // Handle invalid tokens (APNS 410 = unregistered)
-    for (const result of results) {
-      if (!result.success && result.reason === 'Unregistered') {
-        // Mark token as invalid
-        db.prepare('UPDATE device_tokens SET is_active = 0 WHERE device_token = ?')
-          .run(result.deviceToken);
-        logger.info('Marked unregistered device token as inactive', {
-          deviceToken: result.deviceToken.substring(0, 8) + '...',
-        });
-      }
-    }
-
-    const successCount = results.filter((r) => r.success).length;
-    const failureCount = results.filter((r) => !r.success).length;
-    const errors = results
-      .filter((r) => !r.success && r.error)
-      .map((r) => r.error!);
-
-    return { successCount, failureCount, errors: errors.length > 0 ? errors : undefined };
-  }
-
-  // ===========================================================================
-  // Backlog Operations
-  // ===========================================================================
-
-  /**
-   * Get backlogged tasks for a workspace.
-   * Used by RPC handlers for iOS task visibility.
-   */
   getBacklog(workspaceId: string, options?: { includeRestored?: boolean; limit?: number }): BackloggedTask[] {
-    return this.getBacklogService().getBacklog(workspaceId, options);
+    return this.todoController.getBacklog(workspaceId, options);
   }
 
-  /**
-   * Get count of unrestored backlogged tasks for a workspace.
-   */
   getBacklogCount(workspaceId: string): number {
-    return this.getBacklogService().getUnrestoredCount(workspaceId);
+    return this.todoController.getBacklogCount(workspaceId);
   }
 
-  /**
-   * Restore tasks from backlog to a session.
-   * Creates new TodoItems in the session and records a todo.write event.
-   */
   async restoreFromBacklog(sessionId: string, taskIds: string[]): Promise<TodoItem[]> {
-    const active = this.activeSessions.get(sessionId);
-    if (!active) {
-      throw new Error('Session not active');
-    }
-
-    // Generate IDs for restored tasks
-    const generateId = () => `todo_${crypto.randomUUID().slice(0, 8)}`;
-
-    // Restore tasks from backlog (marks them as restored in DB)
-    const restoredTodos = this.getBacklogService().restoreTasks(taskIds, sessionId, generateId);
-
-    if (restoredTodos.length === 0) {
-      return [];
-    }
-
-    // Merge with existing todos
-    const existingTodos = active.todoTracker.getAllTodos();
-    const newTodoList = [...existingTodos, ...restoredTodos];
-
-    // Record todo.write event with merged list
-    const event = await active.sessionContext!.appendEvent('todo.write', {
-      todos: newTodoList,
-      trigger: 'restore',
-    });
-
-    if (event) {
-      active.todoTracker.setTodos(newTodoList, event.id);
-    }
-
-    // Emit event for WebSocket broadcast
-    this.emit('todos_updated', {
-      sessionId,
-      todos: newTodoList,
-      restoredCount: restoredTodos.length,
-    });
-
-    logger.info('Tasks restored from backlog', {
-      sessionId,
-      requestedCount: taskIds.length,
-      restoredCount: restoredTodos.length,
-      totalTodos: newTodoList.length,
-    });
-
-    return restoredTodos;
+    return this.todoController.restoreFromBacklog(sessionId, taskIds);
   }
 
-  /**
-   * Move incomplete todos to backlog for a session.
-   * Called internally when context is cleared.
-   */
   async backlogIncompleteTodos(
     sessionId: string,
     workspaceId: string,
     reason: 'session_clear' | 'context_compact' | 'session_end'
   ): Promise<number> {
-    const active = this.activeSessions.get(sessionId);
-    if (!active) {
-      return 0;
-    }
-
-    const incompleteTodos = active.todoTracker.getIncomplete();
-    if (incompleteTodos.length === 0) {
-      return 0;
-    }
-
-    this.getBacklogService().backlogTasks(incompleteTodos, sessionId, workspaceId, reason);
-
-    logger.info('Incomplete todos backlogged', {
-      sessionId,
-      workspaceId,
-      reason,
-      count: incompleteTodos.length,
-    });
-
-    return incompleteTodos.length;
+    return this.todoController.backlogIncompleteTodos(sessionId, workspaceId, reason);
   }
-
 }
