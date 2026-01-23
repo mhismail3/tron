@@ -9,9 +9,9 @@
  */
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { WriteTool } from '../write.js';
-import { BashTool } from '../bash.js';
-import { EditTool } from '../edit.js';
+import { WriteTool } from '../fs/write.js';
+import { BashTool } from '../system/bash.js';
+import { EditTool } from '../fs/edit.js';
 
 // Mock fs for Write and Edit tools
 vi.mock('fs/promises', () => ({

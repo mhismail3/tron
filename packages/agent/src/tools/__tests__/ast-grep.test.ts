@@ -10,7 +10,7 @@ import * as fs from 'fs/promises';
 import * as path from 'path';
 import { fileURLToPath } from 'url';
 
-import { AstGrepTool } from '../ast-grep.js';
+import { AstGrepTool } from '../system/ast-grep.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const FIXTURES_PATH = path.join(__dirname, '..', '__fixtures__', 'ast-grep');

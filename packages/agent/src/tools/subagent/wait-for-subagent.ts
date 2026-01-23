@@ -5,9 +5,9 @@
  * Supports waiting for single or multiple sub-agents with timeout.
  */
 
-import type { TronTool, TronToolResult } from '../types/index.js';
+import type { TronTool, TronToolResult } from '../../types/index.js';
 import type { SubagentResult } from './subagent-tracker.js';
-import { createLogger } from '../logging/logger.js';
+import { createLogger } from '../../logging/logger.js';
 
 const logger = createLogger('tool:wait-for-subagent');
 

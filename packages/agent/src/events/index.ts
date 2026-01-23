@@ -117,10 +117,9 @@ export {
   type ReconstructionResult,
 } from './message-reconstructor.js';
 
-// SQLite Backend (for advanced use cases)
-// Now using modular facade instead of legacy monolithic backend
+// SQLite Event Store (for advanced use cases)
+// Uses modular facade architecture
 export {
-  SQLiteBackend,
   SQLiteEventStore,
   type SQLiteBackendConfig,
   type CreateWorkspaceOptions,

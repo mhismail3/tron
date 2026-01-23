@@ -458,13 +458,4 @@ export async function createSQLiteEventStore(
   return store;
 }
 
-// =============================================================================
-// Backward Compatibility Alias
-// =============================================================================
-
-/**
- * Alias for SQLiteEventStore - maintains backward compatibility with legacy code
- * @deprecated Use SQLiteEventStore instead
- */
-export const SQLiteBackend = SQLiteEventStore;
-export type SQLiteBackend = SQLiteEventStore;
+// NOTE: SQLiteBackend alias removed - use SQLiteEventStore directly

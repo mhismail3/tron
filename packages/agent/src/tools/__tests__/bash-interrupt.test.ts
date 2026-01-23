@@ -3,7 +3,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { BashTool } from '../bash.js';
+import { BashTool } from '../system/bash.js';
 
 describe('BashTool Interrupt', () => {
   let bashTool: BashTool;

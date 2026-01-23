@@ -5,9 +5,9 @@
  * Uses snapshot-based updates (each call replaces the full list).
  */
 
-import type { TronTool, TronToolResult } from '../types/index.js';
-import type { TodoItem } from '../todos/types.js';
-import { createLogger } from '../logging/logger.js';
+import type { TronTool, TronToolResult } from '../../types/index.js';
+import type { TodoItem } from '../../todos/types.js';
+import { createLogger } from '../../logging/logger.js';
 
 const logger = createLogger('tool:todo-write');
 

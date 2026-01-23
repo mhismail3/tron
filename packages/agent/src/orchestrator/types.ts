@@ -12,7 +12,7 @@ import type { WorkingDirectory } from '../session/working-directory.js';
 import type { WorktreeCoordinatorConfig } from '../session/worktree-coordinator.js';
 import type { SkillTracker } from '../skills/skill-tracker.js';
 import type { RulesTracker } from '../context/rules-tracker.js';
-import type { SubAgentTracker } from '../tools/subagent-tracker.js';
+import type { SubAgentTracker } from '../tools/subagent/subagent-tracker.js';
 import type { TodoTracker } from '../todos/todo-tracker.js';
 import type { SessionContext } from './session-context.js';
 
@@ -78,6 +78,13 @@ export interface WorktreeInfo {
 export interface ActiveSession {
   sessionId: SessionId;
   agent: TronAgent;
+  /**
+   * @deprecated Use `sessionContext.isProcessing()` instead.
+   *
+   * This field is kept for backward compatibility but `sessionContext.isProcessing()`
+   * is the authoritative source of truth. Both are synchronized when set, but reads
+   * should always go through `sessionContext.isProcessing()` to avoid race conditions.
+   */
   isProcessing: boolean;
   lastActivity: Date;
   workingDirectory: string;

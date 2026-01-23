@@ -5,10 +5,10 @@
  * The sub-agent runs asynchronously and can be monitored via QuerySubagent.
  */
 
-import type { TronTool, TronToolResult } from '../types/index.js';
+import type { TronTool, TronToolResult } from '../../types/index.js';
 import type { SubAgentTracker } from './subagent-tracker.js';
-import type { SessionId } from '../events/types.js';
-import { createLogger } from '../logging/logger.js';
+import type { SessionId } from '../../events/types.js';
+import { createLogger } from '../../logging/logger.js';
 
 const logger = createLogger('tool:spawn-subagent');
 

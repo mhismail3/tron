@@ -10,7 +10,7 @@ import type {
   SessionId,
   TokenUsage,
   SubagentSpawnType,
-} from '../events/types.js';
+} from '../../events/types.js';
 
 /**
  * Status of a tracked sub-agent

@@ -5,7 +5,7 @@
  */
 
 import { describe, it, expect, beforeEach } from 'vitest';
-import { OpenBrowserTool } from '../open-browser.js';
+import { OpenBrowserTool } from '../browser/open-browser.js';
 
 describe('OpenBrowserTool', () => {
   let openBrowserTool: OpenBrowserTool;

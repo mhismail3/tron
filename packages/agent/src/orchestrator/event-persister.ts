@@ -39,6 +39,7 @@ import type {
   SessionId,
   SessionEvent as TronSessionEvent,
 } from '../events/types.js';
+import { PersistenceError, TronError } from '../utils/errors.js';
 
 const logger = createLogger('event-persister');
 
@@ -53,6 +54,11 @@ export interface EventPersisterConfig {
   sessionId: SessionId;
   /** Initial head event ID (from session creation or reconstruction) */
   initialHeadEventId: EventId;
+  /**
+   * Optional callback invoked when a persistence error occurs.
+   * Use this to get visibility into fire-and-forget failures.
+   */
+  onError?: (error: TronError) => void;
 }
 
 export interface AppendRequest {
@@ -75,14 +81,16 @@ export interface AppendRequest {
 export class EventPersister {
   private readonly eventStore: EventStore;
   private readonly sessionId: SessionId;
+  private readonly onError?: (error: TronError) => void;
   private pendingHead: EventId;
   private chain: Promise<void>;
-  private lastError?: Error;
+  private lastError?: TronError;
 
   constructor(config: EventPersisterConfig) {
     this.eventStore = config.eventStore;
     this.sessionId = config.sessionId;
     this.pendingHead = config.initialHeadEventId;
+    this.onError = config.onError;
     this.chain = Promise.resolve();
   }
 
@@ -224,8 +232,10 @@ export class EventPersister {
       throw new Error(`Cannot run operation: prior error - ${this.lastError.message}`);
     }
 
+    // Capture parentId before try block for error context
+    const parentId = this.pendingHead;
+
     try {
-      const parentId = this.pendingHead;
       const event = await operation(parentId);
 
       // Update head for next event
@@ -233,15 +243,27 @@ export class EventPersister {
 
       return event;
     } catch (err) {
-      logger.error('Failed to run linearized operation', {
-        err,
-        sessionId: this.sessionId,
+      // Create structured PersistenceError
+      const persistenceError = new PersistenceError('Failed to run linearized operation', {
+        table: 'events',
+        operation: 'write',
+        context: {
+          parentId,
+        },
+        cause: err instanceof Error ? err : undefined,
       });
 
-      // Track error to prevent subsequent appends
-      this.lastError = err instanceof Error ? err : new Error(String(err));
+      logger.error('Linearized operation failed', persistenceError.toStructuredLog());
 
-      throw err;
+      // Track error to prevent subsequent appends
+      this.lastError = persistenceError;
+
+      // Notify caller via callback if provided
+      if (this.onError) {
+        this.onError(persistenceError);
+      }
+
+      throw persistenceError;
     }
   }
 
@@ -268,7 +290,7 @@ export class EventPersister {
   /**
    * Get the last error that occurred, if any.
    */
-  getError(): Error | undefined {
+  getError(): TronError | undefined {
     return this.lastError;
   }
 
@@ -304,13 +326,26 @@ export class EventPersister {
 
       return event;
     } catch (err) {
-      logger.error(`Failed to append ${type} event`, {
-        err,
-        sessionId: this.sessionId,
+      // Create structured PersistenceError
+      const persistenceError = new PersistenceError(`Failed to append ${type} event`, {
+        table: 'events',
+        operation: 'write',
+        context: {
+          eventType: type,
+          parentId,
+        },
+        cause: err instanceof Error ? err : undefined,
       });
 
+      logger.error('Event persistence failed', persistenceError.toStructuredLog());
+
       // Track error to prevent subsequent appends
-      this.lastError = err instanceof Error ? err : new Error(String(err));
+      this.lastError = persistenceError;
+
+      // Notify caller via callback if provided
+      if (this.onError) {
+        this.onError(persistenceError);
+      }
 
       return null;
     }

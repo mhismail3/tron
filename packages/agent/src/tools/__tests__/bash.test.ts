@@ -6,7 +6,7 @@
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { spawn } from 'child_process';
-import { BashTool } from '../bash.js';
+import { BashTool } from '../system/bash.js';
 
 // Mock child_process
 vi.mock('child_process', () => ({

@@ -27,15 +27,15 @@ import type {
   EventType,
   SessionEvent as TronSessionEvent,
 } from '../events/types.js';
-import type { SpawnSubagentParams } from '../tools/spawn-subagent.js';
-import type { SpawnTmuxAgentParams } from '../tools/spawn-tmux-agent.js';
+import type { SpawnSubagentParams } from '../tools/subagent/spawn-subagent.js';
+import type { SpawnTmuxAgentParams } from '../tools/subagent/spawn-tmux-agent.js';
 import type {
   SubagentQueryType,
   SubagentStatusInfo,
   SubagentEventInfo,
   SubagentLogInfo,
-} from '../tools/query-subagent.js';
-import type { SubagentResult } from '../tools/subagent-tracker.js';
+} from '../tools/subagent/query-subagent.js';
+import type { SubagentResult } from '../tools/subagent/subagent-tracker.js';
 import type { ActiveSession, AgentRunOptions, SessionInfo, CreateSessionOptions } from './types.js';
 
 const logger = createLogger('subagent-ops');

@@ -1,10 +1,10 @@
 /**
- * @fileoverview Tests for SQLite Backend
+ * @fileoverview Tests for SQLite Event Store
  *
  * TDD: Tests for the event store SQLite persistence layer
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { SQLiteBackend } from '../sqlite/facade.js';
+import { SQLiteEventStore } from '../sqlite/facade.js';
 import {
   EventId,
   SessionId,
@@ -14,12 +14,12 @@ import {
   type AssistantMessageEvent,
 } from '../types.js';
 
-describe('SQLiteBackend', () => {
-  let backend: SQLiteBackend;
+describe('SQLiteEventStore', () => {
+  let backend: SQLiteEventStore;
 
   beforeEach(async () => {
     // Use in-memory database for tests
-    backend = new SQLiteBackend(':memory:');
+    backend = new SQLiteEventStore(':memory:');
     await backend.initialize();
   });
 

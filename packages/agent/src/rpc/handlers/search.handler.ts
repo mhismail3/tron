@@ -64,24 +64,8 @@ export async function handleSearchEvents(
   request: RpcRequest,
   context: RpcContext
 ): Promise<RpcResponse> {
-  if (!context.eventStore) {
-    return MethodRegistry.errorResponse(request.id, 'NOT_SUPPORTED', 'EventStore not available');
-  }
-
-  const params = request.params as SearchParams | undefined;
-
-  if (!params?.query) {
-    return MethodRegistry.errorResponse(request.id, 'INVALID_PARAMS', 'query is required');
-  }
-
-  const result = await context.eventStore.searchContent(params.query, {
-    sessionId: params.sessionId,
-    workspaceId: params.workspaceId,
-    types: params.types,
-    limit: params.limit,
-  });
-
-  return MethodRegistry.successResponse(request.id, result);
+  // Delegate to handleSearchContent since they're functionally identical
+  return handleSearchContent(request, context);
 }
 
 // =============================================================================
@@ -104,15 +88,8 @@ export function createSearchHandlers(): MethodRegistration[] {
     throw err;
   };
 
-  const eventsHandler: MethodHandler = async (request, context) => {
-    const response = await handleSearchEvents(request, context);
-    if (response.success && response.result) {
-      return response.result;
-    }
-    const err = new Error(response.error?.message || 'Unknown error');
-    (err as any).code = response.error?.code;
-    throw err;
-  };
+  // Events handler delegates to content handler since they're functionally identical
+  const eventsHandler: MethodHandler = contentHandler;
 
   return [
     {

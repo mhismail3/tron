@@ -12,10 +12,10 @@
  * - Agent turn ends cleanly after presenting questions
  */
 
-import type { TronTool, TronToolResult } from '../types/index.js';
-import type { AskUserQuestionParams } from '../types/ask-user-question.js';
-import { validateAskUserQuestionParams } from '../types/ask-user-question.js';
-import { createLogger } from '../logging/logger.js';
+import type { TronTool, TronToolResult } from '../../types/index.js';
+import type { AskUserQuestionParams } from '../../types/ask-user-question.js';
+import { validateAskUserQuestionParams } from '../../types/ask-user-question.js';
+import { createLogger } from '../../logging/logger.js';
 
 const logger = createLogger('tool:ask-user-question');
 

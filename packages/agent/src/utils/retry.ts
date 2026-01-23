@@ -109,7 +109,7 @@ export function parseRetryAfterHeader(value: string | undefined): number | null 
 /**
  * Sleep for a specified duration, respecting abort signal
  */
-async function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+export async function sleepWithAbort(ms: number, signal?: AbortSignal): Promise<void> {
   return new Promise((resolve, reject) => {
     if (signal?.aborted) {
       reject(new Error('Aborted'));
@@ -228,7 +228,7 @@ export async function withRetry<T>(
       let delayMs = calculateBackoffDelay(attempts - 1, baseDelayMs, maxDelayMs, jitterFactor);
 
       // Check for retry-after header in error
-      const retryAfter = extractRetryAfter(error);
+      const retryAfter = extractRetryAfterFromError(error);
       if (retryAfter !== null) {
         delayMs = Math.max(delayMs, retryAfter);
       }
@@ -248,7 +248,7 @@ export async function withRetry<T>(
 
       // Wait before retry
       try {
-        await sleep(delayMs, signal);
+        await sleepWithAbort(delayMs, signal);
         totalDelayMs += delayMs;
       } catch {
         // Aborted during sleep
@@ -281,8 +281,11 @@ export async function withRetry<T>(
 
 /**
  * Extract retry-after value from an error object
+ *
+ * Looks for retry-after header in error.headers or error.response.headers.
+ * Returns the delay in milliseconds, or null if not found.
  */
-function extractRetryAfter(error: unknown): number | null {
+export function extractRetryAfterFromError(error: unknown): number | null {
   if (!error || typeof error !== 'object') return null;
 
   // Check for headers in various locations
@@ -384,7 +387,7 @@ export async function* withStreamRetry<T>(
       let delayMs = calculateBackoffDelay(attempts - 1, baseDelayMs, maxDelayMs, jitterFactor);
 
       // Check for retry-after header
-      const retryAfter = extractRetryAfter(error);
+      const retryAfter = extractRetryAfterFromError(error);
       if (retryAfter !== null) {
         delayMs = Math.max(delayMs, retryAfter);
       }
@@ -402,7 +405,7 @@ export async function* withStreamRetry<T>(
       }
 
       try {
-        await sleep(delayMs, signal);
+        await sleepWithAbort(delayMs, signal);
       } catch {
         throw new Error('Operation was cancelled during retry wait');
       }

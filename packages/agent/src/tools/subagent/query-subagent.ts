@@ -4,8 +4,8 @@
  * Query the status, events, logs, or output of a spawned sub-agent.
  */
 
-import type { TronTool, TronToolResult } from '../types/index.js';
-import { createLogger } from '../logging/logger.js';
+import type { TronTool, TronToolResult } from '../../types/index.js';
+import { createLogger } from '../../logging/logger.js';
 
 const logger = createLogger('tool:query-subagent');
 

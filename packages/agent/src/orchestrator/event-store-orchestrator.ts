@@ -65,13 +65,14 @@ import { createLogger } from '../logging/logger.js';
 import { withLoggingContext } from '../logging/log-context.js';
 import { TronAgent } from '../agent/tron-agent.js';
 import type { TurnResult } from '../agent/types.js';
-import { EventStore, type AppendEventOptions } from '../events/event-store.js';
+import { EventStore, type AppendEventOptions, type SearchOptions } from '../events/event-store.js';
 import {
   type SessionEvent as TronSessionEvent,
   type SessionState as EventSessionState,
   type Message as EventMessage,
   type EventId,
   type SessionId,
+  type WorkspaceId,
   type EventType,
 } from '../events/types.js';
 import {
@@ -79,7 +80,7 @@ import {
   createWorktreeCoordinator,
 } from '../session/worktree-coordinator.js';
 import { loadServerAuth } from '../auth/oauth.js';
-import { SubAgentTracker, type SubagentResult } from '../tools/subagent-tracker.js';
+import { SubAgentTracker, type SubagentResult } from '../tools/subagent/subagent-tracker.js';
 import { BacklogService, createBacklogService } from '../todos/backlog-service.js';
 import type { TronEvent } from '../types/events.js';
 import type {
@@ -90,18 +91,22 @@ import type {
   CompactionResult,
 } from '../context/context-manager.js';
 import type { UserContent } from '../types/messages.js';
-import type { SpawnSubagentParams } from '../tools/spawn-subagent.js';
-import type { SpawnTmuxAgentParams } from '../tools/spawn-tmux-agent.js';
+import type { SpawnSubagentParams } from '../tools/subagent/spawn-subagent.js';
+import type { SpawnTmuxAgentParams } from '../tools/subagent/spawn-tmux-agent.js';
 import type {
   SubagentQueryType,
   SubagentStatusInfo,
   SubagentEventInfo,
   SubagentLogInfo,
-} from '../tools/query-subagent.js';
+} from '../tools/subagent/query-subagent.js';
 import type { TodoItem, BackloggedTask } from '../todos/types.js';
-import type { NotifyAppResult } from '../tools/notify-app.js';
+import type { NotifyAppResult } from '../tools/ui/notify-app.js';
 import { BrowserService } from '../external/browser/index.js';
 import { normalizeContentBlocks } from '../utils/content-normalizer.js';
+import {
+  PersistenceError,
+  SessionError,
+} from '../utils/errors.js';
 import {
   buildWorktreeInfoWithStatus,
   commitWorkingDirectory,
@@ -129,6 +134,7 @@ import {
 import {
   AgentFactory,
   createAgentFactory,
+  normalizeToUnifiedAuth,
 } from './agent-factory.js';
 import {
   AuthProvider,
@@ -285,7 +291,7 @@ export class EventStoreOrchestrator extends EventEmitter {
         return this.sendNotification(sessionId, notification, toolCallId);
       } : undefined,
       browserService: this.browserService ? {
-        execute: (sid, action, params) => this.browserService.execute(sid, action as any, params),
+        execute: (sid, action, params) => this.browserService.execute(sid, action, params),
         createSession: async (sid) => { await this.browserService.createSession(sid); },
         startScreencast: async (sid, options) => { await this.browserService.startScreencast(sid, options); },
         hasSession: (sid) => this.browserService.hasSession(sid),
@@ -339,7 +345,13 @@ export class EventStoreOrchestrator extends EventEmitter {
       try {
         await this.endSession(sessionId);
       } catch (error) {
-        logger.error('Failed to end session during shutdown', { sessionId, error });
+        // Wrap in SessionError for structured logging but don't re-throw during shutdown
+        const sessionError = new SessionError('Failed to end session during shutdown', {
+          sessionId,
+          operation: 'close',
+          cause: error instanceof Error ? error : undefined,
+        });
+        logger.error('Failed to end session during shutdown', sessionError.toStructuredLog());
       }
     }
     this.activeSessions.clear();
@@ -917,7 +929,30 @@ export class EventStoreOrchestrator extends EventEmitter {
           });
         }
       } catch (storeErr) {
-        logger.error('Failed to store error.agent event', { storeErr, sessionId: options.sessionId });
+        // Wrap in PersistenceError for structured logging
+        // Note: We still throw the original error, but we want visibility into storage failures
+        const persistenceError = new PersistenceError('Failed to store error.agent event', {
+          table: 'events',
+          operation: 'write',
+          context: {
+            sessionId: options.sessionId,
+            eventType: 'error.agent',
+            originalError: error instanceof Error ? error.message : String(error),
+          },
+          cause: storeErr instanceof Error ? storeErr : undefined,
+        });
+        logger.error('Persistence error during error handling', persistenceError.toStructuredLog());
+        // Emit error event so callers can observe storage failures
+        this.emit('agent_event', {
+          type: 'error.persistence',
+          sessionId: options.sessionId,
+          timestamp: new Date().toISOString(),
+          data: {
+            message: 'Failed to persist error event',
+            eventType: 'error.agent',
+            code: persistenceError.code,
+          },
+        });
       }
 
       if (options.onEvent) {
@@ -987,7 +1022,8 @@ export class EventStoreOrchestrator extends EventEmitter {
 
     // P0 FIX: Prevent model switch during active agent processing
     // Modifying agent.model while agent.run() is in-flight causes inconsistent model usage
-    if (active?.isProcessing) {
+    // NOTE: Use sessionContext.isProcessing() as the authoritative source of truth
+    if (active?.sessionContext.isProcessing()) {
       throw new Error('Cannot switch model while agent is processing');
     }
 
@@ -1032,8 +1068,12 @@ export class EventStoreOrchestrator extends EventEmitter {
       active.model = model;
       // CRITICAL: Use agent's switchModel() to preserve conversation history
       // Pass the new auth to ensure correct credentials for the new provider
-      // Cast is safe - GoogleAuth is compatible with UnifiedAuth & { endpoint? }
-      active.agent.switchModel(model, undefined, newAuth as any);
+      // Normalize auth to UnifiedAuth format and preserve endpoint for Google models
+      const normalizedAuth = normalizeToUnifiedAuth(newAuth);
+      const authWithEndpoint = 'endpoint' in newAuth
+        ? { ...normalizedAuth, endpoint: newAuth.endpoint }
+        : normalizedAuth;
+      active.agent.switchModel(model, undefined, authWithEndpoint);
       logger.debug('[MODEL_SWITCH] Agent model switched (preserving messages)', { sessionId, model });
     }
 
@@ -1094,7 +1134,14 @@ export class EventStoreOrchestrator extends EventEmitter {
     types?: string[];
     limit?: number;
   }) {
-    return this.eventStore.search(query, options as any);
+    // Cast string IDs to branded types for EventStore
+    const searchOptions: SearchOptions | undefined = options ? {
+      workspaceId: options.workspaceId as WorkspaceId | undefined,
+      sessionId: options.sessionId as SessionId | undefined,
+      types: options.types as EventType[] | undefined,
+      limit: options.limit,
+    } : undefined;
+    return this.eventStore.search(query, searchOptions);
   }
 
   // ===========================================================================
@@ -1107,8 +1154,9 @@ export class EventStoreOrchestrator extends EventEmitter {
     processingSessions: number;
     uptime: number;
   } {
+    // Use sessionContext.isProcessing() as the authoritative source of truth
     const processingSessions = Array.from(this.activeSessions.values())
-      .filter(a => a.isProcessing).length;
+      .filter(a => a.sessionContext.isProcessing()).length;
 
     return {
       status: 'healthy',

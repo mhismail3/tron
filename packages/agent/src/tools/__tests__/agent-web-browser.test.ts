@@ -3,7 +3,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { AgentWebBrowserTool, type BrowserDelegate } from '../agent-web-browser.js';
+import { AgentWebBrowserTool, type BrowserDelegate } from '../browser/agent-web-browser.js';
 
 describe('AgentWebBrowserTool', () => {
   let mockDelegate: BrowserDelegate;

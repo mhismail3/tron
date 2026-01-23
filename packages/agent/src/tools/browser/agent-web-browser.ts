@@ -2,7 +2,7 @@
  * @fileoverview AgentWebBrowser tool using agent-browser library
  */
 
-import type { TronTool, TronToolResult, ToolResultContentType } from '../types/index.js';
+import type { TronTool, TronToolResult, ToolResultContentType } from '../../types/index.js';
 
 export interface AgentWebBrowserToolConfig {
   workingDirectory?: string;

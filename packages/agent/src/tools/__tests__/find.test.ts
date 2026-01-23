@@ -6,7 +6,7 @@
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import * as fs from 'fs/promises';
-import { FindTool } from '../find.js';
+import { FindTool } from '../fs/find.js';
 
 // Mock fs/promises
 vi.mock('fs/promises');

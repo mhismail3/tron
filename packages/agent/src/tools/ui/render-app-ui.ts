@@ -12,11 +12,11 @@
  */
 
 import { randomUUID } from 'crypto';
-import type { TronTool, TronToolResult } from '../types/index.js';
-import type { RenderAppUIParams } from '../ui/components.js';
-import { validateRenderAppUIParams } from '../ui/validators.js';
-import { UI_COMPONENT_SCHEMA } from '../ui/schema.js';
-import { createLogger } from '../logging/logger.js';
+import type { TronTool, TronToolResult } from '../../types/index.js';
+import type { RenderAppUIParams } from '../../ui/components.js';
+import { validateRenderAppUIParams } from '../../ui/validators.js';
+import { UI_COMPONENT_SCHEMA } from '../../ui/schema.js';
+import { createLogger } from '../../logging/logger.js';
 
 const logger = createLogger('tool:render-app-ui');
 

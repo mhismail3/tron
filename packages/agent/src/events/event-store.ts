@@ -6,7 +6,7 @@
  */
 
 import * as crypto from 'crypto';
-import { SQLiteBackend, type SessionRow, type ListSessionsOptions } from './sqlite/facade.js';
+import { SQLiteEventStore, type SessionRow, type ListSessionsOptions } from './sqlite/facade.js';
 import {
   EventId,
   SessionId,
@@ -83,13 +83,13 @@ export interface SearchOptions {
 // =============================================================================
 
 export class EventStore {
-  private backend: SQLiteBackend;
+  private backend: SQLiteEventStore;
   private initialized = false;
   private dbPath: string;
 
   constructor(dbPath: string) {
     this.dbPath = dbPath;
-    this.backend = new SQLiteBackend(dbPath);
+    this.backend = new SQLiteEventStore(dbPath);
   }
 
   // ===========================================================================

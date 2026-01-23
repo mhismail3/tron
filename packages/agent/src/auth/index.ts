@@ -57,8 +57,7 @@ export type {
   ProviderId,
   AuthStorage,
   ServerAuth,
-  LegacyAnthropicAuth,
-  LegacyCodexTokens,
+  // NOTE: LegacyAnthropicAuth and LegacyCodexTokens removed - no longer needed
 } from './types.js';
 
 // Unified auth functions

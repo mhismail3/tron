@@ -7,8 +7,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs/promises';
 import * as path from 'path';
-import { ReadTool } from '../read.js';
-import type { TronToolResult } from '../types/index.js';
+import { ReadTool } from '../fs/read.js';
+import type { TronToolResult } from '../../types/index.js';
 
 // Mock fs/promises
 vi.mock('fs/promises');

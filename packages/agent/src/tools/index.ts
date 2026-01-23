@@ -1,44 +1,42 @@
 /**
  * @fileoverview Tools module exports
+ *
+ * Tools are organized by domain:
+ * - fs/       - Filesystem operations (read, write, edit, find, grep, ls)
+ * - subagent/ - Subagent management (spawn, query, wait, tracker)
+ * - browser/  - Browser automation (open-browser, agent-web-browser)
+ * - system/   - System commands (bash, ast-grep)
+ * - ui/       - User interaction (ask-user-question, todo-write, notify-app, render-app-ui)
  */
 
-export { ReadTool, type ReadToolConfig } from './read.js';
-export { WriteTool, type WriteToolConfig } from './write.js';
-export { EditTool, type EditToolConfig } from './edit.js';
-export { BashTool, type BashToolConfig } from './bash.js';
-export { GrepTool, type GrepToolConfig } from './grep.js';
-export { FindTool, type FindToolConfig } from './find.js';
-export { LsTool, type LsToolConfig } from './ls.js';
-export { AgentWebBrowserTool, type AgentWebBrowserToolConfig, type BrowserDelegate } from './agent-web-browser.js';
+// Filesystem tools
 export {
-  AskUserQuestionTool,
-  type AskUserQuestionConfig,
-} from './ask-user-question.js';
-export { OpenBrowserTool, type OpenBrowserConfig } from './open-browser.js';
-export { AstGrepTool, type AstGrepToolConfig, type AstGrepMatch, type AstGrepDetails } from './ast-grep.js';
+  ReadTool,
+  type ReadToolConfig,
+  WriteTool,
+  type WriteToolConfig,
+  EditTool,
+  type EditToolConfig,
+  FindTool,
+  type FindToolConfig,
+  GrepTool,
+  type GrepToolConfig,
+  LsTool,
+  type LsToolConfig,
+} from './fs/index.js';
 
-// UI rendering tool
-export {
-  RenderAppUITool,
-  type RenderAppUIConfig,
-} from './render-app-ui.js';
-
-// Sub-agent spawning tools
+// Subagent tools
 export {
   SpawnSubagentTool,
   type SpawnSubagentToolConfig,
   type SpawnSubagentParams,
   type SpawnSubagentResult,
   type SpawnSubagentCallback,
-} from './spawn-subagent.js';
-export {
   SpawnTmuxAgentTool,
   type SpawnTmuxAgentToolConfig,
   type SpawnTmuxAgentParams,
   type SpawnTmuxAgentResult,
   type SpawnTmuxAgentCallback,
-} from './spawn-tmux-agent.js';
-export {
   QuerySubagentTool,
   type QuerySubagentToolConfig,
   type QuerySubagentParams,
@@ -48,17 +46,11 @@ export {
   type SubagentStatusInfo,
   type SubagentEventInfo,
   type SubagentLogInfo,
-} from './query-subagent.js';
-export {
   WaitForSubagentTool,
   type WaitForSubagentToolConfig,
   type WaitForSubagentParams,
   type WaitForSubagentResult,
   type WaitForSubagentCallback,
-} from './wait-for-subagent.js';
-
-// Subagent tracking
-export {
   SubAgentTracker,
   createSubAgentTracker,
   type TrackedSubagent,
@@ -66,24 +58,43 @@ export {
   type SubagentTrackingEvent,
   type SubagentResult,
   type SubagentCompletionCallback,
-} from './subagent-tracker.js';
+} from './subagent/index.js';
 
-// Todo management tool
+// Browser tools
 export {
+  OpenBrowserTool,
+  type OpenBrowserConfig,
+  AgentWebBrowserTool,
+  type AgentWebBrowserToolConfig,
+  type BrowserDelegate,
+} from './browser/index.js';
+
+// System tools
+export {
+  BashTool,
+  type BashToolConfig,
+  AstGrepTool,
+  type AstGrepToolConfig,
+  type AstGrepMatch,
+  type AstGrepDetails,
+} from './system/index.js';
+
+// UI tools
+export {
+  AskUserQuestionTool,
+  type AskUserQuestionConfig,
   TodoWriteTool,
   type TodoWriteToolConfig,
   type TodoWriteParams,
   type TodoWriteDetails,
-} from './todo-write.js';
-
-// Push notification tool
-export {
   NotifyAppTool,
   type NotifyAppToolConfig,
   type NotifyAppParams,
   type NotifyAppResult,
   type NotifyAppCallback,
-} from './notify-app.js';
+  RenderAppUITool,
+  type RenderAppUIConfig,
+} from './ui/index.js';
 
 // Utility functions for token estimation and output truncation
 export {

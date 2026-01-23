@@ -8,8 +8,8 @@
  * - User input is required (when app may be backgrounded)
  */
 
-import type { TronTool, TronToolResult } from '../types/index.js';
-import { createLogger } from '../logging/logger.js';
+import type { TronTool, TronToolResult } from '../../types/index.js';
+import { createLogger } from '../../logging/logger.js';
 
 const logger = createLogger('tool:notify-app');
 

@@ -54,7 +54,7 @@ const logger = createLogger('agent-factory');
  * Normalize auth to UnifiedAuth format for provider factory.
  * GoogleAuth has optional fields, but UnifiedAuth requires specific shapes.
  */
-function normalizeToUnifiedAuth(auth: ServerAuth | GoogleAuth): UnifiedAuth {
+export function normalizeToUnifiedAuth(auth: ServerAuth | GoogleAuth): UnifiedAuth {
   if (auth.type === 'api_key') {
     // For API key auth, use apiKey from GoogleAuth or ServerAuth
     const apiKey = 'apiKey' in auth ? auth.apiKey : undefined;

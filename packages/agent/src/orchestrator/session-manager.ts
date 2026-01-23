@@ -15,7 +15,7 @@ import { createLogger } from '../logging/logger.js';
 import { EventStore } from '../events/event-store.js';
 import { WorktreeCoordinator } from '../session/worktree-coordinator.js';
 import { SkillTracker, createSkillTracker, type SkillTrackingEvent } from '../skills/skill-tracker.js';
-import { SubAgentTracker, createSubAgentTracker, type SubagentTrackingEvent } from '../tools/subagent-tracker.js';
+import { SubAgentTracker, createSubAgentTracker, type SubagentTrackingEvent } from '../tools/subagent/subagent-tracker.js';
 import { RulesTracker, createRulesTracker, type RulesTrackingEvent } from '../context/rules-tracker.js';
 import { TodoTracker, createTodoTracker } from '../todos/todo-tracker.js';
 import type { TodoTrackingEvent } from '../todos/types.js';
@@ -413,7 +413,8 @@ export class SessionManager {
     commitMessage?: string;
   }): Promise<void> {
     const active = this.config.getActiveSession(sessionId);
-    if (active?.isProcessing) {
+    // Use sessionContext.isProcessing() as the authoritative source of truth
+    if (active?.sessionContext.isProcessing()) {
       throw new Error('Cannot end session while processing');
     }
 

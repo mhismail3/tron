@@ -11,7 +11,12 @@
 import type { StreamEvent } from '../../types/index.js';
 import { createLogger } from '../../logging/logger.js';
 import { parseError, formatError } from '../../utils/errors.js';
-import { calculateBackoffDelay, type RetryConfig } from '../../utils/retry.js';
+import {
+  calculateBackoffDelay,
+  extractRetryAfterFromError,
+  sleepWithAbort,
+  type RetryConfig,
+} from '../../utils/retry.js';
 
 const logger = createLogger('provider-retry');
 
@@ -169,7 +174,7 @@ export async function* withProviderRetry(
       );
 
       // Check for retry-after header
-      const retryAfter = extractRetryAfter(error);
+      const retryAfter = extractRetryAfterFromError(error);
       const actualDelay = retryAfter !== null ? Math.max(delayMs, retryAfter) : delayMs;
 
       logger.info('Retrying stream after error', {
@@ -197,71 +202,10 @@ export async function* withProviderRetry(
       }
 
       // Wait before retry
-      await sleep(actualDelay, signal);
+      await sleepWithAbort(actualDelay, signal);
     }
   }
 }
 
-// =============================================================================
-// Helpers
-// =============================================================================
-
-/**
- * Extract retry-after header value from an error
- */
-function extractRetryAfter(error: unknown): number | null {
-  if (!error || typeof error !== 'object') return null;
-
-  const errorObj = error as {
-    headers?: Record<string, string>;
-    response?: { headers?: Record<string, string> };
-  };
-
-  const headers = errorObj.headers ?? errorObj.response?.headers;
-  if (!headers) return null;
-
-  const retryAfterKey = Object.keys(headers).find(
-    (k) => k.toLowerCase() === 'retry-after'
-  );
-  if (!retryAfterKey) return null;
-
-  const value = headers[retryAfterKey];
-  if (!value) return null;
-
-  // Try parsing as number of seconds
-  const seconds = parseInt(value, 10);
-  if (!isNaN(seconds)) {
-    return seconds * 1000;
-  }
-
-  // Try parsing as HTTP date
-  const date = new Date(value);
-  if (!isNaN(date.getTime())) {
-    const delayMs = date.getTime() - Date.now();
-    return delayMs > 0 ? delayMs : 0;
-  }
-
-  return null;
-}
-
-/**
- * Sleep for specified duration, respecting abort signal
- */
-function sleep(ms: number, signal?: AbortSignal): Promise<void> {
-  return new Promise((resolve, reject) => {
-    if (signal?.aborted) {
-      reject(new Error('Aborted'));
-      return;
-    }
-
-    const timeout = setTimeout(resolve, ms);
-
-    if (signal) {
-      const onAbort = () => {
-        clearTimeout(timeout);
-        reject(new Error('Aborted'));
-      };
-      signal.addEventListener('abort', onAbort, { once: true });
-    }
-  });
-}
+// Helper functions (extractRetryAfterFromError, sleepWithAbort) are now
+// imported from utils/retry.ts to avoid duplication

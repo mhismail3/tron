@@ -9,10 +9,10 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { SpawnSubagentTool } from '../spawn-subagent.js';
-import { SubAgentTracker } from '../subagent-tracker.js';
-import type { SpawnSubagentToolConfig, SpawnSubagentParams } from '../spawn-subagent.js';
-import type { SessionId } from '../events/types.js';
+import { SpawnSubagentTool } from '../subagent/spawn-subagent.js';
+import { SubAgentTracker } from '../subagent/subagent-tracker.js';
+import type { SpawnSubagentToolConfig, SpawnSubagentParams } from '../subagent/spawn-subagent.js';
+import type { SessionId } from '../../events/types.js';
 
 describe('SpawnSubagentTool', () => {
   let tool: SpawnSubagentTool;

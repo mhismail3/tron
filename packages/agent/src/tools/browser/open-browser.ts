@@ -5,8 +5,8 @@
  * It's a fire-and-forget operation - returns immediately after validating the URL.
  */
 
-import type { TronTool, TronToolResult } from '../types/index.js';
-import { createLogger } from '../logging/logger.js';
+import type { TronTool, TronToolResult } from '../../types/index.js';
+import { createLogger } from '../../logging/logger.js';
 
 const logger = createLogger('tool:open-browser');
 

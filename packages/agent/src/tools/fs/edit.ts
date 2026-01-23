@@ -7,8 +7,8 @@
 
 import * as fs from 'fs/promises';
 import * as path from 'path';
-import type { TronTool, TronToolResult } from '../types/index.js';
-import { createLogger } from '../logging/logger.js';
+import type { TronTool, TronToolResult } from '../../types/index.js';
+import { createLogger } from '../../logging/logger.js';
 
 /**
  * Generate a unified diff between old and new strings.

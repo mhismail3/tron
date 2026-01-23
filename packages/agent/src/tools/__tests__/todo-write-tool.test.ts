@@ -9,7 +9,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { TodoWriteTool, type TodoWriteToolConfig, type TodoItem } from '../todo-write.js';
+import { TodoWriteTool, type TodoWriteToolConfig, type TodoItem } from '../ui/todo-write.js';
 
 // =============================================================================
 // Test Helpers
