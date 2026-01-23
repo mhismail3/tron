@@ -495,8 +495,8 @@ describe('Google Gemini Provider', () => {
 
       const fetchCall = (global.fetch as any).mock.calls[0];
       const requestBody = JSON.parse(fetchCall[1].body);
-      // Flash default is 'low' -> 'LOW'
-      expect(requestBody.generationConfig?.thinkingConfig?.thinkingLevel).toBe('LOW');
+      // Flash default is 'high' -> 'HIGH'
+      expect(requestBody.generationConfig?.thinkingConfig?.thinkingLevel).toBe('HIGH');
     });
 
     it('should use thinkingBudget for Gemini 2.5 models', async () => {

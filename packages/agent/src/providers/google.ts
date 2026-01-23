@@ -219,7 +219,7 @@ export const GEMINI_MODELS: Record<string, GeminiModelInfo> = {
     supportsThinking: true,
     tier: 'pro',
     preview: true,
-    defaultThinkingLevel: 'medium',
+    defaultThinkingLevel: 'high',
     supportedThinkingLevels: ['low', 'medium', 'high'],
     inputCostPer1k: 0.00125,
     outputCostPer1k: 0.005,
@@ -233,7 +233,7 @@ export const GEMINI_MODELS: Record<string, GeminiModelInfo> = {
     supportsThinking: true,
     tier: 'flash',
     preview: true,
-    defaultThinkingLevel: 'low',
+    defaultThinkingLevel: 'high',
     supportedThinkingLevels: ['minimal', 'low', 'medium', 'high'],
     inputCostPer1k: 0.000075,
     outputCostPer1k: 0.0003,
@@ -248,7 +248,7 @@ export const GEMINI_MODELS: Record<string, GeminiModelInfo> = {
     supportsTools: true,
     supportsThinking: true,
     tier: 'pro',
-    defaultThinkingLevel: 'medium',
+    defaultThinkingLevel: 'high',
     supportedThinkingLevels: ['low', 'medium', 'high'],
     inputCostPer1k: 0.00125,
     outputCostPer1k: 0.005,
@@ -662,13 +662,16 @@ export class GoogleProvider {
 
       if (isGemini3 && thinkingLevel) {
         // Gemini 3 uses thinkingLevel (discrete levels)
+        // includeThoughts: true enables thought summaries in the response
         generationConfig.thinkingConfig = {
           thinkingLevel: thinkingLevel.toUpperCase(), // API expects MINIMAL, LOW, MEDIUM, HIGH
+          includeThoughts: true,
         };
       } else if (!isGemini3 && thinkingBudget !== undefined) {
         // Gemini 2.5 uses thinkingBudget (token count 0-32768)
         generationConfig.thinkingConfig = {
           thinkingBudget,
+          includeThoughts: true,
         };
       }
 
