@@ -3,12 +3,13 @@ import SwiftUI
 /// A robust connection status pill that appears at the bottom of the chat when connection issues occur.
 /// - Only shows after the connection has been lost (not on initial connection)
 /// - Debounces rapid state changes to prevent flickering
-/// - Reserves space to prevent content jumping
-/// - Uses iOS 26 liquid glass styling
+/// - Animates smoothly with iOS 26 liquid glass styling
 @available(iOS 26.0, *)
 struct ConnectionStatusPill: View {
     let connectionState: ConnectionState
     let onRetry: () async -> Void
+    /// Called when the pill is about to disappear (for scroll adjustment)
+    var onWillDisappear: (() -> Void)?
 
     /// Tracks if we've ever seen a non-connected state in this session
     @State private var hasSeenDisconnect = false
@@ -16,22 +17,25 @@ struct ConnectionStatusPill: View {
     /// The state we're actually displaying (debounced)
     @State private var displayedState: ConnectionState?
 
+    /// Controls visibility for smooth fade out
+    @State private var isVisible = false
+
     /// Debounce task for state changes
     @State private var debounceTask: Task<Void, Never>?
 
     private let debounceDelay: TimeInterval = 0.3
 
     var body: some View {
-        ZStack {
-            if let state = displayedState, hasSeenDisconnect {
-                pillContent(for: state)
-                    .transition(.opacity.combined(with: .scale(scale: 0.95)))
+        // Wrap in VStack to allow height animation
+        VStack(spacing: 0) {
+            if hasSeenDisconnect && displayedState != nil {
+                pillContent
+                    .opacity(isVisible ? 1 : 0)
+                    .scaleEffect(isVisible ? 1 : 0.9)
             }
         }
-        .frame(height: hasSeenDisconnect && displayedState != nil ? nil : 0)
-        .clipped()
-        .animation(.spring(response: 0.35, dampingFraction: 0.8), value: displayedState)
-        .animation(.spring(response: 0.35, dampingFraction: 0.8), value: hasSeenDisconnect)
+        .animation(.spring(response: 0.4, dampingFraction: 0.85), value: isVisible)
+        .animation(.spring(response: 0.4, dampingFraction: 0.85), value: displayedState == nil)
         .onChange(of: connectionState) { _, newState in
             handleStateChange(newState)
         }
@@ -39,38 +43,41 @@ struct ConnectionStatusPill: View {
             if !connectionState.isConnected {
                 hasSeenDisconnect = true
                 displayedState = connectionState
+                isVisible = true
             }
         }
     }
 
     @ViewBuilder
-    private func pillContent(for state: ConnectionState) -> some View {
-        Button {
-            Task { await onRetry() }
-        } label: {
-            HStack(spacing: 8) {
-                statusIcon(for: state)
+    private var pillContent: some View {
+        if let state = displayedState, hasSeenDisconnect {
+            Button {
+                Task { await onRetry() }
+            } label: {
+                HStack(spacing: 8) {
+                    statusIcon(for: state)
 
-                Text(statusText(for: state))
-                    .font(TronTypography.mono(size: TronTypography.sizeCaption, weight: .medium))
+                    Text(statusText(for: state))
+                        .font(TronTypography.mono(size: TronTypography.sizeCaption, weight: .medium))
 
-                // Countdown for reconnecting
-                if case .reconnecting(_, let seconds) = state, seconds > 0 {
-                    Text("(\(seconds)s)")
-                        .font(TronTypography.mono(size: TronTypography.sizeCaption))
-                        .foregroundStyle(.white.opacity(0.7))
+                    // Countdown for reconnecting
+                    if case .reconnecting(_, let seconds) = state, seconds > 0 {
+                        Text("(\(seconds)s)")
+                            .font(TronTypography.mono(size: TronTypography.sizeCaption))
+                            .foregroundStyle(.white.opacity(0.7))
+                    }
                 }
+                .foregroundStyle(.white)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 10)
             }
-            .foregroundStyle(.white)
-            .padding(.horizontal, 16)
-            .padding(.vertical, 10)
+            .buttonStyle(.plain)
+            .disabled(state.isConnected)
+            .glassEffect(
+                .regular.tint(tintColor(for: state)).interactive(),
+                in: .capsule
+            )
         }
-        .buttonStyle(.plain)
-        .disabled(state.isConnected)
-        .glassEffect(
-            .regular.tint(tintColor(for: state)).interactive(),
-            in: .capsule
-        )
     }
 
     @ViewBuilder
@@ -83,17 +90,10 @@ struct ConnectionStatusPill: View {
             ProgressView()
                 .scaleEffect(0.65)
                 .tint(.white)
-        case .reconnecting(_, let seconds):
-            if seconds > 0 {
-                ProgressView()
-                    .scaleEffect(0.65)
-                    .tint(.white)
-            } else {
-                // Attempting connection
-                ProgressView()
-                    .scaleEffect(0.65)
-                    .tint(.white)
-            }
+        case .reconnecting:
+            ProgressView()
+                .scaleEffect(0.65)
+                .tint(.white)
         case .connected:
             Image(systemName: "checkmark.circle.fill")
                 .font(.system(size: 13, weight: .semibold))
@@ -137,32 +137,56 @@ struct ConnectionStatusPill: View {
         guard hasSeenDisconnect else { return }
 
         if newState.isConnected {
-            // Transitioning to connected - debounce to prevent flicker
+            // Transitioning to connected - debounce to prevent flicker from optimistic connection
             debounceTask = Task {
                 try? await Task.sleep(for: .seconds(debounceDelay))
                 guard !Task.isCancelled else { return }
 
                 await MainActor.run {
+                    // Only show "Connected" if we were showing a non-connected state
                     if displayedState != nil && !displayedState!.isConnected {
                         displayedState = newState
 
+                        // Schedule fade out after showing "Connected" briefly
                         debounceTask = Task {
                             try? await Task.sleep(for: .seconds(2.0))
                             guard !Task.isCancelled else { return }
                             await MainActor.run {
                                 if connectionState.isConnected {
-                                    displayedState = nil
+                                    // Notify scroll coordinator before fade starts
+                                    onWillDisappear?()
+                                    // Fade out smoothly
+                                    isVisible = false
+                                    // Clear state after animation completes
+                                    debounceTask = Task {
+                                        try? await Task.sleep(for: .seconds(0.5))
+                                        guard !Task.isCancelled else { return }
+                                        await MainActor.run {
+                                            if connectionState.isConnected {
+                                                displayedState = nil
+                                            }
+                                        }
+                                    }
                                 }
                             }
                         }
                     } else {
-                        displayedState = nil
+                        // Was already nil or already connected - just clear
+                        isVisible = false
+                        debounceTask = Task {
+                            try? await Task.sleep(for: .seconds(0.5))
+                            guard !Task.isCancelled else { return }
+                            await MainActor.run {
+                                displayedState = nil
+                            }
+                        }
                     }
                 }
             }
         } else {
             // Non-connected states - update immediately for reconnecting (countdown needs real-time updates)
             displayedState = newState
+            isVisible = true
         }
     }
 }

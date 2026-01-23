@@ -172,6 +172,17 @@ final class ScrollStateCoordinator: ObservableObject {
         hasUnreadContent = false
     }
 
+    /// Call when bottom content (like connection pill) changes height
+    /// Ensures smooth scroll adjustment when content at bottom shrinks/grows
+    func bottomContentHeightChanged(using proxy: ScrollViewProxy?) {
+        // Only adjust if we're following - reviewing mode maintains position
+        if mode == .following {
+            withAnimation(.spring(response: 0.4, dampingFraction: 0.85)) {
+                proxy?.scrollTo("bottom", anchor: .bottom)
+            }
+        }
+    }
+
     // MARK: - Query Methods
 
     /// Whether we should show the "New content" button

@@ -68,6 +68,13 @@ struct ChatView: View {
     /// Content for thinking detail sheet (when a thinking block is tapped)
     @State private var thinkingSheetContent: String?
 
+    // MARK: - Connection Interaction State
+    /// Debounced interaction state to prevent flicker during reconnection attempts.
+    /// Only becomes true after connection is stable, not during optimistic connection.
+    @State private var isInteractionEnabled = true
+    /// Task for debouncing interaction state changes
+    @State private var interactionDebounceTask: Task<Void, Never>?
+
     /// UserDefaults key for storing reasoning level per session
     private var reasoningLevelKey: String { "tron.reasoningLevel.\(sessionId)" }
 
@@ -187,7 +194,7 @@ struct ChatView: View {
                             showSkillDetailSheet = true
                         },
                         animationCoordinator: viewModel.animationCoordinator,
-                        readOnly: workspaceDeleted || !viewModel.connectionState.canInteract
+                        readOnly: workspaceDeleted || !isInteractionEnabled
                     )
                     .id(sessionId)
                 }
@@ -510,6 +517,25 @@ struct ChatView: View {
                     await viewModel.connectAndResume()
                 }
             }
+
+            // Debounce interaction enabled state to prevent UI flicker during reconnection
+            interactionDebounceTask?.cancel()
+            if newState.canInteract {
+                // Becoming connected - wait to ensure it's stable (not optimistic)
+                interactionDebounceTask = Task {
+                    try? await Task.sleep(for: .milliseconds(500))
+                    guard !Task.isCancelled else { return }
+                    await MainActor.run {
+                        // Double-check still connected before enabling
+                        if viewModel.connectionState.canInteract {
+                            isInteractionEnabled = true
+                        }
+                    }
+                }
+            } else {
+                // Becoming disconnected - disable immediately
+                isInteractionEnabled = false
+            }
         }
         .onChange(of: viewModel.shouldDismiss) { _, shouldDismiss in
             // Navigate back when session doesn't exist on server
@@ -719,7 +745,11 @@ struct ChatView: View {
                             // Connection status pill - appears when not connected
                             ConnectionStatusPill(
                                 connectionState: viewModel.connectionState,
-                                onRetry: { await rpcClient.manualRetry() }
+                                onRetry: { await rpcClient.manualRetry() },
+                                onWillDisappear: {
+                                    // Notify scroll coordinator to smoothly adjust when pill disappears
+                                    scrollCoordinator.bottomContentHeightChanged(using: proxy)
+                                }
                             )
                             .frame(maxWidth: .infinity)
                             .padding(.top, 8)
