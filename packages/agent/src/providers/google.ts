@@ -1037,19 +1037,47 @@ export class GoogleProvider {
     for (const msg of context.messages) {
       if (msg.role === 'user') {
         const parts: GeminiPart[] = [];
+        const toolResultParts: GeminiPart[] = [];
 
         if (typeof msg.content === 'string') {
           parts.push({ text: msg.content });
         } else {
-          for (const c of msg.content) {
+          // Cast to handle both standard UserContent and legacy tool_result blocks
+          // (message reconstructor outputs tool results as user messages with tool_result content)
+          const contentArray = msg.content as unknown as Array<{ type: string; [key: string]: unknown }>;
+          for (const c of contentArray) {
             if (c.type === 'text') {
-              parts.push({ text: c.text });
+              parts.push({ text: c.text as string });
+            } else if (c.type === 'tool_result') {
+              // Handle tool_result content blocks (from reconstructed messages - legacy format)
+              // This is how message-reconstructor currently outputs tool results:
+              // as user messages with tool_result content blocks
+              // Support both API format (tool_use_id) and internal format (toolCallId)
+              const callId = (c.tool_use_id ?? c.toolCallId ?? '') as string;
+
+              toolResultParts.push({
+                functionResponse: {
+                  name: 'tool_result',
+                  response: {
+                    result: c.content as string,
+                    tool_call_id: idMapping.get(callId) ?? callId,
+                  },
+                },
+              });
             }
             // Note: Image handling would go here for multimodal
           }
         }
 
-        contents.push({ role: 'user', parts });
+        // Add text parts as user message
+        if (parts.length > 0) {
+          contents.push({ role: 'user', parts });
+        }
+
+        // Add tool results as separate user turn with functionResponse
+        if (toolResultParts.length > 0) {
+          contents.push({ role: 'user', parts: toolResultParts });
+        }
       } else if (msg.role === 'assistant') {
         const parts: GeminiPart[] = [];
 

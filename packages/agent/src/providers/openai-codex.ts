@@ -855,19 +855,46 @@ export class OpenAICodexProvider {
     // Second pass: convert messages with remapped IDs
     for (const msg of context.messages) {
       if (msg.role === 'user') {
-        const text = typeof msg.content === 'string'
-          ? msg.content
-          : msg.content
-              .filter(c => c.type === 'text')
-              .map(c => (c as TextContent).text)
-              .join('\n');
+        // Cast to handle both standard UserContent and legacy tool_result blocks
+        // (message reconstructor outputs tool results as user messages with tool_result content)
+        const content = typeof msg.content === 'string'
+          ? [{ type: 'text' as const, text: msg.content }]
+          : (msg.content as unknown as Array<{ type: string; [key: string]: unknown }>);
 
-        // ChatGPT backend API requires 'message' type, not 'input_text'
-        input.push({
-          type: 'message',
-          role: 'user',
-          content: [{ type: 'input_text', text }],
-        });
+        // Extract text content
+        const textParts = content
+          .filter(c => c.type === 'text')
+          .map(c => c.text as string);
+
+        if (textParts.length > 0) {
+          // ChatGPT backend API requires 'message' type, not 'input_text'
+          input.push({
+            type: 'message',
+            role: 'user',
+            content: [{ type: 'input_text', text: textParts.join('\n') }],
+          });
+        }
+
+        // Handle tool_result content blocks (from reconstructed messages - legacy format)
+        // This is how message-reconstructor currently outputs tool results:
+        // as user messages with tool_result content blocks
+        const toolResults = content.filter(c => c.type === 'tool_result');
+        for (const tr of toolResults) {
+          // Support both API format (tool_use_id) and internal format (toolCallId)
+          const callId = (tr.tool_use_id ?? tr.toolCallId ?? '') as string;
+
+          // Truncate long outputs (Codex has 16k limit per output)
+          const output = tr.content as string;
+          const truncatedOutput = output.length > 16000
+            ? output.slice(0, 16000) + '\n... [truncated]'
+            : output;
+
+          input.push({
+            type: 'function_call_output',
+            call_id: idMapping.get(callId) ?? callId,
+            output: truncatedOutput,
+          });
+        }
       } else if (msg.role === 'assistant') {
         // Handle assistant messages with text
         const textParts = msg.content
