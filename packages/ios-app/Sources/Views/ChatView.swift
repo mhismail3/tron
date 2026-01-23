@@ -26,13 +26,6 @@ private struct InteractivePopGestureEnabler: UIViewControllerRepresentable {
 // MARK: - Scroll Position Tracking
 
 /// Simple PreferenceKey to track scroll offset for detecting user scroll direction
-private struct ScrollOffsetPreferenceKey: PreferenceKey {
-    nonisolated(unsafe) static var defaultValue: CGFloat = 0
-
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
-        value = nextValue()
-    }
-}
 
 // MARK: - Chat View
 
@@ -507,8 +500,13 @@ struct ChatView: View {
             await viewModel.syncAndLoadMessagesForResume()
 
             // Mark initial load complete - enables auto-scroll for subsequent updates
-            // Note: NO explicit scroll needed here - defaultScrollAnchor(.bottom) handles it
             initialLoadComplete = true
+
+            // Scroll to bottom after messages are loaded
+            // (We don't use defaultScrollAnchor because it causes keyboard issues)
+            await MainActor.run {
+                scrollProxy?.scrollTo("bottom", anchor: .bottom)
+            }
         }
         .onChange(of: viewModel.connectionState) { oldState, newState in
             // React when connection transitions to connected
@@ -573,7 +571,7 @@ struct ChatView: View {
     /// Perform scroll to deep link target
     private func performDeepLinkScroll(to target: ScrollTarget) {
         if let messageId = viewModel.findMessageId(for: target) {
-            scrollCoordinator.scrollToDeepLinkTarget(messageId: messageId, using: scrollProxy)
+            scrollCoordinator.scrollToTarget(messageId: messageId, using: scrollProxy)
             logger.info("Deep link scroll to message: \(messageId)", category: .notification)
         } else {
             logger.warning("Deep link target not found: \(target)", category: .notification)
@@ -656,193 +654,182 @@ struct ChatView: View {
     // MARK: - Messages Scroll View
 
     private var messagesScrollView: some View {
-        GeometryReader { containerGeo in
-            let containerHeight = containerGeo.size.height
+        ZStack(alignment: .bottom) {
+            ScrollViewReader { proxy in
+                ScrollView {
+                    LazyVStack(spacing: 12) {
+                        // Load more messages button (like iOS Messages)
+                        if viewModel.hasMoreMessages {
+                            loadMoreButton
+                                .id("loadMore")
+                        }
 
-            ZStack(alignment: .bottom) {
-                ScrollViewReader { proxy in
-                    ScrollView {
-                        LazyVStack(spacing: 12) {
-                            // Load more messages button (like iOS Messages)
-                            if viewModel.hasMoreMessages {
-                                loadMoreButton
-                                    .id("loadMore")
-                            }
+                        ForEach(viewModel.messages) { message in
+                            MessageBubble(
+                                message: message,
+                                onSkillTap: { skill in
+                                    skillForDetailSheet = skill
+                                    showSkillDetailSheet = true
+                                },
+                                onAskUserQuestionTap: { data in
+                                    viewModel.openAskUserQuestionSheet(for: data)
+                                },
+                                onThinkingTap: { content in
+                                    thinkingSheetContent = content
+                                },
+                                onCompactionTap: { tokensBefore, tokensAfter, reason, summary in
+                                    compactionDetailData = (tokensBefore, tokensAfter, reason, summary)
+                                    showCompactionDetail = true
+                                },
+                                onSubagentTap: { data in
+                                    viewModel.subagentState.showDetails(with: data)
+                                },
+                                onRenderAppUITap: { data in
+                                    // Load canvas from server if not in memory, then show sheet
+                                    Task {
+                                        // Try to load from server (skips if already in memory)
+                                        let loaded = await viewModel.uiCanvasState.loadFromServer(
+                                            canvasId: data.canvasId,
+                                            rpcClient: rpcClient
+                                        )
 
-                            ForEach(viewModel.messages) { message in
-                                MessageBubble(
-                                    message: message,
-                                    onSkillTap: { skill in
-                                        skillForDetailSheet = skill
-                                        showSkillDetailSheet = true
-                                    },
-                                    onAskUserQuestionTap: { data in
-                                        viewModel.openAskUserQuestionSheet(for: data)
-                                    },
-                                    onThinkingTap: { content in
-                                        thinkingSheetContent = content
-                                    },
-                                    onCompactionTap: { tokensBefore, tokensAfter, reason, summary in
-                                        compactionDetailData = (tokensBefore, tokensAfter, reason, summary)
-                                        showCompactionDetail = true
-                                    },
-                                    onSubagentTap: { data in
-                                        viewModel.subagentState.showDetails(with: data)
-                                    },
-                                    onRenderAppUITap: { data in
-                                        // Load canvas from server if not in memory, then show sheet
-                                        Task {
-                                            // Try to load from server (skips if already in memory)
-                                            let loaded = await viewModel.uiCanvasState.loadFromServer(
-                                                canvasId: data.canvasId,
-                                                rpcClient: rpcClient
-                                            )
-
-                                            if loaded {
-                                                viewModel.uiCanvasState.activeCanvasId = data.canvasId
-                                                viewModel.uiCanvasState.showSheet = true
-                                            } else {
-                                                // Canvas not found on server - show error
-                                                viewModel.showErrorAlert("Canvas not found")
-                                            }
+                                        if loaded {
+                                            viewModel.uiCanvasState.activeCanvasId = data.canvasId
+                                            viewModel.uiCanvasState.showSheet = true
+                                        } else {
+                                            // Canvas not found on server - show error
+                                            viewModel.showErrorAlert("Canvas not found")
                                         }
-                                    },
-                                    onTodoWriteTap: {
-                                        viewModel.todoState.showSheet = true
-                                    },
-                                    onNotifyAppTap: { data in
-                                        notifyAppSheetData = data
                                     }
-                                )
-                                .id(message.id)
-                                // Entrance animation - fade in with slight upward movement
-                                .opacity(showEntryContent ? 1 : 0)
-                                .offset(y: showEntryContent ? 0 : 6)
-                                .transition(.opacity.combined(with: .scale(scale: 0.98, anchor: .bottom)))
-                            }
-                            .animation(.easeOut(duration: 0.3), value: showEntryContent)
-                            .animation(.easeOut(duration: 0.25), value: viewModel.messages.count)
-
-                            // Note: Thinking is now rendered as a message in the ForEach above
-                            // (ChatMessage with .thinking content type) so it appears in linear history
-
-                            // Show processing indicator only when:
-                            // 1. Processing is happening
-                            // 2. Last message is not streaming text
-                            // 3. No subagent is blocking (subagent chip shows its own spinner)
-                            // 4. No thinking message is active (thinking message has its own visual)
-                            if viewModel.isProcessing && viewModel.messages.last?.isStreaming != true && !viewModel.subagentState.hasRunningSubagents && viewModel.thinkingMessageId == nil {
-                                ProcessingIndicator()
-                                    .id("processing")
-                            }
-
-                            // Show workspace deleted notification when workspace folder no longer exists
-                            if workspaceDeleted {
-                                WorkspaceDeletedNotificationView()
-                                    .id("workspaceDeleted")
-                            }
-
-                            // Connection status pill - appears when not connected
-                            ConnectionStatusPill(
-                                connectionState: viewModel.connectionState,
-                                onRetry: { await rpcClient.manualRetry() },
-                                onWillDisappear: {
-                                    // Notify scroll coordinator to smoothly adjust when pill disappears
-                                    scrollCoordinator.bottomContentHeightChanged(using: proxy)
+                                },
+                                onTodoWriteTap: {
+                                    viewModel.todoState.showSheet = true
+                                },
+                                onNotifyAppTap: { data in
+                                    notifyAppSheetData = data
                                 }
                             )
-                            .frame(maxWidth: .infinity)
-                            .padding(.top, 8)
-                            .id("connectionStatusPill")
+                            .id(message.id)
+                            // Entrance animation - fade in with slight upward movement
+                            .opacity(showEntryContent ? 1 : 0)
+                            .offset(y: showEntryContent ? 0 : 6)
+                            .transition(.opacity.combined(with: .scale(scale: 0.98, anchor: .bottom)))
+                        }
+                        .animation(.easeOut(duration: 0.3), value: showEntryContent)
+                        .animation(.easeOut(duration: 0.25), value: viewModel.messages.count)
 
-                            // Scroll anchor with position detection for "at bottom" tracking
-                            GeometryReader { geo in
-                                Color.clear
-                                    .preference(
-                                        key: ScrollOffsetPreferenceKey.self,
-                                        value: geo.frame(in: .named("scrollContainer")).minY - containerHeight
-                                    )
-                            }
+                        // Show processing indicator only when:
+                        // 1. Processing is happening
+                        // 2. Last message is not streaming text
+                        // 3. No subagent is blocking (subagent chip shows its own spinner)
+                        // 4. No thinking message is active (thinking message has its own visual)
+                        if viewModel.isProcessing && viewModel.messages.last?.isStreaming != true && !viewModel.subagentState.hasRunningSubagents && viewModel.thinkingMessageId == nil {
+                            ProcessingIndicator()
+                                .id("processing")
+                        }
+
+                        // Show workspace deleted notification when workspace folder no longer exists
+                        if workspaceDeleted {
+                            WorkspaceDeletedNotificationView()
+                                .id("workspaceDeleted")
+                        }
+
+                        // Connection status pill - appears when not connected
+                        ConnectionStatusPill(
+                            connectionState: viewModel.connectionState,
+                            onRetry: { await rpcClient.manualRetry() }
+                        )
+                        .frame(maxWidth: .infinity)
+                        .padding(.top, 8)
+                        .id("connectionStatusPill")
+
+                        // Bottom anchor for scrolling
+                        Color.clear
                             .frame(height: 1)
                             .id("bottom")
-                        }
-                        .padding()
                     }
-                    .defaultScrollAnchor(.bottom)  // Start at bottom - no visible scroll on load
-                    .coordinateSpace(name: "scrollContainer")
-                    .scrollDismissesKeyboard(.interactively)
-                    // Track distance from bottom via coordinator
-                    .onPreferenceChange(ScrollOffsetPreferenceKey.self) { distanceFromBottom in
-                        // Don't process scroll position during initial load
-                        guard initialLoadComplete else { return }
-                        scrollCoordinator.userScrolled(distanceFromBottom: distanceFromBottom, isProcessing: viewModel.isProcessing)
-                    }
-                    .onAppear {
-                        scrollProxy = proxy
-                    }
-                    // Consolidated onChange handlers via ScrollStateCoordinator
-                    .onChange(of: viewModel.messages.count) { oldCount, newCount in
-                        // Don't auto-scroll during initial load - defaultScrollAnchor handles it
-                        guard initialLoadComplete else { return }
-                        guard newCount != oldCount else { return }
-
-                        // Determine mutation type based on whether we're loading history
-                        if viewModel.isLoadingMoreMessages {
-                            scrollCoordinator.didMutateContent(.prependHistory)
-                        } else {
-                            // Use proxy for scrolling since ScrollPosition bidirectional binding
-                            // doesn't work well with LazyVStack in iOS 17
-                            scrollCoordinator.didMutateContent(.appendNew)
-                            if scrollCoordinator.autoScrollEnabled {
-                                withAnimation(.tronFast) {
-                                    proxy.scrollTo("bottom", anchor: .bottom)
-                                }
-                            }
+                    .padding()
+                }
+                // NOTE: We intentionally do NOT use .defaultScrollAnchor(.bottom) here.
+                // It causes content to jump off-screen when keyboard appears with long content,
+                // because it tries to re-anchor when container size changes.
+                // Instead, we manually scroll to bottom on initial load and when keyboard appears.
+                .scrollDismissesKeyboard(.interactively)
+                .onScrollGeometryChange(for: Bool.self) { geometry in
+                    // Check if we're near the bottom (within 100 points)
+                    let distanceFromBottom = geometry.contentSize.height - geometry.contentOffset.y - geometry.containerSize.height
+                    return distanceFromBottom < 100
+                } action: { wasNearBottom, isNearBottom in
+                    guard initialLoadComplete else { return }
+                    scrollCoordinator.userDidScroll(isNearBottom: isNearBottom)
+                }
+                // Scroll to bottom when keyboard appears (container height shrinks significantly)
+                .onScrollGeometryChange(for: CGFloat.self) { geometry in
+                    geometry.containerSize.height
+                } action: { oldHeight, newHeight in
+                    guard initialLoadComplete else { return }
+                    let heightChange = oldHeight - newHeight
+                    // Container shrank significantly (keyboard appeared, not just pill animation)
+                    // Always scroll to bottom when keyboard appears - this is the expected behavior
+                    if heightChange > 100 {
+                        withAnimation(.easeOut(duration: 0.25)) {
+                            proxy.scrollTo("bottom", anchor: .bottom)
                         }
                     }
-                    .onChange(of: viewModel.messages.last?.streamingVersion) { _, _ in
-                        // Don't auto-scroll during initial load - defaultScrollAnchor handles it
-                        guard initialLoadComplete else { return }
+                }
+                .onAppear {
+                    scrollProxy = proxy
+                }
+                // Auto-scroll on new messages
+                .onChange(of: viewModel.messages.count) { oldCount, newCount in
+                    guard initialLoadComplete else { return }
+                    guard newCount > oldCount else { return }  // Only for new messages, not history
 
-                        // Streaming content update (version-based detection is more reliable)
-                        // Use debounced scroll to prevent jitter during rapid updates
-                        if viewModel.isProcessing {
-                            if scrollCoordinator.shouldAutoScrollWithDebounce() {
+                    scrollCoordinator.contentAdded()
+                    if scrollCoordinator.shouldAutoScroll {
+                        withAnimation(.easeOut(duration: 0.2)) {
+                            proxy.scrollTo("bottom", anchor: .bottom)
+                        }
+                    }
+                }
+                // Auto-scroll during streaming
+                .onChange(of: viewModel.messages.last?.streamingVersion) { _, _ in
+                    guard initialLoadComplete else { return }
+                    guard viewModel.isProcessing else { return }
+
+                    if scrollCoordinator.shouldAutoScroll {
+                        proxy.scrollTo("bottom", anchor: .bottom)
+                    }
+                }
+                // Final scroll when processing ends
+                .onChange(of: viewModel.isProcessing) { wasProcessing, isProcessing in
+                    guard initialLoadComplete else { return }
+
+                    if wasProcessing && !isProcessing {
+                        scrollCoordinator.processingEnded()
+                        if scrollCoordinator.shouldAutoScroll {
+                            withAnimation(.easeOut(duration: 0.2)) {
                                 proxy.scrollTo("bottom", anchor: .bottom)
-                            } else if !scrollCoordinator.autoScrollEnabled {
-                                scrollCoordinator.didMutateContent(.updateExisting)
-                            }
-                        }
-                    }
-                    .onChange(of: viewModel.isProcessing) { wasProcessing, isProcessing in
-                        // Don't auto-scroll during initial load - defaultScrollAnchor handles it
-                        guard initialLoadComplete else { return }
-
-                        if wasProcessing && !isProcessing {
-                            // Processing ended - notify coordinator
-                            scrollCoordinator.processingEnded()
-                            if scrollCoordinator.autoScrollEnabled {
-                                withAnimation(.tronFast) {
-                                    proxy.scrollTo("bottom", anchor: .bottom)
-                                }
                             }
                         }
                     }
                 }
-
-                // Floating "New Messages" button - show when user has scrolled up during streaming
-                if scrollCoordinator.shouldShowScrollToBottomButton {
-                    scrollToBottomButton
-                        .transition(.asymmetric(
-                            insertion: .opacity.combined(with: .scale(scale: 0.8)).combined(with: .move(edge: .bottom)),
-                            removal: .opacity.combined(with: .scale(scale: 0.9))
-                        ))
-                        .padding(.bottom, 16)
-                        .animation(.tronStandard, value: scrollCoordinator.hasUnreadContent)
+                // Restore scroll position after loading older messages
+                .onChange(of: viewModel.isLoadingMoreMessages) { wasLoading, isLoading in
+                    if wasLoading && !isLoading {
+                        scrollCoordinator.didPrependHistory(using: proxy)
+                    }
                 }
+            }
 
+            // Floating "New Messages" button
+            if scrollCoordinator.shouldShowScrollToBottomButton {
+                scrollToBottomButton
+                    .transition(.opacity.combined(with: .scale(scale: 0.9)))
+                    .padding(.bottom, 16)
             }
         }
+        .animation(.easeOut(duration: 0.2), value: scrollCoordinator.shouldShowScrollToBottomButton)
     }
 
     // MARK: - Scroll to Bottom Button
@@ -878,7 +865,7 @@ struct ChatView: View {
     private var loadMoreButton: some View {
         Button {
             // Notify coordinator before prepending history
-            scrollCoordinator.willMutateContent(.prependHistory, firstVisibleId: viewModel.messages.first?.id)
+            scrollCoordinator.willPrependHistory(firstVisibleId: viewModel.messages.first?.id)
             viewModel.loadMoreMessages()
         } label: {
             HStack(spacing: 8) {
