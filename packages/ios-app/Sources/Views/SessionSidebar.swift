@@ -12,10 +12,19 @@ enum NavigationMode: String, CaseIterable {
 struct SessionSidebar: View {
     @EnvironmentObject var eventStoreManager: EventStoreManager
     @EnvironmentObject var appState: AppState
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @Binding var selectedSessionId: String?
     let onNewSession: () -> Void
     let onDeleteSession: (String) -> Void
+    let onSettings: () -> Void
     let onVoiceNote: () -> Void
+    var onNavigationModeChange: ((NavigationMode) -> Void)?
+
+    /// On iPad (regular), sidebar is a side panel - minimal chrome
+    /// On iPhone (compact), sidebar is the main view - needs full toolbar
+    private var isCompact: Bool {
+        horizontalSizeClass == .compact
+    }
 
     var body: some View {
         ZStack(alignment: .bottomTrailing) {
@@ -61,7 +70,42 @@ struct SessionSidebar: View {
             .padding(.bottom, 24)
         }
         .navigationBarTitleDisplayMode(.inline)
+        .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
         .toolbar(removing: .sidebarToggle)
+        .toolbar {
+            // Only show toolbar items on iPhone (compact) - iPad has its own in detail view
+            if isCompact {
+                ToolbarItem(placement: .topBarLeading) {
+                    Menu {
+                        ForEach(NavigationMode.allCases, id: \.self) { mode in
+                            Button {
+                                onNavigationModeChange?(mode)
+                            } label: {
+                                Label(mode.rawValue, systemImage: mode == .agents ? "cpu" : "waveform")
+                            }
+                        }
+                    } label: {
+                        Image("TronLogo")
+                            .resizable()
+                            .aspectRatio(contentMode: .fit)
+                            .frame(height: 24)
+                    }
+                }
+                ToolbarItem(placement: .principal) {
+                    Text("TRON")
+                        .font(TronTypography.mono(size: TronTypography.sizeTitle, weight: .bold))
+                        .foregroundStyle(.tronEmerald)
+                        .tracking(2)
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button(action: onSettings) {
+                        Image(systemName: "gearshape")
+                            .font(TronTypography.sans(size: TronTypography.sizeTitle, weight: .medium))
+                            .foregroundStyle(.tronEmerald)
+                    }
+                }
+            }
+        }
     }
 }
 

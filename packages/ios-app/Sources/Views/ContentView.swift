@@ -138,12 +138,12 @@ struct ContentView: View {
 
     /// Toggle sidebar visibility
     private func toggleSidebar() {
-        withAnimation {
-            if columnVisibility == .detailOnly {
-                columnVisibility = .all
-            } else {
-                columnVisibility = .detailOnly
-            }
+        // Don't use withAnimation here - the NavigationSplitView has its own
+        // .animation() modifier that handles both appear and disappear
+        if columnVisibility == .detailOnly {
+            columnVisibility = .all
+        } else {
+            columnVisibility = .detailOnly
         }
     }
 
@@ -157,6 +157,8 @@ struct ContentView: View {
         .navigationSplitViewStyle(.balanced)
         .scrollContentBackground(.hidden)
         .tint(.tronEmerald)
+        // Explicit animation for column visibility changes - ensures smooth transitions both ways
+        .animation(.easeInOut(duration: 0.35), value: columnVisibility)
     }
 
     @ViewBuilder
@@ -174,7 +176,11 @@ struct ContentView: View {
                             deleteSession(sessionId)
                         }
                     },
-                    onVoiceNote: { showVoiceNotesRecording = true }
+                    onSettings: { showSettings = true },
+                    onVoiceNote: { showVoiceNotesRecording = true },
+                    onNavigationModeChange: { mode in
+                        navigationMode = mode
+                    }
                 )
             } else {
                 VoiceNotesListView(
@@ -357,6 +363,7 @@ struct ContentView: View {
         }
         .padding(40)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .geometryGroup() // Ensures geometry changes animate together with NavigationSplitView
         .toolbar {
             // Custom emerald sidebar toggle for iPad
             if horizontalSizeClass == .regular {
@@ -369,7 +376,6 @@ struct ContentView: View {
                 }
             }
         }
-        .animation(.easeInOut(duration: 0.3), value: isSidebarVisible)
     }
 
     private func deleteSession(_ sessionId: String) {
@@ -418,7 +424,6 @@ struct WelcomePage: View {
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .offset(y: -60)
-                .animation(.easeInOut(duration: 0.3), value: isSidebarVisible)
 
                 // Floating buttons - mic and plus (hide when sidebar is visible to avoid duplicates)
                 if !isSidebarVisible {
@@ -430,6 +435,7 @@ struct WelcomePage: View {
                     .padding(.bottom, 24)
                 }
             }
+            .geometryGroup() // Ensures geometry changes animate together with NavigationSplitView
             .navigationBarTitleDisplayMode(.inline)
             .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
             .toolbar {
