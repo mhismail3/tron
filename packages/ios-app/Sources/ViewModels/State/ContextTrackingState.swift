@@ -1,7 +1,8 @@
 import SwiftUI
 
 /// Manages context and token tracking state for ChatViewModel
-/// Extracted from ChatViewModel to reduce property sprawl
+/// Uses server-provided normalizedUsage values instead of local calculations
+/// to eliminate bugs from model switches, session resume/fork, and context shrinks.
 @Observable
 @MainActor
 final class ContextTrackingState {
@@ -10,6 +11,19 @@ final class ContextTrackingState {
 
     /// Current model's context window size (from server's model.list)
     var currentContextWindow: Int = 200_000
+
+    // MARK: - Server-Provided Values (from normalizedUsage)
+
+    /// Per-turn NEW tokens (for stats line display) - from server's normalizedUsage.newInputTokens
+    var newInputTokens: Int = 0
+
+    /// Total context size in tokens (for progress pill) - from server's normalizedUsage.contextWindowTokens
+    var contextWindowTokens: Int = 0
+
+    /// Output tokens for this turn - from server's normalizedUsage.outputTokens
+    var outputTokens: Int = 0
+
+    // MARK: - Accumulated Totals (from session counters, NOT locally accumulated)
 
     /// Accumulated input tokens across all turns
     var accumulatedInputTokens = 0
@@ -26,30 +40,50 @@ final class ContextTrackingState {
     /// Accumulated cost across all turns
     var accumulatedCost: Double = 0
 
+    // MARK: - Legacy Compatibility (for backward compatibility with existing code)
+
     /// Last turn's input tokens (represents actual current context size)
-    var lastTurnInputTokens = 0
+    /// This is now a proxy to contextWindowTokens for backward compatibility
+    var lastTurnInputTokens: Int {
+        get { contextWindowTokens }
+        set { contextWindowTokens = newValue }
+    }
 
     /// Previous turn's final input tokens (for computing incremental delta)
+    /// Kept for backward compatibility but no longer used for local delta calculation
     var previousTurnFinalInputTokens = 0
 
     init() {}
 
-    /// Estimated context usage percentage based on last turn's input tokens
-    /// (which represents the actual current context size sent to the LLM)
+    // MARK: - Computed Properties (using server values)
+
+    /// Estimated context usage percentage based on server-provided contextWindowTokens
+    /// (which represents the actual current context size)
     var contextPercentage: Int {
         guard currentContextWindow > 0 else { return 0 }
-        guard lastTurnInputTokens > 0 else { return 0 }
+        guard contextWindowTokens > 0 else { return 0 }
 
-        let percentage = Double(lastTurnInputTokens) / Double(currentContextWindow) * 100
+        let percentage = Double(contextWindowTokens) / Double(currentContextWindow) * 100
         return min(100, Int(percentage.rounded()))
     }
 
-    /// The incremental token delta from the previous turn
-    var tokenDelta: Int {
-        lastTurnInputTokens - previousTurnFinalInputTokens
+    /// Tokens remaining in the context window
+    var tokensRemaining: Int {
+        max(0, currentContextWindow - contextWindowTokens)
     }
 
-    /// Accumulate tokens from a turn
+    // MARK: - Server Value Updates
+
+    /// Update from server's normalizedUsage (called on turn_end)
+    /// This is the preferred method - uses server-calculated values
+    func updateFromNormalizedUsage(_ usage: NormalizedTokenUsage) {
+        newInputTokens = usage.newInputTokens
+        contextWindowTokens = usage.contextWindowTokens
+        outputTokens = usage.outputTokens
+    }
+
+    /// Accumulate tokens from a turn (for billing tracking)
+    /// Note: This still accumulates locally for total display, but delta calculations use server values
     func accumulate(
         inputTokens: Int,
         outputTokens: Int,
@@ -64,9 +98,9 @@ final class ContextTrackingState {
         accumulatedCost += cost
     }
 
-    /// Record the end of a turn (updates previous turn tokens for delta calculation)
+    /// Record the end of a turn (updates previous turn tokens for legacy compatibility)
     func recordTurnEnd() {
-        previousTurnFinalInputTokens = lastTurnInputTokens
+        previousTurnFinalInputTokens = contextWindowTokens
     }
 
     /// Update context window based on available model info
@@ -79,12 +113,14 @@ final class ContextTrackingState {
     /// Reset all accumulated state (for new session)
     func reset() {
         totalTokenUsage = nil
+        newInputTokens = 0
+        contextWindowTokens = 0
+        outputTokens = 0
         accumulatedInputTokens = 0
         accumulatedOutputTokens = 0
         accumulatedCacheReadTokens = 0
         accumulatedCacheCreationTokens = 0
         accumulatedCost = 0
-        lastTurnInputTokens = 0
         previousTurnFinalInputTokens = 0
     }
 }

@@ -166,7 +166,8 @@ export class TurnContentTracker {
 
   /**
    * Previous context size for delta calculation (non-Anthropic providers).
-   * Reset to 0 on agent start, model switch, or session resume/fork.
+   * Reset to 0 only when provider type changes (model switch).
+   * Persists across agent runs within a session to maintain accurate deltas.
    */
   private previousContextSize: number = 0;
 
@@ -484,7 +485,13 @@ export class TurnContentTracker {
 
   /**
    * Called when a new agent run starts.
-   * Clears ALL state (both accumulated and per-turn).
+   * Clears content tracking state (both accumulated and per-turn).
+   *
+   * IMPORTANT: Does NOT reset previousContextSize!
+   * The token baseline persists across agent runs within a session to maintain
+   * accurate delta calculations. It only resets when:
+   * 1. Provider type changes (handled by setProviderType())
+   * 2. Session first starts (initialized to 0 in constructor)
    */
   onAgentStart(): void {
     // Clear accumulated state
@@ -508,12 +515,16 @@ export class TurnContentTracker {
     this.currentTurn = 0;
     this.currentTurnStartTime = undefined;
 
-    // Reset token normalization baseline
-    // This ensures first turn shows full context as "new" tokens
-    this.previousContextSize = 0;
+    // NOTE: previousContextSize is intentionally NOT reset here.
+    // It persists across agent runs to maintain accurate delta calculations.
+    // Only provider type changes (setProviderType) reset the baseline.
+    // Clear lastNormalizedUsage since it's per-turn data.
     this.lastNormalizedUsage = undefined;
 
-    logger.debug('Agent run started, all tracking cleared');
+    logger.debug('Agent run started, content tracking cleared', {
+      previousContextSize: this.previousContextSize,
+      providerType: this.currentProviderType,
+    });
   }
 
   /**

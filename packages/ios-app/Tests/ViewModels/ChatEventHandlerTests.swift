@@ -186,12 +186,20 @@ final class ChatEventHandlerTests: XCTestCase {
 
     // MARK: - Turn End Tests
 
-    func testTurnEndUpdatesMetadata() async throws {
-        // Given: a turn end event with token usage
+    func testTurnEndPassesThroughServerValues() async throws {
+        // Given: a turn end event with token usage and normalizedUsage
         let tokenUsage = TokenUsage(
             inputTokens: 1000,
             outputTokens: 500,
             cacheReadTokens: 100,
+            cacheCreationTokens: 50
+        )
+        let normalizedUsage = NormalizedTokenUsage(
+            newInputTokens: 500,
+            outputTokens: 500,
+            contextWindowTokens: 8500,
+            rawInputTokens: 1000,
+            cacheReadTokens: 8000,
             cacheCreationTokens: 50
         )
         let turnData = TurnEndData(
@@ -202,25 +210,27 @@ final class ChatEventHandlerTests: XCTestCase {
             turnNumber: 1,
             stopReason: "end_turn",
             tokenUsage: tokenUsage,
+            normalizedUsage: normalizedUsage,
             contextLimit: 200000,
             data: turnData,
             cost: 0.05
         )
 
-        // When: handling turn end
-        let result = handler.handleTurnEnd(event, previousInputTokens: 0)
+        // When: handling turn end (no previousInputTokens parameter - uses server values)
+        let result = handler.handleTurnEnd(event)
 
-        // Then: metadata should be extracted
+        // Then: server values should be passed through (no local calculation)
         XCTAssertEqual(result.turnNumber, 1)
-        XCTAssertEqual(result.inputTokens, 1000)
-        XCTAssertEqual(result.outputTokens, 500)
+        XCTAssertEqual(result.tokenUsage?.inputTokens, 1000)
+        XCTAssertEqual(result.tokenUsage?.outputTokens, 500)
+        XCTAssertEqual(result.normalizedUsage?.newInputTokens, 500)
+        XCTAssertEqual(result.normalizedUsage?.contextWindowTokens, 8500)
         XCTAssertEqual(result.contextLimit, 200000)
         XCTAssertEqual(result.cost, 0.05)
-        XCTAssertEqual(result.incrementalInputTokens, 1000)
     }
 
-    func testTurnEndCalculatesIncrementalTokens() async throws {
-        // Given: a turn end with previous tokens
+    func testTurnEndWithoutNormalizedUsage() async throws {
+        // Given: a turn end event without normalizedUsage (backward compatibility)
         let tokenUsage = TokenUsage(
             inputTokens: 1500,
             outputTokens: 200,
@@ -231,16 +241,38 @@ final class ChatEventHandlerTests: XCTestCase {
             turnNumber: 2,
             stopReason: "end_turn",
             tokenUsage: tokenUsage,
+            normalizedUsage: nil,
             contextLimit: nil,
             data: nil,
             cost: nil
         )
 
-        // When: handling turn end with previous input tokens
-        let result = handler.handleTurnEnd(event, previousInputTokens: 1000)
+        // When: handling turn end
+        let result = handler.handleTurnEnd(event)
 
-        // Then: incremental tokens should be calculated
-        XCTAssertEqual(result.incrementalInputTokens, 500)
+        // Then: normalizedUsage should be nil, tokenUsage should be present
+        XCTAssertNil(result.normalizedUsage)
+        XCTAssertEqual(result.tokenUsage?.inputTokens, 1500)
+        XCTAssertEqual(result.tokenUsage?.outputTokens, 200)
+    }
+
+    func testTurnEndDoesNotRequirePreviousInputTokens() async throws {
+        // Verify the method signature no longer requires previousInputTokens
+        let event = TurnEndEvent(
+            turnNumber: 1,
+            stopReason: "end_turn",
+            tokenUsage: TokenUsage(inputTokens: 500, outputTokens: 100, cacheReadTokens: nil, cacheCreationTokens: nil),
+            normalizedUsage: nil,
+            contextLimit: nil,
+            data: nil,
+            cost: nil
+        )
+
+        // This should compile without previousInputTokens parameter
+        let result = handler.handleTurnEnd(event)
+
+        XCTAssertNotNil(result)
+        XCTAssertEqual(result.turnNumber, 1)
     }
 
     // MARK: - Reset Tests

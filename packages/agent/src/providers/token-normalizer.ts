@@ -3,12 +3,16 @@
  *
  * Handles the semantic differences in how different providers report token usage:
  *
- * | Provider    | inputTokens Means      | Cache Support                    |
- * |-------------|------------------------|----------------------------------|
- * | Anthropic   | NEW tokens only        | cache_read + cache_creation      |
- * | OpenAI      | FULL context sent      | cached_tokens                    |
- * | OpenAI Codex| FULL context sent      | None                             |
- * | Gemini      | FULL context sent      | None                             |
+ * | Provider    | inputTokens Means           | Cache Support                    |
+ * |-------------|-----------------------------|---------------------------------|
+ * | Anthropic   | Non-cached tokens (cumulative) | cache_read + cache_creation   |
+ * | OpenAI      | FULL context sent           | cached_tokens                    |
+ * | OpenAI Codex| FULL context sent           | None                             |
+ * | Gemini      | FULL context sent           | None                             |
+ *
+ * IMPORTANT: For Anthropic, inputTokens is NOT per-turn new tokens!
+ * It's the cumulative non-cached content (conversation history grows each turn).
+ * Only the system prompt gets cached. We calculate delta using contextWindowTokens.
  *
  * This normalizer provides:
  * - newInputTokens: Per-turn new tokens (for stats line display)
@@ -44,13 +48,13 @@ export interface NormalizedTokenUsage {
  *
  * @param raw - Raw token usage from provider
  * @param providerType - The provider type (affects semantic interpretation)
- * @param previousContextSize - Previous context size for delta calculation (non-Anthropic)
+ * @param previousContextSize - Previous context size for delta calculation (ALL providers)
  * @returns Normalized token usage with semantic clarity
  *
  * @example
- * // Anthropic (inputTokens already per-turn new)
- * normalizeTokenUsage({ inputTokens: 500, outputTokens: 100, cacheReadTokens: 4000 }, 'anthropic', 0)
- * // => { newInputTokens: 500, contextWindowTokens: 4500, ... }
+ * // Anthropic with cache (delta calculated from contextWindowTokens)
+ * normalizeTokenUsage({ inputTokens: 604, outputTokens: 100, cacheReadTokens: 8266 }, 'anthropic', 8768)
+ * // => { newInputTokens: 102, contextWindowTokens: 8870, ... }
  *
  * @example
  * // OpenAI (inputTokens is full context - calculate delta)
@@ -65,45 +69,39 @@ export function normalizeTokenUsage(
   const cacheRead = raw.cacheReadTokens ?? 0;
   const cacheCreation = raw.cacheCreationTokens ?? 0;
 
-  if (providerType === 'anthropic') {
-    // Anthropic: inputTokens is already per-turn new tokens (excludes cache)
-    // contextWindowTokens = inputTokens + cached tokens
-    return {
-      newInputTokens: raw.inputTokens,
-      outputTokens: raw.outputTokens,
-      contextWindowTokens: raw.inputTokens + cacheRead + cacheCreation,
-      rawInputTokens: raw.inputTokens,
-      cacheReadTokens: cacheRead,
-      cacheCreationTokens: cacheCreation,
-    };
-  }
+  // Calculate contextWindowTokens based on provider
+  // For Anthropic: includes cached tokens
+  // For others: just inputTokens
+  const contextWindowTokens = providerType === 'anthropic'
+    ? raw.inputTokens + cacheRead + cacheCreation
+    : raw.inputTokens;
 
-  // OpenAI/Codex/Gemini: inputTokens is full context
-  // Need to calculate delta from previous context size
+  // Calculate newInputTokens as delta from previous context (ALL providers)
+  // This is the per-turn new tokens for display
   let newInputTokens: number;
 
   if (previousContextSize === 0) {
     // First turn: all tokens are "new"
-    newInputTokens = raw.inputTokens;
-  } else if (raw.inputTokens < previousContextSize) {
-    // Context shrank (Codex edge case - summarization/truncation)
+    newInputTokens = contextWindowTokens;
+  } else if (contextWindowTokens < previousContextSize) {
+    // Context shrank (Codex summarization/truncation, or Anthropic cache eviction)
     // Report 0 new tokens and log warning
     newInputTokens = 0;
     logger.warn('Context shrank', {
       previousContextSize,
-      currentContextSize: raw.inputTokens,
-      delta: previousContextSize - raw.inputTokens,
+      currentContextSize: contextWindowTokens,
+      delta: previousContextSize - contextWindowTokens,
       providerType,
     });
   } else {
     // Normal case: delta = current - previous
-    newInputTokens = raw.inputTokens - previousContextSize;
+    newInputTokens = contextWindowTokens - previousContextSize;
   }
 
   return {
     newInputTokens,
     outputTokens: raw.outputTokens,
-    contextWindowTokens: raw.inputTokens,
+    contextWindowTokens,
     rawInputTokens: raw.inputTokens,
     cacheReadTokens: cacheRead,
     cacheCreationTokens: cacheCreation,

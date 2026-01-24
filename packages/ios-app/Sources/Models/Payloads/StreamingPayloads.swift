@@ -129,6 +129,8 @@ struct StreamingTurnStartPayload {
 struct StreamingTurnEndPayload {
     let turn: Int
     let tokenUsage: TokenUsage?
+    /// Server-calculated normalized token usage (preferred over local calculations)
+    let normalizedUsage: NormalizedTokenUsage?
     let stopReason: String?
     let durationMs: Int?
     /// Current model's context window limit (for syncing iOS state after model switch)
@@ -147,6 +149,20 @@ struct StreamingTurnEndPayload {
             )
         } else {
             self.tokenUsage = nil
+        }
+
+        // Parse normalizedUsage from server
+        if let normalized = data["normalizedUsage"] as? [String: Any] {
+            self.normalizedUsage = NormalizedTokenUsage(
+                newInputTokens: normalized["newInputTokens"] as? Int ?? 0,
+                outputTokens: normalized["outputTokens"] as? Int ?? 0,
+                contextWindowTokens: normalized["contextWindowTokens"] as? Int ?? 0,
+                rawInputTokens: normalized["rawInputTokens"] as? Int ?? 0,
+                cacheReadTokens: normalized["cacheReadTokens"] as? Int ?? 0,
+                cacheCreationTokens: normalized["cacheCreationTokens"] as? Int ?? 0
+            )
+        } else {
+            self.normalizedUsage = nil
         }
 
         self.stopReason = data["stopReason"] as? String

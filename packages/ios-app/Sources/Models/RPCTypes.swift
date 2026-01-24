@@ -342,6 +342,24 @@ struct TokenUsage: Decodable, Equatable {
     var formattedTotal: String { totalTokens.formattedTokenCount }
 }
 
+/// Server-calculated normalized token usage
+/// iOS app should use these values directly instead of calculating locally.
+/// This eliminates bugs from model switches, session resume/fork, and context shrinks.
+struct NormalizedTokenUsage: Decodable, Equatable {
+    /// Per-turn NEW tokens (for stats line display)
+    let newInputTokens: Int
+    /// Output tokens for this turn
+    let outputTokens: Int
+    /// Total context size in tokens (for progress pill)
+    let contextWindowTokens: Int
+    /// Raw input tokens from provider
+    let rawInputTokens: Int
+    /// Tokens read from cache
+    let cacheReadTokens: Int
+    /// Tokens created in cache
+    let cacheCreationTokens: Int
+}
+
 // MARK: - System Methods
 
 struct SystemInfoResult: Decodable {

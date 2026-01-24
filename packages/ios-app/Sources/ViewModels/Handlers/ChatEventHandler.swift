@@ -44,13 +44,12 @@ struct TurnStartResult {
 struct TurnEndResult {
     let turnNumber: Int
     let stopReason: String?
-    let inputTokens: Int
-    let outputTokens: Int
-    let cacheReadTokens: Int?
-    let cacheCreationTokens: Int?
+    /// Server-provided normalized token usage (preferred)
+    let normalizedUsage: NormalizedTokenUsage?
+    /// Raw token usage (for backward compatibility)
+    let tokenUsage: TokenUsage?
     let contextLimit: Int?
     let cost: Double?
-    let incrementalInputTokens: Int
     let durationMs: Int?
 }
 
@@ -204,25 +203,17 @@ final class ChatEventHandler {
     }
 
     /// Handle a turn end event
-    /// - Parameters:
-    ///   - event: The turn end event
-    ///   - previousInputTokens: Input tokens from previous turn for incremental calculation
-    /// - Returns: Result with all turn metadata
-    func handleTurnEnd(_ event: TurnEndEvent, previousInputTokens: Int) -> TurnEndResult {
-        let inputTokens = event.tokenUsage?.inputTokens ?? 0
-        let outputTokens = event.tokenUsage?.outputTokens ?? 0
-        let incrementalInput = max(0, inputTokens - previousInputTokens)
-
+    /// - Parameter event: The turn end event
+    /// - Returns: Result with server-provided values (no local calculation)
+    func handleTurnEnd(_ event: TurnEndEvent) -> TurnEndResult {
+        // Pass through server values - NO LOCAL CALCULATION
         return TurnEndResult(
             turnNumber: event.turnNumber,
             stopReason: event.stopReason,
-            inputTokens: inputTokens,
-            outputTokens: outputTokens,
-            cacheReadTokens: event.tokenUsage?.cacheReadTokens,
-            cacheCreationTokens: event.tokenUsage?.cacheCreationTokens,
+            normalizedUsage: event.normalizedUsage,
+            tokenUsage: event.tokenUsage,
             contextLimit: event.contextLimit,
             cost: event.cost,
-            incrementalInputTokens: incrementalInput,
             durationMs: event.data?.duration
         )
     }

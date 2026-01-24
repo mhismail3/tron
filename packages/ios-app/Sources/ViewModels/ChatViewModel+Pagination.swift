@@ -280,6 +280,10 @@ extension ChatViewModel {
     /// For display, we show:
     /// - Input: DELTA between consecutive turns (context growth)
     /// - Output: Per-turn value directly (tokens generated)
+    ///
+    /// NOTE: This uses local delta calculation because historical events stored in the database
+    /// may not have normalizedUsage (pre-dates server-side normalization) or incrementalTokens persisted.
+    /// For LIVE events, handleTurnEnd uses server-provided normalizedUsage which is authoritative.
     func restoreTokenStateFromMessages() {
         // 1. Find last assistant message to restore lastTurnInputTokens (context window size)
         for message in allReconstructedMessages.reversed() {
@@ -290,7 +294,8 @@ extension ChatViewModel {
             }
         }
 
-        // 2. Compute incrementalTokens for display
+        // 2. Compute incrementalTokens for display (fallback for historical data)
+        // For new events, server provides normalizedUsage which is used instead
         // - inputTokens: DELTA from previous turn (shows context growth)
         // - outputTokens: per-turn value directly (tokens generated)
         var incrementalTokensMap: [UUID: TokenUsage] = [:]
@@ -311,15 +316,21 @@ extension ChatViewModel {
         // Track the last turn's input tokens for future incremental calculations
         previousTurnFinalInputTokens = previousInputTokens
 
-        // 3. Apply computed incremental tokens to displayed messages
+        // 3. Apply computed incremental tokens to displayed messages (only if not already set)
+        var appliedCount = 0
+        var skippedCount = 0
         for i in 0..<messages.count {
             if messages[i].incrementalTokens == nil,
                let computed = incrementalTokensMap[messages[i].id] {
                 messages[i].incrementalTokens = computed
+                appliedCount += 1
+            } else if messages[i].incrementalTokens != nil {
+                skippedCount += 1
             }
         }
 
-        logger.debug("Restored token state for \(messages.filter { $0.role == .assistant }.count) assistant messages", category: .session)
+        let assistantCount = messages.filter { $0.role == .assistant }.count
+        logger.debug("Restored token state: \(assistantCount) assistant messages, applied=\(appliedCount) skipped=\(skippedCount) (had stored incremental)", category: .session)
     }
 }
 

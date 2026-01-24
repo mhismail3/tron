@@ -8,19 +8,23 @@ final class ContextStateTests: XCTestCase {
         let state = ContextTrackingState()
         XCTAssertNil(state.totalTokenUsage)
         XCTAssertEqual(state.currentContextWindow, 200_000)
+        XCTAssertEqual(state.newInputTokens, 0)
+        XCTAssertEqual(state.contextWindowTokens, 0)
+        XCTAssertEqual(state.outputTokens, 0)
         XCTAssertEqual(state.accumulatedInputTokens, 0)
         XCTAssertEqual(state.accumulatedOutputTokens, 0)
         XCTAssertEqual(state.accumulatedCacheReadTokens, 0)
         XCTAssertEqual(state.accumulatedCacheCreationTokens, 0)
         XCTAssertEqual(state.accumulatedCost, 0)
-        XCTAssertEqual(state.lastTurnInputTokens, 0)
         XCTAssertEqual(state.previousTurnFinalInputTokens, 0)
     }
+
+    // MARK: - Context Percentage Tests (using server values)
 
     func testContextPercentage() {
         let state = ContextTrackingState()
         state.currentContextWindow = 200_000
-        state.lastTurnInputTokens = 100_000
+        state.contextWindowTokens = 100_000
 
         XCTAssertEqual(state.contextPercentage, 50)
     }
@@ -28,7 +32,7 @@ final class ContextStateTests: XCTestCase {
     func testContextPercentageZeroWindow() {
         let state = ContextTrackingState()
         state.currentContextWindow = 0
-        state.lastTurnInputTokens = 100_000
+        state.contextWindowTokens = 100_000
 
         XCTAssertEqual(state.contextPercentage, 0)
     }
@@ -36,7 +40,7 @@ final class ContextStateTests: XCTestCase {
     func testContextPercentageZeroTokens() {
         let state = ContextTrackingState()
         state.currentContextWindow = 200_000
-        state.lastTurnInputTokens = 0
+        state.contextWindowTokens = 0
 
         XCTAssertEqual(state.contextPercentage, 0)
     }
@@ -44,10 +48,77 @@ final class ContextStateTests: XCTestCase {
     func testContextPercentageCapped() {
         let state = ContextTrackingState()
         state.currentContextWindow = 100_000
-        state.lastTurnInputTokens = 150_000
+        state.contextWindowTokens = 150_000
 
         XCTAssertEqual(state.contextPercentage, 100)
     }
+
+    func testContextPercentageAt95Percent() {
+        let state = ContextTrackingState()
+        state.currentContextWindow = 200_000
+        state.contextWindowTokens = 190_000
+
+        XCTAssertEqual(state.contextPercentage, 95)
+    }
+
+    // MARK: - Tokens Remaining Tests
+
+    func testTokensRemaining() {
+        let state = ContextTrackingState()
+        state.currentContextWindow = 200_000
+        state.contextWindowTokens = 150_000
+
+        XCTAssertEqual(state.tokensRemaining, 50_000)
+    }
+
+    func testTokensRemainingNeverNegative() {
+        let state = ContextTrackingState()
+        state.currentContextWindow = 200_000
+        state.contextWindowTokens = 250_000  // Over limit
+
+        XCTAssertEqual(state.tokensRemaining, 0)  // Should be 0, not negative
+    }
+
+    // MARK: - updateFromNormalizedUsage Tests
+
+    func testUpdateFromNormalizedUsage() {
+        let state = ContextTrackingState()
+
+        let usage = NormalizedTokenUsage(
+            newInputTokens: 500,
+            outputTokens: 100,
+            contextWindowTokens: 8500,
+            rawInputTokens: 500,
+            cacheReadTokens: 8000,
+            cacheCreationTokens: 0
+        )
+
+        state.updateFromNormalizedUsage(usage)
+
+        XCTAssertEqual(state.newInputTokens, 500)
+        XCTAssertEqual(state.contextWindowTokens, 8500)
+        XCTAssertEqual(state.outputTokens, 100)
+    }
+
+    func testUpdateFromNormalizedUsageUpdatesLastTurnInputTokens() {
+        let state = ContextTrackingState()
+
+        let usage = NormalizedTokenUsage(
+            newInputTokens: 500,
+            outputTokens: 100,
+            contextWindowTokens: 8500,
+            rawInputTokens: 500,
+            cacheReadTokens: 8000,
+            cacheCreationTokens: 0
+        )
+
+        state.updateFromNormalizedUsage(usage)
+
+        // lastTurnInputTokens is now a proxy to contextWindowTokens
+        XCTAssertEqual(state.lastTurnInputTokens, 8500)
+    }
+
+    // MARK: - Accumulation Tests (still needed for billing)
 
     func testAccumulateTokens() {
         let state = ContextTrackingState()
@@ -82,51 +153,45 @@ final class ContextStateTests: XCTestCase {
         XCTAssertEqual(state.accumulatedCost, 0.075, accuracy: 0.0001)
     }
 
+    // MARK: - RecordTurnEnd Tests (legacy compatibility)
+
     func testRecordTurnEnd() {
         let state = ContextTrackingState()
-        state.lastTurnInputTokens = 5000
+        state.contextWindowTokens = 5000
 
         state.recordTurnEnd()
 
         XCTAssertEqual(state.previousTurnFinalInputTokens, 5000)
     }
 
-    func testTokenDelta() {
-        let state = ContextTrackingState()
-        state.previousTurnFinalInputTokens = 3000
-        state.lastTurnInputTokens = 5000
-
-        XCTAssertEqual(state.tokenDelta, 2000)
-    }
-
-    func testTokenDeltaWhenNoPreviousTurn() {
-        let state = ContextTrackingState()
-        state.previousTurnFinalInputTokens = 0
-        state.lastTurnInputTokens = 5000
-
-        XCTAssertEqual(state.tokenDelta, 5000)
-    }
+    // MARK: - Reset Tests
 
     func testReset() {
         let state = ContextTrackingState()
+        state.newInputTokens = 500
+        state.contextWindowTokens = 8500
+        state.outputTokens = 100
         state.accumulatedInputTokens = 1000
         state.accumulatedOutputTokens = 500
         state.accumulatedCacheReadTokens = 200
         state.accumulatedCacheCreationTokens = 100
         state.accumulatedCost = 0.05
-        state.lastTurnInputTokens = 5000
         state.previousTurnFinalInputTokens = 3000
 
         state.reset()
 
+        XCTAssertEqual(state.newInputTokens, 0)
+        XCTAssertEqual(state.contextWindowTokens, 0)
+        XCTAssertEqual(state.outputTokens, 0)
         XCTAssertEqual(state.accumulatedInputTokens, 0)
         XCTAssertEqual(state.accumulatedOutputTokens, 0)
         XCTAssertEqual(state.accumulatedCacheReadTokens, 0)
         XCTAssertEqual(state.accumulatedCacheCreationTokens, 0)
         XCTAssertEqual(state.accumulatedCost, 0)
-        XCTAssertEqual(state.lastTurnInputTokens, 0)
         XCTAssertEqual(state.previousTurnFinalInputTokens, 0)
     }
+
+    // MARK: - Model Context Window Update Tests
 
     func testUpdateFromModels() {
         let state = ContextTrackingState()
@@ -150,6 +215,31 @@ final class ContextStateTests: XCTestCase {
         state.updateContextWindow(from: models, currentModel: "unknown-model")
 
         XCTAssertEqual(state.currentContextWindow, initialWindow)
+    }
+
+    // MARK: - Integration Test: Model Switch Scenario
+
+    func testModelSwitchResetsCorrectly() {
+        let state = ContextTrackingState()
+
+        // First turn with Anthropic
+        state.updateFromNormalizedUsage(NormalizedTokenUsage(
+            newInputTokens: 500, outputTokens: 100, contextWindowTokens: 8500,
+            rawInputTokens: 500, cacheReadTokens: 8000, cacheCreationTokens: 0
+        ))
+
+        XCTAssertEqual(state.contextWindowTokens, 8500)
+        XCTAssertEqual(state.newInputTokens, 500)
+
+        // Model switch to Codex - server sends full context as newInputTokens
+        state.updateFromNormalizedUsage(NormalizedTokenUsage(
+            newInputTokens: 11000, outputTokens: 50, contextWindowTokens: 11000,
+            rawInputTokens: 11000, cacheReadTokens: 0, cacheCreationTokens: 0
+        ))
+
+        // Verify: iOS just displays what server sends, no local calculation
+        XCTAssertEqual(state.newInputTokens, 11000)
+        XCTAssertEqual(state.contextWindowTokens, 11000)
     }
 
     // MARK: - Helper Methods

@@ -8,39 +8,56 @@ import { describe, it, expect } from 'vitest';
 import { normalizeTokenUsage, detectProviderType } from '../token-normalizer.js';
 
 describe('normalizeTokenUsage', () => {
-  describe('Anthropic provider (inputTokens is per-turn new)', () => {
-    it('uses inputTokens directly as newInputTokens', () => {
+  describe('Anthropic provider (inputTokens is cumulative non-cached)', () => {
+    it('calculates contextWindowTokens including cache on first turn', () => {
+      // Turn 1: inputTokens=500 (conversation), cacheCreate=8000 (system prompt)
       const result = normalizeTokenUsage(
-        { inputTokens: 500, outputTokens: 100 },
+        { inputTokens: 500, outputTokens: 100, cacheCreationTokens: 8000 },
         'anthropic',
         0
       );
 
-      expect(result.newInputTokens).toBe(500);
+      expect(result.newInputTokens).toBe(8500); // First turn: all context is "new"
+      expect(result.contextWindowTokens).toBe(8500); // 500 + 8000
       expect(result.rawInputTokens).toBe(500);
     });
 
-    it('calculates contextWindowTokens including cache', () => {
+    it('calculates delta from previous context on subsequent turns', () => {
+      // Turn 2: inputTokens=604 (grew by 104), cacheRead=8000 (system prompt)
+      // Previous contextWindowTokens was 8500
+      const result = normalizeTokenUsage(
+        { inputTokens: 604, outputTokens: 100, cacheReadTokens: 8000 },
+        'anthropic',
+        8500 // Previous context size
+      );
+
+      expect(result.newInputTokens).toBe(104); // 8604 - 8500
+      expect(result.contextWindowTokens).toBe(8604); // 604 + 8000
+      expect(result.cacheReadTokens).toBe(8000);
+    });
+
+    it('calculates contextWindowTokens including both cache read and creation', () => {
       const result = normalizeTokenUsage(
         { inputTokens: 500, outputTokens: 100, cacheReadTokens: 4000, cacheCreationTokens: 200 },
         'anthropic',
         0
       );
 
-      expect(result.newInputTokens).toBe(500);
       expect(result.contextWindowTokens).toBe(500 + 4000 + 200); // 4700
       expect(result.cacheReadTokens).toBe(4000);
       expect(result.cacheCreationTokens).toBe(200);
     });
 
-    it('ignores previousContextSize (Anthropic already per-turn)', () => {
+    it('uses previousContextSize for delta calculation', () => {
+      // Previous context was 10000, now it's 4500
+      // Context shrank (maybe cache eviction)
       const result = normalizeTokenUsage(
         { inputTokens: 500, outputTokens: 100, cacheReadTokens: 4000 },
         'anthropic',
-        10000 // Should be ignored
+        10000
       );
 
-      expect(result.newInputTokens).toBe(500);
+      expect(result.newInputTokens).toBe(0); // Context shrank, report 0
       expect(result.contextWindowTokens).toBe(4500);
     });
   });

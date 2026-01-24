@@ -671,16 +671,10 @@ class ChatViewModel: ObservableObject {
         rpcClient.hasActiveSession
     }
 
-    /// Estimated context usage percentage based on last turn's input tokens
-    /// (which represents the actual current context size sent to the LLM)
+    /// Estimated context usage percentage based on server-provided contextWindowTokens
+    /// Uses ContextTrackingState which consumes server's normalizedUsage values
     var contextPercentage: Int {
-        guard currentContextWindow > 0 else { return 0 }
-        guard lastTurnInputTokens > 0 else { return 0 }
-
-        // Last turn's input tokens = actual context size (system + history + message)
-        let percentage = Double(lastTurnInputTokens) / Double(currentContextWindow) * 100
-
-        return min(100, Int(percentage.rounded()))
+        contextState.contextPercentage
     }
 
     /// Updates the context window based on available model info

@@ -1,5 +1,9 @@
 import Foundation
 
+// MARK: - Type Aliases for Nested Types (for test convenience)
+
+typealias TurnEndData = TurnEndEvent.TurnEndData
+
 // MARK: - Server Event Types
 
 /// Represents all server-sent events via WebSocket
@@ -170,13 +174,15 @@ struct TurnEndEvent: Decodable {
         let turnNumber: Int?
         let duration: Int?
         let tokenUsage: TokenUsage?
+        /// Server-calculated normalized token usage (preferred over local calculations)
+        let normalizedUsage: NormalizedTokenUsage?
         let stopReason: String?
         let cost: Double?
         /// Current model's context window limit (for syncing iOS state after model switch)
         let contextLimit: Int?
 
         enum CodingKeys: String, CodingKey {
-            case turn, turnNumber, duration, tokenUsage, stopReason, cost, contextLimit
+            case turn, turnNumber, duration, tokenUsage, normalizedUsage, stopReason, cost, contextLimit
         }
 
         init(from decoder: Decoder) throws {
@@ -185,6 +191,7 @@ struct TurnEndEvent: Decodable {
             turnNumber = try container.decodeIfPresent(Int.self, forKey: .turnNumber)
             duration = try container.decodeIfPresent(Int.self, forKey: .duration)
             tokenUsage = try container.decodeIfPresent(TokenUsage.self, forKey: .tokenUsage)
+            normalizedUsage = try container.decodeIfPresent(NormalizedTokenUsage.self, forKey: .normalizedUsage)
             stopReason = try container.decodeIfPresent(String.self, forKey: .stopReason)
             contextLimit = try container.decodeIfPresent(Int.self, forKey: .contextLimit)
 
@@ -202,10 +209,62 @@ struct TurnEndEvent: Decodable {
 
     var turnNumber: Int { data?.turn ?? data?.turnNumber ?? 1 }
     var tokenUsage: TokenUsage? { data?.tokenUsage }
+    /// Server-calculated normalized token usage
+    var normalizedUsage: NormalizedTokenUsage? { data?.normalizedUsage }
     var stopReason: String? { data?.stopReason }
     var cost: Double? { data?.cost }
     /// Current model's context window limit
     var contextLimit: Int? { data?.contextLimit }
+
+    // MARK: - Test Convenience Initializers
+
+    /// Convenience initializer for testing (creates event from direct values)
+    init(
+        turnNumber: Int,
+        stopReason: String?,
+        tokenUsage: TokenUsage?,
+        normalizedUsage: NormalizedTokenUsage? = nil,
+        contextLimit: Int?,
+        data: TurnEndData?,
+        cost: Double?
+    ) {
+        self.type = "agent.turn_end"
+        self.sessionId = nil
+        self.timestamp = nil
+        // Create a TurnEndData with the provided values
+        self.data = TurnEndData(
+            turn: turnNumber,
+            duration: data?.duration,
+            tokenUsage: tokenUsage,
+            normalizedUsage: normalizedUsage,
+            stopReason: stopReason,
+            cost: cost,
+            contextLimit: contextLimit
+        )
+    }
+}
+
+extension TurnEndEvent.TurnEndData {
+    /// Convenience initializer for testing
+    init(
+        turn: Int? = nil,
+        turnNumber: Int? = nil,
+        duration: Int? = nil,
+        tokenUsage: TokenUsage? = nil,
+        normalizedUsage: NormalizedTokenUsage? = nil,
+        stopReason: String? = nil,
+        cost: Double? = nil,
+        contextLimit: Int? = nil
+    ) {
+        self.turn = turn ?? turnNumber
+        self.turnNumber = turnNumber ?? turn
+        self.duration = duration
+        self.tokenUsage = tokenUsage
+        self.normalizedUsage = normalizedUsage
+        self.stopReason = stopReason
+        self.cost = cost
+        self.contextLimit = contextLimit
+    }
 }
 
 struct CompleteEvent: Decodable {

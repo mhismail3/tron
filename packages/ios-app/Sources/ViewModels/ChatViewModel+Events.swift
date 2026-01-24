@@ -414,7 +414,18 @@ extension ChatViewModel {
     }
 
     func handleTurnEnd(_ event: TurnEndEvent) {
-        logger.info("Turn ended, tokens: in=\(event.tokenUsage?.inputTokens ?? 0) out=\(event.tokenUsage?.outputTokens ?? 0)", category: .events)
+        // Log both raw and normalized usage for debugging
+        let rawIn = event.tokenUsage?.inputTokens ?? 0
+        let rawOut = event.tokenUsage?.outputTokens ?? 0
+        let hasNormalized = event.normalizedUsage != nil
+        logger.info("Turn ended, tokens: raw_in=\(rawIn) raw_out=\(rawOut) hasNormalizedUsage=\(hasNormalized)", category: .events)
+
+        // Log normalized values if available (server's pre-calculated values)
+        if let normalized = event.normalizedUsage {
+            logger.debug("NormalizedUsage: newInput=\(normalized.newInputTokens) contextWindow=\(normalized.contextWindowTokens) cacheRead=\(normalized.cacheReadTokens)", category: .events)
+        } else {
+            logger.debug("NormalizedUsage not available, will use fallback local calculation", category: .events)
+        }
 
         // Persist thinking content for this turn (before clearing state)
         Task {
@@ -463,9 +474,19 @@ extension ChatViewModel {
             messages[index].stopReason = event.stopReason
             messages[index].turnNumber = event.turnNumber
 
-            // Compute incremental tokens (delta from previous turn) for display
-            // Use tracked previous turn value instead of searching messages (which may not have tokenUsage)
-            if let usage = event.tokenUsage {
+            // Use server-provided normalizedUsage for incremental tokens (preferred)
+            // Falls back to local calculation only if server doesn't provide normalizedUsage
+            if let normalized = event.normalizedUsage {
+                // SERVER VALUES - no local calculation
+                messages[index].incrementalTokens = TokenUsage(
+                    inputTokens: normalized.newInputTokens,  // FROM SERVER
+                    outputTokens: normalized.outputTokens,
+                    cacheReadTokens: normalized.cacheReadTokens,
+                    cacheCreationTokens: normalized.cacheCreationTokens
+                )
+                logger.debug("Incremental tokens (from server): in=\(normalized.newInputTokens)", category: .events)
+            } else if let usage = event.tokenUsage {
+                // FALLBACK: legacy calculation if server doesn't send normalizedUsage
                 let incrementalInput = max(0, usage.inputTokens - previousTurnFinalInputTokens)
                 messages[index].incrementalTokens = TokenUsage(
                     inputTokens: incrementalInput,
@@ -473,7 +494,7 @@ extension ChatViewModel {
                     cacheReadTokens: usage.cacheReadTokens,
                     cacheCreationTokens: usage.cacheCreationTokens
                 )
-                logger.debug("Incremental tokens: in=\(incrementalInput) (prev=\(previousTurnFinalInputTokens))", category: .events)
+                logger.debug("Incremental tokens (fallback): in=\(incrementalInput) (prev=\(previousTurnFinalInputTokens))", category: .events)
             }
         } else {
             logger.warning("Could not find message to update with turn metadata (turn=\(event.turnNumber))", category: .events)
@@ -505,46 +526,52 @@ extension ChatViewModel {
             logger.debug("Updated context window from turn_end: \(contextLimit)", category: .events)
         }
 
-        // Update token tracking
-        if let usage = event.tokenUsage {
-            // Store last turn's input tokens for context bar calculation
-            // This represents the actual current context size sent to the LLM
-            lastTurnInputTokens = usage.inputTokens
+        // Use server's normalizedUsage for context tracking (preferred)
+        // This updates contextWindowTokens, newInputTokens, outputTokens in contextState
+        if let normalized = event.normalizedUsage {
+            contextState.updateFromNormalizedUsage(normalized)
+            logger.debug("Context tracking updated from normalizedUsage: contextWindow=\(normalized.contextWindowTokens) newInput=\(normalized.newInputTokens)", category: .events)
+        }
 
-            // Track this turn's input for next turn's incremental calculation
-            previousTurnFinalInputTokens = usage.inputTokens
+        // Update token tracking and accumulation
+        if let usage = event.tokenUsage {
+            // Determine context size: prefer server's normalizedUsage, fallback to raw inputTokens
+            let contextSize = event.normalizedUsage?.contextWindowTokens ?? usage.inputTokens
+
+            // Only update lastTurnInputTokens (proxy to contextWindowTokens) if we didn't get normalizedUsage
+            // (If we got normalizedUsage, contextState.updateFromNormalizedUsage already set contextWindowTokens)
+            if event.normalizedUsage == nil {
+                lastTurnInputTokens = contextSize
+                logger.debug("Set lastTurnInputTokens from raw inputTokens: \(contextSize)", category: .events)
+            }
+
+            // Track for legacy delta calculation (still needed for backward compatibility with old events)
+            previousTurnFinalInputTokens = contextSize
 
             // Accumulate ALL tokens for billing tracking
-            // Input tokens: each API call charges for full context window
             accumulatedInputTokens += usage.inputTokens
             accumulatedOutputTokens += usage.outputTokens
             accumulatedCacheReadTokens += usage.cacheReadTokens ?? 0
             accumulatedCacheCreationTokens += usage.cacheCreationTokens ?? 0
             accumulatedCost += event.cost ?? 0
 
-            // Total usage shows current context input + accumulated output
-            // The context bar uses lastTurnInputTokens via contextPercentage
+            // Total usage shows current context + accumulated output
             totalTokenUsage = TokenUsage(
-                inputTokens: lastTurnInputTokens,  // Current context size for display
+                inputTokens: contextSize,  // Current context size for display
                 outputTokens: accumulatedOutputTokens,
                 cacheReadTokens: accumulatedCacheReadTokens > 0 ? accumulatedCacheReadTokens : nil,
                 cacheCreationTokens: accumulatedCacheCreationTokens > 0 ? accumulatedCacheCreationTokens : nil
             )
-            logger.debug("Total tokens: context=\(lastTurnInputTokens) out=\(accumulatedOutputTokens) accumulatedIn=\(accumulatedInputTokens)", category: .events)
+            logger.debug("Total tokens: context=\(contextSize) out=\(accumulatedOutputTokens) accumulatedIn=\(accumulatedInputTokens)", category: .events)
 
             // Update CachedSession with token info for dashboard
-            // - inputTokens: accumulated for billing
-            // - outputTokens: accumulated
-            // - lastTurnInputTokens: current context size for context bar
-            // - cacheReadTokens/cacheCreationTokens: accumulated cache tokens
-            // - cost: accumulated cost from all turns
             if let manager = eventStoreManager {
                 do {
                     try manager.updateSessionTokens(
                         sessionId: sessionId,
                         inputTokens: accumulatedInputTokens,
                         outputTokens: accumulatedOutputTokens,
-                        lastTurnInputTokens: lastTurnInputTokens,
+                        lastTurnInputTokens: contextSize,
                         cacheReadTokens: accumulatedCacheReadTokens,
                         cacheCreationTokens: accumulatedCacheCreationTokens,
                         cost: accumulatedCost
