@@ -58,6 +58,7 @@ export {
   type AssistantContentBlock,
   type ToolResultBlock,
   type EndTurnResult,
+  type NormalizedTokenUsage,
 } from './turn-manager.js';
 
 // Handlers (Phase 3)

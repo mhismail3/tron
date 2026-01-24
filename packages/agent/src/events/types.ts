@@ -325,6 +325,27 @@ export interface StreamTurnStartEvent extends BaseEvent {
 }
 
 /**
+ * Normalized token usage with semantic clarity for different UI components.
+ * Handles the semantic differences in how different providers report tokens:
+ * - Anthropic: inputTokens is NEW tokens only (excludes cache)
+ * - OpenAI/Codex/Gemini: inputTokens is FULL context sent
+ */
+export interface NormalizedTokenUsage {
+  /** Per-turn NEW input tokens (for stats line display) */
+  newInputTokens: number;
+  /** Output tokens for this turn */
+  outputTokens: number;
+  /** Total context window size (for progress pill) */
+  contextWindowTokens: number;
+  /** Raw input tokens as reported by provider (for billing/debugging) */
+  rawInputTokens: number;
+  /** Tokens read from cache (Anthropic/OpenAI) */
+  cacheReadTokens: number;
+  /** Tokens written to cache (Anthropic only) */
+  cacheCreationTokens: number;
+}
+
+/**
  * Turn end event
  */
 export interface StreamTurnEndEvent extends BaseEvent {
@@ -332,6 +353,11 @@ export interface StreamTurnEndEvent extends BaseEvent {
   payload: {
     turn: number;
     tokenUsage: TokenUsage;
+    /**
+     * Normalized token usage with semantic clarity for different UI components.
+     * Handles provider semantic differences (Anthropic vs OpenAI/Codex/Gemini).
+     */
+    normalizedUsage?: NormalizedTokenUsage;
     /** Cost for this turn in USD */
     cost?: number;
   };

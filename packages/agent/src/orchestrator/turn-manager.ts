@@ -40,11 +40,13 @@ import type {
   ApiToolResultBlock,
   TokenUsage as CoreTokenUsage,
 } from '../types/messages.js';
+import type { ProviderType } from '../types/messages.js';
 import {
   TurnContentTracker,
   type AccumulatedContent,
   type InterruptedContent,
   type TurnContent,
+  type NormalizedTokenUsage,
 } from './turn-content-tracker.js';
 
 const logger = createLogger('turn-manager');
@@ -100,6 +102,11 @@ export interface EndTurnResult {
   toolResults: ToolResultBlock[];
   /** Token usage if provided */
   tokenUsage?: TokenUsage;
+  /**
+   * Normalized token usage with semantic clarity for different UI components.
+   * Handles provider semantic differences (Anthropic vs OpenAI/Codex/Gemini).
+   */
+  normalizedUsage?: NormalizedTokenUsage;
 }
 
 // =============================================================================
@@ -119,6 +126,28 @@ export class TurnManager {
   }
 
   // ===========================================================================
+  // Provider Type Management
+  // ===========================================================================
+
+  /**
+   * Set the current provider type for token normalization.
+   * Different providers report inputTokens differently and require
+   * different normalization strategies.
+   *
+   * @param type - The provider type ('anthropic' | 'openai' | 'openai-codex' | 'google')
+   */
+  setProviderType(type: ProviderType): void {
+    this.tracker.setProviderType(type);
+  }
+
+  /**
+   * Get the current provider type.
+   */
+  getProviderType(): ProviderType {
+    return this.tracker.getProviderType();
+  }
+
+  // ===========================================================================
   // Turn Lifecycle
   // ===========================================================================
 
@@ -134,11 +163,14 @@ export class TurnManager {
    * End the current turn and get content blocks.
    *
    * @param tokenUsage - Optional token usage from the LLM response
-   * @returns Content blocks and tool results for persistence
+   * @returns Content blocks, tool results, and normalized usage for persistence
    */
   endTurn(tokenUsage?: TokenUsage): EndTurnResult {
     const turn = this.tracker.getCurrentTurn();
     const turnContent = this.tracker.onTurnEnd(tokenUsage);
+
+    // Get normalized usage (calculated by tracker during onTurnEnd)
+    const normalizedUsage = this.tracker.getLastNormalizedUsage();
 
     // Build content blocks from turn content
     const { content, toolResults } = this.buildContentBlocks(turnContent);
@@ -147,6 +179,7 @@ export class TurnManager {
       turn,
       contentBlocks: content.length,
       toolResults: toolResults.length,
+      hasNormalizedUsage: !!normalizedUsage,
     });
 
     return {
@@ -154,6 +187,7 @@ export class TurnManager {
       content,
       toolResults,
       tokenUsage,
+      normalizedUsage,
     };
   }
 
@@ -410,4 +444,4 @@ export function createTurnManager(): TurnManager {
 // Re-exports
 // =============================================================================
 
-export type { AccumulatedContent, InterruptedContent } from './turn-content-tracker.js';
+export type { AccumulatedContent, InterruptedContent, NormalizedTokenUsage } from './turn-content-tracker.js';

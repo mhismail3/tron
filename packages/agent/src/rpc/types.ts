@@ -1051,6 +1051,41 @@ export type RpcEventType =
   | 'agent.ui_state_change';
 
 /**
+ * Normalized token usage with semantic clarity for different UI components.
+ * Handles the semantic differences in how different providers report tokens:
+ * - Anthropic: inputTokens is NEW tokens only (excludes cache)
+ * - OpenAI/Codex/Gemini: inputTokens is FULL context sent
+ */
+export interface NormalizedTokenUsage {
+  /** Per-turn NEW input tokens (for stats line display) */
+  newInputTokens: number;
+  /** Output tokens for this turn */
+  outputTokens: number;
+  /** Total context window size (for progress pill) */
+  contextWindowTokens: number;
+  /** Raw input tokens as reported by provider (for billing/debugging) */
+  rawInputTokens: number;
+  /** Tokens read from cache (Anthropic/OpenAI) */
+  cacheReadTokens: number;
+  /** Tokens written to cache (Anthropic only) */
+  cacheCreationTokens: number;
+}
+
+/**
+ * Event data for agent turn end
+ * Includes both raw and normalized token usage for different UI components
+ */
+export interface AgentTurnEndEvent {
+  turn: number;
+  duration: number;
+  tokenUsage?: TokenUsage;
+  /** Normalized usage for UI display (handles provider semantic differences) */
+  normalizedUsage?: NormalizedTokenUsage;
+  cost?: number;
+  contextLimit?: number;
+}
+
+/**
  * Event data for agent text streaming
  */
 export interface AgentTextDeltaEvent {

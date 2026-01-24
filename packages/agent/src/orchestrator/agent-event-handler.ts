@@ -220,6 +220,9 @@ export class AgentEventHandler {
     // they get ALL content from Turn 1, Turn 2, etc.
     // Accumulation is cleared at agent_start/agent_end instead.
 
+    // Track turnResult for normalizedUsage access
+    let turnResult: { turn: number; content: unknown[]; normalizedUsage?: unknown } | undefined;
+
     // CREATE MESSAGE.ASSISTANT FOR THIS TURN - BUT ONLY IF NOT ALREADY FLUSHED
     // Linear event ordering means content with tool_use is flushed at first tool_execution_start.
     // Only create message.assistant here if:
@@ -230,9 +233,9 @@ export class AgentEventHandler {
       const wasPreToolFlushed = active.sessionContext!.hasPreToolContentFlushed();
 
       // Use SessionContext for turn end
-      // This returns built content blocks and clears per-turn tracking
+      // This returns built content blocks, clears per-turn tracking, and includes normalizedUsage
       const turnStartTime = active.sessionContext!.getTurnStartTime();
-      const turnResult = active.sessionContext!.endTurn(turnEndEvent.tokenUsage);
+      turnResult = active.sessionContext!.endTurn(turnEndEvent.tokenUsage);
 
       // Only create message.assistant if we didn't already flush content for tools
       // If wasPreToolFlushed is true, the content was already emitted at tool_execution_start
@@ -252,7 +255,7 @@ export class AgentEventHandler {
         if (normalizedContent.length > 0) {
           this.config.appendEventLinearized(sessionId, 'message.assistant' as EventType, {
             content: normalizedContent,
-            tokenUsage: turnResult.tokenUsage,
+            tokenUsage: (turnResult as { tokenUsage?: unknown }).tokenUsage,
             turn: turnResult.turn,
             model: active.model,
             stopReason: 'end_turn',
@@ -271,7 +274,7 @@ export class AgentEventHandler {
             sessionId,
             turn: turnResult.turn,
             contentBlocks: normalizedContent.length,
-            tokenUsage: turnResult.tokenUsage,
+            tokenUsage: (turnResult as { tokenUsage?: unknown }).tokenUsage,
             latency: turnLatency,
           });
         }
@@ -307,14 +310,20 @@ export class AgentEventHandler {
         turn: turnEndEvent.turn,
         duration: turnEndEvent.duration,
         tokenUsage: turnEndEvent.tokenUsage,
+        // Include normalized usage for UI components that need semantic token values:
+        // - newInputTokens: for stats line (per-turn new tokens)
+        // - contextWindowTokens: for context progress pill (total context size)
+        // - rawInputTokens: for billing/debugging
+        normalizedUsage: turnResult?.normalizedUsage,
         cost: turnCost,
       },
     });
 
-    // Store turn end event with token usage and cost (linearized)
+    // Store turn end event with token usage, normalized usage, and cost (linearized)
     this.config.appendEventLinearized(sessionId, 'stream.turn_end' as EventType, {
       turn: turnEndEvent.turn,
       tokenUsage: turnEndEvent.tokenUsage ?? { inputTokens: 0, outputTokens: 0 },
+      normalizedUsage: turnResult?.normalizedUsage,
       cost: turnCost,
     });
   }

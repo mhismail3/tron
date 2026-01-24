@@ -678,7 +678,7 @@ export class AnthropicProvider {
                     message: {
                       role: 'assistant' as const,
                       content: [],
-                      usage: { inputTokens, outputTokens, cacheCreationTokens, cacheReadTokens },
+                      usage: { inputTokens, outputTokens, cacheCreationTokens, cacheReadTokens, providerType: 'anthropic' as const },
                     },
                     stopReason: 'end_turn',
                   };
@@ -692,7 +692,7 @@ export class AnthropicProvider {
                   message: {
                     role: 'assistant' as const,
                     content: [],
-                    usage: { inputTokens, outputTokens, cacheCreationTokens, cacheReadTokens },
+                    usage: { inputTokens, outputTokens, cacheCreationTokens, cacheReadTokens, providerType: 'anthropic' as const },
                   },
                   stopReason: 'end_turn',
                 };
@@ -1089,6 +1089,7 @@ export class AnthropicProvider {
         outputTokens: usageWithCache?.output_tokens ?? 0,
         cacheCreationTokens: usageWithCache?.cache_creation_input_tokens,
         cacheReadTokens: usageWithCache?.cache_read_input_tokens,
+        providerType: 'anthropic' as const,
       },
       stopReason: response.stop_reason as AssistantMessage['stopReason'],
     };

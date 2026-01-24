@@ -50,6 +50,8 @@ import type {
   SessionEvent as TronSessionEvent,
 } from '../events/types.js';
 import type { WorkingDirectory } from '../session/working-directory.js';
+import type { ProviderType } from '../types/messages.js';
+import { detectProviderType } from '../providers/token-normalizer.js';
 import {
   EventPersister,
   createEventPersister,
@@ -148,9 +150,14 @@ export class SessionContext {
     this.planModeHandler = createPlanModeHandler();
     this.reconstructor = createSessionReconstructor();
 
+    // Set provider type based on model for token normalization
+    const providerType = detectProviderType(config.model);
+    this.turnManager.setProviderType(providerType);
+
     logger.debug('Session context created', {
       sessionId: this.sessionId,
       model: this.model,
+      providerType,
     });
   }
 
@@ -184,6 +191,31 @@ export class SessionContext {
 
   setReasoningLevel(level: string | undefined): void {
     this.reasoningLevel = level;
+  }
+
+  /**
+   * Update the provider type for token normalization.
+   * Called when the model changes mid-session.
+   */
+  setProviderType(type: ProviderType): void {
+    this.turnManager.setProviderType(type);
+  }
+
+  /**
+   * Get the current provider type.
+   */
+  getProviderType(): ProviderType {
+    return this.turnManager.getProviderType();
+  }
+
+  /**
+   * Update provider type based on model ID.
+   * Convenience method for when the model changes mid-session.
+   */
+  updateProviderTypeForModel(modelId: string): void {
+    const type = detectProviderType(modelId);
+    this.turnManager.setProviderType(type);
+    logger.debug('Provider type updated for model', { modelId, providerType: type });
   }
 
   // ===========================================================================

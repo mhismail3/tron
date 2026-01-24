@@ -497,7 +497,7 @@ export class OpenAIProvider {
               const message: AssistantMessage = {
                 role: 'assistant',
                 content,
-                usage: { inputTokens, outputTokens, cacheReadTokens },
+                usage: { inputTokens, outputTokens, cacheReadTokens, providerType: 'openai' as const },
                 stopReason: this.mapStopReason(choice.finish_reason),
               };
 

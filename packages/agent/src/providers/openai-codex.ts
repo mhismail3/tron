@@ -841,7 +841,7 @@ export class OpenAICodexProvider {
                   const message: AssistantMessage = {
                     role: 'assistant',
                     content,
-                    usage: { inputTokens, outputTokens },
+                    usage: { inputTokens, outputTokens, providerType: 'openai-codex' as const },
                     stopReason: toolCalls.size > 0 ? 'tool_use' : 'end_turn',
                   };
 

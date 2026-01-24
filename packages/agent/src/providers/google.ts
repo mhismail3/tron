@@ -984,7 +984,7 @@ export class GoogleProvider {
               const message: AssistantMessage = {
                 role: 'assistant',
                 content,
-                usage: { inputTokens, outputTokens },
+                usage: { inputTokens, outputTokens, providerType: 'google' as const },
                 stopReason: this.mapStopReason(candidate.finishReason),
               };
 

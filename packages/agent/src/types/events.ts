@@ -205,6 +205,26 @@ export interface TurnEndEvent extends BaseTronEvent {
     /** Tokens written to prompt cache (billed at premium rate) */
     cacheCreationTokens?: number;
   };
+  /**
+   * Normalized token usage with semantic clarity for different UI components.
+   * Handles the semantic differences in how different providers report tokens:
+   * - Anthropic: inputTokens is NEW tokens only (excludes cache)
+   * - OpenAI/Codex/Gemini: inputTokens is FULL context sent
+   */
+  normalizedUsage?: {
+    /** Per-turn NEW input tokens (for stats line display) */
+    newInputTokens: number;
+    /** Output tokens for this turn */
+    outputTokens: number;
+    /** Total context window size (for progress pill) */
+    contextWindowTokens: number;
+    /** Raw input tokens as reported by provider (for billing/debugging) */
+    rawInputTokens: number;
+    /** Tokens read from cache (Anthropic/OpenAI) */
+    cacheReadTokens: number;
+    /** Tokens written to cache (Anthropic only) */
+    cacheCreationTokens: number;
+  };
   /** Cost for this turn in USD */
   cost?: number;
   /** Current model's context window limit (for iOS sync after model switch) */

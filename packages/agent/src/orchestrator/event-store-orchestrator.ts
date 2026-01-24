@@ -1095,6 +1095,10 @@ export class EventStoreOrchestrator extends EventEmitter {
       logger.debug('[MODEL_SWITCH] Auth loaded', { sessionId, authType: newAuth.type });
 
       active.model = model;
+
+      // Update provider type for token normalization (resets baseline)
+      active.sessionContext.updateProviderTypeForModel(model);
+
       // CRITICAL: Use agent's switchModel() to preserve conversation history
       // Pass the new auth to ensure correct credentials for the new provider
       // Normalize auth to UnifiedAuth format and preserve endpoint for Google models

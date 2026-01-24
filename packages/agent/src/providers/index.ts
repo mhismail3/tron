@@ -61,3 +61,10 @@ export {
   type ModelInfo,
   type ModelCategory,
 } from './models.js';
+
+// Token normalization (handles provider semantic differences)
+// Note: NormalizedTokenUsage type is exported via orchestrator/turn-manager to avoid duplicate exports
+export {
+  normalizeTokenUsage,
+  detectProviderType as detectProviderTypeFromModel,
+} from './token-normalizer.js';

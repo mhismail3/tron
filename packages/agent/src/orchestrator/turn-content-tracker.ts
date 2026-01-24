@@ -24,8 +24,13 @@
  */
 import { createLogger } from '../logging/logger.js';
 import type { CurrentTurnToolCall } from '../rpc/types.js';
+import type { ProviderType } from '../types/messages.js';
+import { normalizeTokenUsage, type NormalizedTokenUsage } from '../providers/token-normalizer.js';
 
 const logger = createLogger('turn-content-tracker');
+
+// Re-export NormalizedTokenUsage for convenience
+export type { NormalizedTokenUsage } from '../providers/token-normalizer.js';
 
 // =============================================================================
 // Types
@@ -148,6 +153,58 @@ export class TurnContentTracker {
     cacheReadTokens?: number;
     cacheCreationTokens?: number;
   } | undefined;
+
+  // =========================================================================
+  // Token Normalization State
+  // =========================================================================
+  /**
+   * Provider type determines how inputTokens should be interpreted:
+   * - anthropic: inputTokens is NEW tokens only (excludes cache)
+   * - openai/openai-codex/google: inputTokens is FULL context sent
+   */
+  private currentProviderType: ProviderType = 'anthropic';
+
+  /**
+   * Previous context size for delta calculation (non-Anthropic providers).
+   * Reset to 0 on agent start, model switch, or session resume/fork.
+   */
+  private previousContextSize: number = 0;
+
+  /**
+   * Last normalized token usage for this turn.
+   * Provides semantic clarity for different UI components.
+   */
+  private lastNormalizedUsage: NormalizedTokenUsage | undefined;
+
+  // =========================================================================
+  // Provider Type Management
+  // =========================================================================
+
+  /**
+   * Set the current provider type (called when model changes).
+   * Different providers report inputTokens differently and require
+   * different normalization strategies.
+   *
+   * @param type - The provider type ('anthropic' | 'openai' | 'openai-codex' | 'google')
+   */
+  setProviderType(type: ProviderType): void {
+    if (this.currentProviderType !== type) {
+      logger.debug('Provider type changed', {
+        from: this.currentProviderType,
+        to: type,
+      });
+      this.currentProviderType = type;
+      // Reset baseline when provider changes (context interpretation changes)
+      this.previousContextSize = 0;
+    }
+  }
+
+  /**
+   * Get the current provider type.
+   */
+  getProviderType(): ProviderType {
+    return this.currentProviderType;
+  }
 
   // =========================================================================
   // Update Methods (update BOTH tracking structures)
@@ -365,7 +422,10 @@ export class TurnContentTracker {
 
   /**
    * Called at the end of each turn.
-   * Stores token usage and returns per-turn content for message.assistant creation.
+   * Stores token usage, calculates normalized usage, and returns per-turn content.
+   *
+   * @param tokenUsage - Raw token usage from the provider
+   * @returns Per-turn content for message.assistant creation
    */
   onTurnEnd(tokenUsage?: {
     inputTokens: number;
@@ -373,9 +433,28 @@ export class TurnContentTracker {
     cacheReadTokens?: number;
     cacheCreationTokens?: number;
   }): TurnContent {
-    // Store token usage
+    // Store raw token usage
     if (tokenUsage) {
       this.lastTurnTokenUsage = tokenUsage;
+
+      // Calculate normalized token usage
+      this.lastNormalizedUsage = normalizeTokenUsage(
+        tokenUsage,
+        this.currentProviderType,
+        this.previousContextSize
+      );
+
+      // Update baseline for next turn (use contextWindowTokens which represents actual context size)
+      this.previousContextSize = this.lastNormalizedUsage.contextWindowTokens;
+
+      logger.debug('Token usage normalized', {
+        turn: this.currentTurn,
+        providerType: this.currentProviderType,
+        rawInputTokens: tokenUsage.inputTokens,
+        newInputTokens: this.lastNormalizedUsage.newInputTokens,
+        contextWindowTokens: this.lastNormalizedUsage.contextWindowTokens,
+        previousContextSize: this.previousContextSize,
+      });
     }
 
     // Capture per-turn content before clearing
@@ -428,6 +507,11 @@ export class TurnContentTracker {
     // Reset metadata
     this.currentTurn = 0;
     this.currentTurnStartTime = undefined;
+
+    // Reset token normalization baseline
+    // This ensures first turn shows full context as "new" tokens
+    this.previousContextSize = 0;
+    this.lastNormalizedUsage = undefined;
 
     logger.debug('Agent run started, all tracking cleared');
   }
@@ -511,6 +595,25 @@ export class TurnContentTracker {
    */
   getLastTurnTokenUsage(): typeof this.lastTurnTokenUsage {
     return this.lastTurnTokenUsage;
+  }
+
+  /**
+   * Get last turn's normalized token usage.
+   * Provides semantic clarity for different UI components:
+   * - newInputTokens: For stats line (per-turn new tokens)
+   * - contextWindowTokens: For context progress pill (total context size)
+   * - rawInputTokens: For billing/debugging
+   */
+  getLastNormalizedUsage(): NormalizedTokenUsage | undefined {
+    return this.lastNormalizedUsage;
+  }
+
+  /**
+   * Get the current context baseline size.
+   * Used for debugging and verification.
+   */
+  getContextBaseline(): number {
+    return this.previousContextSize;
   }
 
   /**

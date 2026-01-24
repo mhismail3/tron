@@ -158,6 +158,14 @@ export function normalizeIsError(
 // =============================================================================
 
 /**
+ * Provider types for token normalization.
+ * Different providers report inputTokens differently:
+ * - anthropic: inputTokens is NEW tokens only (excludes cache)
+ * - openai/openai-codex/google: inputTokens is FULL context sent
+ */
+export type ProviderType = 'anthropic' | 'openai' | 'openai-codex' | 'google';
+
+/**
  * Token usage information
  */
 export interface TokenUsage {
@@ -165,6 +173,8 @@ export interface TokenUsage {
   outputTokens: number;
   cacheReadTokens?: number;
   cacheCreationTokens?: number;
+  /** Provider type for normalization (different providers report tokens differently) */
+  providerType?: ProviderType;
 }
 
 /**

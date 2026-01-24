@@ -149,6 +149,7 @@ export {
   type AssistantContentBlock,
   type ToolResultBlock,
   type EndTurnResult,
+  type NormalizedTokenUsage,
   type PlanModeState,
   type InterruptContext,
   type InterruptResult,
