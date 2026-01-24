@@ -94,13 +94,16 @@ struct ChatView: View {
     private let rpcClient: RPCClient
     private let skillStore: SkillStore?
     let workspaceDeleted: Bool
+    /// Callback to toggle sidebar visibility (iPad only)
+    var onToggleSidebar: (() -> Void)?
 
-    init(rpcClient: RPCClient, sessionId: String, skillStore: SkillStore? = nil, workspaceDeleted: Bool = false, scrollTarget: Binding<ScrollTarget?> = .constant(nil)) {
+    init(rpcClient: RPCClient, sessionId: String, skillStore: SkillStore? = nil, workspaceDeleted: Bool = false, scrollTarget: Binding<ScrollTarget?> = .constant(nil), onToggleSidebar: (() -> Void)? = nil) {
         self.sessionId = sessionId
         self.rpcClient = rpcClient
         self.skillStore = skillStore
         self.workspaceDeleted = workspaceDeleted
         self._scrollTarget = scrollTarget
+        self.onToggleSidebar = onToggleSidebar
         _viewModel = StateObject(wrappedValue: ChatViewModel(rpcClient: rpcClient, sessionId: sessionId))
     }
 
@@ -234,12 +237,22 @@ struct ChatView: View {
         .background(InteractivePopGestureEnabler())
         .toolbar {
             ToolbarItem(placement: .topBarLeading) {
-                Button {
-                    dismiss()
-                } label: {
-                    Image(systemName: "chevron.left")
-                        .font(TronTypography.button)
-                        .foregroundStyle(.tronEmerald)
+                if let onToggleSidebar = onToggleSidebar {
+                    // iPad - show sidebar toggle
+                    Button(action: onToggleSidebar) {
+                        Image(systemName: "sidebar.leading")
+                            .font(TronTypography.sans(size: TronTypography.sizeTitle, weight: .medium))
+                            .foregroundStyle(.tronEmerald)
+                    }
+                } else {
+                    // iPhone - show back button
+                    Button {
+                        dismiss()
+                    } label: {
+                        Image(systemName: "chevron.left")
+                            .font(TronTypography.button)
+                            .foregroundStyle(.tronEmerald)
+                    }
                 }
             }
             ToolbarItem(placement: .principal) {

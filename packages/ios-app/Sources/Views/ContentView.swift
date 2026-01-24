@@ -203,14 +203,7 @@ struct ContentView: View {
     private var detailContent: some View {
         if let sessionId = selectedSessionId,
            eventStoreManager.sessionExists(sessionId) {
-            let scrollBinding = $currentScrollTarget
-            ChatView(
-                rpcClient: appState.rpcClient,
-                sessionId: sessionId,
-                skillStore: appState.skillStore,
-                workspaceDeleted: workspaceDeletedForSession[sessionId] ?? false,
-                scrollTarget: scrollBinding
-            )
+            chatViewForSession(sessionId)
         } else if eventStoreManager.sessions.isEmpty {
             WelcomePage(
                 isSidebarVisible: isSidebarVisible,
@@ -377,6 +370,30 @@ struct ContentView: View {
                     }
                 }
             }
+        }
+    }
+
+    /// Creates a ChatView for the given session
+    /// iPad (regular) gets sidebar toggle, iPhone (compact) uses back button
+    @ViewBuilder
+    private func chatViewForSession(_ sessionId: String) -> some View {
+        if horizontalSizeClass == .regular {
+            ChatView(
+                rpcClient: appState.rpcClient,
+                sessionId: sessionId,
+                skillStore: appState.skillStore,
+                workspaceDeleted: workspaceDeletedForSession[sessionId] ?? false,
+                scrollTarget: $currentScrollTarget,
+                onToggleSidebar: toggleSidebar
+            )
+        } else {
+            ChatView(
+                rpcClient: appState.rpcClient,
+                sessionId: sessionId,
+                skillStore: appState.skillStore,
+                workspaceDeleted: workspaceDeletedForSession[sessionId] ?? false,
+                scrollTarget: $currentScrollTarget
+            )
         }
     }
 

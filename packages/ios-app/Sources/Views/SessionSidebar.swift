@@ -250,7 +250,7 @@ struct CachedSessionSidebarRow: View {
         .padding(.horizontal, 14)
         .glassEffect(
             isSelected
-                ? .regular.tint(Color.tronEmerald.opacity(0.4)).interactive()
+                ? .regular.tint(Color.tronEmerald.opacity(0.25))
                 : .regular.tint(Color.tronPhthaloGreen.opacity(0.15)),
             in: RoundedRectangle(cornerRadius: 12, style: .continuous)
         )
