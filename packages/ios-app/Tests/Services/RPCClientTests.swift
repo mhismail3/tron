@@ -33,7 +33,7 @@ final class ConnectionStateTests: XCTestCase {
         XCTAssertFalse(ConnectionState.disconnected.isConnected)
         XCTAssertFalse(ConnectionState.connecting.isConnected)
         XCTAssertTrue(ConnectionState.connected.isConnected)
-        XCTAssertFalse(ConnectionState.reconnecting(attempt: 1).isConnected)
+        XCTAssertFalse(ConnectionState.reconnecting(attempt: 1, nextRetrySeconds: 5).isConnected)
         XCTAssertFalse(ConnectionState.failed(reason: "Test error").isConnected)
     }
 
@@ -41,7 +41,7 @@ final class ConnectionStateTests: XCTestCase {
         XCTAssertEqual(ConnectionState.disconnected.displayText, "Disconnected")
         XCTAssertEqual(ConnectionState.connecting.displayText, "Connecting...")
         XCTAssertEqual(ConnectionState.connected.displayText, "Connected")
-        XCTAssertTrue(ConnectionState.reconnecting(attempt: 2).displayText.contains("Reconnecting"))
+        XCTAssertTrue(ConnectionState.reconnecting(attempt: 2, nextRetrySeconds: 3).displayText.contains("Reconnecting"))
         XCTAssertTrue(ConnectionState.failed(reason: "Network error").displayText.contains("Failed"))
     }
 

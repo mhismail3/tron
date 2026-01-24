@@ -250,11 +250,17 @@ final class UnifiedEventTransformerTests: XCTestCase {
         XCTAssertNotNil(message)
         XCTAssertEqual(message?.role, .system)
 
-        if case .modelChange(let from, let to) = message?.content {
-            XCTAssertEqual(from, "claude-sonnet-4")
-            XCTAssertEqual(to, "claude-opus-4")
-        } else {
-            XCTFail("Expected modelChange content")
+        guard let content = message?.content else {
+            XCTFail("Expected content")
+            return
+        }
+        switch content {
+        case .systemEvent(.modelChange(let from, let to)):
+            // Transformer humanizes model names for display
+            XCTAssertEqual(from, "Sonnet 4")
+            XCTAssertEqual(to, "Opus 4")
+        default:
+            XCTFail("Expected systemEvent(.modelChange) content, got \(content)")
         }
     }
 
