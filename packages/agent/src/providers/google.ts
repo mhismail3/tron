@@ -817,6 +817,10 @@ export class GoogleProvider {
       let textStarted = false;
       let thinkingStarted = false;
       let toolCallIndex = 0;
+      // Generate a unique prefix for this streaming response to avoid ID collisions across turns
+      // Other providers (Anthropic, OpenAI) return globally unique IDs from the API
+      // But Gemini doesn't provide IDs, so we must generate them ourselves
+      const uniquePrefix = Math.random().toString(36).substring(2, 10);
 
       while (true) {
         const { done, value } = await reader.read();
@@ -898,7 +902,7 @@ export class GoogleProvider {
               // Handle function calls
               if ('functionCall' in part) {
                 const fc = part.functionCall;
-                const id = `call_${toolCallIndex++}`;
+                const id = `call_${uniquePrefix}_${toolCallIndex++}`;
                 // thoughtSignature is at the part level, not inside functionCall
                 const thoughtSig = (part as { thoughtSignature?: string }).thoughtSignature;
 
