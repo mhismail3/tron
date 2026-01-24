@@ -285,7 +285,7 @@ struct NewSessionFlow: View {
                 if state.isConnected && serverSessionsError != nil {
                     // Connection established and we had an error - reload data
                     serverSessionsError = nil
-                    Task {
+                    _ = Task {
                         await loadModels()
                         await loadServerSessions()
                         await validateWorkspacePaths()

@@ -332,11 +332,11 @@ struct UnifiedEventTransformer {
                 cacheCreationTokens: normalized.cacheCreationTokens
             )
             logger.debug("[TOKEN-FLOW] iOS: message.assistant reconstruction", category: .events)
-            logger.debug("  turn=\(parsed.turn ?? -1), blocks=\(blocks.count)", category: .events)
+            logger.debug("  turn=\(parsed.turn), blocks=\(blocks.count)", category: .events)
             logger.debug("  normalizedUsage: newInput=\(normalized.newInputTokens), contextWindow=\(normalized.contextWindowTokens), output=\(normalized.outputTokens)", category: .events)
         } else {
             // Server MUST provide normalizedUsage - stats will be missing
-            logger.warning("[TOKEN-FLOW] iOS: message.assistant MISSING normalizedUsage (turn=\(parsed.turn ?? -1))", category: .events)
+            logger.warning("[TOKEN-FLOW] iOS: message.assistant MISSING normalizedUsage (turn=\(parsed.turn))", category: .events)
             effectiveIncrementalTokens = nil
         }
 

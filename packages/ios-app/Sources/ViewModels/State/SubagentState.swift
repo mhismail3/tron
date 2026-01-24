@@ -432,7 +432,7 @@ final class SubagentState {
     ///   - subagentSessionId: The session ID of the subagent
     ///   - eventDB: The event database to load from
     ///   - forceReload: If true, reloads even if already loaded (e.g., after sync)
-    func loadEventsFromDatabase(for subagentSessionId: String, eventDB: EventDatabaseProtocol, forceReload: Bool = false) {
+    func loadEventsFromDatabase(for subagentSessionId: String, eventDB: any EventDatabaseProtocol, forceReload: Bool = false) {
         // Skip if already loaded (unless force reload)
         if !forceReload && subagentEvents[subagentSessionId] != nil {
             return

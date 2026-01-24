@@ -310,7 +310,7 @@ extension EventStoreManager {
             cacheReadTokens: serverInfo.cacheReadTokens ?? existing.cacheReadTokens,
             cacheCreationTokens: serverInfo.cacheCreationTokens ?? existing.cacheCreationTokens,
             cost: serverInfo.cost ?? existing.cost,
-            isFork: serverInfo.isFork ?? existing.isFork,
+            isFork: serverInfo.isFork,
             serverOrigin: serverOrigin  // Always update origin
         )
     }
