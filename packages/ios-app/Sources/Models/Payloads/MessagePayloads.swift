@@ -163,6 +163,8 @@ struct AssistantMessagePayload {
     let contentBlocks: [[String: Any]]?
     let turn: Int
     let tokenUsage: TokenUsage?
+    /// Normalized token usage (preferred for display, handles provider semantic differences)
+    let normalizedUsage: NormalizedTokenUsage?
     let stopReason: StopReason?
     let latencyMs: Int?
     let model: String?
@@ -215,6 +217,13 @@ struct AssistantMessagePayload {
             )
         } else {
             self.tokenUsage = nil
+        }
+
+        // Parse normalizedUsage (preferred for display, handles provider semantic differences)
+        if let normalized = payload.dict("normalizedUsage") {
+            self.normalizedUsage = NormalizedTokenUsage(from: normalized)
+        } else {
+            self.normalizedUsage = nil
         }
 
         if let stopStr = payload.string("stopReason") {

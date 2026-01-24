@@ -480,35 +480,23 @@ extension ChatViewModel {
 
             // Use server-provided normalizedUsage for incremental tokens (preferred)
             // Falls back to local calculation only if server doesn't provide normalizedUsage
+            //
+            // Note: normalizedUsage is always available on stream.turn_end. For message.assistant,
+            // it's available for no-tool turns. For tool turns, the pre-tool message.assistant
+            // is created before turn_end, so normalizedUsage isn't available there. However,
+            // the live streaming case here uses stream.turn_end, so normalizedUsage should
+            // Server MUST provide normalizedUsage - no fallback
             if let normalized = result.normalizedUsage {
-                // SERVER VALUES - no local calculation
                 messages[index].incrementalTokens = TokenUsage(
-                    inputTokens: normalized.newInputTokens,  // FROM SERVER
+                    inputTokens: normalized.newInputTokens,
                     outputTokens: normalized.outputTokens,
                     cacheReadTokens: normalized.cacheReadTokens,
                     cacheCreationTokens: normalized.cacheCreationTokens
                 )
-                logger.debug("Incremental tokens (from server): in=\(normalized.newInputTokens)", category: .events)
-            } else if let usage = result.tokenUsage {
-                // FALLBACK: Legacy calculation if server doesn't send normalizedUsage.
-                //
-                // WARNING: This fallback is INCORRECT for Anthropic!
-                // Anthropic's inputTokens is non-cached content only (excludes cache_read/cache_create).
-                // The correct formula for Anthropic is:
-                //   delta = (inputTokens + cacheRead + cacheCreate) - previousContextWindow
-                //
-                // This simple fallback only works for OpenAI/Codex/Gemini where inputTokens = full context.
-                // For Anthropic, the delta will be wrong (shows raw input growth, not context growth).
-                //
-                // TODO: Either fix this fallback or remove it entirely once all servers send normalizedUsage.
-                let incrementalInput = max(0, usage.inputTokens - contextState.previousTurnFinalInputTokens)
-                messages[index].incrementalTokens = TokenUsage(
-                    inputTokens: incrementalInput,
-                    outputTokens: usage.outputTokens,
-                    cacheReadTokens: usage.cacheReadTokens,
-                    cacheCreationTokens: usage.cacheCreationTokens
-                )
-                logger.warning("Using fallback delta calculation (may be wrong for Anthropic): in=\(incrementalInput)", category: .events)
+                logger.debug("[TOKEN-FLOW] iOS: stream.turn_end received", category: .events)
+                logger.debug("  turn=\(result.turnNumber), newInput=\(normalized.newInputTokens), contextWindow=\(normalized.contextWindowTokens), output=\(normalized.outputTokens)", category: .events)
+            } else {
+                logger.error("[TOKEN-FLOW] iOS: stream.turn_end MISSING normalizedUsage (turn=\(result.turnNumber))", category: .events)
             }
         } else {
             logger.warning("Could not find message to update with turn metadata (turn=\(result.turnNumber))", category: .events)
@@ -540,27 +528,19 @@ extension ChatViewModel {
             logger.debug("Updated context window from turn_end: \(contextLimit)", category: .events)
         }
 
-        // Use server's normalizedUsage for context tracking (preferred)
-        // This updates contextWindowTokens, newInputTokens, outputTokens in contextState
+        // Server MUST provide normalizedUsage for context tracking
         if let normalized = result.normalizedUsage {
             contextState.updateFromNormalizedUsage(normalized)
-            logger.debug("Context tracking updated from normalizedUsage: contextWindow=\(normalized.contextWindowTokens) newInput=\(normalized.newInputTokens)", category: .events)
+            logger.debug("[TOKEN-FLOW] iOS: Context state updated from stream.turn_end", category: .events)
+            logger.debug("  lastTurnInput=\(contextState.lastTurnInputTokens)", category: .events)
+        } else {
+            logger.error("[TOKEN-FLOW] iOS: Context tracking stale - no normalizedUsage on turn_end", category: .events)
         }
 
         // Update token tracking and accumulation
         if let usage = result.tokenUsage {
-            // Determine context size: prefer server's normalizedUsage, fallback to raw inputTokens
-            let contextSize = result.normalizedUsage?.contextWindowTokens ?? usage.inputTokens
-
-            // Only update lastTurnInputTokens (proxy to contextWindowTokens) if we didn't get normalizedUsage
-            // (If we got normalizedUsage, contextState.updateFromNormalizedUsage already set contextWindowTokens)
-            if result.normalizedUsage == nil {
-                contextState.lastTurnInputTokens = contextSize
-                logger.debug("Set lastTurnInputTokens from raw inputTokens: \(contextSize)", category: .events)
-            }
-
-            // Track for legacy delta calculation (still needed for backward compatibility with old events)
-            contextState.previousTurnFinalInputTokens = contextSize
+            let contextSize = result.normalizedUsage?.contextWindowTokens ?? 0
+            logger.info("LIVE handleTurnEnd: contextSize=\(contextSize)", category: .events)
 
             // Accumulate ALL tokens for billing tracking
             contextState.accumulatedInputTokens += usage.inputTokens
@@ -727,7 +707,6 @@ extension ChatViewModel {
 
         // Update context tracking - the new context size is tokensAfter
         contextState.lastTurnInputTokens = result.tokensAfter
-        contextState.previousTurnFinalInputTokens = result.tokensAfter
         logger.debug("Updated lastTurnInputTokens to \(result.tokensAfter) after compaction", category: .events)
 
         // Add compaction notification pill to chat
@@ -756,7 +735,6 @@ extension ChatViewModel {
 
         // Update context tracking - the new context size is tokensAfter
         contextState.lastTurnInputTokens = result.tokensAfter
-        contextState.previousTurnFinalInputTokens = result.tokensAfter
         logger.debug("Updated lastTurnInputTokens to \(result.tokensAfter) after context clear", category: .events)
 
         // Add context cleared notification pill to chat

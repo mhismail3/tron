@@ -165,8 +165,9 @@ describe('SessionContext', () => {
 
       context.addTextDelta('Hello');
       context.addTextDelta(' world');
+      context.setResponseTokenUsage({ inputTokens: 100, outputTokens: 50 });
 
-      const result = context.endTurn({ inputTokens: 100, outputTokens: 50 });
+      const result = context.endTurn();
 
       expect(result.turn).toBe(1);
       expect(result.content.length).toBe(1);
@@ -378,8 +379,9 @@ describe('SessionContext', () => {
       context.addThinkingDelta('Let me ');
       context.addThinkingDelta('analyze this...');
       context.addTextDelta('Here is my response');
+      context.setResponseTokenUsage({ inputTokens: 100, outputTokens: 50 });
 
-      const result = context.endTurn({ inputTokens: 100, outputTokens: 50 });
+      const result = context.endTurn();
 
       // Thinking should come first
       expect(result.content.length).toBe(2);

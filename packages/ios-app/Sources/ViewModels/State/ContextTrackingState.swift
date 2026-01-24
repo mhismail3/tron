@@ -43,15 +43,11 @@ final class ContextTrackingState {
     // MARK: - Legacy Compatibility (for backward compatibility with existing code)
 
     /// Last turn's input tokens (represents actual current context size)
-    /// This is now a proxy to contextWindowTokens for backward compatibility
+    /// This is now a proxy to contextWindowTokens
     var lastTurnInputTokens: Int {
         get { contextWindowTokens }
         set { contextWindowTokens = newValue }
     }
-
-    /// Previous turn's final input tokens (for computing incremental delta)
-    /// Kept for backward compatibility but no longer used for local delta calculation
-    var previousTurnFinalInputTokens = 0
 
     init() {}
 
@@ -98,11 +94,6 @@ final class ContextTrackingState {
         accumulatedCost += cost
     }
 
-    /// Record the end of a turn (updates previous turn tokens for legacy compatibility)
-    func recordTurnEnd() {
-        previousTurnFinalInputTokens = contextWindowTokens
-    }
-
     /// Update context window based on available model info
     func updateContextWindow(from models: [ModelInfo], currentModel: String) {
         if let model = models.first(where: { $0.id == currentModel }) {
@@ -121,6 +112,5 @@ final class ContextTrackingState {
         accumulatedCacheReadTokens = 0
         accumulatedCacheCreationTokens = 0
         accumulatedCost = 0
-        previousTurnFinalInputTokens = 0
     }
 }

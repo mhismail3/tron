@@ -121,50 +121,43 @@ extension ChatViewModel {
             // Update turn counter from unified state
             currentTurn = state.currentTurn
 
-            // Restore lastTurnInputTokens and compute incrementalTokens for loaded messages
-            restoreTokenStateFromMessages()
+            // =============================================================================
+            // TOKEN STATE FROM RECONSTRUCTED STATE (SERVER EVENTS = SINGLE SOURCE OF TRUTH)
+            // =============================================================================
+            //
+            // The reconstructed state comes from parsing events synced from the server.
+            // This is the ONLY source of truth for token values:
+            // - state.lastTurnInputTokens = from stream.turn_end events' normalizedUsage.contextWindowTokens
+            // - state.totalTokenUsage = accumulated from all turn_end events
+            //
+            // The iOS DB session table is ONLY for dashboard display (which sessions exist).
+            // It should NOT be used for token state - that leads to stale/wrong values.
+            //
+            let usage = state.totalTokenUsage
 
-            // Get token totals from cached session (server source of truth)
-            // instead of reconstructed state (local calculation that may double-count)
-            // Cache tokens come from reconstructed state since session doesn't store them
+            // Set token state from reconstructed state (derived from server events)
+            contextState.accumulatedInputTokens = usage.inputTokens
+            contextState.accumulatedOutputTokens = usage.outputTokens
+            contextState.accumulatedCacheReadTokens = usage.cacheReadTokens ?? 0
+            contextState.accumulatedCacheCreationTokens = usage.cacheCreationTokens ?? 0
+
+            // lastTurnInputTokens = context window size from last stream.turn_end event
+            // This is extracted from normalizedUsage.contextWindowTokens in UnifiedEventTransformer
+            contextState.lastTurnInputTokens = state.lastTurnInputTokens
+            logger.info("[TOKEN-FIX] RESUME from server events: lastTurnInputTokens=\(state.lastTurnInputTokens)", category: .session)
+
+            // Get cost from iOS DB session cache (this is fine as it's just for display)
             if let session = try? manager.eventDB.getSession(sessionId) {
-                // Accumulated totals for billing
-                contextState.accumulatedInputTokens = session.inputTokens
-                contextState.accumulatedOutputTokens = session.outputTokens
-                contextState.accumulatedCacheReadTokens = state.totalTokenUsage.cacheReadTokens ?? 0
-                contextState.accumulatedCacheCreationTokens = state.totalTokenUsage.cacheCreationTokens ?? 0
                 contextState.accumulatedCost = session.cost
-
-                // Current context size for context bar (lastTurnInputTokens from server)
-                contextState.lastTurnInputTokens = session.lastTurnInputTokens
-
-                // totalTokenUsage: input = current context size for display, output = accumulated
-                contextState.totalTokenUsage = TokenUsage(
-                    inputTokens: session.lastTurnInputTokens,  // Current context size for context bar
-                    outputTokens: session.outputTokens,
-                    cacheReadTokens: state.totalTokenUsage.cacheReadTokens,
-                    cacheCreationTokens: state.totalTokenUsage.cacheCreationTokens
-                )
-            } else {
-                // Fallback to reconstructed state if session not found
-                let usage = state.totalTokenUsage
-                if usage.inputTokens > 0 || usage.outputTokens > 0 {
-                    // Accumulated totals for billing
-                    contextState.accumulatedInputTokens = usage.inputTokens
-                    contextState.accumulatedOutputTokens = usage.outputTokens
-                    contextState.accumulatedCacheReadTokens = usage.cacheReadTokens ?? 0
-                    contextState.accumulatedCacheCreationTokens = usage.cacheCreationTokens ?? 0
-                    // Use state.lastTurnInputTokens for context bar (current context size)
-                    contextState.lastTurnInputTokens = state.lastTurnInputTokens
-                    // totalTokenUsage: inputTokens = context size for bar, outputTokens = accumulated
-                    contextState.totalTokenUsage = TokenUsage(
-                        inputTokens: state.lastTurnInputTokens,
-                        outputTokens: usage.outputTokens,
-                        cacheReadTokens: usage.cacheReadTokens,
-                        cacheCreationTokens: usage.cacheCreationTokens
-                    )
-                }
             }
+
+            // totalTokenUsage for display
+            contextState.totalTokenUsage = TokenUsage(
+                inputTokens: state.lastTurnInputTokens,  // Context window size for progress bar
+                outputTokens: usage.outputTokens,
+                cacheReadTokens: usage.cacheReadTokens,
+                cacheCreationTokens: usage.cacheCreationTokens
+            )
 
             logger.info("Loaded \(loadedMessages.count) messages via UnifiedEventTransformer, displaying latest \(batchSize) for session \(sessionId)", category: .session)
         } catch {
@@ -215,48 +208,31 @@ extension ChatViewModel {
 
             currentTurn = state.currentTurn
 
-            // Restore lastTurnInputTokens and compute incrementalTokens for loaded messages
-            restoreTokenStateFromMessages()
+            // Token state from reconstructed state (server events = single source of truth)
+            let usage = state.totalTokenUsage
 
-            // Get token totals from cached session (server source of truth)
-            // Cache tokens come from reconstructed state since session doesn't store them
+            // Set token state from reconstructed state (derived from server events)
+            contextState.accumulatedInputTokens = usage.inputTokens
+            contextState.accumulatedOutputTokens = usage.outputTokens
+            contextState.accumulatedCacheReadTokens = usage.cacheReadTokens ?? 0
+            contextState.accumulatedCacheCreationTokens = usage.cacheCreationTokens ?? 0
+
+            // lastTurnInputTokens from stream.turn_end events' normalizedUsage.contextWindowTokens
+            contextState.lastTurnInputTokens = state.lastTurnInputTokens
+            logger.info("[TOKEN-FIX] RESUME (sync) from server events: lastTurnInputTokens=\(state.lastTurnInputTokens)", category: .session)
+
+            // Get cost from iOS DB session cache (just for display)
             if let session = try? manager.eventDB.getSession(sessionId) {
-                // Accumulated totals for billing
-                contextState.accumulatedInputTokens = session.inputTokens
-                contextState.accumulatedOutputTokens = session.outputTokens
-                contextState.accumulatedCacheReadTokens = state.totalTokenUsage.cacheReadTokens ?? 0
-                contextState.accumulatedCacheCreationTokens = state.totalTokenUsage.cacheCreationTokens ?? 0
                 contextState.accumulatedCost = session.cost
-
-                // Current context size for context bar
-                contextState.lastTurnInputTokens = session.lastTurnInputTokens
-
-                contextState.totalTokenUsage = TokenUsage(
-                    inputTokens: session.lastTurnInputTokens,  // Current context size for context bar
-                    outputTokens: session.outputTokens,
-                    cacheReadTokens: state.totalTokenUsage.cacheReadTokens,
-                    cacheCreationTokens: state.totalTokenUsage.cacheCreationTokens
-                )
-            } else {
-                // Fallback to reconstructed state if session not found
-                let usage = state.totalTokenUsage
-                if usage.inputTokens > 0 || usage.outputTokens > 0 {
-                    // Accumulated totals for billing
-                    contextState.accumulatedInputTokens = usage.inputTokens
-                    contextState.accumulatedOutputTokens = usage.outputTokens
-                    contextState.accumulatedCacheReadTokens = usage.cacheReadTokens ?? 0
-                    contextState.accumulatedCacheCreationTokens = usage.cacheCreationTokens ?? 0
-                    // Use state.lastTurnInputTokens for context bar (current context size)
-                    contextState.lastTurnInputTokens = state.lastTurnInputTokens
-                    // totalTokenUsage: inputTokens = context size for bar, outputTokens = accumulated
-                    contextState.totalTokenUsage = TokenUsage(
-                        inputTokens: state.lastTurnInputTokens,
-                        outputTokens: usage.outputTokens,
-                        cacheReadTokens: usage.cacheReadTokens,
-                        cacheCreationTokens: usage.cacheCreationTokens
-                    )
-                }
             }
+
+            // totalTokenUsage for display
+            contextState.totalTokenUsage = TokenUsage(
+                inputTokens: state.lastTurnInputTokens,
+                outputTokens: usage.outputTokens,
+                cacheReadTokens: usage.cacheReadTokens,
+                cacheCreationTokens: usage.cacheCreationTokens
+            )
 
             logger.info("Loaded \(messages.count) messages via UnifiedEventTransformer for session \(sessionId)", category: .session)
         } catch {
@@ -270,82 +246,6 @@ extension ChatViewModel {
     func appendMessage(_ message: ChatMessage) {
         messages.append(message)
         messageWindowManager.appendMessage(message)
-    }
-
-    /// Restore token state from loaded messages (called on session resume)
-    /// This ensures lastTurnInputTokens and incrementalTokens are properly set
-    /// when returning to a session from the dashboard
-    ///
-    /// The server stores PER-TURN token usage in message.assistant events:
-    /// - tokenUsage.inputTokens = context window size sent to LLM for this turn
-    /// - tokenUsage.outputTokens = tokens generated by LLM in this turn
-    ///
-    /// For display, we show:
-    /// - Input: DELTA between consecutive turns (context growth)
-    /// - Output: Per-turn value directly (tokens generated)
-    ///
-    /// NOTE: This uses local delta calculation because historical events stored in the database
-    /// may not have normalizedUsage (pre-dates server-side normalization) or incrementalTokens persisted.
-    /// For LIVE events, handleTurnEnd uses server-provided normalizedUsage which is authoritative.
-    ///
-    /// WARNING: The local delta calculation here is INCORRECT for Anthropic sessions!
-    /// Anthropic's inputTokens excludes cache tokens, so `inputTokens - previousInputTokens`
-    /// gives the wrong delta. The correct formula for Anthropic is:
-    ///   delta = (inputTokens + cacheRead + cacheCreate) - previousContextWindow
-    ///
-    /// This affects historical sessions that don't have incrementalTokens stored.
-    /// New sessions with server-provided normalizedUsage will display correctly.
-    func restoreTokenStateFromMessages() {
-        // 1. Find last assistant message to restore lastTurnInputTokens (context window size)
-        // For Anthropic, we should include cache tokens, but historical data may not have them
-        for message in allReconstructedMessages.reversed() {
-            if message.role == .assistant, let usage = message.tokenUsage {
-                // Best effort: use inputTokens (may not include cache for Anthropic historical data)
-                contextState.lastTurnInputTokens = usage.inputTokens
-                logger.debug("Restored lastTurnInputTokens=\(usage.inputTokens) from last assistant message", category: .session)
-                break
-            }
-        }
-
-        // 2. Compute incrementalTokens for display (fallback for historical data)
-        // For new events, server provides normalizedUsage which is used instead
-        //
-        // WARNING: This simple delta calculation is WRONG for Anthropic because it doesn't
-        // account for cache tokens. Anthropic's inputTokens = non-cached content only.
-        // The UI will show incorrect deltas for historical Anthropic sessions.
-        var incrementalTokensMap: [UUID: TokenUsage] = [:]
-        var previousInputTokens = 0
-        for message in allReconstructedMessages {
-            if message.role == .assistant, let usage = message.tokenUsage {
-                let incrementalInput = max(0, usage.inputTokens - previousInputTokens)
-                incrementalTokensMap[message.id] = TokenUsage(
-                    inputTokens: incrementalInput,
-                    outputTokens: usage.outputTokens,  // Per-turn, use directly
-                    cacheReadTokens: usage.cacheReadTokens,
-                    cacheCreationTokens: usage.cacheCreationTokens
-                )
-                previousInputTokens = usage.inputTokens
-            }
-        }
-
-        // Track the last turn's input tokens for future incremental calculations
-        contextState.previousTurnFinalInputTokens = previousInputTokens
-
-        // 3. Apply computed incremental tokens to displayed messages (only if not already set)
-        var appliedCount = 0
-        var skippedCount = 0
-        for i in 0..<messages.count {
-            if messages[i].incrementalTokens == nil,
-               let computed = incrementalTokensMap[messages[i].id] {
-                messages[i].incrementalTokens = computed
-                appliedCount += 1
-            } else if messages[i].incrementalTokens != nil {
-                skippedCount += 1
-            }
-        }
-
-        let assistantCount = messages.filter { $0.role == .assistant }.count
-        logger.debug("Restored token state: \(assistantCount) assistant messages, applied=\(appliedCount) skipped=\(skippedCount) (had stored incremental)", category: .session)
     }
 }
 

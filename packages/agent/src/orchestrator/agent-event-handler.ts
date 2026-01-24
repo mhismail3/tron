@@ -43,6 +43,7 @@ import {
   type ToolStartArgs,
   type ToolEndDetails,
 } from './ui-render-handler.js';
+import type { NormalizedTokenUsage } from './turn-content-tracker.js';
 
 const logger = createLogger('agent-event-handler');
 
@@ -111,6 +112,10 @@ export class AgentEventHandler {
 
       case 'turn_end':
         this.handleTurnEnd(sessionId, event, timestamp, active);
+        break;
+
+      case 'response_complete':
+        this.handleResponseComplete(sessionId, event, active);
         break;
 
       case 'message_update':
@@ -233,9 +238,10 @@ export class AgentEventHandler {
       const wasPreToolFlushed = active.sessionContext!.hasPreToolContentFlushed();
 
       // Use SessionContext for turn end
+      // Token usage was already set via setResponseTokenUsage when response_complete fired
       // This returns built content blocks, clears per-turn tracking, and includes normalizedUsage
       const turnStartTime = active.sessionContext!.getTurnStartTime();
-      turnResult = active.sessionContext!.endTurn(turnEndEvent.tokenUsage);
+      turnResult = active.sessionContext!.endTurn();
 
       // Only create message.assistant if we didn't already flush content for tools
       // If wasPreToolFlushed is true, the content was already emitted at tool_execution_start
@@ -256,6 +262,8 @@ export class AgentEventHandler {
           this.config.appendEventLinearized(sessionId, 'message.assistant' as EventType, {
             content: normalizedContent,
             tokenUsage: (turnResult as { tokenUsage?: unknown }).tokenUsage,
+            // Include normalizedUsage for iOS reconstruction - avoids correlating with stream.turn_end
+            normalizedUsage: turnResult.normalizedUsage,
             turn: turnResult.turn,
             model: active.model,
             stopReason: 'end_turn',
@@ -270,11 +278,26 @@ export class AgentEventHandler {
             }
           });
 
-          logger.debug('Created message.assistant for turn (no tools)', {
+          const tokenUsageForLog = (turnResult as { tokenUsage?: { inputTokens: number; outputTokens: number; cacheReadTokens?: number } }).tokenUsage;
+          const normalizedForLog = turnResult.normalizedUsage as NormalizedTokenUsage | undefined;
+          logger.info('[TOKEN-FLOW] 3b. Turn-end message.assistant created (no tools case)', {
             sessionId,
             turn: turnResult.turn,
             contentBlocks: normalizedContent.length,
-            tokenUsage: (turnResult as { tokenUsage?: unknown }).tokenUsage,
+            tokenUsage: tokenUsageForLog
+              ? {
+                  inputTokens: tokenUsageForLog.inputTokens,
+                  outputTokens: tokenUsageForLog.outputTokens,
+                  cacheRead: tokenUsageForLog.cacheReadTokens ?? 0,
+                }
+              : 'MISSING',
+            normalizedUsage: normalizedForLog
+              ? {
+                  newInputTokens: normalizedForLog.newInputTokens,
+                  contextWindowTokens: normalizedForLog.contextWindowTokens,
+                  outputTokens: normalizedForLog.outputTokens,
+                }
+              : 'MISSING',
             latency: turnLatency,
           });
         }
@@ -320,12 +343,96 @@ export class AgentEventHandler {
     });
 
     // Store turn end event with token usage, normalized usage, and cost (linearized)
+    const streamTurnEndNormalized = turnResult?.normalizedUsage as NormalizedTokenUsage | undefined;
+    logger.info('[TOKEN-FLOW] 4. stream.turn_end persisted', {
+      sessionId,
+      turn: turnEndEvent.turn,
+      tokenUsage: turnEndEvent.tokenUsage
+        ? {
+            inputTokens: turnEndEvent.tokenUsage.inputTokens,
+            outputTokens: turnEndEvent.tokenUsage.outputTokens,
+            cacheRead: turnEndEvent.tokenUsage.cacheReadTokens ?? 0,
+          }
+        : 'MISSING',
+      normalizedUsage: streamTurnEndNormalized
+        ? {
+            newInputTokens: streamTurnEndNormalized.newInputTokens,
+            contextWindowTokens: streamTurnEndNormalized.contextWindowTokens,
+            outputTokens: streamTurnEndNormalized.outputTokens,
+          }
+        : 'MISSING',
+      cost: turnCost,
+    });
+
     this.config.appendEventLinearized(sessionId, 'stream.turn_end' as EventType, {
       turn: turnEndEvent.turn,
       tokenUsage: turnEndEvent.tokenUsage ?? { inputTokens: 0, outputTokens: 0 },
       normalizedUsage: turnResult?.normalizedUsage,
       cost: turnCost,
     });
+  }
+
+  /**
+   * Handle response_complete event - fires when LLM streaming finishes, BEFORE tools.
+   *
+   * This is the critical point where we capture token usage early, enabling:
+   * - message.assistant events to ALWAYS include tokenUsage + normalizedUsage
+   * - iOS to read token data directly without correlating with stream.turn_end
+   *
+   * The response_complete event is emitted by turn-runner.ts immediately after
+   * the streaming response completes, before any tool execution begins.
+   */
+  private handleResponseComplete(
+    sessionId: SessionId,
+    event: TronEvent,
+    active: ActiveSession | undefined
+  ): void {
+    if (!active?.sessionContext) {
+      return;
+    }
+
+    // Cast to access response_complete specific properties
+    const responseEvent = event as {
+      turn: number;
+      tokenUsage?: {
+        inputTokens: number;
+        outputTokens: number;
+        cacheReadTokens?: number;
+        cacheCreationTokens?: number;
+      };
+    };
+
+    // Set token usage immediately - this computes normalizedUsage
+    // before any tool execution starts
+    if (responseEvent.tokenUsage) {
+      active.sessionContext.setResponseTokenUsage(responseEvent.tokenUsage);
+
+      // Get the computed normalizedUsage for logging
+      const normalizedUsage = active.sessionContext.getLastNormalizedUsage();
+
+      logger.info('[TOKEN-FLOW] 2. handleResponseComplete - setResponseTokenUsage called', {
+        sessionId,
+        turn: responseEvent.turn,
+        rawTokenUsage: {
+          inputTokens: responseEvent.tokenUsage.inputTokens,
+          outputTokens: responseEvent.tokenUsage.outputTokens,
+          cacheRead: responseEvent.tokenUsage.cacheReadTokens ?? 0,
+          cacheCreation: responseEvent.tokenUsage.cacheCreationTokens ?? 0,
+        },
+        normalizedUsage: normalizedUsage
+          ? {
+              newInputTokens: normalizedUsage.newInputTokens,
+              contextWindowTokens: normalizedUsage.contextWindowTokens,
+              outputTokens: normalizedUsage.outputTokens,
+            }
+          : 'NOT_COMPUTED',
+      });
+    } else {
+      logger.warn('[TOKEN-FLOW] 2. handleResponseComplete - NO tokenUsage in event', {
+        sessionId,
+        turn: responseEvent.turn,
+      });
+    }
   }
 
   private handleMessageUpdate(
@@ -420,8 +527,16 @@ export class AgentEventHandler {
           // Detect if content has thinking blocks
           const hasThinking = normalizedContent.some((b) => (b as Record<string, unknown>).type === 'thinking');
 
+          // Get token usage captured from response_complete
+          // This was set BEFORE tool execution started, so it's available now
+          const tokenUsage = active.sessionContext!.getLastTurnTokenUsage();
+          const normalizedUsage = active.sessionContext!.getLastNormalizedUsage();
+
           this.config.appendEventLinearized(sessionId, 'message.assistant' as EventType, {
             content: normalizedContent,
+            // Include token data for iOS reconstruction - no correlation needed
+            tokenUsage,
+            normalizedUsage,
             turn: active.sessionContext!.getCurrentTurn(),
             model: active.model,
             stopReason: 'tool_use', // Indicates tools are being called
@@ -435,10 +550,24 @@ export class AgentEventHandler {
             }
           });
 
-          logger.debug('Created pre-tool message.assistant for linear ordering', {
+          logger.info('[TOKEN-FLOW] 3a. Pre-tool message.assistant created (tools case)', {
             sessionId,
             turn: active.sessionContext!.getCurrentTurn(),
             contentBlocks: normalizedContent.length,
+            tokenUsage: tokenUsage
+              ? {
+                  inputTokens: tokenUsage.inputTokens,
+                  outputTokens: tokenUsage.outputTokens,
+                  cacheRead: tokenUsage.cacheReadTokens ?? 0,
+                }
+              : 'MISSING',
+            normalizedUsage: normalizedUsage
+              ? {
+                  newInputTokens: normalizedUsage.newInputTokens,
+                  contextWindowTokens: normalizedUsage.contextWindowTokens,
+                  outputTokens: normalizedUsage.outputTokens,
+                }
+              : 'MISSING',
           });
         }
       }

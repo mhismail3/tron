@@ -138,8 +138,6 @@ struct ContentView: View {
 
     /// Toggle sidebar visibility
     private func toggleSidebar() {
-        // Don't use withAnimation here - the NavigationSplitView has its own
-        // .animation() modifier that handles both appear and disappear
         if columnVisibility == .detailOnly {
             columnVisibility = .all
         } else {
@@ -157,7 +155,6 @@ struct ContentView: View {
         .navigationSplitViewStyle(.balanced)
         .scrollContentBackground(.hidden)
         .tint(.tronEmerald)
-        // Explicit animation for column visibility changes - ensures smooth transitions both ways
         .animation(.easeInOut(duration: 0.35), value: columnVisibility)
     }
 
@@ -310,67 +307,68 @@ struct ContentView: View {
     }
 
     private var selectSessionPrompt: some View {
-        VStack(spacing: 24) {
-            Spacer()
+        // Use Color.clear with overlay for true centering that animates smoothly
+        // (Spacer-based centering doesn't animate - it recalculates immediately)
+        Color.clear
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .overlay {
+                VStack(spacing: 24) {
+                    // Logo and branding
+                    VStack(spacing: 16) {
+                        Image("TronLogo")
+                            .resizable()
+                            .aspectRatio(contentMode: .fit)
+                            .frame(height: 64)
 
-            // Logo and branding
-            VStack(spacing: 16) {
-                Image("TronLogo")
-                    .resizable()
-                    .aspectRatio(contentMode: .fit)
-                    .frame(height: 64)
-
-                Text("TRON")
-                    .font(TronTypography.mono(size: TronTypography.sizeHero, weight: .bold))
-                    .foregroundStyle(.tronEmerald)
-                    .tracking(3)
-            }
-
-            // Prompt
-            VStack(spacing: 8) {
-                Text("Select a Session")
-                    .font(TronTypography.sans(size: TronTypography.sizeXL, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.9))
-
-                Text("Choose a session from the sidebar or create a new one")
-                    .font(TronTypography.subheadline)
-                    .foregroundStyle(.white.opacity(0.5))
-                    .multilineTextAlignment(.center)
-            }
-
-            // Show sidebar button on compact
-            if horizontalSizeClass == .compact {
-                Button {
-                    columnVisibility = .all
-                } label: {
-                    Label("Show Sessions", systemImage: "sidebar.left")
-                        .font(TronTypography.headline)
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, 24)
-                        .padding(.vertical, 12)
-                        .contentShape(Capsule())
-                }
-                .glassEffect(.regular.tint(Color.tronEmerald).interactive(), in: .capsule)
-                .padding(.top, 8)
-            }
-
-            Spacer()
-        }
-        .padding(40)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .geometryGroup() // Ensures geometry changes animate together with NavigationSplitView
-        .toolbar {
-            // Custom emerald sidebar toggle for iPad
-            if horizontalSizeClass == .regular {
-                ToolbarItem(placement: .topBarLeading) {
-                    Button(action: toggleSidebar) {
-                        Image(systemName: "sidebar.leading")
-                            .font(TronTypography.sans(size: TronTypography.sizeTitle, weight: .medium))
+                        Text("TRON")
+                            .font(TronTypography.mono(size: TronTypography.sizeHero, weight: .bold))
                             .foregroundStyle(.tronEmerald)
+                            .tracking(3)
+                    }
+
+                    // Prompt
+                    VStack(spacing: 8) {
+                        Text("Select a Session")
+                            .font(TronTypography.sans(size: TronTypography.sizeXL, weight: .medium))
+                            .foregroundStyle(.white.opacity(0.9))
+
+                        Text("Choose a session from the sidebar or create a new one")
+                            .font(TronTypography.subheadline)
+                            .foregroundStyle(.white.opacity(0.5))
+                            .multilineTextAlignment(.center)
+                    }
+
+                    // Show sidebar button on compact
+                    if horizontalSizeClass == .compact {
+                        Button {
+                            columnVisibility = .all
+                        } label: {
+                            Label("Show Sessions", systemImage: "sidebar.left")
+                                .font(TronTypography.headline)
+                                .foregroundStyle(.white)
+                                .padding(.horizontal, 24)
+                                .padding(.vertical, 12)
+                                .contentShape(Capsule())
+                        }
+                        .glassEffect(.regular.tint(Color.tronEmerald).interactive(), in: .capsule)
+                        .padding(.top, 8)
+                    }
+                }
+                .padding(40)
+            }
+            .geometryGroup()
+            .toolbar {
+                // Custom emerald sidebar toggle for iPad
+                if horizontalSizeClass == .regular {
+                    ToolbarItem(placement: .topBarLeading) {
+                        Button(action: toggleSidebar) {
+                            Image(systemName: "sidebar.leading")
+                                .font(TronTypography.sans(size: TronTypography.sizeTitle, weight: .medium))
+                                .foregroundStyle(.tronEmerald)
+                        }
                     }
                 }
             }
-        }
     }
 
     /// Creates a ChatView for the given session

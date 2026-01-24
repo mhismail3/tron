@@ -255,6 +255,13 @@ export interface AssistantMessageEvent extends BaseEvent {
     content: ContentBlock[];
     turn: number;
     tokenUsage: TokenUsage;
+    /**
+     * Normalized token usage with semantic clarity for different UI components.
+     * Handles provider semantic differences (Anthropic vs OpenAI/Codex/Gemini).
+     * This is stored directly on message.assistant so iOS can reconstruct without
+     * correlating with stream.turn_end events.
+     */
+    normalizedUsage?: NormalizedTokenUsage;
     stopReason: 'end_turn' | 'tool_use' | 'max_tokens' | 'stop_sequence';
     /** Duration of LLM call in ms */
     latency?: number;

@@ -33,7 +33,7 @@
  * // Turn management
  * context.startTurn(1);
  * context.addTextDelta('Response text');
- * const result = context.endTurn({ inputTokens: 100, outputTokens: 50 });
+ * const result = context.endTurn();
  *
  * // Plan mode
  * context.enterPlanMode('skill', ['Edit', 'Write']);
@@ -308,9 +308,35 @@ export class SessionContext {
 
   /**
    * End the current turn and get content.
+   * REQUIRES: setResponseTokenUsage() must be called before this method.
    */
-  endTurn(tokenUsage?: TokenUsage): EndTurnResult {
-    return this.turnManager.endTurn(tokenUsage);
+  endTurn(): EndTurnResult {
+    return this.turnManager.endTurn();
+  }
+
+  /**
+   * Set token usage from API response EARLY (before tool execution).
+   * This should be called when response_complete fires, enabling message.assistant
+   * to include token data even for tool-using turns.
+   */
+  setResponseTokenUsage(tokenUsage: TokenUsage): void {
+    this.turnManager.setResponseTokenUsage(tokenUsage);
+  }
+
+  /**
+   * Get the last turn's raw token usage.
+   * Available after setResponseTokenUsage() is called.
+   */
+  getLastTurnTokenUsage(): TokenUsage | undefined {
+    return this.turnManager.getLastTurnTokenUsage();
+  }
+
+  /**
+   * Get the last turn's normalized token usage.
+   * Provides semantic clarity for UI display.
+   */
+  getLastNormalizedUsage() {
+    return this.turnManager.getLastNormalizedUsage();
   }
 
   /**

@@ -634,10 +634,15 @@ class ChatViewModel: ObservableObject, ChatEventContext {
         }
     }
 
-    /// Refresh context state from server (authoritative source)
+    /// Refresh context state from server (authoritative source for ACTIVE sessions)
     /// Call after: session resume, model switch, skill add/remove, context clear/compaction
-    /// This ensures iOS state stays in sync with server's context calculations
+    /// This ensures iOS state stays in sync with server's live context calculations
     /// Includes retry logic for transient network failures
+    ///
+    /// IMPORTANT: When the session is NOT active on the server (e.g., during resume before
+    /// the user sends a message), the server returns currentTokens=0. In this case, we
+    /// preserve the reconstructed state value (from parsing server events).
+    /// The reconstructed state is the source of truth for inactive sessions.
     func refreshContextFromServer() async {
         guard let sessionId = rpcClient.currentSessionId else {
             logger.debug("No session ID available for context refresh", category: .session)
@@ -652,13 +657,33 @@ class ChatViewModel: ObservableObject, ChatEventContext {
             do {
                 let snapshot = try await rpcClient.getContextSnapshot(sessionId: sessionId)
                 await MainActor.run {
+                    // =============================================================================
+                    // CONTEXT SNAPSHOT PURPOSE
+                    // =============================================================================
+                    // The context.getSnapshot RPC returns:
+                    // - contextLimit: Maximum tokens for the model (e.g., 200k)
+                    // - currentTokens: Current ESTIMATED context (system prompt + tools + messages)
+                    //
+                    // CRITICAL: currentTokens is NOT the same as normalizedUsage.contextWindowTokens!
+                    // - contextWindowTokens (stored in turn_end events) = actual tokens sent to LLM
+                    // - currentTokens (from getSnapshot) = current context estimate
+                    //
+                    // We ONLY use the snapshot for:
+                    // 1. Getting the context limit (model's max tokens)
+                    // 2. Updating token count DURING LIVE streaming (handled by handleTurnEnd)
+                    //
+                    // We do NOT use it to update lastTurnInputTokens during resume because:
+                    // - The reconstructed state already has the correct value from turn_end events
+                    // - The snapshot's currentTokens measures something different
+                    // =============================================================================
+
+                    // Update context limit (model's max tokens)
                     self.contextState.currentContextWindow = snapshot.contextLimit
-                    self.contextState.lastTurnInputTokens = snapshot.currentTokens
-                    // Note: Do NOT set previousTurnFinalInputTokens here.
-                    // That value is used for incremental token delta calculations and should only be
-                    // updated by handleTurnEnd() after a turn completes, or by restoreTokenStateFromMessages()
-                    // when loading historical data. Setting it here from the server's current context
-                    // causes the delta to incorrectly show 0 for the first turn of a session.
+
+                    // Do NOT update lastTurnInputTokens here!
+                    // The reconstructed state (from parsing stream.turn_end events) is the
+                    // single source of truth for context window tokens.
+                    logger.debug("[TOKEN-FIX] refreshContextFromServer: contextLimit=\(snapshot.contextLimit), currentTokens=\(snapshot.currentTokens) (NOT updating lastTurnInputTokens, using reconstructed value: \(self.contextState.lastTurnInputTokens))", category: .session)
                 }
                 logger.debug("Context refreshed from server: \(snapshot.currentTokens)/\(snapshot.contextLimit)", category: .session)
                 return  // Success, exit retry loop
@@ -673,9 +698,9 @@ class ChatViewModel: ObservableObject, ChatEventContext {
             }
         }
 
-        // All retries failed
+        // All retries failed - preserve reconstructed state value
         if let error = lastError {
-            logger.warning("Failed to refresh context from server after \(maxRetries) attempts: \(error.localizedDescription)", category: .session)
+            logger.warning("Failed to refresh context from server after \(maxRetries) attempts: \(error.localizedDescription). Preserving reconstructed state value: \(contextState.lastTurnInputTokens)", category: .session)
         }
     }
 

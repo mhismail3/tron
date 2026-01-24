@@ -128,6 +128,46 @@ export class AgentTurnRunner implements ITurnRunner {
 
       const { message: assistantMessage, toolCalls } = streamResult;
 
+      // ==========================================================================
+      // CRITICAL: Emit response_complete BEFORE tool execution
+      // ==========================================================================
+      // Token usage is available now (from the API response). Emit this event
+      // so the orchestrator can compute normalizedUsage immediately. This ensures
+      // message.assistant events (even for tool-using turns) have token data.
+      const tokenUsageForEvent = assistantMessage.usage
+        ? {
+            inputTokens: assistantMessage.usage.inputTokens,
+            outputTokens: assistantMessage.usage.outputTokens,
+            cacheReadTokens: assistantMessage.usage.cacheReadTokens,
+            cacheCreationTokens: assistantMessage.usage.cacheCreationTokens,
+          }
+        : undefined;
+
+      logger.info('[TOKEN-FLOW] 1. response_complete emitting', {
+        turn,
+        hasToolCalls: toolCalls.length > 0,
+        toolCallCount: toolCalls.length,
+        tokenUsage: tokenUsageForEvent
+          ? {
+              inputTokens: tokenUsageForEvent.inputTokens,
+              outputTokens: tokenUsageForEvent.outputTokens,
+              cacheRead: tokenUsageForEvent.cacheReadTokens ?? 0,
+              cacheCreation: tokenUsageForEvent.cacheCreationTokens ?? 0,
+            }
+          : 'MISSING',
+      });
+
+      this.eventEmitter.emit({
+        type: 'response_complete',
+        sessionId: this.sessionId,
+        timestamp: new Date().toISOString(),
+        turn,
+        stopReason: assistantMessage.stopReason ?? 'end_turn',
+        tokenUsage: tokenUsageForEvent,
+        hasToolCalls: toolCalls.length > 0,
+        toolCallCount: toolCalls.length,
+      });
+
       // Add assistant message to history
       this.contextManager.addMessage(assistantMessage);
 

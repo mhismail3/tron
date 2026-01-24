@@ -438,6 +438,12 @@ export class TurnContentTracker {
     this.thisTurnThinking = '';
     this.thisTurnThinkingSignature = '';
 
+    // Clear per-turn token data (will be set by setResponseTokenUsage)
+    // NOTE: We don't clear lastNormalizedUsage here because the baseline
+    // (previousContextSize) needs to persist across turns for delta calculation.
+    // We only clear lastTurnTokenUsage to indicate "no token data yet this turn".
+    this.lastTurnTokenUsage = undefined;
+
     // Reset pre-tool flush flag for new turn
     this.preToolContentFlushed = false;
 
@@ -451,42 +457,65 @@ export class TurnContentTracker {
   }
 
   /**
-   * Called at the end of each turn.
-   * Stores token usage, calculates normalized usage, and returns per-turn content.
+   * Set token usage from API response EARLY (before tool execution).
    *
-   * @param tokenUsage - Raw token usage from the provider
-   * @returns Per-turn content for message.assistant creation
+   * This is called when the response_complete event fires, which happens
+   * immediately after LLM streaming completes but BEFORE any tools execute.
+   * This allows token data to be included on message.assistant events even
+   * for tool-using turns.
+   *
+   * ## Why This Exists
+   *
+   * Previously, token usage was only processed in onTurnEnd(), which happens
+   * AFTER all tools complete. This meant pre-tool message.assistant events
+   * (created for tool-using turns) didn't have token data.
+   *
+   * Now, token data is captured immediately when available, enabling:
+   * - message.assistant events to ALWAYS include tokenUsage + normalizedUsage
+   * - iOS to read token data directly without correlating with stream.turn_end
+   * - Consistent token display for both tool and non-tool turns
+   *
+   * @param tokenUsage - Raw token usage from the provider API response
    */
-  onTurnEnd(tokenUsage?: {
+  setResponseTokenUsage(tokenUsage: {
     inputTokens: number;
     outputTokens: number;
     cacheReadTokens?: number;
     cacheCreationTokens?: number;
-  }): TurnContent {
+  }): void {
     // Store raw token usage
-    if (tokenUsage) {
-      this.lastTurnTokenUsage = tokenUsage;
+    this.lastTurnTokenUsage = tokenUsage;
 
-      // Calculate normalized token usage
-      this.lastNormalizedUsage = normalizeTokenUsage(
-        tokenUsage,
-        this.currentProviderType,
-        this.previousContextSize
-      );
+    // Calculate normalized token usage IMMEDIATELY
+    this.lastNormalizedUsage = normalizeTokenUsage(
+      tokenUsage,
+      this.currentProviderType,
+      this.previousContextSize
+    );
 
-      // Update baseline for next turn (use contextWindowTokens which represents actual context size)
-      this.previousContextSize = this.lastNormalizedUsage.contextWindowTokens;
+    // Update baseline for next turn (use contextWindowTokens which represents actual context size)
+    this.previousContextSize = this.lastNormalizedUsage.contextWindowTokens;
 
-      logger.debug('Token usage normalized', {
-        turn: this.currentTurn,
-        providerType: this.currentProviderType,
-        rawInputTokens: tokenUsage.inputTokens,
-        newInputTokens: this.lastNormalizedUsage.newInputTokens,
-        contextWindowTokens: this.lastNormalizedUsage.contextWindowTokens,
-        previousContextSize: this.previousContextSize,
-      });
-    }
+    logger.debug('Token usage set from response_complete', {
+      turn: this.currentTurn,
+      providerType: this.currentProviderType,
+      rawInputTokens: tokenUsage.inputTokens,
+      newInputTokens: this.lastNormalizedUsage.newInputTokens,
+      contextWindowTokens: this.lastNormalizedUsage.contextWindowTokens,
+      previousContextSize: this.previousContextSize,
+    });
+  }
 
+  /**
+   * Called at the end of each turn.
+   * Returns per-turn content for message.assistant creation.
+   *
+   * REQUIRES: setResponseTokenUsage() must be called before this method
+   * to ensure normalizedUsage is available for message.assistant events.
+   *
+   * @returns Per-turn content for message.assistant creation
+   */
+  onTurnEnd(): TurnContent {
     // Capture per-turn content before clearing
     const content: TurnContent = {
       sequence: [...this.thisTurnSequence],

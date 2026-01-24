@@ -12,6 +12,8 @@ import Foundation
 struct StreamTurnEndPayload {
     let turn: Int
     let tokenUsage: TokenUsage?
+    /// Server-calculated normalized token usage (includes contextWindowTokens)
+    let normalizedUsage: NormalizedTokenUsage?
 
     init(from payload: [String: AnyCodable]) {
         self.turn = payload.int("turn") ?? 1
@@ -26,6 +28,36 @@ struct StreamTurnEndPayload {
         } else {
             self.tokenUsage = nil
         }
+
+        // Extract normalizedUsage for accurate context window tracking
+        if let normalized = payload.dict("normalizedUsage") {
+            self.normalizedUsage = NormalizedTokenUsage(
+                newInputTokens: normalized["newInputTokens"] as? Int ?? 0,
+                outputTokens: normalized["outputTokens"] as? Int ?? 0,
+                contextWindowTokens: normalized["contextWindowTokens"] as? Int ?? 0,
+                rawInputTokens: normalized["rawInputTokens"] as? Int ?? 0,
+                cacheReadTokens: normalized["cacheReadTokens"] as? Int ?? 0,
+                cacheCreationTokens: normalized["cacheCreationTokens"] as? Int ?? 0
+            )
+        } else {
+            self.normalizedUsage = nil
+        }
+    }
+
+    /// Get the context window token count (prefer normalizedUsage, fallback to tokenUsage.inputTokens)
+    var contextWindowTokens: Int {
+        normalizedUsage?.contextWindowTokens ?? tokenUsage?.inputTokens ?? 0
+    }
+
+    /// Get the new input tokens for this turn (delta for stats line display)
+    /// This is the correct value for incremental token display (includes cache tokens)
+    var newInputTokens: Int? {
+        normalizedUsage?.newInputTokens
+    }
+
+    /// Get the output tokens for this turn
+    var outputTokens: Int {
+        normalizedUsage?.outputTokens ?? tokenUsage?.outputTokens ?? 0
     }
 }
 

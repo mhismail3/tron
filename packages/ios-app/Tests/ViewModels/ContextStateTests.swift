@@ -16,7 +16,6 @@ final class ContextStateTests: XCTestCase {
         XCTAssertEqual(state.accumulatedCacheReadTokens, 0)
         XCTAssertEqual(state.accumulatedCacheCreationTokens, 0)
         XCTAssertEqual(state.accumulatedCost, 0)
-        XCTAssertEqual(state.previousTurnFinalInputTokens, 0)
     }
 
     // MARK: - Context Percentage Tests (using server values)
@@ -153,17 +152,6 @@ final class ContextStateTests: XCTestCase {
         XCTAssertEqual(state.accumulatedCost, 0.075, accuracy: 0.0001)
     }
 
-    // MARK: - RecordTurnEnd Tests (legacy compatibility)
-
-    func testRecordTurnEnd() {
-        let state = ContextTrackingState()
-        state.contextWindowTokens = 5000
-
-        state.recordTurnEnd()
-
-        XCTAssertEqual(state.previousTurnFinalInputTokens, 5000)
-    }
-
     // MARK: - Reset Tests
 
     func testReset() {
@@ -176,7 +164,6 @@ final class ContextStateTests: XCTestCase {
         state.accumulatedCacheReadTokens = 200
         state.accumulatedCacheCreationTokens = 100
         state.accumulatedCost = 0.05
-        state.previousTurnFinalInputTokens = 3000
 
         state.reset()
 
@@ -188,7 +175,6 @@ final class ContextStateTests: XCTestCase {
         XCTAssertEqual(state.accumulatedCacheReadTokens, 0)
         XCTAssertEqual(state.accumulatedCacheCreationTokens, 0)
         XCTAssertEqual(state.accumulatedCost, 0)
-        XCTAssertEqual(state.previousTurnFinalInputTokens, 0)
     }
 
     // MARK: - Model Context Window Update Tests

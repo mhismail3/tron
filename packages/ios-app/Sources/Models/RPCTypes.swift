@@ -358,6 +358,38 @@ struct NormalizedTokenUsage: Decodable, Equatable {
     let cacheReadTokens: Int
     /// Tokens created in cache
     let cacheCreationTokens: Int
+
+    /// Memberwise initializer (required since we have custom inits)
+    init(
+        newInputTokens: Int,
+        outputTokens: Int,
+        contextWindowTokens: Int,
+        rawInputTokens: Int,
+        cacheReadTokens: Int,
+        cacheCreationTokens: Int
+    ) {
+        self.newInputTokens = newInputTokens
+        self.outputTokens = outputTokens
+        self.contextWindowTokens = contextWindowTokens
+        self.rawInputTokens = rawInputTokens
+        self.cacheReadTokens = cacheReadTokens
+        self.cacheCreationTokens = cacheCreationTokens
+    }
+
+    /// Convenience initializer for parsing from raw dictionary (e.g., from AnyCodable payloads)
+    init?(from dict: [String: Any]) {
+        guard let newInput = dict["newInputTokens"] as? Int,
+              let output = dict["outputTokens"] as? Int,
+              let contextWindow = dict["contextWindowTokens"] as? Int else {
+            return nil
+        }
+        self.newInputTokens = newInput
+        self.outputTokens = output
+        self.contextWindowTokens = contextWindow
+        self.rawInputTokens = (dict["rawInputTokens"] as? Int) ?? 0
+        self.cacheReadTokens = (dict["cacheReadTokens"] as? Int) ?? 0
+        self.cacheCreationTokens = (dict["cacheCreationTokens"] as? Int) ?? 0
+    }
 }
 
 // MARK: - System Methods

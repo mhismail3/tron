@@ -193,7 +193,7 @@ describe('TurnManager', () => {
       expect(result2.content.length).toBe(0);
     });
 
-    it('should track token usage when provided', () => {
+    it('should track token usage when set before endTurn', () => {
       const tokenUsage: TokenUsage = {
         inputTokens: 100,
         outputTokens: 50,
@@ -203,8 +203,9 @@ describe('TurnManager', () => {
 
       turnManager.startTurn(1);
       turnManager.addTextDelta('Response');
+      turnManager.setResponseTokenUsage(tokenUsage);
 
-      const result = turnManager.endTurn(tokenUsage);
+      const result = turnManager.endTurn();
 
       expect(result.tokenUsage).toEqual(tokenUsage);
     });

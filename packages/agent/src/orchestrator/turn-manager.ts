@@ -25,7 +25,7 @@
  * turnManager.endToolCall('tc_1', 'file contents', false);
  * turnManager.addTextDelta('I see the file');
  *
- * const result = turnManager.endTurn({ inputTokens: 100, outputTokens: 50 });
+ * const result = turnManager.endTurn();
  * // result.content = [text, tool_use, text]
  * // result.toolResults = [tool_result]
  *
@@ -160,16 +160,48 @@ export class TurnManager {
   }
 
   /**
+   * Set token usage from API response EARLY (before tool execution).
+   *
+   * This should be called when the response_complete event fires, which happens
+   * immediately after LLM streaming completes but BEFORE any tools execute.
+   * This allows token data to be included on message.assistant events even
+   * for tool-using turns.
+   *
+   * @param tokenUsage - Raw token usage from the provider API response
+   */
+  setResponseTokenUsage(tokenUsage: TokenUsage): void {
+    this.tracker.setResponseTokenUsage(tokenUsage);
+  }
+
+  /**
+   * Get the last turn's raw token usage.
+   * Available after setResponseTokenUsage() or endTurn() is called.
+   */
+  getLastTurnTokenUsage(): TokenUsage | undefined {
+    return this.tracker.getLastTurnTokenUsage();
+  }
+
+  /**
+   * Get the last turn's normalized token usage.
+   * Provides semantic clarity for UI display.
+   */
+  getLastNormalizedUsage(): NormalizedTokenUsage | undefined {
+    return this.tracker.getLastNormalizedUsage();
+  }
+
+  /**
    * End the current turn and get content blocks.
    *
-   * @param tokenUsage - Optional token usage from the LLM response
+   * REQUIRES: setResponseTokenUsage() must be called before this method.
+   *
    * @returns Content blocks, tool results, and normalized usage for persistence
    */
-  endTurn(tokenUsage?: TokenUsage): EndTurnResult {
+  endTurn(): EndTurnResult {
     const turn = this.tracker.getCurrentTurn();
-    const turnContent = this.tracker.onTurnEnd(tokenUsage);
+    const turnContent = this.tracker.onTurnEnd();
 
-    // Get normalized usage (calculated by tracker during onTurnEnd)
+    // Get token usage and normalized usage (set by setResponseTokenUsage)
+    const tokenUsage = this.tracker.getLastTurnTokenUsage();
     const normalizedUsage = this.tracker.getLastNormalizedUsage();
 
     // Build content blocks from turn content

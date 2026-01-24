@@ -232,6 +232,36 @@ export interface TurnEndEvent extends BaseTronEvent {
 }
 
 /**
+ * Response complete event - emitted when LLM API response finishes streaming,
+ * BEFORE tool execution begins. This provides token usage data at the earliest
+ * possible moment, allowing normalization before message.assistant is created.
+ *
+ * This is a critical event for proper token tracking architecture:
+ * - Fires immediately after streaming completes (message_stop from provider)
+ * - Contains the full token usage from the API response
+ * - Triggers normalizedUsage computation
+ * - Enables message.assistant to include token data even for tool-using turns
+ */
+export interface ResponseCompleteEvent extends BaseTronEvent {
+  type: 'response_complete';
+  /** Turn number */
+  turn: number;
+  /** Stop reason from LLM (end_turn, tool_use, max_tokens, etc.) */
+  stopReason: string;
+  /** Raw token usage from provider API */
+  tokenUsage?: {
+    inputTokens: number;
+    outputTokens: number;
+    cacheReadTokens?: number;
+    cacheCreationTokens?: number;
+  };
+  /** Whether the response contains tool calls */
+  hasToolCalls: boolean;
+  /** Number of tool calls in the response */
+  toolCallCount: number;
+}
+
+/**
  * Message update event (wraps stream events for agent context)
  */
 export interface MessageUpdateEvent extends BaseTronEvent {
@@ -534,6 +564,7 @@ export type TronEvent =
   | AgentInterruptedEvent
   | TurnStartEvent
   | TurnEndEvent
+  | ResponseCompleteEvent
   | MessageUpdateEvent
   | ToolUseBatchEvent
   | ToolExecutionStartEvent
