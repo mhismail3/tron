@@ -14,8 +14,6 @@ final class StreamingManager {
     struct Config {
         /// Maximum streaming text size to prevent memory exhaustion (10MB)
         static let maxStreamingTextSize = 10_000_000
-        /// Thinking text size limit (1MB)
-        static let maxThinkingTextSize = 1_000_000
         /// Target updates per second (30fps for smooth text appearance)
         static let targetUpdatesPerSecond: Int = 30
     }
@@ -31,9 +29,6 @@ final class StreamingManager {
     /// Pending text delta (not yet flushed to UI)
     @ObservationIgnored
     private var pendingTextDelta: String = ""
-
-    /// Accumulated thinking text
-    private(set) var thinkingText: String = ""
 
     /// Whether currently streaming
     var isStreaming: Bool {
@@ -66,10 +61,6 @@ final class StreamingManager {
     /// Called when streaming message should be finalized
     @ObservationIgnored
     var onFinalizeMessage: ((UUID, String) -> Void)?
-
-    /// Called when thinking text updates
-    @ObservationIgnored
-    var onThinkingUpdate: ((String) -> Void)?
 
     // MARK: - Lifecycle
 
@@ -166,28 +157,6 @@ final class StreamingManager {
         return true
     }
 
-    // MARK: - Thinking Text
-
-    /// Handle incoming thinking delta
-    @discardableResult
-    func handleThinkingDelta(_ delta: String) -> Bool {
-        // Enforce limit
-        guard thinkingText.count + delta.count < Config.maxThinkingTextSize else {
-            return false
-        }
-
-        thinkingText += delta
-        onThinkingUpdate?(thinkingText)
-
-        return true
-    }
-
-    /// Clear thinking text
-    func clearThinking() {
-        thinkingText = ""
-        onThinkingUpdate?("")
-    }
-
     // MARK: - Flush and Finalize
 
     /// Flush pending text to UI immediately
@@ -271,7 +240,6 @@ final class StreamingManager {
         streamingMessageId = nil
         streamingText = ""
         pendingTextDelta = ""
-        thinkingText = ""
     }
 }
 

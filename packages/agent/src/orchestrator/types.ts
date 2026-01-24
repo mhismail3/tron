@@ -78,14 +78,6 @@ export interface WorktreeInfo {
 export interface ActiveSession {
   sessionId: SessionId;
   agent: TronAgent;
-  /**
-   * @deprecated Use `sessionContext.isProcessing()` instead.
-   *
-   * This field is kept for backward compatibility but `sessionContext.isProcessing()`
-   * is the authoritative source of truth. Both are synchronized when set, but reads
-   * should always go through `sessionContext.isProcessing()` to avoid race conditions.
-   */
-  isProcessing: boolean;
   lastActivity: Date;
   workingDirectory: string;
   model: string;
@@ -103,13 +95,6 @@ export interface ActiveSession {
    * Tracked in-memory to detect changes and persist events.
    */
   reasoningLevel?: 'low' | 'medium' | 'high' | 'xhigh';
-  /**
-   * Parallel array tracking eventIds for messages in the context manager.
-   * Used by ContextAuditView to enable message deletion.
-   * Index corresponds to context manager message index.
-   * May be undefined for messages created during current session (not yet persisted).
-   */
-  messageEventIds: (string | undefined)[];
   /**
    * Tracks skills explicitly added to this session's context.
    * Reconstructed from events on session resume/fork.

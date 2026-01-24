@@ -465,7 +465,7 @@ export class EventStoreTuiSession {
     }
 
     const state = await this.eventStore.getStateAtHead(this.sessionId);
-    const messages = state.messages.map(em => this.eventMessageToMessage(em));
+    const messages = state.messagesWithEventIds.map(m => this.eventMessageToMessage(m.message));
 
     return {
       messages,
@@ -482,7 +482,7 @@ export class EventStoreTuiSession {
     tokenUsage: TokenUsage;
   }> {
     const state = await this.eventStore.getStateAt(eventId);
-    const messages = state.messages.map(em => this.eventMessageToMessage(em));
+    const messages = state.messagesWithEventIds.map(m => this.eventMessageToMessage(m.message));
 
     return {
       messages,
@@ -864,8 +864,8 @@ export class EventStoreTuiSession {
 
     const state = await this.eventStore.getStateAtHead(this.sessionId);
 
-    // Convert event messages to regular messages
-    this.cachedMessages = state.messages.map(em => this.eventMessageToMessage(em));
+    // Convert event messages to regular messages (extract from unified type)
+    this.cachedMessages = state.messagesWithEventIds.map(m => this.eventMessageToMessage(m.message));
     this.cachedTokenUsage = state.tokenUsage;
   }
 

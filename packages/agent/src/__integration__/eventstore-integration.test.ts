@@ -8,10 +8,15 @@
  * - Event broadcasting
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { EventStore, EventId, SessionId } from '../index.js';
+import { EventStore, EventId, SessionId, type SessionState, type Message } from '../index.js';
 import path from 'path';
 import os from 'os';
 import fs from 'fs';
+
+/** Helper to extract messages array from SessionState (for easier test assertions) */
+function getMessages(state: SessionState): Message[] {
+  return state.messagesWithEventIds.map(m => m.message);
+}
 
 describe('EventStore Integration', () => {
   let eventStore: EventStore;
@@ -285,7 +290,7 @@ describe('EventStore Integration', () => {
       });
 
       const state = await eventStore.getStateAtHead(sessionId);
-      expect(state.messages.length).toBe(2);
+      expect(getMessages(state).length).toBe(2);
       expect(state.tokenUsage.inputTokens).toBe(100);
       expect(state.tokenUsage.outputTokens).toBe(50);
       expect(state.model).toBe('claude-sonnet-4-20250514');
@@ -312,8 +317,8 @@ describe('EventStore Integration', () => {
 
       // Get state at first event (before assistant response)
       const stateAtFirst = await eventStore.getStateAt(event1.id);
-      expect(stateAtFirst.messages.length).toBe(1);
-      expect(stateAtFirst.messages[0].content).toBe('First');
+      expect(getMessages(stateAtFirst).length).toBe(1);
+      expect(getMessages(stateAtFirst)[0].content).toBe('First');
     });
   });
 
@@ -639,7 +644,7 @@ describe('EventStore Integration', () => {
       const state = await eventStore.getStateAtHead(sessionId);
       const stateTime = Date.now() - stateStart;
 
-      expect(state.messages.length).toBe(100);
+      expect(getMessages(state).length).toBe(100);
       expect(appendTime).toBeLessThan(5000); // 5 seconds max
       expect(stateTime).toBeLessThan(1000); // 1 second max for state reconstruction
     });

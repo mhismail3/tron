@@ -11,15 +11,15 @@
  * - Restore truncated tool arguments from tool.call events
  */
 
-import type { EventId, SessionEvent, Message, TokenUsage } from './types.js';
+import type { EventId, SessionEvent, Message, MessageWithEventId, TokenUsage } from './types.js';
 
 // =============================================================================
 // Types
 // =============================================================================
 
 export interface ReconstructionResult {
-  messages: Message[];
-  messageEventIds: (string | undefined)[];
+  /** Messages with their associated event IDs (unified, no parallel arrays) */
+  messagesWithEventIds: MessageWithEventId[];
   tokenUsage: {
     inputTokens: number;
     outputTokens: number;
@@ -115,9 +115,9 @@ export function reconstructFromEvents(ancestors: SessionEvent[]): Reconstruction
     }
   }
 
-  // Second pass: Build messages
-  const messages: Message[] = [];
-  const messageEventIds: (string | undefined)[] = [];
+  // Second pass: Build messages using combined MessageWithEventId array
+  // This ensures messages and their event IDs stay in sync during all operations
+  let combined: MessageWithEventId[] = [];
   let inputTokens = 0;
   let outputTokens = 0;
   let cacheReadTokens = 0;
@@ -128,19 +128,24 @@ export function reconstructFromEvents(ancestors: SessionEvent[]): Reconstruction
   // Accumulate tool results to inject as user messages when needed for agentic loops
   let pendingToolResults: Array<{ toolCallId: string; content: string; isError?: boolean }> = [];
 
+  // Helper to get the last message entry (if any)
+  const getLastEntry = (): MessageWithEventId | undefined => combined[combined.length - 1];
+
   // Helper to flush pending tool results as proper ToolResultMessage objects
   // This outputs the canonical internal format (role: 'toolResult', toolCallId, isError)
   // instead of the legacy format (role: 'user' with tool_result content blocks)
   const flushToolResults = () => {
     if (pendingToolResults.length > 0) {
       for (const tr of pendingToolResults) {
-        messages.push({
-          role: 'toolResult',
-          toolCallId: tr.toolCallId,
-          content: tr.content,
-          isError: tr.isError ?? false,
+        combined.push({
+          message: {
+            role: 'toolResult',
+            toolCallId: tr.toolCallId,
+            content: tr.content,
+            isError: tr.isError ?? false,
+          },
+          eventIds: [undefined], // Synthetic message from tool results
         });
-        messageEventIds.push(undefined); // Synthetic message from tool results
       }
       pendingToolResults = [];
     }
@@ -155,31 +160,33 @@ export function reconstructFromEvents(ancestors: SessionEvent[]): Reconstruction
     // Handle compaction boundary - clear pre-compaction messages and inject summary
     if (event.type === 'compact.summary') {
       const payload = event.payload as { summary: string };
-      messages.length = 0;
-      messageEventIds.length = 0;
+      combined = []; // Atomic clear
       pendingToolResults = [];
-      messages.push({
-        role: 'user',
-        content: `[Context from earlier in this conversation]\n\n${payload.summary}`,
+      combined.push({
+        message: {
+          role: 'user',
+          content: `[Context from earlier in this conversation]\n\n${payload.summary}`,
+        },
+        eventIds: [undefined],
       });
-      messageEventIds.push(undefined);
-      messages.push({
-        role: 'assistant',
-        content: [
-          {
-            type: 'text',
-            text: 'I understand the previous context. Let me continue helping you.',
-          },
-        ],
+      combined.push({
+        message: {
+          role: 'assistant',
+          content: [
+            {
+              type: 'text',
+              text: 'I understand the previous context. Let me continue helping you.',
+            },
+          ],
+        },
+        eventIds: [undefined],
       });
-      messageEventIds.push(undefined);
       continue;
     }
 
     // Handle context cleared - discard all messages before this point
     if (event.type === 'context.cleared') {
-      messages.length = 0;
-      messageEventIds.length = 0;
+      combined = []; // Atomic clear
       pendingToolResults = [];
       continue;
     }
@@ -200,18 +207,21 @@ export function reconstructFromEvents(ancestors: SessionEvent[]): Reconstruction
       pendingToolResults = [];
 
       const payload = event.payload as { content: Message['content']; tokenUsage?: TokenUsage };
-      const lastMessage = messages[messages.length - 1];
+      const lastEntry = getLastEntry();
 
       // Merge consecutive user messages to ensure valid alternating structure
-      if (lastMessage && lastMessage.role === 'user') {
-        lastMessage.content = mergeMessageContent(lastMessage.content, payload.content, 'user');
-        messageEventIds.push(event.id);
+      if (lastEntry && lastEntry.message.role === 'user') {
+        lastEntry.message.content = mergeMessageContent(lastEntry.message.content, payload.content, 'user');
+        // Track ALL eventIds from merged messages for potential deletion
+        lastEntry.eventIds.push(event.id);
       } else {
-        messages.push({
-          role: 'user',
-          content: payload.content,
+        combined.push({
+          message: {
+            role: 'user',
+            content: payload.content,
+          },
+          eventIds: [event.id],
         });
-        messageEventIds.push(event.id);
       }
 
       if (payload.tokenUsage) {
@@ -250,31 +260,34 @@ export function reconstructFromEvents(ancestors: SessionEvent[]): Reconstruction
       const hasToolUse = contentArray.some((block: { type: string }) => block.type === 'tool_use');
 
       // Check if the last message was an assistant (for agentic continuation)
-      const lastMessage = messages[messages.length - 1];
-      const lastWasAssistant = lastMessage && lastMessage.role === 'assistant';
+      const lastEntry = getLastEntry();
+      const lastWasAssistant = lastEntry && lastEntry.message.role === 'assistant';
 
       // CASE 1: Last message was assistant with tool_use, we have pending results
       if (lastWasAssistant && pendingToolResults.length > 0) {
         flushToolResults();
       }
 
-      // Re-check last message after potential flush
-      const lastMessageAfterFlush = messages[messages.length - 1];
+      // Re-check last entry after potential flush
+      const lastEntryAfterFlush = getLastEntry();
 
       // Merge consecutive assistant messages for robustness
-      if (lastMessageAfterFlush && lastMessageAfterFlush.role === 'assistant') {
-        lastMessageAfterFlush.content = mergeMessageContent(
-          lastMessageAfterFlush.content,
+      if (lastEntryAfterFlush && lastEntryAfterFlush.message.role === 'assistant') {
+        lastEntryAfterFlush.message.content = mergeMessageContent(
+          lastEntryAfterFlush.message.content,
           restoredContent,
           'assistant'
         );
-        messageEventIds.push(event.id);
+        // Track ALL eventIds from merged messages for potential deletion
+        lastEntryAfterFlush.eventIds.push(event.id);
       } else {
-        messages.push({
-          role: 'assistant',
-          content: restoredContent,
+        combined.push({
+          message: {
+            role: 'assistant',
+            content: restoredContent,
+          },
+          eventIds: [event.id],
         });
-        messageEventIds.push(event.id);
       }
 
       // CASE 2: This assistant message has tool_use, and we have pending tool results
@@ -297,9 +310,9 @@ export function reconstructFromEvents(ancestors: SessionEvent[]): Reconstruction
 
   // Flush remaining tool results at the end IF the last message is an assistant with tool_use
   if (pendingToolResults.length > 0) {
-    const lastMessage = messages[messages.length - 1];
-    if (lastMessage && lastMessage.role === 'assistant') {
-      const contentArray = Array.isArray(lastMessage.content) ? lastMessage.content : [];
+    const lastEntry = getLastEntry();
+    if (lastEntry && lastEntry.message.role === 'assistant') {
+      const contentArray = Array.isArray(lastEntry.message.content) ? lastEntry.message.content : [];
       const hasToolUse = contentArray.some((block: { type: string }) => block.type === 'tool_use');
       if (hasToolUse) {
         flushToolResults();
@@ -308,8 +321,7 @@ export function reconstructFromEvents(ancestors: SessionEvent[]): Reconstruction
   }
 
   return {
-    messages,
-    messageEventIds,
+    messagesWithEventIds: combined,
     tokenUsage: { inputTokens, outputTokens, cacheReadTokens, cacheCreationTokens },
     turnCount,
     reasoningLevel,

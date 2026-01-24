@@ -211,15 +211,12 @@ export class SessionManager {
     const activeSession: ActiveSession = {
       sessionId,
       agent,
-      isProcessing: false,
       lastActivity: new Date(),
       workingDirectory: workingDir.path,
       model,
       // Parent session ID if this is a subagent (for event forwarding)
       parentSessionId: options.parentSessionId as SessionId | undefined,
       workingDir,
-      // Initialize parallel event ID tracking for context manager messages
-      messageEventIds: [],
       // Initialize empty skill tracker (new sessions have no skills)
       skillTracker: createSkillTracker(),
       // Initialize rules tracker with loaded rules
@@ -282,7 +279,9 @@ export class SessionManager {
       session.latestModel,
       sessionState.systemPrompt // Restore system prompt from events
     );
-    for (const msg of sessionState.messages) {
+    // Extract messages from unified messagesWithEventIds
+    const messages = sessionState.messagesWithEventIds.map(m => m.message);
+    for (const msg of messages) {
       // Convert event store messages to agent message format
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       agent.addMessage(msg as any);
@@ -300,7 +299,7 @@ export class SessionManager {
 
     logger.info('Session history loaded', {
       sessionId,
-      messageCount: sessionState.messages.length,
+      messageCount: messages.length,
     });
 
     // Reconstruct trackers from event history
@@ -380,19 +379,17 @@ export class SessionManager {
     });
     // Restore state from events for SessionContext (plan mode, etc.)
     sessionContext.restoreFromEvents(events as TronSessionEvent[]);
-    // Sync message event IDs for context audit
-    sessionContext.setMessageEventIds(sessionState.messageEventIds);
+    // Sync message event IDs for context audit (extract from unified messagesWithEventIds)
+    sessionContext.setMessagesWithEventIds(sessionState.messagesWithEventIds);
 
     const activeSession: ActiveSession = {
       sessionId: session.id,
       agent,
-      isProcessing: false,
       lastActivity: new Date(),
       workingDirectory: workingDir.path,
       model: session.latestModel,
       workingDir,
       reasoningLevel,
-      messageEventIds: sessionState.messageEventIds,
       skillTracker,
       rulesTracker,
       sessionContext,

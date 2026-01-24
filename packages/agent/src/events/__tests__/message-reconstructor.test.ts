@@ -11,8 +11,15 @@
  */
 import { describe, it, expect } from 'vitest';
 
-import { reconstructFromEvents } from '../message-reconstructor.js';
-import type { SessionEvent } from '../types.js';
+import { reconstructFromEvents, type ReconstructionResult } from '../message-reconstructor.js';
+import type { SessionEvent, Message } from '../types.js';
+
+/**
+ * Helper to extract messages array from reconstruction result (for easier test assertions)
+ */
+function getMessages(result: ReconstructionResult): Message[] {
+  return result.messagesWithEventIds.map(m => m.message);
+}
 
 /**
  * Helper to create a minimal session event
@@ -68,14 +75,14 @@ describe('reconstructFromEvents', () => {
       const result = reconstructFromEvents(events);
 
       // Should have: user, assistant, toolResult, assistant
-      expect(result.messages).toHaveLength(4);
-      expect(result.messages[0].role).toBe('user');
-      expect(result.messages[1].role).toBe('assistant');
-      expect(result.messages[2].role).toBe('toolResult');
-      expect(result.messages[3].role).toBe('assistant');
+      expect(getMessages(result)).toHaveLength(4);
+      expect(getMessages(result)[0].role).toBe('user');
+      expect(getMessages(result)[1].role).toBe('assistant');
+      expect(getMessages(result)[2].role).toBe('toolResult');
+      expect(getMessages(result)[3].role).toBe('assistant');
 
       // Verify toolResult message format
-      const toolResultMsg = result.messages[2];
+      const toolResultMsg = getMessages(result)[2];
       expect(toolResultMsg.role).toBe('toolResult');
       expect((toolResultMsg as any).toolCallId).toBe('call_123');
       expect((toolResultMsg as any).content).toBe('Tool output');
@@ -119,20 +126,20 @@ describe('reconstructFromEvents', () => {
       const result = reconstructFromEvents(events);
 
       // Should have: user, assistant, toolResult, toolResult, assistant
-      expect(result.messages).toHaveLength(5);
-      expect(result.messages[0].role).toBe('user');
-      expect(result.messages[1].role).toBe('assistant');
-      expect(result.messages[2].role).toBe('toolResult');
-      expect(result.messages[3].role).toBe('toolResult');
-      expect(result.messages[4].role).toBe('assistant');
+      expect(getMessages(result)).toHaveLength(5);
+      expect(getMessages(result)[0].role).toBe('user');
+      expect(getMessages(result)[1].role).toBe('assistant');
+      expect(getMessages(result)[2].role).toBe('toolResult');
+      expect(getMessages(result)[3].role).toBe('toolResult');
+      expect(getMessages(result)[4].role).toBe('assistant');
 
       // Verify each tool result
-      const tr1 = result.messages[2] as any;
+      const tr1 = getMessages(result)[2] as any;
       expect(tr1.toolCallId).toBe('call_1');
       expect(tr1.content).toBe('Result 1');
       expect(tr1.isError).toBe(false);
 
-      const tr2 = result.messages[3] as any;
+      const tr2 = getMessages(result)[3] as any;
       expect(tr2.toolCallId).toBe('call_2');
       expect(tr2.content).toBe('Result 2');
       expect(tr2.isError).toBe(true);
@@ -182,13 +189,13 @@ describe('reconstructFromEvents', () => {
       const result = reconstructFromEvents(events);
 
       // Should have: user, assistant, toolResult, assistant, toolResult, assistant
-      expect(result.messages).toHaveLength(6);
-      expect(result.messages[0].role).toBe('user');
-      expect(result.messages[1].role).toBe('assistant');
-      expect(result.messages[2].role).toBe('toolResult');
-      expect(result.messages[3].role).toBe('assistant');
-      expect(result.messages[4].role).toBe('toolResult');
-      expect(result.messages[5].role).toBe('assistant');
+      expect(getMessages(result)).toHaveLength(6);
+      expect(getMessages(result)[0].role).toBe('user');
+      expect(getMessages(result)[1].role).toBe('assistant');
+      expect(getMessages(result)[2].role).toBe('toolResult');
+      expect(getMessages(result)[3].role).toBe('assistant');
+      expect(getMessages(result)[4].role).toBe('toolResult');
+      expect(getMessages(result)[5].role).toBe('assistant');
     });
 
     it('should handle tool results at end of conversation (for resume/fork)', () => {
@@ -215,12 +222,12 @@ describe('reconstructFromEvents', () => {
       const result = reconstructFromEvents(events);
 
       // Should have: user, assistant, toolResult
-      expect(result.messages).toHaveLength(3);
-      expect(result.messages[0].role).toBe('user');
-      expect(result.messages[1].role).toBe('assistant');
-      expect(result.messages[2].role).toBe('toolResult');
+      expect(getMessages(result)).toHaveLength(3);
+      expect(getMessages(result)[0].role).toBe('user');
+      expect(getMessages(result)[1].role).toBe('assistant');
+      expect(getMessages(result)[2].role).toBe('toolResult');
 
-      const toolResult = result.messages[2] as any;
+      const toolResult = getMessages(result)[2] as any;
       expect(toolResult.toolCallId).toBe('call_1');
       expect(toolResult.content).toBe('Tool finished');
     });
@@ -242,10 +249,10 @@ describe('reconstructFromEvents', () => {
 
       const result = reconstructFromEvents(events);
 
-      expect(result.messages).toHaveLength(1);
-      expect(result.messages[0].role).toBe('user');
+      expect(getMessages(result)).toHaveLength(1);
+      expect(getMessages(result)[0].role).toBe('user');
       // Content should be merged
-      const content = result.messages[0].content as any[];
+      const content = getMessages(result)[0].content as any[];
       expect(content).toHaveLength(2);
       expect(content[0].text).toBe('First message');
       expect(content[1].text).toBe('Second message');
@@ -280,10 +287,10 @@ describe('reconstructFromEvents', () => {
 
       // Tool result should be discarded since user interrupted
       // Should have: user, assistant, user
-      expect(result.messages).toHaveLength(3);
-      expect(result.messages[0].role).toBe('user');
-      expect(result.messages[1].role).toBe('assistant');
-      expect(result.messages[2].role).toBe('user');
+      expect(getMessages(result)).toHaveLength(3);
+      expect(getMessages(result)[0].role).toBe('user');
+      expect(getMessages(result)[1].role).toBe('assistant');
+      expect(getMessages(result)[2].role).toBe('user');
     });
   });
 
@@ -312,13 +319,13 @@ describe('reconstructFromEvents', () => {
       const result = reconstructFromEvents(events);
 
       // Should have: synthetic user (summary), synthetic assistant, real user
-      expect(result.messages).toHaveLength(3);
-      expect(result.messages[0].role).toBe('user');
-      expect((result.messages[0].content as string)).toContain('Context from earlier');
-      expect((result.messages[0].content as string)).toContain('Previous conversation summary');
-      expect(result.messages[1].role).toBe('assistant');
-      expect(result.messages[2].role).toBe('user');
-      expect(result.messages[2].content).toBe('New message');
+      expect(getMessages(result)).toHaveLength(3);
+      expect(getMessages(result)[0].role).toBe('user');
+      expect((getMessages(result)[0].content as string)).toContain('Context from earlier');
+      expect((getMessages(result)[0].content as string)).toContain('Previous conversation summary');
+      expect(getMessages(result)[1].role).toBe('assistant');
+      expect(getMessages(result)[2].role).toBe('user');
+      expect(getMessages(result)[2].content).toBe('New message');
     });
   });
 
@@ -399,7 +406,7 @@ describe('reconstructFromEvents', () => {
       const result = reconstructFromEvents(events);
 
       // Assistant message should have restored arguments
-      const assistantMsg = result.messages[1] as any;
+      const assistantMsg = getMessages(result)[1] as any;
       const toolUse = assistantMsg.content[0];
       expect(toolUse.input).toEqual({ largeArg: 'This is the full argument that was truncated' });
     });

@@ -161,8 +161,9 @@ export function createAgentAdapter(deps: AdapterDependencies): AgentManagerAdapt
         wasInterrupted = await orchestrator.wasSessionInterrupted(sessionId);
       }
 
+      const isRunning = active?.sessionContext?.isProcessing() ?? false;
       return {
-        isRunning: active?.isProcessing ?? false,
+        isRunning,
         currentTurn: agentState?.currentTurn ?? 0,
         messageCount: agentState?.messages.length ?? session?.messageCount ?? 0,
         tokenUsage: {
@@ -172,11 +173,12 @@ export function createAgentAdapter(deps: AdapterDependencies): AgentManagerAdapt
         model: session?.model ?? 'unknown',
         tools: [],
         // Include current turn content for resume support (only when agent is running)
-        currentTurnText: active?.isProcessing
-          ? active.sessionContext.getAccumulatedContent().text
+        // Note: if isRunning is true, active is guaranteed to exist (non-null assertion safe)
+        currentTurnText: isRunning
+          ? active!.sessionContext.getAccumulatedContent().text
           : undefined,
-        currentTurnToolCalls: active?.isProcessing
-          ? active.sessionContext.getAccumulatedContent().toolCalls
+        currentTurnToolCalls: isRunning
+          ? active!.sessionContext.getAccumulatedContent().toolCalls
           : undefined,
         // Flag indicating session was interrupted
         wasInterrupted,

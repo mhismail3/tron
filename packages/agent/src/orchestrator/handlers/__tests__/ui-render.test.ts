@@ -23,9 +23,10 @@ describe('AgentEventHandler - UI Render Events', () => {
         getCurrentTurn: vi.fn().mockReturnValue(1),
         flushPreToolContent: vi.fn().mockReturnValue(null),
         hasPreToolContentFlushed: vi.fn().mockReturnValue(false),
+        addMessageEventId: vi.fn(),
+        getMessageEventIds: vi.fn().mockReturnValue([]),
       },
       model: 'claude-opus-4-5-20251101',
-      messageEventIds: [],
     });
 
     handler = new AgentEventHandler({

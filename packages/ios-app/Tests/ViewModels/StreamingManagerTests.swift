@@ -150,13 +150,11 @@ final class StreamingManagerTests: XCTestCase {
         manager.onCreateStreamingMessage = { UUID() }
 
         manager.handleTextDelta("Test")
-        manager.handleThinkingDelta("Thinking...")
         manager.reset()
 
         XCTAssertEqual(manager.streamingText, "")
         XCTAssertNil(manager.streamingMessageId)
         XCTAssertFalse(manager.isStreaming)
-        XCTAssertEqual(manager.thinkingText, "")
     }
 
     func testCancelStreamingClearsState() {
@@ -169,49 +167,6 @@ final class StreamingManagerTests: XCTestCase {
         XCTAssertEqual(manager.streamingText, "")
         XCTAssertNil(manager.streamingMessageId)
         XCTAssertFalse(manager.isStreaming)
-    }
-
-    // MARK: - Thinking Text
-
-    func testHandleThinkingDeltaAccumulatesText() {
-        let manager = StreamingManager()
-        var receivedThinking: String?
-
-        manager.onThinkingUpdate = { text in
-            receivedThinking = text
-        }
-
-        manager.handleThinkingDelta("Thinking")
-        manager.handleThinkingDelta(" deeply")
-
-        XCTAssertEqual(manager.thinkingText, "Thinking deeply")
-        XCTAssertEqual(receivedThinking, "Thinking deeply")
-    }
-
-    func testThinkingTextBackpressure() {
-        let manager = StreamingManager()
-
-        // Fill to just under 1MB limit
-        let largeThinking = String(repeating: "x", count: 999_990)
-        XCTAssertTrue(manager.handleThinkingDelta(largeThinking))
-
-        // This should fail
-        XCTAssertFalse(manager.handleThinkingDelta(String(repeating: "y", count: 20)))
-    }
-
-    func testClearThinking() {
-        let manager = StreamingManager()
-        var cleared = false
-
-        manager.onThinkingUpdate = { text in
-            if text.isEmpty { cleared = true }
-        }
-
-        manager.handleThinkingDelta("Some thinking")
-        manager.clearThinking()
-
-        XCTAssertEqual(manager.thinkingText, "")
-        XCTAssertTrue(cleared)
     }
 
     // MARK: - State Queries

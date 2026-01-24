@@ -22,28 +22,19 @@ extension ChatViewModel {
             return
         }
 
-        // Keep legacy state in sync for compatibility
-        // (used by handleComplete dashboard update, turn metadata, etc.)
-        if streamingMessageId == nil {
-            streamingMessageId = streamingManager.streamingMessageId
-
-            // Track as first text message of this turn if not already set
-            if let id = streamingMessageId, firstTextMessageIdForTurn == nil {
-                firstTextMessageIdForTurn = id
-                logger.debug("Tracked first text message for turn: \(id)", category: .events)
-            }
+        // Track as first text message of this turn if not already set
+        // (StreamingManager is now single source of truth for streamingMessageId)
+        if let id = streamingManager.streamingMessageId, firstTextMessageIdForTurn == nil {
+            firstTextMessageIdForTurn = id
+            logger.debug("Tracked first text message for turn: \(id)", category: .events)
         }
-        streamingText = streamingManager.streamingText
 
-        logger.verbose("Text delta received: +\(delta.count) chars, total: \(streamingText.count)", category: .events)
+        logger.verbose("Text delta received: +\(delta.count) chars, total: \(streamingManager.streamingText.count)", category: .events)
     }
 
     func handleThinkingDelta(_ delta: String) {
         // Process through handler (accumulates thinking text)
         let result = eventHandler.handleThinkingDelta(delta)
-
-        // Sync legacy state for message updates
-        thinkingText = result.thinkingText
 
         // Create thinking message on first delta (so it appears BEFORE the text response)
         if thinkingMessageId == nil {
@@ -87,23 +78,23 @@ extension ChatViewModel {
 
         var message = ChatMessage(role: .assistant, content: .toolUse(result.tool))
 
-        // For RenderAppUI: check if chip already exists (created from ui_render_chunk)
+        // For RenderAppUI: use tracker for atomic state management
         if event.toolName.lowercased() == "renderappui" {
             if let argsData = event.formattedArguments.data(using: .utf8),
                let argsJson = try? JSONSerialization.jsonObject(with: argsData) as? [String: Any],
                let canvasId = argsJson["canvasId"] as? String {
 
-                // Check if chip already exists from ui_render_chunk
-                if let messageId = renderAppUIChipMessageIds[canvasId],
-                   let index = messages.firstIndex(where: { $0.id == messageId }),
+                // Check if chip already exists from ui_render_chunk (via tracker)
+                if let chipState = renderAppUIChipTracker.getChip(canvasId: canvasId),
+                   let index = messages.firstIndex(where: { $0.id == chipState.messageId }),
                    case .renderAppUI(var chipData) = messages[index].content {
                     // Chip already exists - update toolCallId to real one
                     let oldToolCallId = chipData.toolCallId
                     chipData.toolCallId = event.toolCallId
                     messages[index].content = .renderAppUI(chipData)
 
-                    // Clean up placeholder tracking
-                    canvasIdToPlaceholderToolCallId.removeValue(forKey: canvasId)
+                    // Update tracker atomically
+                    renderAppUIChipTracker.updateToolCallId(canvasId: canvasId, realToolCallId: event.toolCallId)
 
                     // Update currentToolMessages with correct ID
                     currentToolMessages[messages[index].id] = messages[index]
@@ -130,11 +121,18 @@ extension ChatViewModel {
                     errorMessage: nil
                 )
                 message.content = .renderAppUI(chipData)
-                renderAppUIChipMessageIds[canvasId] = message.id
+
+                // Track in tracker (single source of truth)
+                renderAppUIChipTracker.createChipFromToolStart(
+                    canvasId: canvasId,
+                    messageId: message.id,
+                    toolCallId: event.toolCallId,
+                    title: title
+                )
                 logger.debug("Created RenderAppUI chip from tool_start: \(canvasId)", category: .events)
             }
-        } else if let pendingRender = pendingUIRenderStarts.removeValue(forKey: event.toolCallId) {
-            // Handle pending UI render start (legacy path)
+        } else if let pendingRender = renderAppUIChipTracker.consumePendingRenderStart(toolCallId: event.toolCallId) {
+            // Handle pending UI render start (legacy path) - via tracker
             let chipData = RenderAppUIChipData(
                 toolCallId: event.toolCallId,
                 canvasId: pendingRender.canvasId,
@@ -143,7 +141,14 @@ extension ChatViewModel {
                 errorMessage: nil
             )
             message.content = .renderAppUI(chipData)
-            renderAppUIChipMessageIds[pendingRender.canvasId] = message.id
+
+            // Track in tracker (single source of truth)
+            renderAppUIChipTracker.createChipFromToolStart(
+                canvasId: pendingRender.canvasId,
+                messageId: message.id,
+                toolCallId: event.toolCallId,
+                title: pendingRender.title
+            )
             logger.debug("Applied pending UI render start to new tool message: \(pendingRender.canvasId)", category: .events)
         }
 
@@ -376,15 +381,13 @@ extension ChatViewModel {
         askUserQuestionState.calledInTurn = false
 
         // Finalize any streaming text from the previous turn
-        if streamingMessageId != nil && !streamingText.isEmpty {
+        if streamingManager.streamingMessageId != nil && !streamingManager.streamingText.isEmpty {
             flushPendingTextUpdates()
             finalizeStreamingMessage()
-            streamingText = ""
         }
 
         // Clear thinking state for the new turn
         thinkingMessageId = nil
-        thinkingText = ""
 
         // Notify ThinkingState of new turn (clears previous turn's thinking for sheet)
         thinkingState.startTurn(result.turnNumber, model: currentModel)
@@ -449,7 +452,7 @@ extension ChatViewModel {
         // Priority: streaming message > first text message of turn > fallback search
         var targetIndex: Int?
 
-        if let id = streamingMessageId,
+        if let id = streamingManager.streamingMessageId,
            let index = messages.firstIndex(where: { $0.id == id }) {
             targetIndex = index
             logger.debug("Using streaming message for turn metadata at index \(index)", category: .events)
@@ -643,7 +646,9 @@ extension ChatViewModel {
     }
 
     func handleComplete() {
-        logger.info("Agent complete, finalizing message (streamingText: \(streamingText.count) chars, toolCalls: \(currentTurnToolCalls.count))", category: .events)
+        // Capture streaming text before finalization clears it
+        let finalStreamingText = streamingManager.streamingText
+        logger.info("Agent complete, finalizing message (streamingText: \(finalStreamingText.count) chars, toolCalls: \(currentTurnToolCalls.count))", category: .events)
 
         // Process through handler (resets handler state)
         _ = eventHandler.handleComplete()
@@ -662,7 +667,6 @@ extension ChatViewModel {
         }
 
         finalizeStreamingMessage()
-        thinkingText = ""
 
         // NOTE: Do NOT clear ThinkingState here - thinking caption should persist
         // until the user sends a new message (cleared by startTurn on next turn)
@@ -674,7 +678,7 @@ extension ChatViewModel {
         eventStoreManager?.setSessionProcessing(sessionId, isProcessing: false)
         eventStoreManager?.updateSessionDashboardInfo(
             sessionId: sessionId,
-            lastAssistantResponse: streamingText.isEmpty ? nil : String(streamingText.prefix(200)),
+            lastAssistantResponse: finalStreamingText.isEmpty ? nil : String(finalStreamingText.prefix(200)),
             lastToolCount: currentTurnToolCalls.isEmpty ? nil : currentTurnToolCalls.count
         )
 
@@ -814,7 +818,6 @@ extension ChatViewModel {
         )
         finalizeStreamingMessage()
         messages.append(.error(result.message))
-        thinkingText = ""
 
         // NOTE: Do NOT clear ThinkingState here - thinking caption should persist
         // so user can see what was happening before the error (cleared on next turn)
@@ -864,12 +867,23 @@ extension ChatViewModel {
                 errorMessage: nil
             )
             messages[index].content = .renderAppUI(chipData)
-            renderAppUIChipMessageIds[event.canvasId] = messages[index].id
+
+            // Track in new tracker (creates or updates)
+            if renderAppUIChipTracker.hasChip(canvasId: event.canvasId) {
+                renderAppUIChipTracker.updateToolCallId(canvasId: event.canvasId, realToolCallId: event.toolCallId)
+            } else {
+                renderAppUIChipTracker.createChipFromToolStart(
+                    canvasId: event.canvasId,
+                    messageId: messages[index].id,
+                    toolCallId: event.toolCallId,
+                    title: event.title
+                )
+            }
             logger.debug("Updated/converted RenderAppUI to chip: \(event.canvasId)", category: .events)
         } else {
             // Tool message doesn't exist yet (ui.render.start arrived before tool.start via streaming)
-            // Store the event for processing when tool.start arrives
-            pendingUIRenderStarts[event.toolCallId] = event
+            // Store the event in tracker for processing when tool.start arrives
+            renderAppUIChipTracker.storePendingRenderStart(event)
             logger.debug("Stored pending UI render start for toolCallId: \(event.toolCallId)", category: .events)
         }
 
@@ -886,24 +900,27 @@ extension ChatViewModel {
 
         // CRITICAL FIX: ui_render_chunk arrives BEFORE tool_start in streaming mode.
         // Create the chip on FIRST chunk so user sees "Rendering..." immediately.
-        if renderAppUIChipMessageIds[event.canvasId] == nil {
+        // Use tracker to check if chip exists (single source of truth)
+        if !renderAppUIChipTracker.hasChip(canvasId: event.canvasId) {
             // First chunk for this canvasId - create the rendering chip
-            let placeholderToolCallId = "pending_\(event.canvasId)"
-            canvasIdToPlaceholderToolCallId[event.canvasId] = placeholderToolCallId
-
             // Try to extract title from accumulated JSON
             let title = extractTitleFromAccumulated(event.accumulated)
 
-            let chipData = RenderAppUIChipData(
-                toolCallId: placeholderToolCallId,
+            let message = ChatMessage(role: .assistant, content: .renderAppUI(RenderAppUIChipData(
+                toolCallId: "pending_\(event.canvasId)", // Placeholder
                 canvasId: event.canvasId,
                 title: title,
                 status: .rendering,
                 errorMessage: nil
-            )
-            let message = ChatMessage(role: .assistant, content: .renderAppUI(chipData))
+            )))
             messages.append(message)
-            renderAppUIChipMessageIds[event.canvasId] = message.id
+
+            // Track in tracker (single source of truth, returns placeholder toolCallId)
+            let placeholderToolCallId = renderAppUIChipTracker.createChipFromChunk(
+                canvasId: event.canvasId,
+                messageId: message.id,
+                title: title
+            )
 
             // Make chip immediately visible
             animationCoordinator.makeToolVisible(placeholderToolCallId)
@@ -962,8 +979,9 @@ extension ChatViewModel {
 
     /// Get the toolCallId for an existing RenderAppUI chip
     private func getToolCallIdForCanvas(_ canvasId: String) -> String? {
-        guard let messageId = renderAppUIChipMessageIds[canvasId],
-              let message = messages.first(where: { $0.id == messageId }),
+        // Use tracker as single source of truth
+        guard let chipState = renderAppUIChipTracker.getChip(canvasId: canvasId),
+              let message = messages.first(where: { $0.id == chipState.messageId }),
               case .renderAppUI(let data) = message.content else {
             return nil
         }
@@ -973,9 +991,9 @@ extension ChatViewModel {
     func handleUIRenderComplete(_ event: UIRenderCompleteEvent) {
         logger.info("UI render complete: canvasId=\(event.canvasId)", category: .events)
 
-        // Update chip status to complete
-        if let messageId = renderAppUIChipMessageIds[event.canvasId],
-           let index = messages.firstIndex(where: { $0.id == messageId }),
+        // Update chip status to complete (use tracker as single source of truth)
+        if let chipState = renderAppUIChipTracker.getChip(canvasId: event.canvasId),
+           let index = messages.firstIndex(where: { $0.id == chipState.messageId }),
            case .renderAppUI(var chipData) = messages[index].content {
             chipData.status = .complete
             chipData.errorMessage = nil
@@ -1008,9 +1026,9 @@ extension ChatViewModel {
     func handleUIRenderError(_ event: UIRenderErrorEvent) {
         logger.warning("UI render error: canvasId=\(event.canvasId), error=\(event.error)", category: .events)
 
-        // Update chip status to error
-        if let messageId = renderAppUIChipMessageIds[event.canvasId],
-           let index = messages.firstIndex(where: { $0.id == messageId }),
+        // Update chip status to error (use tracker as single source of truth)
+        if let chipState = renderAppUIChipTracker.getChip(canvasId: event.canvasId),
+           let index = messages.firstIndex(where: { $0.id == chipState.messageId }),
            case .renderAppUI(var chipData) = messages[index].content {
             chipData.status = .error
             chipData.errorMessage = event.error
@@ -1028,8 +1046,9 @@ extension ChatViewModel {
 
         // Validation failure means error - chip shows error state (not tappable)
         // The agent will create a NEW chip with the retry, so this one stays as error
-        if let messageId = renderAppUIChipMessageIds[event.canvasId],
-           let index = messages.firstIndex(where: { $0.id == messageId }),
+        // Use tracker as single source of truth
+        if let chipState = renderAppUIChipTracker.getChip(canvasId: event.canvasId),
+           let index = messages.firstIndex(where: { $0.id == chipState.messageId }),
            case .renderAppUI(var chipData) = messages[index].content {
             chipData.status = .error
             chipData.errorMessage = "Error generating"

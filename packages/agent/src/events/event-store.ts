@@ -307,7 +307,7 @@ export class EventStore {
   async getMessagesAt(eventId: EventId): Promise<Message[]> {
     const ancestors = await this.backend.getAncestors(eventId);
     const result = reconstructFromEvents(ancestors);
-    return result.messages;
+    return result.messagesWithEventIds.map(m => m.message);
   }
 
   async getStateAtHead(sessionId: SessionId): Promise<SessionState> {
@@ -334,8 +334,7 @@ export class EventStore {
       sessionId: event.sessionId,
       workspaceId: event.workspaceId,
       headEventId: eventId,
-      messages: result.messages,
-      messageEventIds: result.messageEventIds,
+      messagesWithEventIds: result.messagesWithEventIds,
       tokenUsage: result.tokenUsage,
       turnCount: result.turnCount,
       model: session?.latestModel ?? 'unknown',

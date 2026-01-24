@@ -602,8 +602,7 @@ export class EventStoreOrchestrator extends EventEmitter {
       throw new Error('Session is already processing');
     }
 
-    // Update processing state (sync both for backward compatibility)
-    active.isProcessing = true;
+    // Update processing state
     active.lastActivity = new Date();
     active.sessionContext.setProcessing(true);
 
@@ -1006,8 +1005,7 @@ export class EventStoreOrchestrator extends EventEmitter {
 
       throw error;
     } finally {
-      // Clear processing state (sync both for backward compatibility)
-      active.isProcessing = false;
+      // Clear processing state
       active.sessionContext.setProcessing(false);
     }
       }); // End withLoggingContext
@@ -1026,8 +1024,7 @@ export class EventStoreOrchestrator extends EventEmitter {
     // Actually abort the agent - triggers AbortController and interrupts execution
     active.agent.abort();
 
-    // Clear processing state (sync both for backward compatibility)
-    active.isProcessing = false;
+    // Clear processing state
     active.lastActivity = new Date();
     active.sessionContext.setProcessing(false);
     logger.info('Agent cancelled', { sessionId });

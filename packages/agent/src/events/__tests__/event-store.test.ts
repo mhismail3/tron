@@ -11,7 +11,14 @@ import {
   WorkspaceId,
   type ConfigReasoningLevelEvent,
   type MessageDeletedEvent,
+  type SessionState,
+  type Message,
 } from '../types.js';
+
+/** Helper to extract messages array from SessionState (for easier test assertions) */
+function getMessages(state: SessionState): Message[] {
+  return state.messagesWithEventIds.map(m => m.message);
+}
 
 describe('EventStore', () => {
   let store: EventStore;
@@ -346,7 +353,7 @@ describe('EventStore', () => {
 
       const state = await store.getStateAtHead(sessionId);
 
-      expect(state.messages.length).toBe(2);
+      expect(getMessages(state).length).toBe(2);
       expect(state.tokenUsage.inputTokens).toBe(100);
       expect(state.tokenUsage.outputTokens).toBe(200);
       expect(state.turnCount).toBe(1);
@@ -1071,8 +1078,8 @@ describe('EventStore', () => {
 
       // Simulate resume by getting state at head
       const state = await store.getStateAtHead(sessionId);
-      expect(state.messages.length).toBe(1);
-      expect(state.messages[0]!.role).toBe('assistant');
+      expect(getMessages(state).length).toBe(1);
+      expect(getMessages(state)[0]!.role).toBe('assistant');
     });
 
     it('should update getStateAt to account for deletions', async () => {
@@ -1098,12 +1105,12 @@ describe('EventStore', () => {
 
       // Get state at the delete event
       const stateAtDelete = await store.getStateAt(deleteEvent.id);
-      expect(stateAtDelete.messages.length).toBe(1);
-      expect(stateAtDelete.messages[0]!.role).toBe('assistant');
+      expect(getMessages(stateAtDelete).length).toBe(1);
+      expect(getMessages(stateAtDelete)[0]!.role).toBe('assistant');
 
       // Get state before delete (at response) - should still have both messages
       const stateAtResponse = await store.getStateAt(response.id);
-      expect(stateAtResponse.messages.length).toBe(2);
+      expect(getMessages(stateAtResponse).length).toBe(2);
     });
   });
 
@@ -1162,9 +1169,9 @@ describe('EventStore', () => {
 
       const state = await store.getStateAtHead(sessionId);
 
-      expect(state.messages.length).toBe(1);
-      expect(state.messages[0]!.role).toBe('user');
-      const content = state.messages[0]!.content;
+      expect(getMessages(state).length).toBe(1);
+      expect(getMessages(state)[0]!.role).toBe('user');
+      const content = getMessages(state)[0]!.content;
       expect(Array.isArray(content)).toBe(true);
       const textBlocks = (content as Array<{ type: string; text: string }>);
       expect(textBlocks.length).toBe(2);
@@ -1337,10 +1344,11 @@ describe('EventStore', () => {
 
       const state = await store.getStateAtHead(sessionId);
 
-      expect(state.messages.length).toBe(1);
-      // Both event IDs should be tracked for potential deletion
-      expect(state.messageEventIds).toContain(msg1.id);
-      expect(state.messageEventIds).toContain(msg2.id);
+      expect(state.messagesWithEventIds.length).toBe(1);
+      // Both event IDs should be tracked for potential deletion (flattened from unified type)
+      const allEventIds = state.messagesWithEventIds.flatMap(m => m.eventIds);
+      expect(allEventIds).toContain(msg1.id);
+      expect(allEventIds).toContain(msg2.id);
     });
 
     describe('fork scenarios', () => {
@@ -1567,17 +1575,17 @@ describe('EventStore', () => {
         const state = await store.getStateAtHead(forkResult.session.id);
 
         // Should have: user -> assistant(tool_use) -> toolResult -> toolResult
-        expect(state.messages.length).toBe(4);
-        expect(state.messages[0]!.role).toBe('user');
-        expect(state.messages[1]!.role).toBe('assistant');
-        expect(state.messages[2]!.role).toBe('toolResult');
-        expect(state.messages[3]!.role).toBe('toolResult');
+        expect(getMessages(state).length).toBe(4);
+        expect(getMessages(state)[0]!.role).toBe('user');
+        expect(getMessages(state)[1]!.role).toBe('assistant');
+        expect(getMessages(state)[2]!.role).toBe('toolResult');
+        expect(getMessages(state)[3]!.role).toBe('toolResult');
 
         // Verify the tool results are properly formatted
-        expect((state.messages[2] as any).toolCallId).toBe('tc_1');
-        expect((state.messages[2] as any).content).toBe('Content of a.ts');
-        expect((state.messages[3] as any).toolCallId).toBe('tc_2');
-        expect((state.messages[3] as any).content).toBe('Content of b.ts');
+        expect((getMessages(state)[2] as any).toolCallId).toBe('tc_1');
+        expect((getMessages(state)[2] as any).content).toBe('Content of a.ts');
+        expect((getMessages(state)[3] as any).toolCallId).toBe('tc_2');
+        expect((getMessages(state)[3] as any).content).toBe('Content of b.ts');
       });
 
       it('should handle fork after multi-turn agentic loop with tool calls', async () => {
@@ -1642,20 +1650,20 @@ describe('EventStore', () => {
 
         // Should have proper structure with toolResult messages:
         // user -> assistant(tool_use) -> toolResult -> assistant(tool_use) -> toolResult -> assistant(final)
-        expect(state.messages.length).toBe(6);
-        expect(state.messages[0]!.role).toBe('user');
-        expect(state.messages[1]!.role).toBe('assistant'); // tool_use tc_1
-        expect(state.messages[2]!.role).toBe('toolResult'); // tool_result tc_1
-        expect(state.messages[3]!.role).toBe('assistant'); // tool_use tc_2
-        expect(state.messages[4]!.role).toBe('toolResult'); // tool_result tc_2
-        expect(state.messages[5]!.role).toBe('assistant'); // final response
+        expect(getMessages(state).length).toBe(6);
+        expect(getMessages(state)[0]!.role).toBe('user');
+        expect(getMessages(state)[1]!.role).toBe('assistant'); // tool_use tc_1
+        expect(getMessages(state)[2]!.role).toBe('toolResult'); // tool_result tc_1
+        expect(getMessages(state)[3]!.role).toBe('assistant'); // tool_use tc_2
+        expect(getMessages(state)[4]!.role).toBe('toolResult'); // tool_result tc_2
+        expect(getMessages(state)[5]!.role).toBe('assistant'); // final response
 
         // Verify tool results are properly included as toolResult messages
-        expect((state.messages[2] as any).toolCallId).toBe('tc_1');
-        expect((state.messages[2] as any).content).toBe('File X content');
+        expect((getMessages(state)[2] as any).toolCallId).toBe('tc_1');
+        expect((getMessages(state)[2] as any).content).toBe('File X content');
 
-        expect((state.messages[4] as any).toolCallId).toBe('tc_2');
-        expect((state.messages[4] as any).content).toBe('File Y content');
+        expect((getMessages(state)[4] as any).toolCallId).toBe('tc_2');
+        expect((getMessages(state)[4] as any).content).toBe('File Y content');
       });
     });
   });

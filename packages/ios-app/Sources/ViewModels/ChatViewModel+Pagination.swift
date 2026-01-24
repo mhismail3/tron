@@ -83,7 +83,7 @@ extension ChatViewModel {
         guard let manager = eventStoreManager else { return }
 
         // Preserve streaming state if in progress
-        let preserveStreamingState = isProcessing || streamingMessageId != nil
+        let preserveStreamingState = isProcessing || streamingManager.streamingMessageId != nil
         var catchUpMessagesToRestore: [ChatMessage] = []
 
         if preserveStreamingState {

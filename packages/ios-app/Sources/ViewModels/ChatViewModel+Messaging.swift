@@ -55,16 +55,14 @@ extension ChatViewModel {
 
         inputText = ""
         isProcessing = true
-        thinkingText = ""
 
         // Update dashboard processing state
         eventStoreManager?.setSessionProcessing(sessionId, isProcessing: true)
         eventStoreManager?.updateSessionDashboardInfo(sessionId: sessionId, lastUserPrompt: text)
 
+        // Reset streaming state before new message
         // Note: Streaming message is created by StreamingManager on first text delta
-        // This avoids duplicate messages (placeholder + actual streaming message)
-        streamingMessageId = nil
-        streamingText = ""
+        streamingManager.reset()  // Clears streamingMessageId and streamingText
 
         // Prepare file attachments for sending
         let fileAttachments = attachments.map { FileAttachment(attachment: $0) }

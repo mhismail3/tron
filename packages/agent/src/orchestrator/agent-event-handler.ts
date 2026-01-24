@@ -270,11 +270,11 @@ export class AgentEventHandler {
             latency: turnLatency,
             hasThinking,
           }, (evt) => {
-            // Track eventId for context manager message
+            // Track eventId for context manager message via SessionContext
             // Re-fetch active session since callback is async
             const currentActive = this.config.getActiveSession(sessionId);
-            if (currentActive) {
-              currentActive.messageEventIds.push(evt.id);
+            if (currentActive?.sessionContext) {
+              currentActive.sessionContext.addMessageEventId(evt.id);
             }
           });
 
@@ -543,10 +543,10 @@ export class AgentEventHandler {
             latency: turnLatency,
             hasThinking,
           }, (evt) => {
-            // Track eventId for context manager message
+            // Track eventId for context manager message via SessionContext
             const currentActive = this.config.getActiveSession(sessionId);
-            if (currentActive) {
-              currentActive.messageEventIds.push(evt.id);
+            if (currentActive?.sessionContext) {
+              currentActive.sessionContext.addMessageEventId(evt.id);
             }
           });
 
@@ -692,11 +692,11 @@ export class AgentEventHandler {
       duration: toolEndEvent.duration,
       truncated: resultContent.length > MAX_TOOL_RESULT_SIZE,
     }, (evt) => {
-      // Track eventId for context manager message (tool result)
+      // Track eventId for context manager message (tool result) via SessionContext
       // Re-fetch active session since callback is async
       const currentActive = this.config.getActiveSession(sessionId);
-      if (currentActive) {
-        currentActive.messageEventIds.push(evt.id);
+      if (currentActive?.sessionContext) {
+        currentActive.sessionContext.addMessageEventId(evt.id);
       }
     });
   }

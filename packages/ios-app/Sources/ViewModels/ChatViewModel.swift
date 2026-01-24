@@ -20,7 +20,6 @@ class ChatViewModel: ObservableObject, ChatEventContext {
     @Published var showError = false
     /// Set to true when the session doesn't exist on server and view should navigate back
     @Published var shouldDismiss = false
-    @Published var thinkingText = ""
     @Published var isThinkingExpanded = false
     @Published var isRecording = false
     @Published var isTranscribing = false
@@ -114,8 +113,6 @@ class ChatViewModel: ObservableObject, ChatEventContext {
     let rpcClient: RPCClient
     let sessionId: String
     var cancellables = Set<AnyCancellable>()
-    var streamingMessageId: UUID?
-    var streamingText = ""
     /// ID of the thinking message for the current turn (thinking appears before text response)
     var thinkingMessageId: UUID?
     /// ID of the catching-up notification message (removed on turn_end/complete)
@@ -137,13 +134,11 @@ class ChatViewModel: ObservableObject, ChatEventContext {
 
     /// Track tool calls for the current turn (for display purposes)
     var currentTurnToolCalls: [ToolCallRecord] = []
-    /// Track RenderAppUI chip messages by canvasId for status updates
-    var renderAppUIChipMessageIds: [String: UUID] = [:]
-    /// Pending UI render starts that arrived before tool.start (toolCallId → UIRenderStartEvent)
-    var pendingUIRenderStarts: [String: UIRenderStartEvent] = [:]
-    /// Track canvasIds that already have a chip created (from ui_render_chunk)
-    /// Maps canvasId → placeholder toolCallId used before real tool_start arrives
-    var canvasIdToPlaceholderToolCallId: [String: String] = [:]
+
+    /// Tracks RenderAppUI chip messages - consolidates race condition handling
+    /// Single source of truth for canvasId → messageId mapping, placeholder IDs, and pending events
+    let renderAppUIChipTracker = RenderAppUIChipTracker()
+
     let audioRecorder = AudioRecorder()
 
     /// Track the message index where the current turn started
@@ -279,9 +274,6 @@ class ChatViewModel: ObservableObject, ChatEventContext {
             }
         }
 
-        streamingManager.onThinkingUpdate = { [weak self] thinkingText in
-            self?.thinkingText = thinkingText
-        }
     }
 
     /// Set up UIUpdateQueue callback for processing batched, ordered updates
@@ -471,7 +463,7 @@ class ChatViewModel: ObservableObject, ChatEventContext {
     // MARK: - Message Updates
 
     func updateStreamingMessage(with content: MessageContent) {
-        guard let id = streamingMessageId,
+        guard let id = streamingManager.streamingMessageId,
               let index = messages.firstIndex(where: { $0.id == id }) else {
             return
         }
@@ -482,18 +474,8 @@ class ChatViewModel: ObservableObject, ChatEventContext {
     }
 
     func finalizeStreamingMessage() {
-        // Use StreamingManager for finalization
-        let finalText = streamingManager.finalizeStreamingMessage()
-
-        // Clear legacy state
-        streamingMessageId = nil
-        streamingText = ""
-
-        // If StreamingManager didn't handle it (already finalized), try legacy cleanup
-        if finalText.isEmpty && streamingMessageId == nil {
-            // Nothing to do - already handled by StreamingManager callbacks
-            return
-        }
+        // Use StreamingManager for finalization (clears streamingMessageId and streamingText)
+        _ = streamingManager.finalizeStreamingMessage()
     }
 
     /// Force flush any pending text updates (called before completion)
@@ -546,6 +528,7 @@ class ChatViewModel: ObservableObject, ChatEventContext {
 
     func clearMessages() {
         messages = []
+        renderAppUIChipTracker.clearAll()
     }
 
     /// Add an in-chat notification when model is switched

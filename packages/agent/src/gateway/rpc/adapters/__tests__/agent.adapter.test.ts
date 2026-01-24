@@ -46,6 +46,7 @@ describe('AgentAdapter', () => {
     };
 
     mockSessionContext = {
+      isProcessing: vi.fn().mockReturnValue(false),
       getAccumulatedContent: vi.fn().mockReturnValue({
         text: 'partial response',
         toolCalls: [],
@@ -159,8 +160,8 @@ describe('AgentAdapter', () => {
 
   describe('getState', () => {
     it('should return running state when agent is active', async () => {
+      mockSessionContext.isProcessing.mockReturnValue(true);
       vi.mocked(mockOrchestrator.getActiveSession!).mockReturnValue({
-        isProcessing: true,
         wasInterrupted: false,
         agent: mockAgent,
         sessionContext: mockSessionContext,
@@ -207,8 +208,8 @@ describe('AgentAdapter', () => {
     });
 
     it('should detect interrupted session from active flag', async () => {
+      mockSessionContext.isProcessing.mockReturnValue(false);
       vi.mocked(mockOrchestrator.getActiveSession!).mockReturnValue({
-        isProcessing: false,
         wasInterrupted: true,
         agent: mockAgent,
         sessionContext: mockSessionContext,
@@ -260,8 +261,8 @@ describe('AgentAdapter', () => {
     });
 
     it('should include token usage from agent state', async () => {
+      mockSessionContext.isProcessing.mockReturnValue(true);
       vi.mocked(mockOrchestrator.getActiveSession!).mockReturnValue({
-        isProcessing: true,
         wasInterrupted: false,
         agent: mockAgent,
         sessionContext: mockSessionContext,

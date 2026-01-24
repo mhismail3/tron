@@ -101,10 +101,11 @@ export class ContextOps {
     }
     const snapshot = active.agent.getContextManager().getDetailedSnapshot();
 
-    // Augment messages with eventIds from session tracking
+    // Augment messages with eventIds from SessionContext tracking
     // The messageEventIds array parallels the context manager's messages array
+    const messageEventIds = active.sessionContext.getMessageEventIds();
     for (let i = 0; i < snapshot.messages.length; i++) {
-      const eventId = active.messageEventIds[i];
+      const eventId = messageEventIds[i];
       const message = snapshot.messages[i];
       if (eventId && message) {
         message.eventId = eventId;

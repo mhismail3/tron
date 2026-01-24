@@ -73,6 +73,7 @@ import {
   createSessionReconstructor,
 } from './session-reconstructor.js';
 import type { AccumulatedContent, InterruptedContent } from './turn-content-tracker.js';
+import type { MessageWithEventId } from '../events/types.js';
 
 const logger = createLogger('session-context');
 
@@ -556,10 +557,15 @@ export class SessionContext {
   }
 
   /**
-   * Set message event IDs (from state restoration).
+   * Set message event IDs from unified messagesWithEventIds array.
+   * Extracts and flattens all eventIds for tracking (handles merged messages with multiple IDs).
    */
-  setMessageEventIds(ids: (string | undefined)[]): void {
-    this.messageEventIds = ids;
+  setMessagesWithEventIds(messagesWithEventIds: MessageWithEventId[]): void {
+    this.messageEventIds = [];
+    for (const entry of messagesWithEventIds) {
+      // Flatten all eventIds from this entry (supports merged messages)
+      this.messageEventIds.push(...entry.eventIds);
+    }
   }
 
   /**

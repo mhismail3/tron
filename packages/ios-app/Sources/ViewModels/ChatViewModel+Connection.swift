@@ -164,9 +164,8 @@ extension ChatViewModel {
                 } else {
                     let streamingMessage = ChatMessage.streaming()
                     messages.append(streamingMessage)
-                    streamingMessageId = streamingMessage.id
-                    streamingText = segmentText
-                    updateStreamingMessage(with: .streaming(segmentText))
+                    // Use StreamingManager to track both ID and text (triggers onTextUpdate callback)
+                    streamingManager.catchUpToInProgress(existingText: segmentText, messageId: streamingMessage.id)
                     // Track first text message for turn metadata assignment
                     if firstTextMessageIdForTurn == nil {
                         firstTextMessageIdForTurn = streamingMessage.id
@@ -184,12 +183,11 @@ extension ChatViewModel {
             let remainingSegments = Array(textSegments[toolCalls.count...])
             let remainingText = remainingSegments.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
 
-            if !remainingText.isEmpty && streamingMessageId == nil {
+            if !remainingText.isEmpty && streamingManager.streamingMessageId == nil {
                 let streamingMessage = ChatMessage.streaming()
                 messages.append(streamingMessage)
-                streamingMessageId = streamingMessage.id
-                streamingText = remainingText
-                updateStreamingMessage(with: .streaming(remainingText))
+                // Use StreamingManager to track both ID and text (triggers onTextUpdate callback)
+                streamingManager.catchUpToInProgress(existingText: remainingText, messageId: streamingMessage.id)
                 // Track first text message for turn metadata assignment
                 if firstTextMessageIdForTurn == nil {
                     firstTextMessageIdForTurn = streamingMessage.id
@@ -199,12 +197,11 @@ extension ChatViewModel {
         }
 
         // If no tool calls but there is text, create streaming message
-        if toolCalls.isEmpty && !accumulatedText.isEmpty && streamingMessageId == nil {
+        if toolCalls.isEmpty && !accumulatedText.isEmpty && streamingManager.streamingMessageId == nil {
             let streamingMessage = ChatMessage.streaming()
             messages.append(streamingMessage)
-            streamingMessageId = streamingMessage.id
-            streamingText = accumulatedText
-            updateStreamingMessage(with: .streaming(accumulatedText))
+            // Use StreamingManager to track both ID and text (triggers onTextUpdate callback)
+            streamingManager.catchUpToInProgress(existingText: accumulatedText, messageId: streamingMessage.id)
             // Track first text message for turn metadata assignment
             if firstTextMessageIdForTurn == nil {
                 firstTextMessageIdForTurn = streamingMessage.id

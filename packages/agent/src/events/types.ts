@@ -911,6 +911,23 @@ export interface Message {
   isError?: boolean;
 }
 
+/**
+ * Message paired with its associated event IDs.
+ *
+ * Consolidates the parallel arrays pattern where messages[] and messageEventIds[]
+ * had to stay in sync. A message can have multiple eventIds when consecutive
+ * messages of the same role are merged (for proper deletion tracking).
+ *
+ * The eventIds array may be empty for:
+ * - Synthetic messages (tool results, compaction summaries)
+ * - Messages created during the current session (not yet persisted)
+ */
+export interface MessageWithEventId {
+  message: Message;
+  /** Event IDs associated with this message. Multiple IDs when messages are merged. */
+  eventIds: (string | undefined)[];
+}
+
 // =============================================================================
 // Session State (Reconstructed from Events)
 // =============================================================================
@@ -926,10 +943,8 @@ export interface SessionState {
   model: string;
   /** Working directory */
   workingDirectory: string;
-  /** All messages up to this point (for API calls) */
-  messages: Message[];
-  /** Event IDs corresponding to each message (parallel array, for deletion tracking) */
-  messageEventIds: (string | undefined)[];
+  /** Messages with their associated event IDs (unified, no parallel arrays) */
+  messagesWithEventIds: MessageWithEventId[];
   /** Total token usage */
   tokenUsage: TokenUsage;
   /** Turn count */

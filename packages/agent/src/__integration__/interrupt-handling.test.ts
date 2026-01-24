@@ -9,11 +9,16 @@
  * - Content can be recovered after session resume
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { EventStore, SessionId, EventId } from '../index.js';
+import { EventStore, SessionId, EventId, type SessionState, type Message } from '../index.js';
 import path from 'path';
 import os from 'os';
 import fs from 'fs';
 import { EventStoreOrchestrator } from '../orchestrator/event-store-orchestrator.js';
+
+/** Helper to extract messages array from SessionState (for easier test assertions) */
+function getMessages(state: SessionState): Message[] {
+  return state.messagesWithEventIds.map(m => m.message);
+}
 
 // Mock TronAgent for controlled interrupt testing
 const mockTronAgent = (options: {
@@ -393,7 +398,7 @@ describe('Interrupt Handling', () => {
       });
 
       const state = await eventStore.getStateAtHead(sessionId);
-      expect(state.messages.length).toBe(2);
+      expect(getMessages(state).length).toBe(2);
       expect(state.tokenUsage.inputTokens).toBe(200);
       expect(state.tokenUsage.outputTokens).toBe(75);
     });
@@ -635,7 +640,6 @@ describe('Interrupt Handling', () => {
       const mockActiveSession = {
         sessionId: 'sess_123',
         agent: {} as any,
-        isProcessing: false,
         lastActivity: new Date(),
         workingDirectory: '/test',
         model: 'claude-sonnet-4-20250514',
