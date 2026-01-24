@@ -180,7 +180,9 @@ struct ContentView: View {
                     onVoiceNote: { showVoiceNotesRecording = true },
                     onNavigationModeChange: { mode in
                         navigationMode = mode
-                    }
+                    },
+                    // iPad (regular) has toolbar in detail view, iPhone (compact) needs it here
+                    showToolbar: horizontalSizeClass == .compact
                 )
             } else {
                 VoiceNotesListView(

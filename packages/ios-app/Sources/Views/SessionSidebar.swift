@@ -12,7 +12,6 @@ enum NavigationMode: String, CaseIterable {
 struct SessionSidebar: View {
     @EnvironmentObject var eventStoreManager: EventStoreManager
     @EnvironmentObject var appState: AppState
-    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @Binding var selectedSessionId: String?
     let onNewSession: () -> Void
     let onDeleteSession: (String) -> Void
@@ -20,11 +19,10 @@ struct SessionSidebar: View {
     let onVoiceNote: () -> Void
     var onNavigationModeChange: ((NavigationMode) -> Void)?
 
-    /// On iPad (regular), sidebar is a side panel - minimal chrome
-    /// On iPhone (compact), sidebar is the main view - needs full toolbar
-    private var isCompact: Bool {
-        horizontalSizeClass == .compact
-    }
+    /// Whether to show the toolbar (logo, title, settings)
+    /// On iPad, the dashboard has its own toolbar, so sidebar doesn't need one
+    /// On iPhone, sidebar is the main view and needs the toolbar
+    var showToolbar: Bool = true
 
     var body: some View {
         ZStack(alignment: .bottomTrailing) {
@@ -73,8 +71,8 @@ struct SessionSidebar: View {
         .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
         .toolbar(removing: .sidebarToggle)
         .toolbar {
-            // Only show toolbar items on iPhone (compact) - iPad has its own in detail view
-            if isCompact {
+            // Only show toolbar when requested (iPhone needs it, iPad doesn't)
+            if showToolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     Menu {
                         ForEach(NavigationMode.allCases, id: \.self) { mode in
