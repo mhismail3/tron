@@ -53,6 +53,7 @@ struct SessionSidebar: View {
                                 session: session,
                                 isSelected: session.id == selectedSessionId
                             )
+                            .tag(session.id)
                             .listRowBackground(Color.clear)
                             .listRowSeparator(.hidden)
                             .listRowInsets(EdgeInsets(top: 6, leading: 12, bottom: 6, trailing: 12))
@@ -66,6 +67,7 @@ struct SessionSidebar: View {
                             }
                         }
                     }
+                    .tint(.clear) // Hide iPadOS native selection border
                     .listStyle(.plain)
                     .scrollContentBackground(.hidden)
                     .contentMargins(.top, 8)
