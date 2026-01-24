@@ -129,17 +129,17 @@ extension ChatViewModel {
             // Cache tokens come from reconstructed state since session doesn't store them
             if let session = try? manager.eventDB.getSession(sessionId) {
                 // Accumulated totals for billing
-                accumulatedInputTokens = session.inputTokens
-                accumulatedOutputTokens = session.outputTokens
-                accumulatedCacheReadTokens = state.totalTokenUsage.cacheReadTokens ?? 0
-                accumulatedCacheCreationTokens = state.totalTokenUsage.cacheCreationTokens ?? 0
-                accumulatedCost = session.cost
+                contextState.accumulatedInputTokens = session.inputTokens
+                contextState.accumulatedOutputTokens = session.outputTokens
+                contextState.accumulatedCacheReadTokens = state.totalTokenUsage.cacheReadTokens ?? 0
+                contextState.accumulatedCacheCreationTokens = state.totalTokenUsage.cacheCreationTokens ?? 0
+                contextState.accumulatedCost = session.cost
 
                 // Current context size for context bar (lastTurnInputTokens from server)
-                lastTurnInputTokens = session.lastTurnInputTokens
+                contextState.lastTurnInputTokens = session.lastTurnInputTokens
 
                 // totalTokenUsage: input = current context size for display, output = accumulated
-                totalTokenUsage = TokenUsage(
+                contextState.totalTokenUsage = TokenUsage(
                     inputTokens: session.lastTurnInputTokens,  // Current context size for context bar
                     outputTokens: session.outputTokens,
                     cacheReadTokens: state.totalTokenUsage.cacheReadTokens,
@@ -150,14 +150,14 @@ extension ChatViewModel {
                 let usage = state.totalTokenUsage
                 if usage.inputTokens > 0 || usage.outputTokens > 0 {
                     // Accumulated totals for billing
-                    accumulatedInputTokens = usage.inputTokens
-                    accumulatedOutputTokens = usage.outputTokens
-                    accumulatedCacheReadTokens = usage.cacheReadTokens ?? 0
-                    accumulatedCacheCreationTokens = usage.cacheCreationTokens ?? 0
+                    contextState.accumulatedInputTokens = usage.inputTokens
+                    contextState.accumulatedOutputTokens = usage.outputTokens
+                    contextState.accumulatedCacheReadTokens = usage.cacheReadTokens ?? 0
+                    contextState.accumulatedCacheCreationTokens = usage.cacheCreationTokens ?? 0
                     // Use state.lastTurnInputTokens for context bar (current context size)
-                    lastTurnInputTokens = state.lastTurnInputTokens
+                    contextState.lastTurnInputTokens = state.lastTurnInputTokens
                     // totalTokenUsage: inputTokens = context size for bar, outputTokens = accumulated
-                    totalTokenUsage = TokenUsage(
+                    contextState.totalTokenUsage = TokenUsage(
                         inputTokens: state.lastTurnInputTokens,
                         outputTokens: usage.outputTokens,
                         cacheReadTokens: usage.cacheReadTokens,
@@ -222,16 +222,16 @@ extension ChatViewModel {
             // Cache tokens come from reconstructed state since session doesn't store them
             if let session = try? manager.eventDB.getSession(sessionId) {
                 // Accumulated totals for billing
-                accumulatedInputTokens = session.inputTokens
-                accumulatedOutputTokens = session.outputTokens
-                accumulatedCacheReadTokens = state.totalTokenUsage.cacheReadTokens ?? 0
-                accumulatedCacheCreationTokens = state.totalTokenUsage.cacheCreationTokens ?? 0
-                accumulatedCost = session.cost
+                contextState.accumulatedInputTokens = session.inputTokens
+                contextState.accumulatedOutputTokens = session.outputTokens
+                contextState.accumulatedCacheReadTokens = state.totalTokenUsage.cacheReadTokens ?? 0
+                contextState.accumulatedCacheCreationTokens = state.totalTokenUsage.cacheCreationTokens ?? 0
+                contextState.accumulatedCost = session.cost
 
                 // Current context size for context bar
-                lastTurnInputTokens = session.lastTurnInputTokens
+                contextState.lastTurnInputTokens = session.lastTurnInputTokens
 
-                totalTokenUsage = TokenUsage(
+                contextState.totalTokenUsage = TokenUsage(
                     inputTokens: session.lastTurnInputTokens,  // Current context size for context bar
                     outputTokens: session.outputTokens,
                     cacheReadTokens: state.totalTokenUsage.cacheReadTokens,
@@ -242,14 +242,14 @@ extension ChatViewModel {
                 let usage = state.totalTokenUsage
                 if usage.inputTokens > 0 || usage.outputTokens > 0 {
                     // Accumulated totals for billing
-                    accumulatedInputTokens = usage.inputTokens
-                    accumulatedOutputTokens = usage.outputTokens
-                    accumulatedCacheReadTokens = usage.cacheReadTokens ?? 0
-                    accumulatedCacheCreationTokens = usage.cacheCreationTokens ?? 0
+                    contextState.accumulatedInputTokens = usage.inputTokens
+                    contextState.accumulatedOutputTokens = usage.outputTokens
+                    contextState.accumulatedCacheReadTokens = usage.cacheReadTokens ?? 0
+                    contextState.accumulatedCacheCreationTokens = usage.cacheCreationTokens ?? 0
                     // Use state.lastTurnInputTokens for context bar (current context size)
-                    lastTurnInputTokens = state.lastTurnInputTokens
+                    contextState.lastTurnInputTokens = state.lastTurnInputTokens
                     // totalTokenUsage: inputTokens = context size for bar, outputTokens = accumulated
-                    totalTokenUsage = TokenUsage(
+                    contextState.totalTokenUsage = TokenUsage(
                         inputTokens: state.lastTurnInputTokens,
                         outputTokens: usage.outputTokens,
                         cacheReadTokens: usage.cacheReadTokens,
@@ -265,8 +265,11 @@ extension ChatViewModel {
     }
 
     /// Append a new message to the display (streaming messages during active session)
+    /// Also syncs to MessageWindowManager for virtual scrolling
+    /// Required by ChatEventContext protocol
     func appendMessage(_ message: ChatMessage) {
         messages.append(message)
+        messageWindowManager.appendMessage(message)
     }
 
     /// Restore token state from loaded messages (called on session resume)
@@ -298,7 +301,7 @@ extension ChatViewModel {
         for message in allReconstructedMessages.reversed() {
             if message.role == .assistant, let usage = message.tokenUsage {
                 // Best effort: use inputTokens (may not include cache for Anthropic historical data)
-                lastTurnInputTokens = usage.inputTokens
+                contextState.lastTurnInputTokens = usage.inputTokens
                 logger.debug("Restored lastTurnInputTokens=\(usage.inputTokens) from last assistant message", category: .session)
                 break
             }
@@ -326,7 +329,7 @@ extension ChatViewModel {
         }
 
         // Track the last turn's input tokens for future incremental calculations
-        previousTurnFinalInputTokens = previousInputTokens
+        contextState.previousTurnFinalInputTokens = previousInputTokens
 
         // 3. Apply computed incremental tokens to displayed messages (only if not already set)
         var appliedCount = 0

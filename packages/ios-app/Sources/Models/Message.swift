@@ -178,70 +178,41 @@ enum MessageRole: String, Codable, Equatable {
     }
 }
 
-// MARK: - Message Content
+// MARK: - System Event (Notifications)
 
-enum MessageContent: Equatable {
-    case text(String)
-    case streaming(String)
-    case thinking(visible: String, isExpanded: Bool, isStreaming: Bool)
-    case toolUse(ToolUseData)
-    case toolResult(ToolResultData)
-    case error(String)
-    case images([ImageContent])
-    /// Unified attachments (images, PDFs, documents)
-    case attachments([Attachment])
-    /// In-chat notification for model change
+/// System events are non-content notifications displayed in the chat
+/// (model changes, context operations, status updates, etc.)
+enum SystemEvent: Equatable {
+    /// Model was switched during the session
     case modelChange(from: String, to: String)
-    /// In-chat notification for reasoning level change
+    /// Reasoning level was changed
     case reasoningLevelChange(from: String, to: String)
-    /// In-chat notification for interrupted session
+    /// Session was interrupted
     case interrupted
-    /// In-chat notification for transcription failure
+    /// Voice transcription failed
     case transcriptionFailed
-    /// In-chat notification for no speech detected
+    /// No speech was detected in recording
     case transcriptionNoSpeech
-    /// In-chat notification for context compaction
+    /// Context was compacted to save tokens
     case compaction(tokensBefore: Int, tokensAfter: Int, reason: String, summary: String?)
-    /// In-chat notification for context clearing
+    /// Context was cleared
     case contextCleared(tokensBefore: Int, tokensAfter: Int)
-    /// In-chat notification for message deletion from context
+    /// A message was deleted from context
     case messageDeleted(targetType: String)
-    /// In-chat notification for skill removal from context
+    /// A skill was removed from context
     case skillRemoved(skillName: String)
-    /// In-chat notification for rules loaded on session start
+    /// Rules were loaded on session start
     case rulesLoaded(count: Int)
-    /// In-chat notification for plan mode entered
+    /// Plan mode was entered (read-only enforcement)
     case planModeEntered(skillName: String, blockedTools: [String])
-    /// In-chat notification for plan mode exited
+    /// Plan mode was exited
     case planModeExited(reason: String, planPath: String?)
-    /// In-chat notification for catching up to in-progress session
+    /// Catching up to in-progress session
     case catchingUp
-    /// AskUserQuestion tool call (rendered as interactive question sheet)
-    case askUserQuestion(AskUserQuestionToolData)
-    /// User answered agent's questions (rendered as a chip)
-    case answeredQuestions(questionCount: Int)
-    /// Subagent tool call (rendered as a tappable chip with status)
-    case subagent(SubagentToolData)
-    /// RenderAppUI tool call (rendered as a tappable chip with canvas status)
-    case renderAppUI(RenderAppUIChipData)
 
+    /// Human-readable description for the event
     var textContent: String {
         switch self {
-        case .text(let text), .streaming(let text):
-            return text
-        case .thinking(let visible, _, _):
-            return visible
-        case .toolUse(let tool):
-            return "[\(tool.toolName)]"
-        case .toolResult(let result):
-            return result.content
-        case .error(let message):
-            return message
-        case .images:
-            return "[Images]"
-        case .attachments(let files):
-            let count = files.count
-            return "[\(count) \(count == 1 ? "attachment" : "attachments")]"
         case .modelChange(let from, let to):
             return "Switched from \(from) to \(to)"
         case .reasoningLevelChange(let from, let to):
@@ -273,6 +244,114 @@ enum MessageContent: Equatable {
             return "Plan mode \(reason)"
         case .catchingUp:
             return "Loading latest messages..."
+        }
+    }
+
+    private func formatTokens(_ tokens: Int) -> String {
+        if tokens >= 1000 {
+            return String(format: "%.1fk", Double(tokens) / 1000.0)
+        }
+        return "\(tokens)"
+    }
+}
+
+// MARK: - Message Content
+
+enum MessageContent: Equatable {
+    // Core content types
+    case text(String)
+    case streaming(String)
+    case thinking(visible: String, isExpanded: Bool, isStreaming: Bool)
+    case toolUse(ToolUseData)
+    case toolResult(ToolResultData)
+    case error(String)
+    case images([ImageContent])
+    case attachments([Attachment])
+
+    // System events (notifications) - consolidated
+    case systemEvent(SystemEvent)
+
+    // Special tool invocations (rendered as interactive chips)
+    case askUserQuestion(AskUserQuestionToolData)
+    case answeredQuestions(questionCount: Int)
+    case subagent(SubagentToolData)
+    case renderAppUI(RenderAppUIChipData)
+
+    // MARK: - Legacy Convenience Cases (forward to systemEvent)
+    // These allow gradual migration - existing code using .modelChange etc. still works
+
+    /// In-chat notification for model change
+    static func modelChange(from: String, to: String) -> MessageContent {
+        .systemEvent(.modelChange(from: from, to: to))
+    }
+    /// In-chat notification for reasoning level change
+    static func reasoningLevelChange(from: String, to: String) -> MessageContent {
+        .systemEvent(.reasoningLevelChange(from: from, to: to))
+    }
+    /// In-chat notification for interrupted session
+    static var interrupted: MessageContent {
+        .systemEvent(.interrupted)
+    }
+    /// In-chat notification for transcription failure
+    static var transcriptionFailed: MessageContent {
+        .systemEvent(.transcriptionFailed)
+    }
+    /// In-chat notification for no speech detected
+    static var transcriptionNoSpeech: MessageContent {
+        .systemEvent(.transcriptionNoSpeech)
+    }
+    /// In-chat notification for context compaction
+    static func compaction(tokensBefore: Int, tokensAfter: Int, reason: String, summary: String?) -> MessageContent {
+        .systemEvent(.compaction(tokensBefore: tokensBefore, tokensAfter: tokensAfter, reason: reason, summary: summary))
+    }
+    /// In-chat notification for context clearing
+    static func contextCleared(tokensBefore: Int, tokensAfter: Int) -> MessageContent {
+        .systemEvent(.contextCleared(tokensBefore: tokensBefore, tokensAfter: tokensAfter))
+    }
+    /// In-chat notification for message deletion from context
+    static func messageDeleted(targetType: String) -> MessageContent {
+        .systemEvent(.messageDeleted(targetType: targetType))
+    }
+    /// In-chat notification for skill removal from context
+    static func skillRemoved(skillName: String) -> MessageContent {
+        .systemEvent(.skillRemoved(skillName: skillName))
+    }
+    /// In-chat notification for rules loaded on session start
+    static func rulesLoaded(count: Int) -> MessageContent {
+        .systemEvent(.rulesLoaded(count: count))
+    }
+    /// In-chat notification for plan mode entered
+    static func planModeEntered(skillName: String, blockedTools: [String]) -> MessageContent {
+        .systemEvent(.planModeEntered(skillName: skillName, blockedTools: blockedTools))
+    }
+    /// In-chat notification for plan mode exited
+    static func planModeExited(reason: String, planPath: String?) -> MessageContent {
+        .systemEvent(.planModeExited(reason: reason, planPath: planPath))
+    }
+    /// In-chat notification for catching up to in-progress session
+    static var catchingUp: MessageContent {
+        .systemEvent(.catchingUp)
+    }
+
+    var textContent: String {
+        switch self {
+        case .text(let text), .streaming(let text):
+            return text
+        case .thinking(let visible, _, _):
+            return visible
+        case .toolUse(let tool):
+            return "[\(tool.toolName)]"
+        case .toolResult(let result):
+            return result.content
+        case .error(let message):
+            return message
+        case .images:
+            return "[Images]"
+        case .attachments(let files):
+            let count = files.count
+            return "[\(count) \(count == 1 ? "attachment" : "attachments")]"
+        case .systemEvent(let event):
+            return event.textContent
         case .askUserQuestion(let data):
             return "[\(data.params.questions.count) questions]"
         case .answeredQuestions(let count):
@@ -300,13 +379,6 @@ enum MessageContent: Equatable {
         }
     }
 
-    private func formatTokens(_ tokens: Int) -> String {
-        if tokens >= 1000 {
-            return String(format: "%.1fk", Double(tokens) / 1000.0)
-        }
-        return "\(tokens)"
-    }
-
     var isToolRelated: Bool {
         switch self {
         case .toolUse, .toolResult:
@@ -317,12 +389,10 @@ enum MessageContent: Equatable {
     }
 
     var isNotification: Bool {
-        switch self {
-        case .modelChange, .interrupted, .transcriptionFailed, .transcriptionNoSpeech, .compaction, .contextCleared, .messageDeleted, .skillRemoved, .rulesLoaded, .planModeEntered, .planModeExited, .catchingUp:
+        if case .systemEvent = self {
             return true
-        default:
-            return false
         }
+        return false
     }
 
     var isAskUserQuestion: Bool {
@@ -330,6 +400,14 @@ enum MessageContent: Equatable {
             return true
         }
         return false
+    }
+
+    /// Extract SystemEvent if this is a system notification
+    var asSystemEvent: SystemEvent? {
+        if case .systemEvent(let event) = self {
+            return event
+        }
+        return nil
     }
 }
 

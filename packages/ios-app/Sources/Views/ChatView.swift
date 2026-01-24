@@ -47,13 +47,7 @@ struct ChatView: View {
     @State private var isLoadingModels = false
     /// Optimistic model name for instant UI update
     @State private var optimisticModelName: String?
-    /// Reasoning level for OpenAI Codex models (low/medium/high/xhigh)
-    /// Persisted per-session via UserDefaults
-    @State private var reasoningLevel: String = "medium"
-    /// Selected skills for the current message (shown as chips above input bar)
-    @State private var selectedSkills: [Skill] = []
-    /// Selected spells for the current message (ephemeral skills, cleared after send)
-    @State private var selectedSpells: [Skill] = []
+    // Note: reasoningLevel, selectedSkills, and selectedSpells are now in viewModel.inputBarState
     /// Skill to show in detail sheet (when skill chip is tapped in a message)
     @State private var skillForDetailSheet: Skill?
     /// Mode for skill detail sheet (skill = cyan, spell = pink)
@@ -120,6 +114,29 @@ struct ChatView: View {
         cachedModels.first { $0.id == displayModelName }
     }
 
+    // MARK: - State Object Bindings (extracted for type-checker performance)
+
+    private var safariURLPresented: Binding<Bool> {
+        Binding(
+            get: { viewModel.browserState.safariURL != nil },
+            set: { if !$0 { viewModel.browserState.safariURL = nil } }
+        )
+    }
+
+    private var browserWindowPresented: Binding<Bool> {
+        Binding(
+            get: { viewModel.browserState.showBrowserWindow },
+            set: { viewModel.browserState.showBrowserWindow = $0 }
+        )
+    }
+
+    private var askUserQuestionPresented: Binding<Bool> {
+        Binding(
+            get: { viewModel.askUserQuestionState.showSheet },
+            set: { viewModel.askUserQuestionState.showSheet = $0 }
+        )
+    }
+
     var body: some View {
         // Main content
         messagesScrollView
@@ -131,84 +148,80 @@ struct ChatView: View {
 
                     // Input area with integrated status pills and model picker
                     InputBar(
-                        text: $viewModel.inputText,
-                        isProcessing: viewModel.isProcessing,
-                        isRecording: viewModel.isRecording,
-                        isTranscribing: viewModel.isTranscribing,
-                        selectedImages: $viewModel.selectedImages,
-                        onSend: {
-                            inputHistory.addToHistory(viewModel.inputText)
-                            // Notify coordinator that user is sending a message
-                            scrollCoordinator.userSentMessage()
+                        state: viewModel.inputBarState,
+                        config: InputBarConfig(
+                            isProcessing: viewModel.isProcessing,
+                            isRecording: viewModel.isRecording,
+                            isTranscribing: viewModel.isTranscribing,
+                            modelName: displayModelName,
+                            tokenUsage: viewModel.contextState.totalTokenUsage,
+                            contextPercentage: viewModel.contextState.contextPercentage,
+                            contextWindow: viewModel.contextState.currentContextWindow,
+                            lastTurnInputTokens: viewModel.contextState.lastTurnInputTokens,
+                            cachedModels: cachedModels,
+                            isLoadingModels: isLoadingModels,
+                            currentModelInfo: currentModelInfo,
+                            skillStore: skillStore,
+                            inputHistory: inputHistory,
+                            animationCoordinator: viewModel.animationCoordinator,
+                            readOnly: workspaceDeleted || !isInteractionEnabled
+                        ),
+                        actions: InputBarActions(
+                            onSend: { [viewModel, inputHistory, scrollCoordinator] in
+                                inputHistory.addToHistory(viewModel.inputText)
+                                scrollCoordinator.userSentMessage()
 
-                            // CRITICAL: Dismiss keyboard BEFORE processing starts
-                            // This ensures safe area insets update correctly before TextField is disabled
-                            // If we wait until after isProcessing=true, the disabled TextField
-                            // doesn't properly trigger keyboard dismiss animations
-                            UIApplication.shared.sendAction(
-                                #selector(UIResponder.resignFirstResponder),
-                                to: nil, from: nil, for: nil
-                            )
+                                // CRITICAL: Dismiss keyboard BEFORE processing starts
+                                UIApplication.shared.sendAction(
+                                    #selector(UIResponder.resignFirstResponder),
+                                    to: nil, from: nil, for: nil
+                                )
 
-                            // Pass selected skills and spells, then clear them after sending
-                            let skillsToSend = selectedSkills
-                            let spellsToSend = selectedSpells
-                            selectedSkills = []
-                            selectedSpells = []  // Spells are ephemeral - cleared after send
-                            viewModel.sendMessage(
-                                reasoningLevel: currentModelInfo?.supportsReasoning == true ? reasoningLevel : nil,
-                                skills: skillsToSend.isEmpty ? nil : skillsToSend,
-                                spells: spellsToSend.isEmpty ? nil : spellsToSend
-                            )
-                        },
-                        onAbort: viewModel.abortAgent,
-                        onMicTap: viewModel.toggleRecording,
-                        attachments: $viewModel.attachments,
-                        onAddAttachment: viewModel.addAttachment,
-                        onRemoveAttachment: viewModel.removeAttachment,
-                        inputHistory: inputHistory,
-                        onHistoryNavigate: { newText in
-                            viewModel.inputText = newText
-                        },
-                        modelName: displayModelName,
-                        tokenUsage: viewModel.totalTokenUsage,
-                        contextPercentage: viewModel.contextPercentage,
-                        contextWindow: viewModel.currentContextWindow,
-                        lastTurnInputTokens: viewModel.lastTurnInputTokens,
-                        cachedModels: cachedModels,
-                        isLoadingModels: isLoadingModels,
-                        onModelSelect: { model in
-                            switchModel(to: model)
-                        },
-                        reasoningLevel: $reasoningLevel,
-                        currentModelInfo: currentModelInfo,
-                        onReasoningLevelChange: { newLevel in
-                            reasoningLevel = newLevel
-                        },
-                        onContextTap: {
-                            showContextAudit = true
-                        },
-                        skillStore: skillStore,
-                        selectedSkills: $selectedSkills,
-                        onSkillRemove: { _ in
-                            // Skill removed from selection - no additional action needed
-                        },
-                        onSkillDetailTap: { skill in
-                            skillForDetailSheet = skill
-                            skillDetailMode = .skill
-                            showSkillDetailSheet = true
-                        },
-                        selectedSpells: $selectedSpells,
-                        onSpellRemove: { _ in
-                            // Spell removed from selection - no additional action needed
-                        },
-                        onSpellDetailTap: { spell in
-                            skillForDetailSheet = spell
-                            skillDetailMode = .spell
-                            showSkillDetailSheet = true
-                        },
-                        animationCoordinator: viewModel.animationCoordinator,
-                        readOnly: workspaceDeleted || !isInteractionEnabled
+                                // Pass selected skills and spells, then clear them after sending
+                                let skillsToSend = viewModel.inputBarState.selectedSkills
+                                let spellsToSend = viewModel.inputBarState.selectedSpells
+                                viewModel.inputBarState.selectedSkills = []
+                                viewModel.inputBarState.selectedSpells = []  // Spells are ephemeral
+                                viewModel.sendMessage(
+                                    reasoningLevel: currentModelInfo?.supportsReasoning == true ? viewModel.inputBarState.reasoningLevel : nil,
+                                    skills: skillsToSend.isEmpty ? nil : skillsToSend,
+                                    spells: spellsToSend.isEmpty ? nil : spellsToSend
+                                )
+                            },
+                            onAbort: viewModel.abortAgent,
+                            onMicTap: viewModel.toggleRecording,
+                            onAddAttachment: viewModel.addAttachment,
+                            onRemoveAttachment: viewModel.removeAttachment,
+                            onHistoryNavigate: { newText in
+                                viewModel.inputText = newText
+                            },
+                            onModelSelect: { model in
+                                switchModel(to: model)
+                            },
+                            onReasoningLevelChange: { newLevel in
+                                viewModel.inputBarState.reasoningLevel = newLevel
+                            },
+                            onContextTap: {
+                                showContextAudit = true
+                            },
+                            onSkillSelect: nil,
+                            onSkillRemove: { _ in
+                                // Skill removed from selection - no additional action needed
+                            },
+                            onSkillDetailTap: { skill in
+                                skillForDetailSheet = skill
+                                skillDetailMode = .skill
+                                showSkillDetailSheet = true
+                            },
+                            onSpellRemove: { _ in
+                                // Spell removed from selection - no additional action needed
+                            },
+                            onSpellDetailTap: { spell in
+                                skillForDetailSheet = spell
+                                skillDetailMode = .spell
+                                showSkillDetailSheet = true
+                            }
+                        )
                     )
                     .id(sessionId)
                 }
@@ -280,21 +293,18 @@ struct ChatView: View {
             }
         }
         // Safari sheet (OpenBrowser tool)
-        .sheet(isPresented: Binding(
-            get: { viewModel.safariURL != nil },
-            set: { if !$0 { viewModel.safariURL = nil } }
-        )) {
-            if let url = viewModel.safariURL {
+        .sheet(isPresented: safariURLPresented) {
+            if let url = viewModel.browserState.safariURL {
                 SafariView(url: url)
             }
         }
         // Browser sheet (replaces floating window)
-        .sheet(isPresented: $viewModel.showBrowserWindow) {
+        .sheet(isPresented: browserWindowPresented) {
             if #available(iOS 26.0, *) {
                 BrowserSheetView(
-                    frameImage: viewModel.browserFrame,
-                    currentUrl: viewModel.browserStatus?.currentUrl,
-                    isStreaming: viewModel.browserStatus?.isStreaming ?? false,
+                    frameImage: viewModel.browserState.browserFrame,
+                    currentUrl: viewModel.browserState.browserStatus?.currentUrl,
+                    isStreaming: viewModel.browserState.browserStatus?.isStreaming ?? false,
                     onCloseBrowser: {
                         viewModel.userDismissedBrowser()
                     }
@@ -335,8 +345,8 @@ struct ChatView: View {
                 .presentationDetents([.medium, .large])
             }
         }
-        .sheet(isPresented: $viewModel.showAskUserQuestionSheet) {
-            if #available(iOS 26.0, *), let data = viewModel.currentAskUserQuestionData {
+        .sheet(isPresented: askUserQuestionPresented) {
+            if #available(iOS 26.0, *), let data = viewModel.askUserQuestionState.currentData {
                 AskUserQuestionSheet(
                     toolData: data,
                     onSubmit: { answers in
@@ -436,8 +446,8 @@ struct ChatView: View {
         // iOS 26 Menu workaround: Handle reasoning level actions via NotificationCenter
         .onReceive(NotificationCenter.default.publisher(for: .reasoningLevelAction)) { notification in
             guard let level = notification.object as? String else { return }
-            let previousLevel = reasoningLevel
-            reasoningLevel = level
+            let previousLevel = viewModel.inputBarState.reasoningLevel
+            viewModel.inputBarState.reasoningLevel = level
             // Persist reasoning level for this session
             UserDefaults.standard.set(level, forKey: reasoningLevelKey)
             // Add in-chat notification for reasoning level change
@@ -451,15 +461,15 @@ struct ChatView: View {
             guard let skillStore = skillStore else { return }
             if let planSkill = skillStore.skills.first(where: { $0.name.lowercased() == "plan" }) {
                 // Only add if not already selected
-                if !selectedSkills.contains(where: { $0.id == planSkill.id }) {
-                    selectedSkills.append(planSkill)
+                if !viewModel.inputBarState.selectedSkills.contains(where: { $0.id == planSkill.id }) {
+                    viewModel.inputBarState.selectedSkills.append(planSkill)
                 }
             }
         }
         .onAppear {
             // Load persisted reasoning level for this session
             if let savedLevel = UserDefaults.standard.string(forKey: reasoningLevelKey) {
-                reasoningLevel = savedLevel
+                viewModel.inputBarState.reasoningLevel = savedLevel
             }
 
             // Entry morph animation from left with 180ms delay (90% of mic button's 200ms)
@@ -619,7 +629,7 @@ struct ChatView: View {
         // Optimistic update - UI updates instantly
         optimisticModelName = model.id
         // Update context window immediately with new model's value
-        viewModel.currentContextWindow = model.contextWindow
+        viewModel.contextState.currentContextWindow = model.contextWindow
 
         // Fire the actual switch in background
         Task {
@@ -645,7 +655,7 @@ struct ChatView: View {
                     optimisticModelName = nil
                     // Revert context window on failure
                     if let originalModel = cachedModels.first(where: { $0.id == previousModel }) {
-                        viewModel.currentContextWindow = originalModel.contextWindow
+                        viewModel.contextState.currentContextWindow = originalModel.contextWindow
                     }
                     viewModel.showErrorAlert("Failed to switch model: \(error.localizedDescription)")
                 }

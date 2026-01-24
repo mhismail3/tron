@@ -53,6 +53,95 @@ struct TurnEndResult {
     let durationMs: Int?
 }
 
+/// Result of handling compaction
+struct CompactionResult {
+    let tokensBefore: Int
+    let tokensAfter: Int
+    let reason: String
+    let summary: String?
+    var tokensSaved: Int { tokensBefore - tokensAfter }
+}
+
+/// Result of handling context cleared
+struct ContextClearedResult {
+    let tokensBefore: Int
+    let tokensAfter: Int
+    var tokensFreed: Int { tokensBefore - tokensAfter }
+}
+
+/// Result of handling message deleted
+struct MessageDeletedResult {
+    let targetType: String
+    let targetEventId: String
+}
+
+/// Result of handling skill removed
+struct SkillRemovedResult {
+    let skillName: String
+}
+
+/// Result of handling plan mode entered
+struct PlanModeEnteredResult {
+    let skillName: String
+    let blockedTools: [String]
+}
+
+/// Result of handling plan mode exited
+struct PlanModeExitedResult {
+    let reason: String
+    let planPath: String?
+}
+
+/// Result of handling agent complete
+struct CompleteResult {
+    let success: Bool
+}
+
+/// Result of handling agent error
+struct AgentErrorResult {
+    let message: String
+}
+
+/// Result of handling UI render start
+struct UIRenderStartResult {
+    let canvasId: String
+    let title: String?
+    let toolCallId: String
+}
+
+/// Result of handling UI render chunk
+struct UIRenderChunkResult {
+    let canvasId: String
+    let chunk: String
+    let accumulated: String
+}
+
+/// Result of handling UI render complete
+struct UIRenderCompleteResult {
+    let canvasId: String
+    let ui: [String: AnyCodable]?
+    let state: [String: AnyCodable]?
+}
+
+/// Result of handling UI render error
+struct UIRenderErrorResult {
+    let canvasId: String
+    let error: String
+}
+
+/// Result of handling UI render retry
+struct UIRenderRetryResult {
+    let canvasId: String
+    let attempt: Int
+    let errors: String
+}
+
+/// Result of handling todos updated
+struct TodosUpdatedResult {
+    let todos: [RpcTodoItem]
+    let restoredCount: Int
+}
+
 // MARK: - Event Handler
 
 /// Extracts and processes event data from agent streaming
@@ -242,5 +331,163 @@ final class ChatEventHandler {
         let result = (text: streamingText, messageId: id)
         resetStreamingState()
         return result
+    }
+
+    // MARK: - Compaction Handling
+
+    /// Handle a compaction event
+    /// - Parameter event: The compaction event
+    /// - Returns: Result with token counts
+    func handleCompaction(_ event: CompactionEvent) -> CompactionResult {
+        return CompactionResult(
+            tokensBefore: event.tokensBefore,
+            tokensAfter: event.tokensAfter,
+            reason: event.reason,
+            summary: event.summary
+        )
+    }
+
+    // MARK: - Context Cleared Handling
+
+    /// Handle a context cleared event
+    /// - Parameter event: The context cleared event
+    /// - Returns: Result with token counts
+    func handleContextCleared(_ event: ContextClearedEvent) -> ContextClearedResult {
+        return ContextClearedResult(
+            tokensBefore: event.tokensBefore,
+            tokensAfter: event.tokensAfter
+        )
+    }
+
+    // MARK: - Message Deleted Handling
+
+    /// Handle a message deleted event
+    /// - Parameter event: The message deleted event
+    /// - Returns: Result with deletion info
+    func handleMessageDeleted(_ event: MessageDeletedEvent) -> MessageDeletedResult {
+        return MessageDeletedResult(
+            targetType: event.targetType,
+            targetEventId: event.targetEventId
+        )
+    }
+
+    // MARK: - Skill Removed Handling
+
+    /// Handle a skill removed event
+    /// - Parameter event: The skill removed event
+    /// - Returns: Result with skill name
+    func handleSkillRemoved(_ event: SkillRemovedEvent) -> SkillRemovedResult {
+        return SkillRemovedResult(skillName: event.skillName)
+    }
+
+    // MARK: - Plan Mode Handling
+
+    /// Handle plan mode entered event
+    /// - Parameter event: The plan mode entered event
+    /// - Returns: Result with skill name and blocked tools
+    func handlePlanModeEntered(_ event: PlanModeEnteredEvent) -> PlanModeEnteredResult {
+        return PlanModeEnteredResult(
+            skillName: event.skillName,
+            blockedTools: event.blockedTools
+        )
+    }
+
+    /// Handle plan mode exited event
+    /// - Parameter event: The plan mode exited event
+    /// - Returns: Result with exit reason and plan path
+    func handlePlanModeExited(_ event: PlanModeExitedEvent) -> PlanModeExitedResult {
+        return PlanModeExitedResult(
+            reason: event.reason,
+            planPath: event.planPath
+        )
+    }
+
+    // MARK: - Complete Handling
+
+    /// Handle agent complete event
+    /// - Returns: Result indicating success
+    func handleComplete() -> CompleteResult {
+        // Reset all state on completion
+        reset()
+        return CompleteResult(success: true)
+    }
+
+    // MARK: - Error Handling
+
+    /// Handle agent error event
+    /// - Parameter message: The error message
+    /// - Returns: Result with error message
+    func handleAgentError(_ message: String) -> AgentErrorResult {
+        // Reset all state on error
+        reset()
+        return AgentErrorResult(message: message)
+    }
+
+    // MARK: - UI Canvas Handling
+
+    /// Handle UI render start event
+    /// - Parameter event: The UI render start event
+    /// - Returns: Result with canvas info
+    func handleUIRenderStart(_ event: UIRenderStartEvent) -> UIRenderStartResult {
+        return UIRenderStartResult(
+            canvasId: event.canvasId,
+            title: event.title,
+            toolCallId: event.toolCallId
+        )
+    }
+
+    /// Handle UI render chunk event
+    /// - Parameter event: The UI render chunk event
+    /// - Returns: Result with chunk data
+    func handleUIRenderChunk(_ event: UIRenderChunkEvent) -> UIRenderChunkResult {
+        return UIRenderChunkResult(
+            canvasId: event.canvasId,
+            chunk: event.chunk,
+            accumulated: event.accumulated
+        )
+    }
+
+    /// Handle UI render complete event
+    /// - Parameter event: The UI render complete event
+    /// - Returns: Result with final UI
+    func handleUIRenderComplete(_ event: UIRenderCompleteEvent) -> UIRenderCompleteResult {
+        return UIRenderCompleteResult(
+            canvasId: event.canvasId,
+            ui: event.ui,
+            state: event.state
+        )
+    }
+
+    /// Handle UI render error event
+    /// - Parameter event: The UI render error event
+    /// - Returns: Result with error info
+    func handleUIRenderError(_ event: UIRenderErrorEvent) -> UIRenderErrorResult {
+        return UIRenderErrorResult(
+            canvasId: event.canvasId,
+            error: event.error
+        )
+    }
+
+    /// Handle UI render retry event
+    /// - Parameter event: The UI render retry event
+    /// - Returns: Result with retry info
+    func handleUIRenderRetry(_ event: UIRenderRetryEvent) -> UIRenderRetryResult {
+        return UIRenderRetryResult(
+            canvasId: event.canvasId,
+            attempt: event.attempt,
+            errors: event.errors
+        )
+    }
+
+    // MARK: - Todo Handling
+
+    /// Handle todos updated event
+    /// - Parameter event: The todos updated event
+    /// - Returns: Result with todos
+    func handleTodosUpdated(_ event: TodosUpdatedEvent) -> TodosUpdatedResult {
+        return TodosUpdatedResult(
+            todos: event.todos,
+            restoredCount: event.restoredCount
+        )
     }
 }

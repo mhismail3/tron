@@ -9,7 +9,7 @@ extension ChatViewModel {
     func handleTextDelta(_ delta: String) {
         // Skip text if AskUserQuestion was called in this turn
         // (AskUserQuestion should be the final visible entry when called)
-        guard !askUserQuestionCalledInTurn else {
+        guard !askUserQuestionState.calledInTurn else {
             logger.verbose("Skipping text delta - AskUserQuestion was called in this turn", category: .events)
             return
         }
@@ -39,12 +39,15 @@ extension ChatViewModel {
     }
 
     func handleThinkingDelta(_ delta: String) {
-        // Accumulate thinking text
-        thinkingText += delta
+        // Process through handler (accumulates thinking text)
+        let result = eventHandler.handleThinkingDelta(delta)
+
+        // Sync legacy state for message updates
+        thinkingText = result.thinkingText
 
         // Create thinking message on first delta (so it appears BEFORE the text response)
         if thinkingMessageId == nil {
-            let thinkingMessage = ChatMessage.thinking(thinkingText, isStreaming: true)
+            let thinkingMessage = ChatMessage.thinking(result.thinkingText, isStreaming: true)
             messages.append(thinkingMessage)
             thinkingMessageId = thinkingMessage.id
             messageWindowManager.appendMessage(thinkingMessage)
@@ -52,17 +55,18 @@ extension ChatViewModel {
         } else if let id = thinkingMessageId,
                   let index = messages.firstIndex(where: { $0.id == id }) {
             // Update existing thinking message with accumulated content
-            messages[index].content = .thinking(visible: thinkingText, isExpanded: false, isStreaming: true)
+            messages[index].content = .thinking(visible: result.thinkingText, isExpanded: false, isStreaming: true)
         }
 
         // Also route to ThinkingState for sheet/history functionality
         thinkingState.handleThinkingDelta(delta)
 
-        logger.verbose("Thinking delta: +\(delta.count) chars, total: \(thinkingText.count)", category: .events)
+        logger.verbose("Thinking delta: +\(delta.count) chars, total: \(result.thinkingText.count)", category: .events)
     }
 
     func handleToolStart(_ event: ToolStartEvent) {
-        logger.info("Tool started: \(event.toolName) [\(event.toolCallId)]", category: .events)
+        // Process through handler (classifies tool type, parses params)
+        let result = eventHandler.handleToolStart(event, context: self)
         logger.debug("Tool args: \(event.formattedArguments.prefix(200))", category: .events)
 
         // Finalize any current streaming text before tool starts
@@ -70,25 +74,18 @@ extension ChatViewModel {
         finalizeStreamingMessage()
 
         // Check if this is an AskUserQuestion tool call
-        if event.toolName.lowercased() == "askuserquestion" {
-            handleAskUserQuestionToolStart(event)
+        if result.isAskUserQuestion {
+            handleAskUserQuestionToolStart(event, params: result.askUserQuestionParams)
             return
         }
 
         // Check if this is an OpenBrowser tool call
-        if event.toolName.lowercased() == "openbrowser" {
-            handleOpenBrowserToolStart(event)
+        if result.isOpenBrowser {
+            handleOpenBrowserToolStart(url: result.openBrowserURL)
             // Don't return - still display as regular tool use
         }
 
-        let tool = ToolUseData(
-            toolName: event.toolName,
-            toolCallId: event.toolCallId,
-            arguments: event.formattedArguments,
-            status: .running
-        )
-
-        var message = ChatMessage(role: .assistant, content: .toolUse(tool))
+        var message = ChatMessage(role: .assistant, content: .toolUse(result.tool))
 
         // For RenderAppUI: check if chip already exists (created from ui_render_chunk)
         if event.toolName.lowercased() == "renderappui" {
@@ -168,11 +165,11 @@ extension ChatViewModel {
         currentTurnToolCalls.append(record)
 
         // Track that a browser tool is active (for showing browser window)
-        if event.toolName.lowercased().contains("browser") {
+        if result.isBrowserTool {
             logger.info("Browser tool detected", category: .events)
             // Mark that we have an active browser session
-            if browserStatus == nil {
-                browserStatus = BrowserGetStatusResult(hasBrowser: true, isStreaming: false, currentUrl: nil)
+            if browserState.browserStatus == nil {
+                browserState.browserStatus = BrowserGetStatusResult(hasBrowser: true, isStreaming: false, currentUrl: nil)
             }
         }
 
@@ -187,16 +184,18 @@ extension ChatViewModel {
     }
 
     /// Handle AskUserQuestion tool start - creates special message (sheet opens on tool.end)
-    private func handleAskUserQuestionToolStart(_ event: ToolStartEvent) {
-        logger.info("AskUserQuestion tool detected, parsing params", category: .events)
+    /// - Parameters:
+    ///   - event: The tool start event
+    ///   - params: Pre-parsed AskUserQuestion params (from eventHandler)
+    private func handleAskUserQuestionToolStart(_ event: ToolStartEvent, params: AskUserQuestionParams?) {
+        logger.info("AskUserQuestion tool detected", category: .events)
 
         // Mark that AskUserQuestion was called in this turn
         // This suppresses any subsequent text deltas (question should be final entry)
-        askUserQuestionCalledInTurn = true
+        askUserQuestionState.calledInTurn = true
 
-        // Parse the params from JSON arguments
-        guard let paramsData = event.formattedArguments.data(using: .utf8),
-              let params = try? JSONDecoder().decode(AskUserQuestionParams.self, from: paramsData) else {
+        // Use pre-parsed params, fall back to regular tool display if parsing failed
+        guard let params = params else {
             logger.error("Failed to parse AskUserQuestion params: \(event.formattedArguments.prefix(500))", category: .events)
             // Fall back to regular tool display
             let tool = ToolUseData(
@@ -238,30 +237,29 @@ extension ChatViewModel {
     }
 
     /// Handle OpenBrowser tool start - opens Safari in-app browser
-    private func handleOpenBrowserToolStart(_ event: ToolStartEvent) {
-        logger.info("OpenBrowser tool detected, parsing URL", category: .events)
+    /// - Parameter url: Pre-parsed URL (from eventHandler)
+    private func handleOpenBrowserToolStart(url: URL?) {
+        logger.info("OpenBrowser tool detected", category: .events)
 
-        // Extract URL directly from arguments dictionary
-        guard let args = event.arguments,
-              let urlValue = args["url"],
-              let urlString = urlValue.value as? String,
-              let url = URL(string: urlString) else {
+        guard let url = url else {
             logger.error("Failed to parse OpenBrowser URL from arguments", category: .events)
             return
         }
 
-        logger.info("Opening Safari with URL: \(urlString)", category: .events)
-        safariURL = url
+        logger.info("Opening Safari with URL: \(url.absoluteString)", category: .events)
+        browserState.safariURL = url
     }
 
     func handleToolEnd(_ event: ToolEndEvent) {
-        logger.info("Tool ended: \(event.toolCallId) success=\(event.success) duration=\(event.durationMs ?? 0)ms", category: .events)
-        logger.debug("Tool result: \(event.displayResult.prefix(300))", category: .events)
+        // Process through handler (extracts status and result)
+        let result = eventHandler.handleToolEnd(event)
+        logger.info("Tool ended: \(result.toolCallId) status=\(result.status) duration=\(result.durationMs ?? 0)ms", category: .events)
+        logger.debug("Tool result: \(result.result.prefix(300))", category: .events)
 
         // Check if this is an AskUserQuestion tool end
         if let index = messages.lastIndex(where: {
             if case .askUserQuestion(let data) = $0.content {
-                return data.toolCallId == event.toolCallId
+                return data.toolCallId == result.toolCallId
             }
             return false
         }) {
@@ -278,30 +276,31 @@ extension ChatViewModel {
         // (Extract screenshot before queueing - this updates browserFrame, not the message)
         if let index = messages.lastIndex(where: {
             if case .toolUse(let tool) = $0.content {
-                return tool.toolCallId == event.toolCallId
+                return tool.toolCallId == result.toolCallId
             }
             return false
         }) {
             if case .toolUse(let tool) = messages[index].content {
                 if tool.toolName.lowercased().contains("browser") {
+                    // Pass original event for screenshot extraction (needs event.details)
                     extractAndDisplayBrowserScreenshot(from: event)
                 }
             }
         }
 
         // Update tracked tool call with result
-        if let idx = currentTurnToolCalls.firstIndex(where: { $0.toolCallId == event.toolCallId }) {
-            currentTurnToolCalls[idx].result = event.displayResult
-            currentTurnToolCalls[idx].isError = !event.success
+        if let idx = currentTurnToolCalls.firstIndex(where: { $0.toolCallId == result.toolCallId }) {
+            currentTurnToolCalls[idx].result = result.result
+            currentTurnToolCalls[idx].isError = (result.status == .error)
         }
 
         // Enqueue tool end for ordered processing
         // UIUpdateQueue ensures tool ends are processed in the order tools started
         let toolEndData = UIUpdateQueue.ToolEndData(
-            toolCallId: event.toolCallId,
-            success: event.success,
-            result: event.displayResult,
-            durationMs: event.durationMs
+            toolCallId: result.toolCallId,
+            success: (result.status == .success),
+            result: result.result,
+            durationMs: result.durationMs
         )
         uiUpdateQueue.enqueueToolEnd(toolEndData)
     }
@@ -315,10 +314,10 @@ extension ChatViewModel {
            let imageData = Data(base64Encoded: screenshotBase64),
            let image = UIImage(data: imageData) {
             logger.info("Browser screenshot from details (\(image.size.width)x\(image.size.height))", category: .events)
-            browserFrame = image
+            browserState.browserFrame = image
             // Only auto-show if user hasn't manually dismissed this turn
-            if !userDismissedBrowserThisTurn && !showBrowserWindow {
-                showBrowserWindow = true
+            if !browserState.userDismissedBrowserThisTurn && !browserState.showBrowserWindow {
+                browserState.showBrowserWindow = true
             }
             return
         }
@@ -344,10 +343,10 @@ extension ChatViewModel {
                 if let imageData = Data(base64Encoded: base64String),
                    let image = UIImage(data: imageData) {
                     logger.info("Browser screenshot from text (\(image.size.width)x\(image.size.height))", category: .events)
-                    browserFrame = image
+                    browserState.browserFrame = image
                     // Only auto-show if user hasn't manually dismissed this turn
-                    if !userDismissedBrowserThisTurn && !showBrowserWindow {
-                        showBrowserWindow = true
+                    if !browserState.userDismissedBrowserThisTurn && !browserState.showBrowserWindow {
+                        browserState.showBrowserWindow = true
                     }
                     return
                 }
@@ -359,20 +358,22 @@ extension ChatViewModel {
             if let imageData = Data(base64Encoded: result),
                let image = UIImage(data: imageData) {
                 logger.info("Browser screenshot from raw base64 (\(image.size.width)x\(image.size.height))", category: .events)
-                browserFrame = image
+                browserState.browserFrame = image
                 // Only auto-show if user hasn't manually dismissed this turn
-                if !userDismissedBrowserThisTurn && !showBrowserWindow {
-                    showBrowserWindow = true
+                if !browserState.userDismissedBrowserThisTurn && !browserState.showBrowserWindow {
+                    browserState.showBrowserWindow = true
                 }
             }
         }
     }
 
     func handleTurnStart(_ event: TurnStartEvent) {
-        logger.info("Turn \(event.turnNumber) started", category: .events)
+        // Process through handler (resets handler streaming state)
+        let result = eventHandler.handleTurnStart(event)
+        logger.info("Turn \(result.turnNumber) started", category: .events)
 
         // Reset AskUserQuestion tracking for the new turn
-        askUserQuestionCalledInTurn = false
+        askUserQuestionState.calledInTurn = false
 
         // Finalize any streaming text from the previous turn
         if streamingMessageId != nil && !streamingText.isEmpty {
@@ -386,11 +387,11 @@ extension ChatViewModel {
         thinkingText = ""
 
         // Notify ThinkingState of new turn (clears previous turn's thinking for sheet)
-        thinkingState.startTurn(event.turnNumber, model: currentModel)
+        thinkingState.startTurn(result.turnNumber, model: currentModel)
 
         // Clear tool tracking for the new turn
         if !currentTurnToolCalls.isEmpty {
-            logger.debug("Starting Turn \(event.turnNumber), clearing \(currentTurnToolCalls.count) completed tool records from previous turn", category: .events)
+            logger.debug("Starting Turn \(result.turnNumber), clearing \(currentTurnToolCalls.count) completed tool records from previous turn", category: .events)
             currentTurnToolCalls.removeAll()
         }
         if !currentToolMessages.isEmpty {
@@ -400,7 +401,7 @@ extension ChatViewModel {
 
         // Notify UIUpdateQueue of turn boundary (resets tool ordering)
         uiUpdateQueue.enqueueTurnBoundary(UIUpdateQueue.TurnBoundaryData(
-            turnNumber: event.turnNumber,
+            turnNumber: result.turnNumber,
             isStart: true
         ))
 
@@ -410,18 +411,21 @@ extension ChatViewModel {
         // Track turn boundary for multi-turn metadata assignment
         turnStartMessageIndex = messages.count
         firstTextMessageIdForTurn = nil
-        logger.debug("Turn \(event.turnNumber) boundary set at message index \(turnStartMessageIndex ?? -1)", category: .events)
+        logger.debug("Turn \(result.turnNumber) boundary set at message index \(turnStartMessageIndex ?? -1)", category: .events)
     }
 
     func handleTurnEnd(_ event: TurnEndEvent) {
+        // Process through handler (extracts normalized values)
+        let result = eventHandler.handleTurnEnd(event)
+
         // Log both raw and normalized usage for debugging
-        let rawIn = event.tokenUsage?.inputTokens ?? 0
-        let rawOut = event.tokenUsage?.outputTokens ?? 0
-        let hasNormalized = event.normalizedUsage != nil
-        logger.info("Turn ended, tokens: raw_in=\(rawIn) raw_out=\(rawOut) hasNormalizedUsage=\(hasNormalized)", category: .events)
+        let rawIn = result.tokenUsage?.inputTokens ?? 0
+        let rawOut = result.tokenUsage?.outputTokens ?? 0
+        let hasNormalized = result.normalizedUsage != nil
+        logger.info("Turn \(result.turnNumber) ended, tokens: raw_in=\(rawIn) raw_out=\(rawOut) hasNormalizedUsage=\(hasNormalized)", category: .events)
 
         // Log normalized values if available (server's pre-calculated values)
-        if let normalized = event.normalizedUsage {
+        if let normalized = result.normalizedUsage {
             logger.debug("NormalizedUsage: newInput=\(normalized.newInputTokens) contextWindow=\(normalized.contextWindowTokens) cacheRead=\(normalized.cacheReadTokens)", category: .events)
         } else {
             logger.debug("NormalizedUsage not available, will use fallback local calculation", category: .events)
@@ -468,15 +472,15 @@ extension ChatViewModel {
 
         // Update the target message with metadata
         if let index = targetIndex {
-            messages[index].tokenUsage = event.tokenUsage
+            messages[index].tokenUsage = result.tokenUsage
             messages[index].model = currentModel
-            messages[index].latencyMs = event.data?.duration
-            messages[index].stopReason = event.stopReason
-            messages[index].turnNumber = event.turnNumber
+            messages[index].latencyMs = result.durationMs
+            messages[index].stopReason = result.stopReason
+            messages[index].turnNumber = result.turnNumber
 
             // Use server-provided normalizedUsage for incremental tokens (preferred)
             // Falls back to local calculation only if server doesn't provide normalizedUsage
-            if let normalized = event.normalizedUsage {
+            if let normalized = result.normalizedUsage {
                 // SERVER VALUES - no local calculation
                 messages[index].incrementalTokens = TokenUsage(
                     inputTokens: normalized.newInputTokens,  // FROM SERVER
@@ -485,7 +489,7 @@ extension ChatViewModel {
                     cacheCreationTokens: normalized.cacheCreationTokens
                 )
                 logger.debug("Incremental tokens (from server): in=\(normalized.newInputTokens)", category: .events)
-            } else if let usage = event.tokenUsage {
+            } else if let usage = result.tokenUsage {
                 // FALLBACK: Legacy calculation if server doesn't send normalizedUsage.
                 //
                 // WARNING: This fallback is INCORRECT for Anthropic!
@@ -497,7 +501,7 @@ extension ChatViewModel {
                 // For Anthropic, the delta will be wrong (shows raw input growth, not context growth).
                 //
                 // TODO: Either fix this fallback or remove it entirely once all servers send normalizedUsage.
-                let incrementalInput = max(0, usage.inputTokens - previousTurnFinalInputTokens)
+                let incrementalInput = max(0, usage.inputTokens - contextState.previousTurnFinalInputTokens)
                 messages[index].incrementalTokens = TokenUsage(
                     inputTokens: incrementalInput,
                     outputTokens: usage.outputTokens,
@@ -507,13 +511,13 @@ extension ChatViewModel {
                 logger.warning("Using fallback delta calculation (may be wrong for Anthropic): in=\(incrementalInput)", category: .events)
             }
         } else {
-            logger.warning("Could not find message to update with turn metadata (turn=\(event.turnNumber))", category: .events)
+            logger.warning("Could not find message to update with turn metadata (turn=\(result.turnNumber))", category: .events)
         }
 
         // Update all assistant messages from this turn with turn number
         if let startIndex = turnStartMessageIndex {
             for i in startIndex..<messages.count where messages[i].role == .assistant {
-                messages[i].turnNumber = event.turnNumber
+                messages[i].turnNumber = result.turnNumber
             }
         }
 
@@ -531,60 +535,60 @@ extension ChatViewModel {
         }
 
         // Update context window if server provides it (ensures iOS stays in sync after model switch)
-        if let contextLimit = event.contextLimit {
-            currentContextWindow = contextLimit
+        if let contextLimit = result.contextLimit {
+            contextState.currentContextWindow = contextLimit
             logger.debug("Updated context window from turn_end: \(contextLimit)", category: .events)
         }
 
         // Use server's normalizedUsage for context tracking (preferred)
         // This updates contextWindowTokens, newInputTokens, outputTokens in contextState
-        if let normalized = event.normalizedUsage {
+        if let normalized = result.normalizedUsage {
             contextState.updateFromNormalizedUsage(normalized)
             logger.debug("Context tracking updated from normalizedUsage: contextWindow=\(normalized.contextWindowTokens) newInput=\(normalized.newInputTokens)", category: .events)
         }
 
         // Update token tracking and accumulation
-        if let usage = event.tokenUsage {
+        if let usage = result.tokenUsage {
             // Determine context size: prefer server's normalizedUsage, fallback to raw inputTokens
-            let contextSize = event.normalizedUsage?.contextWindowTokens ?? usage.inputTokens
+            let contextSize = result.normalizedUsage?.contextWindowTokens ?? usage.inputTokens
 
             // Only update lastTurnInputTokens (proxy to contextWindowTokens) if we didn't get normalizedUsage
             // (If we got normalizedUsage, contextState.updateFromNormalizedUsage already set contextWindowTokens)
-            if event.normalizedUsage == nil {
-                lastTurnInputTokens = contextSize
+            if result.normalizedUsage == nil {
+                contextState.lastTurnInputTokens = contextSize
                 logger.debug("Set lastTurnInputTokens from raw inputTokens: \(contextSize)", category: .events)
             }
 
             // Track for legacy delta calculation (still needed for backward compatibility with old events)
-            previousTurnFinalInputTokens = contextSize
+            contextState.previousTurnFinalInputTokens = contextSize
 
             // Accumulate ALL tokens for billing tracking
-            accumulatedInputTokens += usage.inputTokens
-            accumulatedOutputTokens += usage.outputTokens
-            accumulatedCacheReadTokens += usage.cacheReadTokens ?? 0
-            accumulatedCacheCreationTokens += usage.cacheCreationTokens ?? 0
-            accumulatedCost += event.cost ?? 0
+            contextState.accumulatedInputTokens += usage.inputTokens
+            contextState.accumulatedOutputTokens += usage.outputTokens
+            contextState.accumulatedCacheReadTokens += usage.cacheReadTokens ?? 0
+            contextState.accumulatedCacheCreationTokens += usage.cacheCreationTokens ?? 0
+            contextState.accumulatedCost += result.cost ?? 0
 
             // Total usage shows current context + accumulated output
-            totalTokenUsage = TokenUsage(
+            contextState.totalTokenUsage = TokenUsage(
                 inputTokens: contextSize,  // Current context size for display
-                outputTokens: accumulatedOutputTokens,
-                cacheReadTokens: accumulatedCacheReadTokens > 0 ? accumulatedCacheReadTokens : nil,
-                cacheCreationTokens: accumulatedCacheCreationTokens > 0 ? accumulatedCacheCreationTokens : nil
+                outputTokens: contextState.accumulatedOutputTokens,
+                cacheReadTokens: contextState.accumulatedCacheReadTokens > 0 ? contextState.accumulatedCacheReadTokens : nil,
+                cacheCreationTokens: contextState.accumulatedCacheCreationTokens > 0 ? contextState.accumulatedCacheCreationTokens : nil
             )
-            logger.debug("Total tokens: context=\(contextSize) out=\(accumulatedOutputTokens) accumulatedIn=\(accumulatedInputTokens)", category: .events)
+            logger.debug("Total tokens: context=\(contextSize) out=\(contextState.accumulatedOutputTokens) accumulatedIn=\(contextState.accumulatedInputTokens)", category: .events)
 
             // Update CachedSession with token info for dashboard
             if let manager = eventStoreManager {
                 do {
                     try manager.updateSessionTokens(
                         sessionId: sessionId,
-                        inputTokens: accumulatedInputTokens,
-                        outputTokens: accumulatedOutputTokens,
+                        inputTokens: contextState.accumulatedInputTokens,
+                        outputTokens: contextState.accumulatedOutputTokens,
                         lastTurnInputTokens: contextSize,
-                        cacheReadTokens: accumulatedCacheReadTokens,
-                        cacheCreationTokens: accumulatedCacheCreationTokens,
-                        cost: accumulatedCost
+                        cacheReadTokens: contextState.accumulatedCacheReadTokens,
+                        cacheCreationTokens: contextState.accumulatedCacheCreationTokens,
+                        cost: contextState.accumulatedCost
                     )
                 } catch {
                     logger.error("Failed to update session tokens: \(error.localizedDescription)", category: .events)
@@ -661,6 +665,9 @@ extension ChatViewModel {
     func handleComplete() {
         logger.info("Agent complete, finalizing message (streamingText: \(streamingText.count) chars, toolCalls: \(currentTurnToolCalls.count))", category: .events)
 
+        // Process through handler (resets handler state)
+        _ = eventHandler.handleComplete()
+
         // Flush any pending UI updates to ensure all tool results are displayed
         uiUpdateQueue.flush()
 
@@ -681,7 +688,7 @@ extension ChatViewModel {
         // until the user sends a new message (cleared by startTurn on next turn)
 
         // Reset browser dismiss flag for next turn
-        userDismissedBrowserThisTurn = false
+        browserState.userDismissedBrowserThisTurn = false
 
         // Update dashboard with final response and tool count
         eventStoreManager?.setSessionProcessing(sessionId, isProcessing: false)
@@ -710,24 +717,25 @@ extension ChatViewModel {
     }
 
     func handleCompaction(_ event: CompactionEvent) {
-        let tokensSaved = event.tokensBefore - event.tokensAfter
-        logger.info("Context compacted: \(event.tokensBefore) -> \(event.tokensAfter) tokens (saved \(tokensSaved), reason: \(event.reason))", category: .events)
+        // Process event through handler
+        let result = eventHandler.handleCompaction(event)
+        logger.info("Context compacted: \(result.tokensBefore) -> \(result.tokensAfter) tokens (saved \(result.tokensSaved), reason: \(result.reason))", category: .events)
 
         // Finalize any current streaming before adding notification
         flushPendingTextUpdates()
         finalizeStreamingMessage()
 
         // Update context tracking - the new context size is tokensAfter
-        lastTurnInputTokens = event.tokensAfter
-        previousTurnFinalInputTokens = event.tokensAfter
-        logger.debug("Updated lastTurnInputTokens to \(event.tokensAfter) after compaction", category: .events)
+        contextState.lastTurnInputTokens = result.tokensAfter
+        contextState.previousTurnFinalInputTokens = result.tokensAfter
+        logger.debug("Updated lastTurnInputTokens to \(result.tokensAfter) after compaction", category: .events)
 
         // Add compaction notification pill to chat
         let compactionMessage = ChatMessage.compaction(
-            tokensBefore: event.tokensBefore,
-            tokensAfter: event.tokensAfter,
-            reason: event.reason,
-            summary: event.summary
+            tokensBefore: result.tokensBefore,
+            tokensAfter: result.tokensAfter,
+            reason: result.reason,
+            summary: result.summary
         )
         messages.append(compactionMessage)
 
@@ -738,22 +746,23 @@ extension ChatViewModel {
     }
 
     func handleContextCleared(_ event: ContextClearedEvent) {
-        let tokensFreed = event.tokensBefore - event.tokensAfter
-        logger.info("Context cleared: \(event.tokensBefore) -> \(event.tokensAfter) tokens (freed \(tokensFreed))", category: .events)
+        // Process event through handler
+        let result = eventHandler.handleContextCleared(event)
+        logger.info("Context cleared: \(result.tokensBefore) -> \(result.tokensAfter) tokens (freed \(result.tokensFreed))", category: .events)
 
         // Finalize any current streaming before adding notification
         flushPendingTextUpdates()
         finalizeStreamingMessage()
 
         // Update context tracking - the new context size is tokensAfter
-        lastTurnInputTokens = event.tokensAfter
-        previousTurnFinalInputTokens = event.tokensAfter
-        logger.debug("Updated lastTurnInputTokens to \(event.tokensAfter) after context clear", category: .events)
+        contextState.lastTurnInputTokens = result.tokensAfter
+        contextState.previousTurnFinalInputTokens = result.tokensAfter
+        logger.debug("Updated lastTurnInputTokens to \(result.tokensAfter) after context clear", category: .events)
 
         // Add context cleared notification pill to chat
         let clearedMessage = ChatMessage.contextCleared(
-            tokensBefore: event.tokensBefore,
-            tokensAfter: event.tokensAfter
+            tokensBefore: result.tokensBefore,
+            tokensAfter: result.tokensAfter
         )
         messages.append(clearedMessage)
 
@@ -764,18 +773,22 @@ extension ChatViewModel {
     }
 
     func handleMessageDeleted(_ event: MessageDeletedEvent) {
-        logger.info("Message deleted: targetType=\(event.targetType), eventId=\(event.targetEventId)", category: .events)
+        // Process event through handler
+        let result = eventHandler.handleMessageDeleted(event)
+        logger.info("Message deleted: targetType=\(result.targetType), eventId=\(result.targetEventId)", category: .events)
 
         // Add message deleted notification pill to chat
-        let deletedMessage = ChatMessage.messageDeleted(targetType: event.targetType)
+        let deletedMessage = ChatMessage.messageDeleted(targetType: result.targetType)
         messages.append(deletedMessage)
     }
 
     func handleSkillRemoved(_ event: SkillRemovedEvent) {
-        logger.info("Skill removed: \(event.skillName)", category: .events)
+        // Process event through handler
+        let result = eventHandler.handleSkillRemoved(event)
+        logger.info("Skill removed: \(result.skillName)", category: .events)
 
         // Add skill removed notification pill to chat
-        let skillRemovedMessage = ChatMessage.skillRemoved(skillName: event.skillName)
+        let skillRemovedMessage = ChatMessage.skillRemoved(skillName: result.skillName)
         messages.append(skillRemovedMessage)
 
         // Refresh context from server - skill removal changes context size
@@ -786,22 +799,28 @@ extension ChatViewModel {
     }
 
     func handlePlanModeEntered(_ event: PlanModeEnteredEvent) {
-        logger.info("Plan mode entered: skill=\(event.skillName), blocked=\(event.blockedTools.joined(separator: ", "))", category: .events)
+        // Process event through handler
+        let result = eventHandler.handlePlanModeEntered(event)
+        logger.info("Plan mode entered: skill=\(result.skillName), blocked=\(result.blockedTools.joined(separator: ", "))", category: .events)
 
         // Update state and add notification to chat
-        enterPlanMode(skillName: event.skillName, blockedTools: event.blockedTools)
+        enterPlanMode(skillName: result.skillName, blockedTools: result.blockedTools)
     }
 
     func handlePlanModeExited(_ event: PlanModeExitedEvent) {
-        logger.info("Plan mode exited: reason=\(event.reason), planPath=\(event.planPath ?? "none")", category: .events)
+        // Process event through handler
+        let result = eventHandler.handlePlanModeExited(event)
+        logger.info("Plan mode exited: reason=\(result.reason), planPath=\(result.planPath ?? "none")", category: .events)
 
         // Update state and add notification to chat
-        exitPlanMode(reason: event.reason, planPath: event.planPath)
+        exitPlanMode(reason: result.reason, planPath: result.planPath)
     }
 
     /// Handle errors from the agent streaming (shows error in chat)
     func handleAgentError(_ message: String) {
-        logger.error("Agent error: \(message)", category: .events)
+        // Process through handler (resets handler state)
+        let result = eventHandler.handleAgentError(message)
+        logger.error("Agent error: \(result.message)", category: .events)
 
         // Flush and reset all manager states on error
         uiUpdateQueue.flush()
@@ -813,10 +832,10 @@ extension ChatViewModel {
         eventStoreManager?.setSessionProcessing(sessionId, isProcessing: false)
         eventStoreManager?.updateSessionDashboardInfo(
             sessionId: sessionId,
-            lastAssistantResponse: "Error: \(String(message.prefix(100)))"
+            lastAssistantResponse: "Error: \(String(result.message.prefix(100)))"
         )
         finalizeStreamingMessage()
-        messages.append(.error(message))
+        messages.append(.error(result.message))
         thinkingText = ""
 
         // NOTE: Do NOT clear ThinkingState here - thinking caption should persist
@@ -1052,7 +1071,9 @@ extension ChatViewModel {
     // MARK: - Todo Event Handlers
 
     func handleTodosUpdated(_ event: TodosUpdatedEvent) {
-        logger.debug("Todos updated: count=\(event.todos.count)", category: .events)
+        // Process through handler (extracts todos)
+        let result = eventHandler.handleTodosUpdated(event)
+        logger.debug("Todos updated: count=\(result.todos.count), restoredCount=\(result.restoredCount)", category: .events)
 
         // Update todo state from server event
         todoState.handleTodosUpdated(event)

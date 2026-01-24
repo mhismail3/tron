@@ -33,48 +33,24 @@ class RPCClient: ObservableObject {
     private var modelCacheTime: Date?
     private let modelCacheTTL: TimeInterval = 300 // 5 minutes
 
-    // Event callbacks (for current session)
-    var onTextDelta: ((String) -> Void)?
-    var onThinkingDelta: ((String) -> Void)?
-    var onToolStart: ((ToolStartEvent) -> Void)?
-    var onToolEnd: ((ToolEndEvent) -> Void)?
-    var onTurnStart: ((TurnStartEvent) -> Void)?
-    var onTurnEnd: ((TurnEndEvent) -> Void)?
-    var onAgentTurn: ((AgentTurnEvent) -> Void)?
-    var onCompaction: ((CompactionEvent) -> Void)?
-    var onContextCleared: ((ContextClearedEvent) -> Void)?
-    var onMessageDeleted: ((MessageDeletedEvent) -> Void)?
-    var onSkillRemoved: ((SkillRemovedEvent) -> Void)?
-    var onPlanModeEntered: ((PlanModeEnteredEvent) -> Void)?
-    var onPlanModeExited: ((PlanModeExitedEvent) -> Void)?
-    var onComplete: (() -> Void)?
-    var onError: ((String) -> Void)?
+    // MARK: - Unified Event Stream
+    //
+    // Single event stream replaces 30+ individual callbacks.
+    // Consumers subscribe once and handle events via switch:
+    //
+    //   rpcClient.eventPublisher
+    //       .filter { event in event.sessionId == mySessionId }
+    //       .sink { event in
+    //           switch event { ... }
+    //       }
+    //
+    private let _eventPublisher = PassthroughSubject<ParsedEvent, Never>()
 
-    // Browser event callbacks
-    var onBrowserFrame: ((BrowserFrameEvent) -> Void)?
-    var onBrowserClosed: ((String) -> Void)?  // sessionId
-
-    // Subagent event callbacks (for real-time iOS updates)
-    var onSubagentSpawned: ((SubagentSpawnedEvent) -> Void)?
-    var onSubagentStatus: ((SubagentStatusEvent) -> Void)?
-    var onSubagentCompleted: ((SubagentCompletedEvent) -> Void)?
-    var onSubagentFailed: ((SubagentFailedEvent) -> Void)?
-    var onSubagentEvent: ((SubagentForwardedEvent) -> Void)?  // Forwarded events for detail sheet
-
-    // UI Canvas event callbacks (for RenderAppUI tool)
-    var onUIRenderStart: ((UIRenderStartEvent) -> Void)?
-    var onUIRenderChunk: ((UIRenderChunkEvent) -> Void)?
-    var onUIRenderComplete: ((UIRenderCompleteEvent) -> Void)?
-    var onUIRenderError: ((UIRenderErrorEvent) -> Void)?
-    var onUIRenderRetry: ((UIRenderRetryEvent) -> Void)?
-
-    // Todo event callbacks
-    var onTodosUpdated: ((TodosUpdatedEvent) -> Void)?
-
-    // Global event callbacks (for ALL sessions - used by dashboard)
-    var onGlobalComplete: ((String) -> Void)?  // sessionId
-    var onGlobalError: ((String, String) -> Void)?  // sessionId, message
-    var onGlobalProcessingStart: ((String) -> Void)?  // sessionId
+    /// Publisher for all parsed WebSocket events.
+    /// Events are published without session filtering - consumers filter as needed.
+    var eventPublisher: AnyPublisher<ParsedEvent, Never> {
+        _eventPublisher.eraseToAnyPublisher()
+    }
 
     private let serverURL: URL
 
@@ -207,144 +183,14 @@ class RPCClient: ObservableObject {
             return
         }
 
-        // Check session ID matches (for session-scoped events)
-        func checkSession(_ sessionId: String?) -> Bool {
-            guard let eventSessionId = sessionId else { return true }
-            return eventSessionId == currentSessionId
-        }
-
-        switch event {
-        case .textDelta(let e):
-            guard checkSession(e.sessionId) else { return }
-            onTextDelta?(e.delta)
-
-        case .thinkingDelta(let e):
-            guard checkSession(e.sessionId) else { return }
-            onThinkingDelta?(e.delta)
-
-        case .toolStart(let e):
-            guard checkSession(e.sessionId) else { return }
-            onToolStart?(e)
-
-        case .toolEnd(let e):
-            guard checkSession(e.sessionId) else { return }
-            onToolEnd?(e)
-
-        case .turnStart(let e):
-            // Always notify global listeners for dashboard updates
-            if let sessionId = e.sessionId {
-                onGlobalProcessingStart?(sessionId)
-            }
-            guard checkSession(e.sessionId) else { return }
-            onTurnStart?(e)
-
-        case .turnEnd(let e):
-            guard checkSession(e.sessionId) else { return }
-            onTurnEnd?(e)
-
-        case .agentTurn(let e):
-            guard checkSession(e.sessionId) else { return }
-            onAgentTurn?(e)
-
-        case .complete(let e):
-            // Always notify global listeners for dashboard updates
-            if let sessionId = e.sessionId {
-                onGlobalComplete?(sessionId)
-            }
-            guard checkSession(e.sessionId) else { return }
-            onComplete?()
-
-        case .compaction(let e):
-            guard checkSession(e.sessionId) else { return }
-            onCompaction?(e)
-
-        case .contextCleared(let e):
-            guard checkSession(e.sessionId) else { return }
-            onContextCleared?(e)
-
-        case .messageDeleted(let e):
-            guard checkSession(e.sessionId) else { return }
-            onMessageDeleted?(e)
-
-        case .skillRemoved(let e):
-            guard checkSession(e.sessionId) else { return }
-            onSkillRemoved?(e)
-
-        case .planModeEntered(let e):
-            guard checkSession(e.sessionId) else { return }
-            onPlanModeEntered?(e)
-
-        case .planModeExited(let e):
-            guard checkSession(e.sessionId) else { return }
-            onPlanModeExited?(e)
-
-        case .error(let e):
-            // Always notify global listeners for dashboard updates
-            if let sessionId = e.sessionId {
-                onGlobalError?(sessionId, e.message)
-            }
-            guard checkSession(e.sessionId) else { return }
-            onError?(e.message)
-
-        case .connected(let e):
+        // Log connection events
+        if case .connected(let e) = event {
             logger.info("Server version: \(e.version ?? "unknown")", category: .rpc)
-
-        case .browserFrame(let e):
-            // Browser frames don't need session check - they include their own sessionId
-            onBrowserFrame?(e)
-
-        case .browserClosed(let sessionId):
-            onBrowserClosed?(sessionId)
-
-        // Subagent events
-        case .subagentSpawned(let e):
-            guard checkSession(e.sessionId) else { return }
-            onSubagentSpawned?(e)
-
-        case .subagentStatus(let e):
-            guard checkSession(e.sessionId) else { return }
-            onSubagentStatus?(e)
-
-        case .subagentCompleted(let e):
-            guard checkSession(e.sessionId) else { return }
-            onSubagentCompleted?(e)
-
-        case .subagentFailed(let e):
-            guard checkSession(e.sessionId) else { return }
-            onSubagentFailed?(e)
-
-        case .subagentEvent(let e):
-            guard checkSession(e.sessionId) else { return }
-            onSubagentEvent?(e)
-
-        // UI Canvas events
-        case .uiRenderStart(let e):
-            guard checkSession(e.sessionId) else { return }
-            onUIRenderStart?(e)
-
-        case .uiRenderChunk(let e):
-            guard checkSession(e.sessionId) else { return }
-            onUIRenderChunk?(e)
-
-        case .uiRenderComplete(let e):
-            guard checkSession(e.sessionId) else { return }
-            onUIRenderComplete?(e)
-
-        case .uiRenderError(let e):
-            guard checkSession(e.sessionId) else { return }
-            onUIRenderError?(e)
-
-        case .uiRenderRetry(let e):
-            guard checkSession(e.sessionId) else { return }
-            onUIRenderRetry?(e)
-
-        case .todosUpdated(let e):
-            guard checkSession(e.sessionId) else { return }
-            onTodosUpdated?(e)
-
-        case .unknown(let type):
-            logger.debug("Unknown event type: \(type)", category: .events)
         }
+
+        // Publish all events to the unified stream
+        // Consumers handle session filtering via their own subscription filters
+        _eventPublisher.send(event)
     }
 
     // MARK: - Session Methods

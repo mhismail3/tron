@@ -24,7 +24,7 @@ extension ChatViewModel {
         }
 
         // Reset browser dismiss flag for new prompt - browser can auto-open again
-        userDismissedBrowserThisTurn = false
+        browserState.userDismissedBrowserThisTurn = false
 
         // Create user message with attachments, skills, and spells displayed above text
         let attachmentsToShow = attachments.isEmpty ? nil : attachments

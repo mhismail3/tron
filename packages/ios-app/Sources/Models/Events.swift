@@ -267,6 +267,177 @@ extension TurnEndEvent.TurnEndData {
     }
 }
 
+// MARK: - Additional Test Convenience Initializers
+
+extension ToolStartEvent {
+    /// Convenience initializer for testing
+    init(toolName: String, toolCallId: String, arguments: [String: AnyCodable]?, formattedArguments: String) {
+        self.type = "agent.tool_start"
+        self.sessionId = nil
+        self.timestamp = nil
+        self.data = ToolStartData(toolName: toolName, toolCallId: toolCallId, arguments: arguments)
+    }
+}
+
+// ToolStartEvent.ToolStartData uses synthesized memberwise initializer
+
+extension ToolEndEvent {
+    /// Convenience initializer for testing
+    init(toolCallId: String, success: Bool, displayResult: String, durationMs: Int?, details: ToolDetails?) {
+        self.type = "agent.tool_end"
+        self.sessionId = nil
+        self.timestamp = nil
+        self.data = ToolEndData(toolCallId: toolCallId, success: success, result: displayResult, durationMs: durationMs, details: details)
+    }
+}
+
+extension ToolEndEvent.ToolEndData {
+    /// Convenience initializer for testing
+    init(toolCallId: String, success: Bool, result: String?, durationMs: Int?, details: ToolEndEvent.ToolDetails?) {
+        self.toolCallId = toolCallId
+        self.toolName = nil
+        self.success = success
+        self.result = result
+        self.output = nil
+        self.error = success ? nil : result
+        self.durationMs = durationMs
+        self.duration = nil
+        self.details = details
+    }
+}
+
+extension TurnStartEvent {
+    /// Convenience initializer for testing
+    init(turnNumber: Int) {
+        self.type = "agent.turn_start"
+        self.sessionId = nil
+        self.timestamp = nil
+        self.data = TurnStartData(turn: turnNumber, turnNumber: turnNumber)
+    }
+}
+
+// TurnStartEvent.TurnStartData uses synthesized memberwise initializer
+
+extension CompactionEvent {
+    /// Convenience initializer for testing
+    init(tokensBefore: Int, tokensAfter: Int, reason: String, summary: String?) {
+        self.type = "agent.compaction"
+        self.sessionId = nil
+        self.timestamp = nil
+        self.data = CompactionData(tokensBefore: tokensBefore, tokensAfter: tokensAfter, compressionRatio: nil, reason: reason, summary: summary)
+    }
+}
+
+// CompactionEvent.CompactionData uses synthesized memberwise initializer
+
+extension ContextClearedEvent {
+    /// Convenience initializer for testing
+    init(tokensBefore: Int, tokensAfter: Int) {
+        self.type = "agent.context_cleared"
+        self.sessionId = nil
+        self.timestamp = nil
+        self.data = ContextClearedData(tokensBefore: tokensBefore, tokensAfter: tokensAfter)
+    }
+}
+
+// ContextClearedEvent.ContextClearedData uses synthesized memberwise initializer
+
+extension MessageDeletedEvent {
+    /// Convenience initializer for testing
+    init(targetEventId: String, targetType: String) {
+        self.type = "agent.message_deleted"
+        self.sessionId = nil
+        self.timestamp = nil
+        self.data = MessageDeletedData(targetEventId: targetEventId, targetType: targetType, targetTurn: nil, reason: nil)
+    }
+}
+
+// MessageDeletedEvent.MessageDeletedData uses synthesized memberwise initializer
+
+extension SkillRemovedEvent {
+    /// Convenience initializer for testing
+    init(skillName: String) {
+        self.type = "agent.skill_removed"
+        self.sessionId = nil
+        self.timestamp = nil
+        self.data = SkillRemovedData(skillName: skillName)
+    }
+}
+
+// SkillRemovedEvent.SkillRemovedData uses synthesized memberwise initializer
+
+extension PlanModeEnteredEvent {
+    /// Convenience initializer for testing
+    init(skillName: String, blockedTools: [String]) {
+        self.type = "plan.mode_entered"
+        self.sessionId = nil
+        self.timestamp = nil
+        self.data = PlanModeEnteredData(skillName: skillName, blockedTools: blockedTools)
+    }
+}
+
+// PlanModeEnteredEvent.PlanModeEnteredData uses synthesized memberwise initializer
+
+extension PlanModeExitedEvent {
+    /// Convenience initializer for testing
+    init(reason: String, planPath: String?) {
+        self.type = "plan.mode_exited"
+        self.sessionId = nil
+        self.timestamp = nil
+        self.data = PlanModeExitedData(reason: reason, planPath: planPath)
+    }
+}
+
+// PlanModeExitedEvent.PlanModeExitedData uses synthesized memberwise initializer
+
+extension UIRenderStartEvent {
+    /// Convenience initializer for testing
+    init(canvasId: String, title: String?, toolCallId: String) {
+        self.type = "ui.render.start"
+        self.sessionId = nil
+        self.timestamp = nil
+        self.data = UIRenderStartData(canvasId: canvasId, title: title, toolCallId: toolCallId)
+    }
+}
+
+// UIRenderStartEvent.UIRenderStartData uses synthesized memberwise initializer
+
+extension UIRenderChunkEvent {
+    /// Convenience initializer for testing
+    init(canvasId: String, chunk: String, accumulated: String) {
+        self.type = "ui.render.chunk"
+        self.sessionId = nil
+        self.timestamp = nil
+        self.data = UIRenderChunkData(canvasId: canvasId, chunk: chunk, accumulated: accumulated)
+    }
+}
+
+// UIRenderChunkEvent.UIRenderChunkData uses synthesized memberwise initializer
+
+extension UIRenderErrorEvent {
+    /// Convenience initializer for testing
+    init(canvasId: String, error: String) {
+        self.type = "ui.render.error"
+        self.sessionId = nil
+        self.timestamp = nil
+        self.data = UIRenderErrorData(canvasId: canvasId, error: error)
+    }
+}
+
+// UIRenderErrorEvent.UIRenderErrorData uses synthesized memberwise initializer
+
+extension UIRenderRetryEvent {
+    /// Convenience initializer for testing
+    init(canvasId: String, attempt: Int, errors: String) {
+        self.type = "ui.render.retry"
+        self.sessionId = nil
+        self.timestamp = nil
+        self.data = UIRenderRetryData(canvasId: canvasId, attempt: attempt, errors: errors)
+    }
+}
+
+// UIRenderRetryEvent.UIRenderRetryData uses synthesized memberwise initializer
+
 struct CompleteEvent: Decodable {
     let type: String
     let sessionId: String?
@@ -1012,5 +1183,52 @@ enum ParsedEvent {
             }
             return nil
         }
+    }
+
+    // MARK: - Session ID Accessor
+
+    /// Extract sessionId from the event for filtering.
+    /// Returns nil for events that don't have a sessionId (e.g., connected, unknown).
+    var sessionId: String? {
+        switch self {
+        case .textDelta(let e): return e.sessionId
+        case .thinkingDelta(let e): return e.sessionId
+        case .toolStart(let e): return e.sessionId
+        case .toolEnd(let e): return e.sessionId
+        case .turnStart(let e): return e.sessionId
+        case .turnEnd(let e): return e.sessionId
+        case .agentTurn(let e): return e.sessionId
+        case .complete(let e): return e.sessionId
+        case .error(let e): return e.sessionId
+        case .compaction(let e): return e.sessionId
+        case .contextCleared(let e): return e.sessionId
+        case .messageDeleted(let e): return e.sessionId
+        case .skillRemoved(let e): return e.sessionId
+        case .planModeEntered(let e): return e.sessionId
+        case .planModeExited(let e): return e.sessionId
+        case .browserFrame(let e): return e.sessionId
+        case .browserClosed(let sessionId): return sessionId
+        case .subagentSpawned(let e): return e.sessionId
+        case .subagentStatus(let e): return e.sessionId
+        case .subagentCompleted(let e): return e.sessionId
+        case .subagentFailed(let e): return e.sessionId
+        case .subagentEvent(let e): return e.sessionId
+        case .uiRenderStart(let e): return e.sessionId
+        case .uiRenderChunk(let e): return e.sessionId
+        case .uiRenderComplete(let e): return e.sessionId
+        case .uiRenderError(let e): return e.sessionId
+        case .uiRenderRetry(let e): return e.sessionId
+        case .todosUpdated(let e): return e.sessionId
+        case .connected: return nil
+        case .unknown: return nil
+        }
+    }
+
+    /// Check if this event matches the given session ID.
+    /// Returns true if the event has no sessionId (global event) or if it matches.
+    func matchesSession(_ targetSessionId: String?) -> Bool {
+        guard let eventSessionId = sessionId else { return true }
+        guard let targetSessionId = targetSessionId else { return false }
+        return eventSessionId == targetSessionId
     }
 }

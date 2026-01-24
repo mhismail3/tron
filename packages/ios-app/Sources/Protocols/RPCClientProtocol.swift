@@ -9,31 +9,10 @@ protocol RPCClientProtocol: ObservableObject {
     var currentSessionId: String? { get }
     var currentModel: String { get }
 
-    // MARK: - Event Callbacks
-    var onTextDelta: ((String) -> Void)? { get set }
-    var onThinkingDelta: ((String) -> Void)? { get set }
-    var onToolStart: ((ToolStartEvent) -> Void)? { get set }
-    var onToolEnd: ((ToolEndEvent) -> Void)? { get set }
-    var onTurnStart: ((TurnStartEvent) -> Void)? { get set }
-    var onTurnEnd: ((TurnEndEvent) -> Void)? { get set }
-    var onAgentTurn: ((AgentTurnEvent) -> Void)? { get set }
-    var onCompaction: ((CompactionEvent) -> Void)? { get set }
-    var onContextCleared: ((ContextClearedEvent) -> Void)? { get set }
-    var onMessageDeleted: ((MessageDeletedEvent) -> Void)? { get set }
-    var onSkillRemoved: ((SkillRemovedEvent) -> Void)? { get set }
-    var onPlanModeEntered: ((PlanModeEnteredEvent) -> Void)? { get set }
-    var onPlanModeExited: ((PlanModeExitedEvent) -> Void)? { get set }
-    var onComplete: (() -> Void)? { get set }
-    var onError: ((String) -> Void)? { get set }
-
-    // Browser event callbacks
-    var onBrowserFrame: ((BrowserFrameEvent) -> Void)? { get set }
-    var onBrowserClosed: ((String) -> Void)? { get set }
-
-    // Global event callbacks
-    var onGlobalComplete: ((String) -> Void)? { get set }
-    var onGlobalError: ((String, String) -> Void)? { get set }
-    var onGlobalProcessingStart: ((String) -> Void)? { get set }
+    // MARK: - Unified Event Stream
+    /// Publisher for all parsed WebSocket events.
+    /// Consumers subscribe and filter by session ID as needed.
+    var eventPublisher: AnyPublisher<ParsedEvent, Never> { get }
 
     // MARK: - Computed Properties
     var isConnected: Bool { get }

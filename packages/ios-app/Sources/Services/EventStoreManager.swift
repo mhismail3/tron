@@ -67,6 +67,9 @@ class EventStoreManager: ObservableObject {
     /// Cancellable for server settings subscription
     private var serverSettingsSubscription: AnyCancellable?
 
+    /// Cancellables for event stream subscription
+    private var eventCancellables = Set<AnyCancellable>()
+
     // MARK: - Initialization
 
     init(eventDB: EventDatabase, rpcClient: RPCClient) {
@@ -108,32 +111,56 @@ class EventStoreManager: ObservableObject {
     }
 
     /// Set up handlers for global events (events from all sessions)
+    /// These events update dashboard state for ALL sessions, not just the active one.
     private func setupGlobalEventHandlers() {
-        rpcClient.onGlobalProcessingStart = { [weak self] sessionId in
-            Task { @MainActor in
+        // Clear existing subscriptions to prevent duplicates when RPC client is updated
+        eventCancellables.removeAll()
+
+        // Subscribe to event stream for global events
+        // We don't filter by session ID here - we want events from ALL sessions
+        rpcClient.eventPublisher
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] event in
+                self?.handleGlobalEvent(event)
+            }
+            .store(in: &eventCancellables)
+    }
+
+    /// Handle global events for dashboard updates
+    private func handleGlobalEvent(_ event: ParsedEvent) {
+        switch event {
+        case .turnStart(let e):
+            // Processing started for a session
+            if let sessionId = e.sessionId {
                 logger.info("Global: Session \(sessionId) started processing", category: .session)
-                self?.setSessionProcessing(sessionId, isProcessing: true)
+                setSessionProcessing(sessionId, isProcessing: true)
             }
-        }
 
-        rpcClient.onGlobalComplete = { [weak self] sessionId in
-            Task { @MainActor in
+        case .complete(let e):
+            // Processing completed for a session
+            if let sessionId = e.sessionId {
                 logger.info("Global: Session \(sessionId) completed processing", category: .session)
-                self?.setSessionProcessing(sessionId, isProcessing: false)
-                try? await self?.syncSessionEvents(sessionId: sessionId)
-                self?.extractDashboardInfoFromEvents(sessionId: sessionId)
+                setSessionProcessing(sessionId, isProcessing: false)
+                Task {
+                    try? await self.syncSessionEvents(sessionId: sessionId)
+                    self.extractDashboardInfoFromEvents(sessionId: sessionId)
+                }
             }
-        }
 
-        rpcClient.onGlobalError = { [weak self] sessionId, message in
-            Task { @MainActor in
-                logger.info("Global: Session \(sessionId) error: \(message)", category: .session)
-                self?.setSessionProcessing(sessionId, isProcessing: false)
-                self?.updateSessionDashboardInfo(
+        case .error(let e):
+            // Error occurred in a session
+            if let sessionId = e.sessionId {
+                logger.info("Global: Session \(sessionId) error: \(e.message)", category: .session)
+                setSessionProcessing(sessionId, isProcessing: false)
+                updateSessionDashboardInfo(
                     sessionId: sessionId,
-                    lastAssistantResponse: "Error: \(String(message.prefix(100)))"
+                    lastAssistantResponse: "Error: \(String(e.message.prefix(100)))"
                 )
             }
+
+        default:
+            // Other events are handled by session-specific subscribers
+            break
         }
     }
 

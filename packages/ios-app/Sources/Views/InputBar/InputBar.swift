@@ -5,57 +5,16 @@ import PhotosUI
 
 @available(iOS 26.0, *)
 struct InputBar: View {
-    @Binding var text: String
-    let isProcessing: Bool
-    let isRecording: Bool
-    let isTranscribing: Bool
-    @Binding var selectedImages: [PhotosPickerItem]
-    let onSend: () -> Void
-    let onAbort: () -> Void
-    let onMicTap: () -> Void
-    @Binding var attachments: [Attachment]
-    let onAddAttachment: (Attachment) -> Void
-    let onRemoveAttachment: (Attachment) -> Void
-    var inputHistory: InputHistoryStore?
-    var onHistoryNavigate: ((String) -> Void)?
+    // MARK: - Consolidated Input (State/Config/Actions pattern)
 
-    // Status bar info
-    var modelName: String = ""
-    var tokenUsage: TokenUsage?
-    var contextPercentage: Int = 0
-    var contextWindow: Int = 0
-    var lastTurnInputTokens: Int = 0
+    /// Mutable input state (text, attachments, skills, etc.)
+    @Bindable var state: InputBarState
 
-    // Model picker integration
-    var cachedModels: [ModelInfo] = []
-    var isLoadingModels: Bool = false
-    var onModelSelect: ((ModelInfo) -> Void)?
+    /// Read-only configuration (processing state, model info, etc.)
+    let config: InputBarConfig
 
-    // Reasoning level picker
-    @Binding var reasoningLevel: String
-    var currentModelInfo: ModelInfo?
-    var onReasoningLevelChange: ((String) -> Void)?
-
-    // Context manager action
-    var onContextTap: (() -> Void)?
-
-    // Skills integration
-    var skillStore: SkillStore?
-    var onSkillSelect: ((Skill) -> Void)?
-    @Binding var selectedSkills: [Skill]
-    var onSkillRemove: ((Skill) -> Void)?
-    var onSkillDetailTap: ((Skill) -> Void)?
-
-    // Spells integration (ephemeral skills)
-    @Binding var selectedSpells: [Skill]
-    var onSpellRemove: ((Skill) -> Void)?
-    var onSpellDetailTap: ((Skill) -> Void)?
-
-    /// Optional animation coordinator for chained pill morph animations
-    var animationCoordinator: AnimationCoordinator?
-
-    /// Read-only mode disables input when workspace is deleted
-    var readOnly: Bool = false
+    /// Action callbacks (send, abort, mic, etc.)
+    let actions: InputBarActions
 
     // MARK: - Private State
 
@@ -87,19 +46,19 @@ struct InputBar: View {
     // MARK: - Computed Properties
 
     private var canSend: Bool {
-        !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !attachments.isEmpty
+        state.hasContent
     }
 
     private var shouldShowActionButton: Bool {
-        isProcessing || canSend
+        config.isProcessing || canSend
     }
 
     private var shouldShowStatusPills: Bool {
-        !modelName.isEmpty || true // Token pill always visible
+        !config.modelName.isEmpty || true // Token pill always visible
     }
 
     private var hasSkillsAvailable: Bool {
-        skillStore != nil && (skillStore?.totalCount ?? 0) > 0
+        config.skillStore != nil && (config.skillStore?.totalCount ?? 0) > 0
     }
 
     private var textFieldTrailingPadding: CGFloat {
@@ -119,7 +78,7 @@ struct InputBar: View {
     var body: some View {
         VStack(spacing: 10) {
             // Skill mention popup
-            if showSkillMentionPopup, let store = skillStore {
+            if showSkillMentionPopup, let store = config.skillStore {
                 SkillMentionPopup(
                     skills: store.skills,
                     query: skillMentionQuery,
@@ -135,7 +94,7 @@ struct InputBar: View {
             }
 
             // Spell mention popup (ephemeral skills)
-            if showSpellMentionPopup, let store = skillStore {
+            if showSpellMentionPopup, let store = config.skillStore {
                 SpellMentionPopup(
                     skills: store.skills,
                     query: spellMentionQuery,
@@ -160,10 +119,10 @@ struct InputBar: View {
                 // Attachment button
                 if showAttachmentButton {
                     GlassAttachmentButton(
-                        isProcessing: isProcessing || readOnly,
+                        isProcessing: config.isProcessing || config.readOnly,
                         hasSkillsAvailable: hasSkillsAvailable,
                         buttonSize: actionButtonSize,
-                        skillStore: skillStore,
+                        skillStore: config.skillStore,
                         showCamera: $showCamera,
                         showingImagePicker: $showingImagePicker,
                         showFilePicker: $showFilePicker,
@@ -204,12 +163,12 @@ struct InputBar: View {
                     }
 
                 // Send/Abort button
-                if shouldShowActionButton && !readOnly {
+                if shouldShowActionButton && !config.readOnly {
                     GlassActionButton(
-                        isProcessing: isProcessing,
+                        isProcessing: config.isProcessing,
                         canSend: canSend,
-                        onSend: onSend,
-                        onAbort: onAbort,
+                        onSend: actions.onSend,
+                        onAbort: actions.onAbort,
                         namespace: actionButtonNamespace,
                         buttonSize: actionButtonSize
                     )
@@ -219,10 +178,10 @@ struct InputBar: View {
                 // Mic button
                 if showMicButton {
                     GlassMicButton(
-                        isRecording: isRecording,
-                        isTranscribing: isTranscribing,
-                        isProcessing: isProcessing || readOnly,
-                        onMicTap: onMicTap,
+                        isRecording: config.isRecording,
+                        isTranscribing: config.isTranscribing,
+                        isProcessing: config.isProcessing || config.readOnly,
+                        onMicTap: actions.onMicTap,
                         buttonSize: actionButtonSize,
                         audioMonitor: audioMonitor
                     )
@@ -243,7 +202,7 @@ struct InputBar: View {
             }
         }
         .animation(nil, value: isFocused)
-        .onChange(of: isProcessing) { wasProcessing, isNowProcessing in
+        .onChange(of: config.isProcessing) { wasProcessing, isNowProcessing in
             if !wasProcessing && isNowProcessing {
                 // Processing started - dismiss keyboard IMMEDIATELY using both methods
                 // 1. SwiftUI FocusState - updates focus binding
@@ -261,11 +220,11 @@ struct InputBar: View {
             }
         }
         // Animation coordinator updates
-        .onChange(of: currentModelInfo?.supportsReasoning) { _, supportsReasoning in
-            animationCoordinator?.updateReasoningSupport(supportsReasoning == true)
+        .onChange(of: config.currentModelInfo?.supportsReasoning) { _, supportsReasoning in
+            config.animationCoordinator?.updateReasoningSupport(supportsReasoning == true)
         }
         // Skill and spell mention detection
-        .onChange(of: text) { _, newText in
+        .onChange(of: state.text) { _, newText in
             detectSkillMention(in: newText)
             detectSpellMention(in: newText)
         }
@@ -282,7 +241,7 @@ struct InputBar: View {
                             originalSize: Int(capturedImage.jpegData(compressionQuality: 1.0)?.count ?? 0)
                         )
                         await MainActor.run {
-                            onAddAttachment(attachment)
+                            actions.onAddAttachment(attachment)
                         }
                     }
                 }
@@ -299,7 +258,7 @@ struct InputBar: View {
                         mimeType: mimeType,
                         fileName: fileName
                     )
-                    onAddAttachment(attachment)
+                    actions.onAddAttachment(attachment)
                 } catch {
                     logger.warning("Failed to read document: \(error.localizedDescription)", category: .chat)
                 }
@@ -307,7 +266,7 @@ struct InputBar: View {
         }
         .photosPicker(
             isPresented: $showingImagePicker,
-            selection: $selectedImages,
+            selection: $state.selectedImages,
             maxSelectionCount: 5,
             matching: .images
         )
@@ -347,37 +306,37 @@ struct InputBar: View {
     @ViewBuilder
     private var contentArea: some View {
         HStack(alignment: .bottom, spacing: 12) {
-            if !selectedSkills.isEmpty || !selectedSpells.isEmpty || !attachments.isEmpty {
+            if !state.selectedSkills.isEmpty || !state.selectedSpells.isEmpty || !state.attachments.isEmpty {
                 ContentAreaView(
-                    selectedSkills: selectedSkills,
-                    selectedSpells: selectedSpells,
-                    attachments: attachments,
+                    selectedSkills: state.selectedSkills,
+                    selectedSpells: state.selectedSpells,
+                    attachments: state.attachments,
                     onSkillRemove: { skill in
                         removeSelectedSkill(skill)
                     },
-                    onSkillDetailTap: onSkillDetailTap,
+                    onSkillDetailTap: actions.onSkillDetailTap,
                     onSpellRemove: { skill in
                         removeSelectedSpell(skill)
                     },
-                    onSpellDetailTap: onSpellDetailTap,
-                    onRemoveAttachment: onRemoveAttachment
+                    onSpellDetailTap: actions.onSpellDetailTap,
+                    onRemoveAttachment: actions.onRemoveAttachment
                 )
             }
 
             Spacer(minLength: 0)
 
             StatusPillsColumn(
-                modelName: modelName,
-                cachedModels: cachedModels,
-                currentModelInfo: currentModelInfo,
-                contextPercentage: contextPercentage,
-                contextWindow: contextWindow,
-                lastTurnInputTokens: lastTurnInputTokens,
-                reasoningLevel: $reasoningLevel,
+                modelName: config.modelName,
+                cachedModels: config.cachedModels,
+                currentModelInfo: config.currentModelInfo,
+                contextPercentage: config.contextPercentage,
+                contextWindow: config.contextWindow,
+                lastTurnInputTokens: config.lastTurnInputTokens,
+                reasoningLevel: $state.reasoningLevel,
                 hasAppeared: hasAppeared,
                 reasoningPillNamespace: reasoningPillNamespace,
-                onContextTap: onContextTap,
-                readOnly: readOnly
+                onContextTap: actions.onContextTap,
+                readOnly: config.readOnly
             )
             .opacity(shouldShowStatusPills ? 1 : 0)
         }
@@ -387,7 +346,7 @@ struct InputBar: View {
 
     private var textFieldGlass: some View {
         ZStack(alignment: .leading) {
-            if text.isEmpty && !isFocused {
+            if state.text.isEmpty && !isFocused {
                 Text("Type here")
                     .font(TronTypography.input)
                     .foregroundStyle(.tronEmerald.opacity(0.5))
@@ -395,19 +354,19 @@ struct InputBar: View {
                     .padding(.vertical, 10)
             }
 
-            TextField("", text: $text, axis: .vertical)
+            TextField("", text: $state.text, axis: .vertical)
                 .textFieldStyle(.plain)
                 .font(TronTypography.input)
-                .foregroundStyle(readOnly ? .tronEmerald.opacity(0.5) : .tronEmerald)
+                .foregroundStyle(config.readOnly ? .tronEmerald.opacity(0.5) : .tronEmerald)
                 .padding(.leading, 14)
                 .padding(.trailing, textFieldTrailingPadding)
                 .padding(.vertical, 10)
                 .lineLimit(1...8)
                 .focused($isFocused)
-                .disabled(isProcessing || readOnly)
+                .disabled(config.isProcessing || config.readOnly)
                 .onSubmit {
-                    if !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !readOnly {
-                        onSend()
+                    if !state.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !config.readOnly {
+                        actions.onSend()
                     }
                 }
         }
@@ -420,7 +379,7 @@ struct InputBar: View {
     // MARK: - Skill Mention Detection
 
     private func detectSkillMention(in newText: String) {
-        guard let store = skillStore else { return }
+        guard let store = config.skillStore else { return }
 
         if let completedSkill = detectCompletedSkillMention(in: newText, skills: store.skills) {
             selectCompletedSkillMention(completedSkill, in: newText)
@@ -474,7 +433,7 @@ struct InputBar: View {
             if backtickCount % 2 != 0 { continue }
 
             if let skill = skills.first(where: { $0.name.lowercased() == skillName.lowercased() }) {
-                if !selectedSkills.contains(where: { $0.name.lowercased() == skillName.lowercased() }) {
+                if !state.selectedSkills.contains(where: { $0.name.lowercased() == skillName.lowercased() }) {
                     return skill
                 }
             }
@@ -484,25 +443,25 @@ struct InputBar: View {
     }
 
     private func selectCompletedSkillMention(_ skill: Skill, in currentText: String) {
-        if !selectedSkills.contains(where: { $0.name == skill.name }) {
-            selectedSkills.append(skill)
+        if !state.selectedSkills.contains(where: { $0.name == skill.name }) {
+            state.selectedSkills.append(skill)
         }
         dismissSkillMentionPopup()
-        onSkillSelect?(skill)
+        actions.onSkillSelect?(skill)
     }
 
     private func selectSkillFromMention(_ skill: Skill) {
-        if let atIndex = text.lastIndex(of: "@") {
-            let beforeAt = String(text[..<atIndex])
-            text = beforeAt + "@" + skill.name + " "
+        if let atIndex = state.text.lastIndex(of: "@") {
+            let beforeAt = String(state.text[..<atIndex])
+            state.text = beforeAt + "@" + skill.name + " "
         }
 
-        if !selectedSkills.contains(where: { $0.name == skill.name }) {
-            selectedSkills.append(skill)
+        if !state.selectedSkills.contains(where: { $0.name == skill.name }) {
+            state.selectedSkills.append(skill)
         }
 
         dismissSkillMentionPopup()
-        onSkillSelect?(skill)
+        actions.onSkillSelect?(skill)
     }
 
     private func dismissSkillMentionPopup() {
@@ -513,14 +472,14 @@ struct InputBar: View {
     }
 
     private func removeSelectedSkill(_ skill: Skill) {
-        selectedSkills.removeAll { $0.name == skill.name }
-        onSkillRemove?(skill)
+        state.selectedSkills.removeAll { $0.name == skill.name }
+        actions.onSkillRemove?(skill)
     }
 
     // MARK: - Spell Mention Detection
 
     private func detectSpellMention(in newText: String) {
-        guard let store = skillStore else { return }
+        guard let store = config.skillStore else { return }
 
         // Check for completed %spellname mentions
         if let completedSpell = detectCompletedSpellMention(in: newText, skills: store.skills) {
@@ -580,7 +539,7 @@ struct InputBar: View {
             // Match against skills (spells use the same source)
             if let skill = skills.first(where: { $0.name.lowercased() == spellName.lowercased() }) {
                 // Don't add if already selected as a spell
-                if !selectedSpells.contains(where: { $0.name.lowercased() == spellName.lowercased() }) {
+                if !state.selectedSpells.contains(where: { $0.name.lowercased() == spellName.lowercased() }) {
                     return skill
                 }
             }
@@ -590,21 +549,21 @@ struct InputBar: View {
     }
 
     private func selectCompletedSpellMention(_ skill: Skill, in currentText: String) {
-        if !selectedSpells.contains(where: { $0.name == skill.name }) {
-            selectedSpells.append(skill)
+        if !state.selectedSpells.contains(where: { $0.name == skill.name }) {
+            state.selectedSpells.append(skill)
         }
         dismissSpellMentionPopup()
     }
 
     private func selectSpellFromMention(_ skill: Skill) {
         // Replace the %query with %skillname followed by space
-        if let percentIndex = text.lastIndex(of: "%") {
-            let beforePercent = String(text[..<percentIndex])
-            text = beforePercent + "%" + skill.name + " "
+        if let percentIndex = state.text.lastIndex(of: "%") {
+            let beforePercent = String(state.text[..<percentIndex])
+            state.text = beforePercent + "%" + skill.name + " "
         }
 
-        if !selectedSpells.contains(where: { $0.name == skill.name }) {
-            selectedSpells.append(skill)
+        if !state.selectedSpells.contains(where: { $0.name == skill.name }) {
+            state.selectedSpells.append(skill)
         }
 
         dismissSpellMentionPopup()
@@ -618,18 +577,18 @@ struct InputBar: View {
     }
 
     private func removeSelectedSpell(_ skill: Skill) {
-        selectedSpells.removeAll { $0.name == skill.name }
-        onSpellRemove?(skill)
+        state.selectedSpells.removeAll { $0.name == skill.name }
+        actions.onSpellRemove?(skill)
     }
 
     /// Trigger reasoning pill animation
     func triggerReasoningPillAnimation() {
-        animationCoordinator?.updateReasoningSupport(true)
+        config.animationCoordinator?.updateReasoningSupport(true)
     }
 
     /// Hide reasoning pill
     func hideReasoningPill() {
-        animationCoordinator?.updateReasoningSupport(false)
+        config.animationCoordinator?.updateReasoningSupport(false)
     }
 }
 
@@ -648,40 +607,34 @@ extension Notification.Name {
 
 @available(iOS 26.0, *)
 #Preview {
+    @Previewable @State var previewState = InputBarState()
+
     VStack {
         Spacer()
         InputBar(
-            text: .constant("Hello world"),
-            isProcessing: false,
-            isRecording: false,
-            isTranscribing: false,
-            selectedImages: .constant([]),
-            onSend: {},
-            onAbort: {},
-            onMicTap: {},
-            attachments: .constant([]),
-            onAddAttachment: { _ in },
-            onRemoveAttachment: { _ in },
-            inputHistory: nil,
-            onHistoryNavigate: nil,
-            modelName: "claude-sonnet-4-5-20260105",
-            tokenUsage: TokenUsage(inputTokens: 50000, outputTokens: 10000, cacheReadTokens: nil, cacheCreationTokens: nil),
-            contextPercentage: 30,
-            contextWindow: 200_000,
-            lastTurnInputTokens: 60000,
-            cachedModels: [],
-            isLoadingModels: false,
-            onModelSelect: nil,
-            reasoningLevel: .constant("medium"),
-            currentModelInfo: nil,
-            onReasoningLevelChange: nil,
-            selectedSkills: .constant([]),
-            onSkillRemove: nil,
-            onSkillDetailTap: nil,
-            selectedSpells: .constant([]),
-            onSpellRemove: nil,
-            onSpellDetailTap: nil
+            state: previewState,
+            config: InputBarConfig(
+                isProcessing: false,
+                isRecording: false,
+                isTranscribing: false,
+                modelName: "claude-sonnet-4-5-20260105",
+                tokenUsage: TokenUsage(inputTokens: 50000, outputTokens: 10000, cacheReadTokens: nil, cacheCreationTokens: nil),
+                contextPercentage: 30,
+                contextWindow: 200_000,
+                lastTurnInputTokens: 60000,
+                cachedModels: [],
+                isLoadingModels: false,
+                currentModelInfo: nil,
+                skillStore: nil,
+                inputHistory: nil,
+                animationCoordinator: nil,
+                readOnly: false
+            ),
+            actions: InputBarActions()
         )
+    }
+    .onAppear {
+        previewState.text = "Hello world"
     }
     .preferredColorScheme(.dark)
 }

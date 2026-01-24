@@ -8,12 +8,11 @@ import UIKit
 // Note: ToolCallRecord is defined in EventStoreManager.swift
 
 @MainActor
-class ChatViewModel: ObservableObject {
+class ChatViewModel: ObservableObject, ChatEventContext {
 
     // MARK: - Published State
 
     @Published var messages: [ChatMessage] = []
-    @Published var inputText = ""
     @Published var isProcessing = false
     @Published var connectionState: ConnectionState = .disconnected
     @Published var showSettings = false
@@ -21,8 +20,6 @@ class ChatViewModel: ObservableObject {
     @Published var showError = false
     /// Set to true when the session doesn't exist on server and view should navigate back
     @Published var shouldDismiss = false
-    @Published var selectedImages: [PhotosPickerItem] = []
-    @Published var attachments: [Attachment] = []
     @Published var thinkingText = ""
     @Published var isThinkingExpanded = false
     @Published var isRecording = false
@@ -32,17 +29,24 @@ class ChatViewModel: ObservableObject {
     /// Whether currently loading more messages
     @Published var isLoadingMoreMessages = false
 
-    // MARK: - Context Window (Proxy for backward compatibility)
+    // MARK: - Input State (delegated to InputBarState for backward compatibility)
 
-    /// Total token usage for the session
-    var totalTokenUsage: TokenUsage? {
-        get { contextState.totalTokenUsage }
-        set { contextState.totalTokenUsage = newValue }
+    /// Text input - delegated to inputBarState
+    var inputText: String {
+        get { inputBarState.text }
+        set { inputBarState.text = newValue }
     }
-    /// Current model's context window size (from server's model.list)
-    var currentContextWindow: Int {
-        get { contextState.currentContextWindow }
-        set { contextState.currentContextWindow = newValue }
+
+    /// Selected images from photo picker - delegated to inputBarState
+    var selectedImages: [PhotosPickerItem] {
+        get { inputBarState.selectedImages }
+        set { inputBarState.selectedImages = newValue }
+    }
+
+    /// Attachments for the current message - delegated to inputBarState
+    var attachments: [Attachment] {
+        get { inputBarState.attachments }
+        set { inputBarState.attachments = newValue }
     }
 
     // MARK: - Extracted State Objects
@@ -63,72 +67,46 @@ class ChatViewModel: ObservableObject {
     let todoState = TodoState()
     /// Thinking state (for extended thinking display)
     let thinkingState = ThinkingState()
+    /// Input bar state (text, attachments, skills, reasoning level)
+    let inputBarState = InputBarState()
 
-    // MARK: - Browser State (Proxies for backward compatibility)
+    // MARK: - Protocol Conformance (ChatEventContext)
+    // These are thin wrappers for protocol conformance only
 
-    /// Current browser frame image
-    var browserFrame: UIImage? {
-        get { browserState.browserFrame }
-        set { browserState.browserFrame = newValue }
-    }
-    /// Whether to show the browser sheet
-    var showBrowserWindow: Bool {
-        get { browserState.showBrowserWindow }
-        set { browserState.showBrowserWindow = newValue }
-    }
-    /// Current browser status
-    var browserStatus: BrowserGetStatusResult? {
-        get { browserState.browserStatus }
-        set { browserState.browserStatus = newValue }
-    }
-    /// Whether user manually dismissed browser sheet this turn (prevents auto-reopen)
-    var userDismissedBrowserThisTurn: Bool {
-        get { browserState.userDismissedBrowserThisTurn }
-        set { browserState.userDismissedBrowserThisTurn = newValue }
-    }
-
-    // MARK: - Safari State (OpenBrowser Tool)
-
-    /// URL to open in native Safari (set by OpenBrowser tool)
-    var safariURL: URL? {
-        get { browserState.safariURL }
-        set { browserState.safariURL = newValue }
-    }
-
-    // MARK: - AskUserQuestion State (Proxies for backward compatibility)
-
-    /// Whether to show the AskUserQuestion sheet
-    var showAskUserQuestionSheet: Bool {
-        get { askUserQuestionState.showSheet }
-        set { askUserQuestionState.showSheet = newValue }
-    }
-    /// Current AskUserQuestion tool data (when sheet is open)
-    var currentAskUserQuestionData: AskUserQuestionToolData? {
-        get { askUserQuestionState.currentData }
-        set { askUserQuestionState.currentData = newValue }
-    }
-    /// Pending answers keyed by question ID
-    var askUserQuestionAnswers: [String: AskUserQuestionAnswer] {
-        get { askUserQuestionState.answers }
-        set { askUserQuestionState.answers = newValue }
-    }
-    /// Whether AskUserQuestion was called in the current turn (to suppress subsequent text)
+    /// Whether AskUserQuestion was called in the current turn (ChatEventContext)
     var askUserQuestionCalledInTurn: Bool {
         get { askUserQuestionState.calledInTurn }
         set { askUserQuestionState.calledInTurn = newValue }
     }
 
-    // MARK: - Plan Mode State (Proxies for backward compatibility)
-
-    /// Whether plan mode is currently active
-    var isPlanModeActive: Bool {
-        get { planModeState.isActive }
-        set { if newValue { planModeState.enter(skillName: planModeSkillName ?? "") } else { planModeState.exit() } }
+    /// Current browser status (ChatEventContext)
+    var browserStatus: BrowserGetStatusResult? {
+        get { browserState.browserStatus }
+        set { browserState.browserStatus = newValue }
     }
-    /// Name of the skill that activated plan mode
-    var planModeSkillName: String? {
-        get { planModeState.skillName }
-        set { if let name = newValue { planModeState.enter(skillName: name) } }
+
+    // appendMessage is defined in ChatViewModel+Pagination.swift
+
+    /// Make a tool visible for rendering (ChatEventContext)
+    func makeToolVisible(_ toolCallId: String) {
+        animationCoordinator.makeToolVisible(toolCallId)
+    }
+
+    /// Logging methods (ChatEventContext)
+    func logDebug(_ message: String) {
+        logger.debug(message, category: .events)
+    }
+
+    func logInfo(_ message: String) {
+        logger.info(message, category: .events)
+    }
+
+    func logWarning(_ message: String) {
+        logger.warning(message, category: .events)
+    }
+
+    func logError(_ message: String) {
+        logger.error(message, category: .events)
     }
 
     // MARK: - Internal State (accessible to extensions)
@@ -143,7 +121,7 @@ class ChatViewModel: ObservableObject {
     /// ID of the catching-up notification message (removed on turn_end/complete)
     var catchingUpMessageId: UUID?
 
-    // MARK: - Sub-Managers (Phase 1: Foundation - initially unused)
+    // MARK: - Sub-Managers
 
     /// Coordinates pill morph animations, message cascade timing, and tool staggering
     let animationCoordinator = AnimationCoordinator()
@@ -153,40 +131,9 @@ class ChatViewModel: ObservableObject {
     let messageWindowManager = MessageWindowManager()
     /// Manages text delta batching, thinking content, and backpressure
     let streamingManager = StreamingManager()
+    /// Extracts and processes event data from agent streaming (stateless handler)
+    let eventHandler = ChatEventHandler()
     var currentToolMessages: [UUID: ChatMessage] = [:]
-
-    // MARK: - Context Tracking (Proxies for backward compatibility)
-
-    var accumulatedInputTokens: Int {
-        get { contextState.accumulatedInputTokens }
-        set { contextState.accumulatedInputTokens = newValue }
-    }
-    var accumulatedOutputTokens: Int {
-        get { contextState.accumulatedOutputTokens }
-        set { contextState.accumulatedOutputTokens = newValue }
-    }
-    var accumulatedCacheReadTokens: Int {
-        get { contextState.accumulatedCacheReadTokens }
-        set { contextState.accumulatedCacheReadTokens = newValue }
-    }
-    var accumulatedCacheCreationTokens: Int {
-        get { contextState.accumulatedCacheCreationTokens }
-        set { contextState.accumulatedCacheCreationTokens = newValue }
-    }
-    var accumulatedCost: Double {
-        get { contextState.accumulatedCost }
-        set { contextState.accumulatedCost = newValue }
-    }
-    /// Last turn's input tokens (represents actual current context size)
-    var lastTurnInputTokens: Int {
-        get { contextState.lastTurnInputTokens }
-        set { contextState.lastTurnInputTokens = newValue }
-    }
-    /// Previous turn's final input tokens (for computing incremental delta)
-    var previousTurnFinalInputTokens: Int {
-        get { contextState.previousTurnFinalInputTokens }
-        set { contextState.previousTurnFinalInputTokens = newValue }
-    }
 
     /// Track tool calls for the current turn (for display purposes)
     var currentTurnToolCalls: [ToolCallRecord] = []
@@ -251,12 +198,9 @@ class ChatViewModel: ObservableObject {
             .receive(on: DispatchQueue.main)
             .assign(to: &$connectionState)
 
-        // Handle image picker changes
-        $selectedImages
-            .sink { [weak self] items in
-                Task { await self?.processSelectedImages(items) }
-            }
-            .store(in: &cancellables)
+        // Handle image picker changes - observe inputBarState.selectedImages
+        // Using withObservationTracking to react to @Observable changes
+        observeSelectedImagesChanges()
 
         audioRecorder.$isRecording
             .receive(on: DispatchQueue.main)
@@ -266,6 +210,27 @@ class ChatViewModel: ObservableObject {
     private func setupAudioRecorder() {
         audioRecorder.onFinish = { [weak self] url, success in
             Task { await self?.handleRecordingFinished(url: url, success: success) }
+        }
+    }
+
+    /// Observe changes to inputBarState.selectedImages using Swift Observation
+    private func observeSelectedImagesChanges() {
+        startImageObservation()
+    }
+
+    /// Recursive observation helper for selectedImages changes
+    private func startImageObservation() {
+        withObservationTracking {
+            // Access the property to register for tracking
+            _ = self.inputBarState.selectedImages
+        } onChange: { [weak self] in
+            Task { @MainActor [weak self] in
+                guard let self = self else { return }
+                // Process the new images
+                await self.processSelectedImages(self.inputBarState.selectedImages)
+                // Re-schedule observation
+                self.startImageObservation()
+            }
         }
     }
 
@@ -378,119 +343,109 @@ class ChatViewModel: ObservableObject {
         setupUIUpdateQueueCallback()
         setupStreamingManagerCallbacks()
 
-        rpcClient.onTextDelta = { [weak self] delta in
-            self?.handleTextDelta(delta)
-        }
+        // Subscribe to unified event stream from RPCClient
+        // Filter to only handle events for this session
+        rpcClient.eventPublisher
+            .filter { [weak self] event in
+                event.matchesSession(self?.sessionId)
+            }
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] event in
+                self?.handleEvent(event)
+            }
+            .store(in: &cancellables)
+    }
 
-        rpcClient.onThinkingDelta = { [weak self] delta in
-            self?.handleThinkingDelta(delta)
-        }
+    /// Unified event handler - dispatches ParsedEvent to specific handlers
+    private func handleEvent(_ event: ParsedEvent) {
+        switch event {
+        case .textDelta(let e):
+            handleTextDelta(e.delta)
 
-        rpcClient.onToolStart = { [weak self] event in
-            self?.handleToolStart(event)
-        }
+        case .thinkingDelta(let e):
+            handleThinkingDelta(e.delta)
 
-        rpcClient.onToolEnd = { [weak self] event in
-            self?.handleToolEnd(event)
-        }
+        case .toolStart(let e):
+            handleToolStart(e)
 
-        rpcClient.onTurnStart = { [weak self] event in
-            self?.handleTurnStart(event)
-        }
+        case .toolEnd(let e):
+            handleToolEnd(e)
 
-        rpcClient.onTurnEnd = { [weak self] event in
-            self?.handleTurnEnd(event)
-        }
+        case .turnStart(let e):
+            handleTurnStart(e)
 
-        rpcClient.onAgentTurn = { [weak self] event in
-            self?.handleAgentTurn(event)
-        }
+        case .turnEnd(let e):
+            handleTurnEnd(e)
 
-        rpcClient.onCompaction = { [weak self] event in
-            self?.handleCompaction(event)
-        }
+        case .agentTurn(let e):
+            handleAgentTurn(e)
 
-        rpcClient.onContextCleared = { [weak self] event in
-            self?.handleContextCleared(event)
-        }
+        case .complete:
+            handleComplete()
 
-        rpcClient.onMessageDeleted = { [weak self] event in
-            self?.handleMessageDeleted(event)
-        }
+        case .error(let e):
+            handleAgentError(e.message)
 
-        rpcClient.onSkillRemoved = { [weak self] event in
-            self?.handleSkillRemoved(event)
-        }
+        case .compaction(let e):
+            handleCompaction(e)
 
-        rpcClient.onPlanModeEntered = { [weak self] event in
-            self?.handlePlanModeEntered(event)
-        }
+        case .contextCleared(let e):
+            handleContextCleared(e)
 
-        rpcClient.onPlanModeExited = { [weak self] event in
-            self?.handlePlanModeExited(event)
-        }
+        case .messageDeleted(let e):
+            handleMessageDeleted(e)
 
-        rpcClient.onComplete = { [weak self] in
-            self?.handleComplete()
-        }
+        case .skillRemoved(let e):
+            handleSkillRemoved(e)
 
-        rpcClient.onError = { [weak self] message in
-            self?.handleAgentError(message)
-        }
+        case .planModeEntered(let e):
+            handlePlanModeEntered(e)
 
-        rpcClient.onBrowserFrame = { [weak self] event in
-            self?.handleBrowserFrame(event)
-        }
+        case .planModeExited(let e):
+            handlePlanModeExited(e)
 
-        rpcClient.onBrowserClosed = { [weak self] sessionId in
-            self?.handleBrowserClosed(sessionId)
-        }
+        case .browserFrame(let e):
+            handleBrowserFrame(e)
 
-        // Subagent event handlers
-        rpcClient.onSubagentSpawned = { [weak self] event in
-            self?.handleSubagentSpawned(event)
-        }
+        case .browserClosed(let closedSessionId):
+            handleBrowserClosed(closedSessionId)
 
-        rpcClient.onSubagentStatus = { [weak self] event in
-            self?.handleSubagentStatus(event)
-        }
+        case .subagentSpawned(let e):
+            handleSubagentSpawned(e)
 
-        rpcClient.onSubagentCompleted = { [weak self] event in
-            self?.handleSubagentCompleted(event)
-        }
+        case .subagentStatus(let e):
+            handleSubagentStatus(e)
 
-        rpcClient.onSubagentFailed = { [weak self] event in
-            self?.handleSubagentFailed(event)
-        }
+        case .subagentCompleted(let e):
+            handleSubagentCompleted(e)
 
-        rpcClient.onSubagentEvent = { [weak self] event in
-            self?.handleSubagentForwardedEvent(event)
-        }
+        case .subagentFailed(let e):
+            handleSubagentFailed(e)
 
-        // UI Canvas event handlers
-        rpcClient.onUIRenderStart = { [weak self] event in
-            self?.handleUIRenderStart(event)
-        }
+        case .subagentEvent(let e):
+            handleSubagentForwardedEvent(e)
 
-        rpcClient.onUIRenderChunk = { [weak self] event in
-            self?.handleUIRenderChunk(event)
-        }
+        case .uiRenderStart(let e):
+            handleUIRenderStart(e)
 
-        rpcClient.onUIRenderComplete = { [weak self] event in
-            self?.handleUIRenderComplete(event)
-        }
+        case .uiRenderChunk(let e):
+            handleUIRenderChunk(e)
 
-        rpcClient.onUIRenderError = { [weak self] event in
-            self?.handleUIRenderError(event)
-        }
+        case .uiRenderComplete(let e):
+            handleUIRenderComplete(e)
 
-        rpcClient.onUIRenderRetry = { [weak self] event in
-            self?.handleUIRenderRetry(event)
-        }
+        case .uiRenderError(let e):
+            handleUIRenderError(e)
 
-        // Todo event handler
-        rpcClient.onTodosUpdated = { [weak self] event in
-            self?.handleTodosUpdated(event)
+        case .uiRenderRetry(let e):
+            handleUIRenderRetry(e)
+
+        case .todosUpdated(let e):
+            handleTodosUpdated(e)
+
+        case .connected, .unknown:
+            // These events are handled elsewhere or ignored
+            break
         }
     }
 
@@ -671,17 +626,11 @@ class ChatViewModel: ObservableObject {
         rpcClient.hasActiveSession
     }
 
-    /// Estimated context usage percentage based on server-provided contextWindowTokens
-    /// Uses ContextTrackingState which consumes server's normalizedUsage values
-    var contextPercentage: Int {
-        contextState.contextPercentage
-    }
-
     /// Updates the context window based on available model info
     /// Called by ChatView when models are loaded or model is switched
     func updateContextWindow(from models: [ModelInfo]) {
         if let model = models.first(where: { $0.id == currentModel }) {
-            currentContextWindow = model.contextWindow
+            contextState.currentContextWindow = model.contextWindow
         }
     }
 
@@ -703,8 +652,8 @@ class ChatViewModel: ObservableObject {
             do {
                 let snapshot = try await rpcClient.getContextSnapshot(sessionId: sessionId)
                 await MainActor.run {
-                    self.currentContextWindow = snapshot.contextLimit
-                    self.lastTurnInputTokens = snapshot.currentTokens
+                    self.contextState.currentContextWindow = snapshot.contextLimit
+                    self.contextState.lastTurnInputTokens = snapshot.currentTokens
                     // Note: Do NOT set previousTurnFinalInputTokens here.
                     // That value is used for incremental token delta calculations and should only be
                     // updated by handleTurnEnd() after a turn completes, or by restoreTokenStateFromMessages()
@@ -741,39 +690,39 @@ class ChatViewModel: ObservableObject {
             return
         }
 
-        browserFrame = image
+        browserState.browserFrame = image
 
         // Update browserStatus to reflect that we have an active streaming session
         // This handles the case where BrowserDelegate auto-started streaming
-        let wasFirstFrame = browserStatus == nil || browserStatus?.isStreaming != true
+        let wasFirstFrame = browserState.browserStatus == nil || browserState.browserStatus?.isStreaming != true
         if wasFirstFrame {
-            browserStatus = BrowserGetStatusResult(
+            browserState.browserStatus = BrowserGetStatusResult(
                 hasBrowser: true,
                 isStreaming: true,
-                currentUrl: browserStatus?.currentUrl
+                currentUrl: browserState.browserStatus?.currentUrl
             )
         }
 
         // Auto-show browser window only on the FIRST frame, and only if user hasn't
         // manually dismissed it during this prompt/response cycle
-        if wasFirstFrame && !showBrowserWindow && !userDismissedBrowserThisTurn {
-            showBrowserWindow = true
+        if wasFirstFrame && !browserState.showBrowserWindow && !browserState.userDismissedBrowserThisTurn {
+            browserState.showBrowserWindow = true
             logger.info("Browser window auto-shown on first frame", category: .session)
         }
     }
 
     /// Mark browser as dismissed by user (prevents auto-reopen this turn)
     func userDismissedBrowser() {
-        userDismissedBrowserThisTurn = true
-        showBrowserWindow = false
+        browserState.userDismissedBrowserThisTurn = true
+        browserState.showBrowserWindow = false
         logger.info("User dismissed browser sheet - won't auto-reopen this turn", category: .session)
     }
 
     /// Handle browser session closed
     func handleBrowserClosed(_ sessionId: String) {
-        browserFrame = nil
-        browserStatus = nil
-        showBrowserWindow = false
+        browserState.browserFrame = nil
+        browserState.browserStatus = nil
+        browserState.showBrowserWindow = false
         logger.info("Browser session closed: \(sessionId)", category: .session)
     }
 
@@ -784,7 +733,7 @@ class ChatViewModel: ObservableObject {
         do {
             let status = try await rpcClient.getBrowserStatus(sessionId: sessionId)
             await MainActor.run {
-                self.browserStatus = status
+                self.browserState.browserStatus = status
             }
         } catch {
             logger.error("Failed to get browser status: \(error)", category: .session)
@@ -799,14 +748,14 @@ class ChatViewModel: ObservableObject {
             let result = try await rpcClient.startBrowserStream(sessionId: sessionId)
             if result.success {
                 await MainActor.run {
-                    self.browserStatus = BrowserGetStatusResult(
+                    self.browserState.browserStatus = BrowserGetStatusResult(
                         hasBrowser: true,
                         isStreaming: true,
                         currentUrl: nil
                     )
                     // Only auto-show if user hasn't manually dismissed this turn
-                    if !self.userDismissedBrowserThisTurn {
-                        self.showBrowserWindow = true
+                    if !self.browserState.userDismissedBrowserThisTurn {
+                        self.browserState.showBrowserWindow = true
                     }
                 }
                 logger.info("Browser stream started", category: .session)
@@ -824,10 +773,10 @@ class ChatViewModel: ObservableObject {
         do {
             _ = try await rpcClient.stopBrowserStream(sessionId: sessionId)
             await MainActor.run {
-                self.browserStatus = BrowserGetStatusResult(
-                    hasBrowser: self.browserStatus?.hasBrowser ?? false,
+                self.browserState.browserStatus = BrowserGetStatusResult(
+                    hasBrowser: self.browserState.browserStatus?.hasBrowser ?? false,
                     isStreaming: false,
-                    currentUrl: self.browserStatus?.currentUrl
+                    currentUrl: self.browserState.browserStatus?.currentUrl
                 )
             }
             logger.info("Browser stream stopped", category: .session)
@@ -844,23 +793,23 @@ class ChatViewModel: ObservableObject {
             await stopBrowserStream()
             // Clear all browser state
             await MainActor.run {
-                browserFrame = nil
-                browserStatus = nil
-                showBrowserWindow = false
+                browserState.browserFrame = nil
+                browserState.browserStatus = nil
+                browserState.showBrowserWindow = false
             }
         }
     }
 
     /// Toggle browser window visibility (explicit user action via globe button)
     func toggleBrowserWindow() {
-        if showBrowserWindow {
+        if browserState.showBrowserWindow {
             // User is closing via globe - same as dismissing
             userDismissedBrowser()
         } else if hasBrowserSession {
             // User explicitly wants to see browser - override the dismiss flag
-            showBrowserWindow = true
+            browserState.showBrowserWindow = true
             // Start streaming if not already
-            if browserStatus?.isStreaming != true {
+            if browserState.browserStatus?.isStreaming != true {
                 Task {
                     await startBrowserStream()
                 }
@@ -871,7 +820,7 @@ class ChatViewModel: ObservableObject {
     /// Whether browser toolbar button should be visible
     /// Shows if we have an active browser status OR a browser frame to display
     var hasBrowserSession: Bool {
-        (browserStatus?.hasBrowser ?? false) || browserFrame != nil
+        (browserState.browserStatus?.hasBrowser ?? false) || browserState.browserFrame != nil
     }
 
     // MARK: - AskUserQuestion Methods
@@ -883,17 +832,17 @@ class ChatViewModel: ObservableObject {
             logger.info("Not opening AskUserQuestion sheet - status is \(data.status)", category: .session)
             return
         }
-        currentAskUserQuestionData = data
+        askUserQuestionState.currentData = data
         // Initialize answers from data (in case of re-opening or viewing answered)
-        askUserQuestionAnswers = data.answers
-        showAskUserQuestionSheet = true
+        askUserQuestionState.answers = data.answers
+        askUserQuestionState.showSheet = true
         let mode = data.status == .answered ? "read-only" : "interactive"
         logger.info("Opened AskUserQuestion sheet (\(mode)) for \(data.params.questions.count) questions", category: .session)
     }
 
     /// Handle AskUserQuestion answers submission (async mode: sends as new prompt)
     func submitAskUserQuestionAnswers(_ answers: [AskUserQuestionAnswer]) async {
-        guard let data = currentAskUserQuestionData else {
+        guard let data = askUserQuestionState.currentData else {
             logger.error("Cannot submit answers - no current question data", category: .session)
             return
         }
@@ -902,9 +851,9 @@ class ChatViewModel: ObservableObject {
         guard data.status == .pending else {
             logger.warning("Cannot submit answers - question status is \(data.status)", category: .session)
             showErrorAlert("This question is no longer active")
-            showAskUserQuestionSheet = false
-            currentAskUserQuestionData = nil
-            askUserQuestionAnswers = [:]
+            askUserQuestionState.showSheet = false
+            askUserQuestionState.currentData = nil
+            askUserQuestionState.answers = [:]
             return
         }
 
@@ -941,9 +890,9 @@ class ChatViewModel: ObservableObject {
         let answerPrompt = formatAnswersAsPrompt(data: data, answers: answers)
 
         // Clear state before sending
-        showAskUserQuestionSheet = false
-        currentAskUserQuestionData = nil
-        askUserQuestionAnswers = [:]
+        askUserQuestionState.showSheet = false
+        askUserQuestionState.currentData = nil
+        askUserQuestionState.answers = [:]
 
         // Send as a new prompt (this triggers a new agent turn)
         inputText = answerPrompt
@@ -990,7 +939,7 @@ class ChatViewModel: ObservableObject {
 
     /// Dismiss AskUserQuestion sheet without submitting
     func dismissAskUserQuestionSheet() {
-        showAskUserQuestionSheet = false
+        askUserQuestionState.showSheet = false
         logger.info("AskUserQuestion sheet dismissed without submitting", category: .session)
     }
 
@@ -998,8 +947,7 @@ class ChatViewModel: ObservableObject {
 
     /// Enter plan mode (called from event handler)
     func enterPlanMode(skillName: String, blockedTools: [String]) {
-        isPlanModeActive = true
-        planModeSkillName = skillName
+        planModeState.enter(skillName: skillName)
 
         // Add notification message to chat
         let notification = ChatMessage(
@@ -1013,9 +961,8 @@ class ChatViewModel: ObservableObject {
 
     /// Exit plan mode (called from event handler)
     func exitPlanMode(reason: String, planPath: String?) {
-        isPlanModeActive = false
-        let skillName = planModeSkillName
-        planModeSkillName = nil
+        let skillName = planModeState.skillName
+        planModeState.exit()
 
         // Add notification message to chat
         let notification = ChatMessage(
