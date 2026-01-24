@@ -130,6 +130,23 @@ struct ContentView: View {
         }
     }
 
+    /// Whether the sidebar is currently visible (for hiding duplicate controls in detail view)
+    private var isSidebarVisible: Bool {
+        // On regular size class, sidebar is visible when columnVisibility is .all or .doubleColumn
+        horizontalSizeClass == .regular && (columnVisibility == .all || columnVisibility == .doubleColumn)
+    }
+
+    /// Toggle sidebar visibility
+    private func toggleSidebar() {
+        withAnimation {
+            if columnVisibility == .detailOnly {
+                columnVisibility = .all
+            } else {
+                columnVisibility = .detailOnly
+            }
+        }
+    }
+
     @ViewBuilder
     private var splitViewContent: some View {
         NavigationSplitView(columnVisibility: $columnVisibility) {
@@ -139,38 +156,43 @@ struct ContentView: View {
         }
         .navigationSplitViewStyle(.balanced)
         .scrollContentBackground(.hidden)
+        .tint(.tronEmerald)
     }
 
     @ViewBuilder
     private var sidebarContent: some View {
-        if navigationMode == .agents {
-            SessionSidebar(
-                selectedSessionId: $selectedSessionId,
-                onNewSession: { showNewSessionSheet = true },
-                onDeleteSession: { sessionId in
-                    if confirmArchive {
-                        sessionToArchive = sessionId
-                        showArchiveConfirmation = true
-                    } else {
-                        deleteSession(sessionId)
+        Group {
+            if navigationMode == .agents {
+                SessionSidebar(
+                    selectedSessionId: $selectedSessionId,
+                    onNewSession: { showNewSessionSheet = true },
+                    onDeleteSession: { sessionId in
+                        if confirmArchive {
+                            sessionToArchive = sessionId
+                            showArchiveConfirmation = true
+                        } else {
+                            deleteSession(sessionId)
+                        }
+                    },
+                    onSettings: { showSettings = true },
+                    onVoiceNote: { showVoiceNotesRecording = true },
+                    onNavigationModeChange: { mode in
+                        navigationMode = mode
                     }
-                },
-                onSettings: { showSettings = true },
-                onVoiceNote: { showVoiceNotesRecording = true },
-                onNavigationModeChange: { mode in
-                    navigationMode = mode
-                }
-            )
-        } else {
-            VoiceNotesListView(
-                rpcClient: appState.rpcClient,
-                onVoiceNote: { showVoiceNotesRecording = true },
-                onSettings: { showSettings = true },
-                onNavigationModeChange: { mode in
-                    navigationMode = mode
-                }
-            )
+                )
+            } else {
+                VoiceNotesListView(
+                    rpcClient: appState.rpcClient,
+                    onVoiceNote: { showVoiceNotesRecording = true },
+                    onSettings: { showSettings = true },
+                    onNavigationModeChange: { mode in
+                        navigationMode = mode
+                    }
+                )
+            }
         }
+        // Remove default gray sidebar toggle - we'll add a custom emerald one to detail views
+        .toolbar(removing: .sidebarToggle)
     }
 
     @ViewBuilder
@@ -187,6 +209,8 @@ struct ContentView: View {
             )
         } else if eventStoreManager.sessions.isEmpty {
             WelcomePage(
+                isSidebarVisible: isSidebarVisible,
+                onToggleSidebar: toggleSidebar,
                 onNewSession: { showNewSessionSheet = true },
                 onSettings: { showSettings = true },
                 onVoiceNote: { showVoiceNotesRecording = true }
@@ -337,6 +361,18 @@ struct ContentView: View {
         }
         .padding(40)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .toolbar {
+            // Custom emerald sidebar toggle for iPad
+            if horizontalSizeClass == .regular {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button(action: toggleSidebar) {
+                        Image(systemName: "sidebar.leading")
+                            .font(TronTypography.sans(size: TronTypography.sizeTitle, weight: .medium))
+                            .foregroundStyle(.tronEmerald)
+                    }
+                }
+            }
+        }
     }
 
     private func deleteSession(_ sessionId: String) {
@@ -358,6 +394,10 @@ struct ContentView: View {
 
 @available(iOS 26.0, *)
 struct WelcomePage: View {
+    /// When true, sidebar is visible so we hide duplicate controls (logo, settings, floating buttons)
+    var isSidebarVisible: Bool = false
+    /// Toggle sidebar visibility (used on iPad)
+    var onToggleSidebar: (() -> Void)?
     let onNewSession: () -> Void
     let onSettings: () -> Void
     let onVoiceNote: () -> Void
@@ -382,31 +422,43 @@ struct WelcomePage: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .offset(y: -60)
 
-                // Floating buttons - mic and plus (same as SessionSidebar)
-                HStack(spacing: 12) {
-                    FloatingVoiceNotesButton(action: onVoiceNote)
-                    FloatingNewSessionButton(action: onNewSession)
+                // Floating buttons - mic and plus (hide when sidebar is visible to avoid duplicates)
+                if !isSidebarVisible {
+                    HStack(spacing: 12) {
+                        FloatingVoiceNotesButton(action: onVoiceNote)
+                        FloatingNewSessionButton(action: onNewSession)
+                    }
+                    .padding(.trailing, 20)
+                    .padding(.bottom, 24)
                 }
-                .padding(.trailing, 20)
-                .padding(.bottom, 24)
             }
             .navigationBarTitleDisplayMode(.inline)
             .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
-                    Menu {
-                        ForEach(NavigationMode.allCases, id: \.self) { mode in
-                            Button {
-                                onNavigationModeChange?(mode)
-                            } label: {
-                                Label(mode.rawValue, systemImage: mode == .agents ? "cpu" : "waveform")
-                            }
+                    if let onToggleSidebar = onToggleSidebar {
+                        // iPad - show emerald sidebar toggle (always visible to allow hide/show)
+                        Button(action: onToggleSidebar) {
+                            Image(systemName: "sidebar.leading")
+                                .font(TronTypography.sans(size: TronTypography.sizeTitle, weight: .medium))
+                                .foregroundStyle(.tronEmerald)
                         }
-                    } label: {
-                        Image("TronLogo")
-                            .resizable()
-                            .aspectRatio(contentMode: .fit)
-                            .frame(height: 28)
+                    } else {
+                        // iPhone - show logo menu
+                        Menu {
+                            ForEach(NavigationMode.allCases, id: \.self) { mode in
+                                Button {
+                                    onNavigationModeChange?(mode)
+                                } label: {
+                                    Label(mode.rawValue, systemImage: mode == .agents ? "cpu" : "waveform")
+                                }
+                            }
+                        } label: {
+                            Image("TronLogo")
+                                .resizable()
+                                .aspectRatio(contentMode: .fit)
+                                .frame(height: 24)
+                        }
                     }
                 }
                 ToolbarItem(placement: .principal) {
@@ -415,11 +467,14 @@ struct WelcomePage: View {
                         .foregroundStyle(.tronEmerald)
                         .tracking(2)
                 }
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button(action: onSettings) {
-                        Image(systemName: "gearshape")
-                            .font(TronTypography.sans(size: TronTypography.sizeTitle, weight: .medium))
-                            .foregroundStyle(.tronEmerald)
+                // Hide settings button when sidebar is visible (it has its own settings)
+                if !isSidebarVisible {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button(action: onSettings) {
+                            Image(systemName: "gearshape")
+                                .font(TronTypography.sans(size: TronTypography.sizeTitle, weight: .medium))
+                                .foregroundStyle(.tronEmerald)
+                        }
                     }
                 }
             }

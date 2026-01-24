@@ -68,7 +68,7 @@ struct SessionSidebar: View {
                     Image("TronLogo")
                         .resizable()
                         .aspectRatio(contentMode: .fit)
-                        .frame(height: 28)
+                        .frame(height: 24)
                 }
             }
             ToolbarItem(placement: .principal) {
