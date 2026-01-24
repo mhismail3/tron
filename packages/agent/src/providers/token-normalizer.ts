@@ -3,16 +3,36 @@
  *
  * Handles the semantic differences in how different providers report token usage:
  *
- * | Provider    | inputTokens Means           | Cache Support                    |
- * |-------------|-----------------------------|---------------------------------|
- * | Anthropic   | Non-cached tokens (cumulative) | cache_read + cache_creation   |
- * | OpenAI      | FULL context sent           | cached_tokens                    |
- * | OpenAI Codex| FULL context sent           | None                             |
- * | Gemini      | FULL context sent           | None                             |
+ * | Provider    | inputTokens Means              | Cache Support                  |
+ * |-------------|--------------------------------|--------------------------------|
+ * | Anthropic   | Non-cached tokens (cumulative) | cache_read + cache_creation    |
+ * | OpenAI      | FULL context sent              | cached_tokens                  |
+ * | OpenAI Codex| FULL context sent              | None                           |
+ * | Gemini      | FULL context sent              | None                           |
  *
- * IMPORTANT: For Anthropic, inputTokens is NOT per-turn new tokens!
- * It's the cumulative non-cached content (conversation history grows each turn).
- * Only the system prompt gets cached. We calculate delta using contextWindowTokens.
+ * ============================================================================
+ * CRITICAL: ANTHROPIC TOKEN SEMANTICS (common source of bugs)
+ * ============================================================================
+ *
+ * For Anthropic, inputTokens is NOT the full context and NOT per-turn new tokens!
+ *
+ * What actually happens with Anthropic prompt caching:
+ * 1. System prompt is cached (cache_create on first turn, cache_read thereafter)
+ * 2. Conversation history is NOT cached - grows each turn in inputTokens
+ * 3. inputTokens = cumulative non-cached content (excludes cached system prompt)
+ *
+ * Example session:
+ *   Turn 1: inputTokens=500,  cache_create=8000 → contextWindow = 8500
+ *   Turn 2: inputTokens=600,  cache_read=8000   → contextWindow = 8600, delta = 100
+ *   Turn 3: inputTokens=700,  cache_read=8000   → contextWindow = 8700, delta = 100
+ *
+ * To get the full context size: inputTokens + cacheRead + cacheCreate
+ * To get per-turn delta: currentContextWindow - previousContextWindow
+ *
+ * A common bug is using `inputTokens - previousInputTokens` as the delta.
+ * This is WRONG because it ignores cache tokens in the context size.
+ *
+ * ============================================================================
  *
  * This normalizer provides:
  * - newInputTokens: Per-turn new tokens (for stats line display)

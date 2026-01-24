@@ -284,10 +284,20 @@ extension ChatViewModel {
     /// NOTE: This uses local delta calculation because historical events stored in the database
     /// may not have normalizedUsage (pre-dates server-side normalization) or incrementalTokens persisted.
     /// For LIVE events, handleTurnEnd uses server-provided normalizedUsage which is authoritative.
+    ///
+    /// WARNING: The local delta calculation here is INCORRECT for Anthropic sessions!
+    /// Anthropic's inputTokens excludes cache tokens, so `inputTokens - previousInputTokens`
+    /// gives the wrong delta. The correct formula for Anthropic is:
+    ///   delta = (inputTokens + cacheRead + cacheCreate) - previousContextWindow
+    ///
+    /// This affects historical sessions that don't have incrementalTokens stored.
+    /// New sessions with server-provided normalizedUsage will display correctly.
     func restoreTokenStateFromMessages() {
         // 1. Find last assistant message to restore lastTurnInputTokens (context window size)
+        // For Anthropic, we should include cache tokens, but historical data may not have them
         for message in allReconstructedMessages.reversed() {
             if message.role == .assistant, let usage = message.tokenUsage {
+                // Best effort: use inputTokens (may not include cache for Anthropic historical data)
                 lastTurnInputTokens = usage.inputTokens
                 logger.debug("Restored lastTurnInputTokens=\(usage.inputTokens) from last assistant message", category: .session)
                 break
@@ -296,8 +306,10 @@ extension ChatViewModel {
 
         // 2. Compute incrementalTokens for display (fallback for historical data)
         // For new events, server provides normalizedUsage which is used instead
-        // - inputTokens: DELTA from previous turn (shows context growth)
-        // - outputTokens: per-turn value directly (tokens generated)
+        //
+        // WARNING: This simple delta calculation is WRONG for Anthropic because it doesn't
+        // account for cache tokens. Anthropic's inputTokens = non-cached content only.
+        // The UI will show incorrect deltas for historical Anthropic sessions.
         var incrementalTokensMap: [UUID: TokenUsage] = [:]
         var previousInputTokens = 0
         for message in allReconstructedMessages {

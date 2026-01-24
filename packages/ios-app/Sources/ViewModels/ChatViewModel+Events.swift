@@ -486,7 +486,17 @@ extension ChatViewModel {
                 )
                 logger.debug("Incremental tokens (from server): in=\(normalized.newInputTokens)", category: .events)
             } else if let usage = event.tokenUsage {
-                // FALLBACK: legacy calculation if server doesn't send normalizedUsage
+                // FALLBACK: Legacy calculation if server doesn't send normalizedUsage.
+                //
+                // WARNING: This fallback is INCORRECT for Anthropic!
+                // Anthropic's inputTokens is non-cached content only (excludes cache_read/cache_create).
+                // The correct formula for Anthropic is:
+                //   delta = (inputTokens + cacheRead + cacheCreate) - previousContextWindow
+                //
+                // This simple fallback only works for OpenAI/Codex/Gemini where inputTokens = full context.
+                // For Anthropic, the delta will be wrong (shows raw input growth, not context growth).
+                //
+                // TODO: Either fix this fallback or remove it entirely once all servers send normalizedUsage.
                 let incrementalInput = max(0, usage.inputTokens - previousTurnFinalInputTokens)
                 messages[index].incrementalTokens = TokenUsage(
                     inputTokens: incrementalInput,
@@ -494,7 +504,7 @@ extension ChatViewModel {
                     cacheReadTokens: usage.cacheReadTokens,
                     cacheCreationTokens: usage.cacheCreationTokens
                 )
-                logger.debug("Incremental tokens (fallback): in=\(incrementalInput) (prev=\(previousTurnFinalInputTokens))", category: .events)
+                logger.warning("Using fallback delta calculation (may be wrong for Anthropic): in=\(incrementalInput)", category: .events)
             }
         } else {
             logger.warning("Could not find message to update with turn metadata (turn=\(event.turnNumber))", category: .events)

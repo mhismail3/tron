@@ -156,18 +156,47 @@ export class TurnContentTracker {
 
   // =========================================================================
   // Token Normalization State
+  //
+  // CRITICAL: Understanding token baseline tracking
+  //
+  // previousContextSize tracks the TOTAL context window size from the previous turn.
+  // This is used to calculate per-turn deltas (newInputTokens = current - previous).
+  //
+  // Key behaviors that took time to get right:
+  //
+  // 1. previousContextSize persists across agent runs (onAgentStart does NOT reset it)
+  //    - A new agent run starts on every user message (run() called)
+  //    - If we reset baseline on agent start, first turn after user message shows full context
+  //    - Continuation turns within same agent run would show delta
+  //    - This caused confusing behavior where some turns showed total, others delta
+  //
+  // 2. previousContextSize IS reset when provider type changes (model switch)
+  //    - Different providers interpret inputTokens differently
+  //    - Anthropic: inputTokens = non-cached only, contextWindow = input + cache
+  //    - OpenAI/Codex/Gemini: inputTokens = full context
+  //    - After model switch, previous baseline is meaningless, so reset to 0
+  //
+  // 3. For Anthropic, contextWindowTokens = inputTokens + cacheRead + cacheCreate
+  //    - This is the ACTUAL context size sent to the model
+  //    - Delta is calculated from contextWindowTokens, not raw inputTokens
+  //
+  // See token-normalizer.ts for detailed documentation on provider differences.
   // =========================================================================
   /**
    * Provider type determines how inputTokens should be interpreted:
-   * - anthropic: inputTokens is NEW tokens only (excludes cache)
+   * - anthropic: inputTokens is non-cached tokens only (excludes cache)
    * - openai/openai-codex/google: inputTokens is FULL context sent
    */
   private currentProviderType: ProviderType = 'anthropic';
 
   /**
-   * Previous context size for delta calculation (non-Anthropic providers).
+   * Previous context size for delta calculation (ALL providers).
    * Reset to 0 only when provider type changes (model switch).
    * Persists across agent runs within a session to maintain accurate deltas.
+   *
+   * IMPORTANT: Do NOT reset this in onAgentStart()! That was a bug.
+   * Agent runs start on every user message, but we want consistent delta
+   * tracking across the entire session.
    */
   private previousContextSize: number = 0;
 
