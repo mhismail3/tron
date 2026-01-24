@@ -26,37 +26,50 @@ struct SessionSidebar: View {
 
     var body: some View {
         ZStack(alignment: .bottomTrailing) {
-            if eventStoreManager.sortedSessions.isEmpty {
-                // Empty state placeholder
-                VStack(spacing: 8) {
-                    Text("No active sessions")
-                        .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
-                        .foregroundStyle(.white.opacity(0.5))
+            VStack(spacing: 0) {
+                // Title header (iPad only - iPhone has toolbar)
+                if !showToolbar {
+                    Text("SESSIONS")
+                        .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .semibold))
+                        .foregroundStyle(.tronEmerald)
+                        .tracking(1.5)
+                        .frame(maxWidth: .infinity)
+                        .padding(.top, 16)
+                        .padding(.bottom, 8)
                 }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else {
-                List(selection: $selectedSessionId) {
-                    ForEach(eventStoreManager.sortedSessions) { session in
-                        CachedSessionSidebarRow(
-                            session: session,
-                            isSelected: session.id == selectedSessionId
-                        )
-                        .tag(session.id)
-                        .listRowBackground(Color.clear)
-                        .listRowSeparator(.hidden)
-                        .listRowInsets(EdgeInsets(top: 6, leading: 12, bottom: 6, trailing: 12))
-                        .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-                            Button(role: .destructive) {
-                                onDeleteSession(session.id)
-                            } label: {
-                                Image(systemName: "archivebox")
+
+                if eventStoreManager.sortedSessions.isEmpty {
+                    // Empty state placeholder
+                    VStack(spacing: 8) {
+                        Text("No active sessions")
+                            .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
+                            .foregroundStyle(.white.opacity(0.5))
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else {
+                    List(selection: $selectedSessionId) {
+                        ForEach(eventStoreManager.sortedSessions) { session in
+                            CachedSessionSidebarRow(
+                                session: session,
+                                isSelected: session.id == selectedSessionId
+                            )
+                            .listRowBackground(Color.clear)
+                            .listRowSeparator(.hidden)
+                            .listRowInsets(EdgeInsets(top: 6, leading: 12, bottom: 6, trailing: 12))
+                            .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                                Button(role: .destructive) {
+                                    onDeleteSession(session.id)
+                                } label: {
+                                    Image(systemName: "archivebox")
+                                }
+                                .tint(.tronEmerald)
                             }
-                            .tint(.tronEmerald)
                         }
                     }
+                    .listStyle(.plain)
+                    .scrollContentBackground(.hidden)
+                    .contentMargins(.top, 8)
                 }
-                .listStyle(.plain)
-                .scrollContentBackground(.hidden)
             }
 
             // Floating buttons - mic (smaller) and plus
