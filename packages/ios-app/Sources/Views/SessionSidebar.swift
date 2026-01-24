@@ -15,34 +15,42 @@ struct SessionSidebar: View {
     @Binding var selectedSessionId: String?
     let onNewSession: () -> Void
     let onDeleteSession: (String) -> Void
-    let onSettings: () -> Void
     let onVoiceNote: () -> Void
-    var onNavigationModeChange: ((NavigationMode) -> Void)?
 
     var body: some View {
         ZStack(alignment: .bottomTrailing) {
-            List(selection: $selectedSessionId) {
-                ForEach(eventStoreManager.sortedSessions) { session in
-                    CachedSessionSidebarRow(
-                        session: session,
-                        isSelected: session.id == selectedSessionId
-                    )
-                    .tag(session.id)
-                    .listRowBackground(Color.clear)
-                    .listRowSeparator(.hidden)
-                    .listRowInsets(EdgeInsets(top: 6, leading: 12, bottom: 6, trailing: 12))
-                    .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-                        Button(role: .destructive) {
-                            onDeleteSession(session.id)
-                        } label: {
-                            Image(systemName: "archivebox")
+            if eventStoreManager.sortedSessions.isEmpty {
+                // Empty state placeholder
+                VStack(spacing: 8) {
+                    Text("No active sessions")
+                        .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
+                        .foregroundStyle(.white.opacity(0.5))
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                List(selection: $selectedSessionId) {
+                    ForEach(eventStoreManager.sortedSessions) { session in
+                        CachedSessionSidebarRow(
+                            session: session,
+                            isSelected: session.id == selectedSessionId
+                        )
+                        .tag(session.id)
+                        .listRowBackground(Color.clear)
+                        .listRowSeparator(.hidden)
+                        .listRowInsets(EdgeInsets(top: 6, leading: 12, bottom: 6, trailing: 12))
+                        .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                            Button(role: .destructive) {
+                                onDeleteSession(session.id)
+                            } label: {
+                                Image(systemName: "archivebox")
+                            }
+                            .tint(.tronEmerald)
                         }
-                        .tint(.tronEmerald)
                     }
                 }
+                .listStyle(.plain)
+                .scrollContentBackground(.hidden)
             }
-            .listStyle(.plain)
-            .scrollContentBackground(.hidden)
 
             // Floating buttons - mic (smaller) and plus
             HStack(spacing: 12) {
@@ -53,38 +61,7 @@ struct SessionSidebar: View {
             .padding(.bottom, 24)
         }
         .navigationBarTitleDisplayMode(.inline)
-        .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
-        .toolbar {
-            ToolbarItem(placement: .topBarLeading) {
-                Menu {
-                    ForEach(NavigationMode.allCases, id: \.self) { mode in
-                        Button {
-                            onNavigationModeChange?(mode)
-                        } label: {
-                            Label(mode.rawValue, systemImage: mode == .agents ? "cpu" : "waveform")
-                        }
-                    }
-                } label: {
-                    Image("TronLogo")
-                        .resizable()
-                        .aspectRatio(contentMode: .fit)
-                        .frame(height: 24)
-                }
-            }
-            ToolbarItem(placement: .principal) {
-                Text("TRON")
-                    .font(TronTypography.mono(size: TronTypography.sizeTitle, weight: .bold))
-                    .foregroundStyle(.tronEmerald)
-                    .tracking(2)
-            }
-            ToolbarItem(placement: .topBarTrailing) {
-                Button(action: onSettings) {
-                    Image(systemName: "gearshape")
-                        .font(TronTypography.sans(size: TronTypography.sizeTitle, weight: .medium))
-                        .foregroundStyle(.tronEmerald)
-                }
-            }
-        }
+        .toolbar(removing: .sidebarToggle)
     }
 }
 

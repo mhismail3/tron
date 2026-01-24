@@ -174,11 +174,7 @@ struct ContentView: View {
                             deleteSession(sessionId)
                         }
                     },
-                    onSettings: { showSettings = true },
-                    onVoiceNote: { showVoiceNotesRecording = true },
-                    onNavigationModeChange: { mode in
-                        navigationMode = mode
-                    }
+                    onVoiceNote: { showVoiceNotesRecording = true }
                 )
             } else {
                 VoiceNotesListView(
@@ -373,6 +369,7 @@ struct ContentView: View {
                 }
             }
         }
+        .animation(.easeInOut(duration: 0.3), value: isSidebarVisible)
     }
 
     private func deleteSession(_ sessionId: String) {
@@ -394,7 +391,7 @@ struct ContentView: View {
 
 @available(iOS 26.0, *)
 struct WelcomePage: View {
-    /// When true, sidebar is visible so we hide duplicate controls (logo, settings, floating buttons)
+    /// When true, sidebar is visible so we hide duplicate floating buttons (new session, voice note)
     var isSidebarVisible: Bool = false
     /// Toggle sidebar visibility (used on iPad)
     var onToggleSidebar: (() -> Void)?
@@ -421,6 +418,7 @@ struct WelcomePage: View {
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .offset(y: -60)
+                .animation(.easeInOut(duration: 0.3), value: isSidebarVisible)
 
                 // Floating buttons - mic and plus (hide when sidebar is visible to avoid duplicates)
                 if !isSidebarVisible {
@@ -467,14 +465,11 @@ struct WelcomePage: View {
                         .foregroundStyle(.tronEmerald)
                         .tracking(2)
                 }
-                // Hide settings button when sidebar is visible (it has its own settings)
-                if !isSidebarVisible {
-                    ToolbarItem(placement: .topBarTrailing) {
-                        Button(action: onSettings) {
-                            Image(systemName: "gearshape")
-                                .font(TronTypography.sans(size: TronTypography.sizeTitle, weight: .medium))
-                                .foregroundStyle(.tronEmerald)
-                        }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button(action: onSettings) {
+                        Image(systemName: "gearshape")
+                            .font(TronTypography.sans(size: TronTypography.sizeTitle, weight: .medium))
+                            .foregroundStyle(.tronEmerald)
                     }
                 }
             }
