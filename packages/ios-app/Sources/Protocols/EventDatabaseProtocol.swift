@@ -21,18 +21,25 @@ protocol EventDatabaseProtocol: ObservableObject {
     func getForkedSessions(fromEventId eventId: String) throws -> [CachedSession]
     func getSiblingBranches(forEventId eventId: String, excludingSessionId currentSessionId: String) throws -> [CachedSession]
     func deleteEventsBySession(_ sessionId: String) throws
-    func deleteLocalDuplicates(sessionId: String, serverEvents: [SessionEvent]) throws -> [String: [String: AnyCodable]]
+    func deleteEvents(ids: [String]) throws
     func eventExists(_ id: String) throws -> Bool
 
     // MARK: - Session Operations
     func insertSession(_ session: CachedSession) throws
     func getSession(_ id: String) throws -> CachedSession?
     func getAllSessions() throws -> [CachedSession]
+    func getSessionsByOrigin(_ origin: String?) throws -> [CachedSession]
+    func getSessionOrigin(_ sessionId: String) throws -> String?
+    func sessionExists(_ sessionId: String) throws -> Bool
     func deleteSession(_ id: String) throws
 
     // MARK: - Sync State Operations
     func getSyncState(_ sessionId: String) throws -> SyncState?
     func updateSyncState(_ state: SyncState) throws
+
+    // MARK: - Thinking Events
+    func getThinkingEvents(sessionId: String, previewOnly: Bool) throws -> [ThinkingBlock]
+    func getThinkingContent(eventId: String) throws -> String?
 
     // MARK: - Tree Visualization
     func buildTreeVisualization(_ sessionId: String) throws -> [EventTreeNode]

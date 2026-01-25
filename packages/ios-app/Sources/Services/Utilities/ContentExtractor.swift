@@ -115,4 +115,63 @@ enum ContentExtractor {
 
         return 0
     }
+
+    // MARK: - Payload-Based Methods (for EventDatabase)
+
+    /// Check if payload has tool_use or tool_result blocks.
+    /// Used for deduplication to prefer events with richer content.
+    static func hasToolBlocks(in payload: [String: AnyCodable]) -> Bool {
+        guard let content = payload["content"]?.value else { return false }
+
+        // Array of content blocks (common format)
+        if let contentArray = content as? [[String: Any]] {
+            return contentArray.contains { block in
+                let blockType = block["type"] as? String
+                return blockType == "tool_use" || blockType == "tool_result"
+            }
+        }
+
+        // Array of Any (less common)
+        if let anyArray = content as? [Any] {
+            for element in anyArray {
+                if let dict = element as? [String: Any],
+                   let type = dict["type"] as? String,
+                   type == "tool_use" || type == "tool_result" {
+                    return true
+                }
+            }
+        }
+
+        return false
+    }
+
+    /// Extract text content from payload for duplicate matching.
+    /// Returns concatenated text from all text blocks.
+    static func extractTextForMatching(from payload: [String: AnyCodable]) -> String {
+        guard let content = payload["content"]?.value else { return "" }
+
+        // Direct string content
+        if let text = content as? String {
+            return text
+        }
+
+        // Array of content blocks
+        if let contentArray = content as? [[String: Any]] {
+            return contentArray.compactMap { $0["text"] as? String }.joined()
+        }
+
+        // Array of Any
+        if let anyArray = content as? [Any] {
+            var texts: [String] = []
+            for element in anyArray {
+                if let dict = element as? [String: Any],
+                   let text = dict["text"] as? String {
+                    texts.append(text)
+                }
+            }
+            return texts.joined()
+        }
+
+        return ""
+    }
 }

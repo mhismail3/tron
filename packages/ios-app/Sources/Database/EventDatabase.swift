@@ -66,143 +66,10 @@ class EventDatabase: ObservableObject {
 
     // MARK: - Schema
 
+    /// Create all database tables and run migrations.
+    /// - Note: Delegates to DatabaseSchema for schema management.
     private func createTables() throws {
-        // Events table
-        try execute("""
-            CREATE TABLE IF NOT EXISTS events (
-                id TEXT PRIMARY KEY,
-                parent_id TEXT,
-                session_id TEXT NOT NULL,
-                workspace_id TEXT NOT NULL,
-                type TEXT NOT NULL,
-                timestamp TEXT NOT NULL,
-                sequence INTEGER NOT NULL,
-                payload TEXT NOT NULL
-            )
-        """)
-
-        // Events indexes
-        try execute("CREATE INDEX IF NOT EXISTS idx_events_session ON events(session_id)")
-        try execute("CREATE INDEX IF NOT EXISTS idx_events_parent ON events(parent_id)")
-        try execute("CREATE INDEX IF NOT EXISTS idx_events_timestamp ON events(timestamp)")
-
-        // Sessions table
-        try execute("""
-            CREATE TABLE IF NOT EXISTS sessions (
-                id TEXT PRIMARY KEY,
-                workspace_id TEXT NOT NULL,
-                root_event_id TEXT,
-                head_event_id TEXT,
-                title TEXT,
-                latest_model TEXT NOT NULL,
-                working_directory TEXT NOT NULL,
-                created_at TEXT NOT NULL,
-                last_activity_at TEXT NOT NULL,
-                ended_at TEXT,
-                event_count INTEGER DEFAULT 0,
-                message_count INTEGER DEFAULT 0,
-                input_tokens INTEGER DEFAULT 0,
-                output_tokens INTEGER DEFAULT 0,
-                last_turn_input_tokens INTEGER DEFAULT 0,
-                cache_read_tokens INTEGER DEFAULT 0,
-                cache_creation_tokens INTEGER DEFAULT 0,
-                cost REAL DEFAULT 0
-            )
-        """)
-
-        // Migrations for existing databases
-        do {
-            try execute("ALTER TABLE sessions ADD COLUMN cost REAL DEFAULT 0")
-        } catch {
-            // Column already exists, ignore
-        }
-
-        // Migration: Add is_fork column
-        do {
-            try execute("ALTER TABLE sessions ADD COLUMN is_fork INTEGER DEFAULT 0")
-        } catch {
-            // Column already exists, ignore
-        }
-
-        // Migration: Add last_turn_input_tokens column for current context size tracking
-        do {
-            try execute("ALTER TABLE sessions ADD COLUMN last_turn_input_tokens INTEGER DEFAULT 0")
-        } catch {
-            // Column already exists, ignore
-        }
-
-        // Migration: Add cache token columns for prompt caching tracking
-        do {
-            try execute("ALTER TABLE sessions ADD COLUMN cache_read_tokens INTEGER DEFAULT 0")
-        } catch {
-            // Column already exists, ignore
-        }
-        do {
-            try execute("ALTER TABLE sessions ADD COLUMN cache_creation_tokens INTEGER DEFAULT 0")
-        } catch {
-            // Column already exists, ignore
-        }
-
-        // Migration: Add server_origin for environment filtering
-        do {
-            try execute("ALTER TABLE sessions ADD COLUMN server_origin TEXT")
-        } catch {
-            // Column already exists, ignore
-        }
-
-        // Index for filtering by origin
-        try execute("CREATE INDEX IF NOT EXISTS idx_sessions_origin ON sessions(server_origin)")
-
-        // Migration: Remove provider, status columns; rename model to latest_model
-        // Check if we need migration by looking for provider column
-        if try columnExists(table: "sessions", column: "provider") {
-            // Table rebuild approach for SQLite
-            try execute("""
-                CREATE TABLE sessions_new (
-                    id TEXT PRIMARY KEY,
-                    workspace_id TEXT NOT NULL,
-                    root_event_id TEXT,
-                    head_event_id TEXT,
-                    title TEXT,
-                    latest_model TEXT NOT NULL,
-                    working_directory TEXT NOT NULL,
-                    created_at TEXT NOT NULL,
-                    last_activity_at TEXT NOT NULL,
-                    ended_at TEXT,
-                    event_count INTEGER DEFAULT 0,
-                    message_count INTEGER DEFAULT 0,
-                    input_tokens INTEGER DEFAULT 0,
-                    output_tokens INTEGER DEFAULT 0,
-                    last_turn_input_tokens INTEGER DEFAULT 0,
-                    cost REAL DEFAULT 0
-                )
-            """)
-            try execute("""
-                INSERT INTO sessions_new
-                SELECT id, workspace_id, root_event_id, head_event_id, title,
-                       model, working_directory, created_at, last_activity_at,
-                       CASE WHEN status = 'ended' THEN last_activity_at ELSE NULL END,
-                       event_count, message_count, input_tokens, output_tokens, 0, cost
-                FROM sessions
-            """)
-            try execute("DROP TABLE sessions")
-            try execute("ALTER TABLE sessions_new RENAME TO sessions")
-        }
-
-        // Sessions indexes
-        try execute("CREATE INDEX IF NOT EXISTS idx_sessions_workspace ON sessions(workspace_id)")
-        try execute("CREATE INDEX IF NOT EXISTS idx_sessions_activity ON sessions(last_activity_at)")
-        try execute("CREATE INDEX IF NOT EXISTS idx_sessions_ended ON sessions(ended_at)")
-
-        // Sync state table
-        try execute("""
-            CREATE TABLE IF NOT EXISTS sync_state (
-                key TEXT PRIMARY KEY,
-                last_synced_event_id TEXT,
-                last_sync_timestamp TEXT,
-                pending_event_ids TEXT
-            )
-        """)
+        try DatabaseSchema.createTables(db: db)
     }
 
     // MARK: - Event Operations
@@ -470,132 +337,33 @@ class EventDatabase: ObservableObject {
         }
     }
 
-    /// Delete locally-cached events that would be duplicates of incoming server events.
-    /// @deprecated This method is no longer needed since we don't create local events.
-    /// Server events (evt_* IDs) are now the authoritative source of truth.
-    /// Kept for backwards compatibility with existing data.
-    func deleteLocalDuplicates(sessionId: String, serverEvents: [SessionEvent]) throws -> [String: [String: AnyCodable]] {
-        // Get all local events for this session (those with UUID-style IDs, not "evt_" prefix)
-        let localEvents = try getEventsBySession(sessionId).filter { !$0.id.hasPrefix("evt_") }
+    /// Delete events by their IDs
+    func deleteEvents(ids: [String]) throws {
+        guard !ids.isEmpty else { return }
 
-        // Map of server event ID -> rich content payload to merge
-        var contentToMerge: [String: [String: AnyCodable]] = [:]
-
-        guard !localEvents.isEmpty else {
-            logger.debug("No local events to deduplicate for session \(sessionId)", category: .session)
-            return contentToMerge
-        }
-
-        logger.debug("Checking \(localEvents.count) local events against \(serverEvents.count) server events", category: .session)
-
-        // Helper to check if content has tool_use or tool_result blocks
-        func hasToolBlocks(_ payload: [String: AnyCodable]) -> Bool {
-            guard let contentArray = payload["content"]?.value as? [[String: Any]] else {
-                // Also try [Any] which is what AnyCodable decodes arrays as
-                guard let anyArray = payload["content"]?.value as? [Any] else {
-                    return false
-                }
-                for element in anyArray {
-                    if let dict = element as? [String: Any],
-                       let type = dict["type"] as? String,
-                       type == "tool_use" || type == "tool_result" {
-                        return true
-                    }
-                }
-                return false
+        try execute("BEGIN TRANSACTION")
+        do {
+            let sql = "DELETE FROM events WHERE id = ?"
+            var stmt: OpaquePointer?
+            guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+                throw EventDatabaseError.prepareFailed(errorMessage)
             }
-            return contentArray.contains { block in
-                let blockType = block["type"] as? String
-                return blockType == "tool_use" || blockType == "tool_result"
-            }
-        }
+            defer { sqlite3_finalize(stmt) }
 
-        // Helper to extract text content for matching
-        func extractTextContent(_ payload: [String: AnyCodable]) -> String {
-            if let content = payload["content"]?.value as? String {
-                return content
-            } else if let contentArray = payload["content"]?.value as? [[String: Any]] {
-                return contentArray.compactMap { $0["text"] as? String }.joined()
-            } else if let anyArray = payload["content"]?.value as? [Any] {
-                // Handle [Any] from AnyCodable decoding
-                var texts: [String] = []
-                for element in anyArray {
-                    if let dict = element as? [String: Any],
-                       let text = dict["text"] as? String {
-                        texts.append(text)
-                    }
-                }
-                return texts.joined()
-            }
-            return ""
-        }
-
-        // Build map of server events by key, tracking id and whether they have tool blocks
-        struct ServerEventInfo {
-            let id: String
-            let hasToolBlocks: Bool
-        }
-        var serverEventMap: [String: ServerEventInfo] = [:]
-
-        for event in serverEvents {
-            if event.type == "message.user" || event.type == "message.assistant" {
-                let contentStr = extractTextContent(event.payload)
-                let key = "\(event.type):\(String(contentStr.prefix(100)))"
-                let info = ServerEventInfo(id: event.id, hasToolBlocks: hasToolBlocks(event.payload))
-                serverEventMap[key] = info
-                logger.debug("Server event key: \(key), hasToolBlocks: \(info.hasToolBlocks)", category: .session)
-            }
-        }
-
-        // Find local events that match server events
-        // When local has richer content (tool blocks) than server, store content to merge
-        var idsToDelete: [String] = []
-        for localEvent in localEvents {
-            if localEvent.type == "message.user" || localEvent.type == "message.assistant" {
-                let contentStr = extractTextContent(localEvent.payload)
-                let key = "\(localEvent.type):\(String(contentStr.prefix(100)))"
-                let localHasToolBlocks = hasToolBlocks(localEvent.payload)
-
-                if let serverInfo = serverEventMap[key] {
-                    // Always delete local event - it will be replaced by server event
-                    idsToDelete.append(localEvent.id)
-
-                    // If local has tool blocks but server doesn't, save content to merge
-                    if localHasToolBlocks && !serverInfo.hasToolBlocks {
-                        logger.info("Will merge local tool blocks into server event: \(serverInfo.id)", category: .session)
-                        contentToMerge[serverInfo.id] = localEvent.payload
-                    }
-
-                    logger.debug("Local event key: \(key) - will delete (localTools: \(localHasToolBlocks), serverTools: \(serverInfo.hasToolBlocks), merge: \(localHasToolBlocks && !serverInfo.hasToolBlocks))", category: .session)
-                }
-            }
-        }
-
-        // Delete matching local events
-        if !idsToDelete.isEmpty {
-            logger.info("Deleting \(idsToDelete.count) local duplicate events for session \(sessionId)", category: .session)
-
-            for id in idsToDelete {
-                let sql = "DELETE FROM events WHERE id = ?"
-                var stmt: OpaquePointer?
-                guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
-                    throw EventDatabaseError.prepareFailed(errorMessage)
-                }
-                defer { sqlite3_finalize(stmt) }
-
+            for id in ids {
+                sqlite3_reset(stmt)
+                sqlite3_clear_bindings(stmt)
                 sqlite3_bind_text(stmt, 1, id, -1, SQLITE_TRANSIENT)
 
                 guard sqlite3_step(stmt) == SQLITE_DONE else {
                     throw EventDatabaseError.deleteFailed(errorMessage)
                 }
             }
-
-            logger.info("Deleted \(idsToDelete.count) local duplicate events for session \(sessionId)", category: .session)
-        } else {
-            logger.debug("No duplicates found to delete", category: .session)
+            try execute("COMMIT")
+        } catch {
+            try execute("ROLLBACK")
+            throw error
         }
-
-        return contentToMerge
     }
 
     /// Check if an event with the given ID already exists
@@ -930,52 +698,12 @@ class EventDatabase: ObservableObject {
 
     // MARK: - Tree Visualization
 
+    /// Build tree visualization for a session.
+    /// - Note: Delegates to EventTreeBuilder for presentation logic.
     func buildTreeVisualization(_ sessionId: String) throws -> [EventTreeNode] {
         let events = try getEventsBySession(sessionId)
         let session = try getSession(sessionId)
-
-        guard !events.isEmpty else { return [] }
-
-        // Build parent-child map
-        var childrenMap: [String?: [SessionEvent]] = [:]
-        for event in events {
-            var siblings = childrenMap[event.parentId] ?? []
-            siblings.append(event)
-            childrenMap[event.parentId] = siblings
-        }
-
-        var nodes: [EventTreeNode] = []
-        let headEventId = session?.headEventId
-
-        func buildNode(_ event: SessionEvent, depth: Int) {
-            let children = childrenMap[event.id] ?? []
-            let isBranchPoint = children.count > 1
-
-            nodes.append(EventTreeNode(
-                id: event.id,
-                parentId: event.parentId,
-                type: event.type,
-                timestamp: event.timestamp,
-                summary: event.summary,
-                hasChildren: !children.isEmpty,
-                childCount: children.count,
-                depth: depth,
-                isBranchPoint: isBranchPoint,
-                isHead: event.id == headEventId
-            ))
-
-            for child in children {
-                buildNode(child, depth: depth + 1)
-            }
-        }
-
-        // Start from root events
-        let roots = childrenMap[nil] ?? []
-        for root in roots {
-            buildNode(root, depth: 0)
-        }
-
-        return nodes
+        return EventTreeBuilder.buildTree(from: events, headEventId: session?.headEventId)
     }
 
     // MARK: - Utilities
@@ -989,136 +717,17 @@ class EventDatabase: ObservableObject {
     /// Remove duplicate events for a session, preferring events with richer content (tool blocks).
     /// When content richness is equal, prefers server events (evt_*) over local events (UUIDs).
     /// Call this to repair databases that have accumulated duplicates.
+    /// - Note: Delegates to EventDeduplicator for business logic.
     func deduplicateSession(_ sessionId: String) throws -> Int {
-        let events = try getEventsBySession(sessionId)
-
-        // Helper to check if content has tool_use or tool_result blocks
-        func hasToolBlocks(_ payload: [String: AnyCodable]) -> Bool {
-            guard let contentArray = payload["content"]?.value as? [[String: Any]] else {
-                guard let anyArray = payload["content"]?.value as? [Any] else {
-                    return false
-                }
-                for element in anyArray {
-                    if let dict = element as? [String: Any],
-                       let type = dict["type"] as? String,
-                       type == "tool_use" || type == "tool_result" {
-                        return true
-                    }
-                }
-                return false
-            }
-            return contentArray.contains { block in
-                let blockType = block["type"] as? String
-                return blockType == "tool_use" || blockType == "tool_result"
-            }
-        }
-
-        // Helper to extract text content for matching
-        func extractTextContent(_ payload: [String: AnyCodable]) -> String {
-            if let content = payload["content"]?.value as? String {
-                return content
-            } else if let contentArray = payload["content"]?.value as? [[String: Any]] {
-                return contentArray.compactMap { $0["text"] as? String }.joined()
-            } else if let anyArray = payload["content"]?.value as? [Any] {
-                var texts: [String] = []
-                for element in anyArray {
-                    if let dict = element as? [String: Any],
-                       let text = dict["text"] as? String {
-                        texts.append(text)
-                    }
-                }
-                return texts.joined()
-            }
-            return ""
-        }
-
-        // Group events by (type, content prefix) to find duplicates
-        var keyToEvents: [String: [SessionEvent]] = [:]
-        for event in events {
-            if event.type == "message.user" || event.type == "message.assistant" {
-                let contentStr = extractTextContent(event.payload)
-                let key = "\(event.type):\(String(contentStr.prefix(100)))"
-
-                var group = keyToEvents[key] ?? []
-                group.append(event)
-                keyToEvents[key] = group
-            }
-        }
-
-        // Find duplicate groups and determine which to delete
-        var idsToDelete: [String] = []
-        for (key, group) in keyToEvents {
-            if group.count > 1 {
-                logger.debug("Found \(group.count) events for key: \(key)", category: .session)
-
-                // Categorize events by content richness
-                let eventsWithTools = group.filter { hasToolBlocks($0.payload) }
-                let eventsWithoutTools = group.filter { !hasToolBlocks($0.payload) }
-
-                if !eventsWithTools.isEmpty {
-                    // Keep events with tool blocks, delete those without
-                    logger.debug("Keeping \(eventsWithTools.count) events with tool blocks, deleting \(eventsWithoutTools.count) without", category: .session)
-                    idsToDelete.append(contentsOf: eventsWithoutTools.map { $0.id })
-
-                    // Among events with tools, prefer server events
-                    if eventsWithTools.count > 1 {
-                        let serverWithTools = eventsWithTools.filter { $0.id.hasPrefix("evt_") }
-                        let localWithTools = eventsWithTools.filter { !$0.id.hasPrefix("evt_") }
-
-                        if !serverWithTools.isEmpty {
-                            // Keep server events with tools, delete local ones with tools
-                            idsToDelete.append(contentsOf: localWithTools.map { $0.id })
-                        } else {
-                            // Keep first local with tools
-                            idsToDelete.append(contentsOf: localWithTools.dropFirst().map { $0.id })
-                        }
-                    }
-                } else {
-                    // No events with tools - prefer server events
-                    let serverEvents = group.filter { $0.id.hasPrefix("evt_") }
-                    let localEvents = group.filter { !$0.id.hasPrefix("evt_") }
-
-                    if !serverEvents.isEmpty {
-                        logger.debug("Keeping \(serverEvents.count) server events, deleting \(localEvents.count) local events", category: .session)
-                        idsToDelete.append(contentsOf: localEvents.map { $0.id })
-                    } else {
-                        logger.debug("No server events, keeping first local, deleting \(localEvents.count - 1) others", category: .session)
-                        idsToDelete.append(contentsOf: localEvents.dropFirst().map { $0.id })
-                    }
-                }
-            }
-        }
-
-        // Delete duplicates
-        if !idsToDelete.isEmpty {
-            for id in idsToDelete {
-                let sql = "DELETE FROM events WHERE id = ?"
-                var stmt: OpaquePointer?
-                guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
-                    throw EventDatabaseError.prepareFailed(errorMessage)
-                }
-                defer { sqlite3_finalize(stmt) }
-
-                sqlite3_bind_text(stmt, 1, id, -1, SQLITE_TRANSIENT)
-                _ = sqlite3_step(stmt)
-            }
-
-            logger.info("Deduplicated session \(sessionId): removed \(idsToDelete.count) duplicate events", category: .session)
-        }
-
-        return idsToDelete.count
+        let deduplicator = EventDeduplicator(eventDB: self)
+        return try deduplicator.deduplicateSession(sessionId)
     }
 
     /// Deduplicate all sessions in the database
+    /// - Note: Delegates to EventDeduplicator for business logic.
     func deduplicateAllSessions() throws -> Int {
-        var totalRemoved = 0
-        let sessions = try getAllSessions()
-
-        for session in sessions {
-            totalRemoved += try deduplicateSession(session.id)
-        }
-
-        return totalRemoved
+        let deduplicator = EventDeduplicator(eventDB: self)
+        return try deduplicator.deduplicateAllSessions()
     }
 
     // MARK: - Private Helpers
@@ -1131,23 +740,6 @@ class EventDatabase: ObservableObject {
         guard sqlite3_exec(db, sql, nil, nil, nil) == SQLITE_OK else {
             throw EventDatabaseError.executeFailed(errorMessage)
         }
-    }
-
-    private func columnExists(table: String, column: String) throws -> Bool {
-        let sql = "PRAGMA table_info(\(table))"
-        var stmt: OpaquePointer?
-        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
-            throw EventDatabaseError.prepareFailed(errorMessage)
-        }
-        defer { sqlite3_finalize(stmt) }
-
-        while sqlite3_step(stmt) == SQLITE_ROW {
-            let colName = String(cString: sqlite3_column_text(stmt, 1))
-            if colName == column {
-                return true
-            }
-        }
-        return false
     }
 
     private func bindOptionalText(_ stmt: OpaquePointer?, _ index: Int32, _ value: String?) {

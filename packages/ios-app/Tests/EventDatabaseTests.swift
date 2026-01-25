@@ -713,4 +713,167 @@ final class EventDatabaseTests: XCTestCase {
         // Total: $4.50
         XCTAssertEqual(analytics.totalCost, 4.50, accuracy: 0.01)
     }
+
+    // MARK: - Deduplication Tests
+
+    @MainActor
+    func testDeduplicateSessionRemovesDuplicates() async throws {
+        // Create duplicate events with same type and content prefix
+        let events = [
+            SessionEvent(
+                id: "local-uuid-1",
+                parentId: nil,
+                sessionId: "session-1",
+                workspaceId: "/test",
+                type: "message.user",
+                timestamp: "2024-01-01T00:00:01Z",
+                sequence: 1,
+                payload: ["content": AnyCodable("Hello world, this is a test message")]
+            ),
+            SessionEvent(
+                id: "evt_server-1",
+                parentId: nil,
+                sessionId: "session-1",
+                workspaceId: "/test",
+                type: "message.user",
+                timestamp: "2024-01-01T00:00:02Z",
+                sequence: 2,
+                payload: ["content": AnyCodable("Hello world, this is a test message")]
+            )
+        ]
+
+        try database.insertEvents(events)
+
+        // Verify both events exist
+        let beforeEvents = try database.getEventsBySession("session-1")
+        XCTAssertEqual(beforeEvents.count, 2)
+
+        // Deduplicate
+        let removedCount = try database.deduplicateSession("session-1")
+
+        // Should remove the local event, keep the server event
+        XCTAssertEqual(removedCount, 1)
+
+        let afterEvents = try database.getEventsBySession("session-1")
+        XCTAssertEqual(afterEvents.count, 1)
+        XCTAssertEqual(afterEvents.first?.id, "evt_server-1")
+    }
+
+    @MainActor
+    func testDeduplicatePrefersEventsWithToolBlocks() async throws {
+        // Create duplicate events where one has tool blocks
+        let eventsWithoutTools = SessionEvent(
+            id: "evt_no-tools",
+            parentId: nil,
+            sessionId: "session-1",
+            workspaceId: "/test",
+            type: "message.assistant",
+            timestamp: "2024-01-01T00:00:01Z",
+            sequence: 1,
+            payload: ["content": AnyCodable([
+                ["type": "text", "text": "Here is my response"]
+            ])]
+        )
+
+        let eventsWithTools = SessionEvent(
+            id: "local-with-tools",
+            parentId: nil,
+            sessionId: "session-1",
+            workspaceId: "/test",
+            type: "message.assistant",
+            timestamp: "2024-01-01T00:00:02Z",
+            sequence: 2,
+            payload: ["content": AnyCodable([
+                ["type": "text", "text": "Here is my response"],
+                ["type": "tool_use", "id": "tool-1", "name": "read_file", "input": ["path": "/test"]]
+            ])]
+        )
+
+        try database.insertEvents([eventsWithoutTools, eventsWithTools])
+
+        let removedCount = try database.deduplicateSession("session-1")
+
+        // Should remove the event without tools, keep the one with tools
+        XCTAssertEqual(removedCount, 1)
+
+        let afterEvents = try database.getEventsBySession("session-1")
+        XCTAssertEqual(afterEvents.count, 1)
+        XCTAssertEqual(afterEvents.first?.id, "local-with-tools")
+    }
+
+    @MainActor
+    func testDeduplicateNoDuplicatesReturnsZero() async throws {
+        // Create unique events (different content)
+        let events = [
+            SessionEvent(
+                id: "event-1",
+                parentId: nil,
+                sessionId: "session-1",
+                workspaceId: "/test",
+                type: "message.user",
+                timestamp: "2024-01-01T00:00:01Z",
+                sequence: 1,
+                payload: ["content": AnyCodable("First message")]
+            ),
+            SessionEvent(
+                id: "event-2",
+                parentId: "event-1",
+                sessionId: "session-1",
+                workspaceId: "/test",
+                type: "message.assistant",
+                timestamp: "2024-01-01T00:00:02Z",
+                sequence: 2,
+                payload: ["content": AnyCodable("Response message")]
+            )
+        ]
+
+        try database.insertEvents(events)
+
+        let removedCount = try database.deduplicateSession("session-1")
+
+        XCTAssertEqual(removedCount, 0)
+
+        let afterEvents = try database.getEventsBySession("session-1")
+        XCTAssertEqual(afterEvents.count, 2)
+    }
+
+    @MainActor
+    func testDeduplicateAllSessions() async throws {
+        // Create duplicates in two sessions
+        let session1Events = [
+            SessionEvent(id: "s1-local", parentId: nil, sessionId: "session-1", workspaceId: "/test", type: "message.user", timestamp: "2024-01-01T00:00:01Z", sequence: 1, payload: ["content": AnyCodable("Hello session 1")]),
+            SessionEvent(id: "s1-evt_server", parentId: nil, sessionId: "session-1", workspaceId: "/test", type: "message.user", timestamp: "2024-01-01T00:00:02Z", sequence: 2, payload: ["content": AnyCodable("Hello session 1")])
+        ]
+
+        let session2Events = [
+            SessionEvent(id: "s2-local", parentId: nil, sessionId: "session-2", workspaceId: "/test", type: "message.user", timestamp: "2024-01-01T00:00:01Z", sequence: 1, payload: ["content": AnyCodable("Hello session 2")]),
+            SessionEvent(id: "evt_s2-server", parentId: nil, sessionId: "session-2", workspaceId: "/test", type: "message.user", timestamp: "2024-01-01T00:00:02Z", sequence: 2, payload: ["content": AnyCodable("Hello session 2")])
+        ]
+
+        // Insert sessions first
+        try database.insertSession(CachedSession(
+            id: "session-1", workspaceId: "/test", rootEventId: nil, headEventId: nil,
+            title: "Session 1", latestModel: "claude-sonnet-4", workingDirectory: "/test",
+            createdAt: "2024-01-01T00:00:00Z", lastActivityAt: "2024-01-01T00:00:02Z",
+            endedAt: nil, eventCount: 2, messageCount: 2, inputTokens: 0, outputTokens: 0,
+            lastTurnInputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0, cost: 0,
+            isFork: false, serverOrigin: nil
+        ))
+        try database.insertSession(CachedSession(
+            id: "session-2", workspaceId: "/test", rootEventId: nil, headEventId: nil,
+            title: "Session 2", latestModel: "claude-sonnet-4", workingDirectory: "/test",
+            createdAt: "2024-01-01T00:00:00Z", lastActivityAt: "2024-01-01T00:00:02Z",
+            endedAt: nil, eventCount: 2, messageCount: 2, inputTokens: 0, outputTokens: 0,
+            lastTurnInputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0, cost: 0,
+            isFork: false, serverOrigin: nil
+        ))
+
+        try database.insertEvents(session1Events)
+        try database.insertEvents(session2Events)
+
+        let totalRemoved = try database.deduplicateAllSessions()
+
+        // Should remove 1 duplicate from each session
+        XCTAssertEqual(totalRemoved, 2)
+    }
 }

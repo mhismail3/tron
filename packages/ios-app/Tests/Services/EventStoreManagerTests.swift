@@ -372,6 +372,82 @@ final class ContentExtractorTests: XCTestCase {
         XCTAssertEqual(info.lastAssistantResponse, "The answer is 4")
         XCTAssertEqual(info.lastToolCount, 1)
     }
+
+    // MARK: - Payload-Based Methods Tests
+
+    func testHasToolBlocks_DetectsToolUse() {
+        let payload: [String: AnyCodable] = [
+            "content": AnyCodable([
+                ["type": "text", "text": "Hello"],
+                ["type": "tool_use", "id": "tool_1", "name": "Bash"]
+            ])
+        ]
+
+        XCTAssertTrue(ContentExtractor.hasToolBlocks(in: payload))
+    }
+
+    func testHasToolBlocks_DetectsToolResult() {
+        let payload: [String: AnyCodable] = [
+            "content": AnyCodable([
+                ["type": "tool_result", "tool_use_id": "tool_1", "content": "output"]
+            ])
+        ]
+
+        XCTAssertTrue(ContentExtractor.hasToolBlocks(in: payload))
+    }
+
+    func testHasToolBlocks_ReturnsFalseForTextOnly() {
+        let payload: [String: AnyCodable] = [
+            "content": AnyCodable([
+                ["type": "text", "text": "Hello world"]
+            ])
+        ]
+
+        XCTAssertFalse(ContentExtractor.hasToolBlocks(in: payload))
+    }
+
+    func testHasToolBlocks_ReturnsFalseForStringContent() {
+        let payload: [String: AnyCodable] = [
+            "content": AnyCodable("Just a string")
+        ]
+
+        XCTAssertFalse(ContentExtractor.hasToolBlocks(in: payload))
+    }
+
+    func testHasToolBlocks_ReturnsFalseForEmptyPayload() {
+        let payload: [String: AnyCodable] = [:]
+
+        XCTAssertFalse(ContentExtractor.hasToolBlocks(in: payload))
+    }
+
+    func testExtractTextForMatching_FromContentBlocks() {
+        let payload: [String: AnyCodable] = [
+            "content": AnyCodable([
+                ["type": "text", "text": "Hello "],
+                ["type": "tool_use", "id": "t1", "name": "Bash"],
+                ["type": "text", "text": "world"]
+            ])
+        ]
+
+        let text = ContentExtractor.extractTextForMatching(from: payload)
+        XCTAssertEqual(text, "Hello world")
+    }
+
+    func testExtractTextForMatching_FromStringContent() {
+        let payload: [String: AnyCodable] = [
+            "content": AnyCodable("Hello world")
+        ]
+
+        let text = ContentExtractor.extractTextForMatching(from: payload)
+        XCTAssertEqual(text, "Hello world")
+    }
+
+    func testExtractTextForMatching_FromEmptyPayload() {
+        let payload: [String: AnyCodable] = [:]
+
+        let text = ContentExtractor.extractTextForMatching(from: payload)
+        XCTAssertEqual(text, "")
+    }
 }
 
 // MARK: - SessionStateChecker Tests
