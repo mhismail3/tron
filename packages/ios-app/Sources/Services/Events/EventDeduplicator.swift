@@ -17,11 +17,11 @@ final class EventDeduplicator {
     /// Returns the number of duplicates removed.
     @MainActor
     func deduplicateSession(_ sessionId: String) throws -> Int {
-        let events = try eventDB.getEventsBySession(sessionId)
+        let events = try eventDB.events.getBySession(sessionId)
         let idsToDelete = findDuplicateIds(in: events)
 
         if !idsToDelete.isEmpty {
-            try eventDB.deleteEvents(ids: idsToDelete)
+            try eventDB.events.delete(ids: idsToDelete)
             logger.info("Deduplicated session \(sessionId): removed \(idsToDelete.count) duplicate events", category: .session)
         }
 
@@ -33,7 +33,7 @@ final class EventDeduplicator {
     @MainActor
     func deduplicateAllSessions() throws -> Int {
         var totalRemoved = 0
-        let sessions = try eventDB.getAllSessions()
+        let sessions = try eventDB.sessions.getAll()
 
         for session in sessions {
             totalRemoved += try deduplicateSession(session.id)

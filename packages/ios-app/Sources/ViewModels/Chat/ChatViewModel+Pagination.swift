@@ -142,7 +142,7 @@ extension ChatViewModel {
             logger.info("[TOKEN-FIX] RESUME from server events: lastTurnInputTokens=\(state.lastTurnInputTokens)", category: .session)
 
             // Get cost from iOS DB session cache (this is fine as it's just for display)
-            if let session = try? manager.eventDB.getSession(sessionId) {
+            if let session = try? manager.eventDB.sessions.get(sessionId) {
                 contextState.accumulatedCost = session.cost
             }
 
@@ -205,7 +205,7 @@ extension ChatViewModel {
             logger.info("[TOKEN-FIX] RESUME (sync) from server events: lastTurnInputTokens=\(state.lastTurnInputTokens)", category: .session)
 
             // Get cost from iOS DB session cache (just for display)
-            if let session = try? manager.eventDB.getSession(sessionId) {
+            if let session = try? manager.eventDB.sessions.get(sessionId) {
                 contextState.accumulatedCost = session.cost
             }
 

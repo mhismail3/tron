@@ -122,7 +122,7 @@ final class ThinkingState {
         }
 
         // Get workspace ID from session
-        guard let session = try? database.getSession(sessionId) else {
+        guard let session = try? database.sessions.get(sessionId) else {
             logger.warning("Cannot persist thinking - session not found", category: .session)
             return
         }
@@ -140,7 +140,7 @@ final class ThinkingState {
         )
 
         do {
-            try database.insertEvent(event)
+            try database.events.insert(event)
             logger.debug("Persisted thinking event for turn \(payload.turnNumber)", category: .session)
         } catch {
             logger.error("Failed to persist thinking event: \(error.localizedDescription)", category: .session)
@@ -165,7 +165,7 @@ final class ThinkingState {
         }
 
         do {
-            let loadedBlocks = try database.getThinkingEvents(sessionId: sessionId, previewOnly: true)
+            let loadedBlocks = try database.thinking.getEvents(sessionId: sessionId, previewOnly: true)
             await MainActor.run {
                 withAnimation(.easeInOut(duration: 0.2)) {
                     self.blocks = loadedBlocks
@@ -208,7 +208,7 @@ final class ThinkingState {
         }
 
         do {
-            if let content = try database.getThinkingContent(eventId: block.eventId) {
+            if let content = try database.thinking.getContent(eventId: block.eventId) {
                 loadedFullContent = content
             } else {
                 // Fallback to preview if full content not found

@@ -439,7 +439,7 @@ final class SubagentState {
         }
 
         do {
-            let rawEvents = try eventDB.getEventsBySession(subagentSessionId)
+            let rawEvents = try eventDB.events.getBySession(subagentSessionId)
             let messages = UnifiedEventTransformer.transformPersistedEvents(rawEvents)
             var items = convertMessagesToEventItems(messages)
 

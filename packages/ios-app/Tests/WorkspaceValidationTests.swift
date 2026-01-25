@@ -126,16 +126,16 @@ final class WorkspaceValidationTests: XCTestCase {
     func testArchiveSessionRemovesFromDatabase() async throws {
         // Given: A session in the database
         let session = createCachedSession(id: "test-session", workingDirectory: "/deleted/workspace")
-        try database.insertSession(session)
+        try database.sessions.insert(session)
 
         // Verify it exists
-        XCTAssertNotNil(try database.getSession("test-session"))
+        XCTAssertNotNil(try database.sessions.get("test-session"))
 
         // When: Deleting/archiving the session
-        try database.deleteSession("test-session")
+        try database.sessions.delete("test-session")
 
         // Then: Session should no longer exist
-        XCTAssertNil(try database.getSession("test-session"))
+        XCTAssertNil(try database.sessions.get("test-session"))
     }
 
     /// Test that archiving removes associated events
@@ -143,7 +143,7 @@ final class WorkspaceValidationTests: XCTestCase {
     func testArchiveSessionRemovesEvents() async throws {
         // Given: A session with events
         let session = createCachedSession(id: "test-session", workingDirectory: "/workspace")
-        try database.insertSession(session)
+        try database.sessions.insert(session)
 
         let event = SessionEvent(
             id: "e1",
@@ -155,18 +155,18 @@ final class WorkspaceValidationTests: XCTestCase {
             sequence: 1,
             payload: [:]
         )
-        try database.insertEvents([event])
+        try database.events.insertBatch([event])
 
         // Verify events exist
-        let eventsBefore = try database.getEventsBySession("test-session")
+        let eventsBefore = try database.events.getBySession("test-session")
         XCTAssertEqual(eventsBefore.count, 1)
 
         // When: Deleting the session and its events
-        try database.deleteSession("test-session")
-        try database.deleteEventsBySession("test-session")
+        try database.sessions.delete("test-session")
+        try database.events.deleteBySession("test-session")
 
         // Then: Events should also be removed
-        let eventsAfter = try database.getEventsBySession("test-session")
+        let eventsAfter = try database.events.getBySession("test-session")
         XCTAssertEqual(eventsAfter.count, 0)
     }
 

@@ -242,7 +242,7 @@ class EventStoreManager: ObservableObject {
 
             // Filter by current server origin if enabled
             let origin = filterByOrigin ? currentServerOrigin : nil
-            sessions = try eventDB.getSessionsByOrigin(origin)
+            sessions = try eventDB.sessions.getByOrigin(origin)
             logger.info("Loaded \(self.sessions.count) sessions from EventDatabase (origin filter: \(origin ?? "none"))", category: .session)
 
             // Restore preserved transient state and extract dashboard info
@@ -291,18 +291,18 @@ class EventStoreManager: ObservableObject {
 
     /// Get ChatMessages for a session using the unified transformer.
     func getChatMessages(sessionId: String) throws -> [ChatMessage] {
-        guard let session = try eventDB.getSession(sessionId),
+        guard let session = try eventDB.sessions.get(sessionId),
               let headEventId = session.headEventId else {
             return []
         }
 
-        let events = try eventDB.getAncestors(headEventId)
+        let events = try eventDB.events.getAncestors(headEventId)
         return UnifiedEventTransformer.transformPersistedEvents(events)
     }
 
     /// Get full reconstructed session state using the unified transformer.
     func getReconstructedState(sessionId: String) throws -> ReconstructedState {
-        guard let session = try eventDB.getSession(sessionId) else {
+        guard let session = try eventDB.sessions.get(sessionId) else {
             logger.warning("[RECONSTRUCT] Session not found: \(sessionId)", category: .session)
             return ReconstructedState()
         }
@@ -313,7 +313,7 @@ class EventStoreManager: ObservableObject {
         }
 
         logger.info("[RECONSTRUCT] Loading state for session \(sessionId), headEventId=\(headEventId)", category: .session)
-        let events = try eventDB.getAncestors(headEventId)
+        let events = try eventDB.events.getAncestors(headEventId)
         logger.info("[RECONSTRUCT] Got \(events.count) ancestor events", category: .session)
 
         // Pass presorted: true because getAncestors returns events in correct chain order.

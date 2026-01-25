@@ -115,7 +115,7 @@ extension EventStoreManager {
     /// Delegates to ContentExtractor utility.
     func extractDashboardInfoFromEvents(sessionId: String) {
         do {
-            let events = try eventDB.getEventsBySession(sessionId)
+            let events = try eventDB.events.getBySession(sessionId)
             let info = ContentExtractor.extractDashboardInfo(from: events)
 
             updateSessionDashboardInfo(

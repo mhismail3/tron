@@ -430,8 +430,8 @@ struct ContentView: View {
         Task {
             // Delete from database
             do {
-                try eventStoreManager.eventDB.deleteSession(sessionId)
-                try eventStoreManager.eventDB.deleteEventsBySession(sessionId)
+                try eventStoreManager.eventDB.sessions.delete(sessionId)
+                try eventStoreManager.eventDB.events.deleteBySession(sessionId)
             } catch {
                 logger.error("Failed to delete session from database: \(error)", category: .session)
             }

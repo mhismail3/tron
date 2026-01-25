@@ -35,12 +35,12 @@ extension EventStoreManager {
 
                 // Merge or create session
                 let cachedSession: CachedSession
-                if try eventDB.sessionExists(sessionId), let existingSession = try eventDB.getSession(sessionId) {
+                if try eventDB.sessions.exists(sessionId), let existingSession = try eventDB.sessions.get(sessionId) {
                     cachedSession = mergeSessionData(existing: existingSession, serverInfo: serverSession, serverOrigin: serverOrigin)
                 } else {
                     cachedSession = serverSessionToCached(serverSession, serverOrigin: serverOrigin)
                 }
-                try eventDB.insertSession(cachedSession)
+                try eventDB.sessions.insert(cachedSession)
                 syncedCount += 1
 
                 // Sync events for this session
@@ -84,9 +84,9 @@ extension EventStoreManager {
 
     /// Update session metadata from event database.
     func updateSessionMetadata(sessionId: String) async throws {
-        guard var session = try eventDB.getSession(sessionId) else { return }
+        guard var session = try eventDB.sessions.get(sessionId) else { return }
 
-        let events = try eventDB.getEventsBySession(sessionId)
+        let events = try eventDB.events.getBySession(sessionId)
 
         // Update counts
         session.eventCount = events.count
@@ -103,7 +103,7 @@ extension EventStoreManager {
             session.rootEventId = firstEvent.id
         }
 
-        try eventDB.insertSession(session)
+        try eventDB.sessions.insert(session)
         loadSessions()
     }
 

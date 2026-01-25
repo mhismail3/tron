@@ -34,7 +34,7 @@ final class SessionSynchronizer {
         logger.info("[SYNC] Syncing events for session \(sessionId)", category: .session)
 
         // Get sync state to find cursor
-        let syncState = try eventDB.getSyncState(sessionId)
+        let syncState = try eventDB.sync.getState(sessionId)
         let afterEventId = syncState?.lastSyncedEventId
 
         // Fetch events since cursor from server
@@ -55,7 +55,7 @@ final class SessionSynchronizer {
             events = cache.enrichEvents(events, sessionId: sessionId)
 
             // Insert enriched events
-            try eventDB.insertEvents(events)
+            try eventDB.events.insertBatch(events)
 
             // Update sync state
             if let lastEvent = result.events.last {
@@ -65,7 +65,7 @@ final class SessionSynchronizer {
                     lastSyncTimestamp: ISO8601DateFormatter().string(from: Date()),
                     pendingEventIds: []
                 )
-                try eventDB.updateSyncState(newSyncState)
+                try eventDB.sync.update(newSyncState)
             }
 
             logger.info("[SYNC] Synced \(result.events.count) events for session \(sessionId)", category: .session)
@@ -79,7 +79,7 @@ final class SessionSynchronizer {
         logger.info("[FULL-SYNC] Starting full sync for session \(sessionId)", category: .session)
 
         // Clear existing events
-        try eventDB.deleteEventsBySession(sessionId)
+        try eventDB.events.deleteBySession(sessionId)
 
         // Clear sync state
         let emptySyncState = SyncState(
@@ -88,7 +88,7 @@ final class SessionSynchronizer {
             lastSyncTimestamp: nil,
             pendingEventIds: []
         )
-        try eventDB.updateSyncState(emptySyncState)
+        try eventDB.sync.update(emptySyncState)
 
         // Fetch all events
         let events = try await rpcClient.eventSync.getAll(sessionId: sessionId)
@@ -108,14 +108,14 @@ final class SessionSynchronizer {
             do {
                 let ancestorEvents = try await rpcClient.eventSync.getAncestors(parentId)
                 let ancestorSessionEvents = ancestorEvents.map { rawEventToSessionEvent($0) }
-                let insertedCount = try eventDB.insertEventsIgnoringDuplicates(ancestorSessionEvents)
+                let insertedCount = try eventDB.events.insertIgnoringDuplicates(ancestorSessionEvents)
                 logger.info("[FULL-SYNC] Inserted \(insertedCount) ancestor events", category: .session)
             } catch {
                 logger.warning("[FULL-SYNC] Failed to fetch ancestors: \(error.localizedDescription)", category: .session)
             }
         }
 
-        try eventDB.insertEvents(sessionEvents)
+        try eventDB.events.insertBatch(sessionEvents)
         logger.info("[FULL-SYNC] Completed: \(events.count) events for session \(sessionId)", category: .session)
 
         return events.count
@@ -128,8 +128,8 @@ final class SessionSynchronizer {
 
     /// Check if a session exists locally with a different origin.
     func sessionHasDifferentOrigin(_ sessionId: String, expectedOrigin: String) throws -> Bool {
-        guard try eventDB.sessionExists(sessionId) else { return false }
-        let existingOrigin = try eventDB.getSessionOrigin(sessionId)
+        guard try eventDB.sessions.exists(sessionId) else { return false }
+        let existingOrigin = try eventDB.sessions.getOrigin(sessionId)
         return existingOrigin != nil && existingOrigin != expectedOrigin
     }
 
@@ -139,14 +139,14 @@ final class SessionSynchronizer {
     private func fetchMissingAncestors(for events: [SessionEvent]) async throws {
         for event in events {
             if let parentId = event.parentId {
-                let parentExists = try eventDB.eventExists(parentId)
+                let parentExists = try eventDB.events.exists(parentId)
                 let parentInNewEvents = events.contains(where: { $0.id == parentId })
                 if !parentExists && !parentInNewEvents {
                     logger.info("[SYNC] Event references missing parent \(parentId.prefix(12)), fetching ancestors", category: .session)
                     do {
                         let ancestorEvents = try await rpcClient.eventSync.getAncestors(parentId)
                         let ancestorSessionEvents = ancestorEvents.map { rawEventToSessionEvent($0) }
-                        let insertedCount = try eventDB.insertEventsIgnoringDuplicates(ancestorSessionEvents)
+                        let insertedCount = try eventDB.events.insertIgnoringDuplicates(ancestorSessionEvents)
                         logger.info("[SYNC] Inserted \(insertedCount) ancestor events", category: .session)
                     } catch {
                         logger.warning("[SYNC] Failed to fetch ancestors: \(error.localizedDescription)", category: .session)

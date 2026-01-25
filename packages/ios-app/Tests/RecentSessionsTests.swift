@@ -84,11 +84,11 @@ final class RecentSessionsTests: XCTestCase {
             cost: 0.0
         )
 
-        try database.insertSession(session1)
-        try database.insertSession(session2)
-        try database.insertSession(session3)
+        try database.sessions.insert(session1)
+        try database.sessions.insert(session2)
+        try database.sessions.insert(session3)
 
-        let sessions = try database.getAllSessions()
+        let sessions = try database.sessions.getAll()
 
         XCTAssertEqual(sessions.count, 3)
         XCTAssertEqual(sessions[0].id, "session-newest")
@@ -154,11 +154,11 @@ final class RecentSessionsTests: XCTestCase {
             cost: 0.0
         )
 
-        try database.insertSession(sessionA1)
-        try database.insertSession(sessionA2)
-        try database.insertSession(sessionB1)
+        try database.sessions.insert(sessionA1)
+        try database.sessions.insert(sessionA2)
+        try database.sessions.insert(sessionB1)
 
-        let allSessions = try database.getAllSessions()
+        let allSessions = try database.sessions.getAll()
         XCTAssertEqual(allSessions.count, 3)
 
         // Filter by workspace A
@@ -194,10 +194,10 @@ final class RecentSessionsTests: XCTestCase {
                 lastTurnInputTokens: 0,
                 cost: 0.0
             )
-            try database.insertSession(session)
+            try database.sessions.insert(session)
         }
 
-        let allSessions = try database.getAllSessions()
+        let allSessions = try database.sessions.getAll()
         XCTAssertEqual(allSessions.count, 15)
 
         // Apply the limit (as the feature will do)
@@ -250,10 +250,10 @@ final class RecentSessionsTests: XCTestCase {
             cost: 0.0
         )
 
-        try database.insertSession(activeSession)
-        try database.insertSession(endedSession)
+        try database.sessions.insert(activeSession)
+        try database.sessions.insert(endedSession)
 
-        let sessions = try database.getAllSessions()
+        let sessions = try database.sessions.getAll()
         XCTAssertEqual(sessions.count, 2)
 
         let hasActive = sessions.contains { !$0.isEnded }
@@ -387,8 +387,8 @@ final class RecentSessionsTests: XCTestCase {
             )
         ]
 
-        try database.insertEvents(events)
-        try database.insertSession(CachedSession(
+        try database.events.insertBatch(events)
+        try database.sessions.insert(CachedSession(
             id: "source-session",
             workspaceId: "/workspace",
             rootEventId: "e1",
@@ -407,7 +407,7 @@ final class RecentSessionsTests: XCTestCase {
         ))
 
         // Verify source session exists
-        let sourceSession = try database.getSession("source-session")
+        let sourceSession = try database.sessions.get("source-session")
         XCTAssertNotNil(sourceSession)
         XCTAssertEqual(sourceSession?.headEventId, "e3")
         XCTAssertEqual(sourceSession?.messageCount, 2)
@@ -417,7 +417,7 @@ final class RecentSessionsTests: XCTestCase {
     @MainActor
     func testOriginalSessionUnchangedAfterFork() async throws {
         // Create source session
-        try database.insertSession(CachedSession(
+        try database.sessions.insert(CachedSession(
             id: "original-session",
             workspaceId: "/workspace",
             rootEventId: "e1",
@@ -436,10 +436,10 @@ final class RecentSessionsTests: XCTestCase {
         ))
 
         // Simulate what happens after a fork - original should be unchanged
-        let originalBefore = try database.getSession("original-session")
+        let originalBefore = try database.sessions.get("original-session")
 
         // Create a "forked" session (simulating server response)
-        try database.insertSession(CachedSession(
+        try database.sessions.insert(CachedSession(
             id: "forked-session",
             workspaceId: "/workspace",
             rootEventId: "f1",
@@ -458,7 +458,7 @@ final class RecentSessionsTests: XCTestCase {
         ))
 
         // Verify original is unchanged
-        let originalAfter = try database.getSession("original-session")
+        let originalAfter = try database.sessions.get("original-session")
         XCTAssertEqual(originalBefore?.id, originalAfter?.id)
         XCTAssertEqual(originalBefore?.headEventId, originalAfter?.headEventId)
         XCTAssertEqual(originalBefore?.eventCount, originalAfter?.eventCount)
@@ -471,7 +471,7 @@ final class RecentSessionsTests: XCTestCase {
     @MainActor
     func testFilteredRecentSessionsLogic() async throws {
         // Create sessions in multiple workspaces
-        try database.insertSession(CachedSession(
+        try database.sessions.insert(CachedSession(
             id: "ws-a-1",
             workspaceId: "/projects/app-a",
             rootEventId: nil,
@@ -489,7 +489,7 @@ final class RecentSessionsTests: XCTestCase {
             cost: 0.0
         ))
 
-        try database.insertSession(CachedSession(
+        try database.sessions.insert(CachedSession(
             id: "ws-a-2",
             workspaceId: "/projects/app-a",
             rootEventId: nil,
@@ -507,7 +507,7 @@ final class RecentSessionsTests: XCTestCase {
             cost: 0.0
         ))
 
-        try database.insertSession(CachedSession(
+        try database.sessions.insert(CachedSession(
             id: "ws-b-1",
             workspaceId: "/projects/app-b",
             rootEventId: nil,
@@ -526,7 +526,7 @@ final class RecentSessionsTests: XCTestCase {
         ))
 
         // Get all sessions sorted
-        let allSessions = try database.getAllSessions()
+        let allSessions = try database.sessions.getAll()
         let sortedSessions = allSessions.sorted { $0.lastActivityAt > $1.lastActivityAt }
         let recent = Array(sortedSessions.prefix(10))
 
@@ -578,7 +578,7 @@ final class RecentSessionsTests: XCTestCase {
     /// Test empty sessions list
     @MainActor
     func testEmptySessionsList() async throws {
-        let sessions = try database.getAllSessions()
+        let sessions = try database.sessions.getAll()
         XCTAssertEqual(sessions.count, 0)
 
         // Filtering empty list should return empty
