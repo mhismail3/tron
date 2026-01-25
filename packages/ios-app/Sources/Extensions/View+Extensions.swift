@@ -195,17 +195,39 @@ extension View {
 
 // MARK: - Adaptive Presentation Detents
 
+/// Custom presentation sizing that's smaller than `.page` but larger than `.form`
+/// Provides approximately 85% of the available space on iPad
+@MainActor
+struct LargeFormSizing: PresentationSizing {
+    nonisolated func proposedSize(for root: PresentationSizingRoot, context: PresentationSizingContext) -> ProposedViewSize {
+        // Get screen bounds for sizing reference (using nonisolated unsafe access)
+        let screenBounds = MainActor.assumeIsolated { UIScreen.main.bounds }
+
+        // Use 85% of screen width and 88% of height for a "large form" look
+        // This is smaller than .page but larger than .form
+        let width = screenBounds.width * 0.85
+        let height = screenBounds.height * 0.88
+
+        return ProposedViewSize(width: width, height: height)
+    }
+}
+
+extension PresentationSizing where Self == LargeFormSizing {
+    /// A presentation size larger than `.form` but smaller than `.page`
+    static var largeForm: LargeFormSizing { LargeFormSizing() }
+}
+
 extension View {
-    /// Presentation detents that adapt to device type:
-    /// - iPad: Uses `.presentationSizing(.page)` for full-size sheets (iOS 18+ default is smaller `.form`)
+    /// Presentation detents with adaptive sizing for iPad/iPhone:
+    /// - iPad: Uses custom `.largeForm` sizing (85% width, 88% height) - smaller than page, larger than form
     /// - iPhone: Uses `.presentationDetents` to allow medium/large sizing
+    /// - iOS 26+: Partial-height detents automatically get Liquid Glass appearance
     ///
-    /// On iPad, `presentationDetents` is ignored because sheets appear as floating modals.
-    /// The `presentationSizing(.page)` modifier ensures iPad gets full-size sheets.
+    /// On iPad, `presentationDetents` is ignored for floating modals.
     @ViewBuilder
     func adaptivePresentationDetents(_ detents: Set<PresentationDetent> = [.medium, .large]) -> some View {
         self
             .presentationDetents(detents)
-            .presentationSizing(.page)
+            .presentationSizing(.largeForm)
     }
 }
