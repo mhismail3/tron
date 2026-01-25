@@ -213,6 +213,13 @@ export class ContextManager {
   private cachedSystemPromptTokens: number | null = null;
   private cachedToolsTokens: number | null = null;
 
+  /**
+   * API-reported context token count from model response.
+   * This is the ground truth from the actual tokenizer, set after each turn.
+   * When available, this is preferred over our char/4 estimates.
+   */
+  private lastApiContextTokens: number = 0;
+
   constructor(config: ContextManagerConfig) {
     this.model = config.model;
     this.providerType = detectProviderFromModel(config.model);
@@ -265,6 +272,8 @@ export class ContextManager {
    */
   setMessages(messages: Message[]): void {
     this.messages = [...messages];
+    // Reset API tokens since message set changed - estimate until next turn
+    this.lastApiContextTokens = 0;
     // Rebuild token cache
     for (const msg of this.messages) {
       this.tokenCache.set(msg, this.estimateMessageTokens(msg));
@@ -284,6 +293,8 @@ export class ContextManager {
    */
   clearMessages(): void {
     this.messages = [];
+    // Reset API tokens so estimate is used until next turn completes
+    this.lastApiContextTokens = 0;
     // Token cache will be rebuilt on next add
   }
 
@@ -378,9 +389,23 @@ export class ContextManager {
 
   /**
    * Get current total token count.
-   * Includes: system prompt + tools + rules + messages
+   * Prefers API-reported tokens (ground truth from actual tokenizer) when available.
+   * Falls back to char/4 estimates for new sessions before first turn completes.
    */
   getCurrentTokens(): number {
+    // Prefer API-reported tokens (ground truth from actual tokenizer)
+    if (this.lastApiContextTokens > 0) {
+      return this.lastApiContextTokens;
+    }
+    // Fall back to estimate when no API data yet (new session before first turn)
+    return this.estimateCurrentTokens();
+  }
+
+  /**
+   * Estimate current tokens using char/4 heuristic.
+   * Used as fallback when API-reported tokens aren't available yet.
+   */
+  private estimateCurrentTokens(): number {
     let total = this.estimateSystemPromptTokens();
     total += this.estimateToolsTokens();
     total += this.estimateRulesTokens();
@@ -402,6 +427,22 @@ export class ContextManager {
    */
   getModel(): string {
     return this.model;
+  }
+
+  /**
+   * Set the API-reported context token count.
+   * Called after each turn with actual tokenizer count from model API.
+   * This value is preferred over estimates when available.
+   */
+  setApiContextTokens(tokens: number): void {
+    this.lastApiContextTokens = tokens;
+  }
+
+  /**
+   * Get the API-reported context token count (0 if not yet available).
+   */
+  getApiContextTokens(): number {
+    return this.lastApiContextTokens;
   }
 
   // ===========================================================================

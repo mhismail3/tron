@@ -243,6 +243,15 @@ export class AgentEventHandler {
       const turnStartTime = active.sessionContext!.getTurnStartTime();
       turnResult = active.sessionContext!.endTurn();
 
+      // Sync API token count to ContextManager for consistent RPC responses
+      // This ensures context sheet and progress bar show the same value
+      const normalizedUsage = turnResult?.normalizedUsage as NormalizedTokenUsage | undefined;
+      if (normalizedUsage?.contextWindowTokens !== undefined) {
+        active.agent.getContextManager().setApiContextTokens(
+          normalizedUsage.contextWindowTokens
+        );
+      }
+
       // Only create message.assistant if we didn't already flush content for tools
       // If wasPreToolFlushed is true, the content was already emitted at tool_execution_start
       if (!wasPreToolFlushed && turnResult.content.length > 0) {
