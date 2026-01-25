@@ -638,13 +638,16 @@ export class OpenAICodexProvider {
 
               case 'response.output_item.done':
                 // Handle completed reasoning items - summary may be in item.summary
-                if (event.item?.type === 'reasoning' && event.item.summary) {
+                // Only process if we didn't already get content via streaming deltas
+                // (deltas come as chunks so Set-based dedup doesn't work when assembled text differs)
+                if (event.item?.type === 'reasoning' && event.item.summary && !accumulatedThinking) {
                   if (!thinkingStarted) {
                     thinkingStarted = true;
                     yield { type: 'thinking_start' };
                   }
                   for (const summaryPart of event.item.summary) {
-                    if (summaryPart.type === 'summary_text' && summaryPart.text && !seenThinkingTexts.has(summaryPart.text)) {
+                    if (summaryPart.type === 'summary_text' && summaryPart.text) {
+                      // Add to set so subsequent deltas with same text are skipped
                       seenThinkingTexts.add(summaryPart.text);
                       accumulatedThinking += summaryPart.text;
                       yield { type: 'thinking_delta', delta: summaryPart.text };
