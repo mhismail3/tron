@@ -627,7 +627,7 @@ struct ChatView: View {
     /// Pre-fetch models for model picker menu
     private func prefetchModels() async {
         isLoadingModels = true
-        if let models = try? await rpcClient.listModels() {
+        if let models = try? await rpcClient.model.list() {
             cachedModels = models
             // Update context window from server-provided model info
             viewModel.updateContextWindow(from: models)
@@ -647,7 +647,7 @@ struct ChatView: View {
         // Fire the actual switch in background
         Task {
             do {
-                let result = try await rpcClient.switchModel(sessionId, model: model.id)
+                let result = try await rpcClient.model.switchModel(sessionId, model: model.id)
                 await MainActor.run {
                     // Clear optimistic update - real value now in viewModel.currentModel
                     optimisticModelName = nil

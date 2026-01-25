@@ -247,7 +247,7 @@ struct ContextAuditView: View {
                                         rules: rules,
                                         onFetchContent: { path in
                                             // Fetch rule content from server
-                                            try await rpcClient.readFile(path: path)
+                                            try await rpcClient.filesystem.readFile(path: path)
                                         }
                                     )
                                 }
@@ -325,7 +325,7 @@ struct ContextAuditView: View {
 
         do {
             // Load detailed context snapshot and events in parallel
-            async let snapshotTask = rpcClient.getDetailedContextSnapshot(sessionId: sessionId)
+            async let snapshotTask = rpcClient.context.getDetailedSnapshot(sessionId: sessionId)
             let events = try eventStoreManager.getSessionEvents(sessionId)
 
             detailedSnapshot = try await snapshotTask
@@ -341,7 +341,7 @@ struct ContextAuditView: View {
     /// Background reload that doesn't show loading state (used after optimistic updates)
     private func reloadContextInBackground() async {
         do {
-            async let snapshotTask = rpcClient.getDetailedContextSnapshot(sessionId: sessionId)
+            async let snapshotTask = rpcClient.context.getDetailedSnapshot(sessionId: sessionId)
             let events = try eventStoreManager.getSessionEvents(sessionId)
 
             detailedSnapshot = try await snapshotTask
@@ -363,7 +363,7 @@ struct ContextAuditView: View {
         isClearing = true
 
         do {
-            _ = try await rpcClient.clearContext(sessionId: sessionId)
+            _ = try await rpcClient.context.clear(sessionId: sessionId)
             // Reload context to show updated state
             await loadContext()
         } catch {
@@ -379,7 +379,7 @@ struct ContextAuditView: View {
 
         do {
             logger.info("🔧 Calling rpcClient.compactContext...", category: .general)
-            let result = try await rpcClient.compactContext(sessionId: sessionId)
+            let result = try await rpcClient.context.compact(sessionId: sessionId)
             logger.info("🔧 Compaction succeeded: tokensBefore=\(result.tokensBefore), tokensAfter=\(result.tokensAfter)", category: .general)
             // Dismiss the sheet - the ChatView will show the compaction notification pill
             // when it receives the agent.compaction event from the server
@@ -398,7 +398,7 @@ struct ContextAuditView: View {
         }
 
         do {
-            _ = try await rpcClient.deleteMessage(sessionId, targetEventId: eventId)
+            _ = try await rpcClient.misc.deleteMessage(sessionId, targetEventId: eventId)
             // Background reload to sync state (doesn't show loading)
             await reloadContextInBackground()
         } catch {
@@ -417,7 +417,7 @@ struct ContextAuditView: View {
         }
 
         do {
-            let result = try await rpcClient.removeSkill(sessionId: sessionId, skillName: skillName)
+            let result = try await rpcClient.misc.removeSkill(sessionId: sessionId, skillName: skillName)
             if result.success {
                 // Background reload to sync state (doesn't show loading)
                 await reloadContextInBackground()

@@ -574,7 +574,7 @@ class ChatViewModel: ObservableObject, ChatEventContext {
         logger.info("Deleting message: eventId=\(eventId)", category: .session)
 
         do {
-            let result = try await rpcClient.deleteMessage(sessionId, targetEventId: eventId)
+            let result = try await rpcClient.misc.deleteMessage(sessionId, targetEventId: eventId)
             logger.info("Message deleted successfully: deletionEventId=\(result.deletionEventId)", category: .session)
 
             // Remove the message from local state immediately for responsive UI
@@ -633,7 +633,7 @@ class ChatViewModel: ObservableObject, ChatEventContext {
 
         for attempt in 1...maxRetries {
             do {
-                let snapshot = try await rpcClient.getContextSnapshot(sessionId: sessionId)
+                let snapshot = try await rpcClient.context.getSnapshot(sessionId: sessionId)
                 await MainActor.run {
                     // =============================================================================
                     // CONTEXT SNAPSHOT PURPOSE
@@ -734,7 +734,7 @@ class ChatViewModel: ObservableObject, ChatEventContext {
         guard let sessionId = rpcClient.currentSessionId else { return }
 
         do {
-            let status = try await rpcClient.getBrowserStatus(sessionId: sessionId)
+            let status = try await rpcClient.media.getBrowserStatus(sessionId: sessionId)
             await MainActor.run {
                 self.browserState.browserStatus = status
             }
@@ -748,7 +748,7 @@ class ChatViewModel: ObservableObject, ChatEventContext {
         guard let sessionId = rpcClient.currentSessionId else { return }
 
         do {
-            let result = try await rpcClient.startBrowserStream(sessionId: sessionId)
+            let result = try await rpcClient.media.startBrowserStream(sessionId: sessionId)
             if result.success {
                 await MainActor.run {
                     self.browserState.browserStatus = BrowserGetStatusResult(
@@ -774,7 +774,7 @@ class ChatViewModel: ObservableObject, ChatEventContext {
         guard let sessionId = rpcClient.currentSessionId else { return }
 
         do {
-            _ = try await rpcClient.stopBrowserStream(sessionId: sessionId)
+            _ = try await rpcClient.media.stopBrowserStream(sessionId: sessionId)
             await MainActor.run {
                 self.browserState.browserStatus = BrowserGetStatusResult(
                     hasBrowser: self.browserState.browserStatus?.hasBrowser ?? false,

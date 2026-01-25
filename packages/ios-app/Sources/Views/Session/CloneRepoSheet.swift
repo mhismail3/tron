@@ -286,7 +286,7 @@ struct CloneRepoSheet: View {
                 try? await Task.sleep(for: .milliseconds(100))
             }
 
-            let home = try await rpcClient.getHome()
+            let home = try await rpcClient.filesystem.getHome()
             await MainActor.run {
                 homePath = home.homePath
                 // Set default destination to ~/Downloads/projects
@@ -311,7 +311,7 @@ struct CloneRepoSheet: View {
 
         Task {
             do {
-                let result = try await rpcClient.cloneRepository(
+                let result = try await rpcClient.filesystem.cloneRepository(
                     url: repo.normalizedURL,
                     targetPath: fullDestinationPath
                 )

@@ -216,7 +216,7 @@ struct WorkspaceSelector: View {
                 try? await Task.sleep(for: .milliseconds(100))
             }
 
-            let home = try await rpcClient.getHome()
+            let home = try await rpcClient.filesystem.getHome()
             currentPath = home.homePath
             await loadDirectory(home.homePath)
         } catch {
@@ -227,7 +227,7 @@ struct WorkspaceSelector: View {
 
     private func loadDirectory(_ path: String) async {
         do {
-            let result = try await rpcClient.listDirectory(path: path, showHidden: showHidden)
+            let result = try await rpcClient.filesystem.listDirectory(path: path, showHidden: showHidden)
             await MainActor.run {
                 withAnimation(.tronFast) {
                     entries = result.entries
@@ -386,7 +386,7 @@ struct WorkspaceSelector: View {
         Task {
             do {
                 let newPath = (currentPath as NSString).appendingPathComponent(trimmedName)
-                let result = try await rpcClient.createDirectory(path: newPath)
+                let result = try await rpcClient.filesystem.createDirectory(path: newPath)
 
                 await MainActor.run {
                     isSubmittingFolder = false

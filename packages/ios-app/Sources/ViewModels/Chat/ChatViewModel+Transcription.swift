@@ -48,7 +48,7 @@ extension ChatViewModel {
                 return try Data(contentsOf: url)
             }.value
 
-            let result = try await rpcClient.transcribeAudio(
+            let result = try await rpcClient.media.transcribeAudio(
                 audioData: audioData,
                 mimeType: mimeType(for: url),
                 fileName: url.lastPathComponent

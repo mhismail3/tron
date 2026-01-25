@@ -188,7 +188,7 @@ struct TronMobileApp: App {
 
         do {
             // Register globally - any agent/session can send notifications
-            try await appState.rpcClient.registerDeviceToken(token)
+            try await appState.rpcClient.misc.registerDeviceToken(token)
             TronLogger.shared.info("Device token registered with server", category: .notification)
         } catch {
             TronLogger.shared.error("Failed to register device token: \(error.localizedDescription)", category: .notification)

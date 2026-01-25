@@ -73,7 +73,7 @@ extension EventStoreManager {
 
         // 4. Try to delete from server (optional, don't rollback on failure)
         do {
-            _ = try await rpcClient.deleteSession(sessionId)
+            _ = try await rpcClient.session.delete(sessionId)
         } catch {
             logger.warning("Server delete failed (continuing): \(error.localizedDescription)", category: .session)
         }
@@ -104,7 +104,7 @@ extension EventStoreManager {
                 try eventDB.deleteEventsBySession(session.id)
 
                 do {
-                    _ = try await rpcClient.deleteSession(session.id)
+                    _ = try await rpcClient.session.delete(session.id)
                 } catch {
                     logger.warning("Server delete failed for \(session.id) (continuing): \(error.localizedDescription)", category: .session)
                 }
@@ -162,7 +162,7 @@ extension EventStoreManager {
     func validateWorkspacePath(_ path: String) async -> Bool {
         guard !path.isEmpty else { return false }
         do {
-            _ = try await rpcClient.listDirectory(path: path, showHidden: false)
+            _ = try await rpcClient.filesystem.listDirectory(path: path, showHidden: false)
             return true
         } catch {
             logger.debug("Workspace path validation failed for '\(path)': \(error.localizedDescription)", category: .session)
@@ -186,7 +186,7 @@ extension EventStoreManager {
         }
 
         // Call server with the specific event ID
-        let result = try await rpcClient.forkSession(sessionId, fromEventId: fromEventId)
+        let result = try await rpcClient.session.fork(sessionId, fromEventId: fromEventId)
         logger.info("[FORK] Server returned: newSessionId=\(result.newSessionId), rootEventId=\(result.rootEventId ?? "unknown")", category: .session)
 
         // CRITICAL: Fetch ancestor events to ensure parent history is in local DB
@@ -198,7 +198,7 @@ extension EventStoreManager {
             logger.info("[FORK] Fetching ancestor history from rootEventId=\(rootEventId)", category: .session)
 
             do {
-                let ancestorRawEvents = try await rpcClient.getAncestors(rootEventId)
+                let ancestorRawEvents = try await rpcClient.eventSync.getAncestors(rootEventId)
 
                 // Convert RawEvents to SessionEvents, keeping original session_id
                 // These may already exist in local DB from when parent session was active.

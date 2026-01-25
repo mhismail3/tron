@@ -73,7 +73,7 @@ extension ChatViewModel {
         Task {
             do {
                 logger.debug("Calling rpcClient.sendPrompt() with \(fileAttachments.count) attachments, \(skills?.count ?? 0) skills, \(spells?.count ?? 0) spells...", category: .chat)
-                try await rpcClient.sendPrompt(
+                try await rpcClient.agent.sendPrompt(
                     text,
                     images: nil,  // Legacy - no longer used
                     attachments: fileAttachments.isEmpty ? nil : fileAttachments,
@@ -93,7 +93,7 @@ extension ChatViewModel {
         logger.info("Aborting agent...", category: .chat)
         Task {
             do {
-                try await rpcClient.abortAgent()
+                try await rpcClient.agent.abort()
                 isProcessing = false
                 eventStoreManager?.setSessionProcessing(sessionId, isProcessing: false)
                 eventStoreManager?.updateSessionDashboardInfo(

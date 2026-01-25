@@ -199,7 +199,7 @@ struct VoiceNotesRecordingSheet: View {
                 let data = try Data(contentsOf: url)
 
                 // Fire-and-forget: dismiss immediately, save in background
-                let result = try await rpcClient.saveVoiceNote(
+                let result = try await rpcClient.media.saveVoiceNote(
                     audioData: data
                 )
 

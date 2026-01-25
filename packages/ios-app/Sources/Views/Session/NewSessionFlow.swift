@@ -345,7 +345,7 @@ struct NewSessionFlow: View {
         }
 
         do {
-            let models = try await rpcClient.listModels()
+            let models = try await rpcClient.model.list()
             await MainActor.run {
                 availableModels = models
 
@@ -385,7 +385,7 @@ struct NewSessionFlow: View {
 
         do {
             // Fetch all sessions from server (no workspace filter, include ended)
-            let sessions = try await rpcClient.listSessions(
+            let sessions = try await rpcClient.session.list(
                 workingDirectory: nil,
                 limit: 50,
                 includeEnded: true
@@ -412,7 +412,7 @@ struct NewSessionFlow: View {
         for path in paths {
             guard !path.isEmpty else { continue }
             do {
-                _ = try await rpcClient.listDirectory(path: path, showHidden: false)
+                _ = try await rpcClient.filesystem.listDirectory(path: path, showHidden: false)
                 // Path exists, no action needed
             } catch {
                 // Path doesn't exist, mark as invalid
@@ -429,7 +429,7 @@ struct NewSessionFlow: View {
 
         Task {
             do {
-                let result = try await rpcClient.createSession(
+                let result = try await rpcClient.session.create(
                     workingDirectory: workingDirectory,
                     model: selectedModel
                 )
@@ -697,7 +697,7 @@ struct SessionPreviewSheetWrapper: View {
         }
 
         do {
-            _ = try await rpcClient.listDirectory(path: workDir, showHidden: false)
+            _ = try await rpcClient.filesystem.listDirectory(path: workDir, showHidden: false)
             workspaceExists = true
         } catch {
             workspaceExists = false

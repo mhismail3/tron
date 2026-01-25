@@ -186,7 +186,7 @@ struct SessionPreviewSheet: View {
 
         do {
             // Fetch ALL events from server (no type filter) to show complete history
-            let result = try await rpcClient.getEventHistory(
+            let result = try await rpcClient.eventSync.getHistory(
                 sessionId: session.sessionId,
                 types: nil,  // No filter - get everything
                 limit: 1000

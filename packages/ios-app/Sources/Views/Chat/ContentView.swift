@@ -438,7 +438,7 @@ struct ContentView: View {
 
             // Try to delete from server (optional)
             do {
-                _ = try await appState.rpcClient.deleteSession(sessionId)
+                _ = try await appState.rpcClient.session.delete(sessionId)
             } catch {
                 logger.warning("Server delete failed (continuing): \(error)", category: .session)
             }
@@ -455,7 +455,7 @@ struct ContentView: View {
     private func createQuickSession() {
         Task {
             do {
-                let result = try await appState.rpcClient.createSession(
+                let result = try await appState.rpcClient.session.create(
                     workingDirectory: appState.quickSessionWorkspace,
                     model: appState.defaultModel
                 )

@@ -78,7 +78,7 @@ struct VoiceNotesListView: View {
 
     private func deleteNote(_ note: VoiceNoteMetadata) async {
         do {
-            _ = try await rpcClient.deleteVoiceNote(filename: note.filename)
+            _ = try await rpcClient.media.deleteVoiceNote(filename: note.filename)
             await MainActor.run {
                 notes.removeAll { $0.filename == note.filename }
             }
@@ -167,7 +167,7 @@ struct VoiceNotesListView: View {
         errorMessage = nil
 
         do {
-            let result = try await rpcClient.listVoiceNotes(limit: 100)
+            let result = try await rpcClient.media.listVoiceNotes(limit: 100)
             await MainActor.run {
                 notes = result.notes
                 isLoading = false

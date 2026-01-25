@@ -381,7 +381,7 @@ struct ModelSwitcher: View {
     private func loadModels() async {
         isLoading = true
         do {
-            models = try await rpcClient.listModels()
+            models = try await rpcClient.model.list()
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -391,7 +391,7 @@ struct ModelSwitcher: View {
     /// Refresh models in background without showing loading indicator
     private func refreshModelsInBackground() async {
         do {
-            let freshModels = try await rpcClient.listModels()
+            let freshModels = try await rpcClient.model.list()
             // Only update if we got results
             if !freshModels.isEmpty {
                 models = freshModels
@@ -407,7 +407,7 @@ struct ModelSwitcher: View {
         isSwitching = true
         Task {
             do {
-                _ = try await rpcClient.switchModel(sessionId, model: selectedModelId)
+                _ = try await rpcClient.model.switchModel(sessionId, model: selectedModelId)
                 await MainActor.run {
                     onModelChanged(selectedModelId)
                     dismiss()

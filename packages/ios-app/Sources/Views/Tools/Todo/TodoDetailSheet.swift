@@ -282,13 +282,13 @@ struct TodoDetailSheet: View {
         todoState.startLoading()
 
         do {
-            let result = try await rpcClient.listTodos(sessionId: sessionId)
+            let result = try await rpcClient.misc.listTodos(sessionId: sessionId)
             todoState.updateTodos(result.todos, summary: result.summary)
 
             // Also load backlog if we have a workspace ID
             if let workspaceId {
                 todoState.startBacklogLoading()
-                let backlogResult = try await rpcClient.getBacklog(workspaceId: workspaceId)
+                let backlogResult = try await rpcClient.misc.getBacklog(workspaceId: workspaceId)
                 todoState.updateBacklog(backlogResult.tasks)
             }
         } catch {
@@ -301,7 +301,7 @@ struct TodoDetailSheet: View {
         todoState.markPendingRestore([task.id])
 
         do {
-            let result = try await rpcClient.restoreFromBacklog(sessionId: sessionId, taskIds: [task.id])
+            let result = try await rpcClient.misc.restoreFromBacklog(sessionId: sessionId, taskIds: [task.id])
 
             // On success, clear pending state and update todos
             todoState.clearPendingRestore([task.id])
@@ -389,7 +389,7 @@ struct TodoDetailSheetLegacy: View {
     private func loadTodos() async {
         todoState.startLoading()
         do {
-            let result = try await rpcClient.listTodos(sessionId: sessionId)
+            let result = try await rpcClient.misc.listTodos(sessionId: sessionId)
             todoState.updateTodos(result.todos, summary: result.summary)
         } catch {
             todoState.setError(error.localizedDescription)

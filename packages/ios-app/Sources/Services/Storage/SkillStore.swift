@@ -77,7 +77,7 @@ class SkillStore: ObservableObject {
         error = nil
 
         do {
-            let result = try await rpcClient.listSkills(
+            let result = try await rpcClient.misc.listSkills(
                 sessionId: sessionId,
                 source: source?.rawValue
             )
@@ -101,7 +101,7 @@ class SkillStore: ObservableObject {
         }
 
         do {
-            let result = try await rpcClient.getSkill(name: name, sessionId: sessionId)
+            let result = try await rpcClient.misc.getSkill(name: name, sessionId: sessionId)
             if result.found, let skill = result.skill {
                 return skill
             }
@@ -123,7 +123,7 @@ class SkillStore: ObservableObject {
         error = nil
 
         do {
-            let result = try await rpcClient.refreshSkills(sessionId: sessionId)
+            let result = try await rpcClient.misc.refreshSkills(sessionId: sessionId)
             if result.success {
                 // Reload the skills list after refresh
                 await loadSkills(sessionId: sessionId)

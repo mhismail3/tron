@@ -328,7 +328,7 @@ struct SettingsView: View {
     private func loadModels() async {
         isLoadingModels = true
         do {
-            availableModels = try await rpcClient.listModels()
+            availableModels = try await rpcClient.model.list()
         } catch {
             // Silently fail - user can still type model ID manually if needed
         }

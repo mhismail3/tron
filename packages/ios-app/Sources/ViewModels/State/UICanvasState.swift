@@ -240,7 +240,7 @@ final class UICanvasState {
         }
 
         do {
-            let result = try await rpcClient.getCanvas(canvasId: canvasId)
+            let result = try await rpcClient.misc.getCanvas(canvasId: canvasId)
 
             guard result.found, let canvasData = result.canvas else {
                 logger.warning("Canvas not found on server: \(canvasId)", category: .ui)

@@ -36,7 +36,7 @@ final class SessionStateChecker {
                 }
             }
 
-            let state = try await rpcClient.getAgentStateForSession(sessionId: sessionId)
+            let state = try await rpcClient.agent.getState(sessionId: sessionId)
             return state.isRunning
         } catch {
             logger.debug("Failed to check session \(sessionId) state: \(error.localizedDescription)")

@@ -27,7 +27,7 @@ extension ChatViewModel {
         // Resume the session
         do {
             logger.debug("Calling resumeSession for \(sessionId)...", category: .session)
-            try await rpcClient.resumeSession(sessionId: sessionId)
+            try await rpcClient.session.resume(sessionId: sessionId)
             logger.info("Session resumed successfully", category: .session)
         } catch {
             logger.error("Failed to resume session: \(error.localizedDescription)", category: .session)
@@ -76,7 +76,7 @@ extension ChatViewModel {
 
             // Re-resume the session after reconnection
             do {
-                try await rpcClient.resumeSession(sessionId: sessionId)
+                try await rpcClient.session.resume(sessionId: sessionId)
                 logger.info("Session re-resumed after reconnection", category: .session)
             } catch {
                 logger.error("Failed to re-resume session: \(error)", category: .session)
@@ -94,7 +94,7 @@ extension ChatViewModel {
     /// Fetch current todos when resuming a session
     private func fetchTodosOnResume() async {
         do {
-            let result = try await rpcClient.listTodos(sessionId: sessionId)
+            let result = try await rpcClient.misc.listTodos(sessionId: sessionId)
             todoState.updateTodos(result.todos, summary: result.summary)
             logger.debug("Fetched \(result.todos.count) todos on session resume", category: .session)
         } catch {
@@ -106,7 +106,7 @@ extension ChatViewModel {
     /// Check agent state and set up streaming if agent is currently running
     func checkAndResumeAgentState() async {
         do {
-            let agentState = try await rpcClient.getAgentStateForSession(sessionId: sessionId)
+            let agentState = try await rpcClient.agent.getState(sessionId: sessionId)
             if agentState.isRunning {
                 logger.info("Agent is currently running - setting up streaming state for in-progress session", category: .session)
                 isProcessing = true
