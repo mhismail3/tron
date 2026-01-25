@@ -578,7 +578,7 @@ extension ChatViewModel {
         }
 
         // Cache the turn content for merging with server events
-        manager.cacheTurnContent(
+        manager.turnContentCache.store(
             sessionId: sessionId,
             turnNumber: event.turnNumber,
             messages: turnMessages

@@ -46,9 +46,27 @@ class EventStoreManager: ObservableObject {
 
     // MARK: - Turn Content Cache
 
-    var turnContentCache: [String: (messages: [[String: Any]], timestamp: Date)] = [:]
-    let maxCachedSessions = 10
-    let cacheExpiry: TimeInterval = 120 // 2 minutes
+    /// TTL-based cache for turn content used to enrich server events
+    let turnContentCache = TurnContentCache()
+
+    // MARK: - Polling Components
+
+    /// Manages dashboard polling lifecycle with background suspension
+    private(set) lazy var dashboardPoller: DashboardPoller = {
+        let poller = DashboardPoller()
+        poller.delegate = self
+        return poller
+    }()
+
+    /// Checks session processing states from the server
+    private(set) lazy var sessionStateChecker: SessionStateChecker = {
+        SessionStateChecker(rpcClient: rpcClient)
+    }()
+
+    /// Handles synchronization of session events with the server
+    private(set) lazy var sessionSynchronizer: SessionSynchronizer = {
+        SessionSynchronizer(rpcClient: rpcClient, eventDB: eventDB, cache: turnContentCache)
+    }()
 
     // MARK: - Processing State
 
@@ -57,12 +75,6 @@ class EventStoreManager: ObservableObject {
             UserDefaults.standard.set(Array(processingSessionIds), forKey: "tron.processingSessionIds")
         }
     }
-
-    var pollingTask: Task<Void, Never>?
-    private(set) var isPollingActive = false
-
-    /// Tracks whether the app is in the background to pause polling and save battery
-    private(set) var isInBackground = false
 
     /// Cancellable for server settings subscription
     private var serverSettingsSubscription: AnyCancellable?
@@ -176,14 +188,6 @@ class EventStoreManager: ObservableObject {
 
     func clearLastSyncError() {
         lastSyncError = nil
-    }
-
-    func setIsPollingActive(_ value: Bool) {
-        isPollingActive = value
-    }
-
-    func setIsInBackground(_ value: Bool) {
-        isInBackground = value
     }
 
     func clearSessions() {

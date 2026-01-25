@@ -1,26 +1,53 @@
 import Foundation
 
-// MARK: - Turn Content Caching
+/// TTL-based cache for turn content used to enrich server events.
+/// Server sync events may arrive with truncated tool content - this cache preserves
+/// the full content from agent.turn events for enrichment during sync.
+final class TurnContentCache {
 
-extension EventStoreManager {
+    // MARK: - Types
 
-    /// Cache full turn content from agent.turn event
-    func cacheTurnContent(sessionId: String, turnNumber: Int, messages: [[String: Any]]) {
+    struct CacheEntry {
+        let messages: [[String: Any]]
+        let timestamp: Date
+    }
+
+    // MARK: - Properties
+
+    private var cache: [String: CacheEntry] = [:]
+    private let maxEntries: Int
+    private let expiry: TimeInterval
+
+    // MARK: - Initialization
+
+    init(maxEntries: Int = 10, expiry: TimeInterval = 120) {
+        self.maxEntries = maxEntries
+        self.expiry = expiry
+    }
+
+    // MARK: - Cache Operations
+
+    /// Store turn content for a session.
+    /// - Parameters:
+    ///   - sessionId: The session ID
+    ///   - turnNumber: Turn number (for logging)
+    ///   - messages: The full message content to cache
+    func store(sessionId: String, turnNumber: Int, messages: [[String: Any]]) {
         let now = Date()
 
         // Clean expired entries first
-        cleanExpiredCacheEntries()
+        cleanExpired()
 
-        // Enforce size limit
-        if turnContentCache[sessionId] == nil && turnContentCache.count >= maxCachedSessions {
-            if let oldest = turnContentCache.min(by: { $0.value.timestamp < $1.value.timestamp })?.key {
-                turnContentCache.removeValue(forKey: oldest)
-                logger.debug("Removed oldest cache entry for session \(oldest) to stay within limit")
+        // Enforce size limit by evicting oldest
+        if cache[sessionId] == nil && cache.count >= maxEntries {
+            if let oldest = cache.min(by: { $0.value.timestamp < $1.value.timestamp })?.key {
+                cache.removeValue(forKey: oldest)
+                logger.debug("Evicted oldest cache entry for session \(oldest) to stay within limit")
             }
         }
 
         // Store messages with timestamp
-        turnContentCache[sessionId] = (messages, now)
+        cache[sessionId] = CacheEntry(messages: messages, timestamp: now)
         logger.info("Cached turn \(turnNumber) content for session \(sessionId): \(messages.count) messages")
 
         // Log content block types for debugging
@@ -35,44 +62,53 @@ extension EventStoreManager {
         }
     }
 
-    /// Clean expired cache entries
-    func cleanExpiredCacheEntries() {
-        let now = Date()
-        let expiredCount = turnContentCache.filter { now.timeIntervalSince($0.value.timestamp) > cacheExpiry }.count
-        if expiredCount > 0 {
-            turnContentCache = turnContentCache.filter { now.timeIntervalSince($0.value.timestamp) <= cacheExpiry }
-            logger.debug("Cleaned \(expiredCount) expired cache entries")
-        }
-    }
+    /// Get cached turn content for a session.
+    /// Returns nil if not found or expired.
+    func get(sessionId: String) -> [[String: Any]]? {
+        guard let entry = cache[sessionId] else { return nil }
 
-    /// Get cached turn content for enriching server events
-    func getCachedTurnContent(sessionId: String) -> [[String: Any]]? {
-        guard let cached = turnContentCache[sessionId] else { return nil }
         // Check if expired
-        if Date().timeIntervalSince(cached.timestamp) > cacheExpiry {
-            turnContentCache.removeValue(forKey: sessionId)
+        if Date().timeIntervalSince(entry.timestamp) > expiry {
+            cache.removeValue(forKey: sessionId)
             logger.debug("Cache entry for session \(sessionId) expired, removed")
             return nil
         }
-        return cached.messages
+
+        return entry.messages
     }
 
-    /// Clear cached turn content after successful enrichment
-    func clearCachedTurnContent(sessionId: String) {
-        turnContentCache.removeValue(forKey: sessionId)
+    /// Clear cached turn content for a session.
+    func clear(sessionId: String) {
+        cache.removeValue(forKey: sessionId)
         logger.debug("Cleared turn content cache for session \(sessionId)")
     }
 
-    /// Enrich server events with cached turn content
-    func enrichEventsWithCachedContent(events: [SessionEvent], sessionId: String) throws -> [SessionEvent] {
-        guard let cachedMessages = getCachedTurnContent(sessionId: sessionId) else {
+    /// Clean all expired cache entries.
+    func cleanExpired() {
+        let now = Date()
+        let expiredKeys = cache.filter { now.timeIntervalSince($0.value.timestamp) > expiry }.map { $0.key }
+
+        if !expiredKeys.isEmpty {
+            for key in expiredKeys {
+                cache.removeValue(forKey: key)
+            }
+            logger.debug("Cleaned \(expiredKeys.count) expired cache entries")
+        }
+    }
+
+    // MARK: - Event Enrichment
+
+    /// Enrich server events with cached turn content.
+    /// Server events may have truncated tool content - this restores the full content.
+    func enrichEvents(_ events: [SessionEvent], sessionId: String) -> [SessionEvent] {
+        guard let cachedMessages = get(sessionId: sessionId) else {
             return events
         }
 
         var enrichedEvents = events
         var enrichedCount = 0
 
-        // Build a lookup of cached content by role
+        // Build a lookup of cached assistant messages with tool blocks
         let cachedAssistantMessages = cachedMessages.filter { ($0["role"] as? String) == "assistant" }
 
         // Find message.assistant events that might need enrichment
@@ -109,13 +145,13 @@ extension EventStoreManager {
 
         if enrichedCount > 0 {
             logger.info("Enriched \(enrichedCount) events with cached tool content for session \(sessionId)")
-            clearCachedTurnContent(sessionId: sessionId)
+            clear(sessionId: sessionId)
         }
 
         return enrichedEvents
     }
 
-    /// Check if event payload has tool_use or tool_result blocks
+    /// Check if event payload has tool_use or tool_result blocks.
     func checkForToolBlocks(in payload: [String: AnyCodable]) -> Bool {
         guard let content = payload["content"]?.value else { return false }
 

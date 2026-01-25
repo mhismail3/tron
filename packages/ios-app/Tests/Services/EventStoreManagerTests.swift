@@ -175,6 +175,224 @@ final class SessionEventTests: XCTestCase {
     }
 }
 
+// MARK: - TurnContentCache Tests
+
+@MainActor
+final class TurnContentCacheTests: XCTestCase {
+
+    func testCacheTurnContent_StoresMessages() {
+        // Given
+        let cache = TurnContentCache()
+        let sessionId = "test-session-1"
+        let messages: [[String: Any]] = [
+            ["role": "user", "content": "Hello"],
+            ["role": "assistant", "content": [["type": "text", "text": "Hi"]]]
+        ]
+
+        // When
+        cache.store(sessionId: sessionId, turnNumber: 1, messages: messages)
+
+        // Then
+        let retrieved = cache.get(sessionId: sessionId)
+        XCTAssertNotNil(retrieved)
+        XCTAssertEqual(retrieved?.count, 2)
+    }
+
+    func testGetCachedTurnContent_ReturnsNilForMissingSession() {
+        // Given
+        let cache = TurnContentCache()
+
+        // When
+        let result = cache.get(sessionId: "nonexistent")
+
+        // Then
+        XCTAssertNil(result)
+    }
+
+    func testClearCachedTurnContent_RemovesEntry() {
+        // Given
+        let cache = TurnContentCache()
+        let sessionId = "test-session-1"
+        cache.store(sessionId: sessionId, turnNumber: 1, messages: [["role": "user", "content": "test"]])
+
+        // When
+        cache.clear(sessionId: sessionId)
+
+        // Then
+        XCTAssertNil(cache.get(sessionId: sessionId))
+    }
+
+    func testCacheExpiry_RemovesExpiredEntries() {
+        // Given
+        let cache = TurnContentCache(expiry: 0.1) // 100ms expiry for testing
+        let sessionId = "test-session-1"
+        cache.store(sessionId: sessionId, turnNumber: 1, messages: [["role": "user", "content": "test"]])
+
+        // When - wait for expiry
+        let expectation = XCTestExpectation(description: "Cache expires")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+            expectation.fulfill()
+        }
+        wait(for: [expectation], timeout: 1.0)
+
+        // Then
+        XCTAssertNil(cache.get(sessionId: sessionId))
+    }
+
+    func testMaxCachedSessions_EvictsOldest() {
+        // Given
+        let cache = TurnContentCache(maxEntries: 2, expiry: 60)
+
+        // When - add 3 sessions
+        cache.store(sessionId: "session-1", turnNumber: 1, messages: [["role": "user", "content": "1"]])
+        cache.store(sessionId: "session-2", turnNumber: 1, messages: [["role": "user", "content": "2"]])
+        cache.store(sessionId: "session-3", turnNumber: 1, messages: [["role": "user", "content": "3"]])
+
+        // Then - oldest should be evicted
+        XCTAssertNil(cache.get(sessionId: "session-1"))
+        XCTAssertNotNil(cache.get(sessionId: "session-2"))
+        XCTAssertNotNil(cache.get(sessionId: "session-3"))
+    }
+
+    func testCheckForToolBlocks_DetectsToolUse() {
+        // Given
+        let cache = TurnContentCache()
+        let payloadWithTools: [String: AnyCodable] = [
+            "content": AnyCodable([
+                ["type": "text", "text": "Hello"],
+                ["type": "tool_use", "id": "tool_1", "name": "Bash"]
+            ])
+        ]
+        let payloadWithoutTools: [String: AnyCodable] = [
+            "content": AnyCodable([
+                ["type": "text", "text": "Hello"]
+            ])
+        ]
+        let payloadWithString: [String: AnyCodable] = [
+            "content": AnyCodable("Just text")
+        ]
+
+        // Then
+        XCTAssertTrue(cache.checkForToolBlocks(in: payloadWithTools))
+        XCTAssertFalse(cache.checkForToolBlocks(in: payloadWithoutTools))
+        XCTAssertFalse(cache.checkForToolBlocks(in: payloadWithString))
+    }
+
+    func testCheckForToolBlocks_DetectsToolResult() {
+        // Given
+        let cache = TurnContentCache()
+        let payload: [String: AnyCodable] = [
+            "content": AnyCodable([
+                ["type": "tool_result", "tool_use_id": "tool_1", "content": "output"]
+            ])
+        ]
+
+        // Then
+        XCTAssertTrue(cache.checkForToolBlocks(in: payload))
+    }
+}
+
+// MARK: - ContentExtractor Tests
+
+@MainActor
+final class ContentExtractorTests: XCTestCase {
+
+    func testExtractText_FromString() {
+        let text = ContentExtractor.extractText(from: "Hello world")
+        XCTAssertEqual(text, "Hello world")
+    }
+
+    func testExtractText_FromContentBlocks() {
+        let content: [[String: Any]] = [
+            ["type": "text", "text": "Hello "],
+            ["type": "text", "text": "world"]
+        ]
+        let text = ContentExtractor.extractText(from: content)
+        XCTAssertEqual(text, "Hello world")
+    }
+
+    func testExtractText_FromMixedBlocks() {
+        let content: [[String: Any]] = [
+            ["type": "text", "text": "Hello"],
+            ["type": "tool_use", "id": "t1", "name": "Bash"],
+            ["type": "text", "text": " world"]
+        ]
+        let text = ContentExtractor.extractText(from: content)
+        XCTAssertEqual(text, "Hello world")
+    }
+
+    func testExtractText_FromNil() {
+        let text = ContentExtractor.extractText(from: nil)
+        XCTAssertEqual(text, "")
+    }
+
+    func testExtractToolCount_FromContentBlocks() {
+        let content: [[String: Any]] = [
+            ["type": "text", "text": "Hello"],
+            ["type": "tool_use", "id": "t1", "name": "Bash"],
+            ["type": "tool_use", "id": "t2", "name": "Read"]
+        ]
+        let count = ContentExtractor.extractToolCount(from: content)
+        XCTAssertEqual(count, 2)
+    }
+
+    func testExtractToolCount_FromStringContent() {
+        let count = ContentExtractor.extractToolCount(from: "Just text")
+        XCTAssertEqual(count, 0)
+    }
+
+    func testExtractDashboardInfo_FromEvents() {
+        let userEvent = SessionEvent(
+            id: "e1",
+            parentId: nil,
+            sessionId: "s1",
+            workspaceId: "/test",
+            type: "message.user",
+            timestamp: "2024-01-01T00:00:00Z",
+            sequence: 1,
+            payload: ["content": AnyCodable("What is 2+2?")]
+        )
+        let assistantEvent = SessionEvent(
+            id: "e2",
+            parentId: "e1",
+            sessionId: "s1",
+            workspaceId: "/test",
+            type: "message.assistant",
+            timestamp: "2024-01-01T00:00:01Z",
+            sequence: 2,
+            payload: ["content": AnyCodable([
+                ["type": "text", "text": "The answer is 4"],
+                ["type": "tool_use", "id": "t1", "name": "Calculator"]
+            ])]
+        )
+
+        let info = ContentExtractor.extractDashboardInfo(from: [userEvent, assistantEvent])
+
+        XCTAssertEqual(info.lastUserPrompt, "What is 2+2?")
+        XCTAssertEqual(info.lastAssistantResponse, "The answer is 4")
+        XCTAssertEqual(info.lastToolCount, 1)
+    }
+}
+
+// MARK: - SessionStateChecker Tests
+
+@MainActor
+final class SessionStateCheckerTests: XCTestCase {
+
+    func testProcessingStateTracking() {
+        // Test that we can track processing state independently
+        var processingIds: Set<String> = []
+
+        // Add session
+        processingIds.insert("session-1")
+        XCTAssertTrue(processingIds.contains("session-1"))
+
+        // Remove session
+        processingIds.remove("session-1")
+        XCTAssertFalse(processingIds.contains("session-1"))
+    }
+}
+
 // MARK: - EventTreeNode Tests
 
 @MainActor

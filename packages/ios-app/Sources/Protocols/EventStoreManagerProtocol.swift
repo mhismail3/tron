@@ -1,9 +1,11 @@
 import Foundation
 import Combine
 
-/// Protocol for EventStoreManager enabling dependency injection and mocking
+// MARK: - Session Store Protocol
+
+/// Protocol for core session state management and CRUD operations
 @MainActor
-protocol EventStoreManagerProtocol: ObservableObject {
+protocol SessionStoreProtocol: ObservableObject {
     // MARK: - Published State
     var sessions: [CachedSession] { get }
     var isSyncing: Bool { get }
@@ -13,23 +15,8 @@ protocol EventStoreManagerProtocol: ObservableObject {
     // MARK: - Session Change Notification
     var sessionUpdated: PassthroughSubject<String, Never> { get }
 
-    // MARK: - Turn Content Cache
-    var turnContentCache: [String: (messages: [[String: Any]], timestamp: Date)] { get set }
-    var maxCachedSessions: Int { get }
-    var cacheExpiry: TimeInterval { get }
-
     // MARK: - Processing State
     var processingSessionIds: Set<String> { get set }
-    var pollingTask: Task<Void, Never>? { get set }
-    var isPollingActive: Bool { get }
-    var isInBackground: Bool { get }
-
-    // MARK: - Dependencies
-    var eventDB: EventDatabase { get }
-    var rpcClient: RPCClient { get }
-
-    /// Update the RPC client (e.g., when server settings change)
-    func updateRPCClient(_ client: RPCClient)
 
     // MARK: - Computed Properties
     var sortedSessions: [CachedSession] { get }
@@ -39,8 +26,6 @@ protocol EventStoreManagerProtocol: ObservableObject {
     func setIsSyncing(_ value: Bool)
     func setLastSyncError(_ value: String?)
     func clearLastSyncError()
-    func setIsPollingActive(_ value: Bool)
-    func setIsInBackground(_ value: Bool)
     func clearSessions()
     func setSessions(_ newSessions: [CachedSession])
     func updateSession(at index: Int, _ update: (inout CachedSession) -> Void)
@@ -55,15 +40,7 @@ protocol EventStoreManagerProtocol: ObservableObject {
     func getChatMessages(sessionId: String) throws -> [ChatMessage]
     func getReconstructedState(sessionId: String) throws -> ReconstructedState
 
-    // MARK: - Server Sync (from +Sync extension)
-    func fullSync() async
-    func syncSessionEvents(sessionId: String) async throws
-    func fullSyncSession(_ sessionId: String) async throws
-    func updateSessionMetadata(sessionId: String) async throws
-    func serverSessionToCached(_ info: SessionInfo, serverOrigin: String?) -> CachedSession
-    func rawEventToSessionEvent(_ raw: RawEvent) -> SessionEvent
-
-    // MARK: - Session Operations (from +Operations extension)
+    // MARK: - Session Operations
     func cacheNewSession(
         sessionId: String,
         workspaceId: String,
@@ -93,28 +70,61 @@ protocol EventStoreManagerProtocol: ObservableObject {
     func repairDuplicates()
     func repairSession(_ sessionId: String)
 
-    // MARK: - Dashboard (from +Dashboard extension)
+    // MARK: - Dashboard Info
     func extractDashboardInfoFromEvents(sessionId: String)
     func updateSessionDashboardInfo(sessionId: String, lastUserPrompt: String?, lastAssistantResponse: String?, lastToolCount: Int?)
     func setSessionProcessing(_ sessionId: String, isProcessing: Bool)
     func restoreProcessingSessionIds()
+}
+
+// MARK: - Session Sync Protocol
+
+/// Protocol for server synchronization operations
+@MainActor
+protocol SessionSyncProtocol {
+    func fullSync() async
+    func syncSessionEvents(sessionId: String) async throws
+    func fullSyncSession(_ sessionId: String) async throws
+    func updateSessionMetadata(sessionId: String) async throws
+    func serverSessionToCached(_ info: SessionInfo, serverOrigin: String?) -> CachedSession
+    func rawEventToSessionEvent(_ raw: RawEvent) -> SessionEvent
+}
+
+// MARK: - Dashboard Polling Protocol
+
+/// Protocol for dashboard polling lifecycle management
+@MainActor
+protocol DashboardPollingProtocol {
     func setBackgroundState(_ inBackground: Bool)
     func startDashboardPolling()
     func stopDashboardPolling()
     func pollAllSessionStates() async
     func checkSessionProcessingState(sessionId: String) async
+}
 
-    // MARK: - Cache (from +Cache extension)
-    func cacheTurnContent(sessionId: String, turnNumber: Int, messages: [[String: Any]])
-    func getCachedTurnContent(sessionId: String) -> [[String: Any]]?
-    func clearCachedTurnContent(sessionId: String)
-    func cleanExpiredCacheEntries()
-    func enrichEventsWithCachedContent(events: [SessionEvent], sessionId: String) throws -> [SessionEvent]
+// MARK: - Combined Protocol (for dependency injection)
+
+/// Combined protocol for EventStoreManager enabling full dependency injection
+/// Composes SessionStoreProtocol, SessionSyncProtocol, and DashboardPollingProtocol
+@MainActor
+protocol EventStoreManagerProtocol: SessionStoreProtocol, SessionSyncProtocol, DashboardPollingProtocol {
+    // MARK: - Components
+    var turnContentCache: TurnContentCache { get }
+    var dashboardPoller: DashboardPoller { get }
+    var sessionStateChecker: SessionStateChecker { get }
+    var sessionSynchronizer: SessionSynchronizer { get }
+
+    // MARK: - Dependencies
+    var eventDB: EventDatabase { get }
+    var rpcClient: RPCClient { get }
+
+    /// Update the RPC client (e.g., when server settings change)
+    func updateRPCClient(_ client: RPCClient)
 }
 
 // MARK: - Default Implementation for Optional Parameters
 
-extension EventStoreManagerProtocol {
+extension SessionStoreProtocol {
     func forkSession(_ sessionId: String, fromEventId: String? = nil) async throws -> String {
         try await forkSession(sessionId, fromEventId: fromEventId)
     }
