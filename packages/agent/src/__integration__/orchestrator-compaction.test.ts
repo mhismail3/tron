@@ -45,6 +45,27 @@ const generateTestMessages = (count: number): Message[] => {
   return messages;
 };
 
+// Estimate tokens for test messages (~130 tokens per turn)
+const estimateMessageTokens = (count: number): number => {
+  return count * 130;
+};
+
+// Base overhead for system prompt + tools (typical value)
+const BASE_CONTEXT_OVERHEAD = 15000;
+
+// Helper to inject messages and set API tokens (simulates what happens after a turn)
+const injectMessagesWithTokens = (
+  contextManager: { setMessages: (m: Message[]) => void; setApiContextTokens: (t: number) => void },
+  messages: Message[],
+  tokenCount?: number
+): void => {
+  contextManager.setMessages(messages);
+  // Use provided token count or estimate based on message count plus base overhead
+  // Real API reports total context including system prompt + tools + messages
+  const tokens = tokenCount ?? (BASE_CONTEXT_OVERHEAD + estimateMessageTokens(messages.length / 2));
+  contextManager.setApiContextTokens(tokens);
+};
+
 // =============================================================================
 // Tests
 // =============================================================================
@@ -111,7 +132,7 @@ describe('Orchestrator Compaction', () => {
       // Inject high-context messages via agent's ContextManager
       const active = (orchestrator as any).activeSessions.get(sessionId);
       const messages = generateTestMessages(500); // Lots of messages
-      active.agent.getContextManager().setMessages(messages);
+      injectMessagesWithTokens(active.agent.getContextManager(), messages);
 
       const snapshot = orchestrator.getContextSnapshot(sessionId);
 
@@ -142,7 +163,7 @@ describe('Orchestrator Compaction', () => {
       // Generate enough messages to exceed 70% threshold
       // 200k * 0.7 = 140k tokens, each message ~150 tokens, need ~900 turns
       const messages = generateTestMessages(1000);
-      active.agent.getContextManager().setMessages(messages);
+      injectMessagesWithTokens(active.agent.getContextManager(), messages);
 
       const shouldCompact = orchestrator.shouldCompact(sessionId);
 
@@ -162,7 +183,7 @@ describe('Orchestrator Compaction', () => {
       // Inject messages
       const active = (orchestrator as any).activeSessions.get(sessionId);
       const messages = generateTestMessages(100);
-      active.agent.getContextManager().setMessages(messages);
+      injectMessagesWithTokens(active.agent.getContextManager(), messages);
 
       const preview = await orchestrator.previewCompaction(sessionId);
 
@@ -182,7 +203,7 @@ describe('Orchestrator Compaction', () => {
 
       const active = (orchestrator as any).activeSessions.get(sessionId);
       const messages = generateTestMessages(50);
-      active.agent.getContextManager().setMessages(messages);
+      injectMessagesWithTokens(active.agent.getContextManager(), messages);
 
       const tokensBefore = active.agent.getContextManager().getCurrentTokens();
       const messagesBefore = active.agent.getContextManager().getMessages().length;
@@ -206,7 +227,7 @@ describe('Orchestrator Compaction', () => {
 
       const active = (orchestrator as any).activeSessions.get(sessionId);
       const messages = generateTestMessages(100);
-      active.agent.getContextManager().setMessages(messages);
+      injectMessagesWithTokens(active.agent.getContextManager(), messages);
 
       const tokensBefore = active.agent.getContextManager().getCurrentTokens();
 
@@ -227,7 +248,7 @@ describe('Orchestrator Compaction', () => {
 
       const active = (orchestrator as any).activeSessions.get(sessionId);
       const messages = generateTestMessages(50);
-      active.agent.getContextManager().setMessages(messages);
+      injectMessagesWithTokens(active.agent.getContextManager(), messages);
 
       const customSummary = 'User-edited custom summary for testing purposes.';
       const result = await orchestrator.confirmCompaction(sessionId, {
@@ -250,7 +271,7 @@ describe('Orchestrator Compaction', () => {
 
       const active = (orchestrator as any).activeSessions.get(sessionId);
       const messages = generateTestMessages(50);
-      active.agent.getContextManager().setMessages(messages);
+      injectMessagesWithTokens(active.agent.getContextManager(), messages);
 
       await orchestrator.confirmCompaction(sessionId);
 
@@ -282,7 +303,7 @@ describe('Orchestrator Compaction', () => {
 
       const active = (orchestrator as any).activeSessions.get(sessionId);
       const messages = generateTestMessages(50);
-      active.agent.getContextManager().setMessages(messages);
+      injectMessagesWithTokens(active.agent.getContextManager(), messages);
 
       const events: any[] = [];
       orchestrator.on('compaction_completed', (e) => events.push(e));

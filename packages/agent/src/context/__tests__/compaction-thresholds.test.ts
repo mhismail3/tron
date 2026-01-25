@@ -309,25 +309,30 @@ describe('Compaction Threshold Boundaries', () => {
   });
 
   describe('getSnapshot breakdown accuracy', () => {
-    it('returns accurate breakdown at normal utilization', () => {
+    it('returns breakdown estimates alongside API tokens', () => {
       const harness = CompactionTestHarness.atUtilization(30);
       harness.inject();
 
       const snapshot = harness.contextManager.getSnapshot();
 
-      // Verify breakdown components are non-negative
+      // currentTokens comes from API (set via setApiContextTokens in harness.inject())
+      expect(snapshot.currentTokens).toBe(harness.targetTokens);
+
+      // Breakdown is an estimate (char/4 heuristic) - informational, may differ from API
       expect(snapshot.breakdown.systemPrompt).toBeGreaterThanOrEqual(0);
       expect(snapshot.breakdown.tools).toBeGreaterThanOrEqual(0);
       expect(snapshot.breakdown.rules).toBeGreaterThanOrEqual(0);
       expect(snapshot.breakdown.messages).toBeGreaterThan(0);
 
-      // Verify breakdown sums to currentTokens
+      // Breakdown sum won't exactly match currentTokens since one is API, other is estimate
+      // But they should be in the same ballpark (within 50% tolerance)
       const sum =
         snapshot.breakdown.systemPrompt +
         snapshot.breakdown.tools +
         snapshot.breakdown.rules +
         snapshot.breakdown.messages;
-      expect(snapshot.currentTokens).toBe(sum);
+      expect(sum).toBeGreaterThan(snapshot.currentTokens * 0.5);
+      expect(sum).toBeLessThan(snapshot.currentTokens * 2);
     });
 
     it('returns accurate usagePercent', () => {
@@ -336,9 +341,8 @@ describe('Compaction Threshold Boundaries', () => {
 
       const snapshot = harness.contextManager.getSnapshot();
 
-      // Should be approximately 50% (within 5% tolerance due to token estimation)
-      expect(snapshot.usagePercent).toBeGreaterThan(0.45);
-      expect(snapshot.usagePercent).toBeLessThan(0.55);
+      // usagePercent is based on API tokens (50% of limit)
+      expect(snapshot.usagePercent).toBe(0.5);
     });
   });
 

@@ -93,6 +93,8 @@ describe('TronAgent Compaction Integration', () => {
       const simulator = createContextSimulator({ targetTokens: 1000 });
       const session = simulator.generateAtUtilization(100, 200_000);
       cm.setMessages(session.messages);
+      // Set API tokens to simulate what happens after a turn completes
+      cm.setApiContextTokens(session.estimatedTokens);
 
       // Try to run a turn without summarizer
       const result = await agent.turn();
@@ -112,6 +114,8 @@ describe('TronAgent Compaction Integration', () => {
       const simulator = createContextSimulator({ targetTokens: 1000 });
       const session = simulator.generateAtUtilization(96, 200_000);
       cm.setMessages(session.messages);
+      // Set API tokens to simulate what happens after a turn completes
+      cm.setApiContextTokens(session.estimatedTokens);
 
       const tokensBefore = cm.getCurrentTokens();
 
@@ -157,6 +161,8 @@ describe('TronAgent Compaction Integration', () => {
       const simulator = createContextSimulator({ targetTokens: 500 });
       const session = simulator.generateAtUtilization(50, 200_000);
       cm.setMessages(session.messages);
+      // Set API tokens to simulate what happens after a turn completes
+      cm.setApiContextTokens(session.estimatedTokens);
 
       const preview = await cm.previewCompaction({
         summarizer: createMockSummarizer(),

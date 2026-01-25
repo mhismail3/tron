@@ -389,30 +389,11 @@ export class ContextManager {
 
   /**
    * Get current total token count.
-   * Prefers API-reported tokens (ground truth from actual tokenizer) when available.
-   * Falls back to char/4 estimates for new sessions before first turn completes.
+   * Returns API-reported tokens (ground truth from model's tokenizer).
+   * Returns 0 before first turn completes - this is intentional for UI consistency.
    */
   getCurrentTokens(): number {
-    // Prefer API-reported tokens (ground truth from actual tokenizer)
-    if (this.lastApiContextTokens > 0) {
-      return this.lastApiContextTokens;
-    }
-    // Fall back to estimate when no API data yet (new session before first turn)
-    return this.estimateCurrentTokens();
-  }
-
-  /**
-   * Estimate current tokens using char/4 heuristic.
-   * Used as fallback when API-reported tokens aren't available yet.
-   */
-  private estimateCurrentTokens(): number {
-    let total = this.estimateSystemPromptTokens();
-    total += this.estimateToolsTokens();
-    total += this.estimateRulesTokens();
-    for (const msg of this.messages) {
-      total += this.tokenCache.get(msg) ?? this.estimateMessageTokens(msg);
-    }
-    return total;
+    return this.lastApiContextTokens;
   }
 
   /**
@@ -451,14 +432,21 @@ export class ContextManager {
 
   /**
    * Get a snapshot of current context state.
+   * For UI consistency, uses API tokens when available (matches progress bar).
+   * Before first turn, shows 0 tokens used (full context remaining).
    */
   getSnapshot(): ContextSnapshot {
-    const currentTokens = this.getCurrentTokens();
+    // For UI display: use API tokens (0 if no data) to match progress bar
+    // This ensures Context Manager sheet shows same "tokens remaining" as progress bar
+    const currentTokens = this.lastApiContextTokens;
+
     return {
       currentTokens,
       contextLimit: this.contextLimit,
       usagePercent: currentTokens / this.contextLimit,
       thresholdLevel: this.getThresholdLevel(currentTokens),
+      // Always show breakdown estimates for informational purposes.
+      // These are approximations - currentTokens (API value) is ground truth.
       breakdown: {
         systemPrompt: this.estimateSystemPromptTokens(),
         tools: this.estimateToolsTokens(),
@@ -778,10 +766,24 @@ export class ContextManager {
       summarizedMessages: messagesToSummarize.length,
     });
 
-    // Update state
-    this.setMessages(newMessages);
-    const tokensAfter = this.getCurrentTokens();
+    // Estimate tokens after compaction (API tokens won't be available until next turn)
+    const contextMessageTokens = 50; // Overhead for context wrapper
+    const ackMessageTokens = 50; // Assistant acknowledgment
+    let preservedTokens = 0;
+    for (const msg of preserved) {
+      preservedTokens += this.tokenCache.get(msg) ?? this.estimateMessageTokens(msg);
+    }
+    const tokensAfter =
+      this.estimateSystemPromptTokens() +
+      this.estimateToolsTokens() +
+      summaryTokens +
+      contextMessageTokens +
+      ackMessageTokens +
+      preservedTokens;
     const compressionRatio = tokensAfter / tokensBefore;
+
+    // Update state (this resets API tokens - actual count comes from next turn)
+    this.setMessages(newMessages);
 
     // Log completion with full context breakdown
     logger.trace('Compaction: complete', {

@@ -227,6 +227,9 @@ export class CompactionTestHarness {
 
       inject() {
         contextManager.setMessages(messages);
+        // Set API tokens to simulate what happens after a turn completes
+        // This is the ground truth mechanism - tokens come from API after each turn
+        contextManager.setApiContextTokens(targetTokens);
       },
 
       async executeCompaction(editedSummary?: string) {

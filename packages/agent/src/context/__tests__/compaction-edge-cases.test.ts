@@ -204,6 +204,7 @@ describe('Compaction Edge Cases', () => {
       // Fill to 70% of 200k = 140k tokens
       const messages = PreciseTokenGenerator.generateForTokens(140_000);
       contextManager.setMessages(messages);
+      contextManager.setApiContextTokens(140_000); // 70% of 200k
 
       // Register callback
       let callbackCalled = false;
@@ -226,6 +227,7 @@ describe('Compaction Edge Cases', () => {
       // Fill to 50% of 128k = 64k tokens
       const messages = PreciseTokenGenerator.generateForTokens(64_000);
       contextManager.setMessages(messages);
+      contextManager.setApiContextTokens(64_000); // 50% of 128k
 
       let callbackCalled = false;
       contextManager.onCompactionNeeded(() => {
@@ -373,6 +375,7 @@ describe('Compaction Edge Cases', () => {
       // Fill to 55%
       const messages = PreciseTokenGenerator.generateForTokens(110_000);
       contextManager.setMessages(messages);
+      contextManager.setApiContextTokens(110_000); // 55% of 200k
 
       // Should recommend compaction at 55% with 50% threshold
       expect(contextManager.shouldCompact()).toBe(true);
@@ -390,6 +393,7 @@ describe('Compaction Edge Cases', () => {
       // Fill to 85% (would trigger default 70% threshold)
       const messages = PreciseTokenGenerator.generateForTokens(170_000);
       contextManager.setMessages(messages);
+      contextManager.setApiContextTokens(170_000); // 85% of 200k
 
       // Should NOT recommend compaction at 85% with 90% threshold
       expect(contextManager.shouldCompact()).toBe(false);
@@ -399,6 +403,7 @@ describe('Compaction Edge Cases', () => {
         seed: 999,
       });
       contextManager.setMessages([...messages, ...moreMessages]);
+      contextManager.setApiContextTokens(182_000); // 91% of 200k
 
       // Now should recommend
       expect(contextManager.shouldCompact()).toBe(true);
@@ -477,6 +482,10 @@ describe('Compaction Edge Cases', () => {
 
       await harness.executeCompaction();
 
+      // Simulate API reporting reduced tokens after compaction
+      const reducedTokens = Math.floor(harness.contextLimit * 0.2);
+      harness.contextManager.setApiContextTokens(reducedTokens);
+
       const snapshotAfter = harness.contextManager.getSnapshot();
 
       // Should be in normal range
@@ -484,7 +493,7 @@ describe('Compaction Edge Cases', () => {
       expect(snapshotAfter.usagePercent).toBeLessThan(0.3);
       expect(snapshotAfter.currentTokens).toBeLessThan(snapshotBefore.currentTokens);
 
-      // Breakdown should be accurate
+      // Breakdown should show estimates (non-zero since we have API data)
       expect(snapshotAfter.breakdown.messages).toBeGreaterThan(0);
       expect(snapshotAfter.breakdown.messages).toBeLessThan(
         snapshotBefore.breakdown.messages

@@ -53,16 +53,33 @@ const generateTestMessages = (count: number): Message[] => {
 };
 
 /**
+ * Estimate tokens for test messages (~600 tokens per turn).
+ */
+const estimateMessageTokens = (count: number): number => {
+  return count * 600;
+};
+
+// Base overhead for system prompt + tools (typical value)
+const BASE_CONTEXT_OVERHEAD = 15000;
+
+/**
  * Inject messages directly into a session's ContextManager.
+ * Also sets the API tokens to simulate what happens after a turn completes.
  */
 const injectMessagesIntoSession = (
   orchestrator: EventStoreOrchestrator,
   sessionId: string,
-  messages: Message[]
+  messages: Message[],
+  tokenCount?: number
 ) => {
   const active = (orchestrator as any).activeSessions.get(sessionId);
   if (active) {
-    active.agent.getContextManager().setMessages(messages);
+    const cm = active.agent.getContextManager();
+    cm.setMessages(messages);
+    // Set API tokens to simulate what happens after a turn completes
+    // Real API reports total context including system prompt + tools + messages
+    const tokens = tokenCount ?? (BASE_CONTEXT_OVERHEAD + estimateMessageTokens(messages.length / 2));
+    cm.setApiContextTokens(tokens);
   }
 };
 

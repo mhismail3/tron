@@ -185,12 +185,19 @@ describe('Cross-Provider Model Switching', () => {
         cm.addMessage(msg);
       }
 
+      // Simulate API reporting token usage after a turn
+      const tokens = 50000; // Simulate 50k tokens used
+      cm.setApiContextTokens(tokens);
+
       const snapshot1 = cm.getSnapshot();
-      const tokens = snapshot1.currentTokens;
       const usage1 = snapshot1.usagePercent;
+      expect(snapshot1.currentTokens).toBe(tokens);
 
       // Switch to smaller context model
       cm.switchModel('gpt-4o'); // 128k
+
+      // API tokens persist across model switch
+      cm.setApiContextTokens(tokens);
 
       const snapshot2 = cm.getSnapshot();
 
@@ -208,9 +215,11 @@ describe('Cross-Provider Model Switching', () => {
       });
 
       // Fill to 75% of Claude's limit (150k tokens)
-      // This is within Claude's threshold but would exceed smaller models
-      const largeContent = 'x'.repeat(150000 * 4); // ~150k tokens
+      const largeContent = 'x'.repeat(150000 * 4);
       cm.addMessage({ role: 'user', content: largeContent });
+
+      // Simulate API reporting 150k tokens after turn
+      cm.setApiContextTokens(150000);
 
       let callbackCalled = false;
       cm.onCompactionNeeded(() => {
@@ -399,9 +408,11 @@ describe('Cross-Provider Model Switching', () => {
       });
 
       // Fill to 30% of Gemini's limit (~300k tokens)
-      // This is within Gemini's threshold but would exceed Claude's 200k limit
-      const largeContent = 'x'.repeat(300000 * 4); // ~300k tokens
+      const largeContent = 'x'.repeat(300000 * 4);
       cm.addMessage({ role: 'user', content: largeContent });
+
+      // Simulate API reporting 300k tokens after turn
+      cm.setApiContextTokens(300000);
 
       let callbackCalled = false;
       cm.onCompactionNeeded(() => {

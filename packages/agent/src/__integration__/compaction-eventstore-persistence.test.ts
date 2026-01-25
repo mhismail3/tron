@@ -47,14 +47,34 @@ const generateTestMessages = (count: number): Message[] => {
   return messages;
 };
 
+/**
+ * Estimate tokens for test messages (~600 tokens per turn).
+ */
+const estimateMessageTokens = (count: number): number => {
+  return count * 600;
+};
+
+// Base overhead for system prompt + tools (typical value)
+const BASE_CONTEXT_OVERHEAD = 15000;
+
+/**
+ * Inject messages directly into a session's ContextManager.
+ * Also sets the API tokens to simulate what happens after a turn completes.
+ */
 const injectMessagesIntoSession = (
   orchestrator: EventStoreOrchestrator,
   sessionId: string,
-  messages: Message[]
+  messages: Message[],
+  tokenCount?: number
 ) => {
   const active = (orchestrator as any).activeSessions.get(sessionId);
   if (active) {
-    active.agent.getContextManager().setMessages(messages);
+    const cm = active.agent.getContextManager();
+    cm.setMessages(messages);
+    // Set API tokens to simulate what happens after a turn completes
+    // Real API reports total context including system prompt + tools + messages
+    const tokens = tokenCount ?? (BASE_CONTEXT_OVERHEAD + estimateMessageTokens(messages.length / 2));
+    cm.setApiContextTokens(tokens);
   }
 };
 
@@ -297,10 +317,12 @@ describe('Compaction EventStore Persistence', () => {
       const active = (orchestrator as any).activeSessions.get(session.sessionId);
       const currentMessages = active.agent.getContextManager().getMessages();
       const additionalMessages = generateTestMessages(150);
-      active.agent.getContextManager().setMessages([
-        ...currentMessages,
-        ...additionalMessages,
-      ]);
+      const combinedMessages = [...currentMessages, ...additionalMessages];
+      active.agent.getContextManager().setMessages(combinedMessages);
+      // Set API tokens to simulate what happens after a turn completes
+      active.agent.getContextManager().setApiContextTokens(
+        BASE_CONTEXT_OVERHEAD + estimateMessageTokens(combinedMessages.length / 2)
+      );
       await orchestrator.confirmCompaction(session.sessionId);
 
       // Check events
@@ -467,7 +489,10 @@ describe('Compaction EventStore Persistence', () => {
       for (let i = 0; i < 3; i++) {
         const active = (orchestrator as any).activeSessions.get(session.sessionId);
         const messages = generateTestMessages(150);
-        active.agent.getContextManager().setMessages(messages);
+        const cm = active.agent.getContextManager();
+        cm.setMessages(messages);
+        // Set API tokens to simulate what happens after a turn completes
+        cm.setApiContextTokens(BASE_CONTEXT_OVERHEAD + estimateMessageTokens(messages.length / 2));
         await orchestrator.confirmCompaction(session.sessionId);
       }
 

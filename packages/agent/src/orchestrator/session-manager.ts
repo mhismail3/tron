@@ -307,6 +307,22 @@ export class SessionManager {
     const events = session.headEventId
       ? await this.eventStore.getAncestors(session.headEventId)
       : [];
+
+    // Restore API token count from last turn_end event
+    // This ensures Context Manager sheet matches progress bar on session resume
+    const lastTurnEnd = [...events]
+      .reverse()
+      .find((e) => e.type === 'stream.turn_end');
+    if (lastTurnEnd && lastTurnEnd.payload?.normalizedUsage?.contextWindowTokens) {
+      agent.getContextManager().setApiContextTokens(
+        lastTurnEnd.payload.normalizedUsage.contextWindowTokens
+      );
+      logger.info('API token count restored from last turn', {
+        sessionId,
+        contextWindowTokens: lastTurnEnd.payload.normalizedUsage.contextWindowTokens,
+      });
+    }
+
     const skillTracker = SkillTracker.fromEvents(events as SkillTrackingEvent[]);
 
     logger.info('Skill tracker reconstructed from events', {

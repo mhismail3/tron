@@ -117,9 +117,13 @@ describe('TronAgent + ContextManager Integration', () => {
       const agent = new TronAgent(createTestConfig());
       const cm = agent.getContextManager();
 
+      // Before first turn, API tokens are 0
       const beforeTokens = cm.getCurrentTokens();
+      expect(beforeTokens).toBe(0);
 
       agent.addMessage({ role: 'user', content: 'Hello world' });
+      // Simulate API reporting tokens after a turn
+      cm.setApiContextTokens(100);
 
       expect(cm.getCurrentTokens()).toBeGreaterThan(beforeTokens);
     });
@@ -129,6 +133,8 @@ describe('TronAgent + ContextManager Integration', () => {
       const cm = agent.getContextManager();
 
       agent.addMessage({ role: 'user', content: 'Hello' });
+      // Simulate API reporting tokens after a turn
+      cm.setApiContextTokens(5000);
 
       const snapshot = cm.getSnapshot();
 
@@ -174,6 +180,8 @@ describe('TronAgent + ContextManager Integration', () => {
       const simulator = createContextSimulator({ targetTokens: 1000 });
       const session = simulator.generateAtUtilization(75, 200_000);
       cm.setMessages(session.messages);
+      // Set API tokens to simulate what happens after a turn completes
+      cm.setApiContextTokens(session.estimatedTokens);
 
       const callback = vi.fn();
       cm.onCompactionNeeded(callback);
@@ -206,6 +214,8 @@ describe('TronAgent + ContextManager Integration', () => {
       const simulator = createContextSimulator({ targetTokens: 1000 });
       const session = simulator.generateAtUtilization(80, 200_000);
       cm.setMessages(session.messages);
+      // Set API tokens to simulate what happens after a turn completes
+      cm.setApiContextTokens(session.estimatedTokens);
 
       const validation = cm.canAcceptTurn({ estimatedResponseTokens: 4000 });
 
@@ -218,7 +228,7 @@ describe('TronAgent + ContextManager Integration', () => {
       const agent = new TronAgent(createTestConfig());
       const cm = agent.getContextManager();
 
-      // Low context - should not compact
+      // Low context - should not compact (no API tokens set = 0 usage)
       agent.addMessage({ role: 'user', content: 'Hello' });
       expect(cm.shouldCompact()).toBe(false);
 
@@ -226,6 +236,8 @@ describe('TronAgent + ContextManager Integration', () => {
       const simulator = createContextSimulator({ targetTokens: 1000 });
       const session = simulator.generateAtUtilization(75, 200_000);
       cm.setMessages(session.messages);
+      // Set API tokens to simulate what happens after a turn completes
+      cm.setApiContextTokens(session.estimatedTokens);
       expect(cm.shouldCompact()).toBe(true);
     });
 
@@ -237,6 +249,8 @@ describe('TronAgent + ContextManager Integration', () => {
       const simulator = createContextSimulator({ targetTokens: 1000 });
       const session = simulator.generateAtUtilization(80, 200_000);
       cm.setMessages(session.messages);
+      // Set API tokens to simulate what happens after a turn completes
+      cm.setApiContextTokens(session.estimatedTokens);
 
       const preview = await cm.previewCompaction({
         summarizer: createMockSummarizer(),
@@ -254,6 +268,8 @@ describe('TronAgent + ContextManager Integration', () => {
       const simulator = createContextSimulator({ targetTokens: 1000 });
       const session = simulator.generateAtUtilization(80, 200_000);
       cm.setMessages(session.messages);
+      // Set API tokens to simulate what happens after a turn completes
+      cm.setApiContextTokens(session.estimatedTokens);
 
       const tokensBefore = cm.getCurrentTokens();
       const result = await cm.executeCompaction({
@@ -261,7 +277,9 @@ describe('TronAgent + ContextManager Integration', () => {
       });
 
       expect(result.success).toBe(true);
-      expect(cm.getCurrentTokens()).toBeLessThan(tokensBefore);
+      // After compaction, API tokens are reset to 0 until next turn
+      expect(cm.getCurrentTokens()).toBe(0);
+      expect(result.tokensBefore).toBe(tokensBefore);
     });
   });
 

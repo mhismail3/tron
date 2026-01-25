@@ -3,6 +3,10 @@
  *
  * Tests written FIRST to define expected behavior.
  * Implementation follows to make these pass.
+ *
+ * NOTE: getCurrentTokens() returns API-reported tokens (0 if no API data).
+ * Tests must call setApiContextTokens() to simulate what happens after a turn.
+ * For tests using ContextSimulator, use session.estimatedTokens.
  */
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
@@ -14,6 +18,18 @@ import {
 } from '../context-manager.js';
 import { ContextSimulator, createContextSimulator } from '../__helpers__/context-simulator.js';
 import { MockSummarizer, createMockSummarizer } from '../__helpers__/mock-summarizer.js';
+
+/**
+ * Helper to set up a context manager with simulated session and API tokens.
+ * This mimics what happens after a turn completes in production.
+ */
+function setupWithSimulatedSession(
+  cm: ContextManager,
+  session: ReturnType<ContextSimulator['generateSession']>
+): void {
+  cm.setMessages(session.messages);
+  cm.setApiContextTokens(session.estimatedTokens);
+}
 
 // =============================================================================
 // Construction Tests
@@ -76,10 +92,18 @@ describe('ContextManager', () => {
       cm = createContextManager({ model: 'claude-sonnet-4-20250514' });
     });
 
-    it('adds messages and updates token count', () => {
-      const before = cm.getCurrentTokens();
+    it('adds messages to the context', () => {
       cm.addMessage({ role: 'user', content: 'Hello world' });
-      expect(cm.getCurrentTokens()).toBeGreaterThan(before);
+      expect(cm.getMessages()).toHaveLength(1);
+    });
+
+    it('tracks API-reported tokens after turn', () => {
+      cm.addMessage({ role: 'user', content: 'Hello world' });
+      // Before API reports, tokens are 0
+      expect(cm.getCurrentTokens()).toBe(0);
+      // After turn completes, API reports actual tokens
+      cm.setApiContextTokens(1500);
+      expect(cm.getCurrentTokens()).toBe(1500);
     });
 
     it('returns messages array', () => {
@@ -88,17 +112,20 @@ describe('ContextManager', () => {
       expect(cm.getMessages()).toHaveLength(2);
     });
 
-    it('setMessages replaces all messages', () => {
+    it('setMessages replaces all messages and resets API tokens', () => {
       cm.addMessage({ role: 'user', content: 'First' });
       cm.addMessage({ role: 'user', content: 'Second' });
+      cm.setApiContextTokens(5000);
       expect(cm.getMessages()).toHaveLength(2);
+      expect(cm.getCurrentTokens()).toBe(5000);
 
       cm.setMessages([{ role: 'user', content: 'Only one' }]);
       expect(cm.getMessages()).toHaveLength(1);
+      // API tokens reset after setMessages
+      expect(cm.getCurrentTokens()).toBe(0);
     });
 
-    it('tracks tokens for complex assistant messages', () => {
-      const before = cm.getCurrentTokens();
+    it('handles complex assistant messages', () => {
       cm.addMessage({
         role: 'assistant',
         content: [
@@ -111,11 +138,13 @@ describe('ContextManager', () => {
           },
         ],
       });
-      expect(cm.getCurrentTokens()).toBeGreaterThan(before);
+      expect(cm.getMessages()).toHaveLength(1);
+      // Tokens come from API after turn
+      cm.setApiContextTokens(2000);
+      expect(cm.getCurrentTokens()).toBe(2000);
     });
 
-    it('tracks tokens for tool results', () => {
-      const before = cm.getCurrentTokens();
+    it('handles tool results', () => {
       cm.addMessage({
         role: 'user',
         content: [
@@ -126,17 +155,18 @@ describe('ContextManager', () => {
           },
         ],
       });
-      expect(cm.getCurrentTokens()).toBeGreaterThan(before);
+      expect(cm.getMessages()).toHaveLength(1);
     });
 
-    it('caches token estimates for performance', () => {
-      const msg = { role: 'user' as const, content: 'Test message' };
-      cm.addMessage(msg);
+    it('returns consistent token count from API', () => {
+      cm.addMessage({ role: 'user', content: 'Test message' });
+      cm.setApiContextTokens(1000);
 
-      // Multiple calls should use cached value
+      // Multiple calls should return same API value
       const first = cm.getCurrentTokens();
       const second = cm.getCurrentTokens();
       expect(second).toBe(first);
+      expect(first).toBe(1000);
     });
 
     it('returns defensive copy of messages', () => {
@@ -154,25 +184,26 @@ describe('ContextManager', () => {
   // ===========================================================================
 
   describe('Snapshot', () => {
-    it('returns current token usage', () => {
+    it('returns current token usage from API', () => {
       const cm = createContextManager({ model: 'claude-sonnet-4-20250514' });
       cm.addMessage({ role: 'user', content: 'Hello' });
+      cm.setApiContextTokens(5000); // Simulate API reporting 5k tokens
 
       const snapshot = cm.getSnapshot();
 
-      expect(snapshot.currentTokens).toBeGreaterThan(0);
+      expect(snapshot.currentTokens).toBe(5000);
       expect(snapshot.contextLimit).toBe(200_000);
-      expect(snapshot.usagePercent).toBeGreaterThan(0);
-      expect(snapshot.usagePercent).toBeLessThan(0.05); // Very low for simple message
+      expect(snapshot.usagePercent).toBe(5000 / 200_000);
     });
 
-    it('includes breakdown of token usage', () => {
+    it('includes breakdown of token usage when API data available', () => {
       const cm = createContextManager({
         model: 'claude-sonnet-4-20250514',
         systemPrompt: 'You are a helpful assistant.',
         tools: [{ name: 'test', description: 'A test tool', inputSchema: { type: 'object' } }],
       });
       cm.addMessage({ role: 'user', content: 'Hello' });
+      cm.setApiContextTokens(5000); // Simulate API reporting tokens
 
       const snapshot = cm.getSnapshot();
 
@@ -182,9 +213,34 @@ describe('ContextManager', () => {
       expect(snapshot.breakdown.messages).toBeGreaterThan(0);
     });
 
+    it('returns zero currentTokens but shows breakdown estimates before first turn', () => {
+      const cm = createContextManager({
+        model: 'claude-sonnet-4-20250514',
+        systemPrompt: 'You are a helpful assistant.',
+        tools: [
+          {
+            name: 'test_tool',
+            description: 'A test tool for unit tests',
+            input_schema: { type: 'object', properties: {} },
+          },
+        ],
+      });
+      cm.addMessage({ role: 'user', content: 'Hello' });
+
+      const snapshot = cm.getSnapshot();
+
+      // Before API data, currentTokens is 0 (matches progress bar)
+      expect(snapshot.currentTokens).toBe(0);
+      // But breakdown shows estimates for informational purposes
+      expect(snapshot.breakdown.systemPrompt).toBeGreaterThan(0);
+      expect(snapshot.breakdown.tools).toBeGreaterThan(0);
+      expect(snapshot.breakdown.messages).toBeGreaterThan(0);
+    });
+
     it('returns normal threshold for low usage', () => {
       const cm = createContextManager({ model: 'claude-sonnet-4-20250514' });
       cm.addMessage({ role: 'user', content: 'Hello' });
+      cm.setApiContextTokens(10000); // 5% of 200k
 
       const snapshot = cm.getSnapshot();
       expect(snapshot.thresholdLevel).toBe('normal');
@@ -195,7 +251,7 @@ describe('ContextManager', () => {
       const session = simulator.generateAtUtilization(60, 200_000);
 
       const cm = createContextManager({ model: 'claude-sonnet-4-20250514' });
-      cm.setMessages(session.messages);
+      setupWithSimulatedSession(cm, session);
 
       const snapshot = cm.getSnapshot();
       expect(snapshot.thresholdLevel).toBe('warning');
@@ -206,7 +262,7 @@ describe('ContextManager', () => {
       const session = simulator.generateAtUtilization(80, 200_000);
 
       const cm = createContextManager({ model: 'claude-sonnet-4-20250514' });
-      cm.setMessages(session.messages);
+      setupWithSimulatedSession(cm, session);
 
       const snapshot = cm.getSnapshot();
       expect(snapshot.thresholdLevel).toBe('alert');
@@ -217,7 +273,7 @@ describe('ContextManager', () => {
       const session = simulator.generateAtUtilization(90, 200_000);
 
       const cm = createContextManager({ model: 'claude-sonnet-4-20250514' });
-      cm.setMessages(session.messages);
+      setupWithSimulatedSession(cm, session);
 
       const snapshot = cm.getSnapshot();
       expect(snapshot.thresholdLevel).toBe('critical');
@@ -228,7 +284,7 @@ describe('ContextManager', () => {
       const session = simulator.generateAtUtilization(98, 200_000);
 
       const cm = createContextManager({ model: 'claude-sonnet-4-20250514' });
-      cm.setMessages(session.messages);
+      setupWithSimulatedSession(cm, session);
 
       const snapshot = cm.getSnapshot();
       expect(snapshot.thresholdLevel).toBe('exceeded');
@@ -243,6 +299,7 @@ describe('ContextManager', () => {
     it('allows turn when context is low', () => {
       const cm = createContextManager({ model: 'claude-sonnet-4-20250514' });
       cm.addMessage({ role: 'user', content: 'Short message' });
+      cm.setApiContextTokens(5000); // Low usage
 
       const validation = cm.canAcceptTurn({ estimatedResponseTokens: 4000 });
 
@@ -256,7 +313,7 @@ describe('ContextManager', () => {
       const session = simulator.generateAtUtilization(80, 200_000);
 
       const cm = createContextManager({ model: 'claude-sonnet-4-20250514' });
-      cm.setMessages(session.messages);
+      setupWithSimulatedSession(cm, session);
 
       const validation = cm.canAcceptTurn({ estimatedResponseTokens: 4000 });
 
@@ -269,7 +326,7 @@ describe('ContextManager', () => {
       const session = simulator.generateAtUtilization(92, 200_000);
 
       const cm = createContextManager({ model: 'claude-sonnet-4-20250514' });
-      cm.setMessages(session.messages);
+      setupWithSimulatedSession(cm, session);
 
       const validation = cm.canAcceptTurn({ estimatedResponseTokens: 4000 });
 
@@ -282,7 +339,7 @@ describe('ContextManager', () => {
       const session = simulator.generateAtUtilization(95, 200_000);
 
       const cm = createContextManager({ model: 'claude-sonnet-4-20250514' });
-      cm.setMessages(session.messages);
+      setupWithSimulatedSession(cm, session);
 
       const validation = cm.canAcceptTurn({ estimatedResponseTokens: 20000 });
 
@@ -292,11 +349,12 @@ describe('ContextManager', () => {
     it('returns token details in validation', () => {
       const cm = createContextManager({ model: 'claude-sonnet-4-20250514' });
       cm.addMessage({ role: 'user', content: 'Hello' });
+      cm.setApiContextTokens(10000);
 
       const validation = cm.canAcceptTurn({ estimatedResponseTokens: 4000 });
 
-      expect(validation.currentTokens).toBeGreaterThan(0);
-      expect(validation.estimatedAfterTurn).toBeGreaterThan(validation.currentTokens);
+      expect(validation.currentTokens).toBe(10000);
+      expect(validation.estimatedAfterTurn).toBe(14000);
       expect(validation.contextLimit).toBe(200_000);
     });
   });
@@ -323,7 +381,7 @@ describe('ContextManager', () => {
 
       // Use empty systemPrompt to avoid loading real ~/.tron/rules/SYSTEM.md
       const cm = createContextManager({ model: 'claude-sonnet-4-20250514', systemPrompt: '' });
-      cm.setMessages(session.messages);
+      setupWithSimulatedSession(cm, session);
 
       // At 75% of 200k, should be "alert"
       expect(cm.getSnapshot().thresholdLevel).toBe('alert');
@@ -342,7 +400,7 @@ describe('ContextManager', () => {
 
       // Use empty systemPrompt to avoid loading real ~/.tron/rules/SYSTEM.md
       const cm = createContextManager({ model: 'gpt-4o', systemPrompt: '' });
-      cm.setMessages(session.messages);
+      setupWithSimulatedSession(cm, session);
 
       // At 88% of 128k, should be "critical" (85-95%)
       expect(cm.getSnapshot().thresholdLevel).toBe('critical');
@@ -360,7 +418,7 @@ describe('ContextManager', () => {
 
       // Use empty systemPrompt to avoid loading real ~/.tron/rules/SYSTEM.md
       const cm = createContextManager({ model: 'claude-sonnet-4-20250514', systemPrompt: '' });
-      cm.setMessages(session.messages);
+      setupWithSimulatedSession(cm, session);
 
       const callback = vi.fn();
       cm.onCompactionNeeded(callback);
@@ -374,6 +432,7 @@ describe('ContextManager', () => {
     it('does not trigger callback if context is fine after switch', () => {
       const cm = createContextManager({ model: 'gpt-4o' });
       cm.addMessage({ role: 'user', content: 'Hello' });
+      cm.setApiContextTokens(5000); // Low usage
 
       const callback = vi.fn();
       cm.onCompactionNeeded(callback);
@@ -437,7 +496,7 @@ describe('ContextManager', () => {
       const session = simulator.generateAtUtilization(95, 200_000);
 
       const cm = createContextManager({ model: 'claude-sonnet-4-20250514' });
-      cm.setMessages(session.messages);
+      setupWithSimulatedSession(cm, session);
 
       // With very tight budget, max tool result size should be smaller than the cap
       const maxSize = cm.getMaxToolResultSize();
@@ -449,7 +508,7 @@ describe('ContextManager', () => {
       const session = simulator.generateAtUtilization(98, 200_000);
 
       const cm = createContextManager({ model: 'claude-sonnet-4-20250514' });
-      cm.setMessages(session.messages);
+      setupWithSimulatedSession(cm, session);
 
       // Should always allow at least some output
       const maxSize = cm.getMaxToolResultSize();
@@ -467,7 +526,7 @@ describe('ContextManager', () => {
       const session = simulator.generateAtUtilization(50, 200_000);
 
       const cm = createContextManager({ model: 'claude-sonnet-4-20250514' });
-      cm.setMessages(session.messages);
+      setupWithSimulatedSession(cm, session);
 
       expect(cm.shouldCompact()).toBe(false);
     });
@@ -477,7 +536,7 @@ describe('ContextManager', () => {
       const session = simulator.generateAtUtilization(75, 200_000);
 
       const cm = createContextManager({ model: 'claude-sonnet-4-20250514' });
-      cm.setMessages(session.messages);
+      setupWithSimulatedSession(cm, session);
 
       expect(cm.shouldCompact()).toBe(true);
     });
@@ -490,7 +549,7 @@ describe('ContextManager', () => {
         model: 'claude-sonnet-4-20250514',
         compaction: { threshold: 0.50 }, // 50% threshold
       });
-      cm.setMessages(session.messages);
+      setupWithSimulatedSession(cm, session);
 
       expect(cm.shouldCompact()).toBe(true);
     });
@@ -518,7 +577,7 @@ describe('ContextManager', () => {
     it('generates preview without modifying state', async () => {
       const simulator = createContextSimulator({ targetTokens: 1000 });
       const session = simulator.generateAtUtilization(80, 200_000);
-      cm.setMessages(session.messages);
+      setupWithSimulatedSession(cm, session);
 
       const originalTokens = cm.getCurrentTokens();
       const originalCount = cm.getMessages().length;
@@ -537,7 +596,7 @@ describe('ContextManager', () => {
     it('returns compression ratio in preview', async () => {
       const simulator = createContextSimulator({ targetTokens: 1000 });
       const session = simulator.generateAtUtilization(80, 200_000);
-      cm.setMessages(session.messages);
+      setupWithSimulatedSession(cm, session);
 
       const preview = await cm.previewCompaction({ summarizer: mockSummarizer });
 
@@ -548,7 +607,7 @@ describe('ContextManager', () => {
     it('shows preserved and summarized turn counts', async () => {
       const simulator = createContextSimulator({ targetTokens: 1000 });
       const session = simulator.generateAtUtilization(80, 200_000);
-      cm.setMessages(session.messages);
+      setupWithSimulatedSession(cm, session);
 
       const preview = await cm.previewCompaction({ summarizer: mockSummarizer });
 
@@ -559,7 +618,7 @@ describe('ContextManager', () => {
     it('includes generated summary in preview', async () => {
       const simulator = createContextSimulator({ targetTokens: 1000 });
       const session = simulator.generateAtUtilization(80, 200_000);
-      cm.setMessages(session.messages);
+      setupWithSimulatedSession(cm, session);
 
       const preview = await cm.previewCompaction({ summarizer: mockSummarizer });
 
@@ -570,7 +629,7 @@ describe('ContextManager', () => {
     it('includes extracted data in preview', async () => {
       const simulator = createContextSimulator({ targetTokens: 1000 });
       const session = simulator.generateAtUtilization(80, 200_000);
-      cm.setMessages(session.messages);
+      setupWithSimulatedSession(cm, session);
 
       const preview = await cm.previewCompaction({ summarizer: mockSummarizer });
 
@@ -601,21 +660,21 @@ describe('ContextManager', () => {
     it('executes compaction and reduces tokens', async () => {
       const simulator = createContextSimulator({ targetTokens: 1000 });
       const session = simulator.generateAtUtilization(80, 200_000);
-      cm.setMessages(session.messages);
+      setupWithSimulatedSession(cm, session);
 
       const tokensBefore = cm.getCurrentTokens();
       const result = await cm.executeCompaction({ summarizer: mockSummarizer });
 
       expect(result.success).toBe(true);
       expect(result.tokensBefore).toBe(tokensBefore);
+      // tokensAfter is estimated since API tokens are reset after setMessages
       expect(result.tokensAfter).toBeLessThan(tokensBefore);
-      expect(cm.getCurrentTokens()).toBe(result.tokensAfter);
     });
 
     it('preserves recent turns', async () => {
       const simulator = createContextSimulator({ targetTokens: 1000 });
       const session = simulator.generateAtUtilization(80, 200_000);
-      cm.setMessages(session.messages);
+      setupWithSimulatedSession(cm, session);
 
       // Get last 6 messages (3 turns)
       const originalMessages = cm.getMessages();
@@ -634,7 +693,7 @@ describe('ContextManager', () => {
     it('adds context summary message at start', async () => {
       const simulator = createContextSimulator({ targetTokens: 1000 });
       const session = simulator.generateAtUtilization(80, 200_000);
-      cm.setMessages(session.messages);
+      setupWithSimulatedSession(cm, session);
 
       await cm.executeCompaction({ summarizer: mockSummarizer });
 
@@ -649,7 +708,7 @@ describe('ContextManager', () => {
     it('adds assistant acknowledgment after context', async () => {
       const simulator = createContextSimulator({ targetTokens: 1000 });
       const session = simulator.generateAtUtilization(80, 200_000);
-      cm.setMessages(session.messages);
+      setupWithSimulatedSession(cm, session);
 
       await cm.executeCompaction({ summarizer: mockSummarizer });
 
@@ -662,7 +721,7 @@ describe('ContextManager', () => {
     it('supports custom edited summary', async () => {
       const simulator = createContextSimulator({ targetTokens: 1000 });
       const session = simulator.generateAtUtilization(80, 200_000);
-      cm.setMessages(session.messages);
+      setupWithSimulatedSession(cm, session);
 
       const customSummary = 'User-edited custom summary for testing purposes.';
       await cm.executeCompaction({
@@ -677,37 +736,46 @@ describe('ContextManager', () => {
     it('returns compression ratio in result', async () => {
       const simulator = createContextSimulator({ targetTokens: 1000 });
       const session = simulator.generateAtUtilization(80, 200_000);
-      cm.setMessages(session.messages);
+      setupWithSimulatedSession(cm, session);
 
       const result = await cm.executeCompaction({ summarizer: mockSummarizer });
 
+      // tokensAfter is an estimate based on preserved messages + summary
+      // since API tokens won't be available until next turn completes
+      expect(result.tokensAfter).toBeGreaterThan(0);
+      expect(result.tokensAfter).toBeLessThan(result.tokensBefore);
+      expect(result.tokensBefore).toBeGreaterThan(0);
+      // Compression ratio = tokensAfter / tokensBefore (should be < 1)
       expect(result.compressionRatio).toBeGreaterThan(0);
       expect(result.compressionRatio).toBeLessThan(1);
-      expect(result.compressionRatio).toBe(result.tokensAfter / result.tokensBefore);
     });
 
     it('returns extracted data in result', async () => {
       const simulator = createContextSimulator({ targetTokens: 1000 });
       const session = simulator.generateAtUtilization(80, 200_000);
-      cm.setMessages(session.messages);
+      setupWithSimulatedSession(cm, session);
 
       const result = await cm.executeCompaction({ summarizer: mockSummarizer });
 
       expect(result.extractedData).toBeDefined();
     });
 
-    it('clears token cache after compaction', async () => {
+    it('resets API tokens after compaction (requires next turn to update)', async () => {
       const simulator = createContextSimulator({ targetTokens: 1000 });
       const session = simulator.generateAtUtilization(80, 200_000);
-      cm.setMessages(session.messages);
+      setupWithSimulatedSession(cm, session);
 
       const tokensBefore = cm.getCurrentTokens();
       await cm.executeCompaction({ summarizer: mockSummarizer });
 
-      // Tokens should be different and cache should be recalculated
-      const tokensAfter = cm.getCurrentTokens();
-      expect(tokensAfter).toBeLessThan(tokensBefore);
-      expect(tokensAfter).not.toBe(tokensBefore);
+      // After compaction, API tokens are reset (setMessages resets them)
+      // So getCurrentTokens() returns 0 until next turn reports actual usage
+      expect(cm.getCurrentTokens()).toBe(0);
+
+      // Simulate next turn reporting reduced tokens
+      cm.setApiContextTokens(50000);
+      expect(cm.getCurrentTokens()).toBe(50000);
+      expect(cm.getCurrentTokens()).toBeLessThan(tokensBefore);
     });
   });
 
@@ -719,7 +787,8 @@ describe('ContextManager', () => {
     it('handles empty messages gracefully', () => {
       const cm = createContextManager({ model: 'claude-sonnet-4-20250514' });
 
-      expect(cm.getCurrentTokens()).toBeGreaterThanOrEqual(0);
+      // Before any API data, tokens are 0
+      expect(cm.getCurrentTokens()).toBe(0);
       expect(cm.getMessages()).toHaveLength(0);
       expect(cm.shouldCompact()).toBe(false);
     });
@@ -731,6 +800,7 @@ describe('ContextManager', () => {
       });
       cm.addMessage({ role: 'user', content: 'Hello' });
       cm.addMessage({ role: 'assistant', content: [{ type: 'text', text: 'Hi' }] });
+      cm.setApiContextTokens(100); // Small token count
 
       // With only 1 turn (2 messages), compaction should preserve all
       const preview = await cm.previewCompaction({
@@ -751,18 +821,21 @@ describe('ContextManager', () => {
       cm.addMessage({ role: 'user', content: '' });
 
       expect(cm.getMessages()).toHaveLength(1);
-      expect(cm.getCurrentTokens()).toBeGreaterThan(0); // At least role overhead
+      // Tokens come from API, not estimates
+      expect(cm.getCurrentTokens()).toBe(0);
     });
 
     it('handles concurrent calls to getCurrentTokens', () => {
       const cm = createContextManager({ model: 'claude-sonnet-4-20250514' });
       cm.addMessage({ role: 'user', content: 'Hello' });
+      cm.setApiContextTokens(1500);
 
-      // Multiple rapid calls should all return same cached value
+      // Multiple rapid calls should all return same API value
       const results = Array.from({ length: 10 }, () => cm.getCurrentTokens());
       const unique = new Set(results);
 
       expect(unique.size).toBe(1);
+      expect(results[0]).toBe(1500);
     });
   });
 
