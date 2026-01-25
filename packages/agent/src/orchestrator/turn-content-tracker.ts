@@ -25,34 +25,31 @@
 import { createLogger } from '../logging/logger.js';
 import type { CurrentTurnToolCall } from '../rpc/types.js';
 import type { ProviderType } from '../types/messages.js';
-import { normalizeTokenUsage, type NormalizedTokenUsage } from '../providers/token-normalizer.js';
+import {
+  TokenUsageTracker,
+  createTokenUsageTracker,
+  type NormalizedTokenUsage,
+} from './token-usage-tracker.js';
+import {
+  buildPreToolContentBlocks,
+  buildInterruptedContentBlocks,
+  type ContentSequenceItem,
+  type ToolCallData,
+  type ToolUseMeta,
+  type ToolResultMeta,
+} from './content-block-builder.js';
 
 const logger = createLogger('turn-content-tracker');
 
 // Re-export NormalizedTokenUsage for convenience
-export type { NormalizedTokenUsage } from '../providers/token-normalizer.js';
+export type { NormalizedTokenUsage } from './token-usage-tracker.js';
+
+// Re-export types from content-block-builder for backward compatibility
+export type { ContentSequenceItem, ToolCallData, ToolUseMeta, ToolResultMeta } from './content-block-builder.js';
 
 // =============================================================================
 // Types
 // =============================================================================
-
-/** Content sequence item - text, thinking, or a reference to a tool call */
-export type ContentSequenceItem =
-  | { type: 'text'; text: string }
-  | { type: 'thinking'; thinking: string }
-  | { type: 'tool_ref'; toolCallId: string };
-
-/** Tool call data for tracking */
-export interface ToolCallData {
-  toolCallId: string;
-  toolName: string;
-  arguments: Record<string, unknown>;
-  status: 'pending' | 'running' | 'completed' | 'error';
-  result?: string;
-  isError?: boolean;
-  startedAt?: string;
-  completedAt?: string;
-}
 
 /** Accumulated content for client catch-up */
 export interface AccumulatedContent {
@@ -69,20 +66,6 @@ export interface TurnContent {
   toolCalls: Map<string, ToolCallData>;
   thinking: string;
   thinkingSignature?: string; // Signature for thinking block verification (API requires this)
-}
-
-/** Metadata for tool_use blocks in interrupted content */
-export interface ToolUseMeta {
-  status: 'pending' | 'running' | 'completed' | 'error';
-  interrupted: boolean;
-  durationMs?: number;
-}
-
-/** Metadata for tool_result blocks in interrupted content */
-export interface ToolResultMeta {
-  durationMs?: number;
-  toolName: string;
-  interrupted?: boolean;
 }
 
 /** Interrupted content for persistence */
@@ -147,67 +130,17 @@ export class TurnContentTracker {
   // =========================================================================
   private currentTurn: number = 0;
   private currentTurnStartTime: number | undefined;
-  private lastTurnTokenUsage: {
-    inputTokens: number;
-    outputTokens: number;
-    cacheReadTokens?: number;
-    cacheCreationTokens?: number;
-  } | undefined;
 
   // =========================================================================
-  // Token Normalization State
+  // Token Usage Tracking (extracted to TokenUsageTracker)
   //
-  // CRITICAL: Understanding token baseline tracking
-  //
-  // previousContextSize tracks the TOTAL context window size from the previous turn.
-  // This is used to calculate per-turn deltas (newInputTokens = current - previous).
-  //
-  // Key behaviors that took time to get right:
-  //
-  // 1. previousContextSize persists across agent runs (onAgentStart does NOT reset it)
-  //    - A new agent run starts on every user message (run() called)
-  //    - If we reset baseline on agent start, first turn after user message shows full context
-  //    - Continuation turns within same agent run would show delta
-  //    - This caused confusing behavior where some turns showed total, others delta
-  //
-  // 2. previousContextSize IS reset when provider type changes (model switch)
-  //    - Different providers interpret inputTokens differently
-  //    - Anthropic: inputTokens = non-cached only, contextWindow = input + cache
-  //    - OpenAI/Codex/Gemini: inputTokens = full context
-  //    - After model switch, previous baseline is meaningless, so reset to 0
-  //
-  // 3. For Anthropic, contextWindowTokens = inputTokens + cacheRead + cacheCreate
-  //    - This is the ACTUAL context size sent to the model
-  //    - Delta is calculated from contextWindowTokens, not raw inputTokens
-  //
-  // See token-normalizer.ts for detailed documentation on provider differences.
+  // Handles provider type management, context baseline tracking, and token
+  // normalization. See TokenUsageTracker for detailed documentation.
   // =========================================================================
-  /**
-   * Provider type determines how inputTokens should be interpreted:
-   * - anthropic: inputTokens is non-cached tokens only (excludes cache)
-   * - openai/openai-codex/google: inputTokens is FULL context sent
-   */
-  private currentProviderType: ProviderType = 'anthropic';
-
-  /**
-   * Previous context size for delta calculation (ALL providers).
-   * Reset to 0 only when provider type changes (model switch).
-   * Persists across agent runs within a session to maintain accurate deltas.
-   *
-   * IMPORTANT: Do NOT reset this in onAgentStart()! That was a bug.
-   * Agent runs start on every user message, but we want consistent delta
-   * tracking across the entire session.
-   */
-  private previousContextSize: number = 0;
-
-  /**
-   * Last normalized token usage for this turn.
-   * Provides semantic clarity for different UI components.
-   */
-  private lastNormalizedUsage: NormalizedTokenUsage | undefined;
+  private tokenTracker: TokenUsageTracker = createTokenUsageTracker();
 
   // =========================================================================
-  // Provider Type Management
+  // Provider Type Management (delegated to TokenUsageTracker)
   // =========================================================================
 
   /**
@@ -218,22 +151,14 @@ export class TurnContentTracker {
    * @param type - The provider type ('anthropic' | 'openai' | 'openai-codex' | 'google')
    */
   setProviderType(type: ProviderType): void {
-    if (this.currentProviderType !== type) {
-      logger.debug('Provider type changed', {
-        from: this.currentProviderType,
-        to: type,
-      });
-      this.currentProviderType = type;
-      // Reset baseline when provider changes (context interpretation changes)
-      this.previousContextSize = 0;
-    }
+    this.tokenTracker.setProviderType(type);
   }
 
   /**
    * Get the current provider type.
    */
   getProviderType(): ProviderType {
-    return this.currentProviderType;
+    return this.tokenTracker.getProviderType();
   }
 
   // =========================================================================
@@ -438,11 +363,8 @@ export class TurnContentTracker {
     this.thisTurnThinking = '';
     this.thisTurnThinkingSignature = '';
 
-    // Clear per-turn token data (will be set by setResponseTokenUsage)
-    // NOTE: We don't clear lastNormalizedUsage here because the baseline
-    // (previousContextSize) needs to persist across turns for delta calculation.
-    // We only clear lastTurnTokenUsage to indicate "no token data yet this turn".
-    this.lastTurnTokenUsage = undefined;
+    // Clear per-turn token data (baseline persists for delta calculation)
+    this.tokenTracker.resetForNewTurn();
 
     // Reset pre-tool flush flag for new turn
     this.preToolContentFlushed = false;
@@ -483,26 +405,17 @@ export class TurnContentTracker {
     cacheReadTokens?: number;
     cacheCreationTokens?: number;
   }): void {
-    // Store raw token usage
-    this.lastTurnTokenUsage = tokenUsage;
+    // Delegate to TokenUsageTracker (handles normalization and baseline update)
+    this.tokenTracker.recordTokenUsage(tokenUsage);
 
-    // Calculate normalized token usage IMMEDIATELY
-    this.lastNormalizedUsage = normalizeTokenUsage(
-      tokenUsage,
-      this.currentProviderType,
-      this.previousContextSize
-    );
-
-    // Update baseline for next turn (use contextWindowTokens which represents actual context size)
-    this.previousContextSize = this.lastNormalizedUsage.contextWindowTokens;
-
+    const normalized = this.tokenTracker.getLastNormalizedUsage();
     logger.debug('Token usage set from response_complete', {
       turn: this.currentTurn,
-      providerType: this.currentProviderType,
+      providerType: this.tokenTracker.getProviderType(),
       rawInputTokens: tokenUsage.inputTokens,
-      newInputTokens: this.lastNormalizedUsage.newInputTokens,
-      contextWindowTokens: this.lastNormalizedUsage.contextWindowTokens,
-      previousContextSize: this.previousContextSize,
+      newInputTokens: normalized?.newInputTokens,
+      contextWindowTokens: normalized?.contextWindowTokens,
+      baseline: this.tokenTracker.getContextBaseline(),
     });
   }
 
@@ -558,7 +471,6 @@ export class TurnContentTracker {
     this.accumulatedThinkingSignature = undefined;
     this.accumulatedToolCalls = [];
     this.accumulatedSequence = [];
-    this.lastTurnTokenUsage = undefined;
 
     // Clear per-turn state
     this.thisTurnSequence = [];
@@ -573,15 +485,12 @@ export class TurnContentTracker {
     this.currentTurn = 0;
     this.currentTurnStartTime = undefined;
 
-    // NOTE: previousContextSize is intentionally NOT reset here.
-    // It persists across agent runs to maintain accurate delta calculations.
-    // Only provider type changes (setProviderType) reset the baseline.
-    // Clear lastNormalizedUsage since it's per-turn data.
-    this.lastNormalizedUsage = undefined;
+    // Reset token tracker (baseline persists for delta calculation)
+    this.tokenTracker.resetForNewAgent();
 
     logger.debug('Agent run started, content tracking cleared', {
-      previousContextSize: this.previousContextSize,
-      providerType: this.currentProviderType,
+      contextBaseline: this.tokenTracker.getContextBaseline(),
+      providerType: this.tokenTracker.getProviderType(),
     });
   }
 
@@ -660,10 +569,15 @@ export class TurnContentTracker {
   }
 
   /**
-   * Get last turn's token usage.
+   * Get last turn's raw token usage.
    */
-  getLastTurnTokenUsage(): typeof this.lastTurnTokenUsage {
-    return this.lastTurnTokenUsage;
+  getLastTurnTokenUsage(): {
+    inputTokens: number;
+    outputTokens: number;
+    cacheReadTokens?: number;
+    cacheCreationTokens?: number;
+  } | undefined {
+    return this.tokenTracker.getLastRawUsage();
   }
 
   /**
@@ -674,7 +588,7 @@ export class TurnContentTracker {
    * - rawInputTokens: For billing/debugging
    */
   getLastNormalizedUsage(): NormalizedTokenUsage | undefined {
-    return this.lastNormalizedUsage;
+    return this.tokenTracker.getLastNormalizedUsage();
   }
 
   /**
@@ -682,7 +596,7 @@ export class TurnContentTracker {
    * Used for debugging and verification.
    */
   getContextBaseline(): number {
-    return this.previousContextSize;
+    return this.tokenTracker.getContextBaseline();
   }
 
   /**
@@ -730,69 +644,27 @@ export class TurnContentTracker {
     name?: string;
     input?: Record<string, unknown>;
   }> | null {
-    // Already flushed this turn - nothing to do
-    if (this.preToolContentFlushed) {
-      return null;
-    }
+    const result = buildPreToolContentBlocks(
+      this.thisTurnThinking,
+      this.thisTurnThinkingSignature,
+      this.thisTurnSequence,
+      this.thisTurnToolCalls,
+      this.preToolContentFlushed
+    );
 
-    // Check if we have any content to flush (thinking OR sequence content)
-    if (!this.thisTurnThinking && this.thisTurnSequence.length === 0) {
-      return null;
-    }
+    // Mark as flushed (even if no content - prevents multiple flush attempts)
+    this.preToolContentFlushed = true;
 
-    // Build content blocks from current turn sequence
-    const content: Array<{
-      type: 'text' | 'tool_use' | 'thinking';
-      text?: string;
-      thinking?: string;
-      signature?: string;
-      id?: string;
-      name?: string;
-      input?: Record<string, unknown>;
-    }> = [];
-
-    // CRITICAL: Include thinking block FIRST with signature - API requires it
-    // Thinking blocks must be at the start of assistant content per Anthropic API convention
-    if (this.thisTurnThinking) {
-      content.push({
-        type: 'thinking',
-        thinking: this.thisTurnThinking,
-        ...(this.thisTurnThinkingSignature && { signature: this.thisTurnThinkingSignature }),
+    if (result) {
+      logger.debug('Flushed pre-tool content', {
+        turn: this.currentTurn,
+        contentBlocks: result.length,
+        hasThinking: !!this.thisTurnThinking,
+        hasSignature: !!this.thisTurnThinkingSignature,
       });
     }
 
-    // Then add text and tool_use blocks
-    for (const item of this.thisTurnSequence) {
-      if (item.type === 'text' && item.text) {
-        content.push({ type: 'text', text: item.text });
-      } else if (item.type === 'tool_ref') {
-        const toolCall = this.thisTurnToolCalls.get(item.toolCallId);
-        if (toolCall) {
-          content.push({
-            type: 'tool_use',
-            id: toolCall.toolCallId,
-            name: toolCall.toolName,
-            input: toolCall.arguments,
-          });
-        }
-      }
-    }
-
-    // Mark as flushed even if no content (prevents multiple flush attempts)
-    this.preToolContentFlushed = true;
-
-    if (content.length === 0) {
-      return null;
-    }
-
-    logger.debug('Flushed pre-tool content', {
-      turn: this.currentTurn,
-      contentBlocks: content.length,
-      hasThinking: !!this.thisTurnThinking,
-      hasSignature: !!this.thisTurnThinkingSignature,
-    });
-
-    return content;
+    return result;
   }
 
   // =========================================================================
@@ -809,119 +681,21 @@ export class TurnContentTracker {
    * - toolResultContent: Content blocks for tool.result events (with _meta)
    */
   buildInterruptedContent(): InterruptedContent {
-    const assistantContent: InterruptedContent['assistantContent'] = [];
-    const toolResultContent: InterruptedContent['toolResultContent'] = [];
-    const toolCallMap = new Map<string, ToolCallData>();
-
-    // Build map of all tool calls for quick lookup
-    for (const tc of this.accumulatedToolCalls) {
-      toolCallMap.set(tc.toolCallId, tc);
-    }
-
-    /**
-     * Helper to calculate duration in milliseconds from timestamps.
-     */
-    const calculateDurationMs = (tc: ToolCallData): number | undefined => {
-      if (tc.completedAt && tc.startedAt) {
-        return new Date(tc.completedAt).getTime() - new Date(tc.startedAt).getTime();
-      }
-      return undefined;
-    };
-
-    /**
-     * Helper to add tool_use and tool_result blocks for a tool call.
-     * Handles both completed and interrupted tools with proper _meta.
-     */
-    const addToolCallBlocks = (tc: ToolCallData): void => {
-      const durationMs = calculateDurationMs(tc);
-      const isInterrupted = tc.status === 'running' || tc.status === 'pending';
-
-      // Add tool_use block with status metadata
-      // Mark interrupted tools so iOS can show red X
-      assistantContent.push({
-        type: 'tool_use',
-        id: tc.toolCallId,
-        name: tc.toolName,
-        input: tc.arguments,
-        _meta: {
-          status: tc.status,
-          interrupted: isInterrupted,
-          durationMs,
-        },
-      });
-
-      // Add tool_result for completed/error tools
-      // This ensures results are visible when session is restored
-      if (tc.status === 'completed' || tc.status === 'error') {
-        toolResultContent.push({
-          type: 'tool_result',
-          tool_use_id: tc.toolCallId,
-          content: tc.result ?? (tc.isError ? 'Error' : '(no output)'),
-          is_error: tc.isError ?? false,
-          _meta: {
-            durationMs,
-            toolName: tc.toolName,
-          },
-        });
-      } else if (isInterrupted) {
-        // Add interrupted tool_result so the UI shows "interrupted" message
-        toolResultContent.push({
-          type: 'tool_result',
-          tool_use_id: tc.toolCallId,
-          content: 'Command interrupted (no output captured)',
-          is_error: false,
-          _meta: {
-            interrupted: true,
-            durationMs,
-            toolName: tc.toolName,
-          },
-        });
-      }
-    };
-
-    // Add thinking content first (Anthropic API puts thinking before text/tools)
-    // IMPORTANT: Must include signature - API requires it when sending thinking back
-    if (this.accumulatedThinking) {
-      assistantContent.push({
-        type: 'thinking',
-        thinking: this.accumulatedThinking,
-        ...(this.accumulatedThinkingSignature && { signature: this.accumulatedThinkingSignature }),
-      });
-    }
-
-    // Build content from sequence to preserve interleaving order
-    if (this.accumulatedSequence.length > 0) {
-      for (const item of this.accumulatedSequence) {
-        if (item.type === 'text' && item.text) {
-          assistantContent.push({ type: 'text', text: item.text });
-        } else if (item.type === 'thinking' && item.thinking) {
-          // Thinking from sequence (if tracked there)
-          assistantContent.push({ type: 'thinking', thinking: item.thinking });
-        } else if (item.type === 'tool_ref') {
-          const tc = toolCallMap.get(item.toolCallId);
-          if (tc) {
-            addToolCallBlocks(tc);
-          }
-        }
-      }
-    } else {
-      // Fallback: build from accumulated data without sequence tracking
-      // This handles edge cases where sequence wasn't populated
-      if (this.accumulatedText) {
-        assistantContent.push({ type: 'text', text: this.accumulatedText });
-      }
-
-      for (const tc of this.accumulatedToolCalls) {
-        addToolCallBlocks(tc);
-      }
-    }
+    // Delegate to extracted builder function
+    const result = buildInterruptedContentBlocks(
+      this.accumulatedThinking,
+      this.accumulatedThinkingSignature,
+      this.accumulatedSequence,
+      this.accumulatedToolCalls,
+      this.accumulatedText
+    );
 
     logger.debug('Built interrupted content', {
-      assistantBlocks: assistantContent.length,
-      toolResultBlocks: toolResultContent.length,
+      assistantBlocks: result.assistantContent.length,
+      toolResultBlocks: result.toolResultContent.length,
       usedSequence: this.accumulatedSequence.length > 0,
     });
 
-    return { assistantContent, toolResultContent };
+    return result;
   }
 }

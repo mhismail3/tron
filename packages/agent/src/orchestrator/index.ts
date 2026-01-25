@@ -104,6 +104,33 @@ export {
 // Turn content tracking
 export { TurnContentTracker } from './turn-content-tracker.js';
 
+// Token usage tracking (extracted from TurnContentTracker)
+export {
+  TokenUsageTracker,
+  createTokenUsageTracker,
+  type RawTokenUsage,
+  type TokenUsageTrackerConfig,
+} from './token-usage-tracker.js';
+
+// Content block building utilities (extracted from TurnContentTracker)
+export {
+  buildPreToolContentBlocks,
+  buildInterruptedContentBlocks,
+  buildThinkingBlock,
+  buildToolUseBlock,
+  buildToolResultBlock,
+  type ContentSequenceItem,
+  type ToolCallData,
+  type PreToolContentBlock,
+  type InterruptedContentBlocks,
+  type ThinkingBlock,
+  type ToolUseBlock,
+  type ToolUseMeta,
+  type ToolResultMeta,
+  // Note: ToolResultBlock not exported to avoid conflict with turn-manager.ts
+  // Use the builder function return type or InterruptedContentBlocks['toolResultContent'][0]
+} from './content-block-builder.js';
+
 // Types
 export type {
   EventStoreOrchestratorConfig,
