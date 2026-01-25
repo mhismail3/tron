@@ -66,7 +66,7 @@ struct VoiceNoteDetailSheet: View {
                 }
             }
         }
-        .presentationDetents([.medium, .large])
+        .adaptivePresentationDetents([.medium, .large])
         .presentationDragIndicator(.hidden)
         .preferredColorScheme(.dark)
     }

@@ -36,7 +36,7 @@ struct NotifyAppDetailSheet: View {
                 }
             }
         }
-        .presentationDetents([.medium, .large])
+        .adaptivePresentationDetents([.medium, .large])
         .presentationDragIndicator(.hidden)
         .tint(.tronEmerald)
         .preferredColorScheme(.dark)

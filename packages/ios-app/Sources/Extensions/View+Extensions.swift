@@ -192,3 +192,20 @@ extension View {
         }
     }
 }
+
+// MARK: - Adaptive Presentation Detents
+
+extension View {
+    /// Presentation detents that adapt to device type:
+    /// - iPad: Uses `.presentationSizing(.page)` for full-size sheets (iOS 18+ default is smaller `.form`)
+    /// - iPhone: Uses `.presentationDetents` to allow medium/large sizing
+    ///
+    /// On iPad, `presentationDetents` is ignored because sheets appear as floating modals.
+    /// The `presentationSizing(.page)` modifier ensures iPad gets full-size sheets.
+    @ViewBuilder
+    func adaptivePresentationDetents(_ detents: Set<PresentationDetent> = [.medium, .large]) -> some View {
+        self
+            .presentationDetents(detents)
+            .presentationSizing(.page)
+    }
+}

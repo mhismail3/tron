@@ -66,7 +66,7 @@ struct AskUserQuestionSheet: View {
                 }
             }
         }
-        .presentationDetents([.medium, .large])
+        .adaptivePresentationDetents([.medium, .large])
         .presentationDragIndicator(.hidden)
         .tint(.tronAmber)
         .preferredColorScheme(.dark)

@@ -296,7 +296,7 @@ struct NewSessionFlow: View {
                 // Don't auto-open workspace selector - let user explicitly tap to select
             }
         }
-        .presentationDetents([.medium, .large])
+        .adaptivePresentationDetents([.medium, .large])
         .presentationDragIndicator(.hidden)
         .tint(.tronEmerald)
         .preferredColorScheme(.dark)

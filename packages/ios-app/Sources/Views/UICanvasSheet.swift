@@ -44,7 +44,7 @@ struct UICanvasSheet: View {
                 }
             }
         }
-        .presentationDetents([.medium, .large])
+        .adaptivePresentationDetents([.medium, .large])
         .presentationDragIndicator(.hidden)
         .tint(.tronEmerald)
         .preferredColorScheme(.dark)
@@ -240,7 +240,7 @@ struct UICanvasSheetFallback: View {
                 }
             }
         }
-        .presentationDetents([.medium, .large])
+        .adaptivePresentationDetents([.medium, .large])
         .presentationDragIndicator(.hidden)
         .preferredColorScheme(.dark)
         .tint(.tronEmerald)

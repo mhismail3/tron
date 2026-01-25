@@ -1645,7 +1645,7 @@ struct SessionHistorySheet: View {
                 }
             }
         }
-        .presentationDetents([.medium, .large])
+        .adaptivePresentationDetents([.medium, .large])
         .presentationDragIndicator(.hidden)
         .tint(.tronPurple)
         .preferredColorScheme(.dark)
@@ -1779,7 +1779,7 @@ struct ForkConfirmationSheet: View {
                 }
             }
         }
-        .presentationDetents([.medium, .large])
+        .adaptivePresentationDetents([.medium, .large])
         .presentationDragIndicator(.hidden)
         .tint(.tronPurple)
         .preferredColorScheme(.dark)

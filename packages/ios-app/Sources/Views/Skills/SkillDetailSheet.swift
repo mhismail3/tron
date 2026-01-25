@@ -55,7 +55,7 @@ struct SkillDetailSheet: View {
                 }
             }
         }
-        .presentationDetents([.medium, .large])
+        .adaptivePresentationDetents([.medium, .large])
         .presentationDragIndicator(.hidden)
         .tint(accentColor)
         .preferredColorScheme(.dark)

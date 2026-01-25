@@ -355,7 +355,7 @@ struct ChatView: View {
                     reason: data.reason,
                     summary: data.summary
                 )
-                .presentationDetents([.medium, .large])
+                .adaptivePresentationDetents([.medium, .large])
             }
         }
         .sheet(isPresented: askUserQuestionPresented) {
@@ -384,7 +384,7 @@ struct ChatView: View {
                     subagentState: viewModel.subagentState,
                     eventStoreManager: eventStoreManager
                 )
-                .presentationDetents([.medium, .large])
+                .adaptivePresentationDetents([.medium, .large])
             }
         }
         .sheet(isPresented: Binding(

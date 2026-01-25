@@ -67,7 +67,7 @@ struct BrowserSheetView: View {
                 }
             }
         }
-        .presentationDetents([.medium, .large])
+        .adaptivePresentationDetents([.medium, .large])
         .presentationDragIndicator(.hidden)
     }
 }
