@@ -14,6 +14,7 @@ struct SessionSidebar: View {
     @EnvironmentObject var appState: AppState
     @Binding var selectedSessionId: String?
     let onNewSession: () -> Void
+    var onNewSessionLongPress: (() -> Void)? = nil
     let onDeleteSession: (String) -> Void
     let onSettings: () -> Void
     let onVoiceNote: () -> Void
@@ -77,7 +78,7 @@ struct SessionSidebar: View {
             // Floating buttons - mic (smaller) and plus
             HStack(spacing: 12) {
                 FloatingVoiceNotesButton(action: onVoiceNote)
-                FloatingNewSessionButton(action: onNewSession)
+                FloatingNewSessionButton(action: onNewSession, onLongPress: onNewSessionLongPress)
             }
             .padding(.trailing, 20)
             .padding(.bottom, 24)
@@ -127,16 +128,21 @@ struct SessionSidebar: View {
 @available(iOS 26.0, *)
 struct FloatingNewSessionButton: View {
     let action: () -> Void
+    var onLongPress: (() -> Void)? = nil
 
     var body: some View {
-        Button(action: action) {
-            Image(systemName: "plus")
-                .font(TronTypography.sans(size: TronTypography.sizeXXL, weight: .semibold))
-                .foregroundStyle(.tronEmerald)
-                .frame(width: 56, height: 56)
-                .contentShape(Circle())
-        }
-        .glassEffect(.regular.tint(Color.tronPhthaloGreen.opacity(0.8)).interactive(), in: .circle)
+        Image(systemName: "plus")
+            .font(TronTypography.sans(size: TronTypography.sizeXXL, weight: .semibold))
+            .foregroundStyle(.tronEmerald)
+            .frame(width: 56, height: 56)
+            .contentShape(Circle())
+            .glassEffect(.regular.tint(Color.tronPhthaloGreen.opacity(0.8)).interactive(), in: .circle)
+            .onTapGesture { action() }
+            .onLongPressGesture(minimumDuration: 0.5) {
+                let generator = UIImpactFeedbackGenerator(style: .medium)
+                generator.impactOccurred()
+                onLongPress?() ?? action()
+            }
     }
 }
 

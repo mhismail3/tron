@@ -108,6 +108,7 @@ struct ContentView: View {
     private var compactWelcomePage: some View {
         WelcomePage(
             onNewSession: { showNewSessionSheet = true },
+            onNewSessionLongPress: { createQuickSession() },
             onSettings: { showSettings = true },
             onVoiceNote: { showVoiceNotesRecording = true },
             onNavigationModeChange: { mode in
@@ -165,6 +166,7 @@ struct ContentView: View {
                 SessionSidebar(
                     selectedSessionId: $selectedSessionId,
                     onNewSession: { showNewSessionSheet = true },
+                    onNewSessionLongPress: { createQuickSession() },
                     onDeleteSession: { sessionId in
                         if confirmArchive {
                             sessionToArchive = sessionId
@@ -206,6 +208,7 @@ struct ContentView: View {
                 isSidebarVisible: isSidebarVisible,
                 onToggleSidebar: toggleSidebar,
                 onNewSession: { showNewSessionSheet = true },
+                onNewSessionLongPress: { createQuickSession() },
                 onSettings: { showSettings = true },
                 onVoiceNote: { showVoiceNotesRecording = true }
             )
@@ -408,6 +411,31 @@ struct ContentView: View {
             }
         }
     }
+
+    /// Creates a quick session using the configured defaults (workspace and model from Settings)
+    private func createQuickSession() {
+        Task {
+            do {
+                let result = try await appState.rpcClient.createSession(
+                    workingDirectory: appState.quickSessionWorkspace,
+                    model: appState.defaultModel
+                )
+
+                try eventStoreManager.cacheNewSession(
+                    sessionId: result.sessionId,
+                    workspaceId: appState.quickSessionWorkspace,
+                    model: result.model,
+                    workingDirectory: appState.quickSessionWorkspace
+                )
+
+                await MainActor.run {
+                    selectedSessionId = result.sessionId
+                }
+            } catch {
+                logger.error("Failed to create quick session: \(error)", category: .session)
+            }
+        }
+    }
 }
 
 // MARK: - Welcome Page
@@ -419,6 +447,7 @@ struct WelcomePage: View {
     /// Toggle sidebar visibility (used on iPad)
     var onToggleSidebar: (() -> Void)?
     let onNewSession: () -> Void
+    var onNewSessionLongPress: (() -> Void)? = nil
     let onSettings: () -> Void
     let onVoiceNote: () -> Void
     var onNavigationModeChange: ((NavigationMode) -> Void)?
@@ -446,7 +475,7 @@ struct WelcomePage: View {
                 if !isSidebarVisible {
                     HStack(spacing: 12) {
                         FloatingVoiceNotesButton(action: onVoiceNote)
-                        FloatingNewSessionButton(action: onNewSession)
+                        FloatingNewSessionButton(action: onNewSession, onLongPress: onNewSessionLongPress)
                     }
                     .padding(.trailing, 20)
                     .padding(.bottom, 24)

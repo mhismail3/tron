@@ -30,6 +30,7 @@ class AppState: ObservableObject {
     @AppStorage("useTLS") private var useTLS = false
     @AppStorage("workingDirectory") var workingDirectory = ""
     @AppStorage("defaultModel") var defaultModel = "claude-opus-4-5-20251101"
+    @AppStorage("quickSessionWorkspace") var quickSessionWorkspace = "/Users/moose/Downloads"
 
     private var _rpcClient: RPCClient?
     private var _skillStore: SkillStore?

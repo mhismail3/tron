@@ -22,6 +22,12 @@ struct SettingsView: View {
     @State private var showArchiveAllConfirmation = false
     @State private var isArchivingAll = false
 
+    // Quick Session settings
+    @AppStorage("quickSessionWorkspace") private var quickSessionWorkspace = "/Users/moose/Downloads"
+    @State private var showQuickSessionWorkspaceSelector = false
+    @State private var availableModels: [ModelInfo] = []
+    @State private var isLoadingModels = false
+
     /// Derives environment selection from current port (or custom port override)
     private var selectedEnvironment: String {
         // If custom port is set, check if it matches standard ports
@@ -43,6 +49,23 @@ struct SettingsView: View {
         }
         // Default to Beta (8082)
         return "8082"
+    }
+
+    /// Quick session workspace formatted for display (truncates /Users/<user>/ to ~/)
+    private var displayQuickSessionWorkspace: String {
+        quickSessionWorkspace.replacingOccurrences(
+            of: "^/Users/[^/]+/",
+            with: "~/",
+            options: .regularExpression
+        )
+    }
+
+    /// Selected model display name
+    private var selectedModelDisplayName: String {
+        if let model = availableModels.first(where: { $0.id == appState.defaultModel }) {
+            return model.formattedModelName
+        }
+        return appState.defaultModel.shortModelName
     }
 
     var body: some View {
@@ -135,6 +158,49 @@ struct SettingsView: View {
                 }
                 .listSectionSpacing(16)
 
+                // Quick Session Section (for long-press quick create)
+                if #available(iOS 26.0, *) {
+                    Section {
+                        // Workspace Path
+                        HStack {
+                            Label("Workspace", systemImage: "folder")
+                                .font(TronTypography.subheadline)
+                            Spacer()
+                            Text(displayQuickSessionWorkspace)
+                                .font(TronTypography.codeSM)
+                                .foregroundStyle(.tronTextSecondary)
+                                .lineLimit(1)
+                        }
+                        .contentShape(Rectangle())
+                        .onTapGesture {
+                            showQuickSessionWorkspaceSelector = true
+                        }
+
+                        // Default Model Picker
+                        ModelPickerMenuContent(
+                            models: availableModels,
+                            selectedModelId: $appState.defaultModel,
+                            isLoading: isLoadingModels
+                        ) {
+                            HStack {
+                                Label("Model", systemImage: "cpu")
+                                    .font(TronTypography.subheadline)
+                                Spacer()
+                                Text(selectedModelDisplayName)
+                                    .font(TronTypography.codeSM)
+                                    .foregroundStyle(.tronTextSecondary)
+                            }
+                        }
+                    } header: {
+                        Text("Quick Session")
+                            .font(TronTypography.caption)
+                    } footer: {
+                        Text("Long-press the + button to instantly start a session with these defaults.")
+                            .font(TronTypography.caption2)
+                    }
+                    .listSectionSpacing(16)
+                }
+
                 // Font Style Section
                 if #available(iOS 26.0, *) {
                     FontStyleSection()
@@ -179,6 +245,15 @@ struct SettingsView: View {
             .environment(\.defaultMinListRowHeight, 40)
             .sheet(isPresented: $showLogViewer) {
                 LogViewer()
+            }
+            .sheet(isPresented: $showQuickSessionWorkspaceSelector) {
+                WorkspaceSelector(
+                    rpcClient: rpcClient,
+                    selectedPath: $quickSessionWorkspace
+                )
+            }
+            .task {
+                await loadModels()
             }
             .navigationBarTitleDisplayMode(.inline)
             .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
@@ -248,6 +323,16 @@ struct SettingsView: View {
             await eventStoreManager.archiveAllSessions()
             isArchivingAll = false
         }
+    }
+
+    private func loadModels() async {
+        isLoadingModels = true
+        do {
+            availableModels = try await rpcClient.listModels()
+        } catch {
+            // Silently fail - user can still type model ID manually if needed
+        }
+        isLoadingModels = false
     }
 }
 
