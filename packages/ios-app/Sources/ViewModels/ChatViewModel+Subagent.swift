@@ -93,12 +93,7 @@ extension ChatViewModel {
         }
 
         // Find the tool call message by toolCallId
-        if let index = messages.firstIndex(where: { message in
-            if case .toolUse(let tool) = message.content {
-                return tool.toolCallId == toolCallId && tool.toolName == "SpawnSubagent"
-            }
-            return false
-        }) {
+        if let index = MessageFinder.indexOfSpawnSubagentTool(toolCallId: toolCallId, in: messages) {
             // Convert to subagent content
             messages[index].content = .subagent(data)
             messageWindowManager.updateMessage(messages[index])
@@ -113,12 +108,7 @@ extension ChatViewModel {
         }
 
         // Find and update the message
-        if let index = messages.firstIndex(where: { message in
-            if case .subagent(let subData) = message.content {
-                return subData.subagentSessionId == subagentSessionId
-            }
-            return false
-        }) {
+        if let index = MessageFinder.indexBySubagentSessionId(subagentSessionId, in: messages) {
             messages[index].content = .subagent(data)
             messageWindowManager.updateMessage(messages[index])
         }

@@ -94,6 +94,28 @@ final class ContextTrackingState {
         accumulatedCost += cost
     }
 
+    /// Set accumulated token state from TokenUsage (used when restoring from reconstructed state)
+    /// This replaces the accumulated values rather than incrementing them.
+    func setAccumulatedTokens(from usage: TokenUsage) {
+        accumulatedInputTokens = usage.inputTokens
+        accumulatedOutputTokens = usage.outputTokens
+        accumulatedCacheReadTokens = usage.cacheReadTokens ?? 0
+        accumulatedCacheCreationTokens = usage.cacheCreationTokens ?? 0
+    }
+
+    /// Set totalTokenUsage for display purposes
+    /// - Parameters:
+    ///   - contextWindowSize: The current context window size (for progress bar)
+    ///   - usage: The token usage with output/cache values
+    func setTotalTokenUsage(contextWindowSize: Int, from usage: TokenUsage) {
+        totalTokenUsage = TokenUsage(
+            inputTokens: contextWindowSize,
+            outputTokens: usage.outputTokens,
+            cacheReadTokens: usage.cacheReadTokens,
+            cacheCreationTokens: usage.cacheCreationTokens
+        )
+    }
+
     /// Update context window based on available model info
     func updateContextWindow(from models: [ModelInfo], currentModel: String) {
         if let model = models.first(where: { $0.id == currentModel }) {

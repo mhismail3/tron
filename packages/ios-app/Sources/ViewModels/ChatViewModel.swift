@@ -240,7 +240,7 @@ class ChatViewModel: ObservableObject, ChatEventContext {
         streamingManager.onTextUpdate = { [weak self] messageId, text in
             guard let self = self else { return }
             // Find and update the streaming message
-            if let index = self.messages.firstIndex(where: { $0.id == messageId }) {
+            if let index = MessageFinder.indexById(messageId, in: self.messages) {
                 self.messages[index].content = .streaming(text)
                 // Increment version to trigger SwiftUI onChange reliably
                 self.messages[index].streamingVersion += 1
@@ -260,7 +260,7 @@ class ChatViewModel: ObservableObject, ChatEventContext {
 
         streamingManager.onFinalizeMessage = { [weak self] messageId, finalText in
             guard let self = self else { return }
-            if let index = self.messages.firstIndex(where: { $0.id == messageId }) {
+            if let index = MessageFinder.indexById(messageId, in: self.messages) {
                 if finalText.isEmpty {
                     self.messages.remove(at: index)
                     // Sync removal to MessageWindowManager
@@ -312,12 +312,7 @@ class ChatViewModel: ObservableObject, ChatEventContext {
     /// Process a tool end update that has been ordered by UIUpdateQueue
     private func processOrderedToolEnd(_ data: UIUpdateQueue.ToolEndData) {
         // Find the tool message by toolCallId
-        if let index = messages.lastIndex(where: {
-            if case .toolUse(let tool) = $0.content {
-                return tool.toolCallId == data.toolCallId
-            }
-            return false
-        }) {
+        if let index = MessageFinder.lastIndexOfToolUse(toolCallId: data.toolCallId, in: messages) {
             if case .toolUse(var tool) = messages[index].content {
                 tool.status = data.success ? .success : .error
                 tool.result = data.result
@@ -464,7 +459,7 @@ class ChatViewModel: ObservableObject, ChatEventContext {
 
     func updateStreamingMessage(with content: MessageContent) {
         guard let id = streamingManager.streamingMessageId,
-              let index = messages.firstIndex(where: { $0.id == id }) else {
+              let index = MessageFinder.indexById(id, in: messages) else {
             return
         }
         messages[index].content = content
@@ -585,7 +580,7 @@ class ChatViewModel: ObservableObject, ChatEventContext {
             // Remove the message from local state immediately for responsive UI
             // The server will also send an event.new notification which we handle in Events extension
             await MainActor.run {
-                if let index = messages.firstIndex(where: { $0.eventId == eventId }) {
+                if let index = MessageFinder.indexByEventId(eventId, in: messages) {
                     messages.remove(at: index)
                 }
             }
@@ -875,12 +870,7 @@ class ChatViewModel: ObservableObject, ChatEventContext {
         logger.info("Submitting AskUserQuestion answers as prompt for toolCallId=\(data.toolCallId)", category: .session)
 
         // Update the chip status to .answered BEFORE sending
-        if let index = messages.lastIndex(where: {
-            if case .askUserQuestion(let toolData) = $0.content {
-                return toolData.toolCallId == data.toolCallId
-            }
-            return false
-        }) {
+        if let index = MessageFinder.lastIndexOfAskUserQuestion(toolCallId: data.toolCallId, in: messages) {
             if case .askUserQuestion(var toolData) = messages[index].content {
                 toolData.status = .answered
                 toolData.result = result

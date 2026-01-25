@@ -136,28 +136,15 @@ extension ChatViewModel {
             let usage = state.totalTokenUsage
 
             // Set token state from reconstructed state (derived from server events)
-            contextState.accumulatedInputTokens = usage.inputTokens
-            contextState.accumulatedOutputTokens = usage.outputTokens
-            contextState.accumulatedCacheReadTokens = usage.cacheReadTokens ?? 0
-            contextState.accumulatedCacheCreationTokens = usage.cacheCreationTokens ?? 0
-
-            // lastTurnInputTokens = context window size from last stream.turn_end event
-            // This is extracted from normalizedUsage.contextWindowTokens in UnifiedEventTransformer
+            contextState.setAccumulatedTokens(from: usage)
             contextState.lastTurnInputTokens = state.lastTurnInputTokens
+            contextState.setTotalTokenUsage(contextWindowSize: state.lastTurnInputTokens, from: usage)
             logger.info("[TOKEN-FIX] RESUME from server events: lastTurnInputTokens=\(state.lastTurnInputTokens)", category: .session)
 
             // Get cost from iOS DB session cache (this is fine as it's just for display)
             if let session = try? manager.eventDB.getSession(sessionId) {
                 contextState.accumulatedCost = session.cost
             }
-
-            // totalTokenUsage for display
-            contextState.totalTokenUsage = TokenUsage(
-                inputTokens: state.lastTurnInputTokens,  // Context window size for progress bar
-                outputTokens: usage.outputTokens,
-                cacheReadTokens: usage.cacheReadTokens,
-                cacheCreationTokens: usage.cacheCreationTokens
-            )
 
             logger.info("Loaded \(loadedMessages.count) messages via UnifiedEventTransformer, displaying latest \(batchSize) for session \(sessionId)", category: .session)
         } catch {
@@ -212,27 +199,15 @@ extension ChatViewModel {
             let usage = state.totalTokenUsage
 
             // Set token state from reconstructed state (derived from server events)
-            contextState.accumulatedInputTokens = usage.inputTokens
-            contextState.accumulatedOutputTokens = usage.outputTokens
-            contextState.accumulatedCacheReadTokens = usage.cacheReadTokens ?? 0
-            contextState.accumulatedCacheCreationTokens = usage.cacheCreationTokens ?? 0
-
-            // lastTurnInputTokens from stream.turn_end events' normalizedUsage.contextWindowTokens
+            contextState.setAccumulatedTokens(from: usage)
             contextState.lastTurnInputTokens = state.lastTurnInputTokens
+            contextState.setTotalTokenUsage(contextWindowSize: state.lastTurnInputTokens, from: usage)
             logger.info("[TOKEN-FIX] RESUME (sync) from server events: lastTurnInputTokens=\(state.lastTurnInputTokens)", category: .session)
 
             // Get cost from iOS DB session cache (just for display)
             if let session = try? manager.eventDB.getSession(sessionId) {
                 contextState.accumulatedCost = session.cost
             }
-
-            // totalTokenUsage for display
-            contextState.totalTokenUsage = TokenUsage(
-                inputTokens: state.lastTurnInputTokens,
-                outputTokens: usage.outputTokens,
-                cacheReadTokens: usage.cacheReadTokens,
-                cacheCreationTokens: usage.cacheCreationTokens
-            )
 
             logger.info("Loaded \(messages.count) messages via UnifiedEventTransformer for session \(sessionId)", category: .session)
         } catch {

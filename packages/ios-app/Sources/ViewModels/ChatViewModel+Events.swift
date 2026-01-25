@@ -44,7 +44,7 @@ extension ChatViewModel {
             messageWindowManager.appendMessage(thinkingMessage)
             logger.debug("Created thinking message: \(thinkingMessage.id)", category: .events)
         } else if let id = thinkingMessageId,
-                  let index = messages.firstIndex(where: { $0.id == id }) {
+                  let index = MessageFinder.indexById(id, in: messages) {
             // Update existing thinking message with accumulated content
             messages[index].content = .thinking(visible: result.thinkingText, isExpanded: false, isStreaming: true)
         }
@@ -86,7 +86,7 @@ extension ChatViewModel {
 
                 // Check if chip already exists from ui_render_chunk (via tracker)
                 if let chipState = renderAppUIChipTracker.getChip(canvasId: canvasId),
-                   let index = messages.firstIndex(where: { $0.id == chipState.messageId }),
+                   let index = MessageFinder.indexById(chipState.messageId, in: messages),
                    case .renderAppUI(var chipData) = messages[index].content {
                     // Chip already exists - update toolCallId to real one
                     let oldToolCallId = chipData.toolCallId
@@ -262,12 +262,7 @@ extension ChatViewModel {
         logger.debug("Tool result: \(result.result.prefix(300))", category: .events)
 
         // Check if this is an AskUserQuestion tool end
-        if let index = messages.lastIndex(where: {
-            if case .askUserQuestion(let data) = $0.content {
-                return data.toolCallId == result.toolCallId
-            }
-            return false
-        }) {
+        if let index = MessageFinder.lastIndexOfAskUserQuestion(toolCallId: result.toolCallId, in: messages) {
             if case .askUserQuestion(let data) = messages[index].content {
                 // In async mode, tool.end means questions are ready for user
                 // Status is already .pending, now auto-open the sheet
@@ -279,12 +274,7 @@ extension ChatViewModel {
 
         // Check if this is a browser tool result with screenshot data
         // (Extract screenshot before queueing - this updates browserFrame, not the message)
-        if let index = messages.lastIndex(where: {
-            if case .toolUse(let tool) = $0.content {
-                return tool.toolCallId == result.toolCallId
-            }
-            return false
-        }) {
+        if let index = MessageFinder.lastIndexOfToolUse(toolCallId: result.toolCallId, in: messages) {
             if case .toolUse(let tool) = messages[index].content {
                 if tool.toolName.lowercased().contains("browser") {
                     // Pass original event for screenshot extraction (needs event.details)
@@ -310,65 +300,19 @@ extension ChatViewModel {
         uiUpdateQueue.enqueueToolEnd(toolEndData)
     }
 
-    /// Extract screenshot from browser tool result and display it
-    /// Prefers the full screenshot from event.details, falls back to parsing text output
+    /// Extract screenshot from browser tool result and display it.
+    /// Uses BrowserScreenshotService for extraction, handling event details and text patterns.
     private func extractAndDisplayBrowserScreenshot(from event: ToolEndEvent) {
-        // First, try to get the full screenshot from details (preferred - untruncated)
-        if let details = event.details,
-           let screenshotBase64 = details.screenshot,
-           let imageData = Data(base64Encoded: screenshotBase64),
-           let image = UIImage(data: imageData) {
-            logger.info("Browser screenshot from details (\(image.size.width)x\(image.size.height))", category: .events)
-            browserState.browserFrame = image
-            // Only auto-show if user hasn't manually dismissed this turn
-            if !browserState.userDismissedBrowserThisTurn && !browserState.showBrowserWindow {
-                browserState.showBrowserWindow = true
-            }
+        guard let result = BrowserScreenshotService.extractScreenshot(from: event) else {
             return
         }
 
-        // Fallback: try to extract from text result (may be truncated)
-        let result = event.displayResult
+        logger.info("Browser screenshot from \(result.source.rawValue) (\(result.image.size.width)x\(result.image.size.height))", category: .events)
+        browserState.browserFrame = result.image
 
-        // Look for base64 image data in the result
-        // Format: "Screenshot captured (base64): iVBORw0KGgo..." or just raw base64
-        let patterns = [
-            "Screenshot captured \\(base64\\): ([A-Za-z0-9+/=]+)",
-            "base64\\): ([A-Za-z0-9+/=]+)",
-            "data:image/[^;]+;base64,([A-Za-z0-9+/=]+)"
-        ]
-
-        for pattern in patterns {
-            if let regex = try? NSRegularExpression(pattern: pattern, options: []),
-               let match = regex.firstMatch(in: result, options: [], range: NSRange(result.startIndex..., in: result)),
-               let range = Range(match.range(at: 1), in: result) {
-                let base64String = String(result[range])
-
-                // Decode base64 to image
-                if let imageData = Data(base64Encoded: base64String),
-                   let image = UIImage(data: imageData) {
-                    logger.info("Browser screenshot from text (\(image.size.width)x\(image.size.height))", category: .events)
-                    browserState.browserFrame = image
-                    // Only auto-show if user hasn't manually dismissed this turn
-                    if !browserState.userDismissedBrowserThisTurn && !browserState.showBrowserWindow {
-                        browserState.showBrowserWindow = true
-                    }
-                    return
-                }
-            }
-        }
-
-        // Also check if the result itself looks like base64 image data (PNG/JPEG magic bytes when decoded)
-        if result.hasPrefix("iVBOR") || result.hasPrefix("/9j/") {
-            if let imageData = Data(base64Encoded: result),
-               let image = UIImage(data: imageData) {
-                logger.info("Browser screenshot from raw base64 (\(image.size.width)x\(image.size.height))", category: .events)
-                browserState.browserFrame = image
-                // Only auto-show if user hasn't manually dismissed this turn
-                if !browserState.userDismissedBrowserThisTurn && !browserState.showBrowserWindow {
-                    browserState.showBrowserWindow = true
-                }
-            }
+        // Only auto-show if user hasn't manually dismissed this turn
+        if !browserState.userDismissedBrowserThisTurn && !browserState.showBrowserWindow {
+            browserState.showBrowserWindow = true
         }
     }
 
@@ -442,7 +386,7 @@ extension ChatViewModel {
         // Update thinking message to mark streaming as complete
         // This removes the spinning brain icon and "Thinking" header
         if let id = thinkingMessageId,
-           let index = messages.firstIndex(where: { $0.id == id }),
+           let index = MessageFinder.indexById(id, in: messages),
            case .thinking(let visible, let isExpanded, _) = messages[index].content {
             messages[index].content = .thinking(visible: visible, isExpanded: isExpanded, isStreaming: false)
             logger.debug("Marked thinking message as no longer streaming", category: .events)
@@ -453,11 +397,11 @@ extension ChatViewModel {
         var targetIndex: Int?
 
         if let id = streamingManager.streamingMessageId,
-           let index = messages.firstIndex(where: { $0.id == id }) {
+           let index = MessageFinder.indexById(id, in: messages) {
             targetIndex = index
             logger.debug("Using streaming message for turn metadata at index \(index)", category: .events)
         } else if let firstTextId = firstTextMessageIdForTurn,
-                  let index = messages.firstIndex(where: { $0.id == firstTextId }) {
+                  let index = MessageFinder.indexById(firstTextId, in: messages) {
             // Streaming message was finalized (e.g., before tool call) but we tracked the first text
             targetIndex = index
             logger.debug("Using tracked first text message for turn metadata at index \(index)", category: .events)
@@ -546,11 +490,13 @@ extension ChatViewModel {
             logger.info("LIVE handleTurnEnd: contextSize=\(contextSize)", category: .events)
 
             // Accumulate ALL tokens for billing tracking
-            contextState.accumulatedInputTokens += usage.inputTokens
-            contextState.accumulatedOutputTokens += usage.outputTokens
-            contextState.accumulatedCacheReadTokens += usage.cacheReadTokens ?? 0
-            contextState.accumulatedCacheCreationTokens += usage.cacheCreationTokens ?? 0
-            contextState.accumulatedCost += result.cost ?? 0
+            contextState.accumulate(
+                inputTokens: usage.inputTokens,
+                outputTokens: usage.outputTokens,
+                cacheReadTokens: usage.cacheReadTokens ?? 0,
+                cacheCreationTokens: usage.cacheCreationTokens ?? 0,
+                cost: result.cost ?? 0
+            )
 
             // Total usage shows current context + accumulated output
             contextState.totalTokenUsage = TokenUsage(
@@ -848,16 +794,7 @@ extension ChatViewModel {
 
         // Find the RenderAppUI message by toolCallId
         // Check if already converted to chip (from handleToolStart) or still a toolUse
-        if let index = messages.lastIndex(where: {
-            switch $0.content {
-            case .renderAppUI(let chipData):
-                return chipData.toolCallId == event.toolCallId
-            case .toolUse(let tool):
-                return tool.toolCallId == event.toolCallId && tool.toolName.lowercased() == "renderappui"
-            default:
-                return false
-            }
-        }) {
+        if let index = MessageFinder.lastIndexOfRenderAppUI(toolCallId: event.toolCallId, in: messages) {
             // Update or convert to chip with rendering status
             let chipData = RenderAppUIChipData(
                 toolCallId: event.toolCallId,
@@ -993,7 +930,7 @@ extension ChatViewModel {
 
         // Update chip status to complete (use tracker as single source of truth)
         if let chipState = renderAppUIChipTracker.getChip(canvasId: event.canvasId),
-           let index = messages.firstIndex(where: { $0.id == chipState.messageId }),
+           let index = MessageFinder.indexById(chipState.messageId, in: messages),
            case .renderAppUI(var chipData) = messages[index].content {
             chipData.status = .complete
             chipData.errorMessage = nil
@@ -1028,7 +965,7 @@ extension ChatViewModel {
 
         // Update chip status to error (use tracker as single source of truth)
         if let chipState = renderAppUIChipTracker.getChip(canvasId: event.canvasId),
-           let index = messages.firstIndex(where: { $0.id == chipState.messageId }),
+           let index = MessageFinder.indexById(chipState.messageId, in: messages),
            case .renderAppUI(var chipData) = messages[index].content {
             chipData.status = .error
             chipData.errorMessage = event.error
@@ -1048,7 +985,7 @@ extension ChatViewModel {
         // The agent will create a NEW chip with the retry, so this one stays as error
         // Use tracker as single source of truth
         if let chipState = renderAppUIChipTracker.getChip(canvasId: event.canvasId),
-           let index = messages.firstIndex(where: { $0.id == chipState.messageId }),
+           let index = MessageFinder.indexById(chipState.messageId, in: messages),
            case .renderAppUI(var chipData) = messages[index].content {
             chipData.status = .error
             chipData.errorMessage = "Error generating"
