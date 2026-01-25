@@ -22,6 +22,11 @@ import {
   loadSystemPromptFromFileSync,
 } from './system-prompts.js';
 import { createLogger } from '../logging/logger.js';
+import {
+  estimateMessageTokens as estimateMessageTokensUtil,
+  estimateRulesTokens as estimateRulesTokensUtil,
+  CHARS_PER_TOKEN,
+} from './token-estimator.js';
 
 const logger = createLogger('context-manager');
 
@@ -879,7 +884,7 @@ export class ContextManager {
     // Also include tool clarification message for providers that need it
     const toolClarification = this.getToolClarificationMessage();
     const totalLength = systemPrompt.length + (toolClarification?.length ?? 0);
-    this.cachedSystemPromptTokens = Math.ceil(totalLength / 4);
+    this.cachedSystemPromptTokens = Math.ceil(totalLength / CHARS_PER_TOKEN);
     return this.cachedSystemPromptTokens;
   }
 
@@ -888,108 +893,31 @@ export class ContextManager {
       return this.cachedToolsTokens;
     }
     this.cachedToolsTokens = Math.ceil(
-      this.tools.reduce((sum, t) => sum + JSON.stringify(t).length / 4, 0)
+      this.tools.reduce((sum, t) => sum + JSON.stringify(t).length / CHARS_PER_TOKEN, 0)
     );
     return this.cachedToolsTokens;
   }
 
   private estimateRulesTokens(): number {
-    if (!this.rulesContent) {
-      return 0;
-    }
-    // Include the "# Project Rules\n\n" header that gets added by the provider
-    const headerLength = 18; // "# Project Rules\n\n"
-    return Math.ceil((this.rulesContent.length + headerLength) / 4);
+    return estimateRulesTokensUtil(this.rulesContent);
   }
 
   private getMessagesTokens(): number {
     let total = 0;
     for (const msg of this.messages) {
-      total += this.tokenCache.get(msg) ?? this.estimateMessageTokens(msg);
+      // Use cached value if available, otherwise estimate and cache
+      let tokens = this.tokenCache.get(msg);
+      if (tokens === undefined) {
+        tokens = estimateMessageTokensUtil(msg);
+        this.tokenCache.set(msg, tokens);
+      }
+      total += tokens;
     }
     return total;
   }
 
   private estimateMessageTokens(message: Message): number {
-    // Base overhead for role and structure
-    let chars = (message.role?.length ?? 0) + 10;
-
-    if (message.role === 'toolResult') {
-      // Tool result message
-      chars += message.toolCallId.length;
-      if (typeof message.content === 'string') {
-        chars += message.content.length;
-      } else if (Array.isArray(message.content)) {
-        for (const block of message.content) {
-          chars += this.estimateBlockChars(block);
-        }
-      }
-    } else if (typeof message.content === 'string') {
-      chars += message.content.length;
-    } else if (Array.isArray(message.content)) {
-      for (const block of message.content) {
-        chars += this.estimateBlockChars(block);
-      }
-    }
-
-    return Math.ceil(chars / 4);
-  }
-
-  private estimateBlockChars(block: unknown): number {
-    if (typeof block !== 'object' || block === null) {
-      return 0;
-    }
-
-    const b = block as Record<string, unknown>;
-
-    if (b.type === 'text' && typeof b.text === 'string') {
-      return b.text.length;
-    }
-
-    if (b.type === 'thinking' && typeof b.thinking === 'string') {
-      return b.thinking.length;
-    }
-
-    if (b.type === 'tool_use') {
-      let size = 0;
-      if (typeof b.id === 'string') size += b.id.length;
-      if (typeof b.name === 'string') size += b.name.length;
-      if (b.input || b.arguments) {
-        size += JSON.stringify(b.input ?? b.arguments).length;
-      }
-      return size;
-    }
-
-    if (b.type === 'tool_result') {
-      let size = 0;
-      if (typeof b.tool_use_id === 'string') size += b.tool_use_id.length;
-      if (typeof b.content === 'string') size += b.content.length;
-      return size;
-    }
-
-    if (b.type === 'image') {
-      // Anthropic image tokenization: tokens = (width × height) / 750
-      // We estimate in characters (will be divided by 4 later in estimateMessageTokens)
-      const source = b.source as Record<string, unknown> | undefined;
-
-      if (source?.type === 'base64' && typeof source.data === 'string') {
-        // Base64: estimate dimensions from data size
-        // Base64 overhead is ~33%, so actual bytes = length * 0.75
-        // JPEG compression ratio ~10:1 for photos, PNG less compressed
-        // Use conservative multiplier of 5 for mixed content
-        const dataLength = (source.data as string).length;
-        const estimatedBytes = dataLength * 0.75;
-        const estimatedPixels = estimatedBytes * 5;
-        const estimatedTokens = Math.max(85, Math.ceil(estimatedPixels / 750));
-        return estimatedTokens * 4; // Convert tokens back to chars
-      }
-
-      // URL or unknown: conservative estimate for typical 1024x1024 image (~1400 tokens)
-      return 1500 * 4;
-    }
-
-    // Unknown type - estimate based on JSON size
-    return JSON.stringify(block).length;
+    return estimateMessageTokensUtil(message);
   }
 }
 

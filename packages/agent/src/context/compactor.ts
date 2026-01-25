@@ -1,27 +1,32 @@
 /**
- * @fileoverview Context Compactor
+ * @fileoverview Context Compactor (DEPRECATED)
  *
- * Manages context window size by monitoring token usage and compacting
- * conversation history when approaching limits. Key features:
+ * @deprecated This class is deprecated. Use ContextManager.previewCompaction()
+ * and ContextManager.executeCompaction() instead, which support LLM-based
+ * summarization via the Summarizer interface.
  *
- * - Token estimation for messages
- * - Configurable compaction thresholds (default: 25k tokens)
- * - Summary generation for compacted context
- * - Preservation of system messages and recent context
+ * This legacy compactor uses simple keyword extraction for summaries, while
+ * ContextManager supports injecting a Summarizer for higher-quality LLM-based
+ * context summarization.
  *
- * @example
+ * Migration:
  * ```typescript
- * const compactor = createContextCompactor({
- *   maxTokens: 25000,
- *   compactionThreshold: 0.85,
- *   targetTokens: 10000,
- * });
- *
+ * // Before (deprecated):
+ * const compactor = createContextCompactor({ maxTokens: 25000 });
  * if (compactor.shouldCompact(messages)) {
  *   const result = await compactor.compact(messages);
- *   // Use result.messages and result.summary
+ * }
+ *
+ * // After (recommended):
+ * const contextManager = createContextManager({ model: 'claude-sonnet-4-20250514' });
+ * if (contextManager.shouldCompact()) {
+ *   const preview = await contextManager.previewCompaction({ summarizer });
+ *   const result = await contextManager.executeCompaction({ summarizer });
  * }
  * ```
+ *
+ * @see ContextManager for the recommended compaction API
+ * @see Summarizer for the summarization interface
  */
 import type { Message } from '../types/index.js';
 import { getSettings } from '../settings/index.js';
@@ -94,9 +99,13 @@ function getDefaultConfig(): CompactorConfig {
 }
 
 // =============================================================================
-// ContextCompactor Class
+// ContextCompactor Class (DEPRECATED)
 // =============================================================================
 
+/**
+ * @deprecated Use ContextManager.previewCompaction() and executeCompaction() instead.
+ * This class uses simple keyword extraction; ContextManager supports LLM-based summarization.
+ */
 export class ContextCompactor {
   private config: CompactorConfig;
 
@@ -377,9 +386,13 @@ const COMMON_WORDS = new Set([
 ]);
 
 // =============================================================================
-// Factory Function
+// Factory Function (DEPRECATED)
 // =============================================================================
 
+/**
+ * @deprecated Use createContextManager() instead.
+ * ContextManager provides better compaction with LLM-based summarization.
+ */
 export function createContextCompactor(config: Partial<CompactorConfig> = {}): ContextCompactor {
   return new ContextCompactor(config);
 }

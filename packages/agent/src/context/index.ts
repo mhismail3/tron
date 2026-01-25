@@ -23,8 +23,11 @@ export {
   type ToolEntry,
 } from './audit.js';
 
+// @deprecated - Use ContextManager.previewCompaction() and executeCompaction() instead
 export {
+  /** @deprecated Use ContextManager instead */
   ContextCompactor,
+  /** @deprecated Use createContextManager instead */
   createContextCompactor,
   type CompactorConfig,
   type CompactResult,
@@ -77,3 +80,15 @@ export {
   type TrackedRulesFile,
   type RulesTrackingEvent,
 } from './rules-tracker.js';
+
+// Token estimation utilities
+export {
+  estimateBlockTokens,
+  estimateImageTokens,
+  estimateMessageTokens,
+  estimateMessagesTokens,
+  estimateSystemTokens,
+  estimateRulesTokens,
+  CHARS_PER_TOKEN,
+  type ImageSource,
+} from './token-estimator.js';
