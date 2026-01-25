@@ -62,7 +62,6 @@ import * as path from 'path';
 import * as os from 'os';
 // Direct imports to avoid circular dependencies through index.js
 import { createLogger } from '../logging/logger.js';
-import { withLoggingContext } from '../logging/log-context.js';
 import { TronAgent } from '../agent/tron-agent.js';
 import type { TurnResult } from '../agent/types.js';
 import { EventStore, type AppendEventOptions, type SearchOptions } from '../events/event-store.js';
@@ -89,7 +88,6 @@ import type {
   CompactionPreview,
   CompactionResult,
 } from '../context/context-manager.js';
-import type { UserContent } from '../types/messages.js';
 import type { SpawnSubagentParams } from '../tools/subagent/spawn-subagent.js';
 import type { SpawnTmuxAgentParams } from '../tools/subagent/spawn-tmux-agent.js';
 import type {
@@ -100,11 +98,7 @@ import type {
 } from '../tools/subagent/query-subagent.js';
 import type { TodoItem, BackloggedTask } from '../todos/types.js';
 import { BrowserService } from '../external/browser/index.js';
-import { normalizeContentBlocks } from '../utils/content-normalizer.js';
-import {
-  PersistenceError,
-  SessionError,
-} from '../utils/errors.js';
+import { SessionError } from '../utils/errors.js';
 import {
   buildWorktreeInfoWithStatus,
   commitWorkingDirectory,
@@ -132,7 +126,6 @@ import {
 import {
   AgentFactory,
   createAgentFactory,
-  normalizeToUnifiedAuth,
 } from './agent-factory.js';
 import {
   AuthProvider,
@@ -164,6 +157,14 @@ import {
   NotificationController,
   createNotificationController,
 } from './notification-controller.js';
+import {
+  AgentRunner,
+  createAgentRunner,
+} from './agent-runner.js';
+import {
+  ModelController,
+  createModelController,
+} from './model-controller.js';
 
 // Re-export types for consumers
 export type {
@@ -203,6 +204,12 @@ export class EventStoreOrchestrator extends EventEmitter {
   private planModeController: PlanModeController;
   private todoController: TodoController;
   private notificationController!: NotificationController;
+
+  // Extracted agent execution coordinator
+  private agentRunner: AgentRunner;
+
+  // Model switching coordinator
+  private modelController: ModelController;
 
   constructor(config: EventStoreOrchestratorConfig) {
     super();
@@ -336,6 +343,22 @@ export class EventStoreOrchestrator extends EventEmitter {
     this.notificationController = createNotificationController({
       apnsService: this.apnsService,
       eventStore: this.eventStore,
+    });
+
+    // Initialize AgentRunner (extracted agent execution coordinator)
+    this.agentRunner = createAgentRunner({
+      skillLoader: this.skillLoader,
+      emit: (event, data) => this.emit(event, data),
+      enterPlanMode: (sessionId, opts) => this.enterPlanMode(sessionId, opts),
+      isInPlanMode: (sessionId) => this.isInPlanMode(sessionId),
+      buildSubagentResultsContext: (active) => this.buildSubagentResultsContext(active),
+    });
+
+    // Initialize ModelController (extracted model switching coordinator)
+    this.modelController = createModelController({
+      eventStore: this.eventStore,
+      authProvider: this.authProvider,
+      getActiveSession: (sessionId) => this.activeSessions.get(sessionId),
     });
   }
 
@@ -606,409 +629,15 @@ export class EventStoreOrchestrator extends EventEmitter {
     active.lastActivity = new Date();
     active.sessionContext.setProcessing(true);
 
-    // Wrap entire agent run with logging context for session correlation
-    return withLoggingContext(
-      { sessionId: options.sessionId },
-      async () => {
     try {
-      // CRITICAL: Wait for any pending stream events to complete before appending message events
-      // This prevents race conditions where stream events (turn_start, etc.) capture wrong parentId
-      await active.sessionContext!.flushEvents();
-
-      // Track skills and load content BEFORE building user content
-      // Skill context is now injected as a system block (not user message)
-      // Also pass plan mode callback to enable skill-triggered plan mode
-      const planModeCallback = {
-        enterPlanMode: async (skillName: string, blockedTools: string[]) => {
-          await this.enterPlanMode(active.sessionId, { skillName, blockedTools });
-        },
-        isInPlanMode: () => this.isInPlanMode(active.sessionId),
-      };
-      const skillContext = await this.skillLoader.loadSkillContextForPrompt(
-        {
-          sessionId: active.sessionId,
-          skillTracker: active.skillTracker,
-          sessionContext: active.sessionContext!,
-        },
-        options,
-        planModeCallback
-      );
-
-      // Set skill context on agent (will be injected into system prompt)
-      if (skillContext) {
-        const isRemovedInstruction = skillContext.includes('<removed-skills>');
-        logger.info('[SKILL] Setting skill context on agent', {
-          sessionId: active.sessionId,
-          skillContextLength: skillContext.length,
-          contextType: isRemovedInstruction ? 'removed-skills-instruction' : 'skill-content',
-          preview: skillContext.substring(0, 150),
-        });
-        active.agent.setSkillContext(skillContext);
-      } else {
-        logger.info('[SKILL] No skill context to set (clearing)', {
-          sessionId: active.sessionId,
-        });
-        active.agent.setSkillContext(undefined);
-      }
-
-      // Check for pending sub-agent results and inject them
-      const subagentResultsContext = this.buildSubagentResultsContext(active);
-      if (subagentResultsContext) {
-        logger.info('[SUBAGENT] Injecting pending sub-agent results', {
-          sessionId: active.sessionId,
-          contextLength: subagentResultsContext.length,
-          preview: subagentResultsContext.substring(0, 200),
-        });
-        active.agent.setSubagentResultsContext(subagentResultsContext);
-      } else {
-        active.agent.setSubagentResultsContext(undefined);
-      }
-
-      // Build and inject todo context if tasks exist
-      const todoContext = active.todoTracker.buildContextString();
-      if (todoContext) {
-        logger.info('[TODO] Injecting todo context', {
-          sessionId: active.sessionId,
-          contextLength: todoContext.length,
-          todoCount: active.todoTracker.count,
-          summary: active.todoTracker.buildSummaryString(),
-        });
-        active.agent.setTodoContext(todoContext);
-      } else {
-        active.agent.setTodoContext(undefined);
-      }
-
-      // Build user content from prompt and any attachments
-      const userContent: UserContent[] = [];
-
-      // Add text prompt (skill context is now in system prompt, not here)
-      if (options.prompt) {
-        userContent.push({ type: 'text', text: options.prompt });
-      }
-
-      // Add images from legacy images array
-      if (options.images && options.images.length > 0) {
-        for (const img of options.images) {
-          if (img.mimeType.startsWith('image/')) {
-            userContent.push({
-              type: 'image',
-              data: img.data,
-              mimeType: img.mimeType,
-            });
-          }
-        }
-      }
-
-      // Add images/documents from attachments array
-      if (options.attachments && options.attachments.length > 0) {
-        for (const att of options.attachments) {
-          if (att.mimeType.startsWith('image/')) {
-            userContent.push({
-              type: 'image',
-              data: att.data,
-              mimeType: att.mimeType,
-            });
-          } else if (att.mimeType === 'application/pdf') {
-            userContent.push({
-              type: 'document',
-              data: att.data,
-              mimeType: att.mimeType,
-              fileName: att.fileName,
-            });
-          } else if (att.mimeType.startsWith('text/') || att.mimeType === 'application/json') {
-            // Text files: preserve as document blocks for display as attachments
-            // The LLM will still be able to read them, but they'll render as thumbnails in the app
-            userContent.push({
-              type: 'document',
-              data: att.data,
-              mimeType: att.mimeType,
-              fileName: att.fileName,
-            });
-          }
-        }
-      }
-
-      logger.debug('Built user content', {
-        sessionId: active.sessionId,
-        contentBlocks: userContent.length,
-        hasImages: userContent.some(c => c.type === 'image'),
-        hasDocuments: userContent.some(c => c.type === 'document'),
-        hasTextFiles: userContent.filter(c => c.type === 'text').length > 1,  // More than just the prompt
-      });
-
-      // Determine if we can use simple string format (backward compat) or need full content array
-      const firstContent = userContent[0];
-      const isSimpleTextOnly = userContent.length === 1 && firstContent?.type === 'text';
-      const messageContent = isSimpleTextOnly ? options.prompt : userContent;
-
-      // Record user message event (linearized via SessionContext)
-      // Build payload with optional skills and spells for chat history display
-      const userMsgPayload: {
-        content: unknown;
-        skills?: { name: string; source: string }[];
-        spells?: { name: string; source: string }[];
-      } = {
-        content: messageContent,
-      };
-      if (options.skills && options.skills.length > 0) {
-        userMsgPayload.skills = options.skills.map(s => ({ name: s.name, source: s.source }));
-      }
-      if (options.spells && options.spells.length > 0) {
-        userMsgPayload.spells = options.spells.map(s => ({ name: s.name, source: s.source }));
-      }
-
-      const userMsgEvent = await active.sessionContext!.appendEvent('message.user', userMsgPayload);
-      // Track eventId for context manager message (user message will be added to context by agent.run)
-      if (userMsgEvent) {
-        active.sessionContext!.addMessageEventId(userMsgEvent.id);
-        logger.debug('[LINEARIZE] message.user appended', {
-          sessionId: active.sessionId,
-          eventId: userMsgEvent.id,
-        });
-      }
-
-      // Set reasoning level if provided (for OpenAI Codex models)
-      // Persist event only when level actually changes
-      if (options.reasoningLevel && options.reasoningLevel !== active.sessionContext!.getReasoningLevel()) {
-        const previousLevel = active.sessionContext!.getReasoningLevel();
-        active.agent.setReasoningLevel(options.reasoningLevel);
-        active.sessionContext!.setReasoningLevel(options.reasoningLevel);
-
-        // Persist reasoning level change as linearized event
-        const reasoningEvent = await active.sessionContext!.appendEvent('config.reasoning_level', {
-          previousLevel,
-          newLevel: options.reasoningLevel,
-        });
-        if (reasoningEvent) {
-          logger.debug('[LINEARIZE] config.reasoning_level appended', {
-            sessionId: active.sessionId,
-            eventId: reasoningEvent.id,
-            previousLevel,
-            newLevel: options.reasoningLevel,
-          });
-        }
-      }
-
-      // Transform content for LLM: convert text file documents to inline text
-      // (Claude's document type only supports PDFs, not text files)
-      const llmContent = this.skillLoader.transformContentForLLM(messageContent);
-
-      // Run agent with transformed content
-      const runResult = await active.agent.run(llmContent);
-      // Update activity timestamp
-      active.lastActivity = new Date();
-      active.sessionContext.touch();
-
-      // Handle interrupted runs - PERSIST partial content so it survives session resume
-      if (runResult.interrupted) {
-        const accumulated = active.sessionContext.getAccumulatedContent();
-        logger.info('Agent run interrupted', {
-          sessionId: options.sessionId,
-          turn: runResult.turns,
-          hasPartialContent: !!runResult.partialContent,
-          accumulatedTextLength: accumulated.text?.length ?? 0,
-          toolCallsCount: accumulated.toolCalls?.length ?? 0,
-        });
-
-        // Notify the RPC caller (if any) about the interruption
-        if (options.onEvent) {
-          options.onEvent({
-            type: 'turn_interrupted',
-            sessionId: options.sessionId,
-            timestamp: new Date().toISOString(),
-            data: {
-              interrupted: true,
-              partialContent: runResult.partialContent,
-            },
-          });
-        }
-
-        // CRITICAL: Persist partial content so it survives session resume
-        // Use SessionContext to build content blocks from accumulated state
-        // This preserves exact interleaving order of text and tool calls
-        const { assistantContent, toolResultContent } = active.sessionContext!.buildInterruptedContent();
-
-        // Only persist if there's actual content
-        if (assistantContent.length > 0 || toolResultContent.length > 0) {
-          // Wait for any pending stream events
-          await active.sessionContext!.flushEvents();
-
-          // 1. Persist assistant message with tool_use blocks
-          if (assistantContent.length > 0) {
-            const normalizedAssistantContent = normalizeContentBlocks(assistantContent);
-
-            const assistantMsgEvent = await active.sessionContext!.appendEvent('message.assistant', {
-              content: normalizedAssistantContent,
-              tokenUsage: runResult.totalTokenUsage,
-              turn: runResult.turns || 1,
-              model: active.sessionContext!.getModel(),
-              stopReason: 'interrupted',
-              interrupted: true,
-            });
-
-            if (assistantMsgEvent) {
-              logger.info('Persisted interrupted assistant message', {
-                sessionId: active.sessionId,
-                eventId: assistantMsgEvent.id,
-                contentBlocks: normalizedAssistantContent.length,
-                hasAccumulatedContent: active.sessionContext!.hasAccumulatedContent(),
-              });
-            }
-          }
-
-          // 2. Persist tool results as user message (like normal flow)
-          // This ensures tool results appear in the session history
-          if (toolResultContent.length > 0) {
-            const normalizedToolResults = normalizeContentBlocks(toolResultContent);
-
-            const toolResultEvent = await active.sessionContext!.appendEvent('message.user', {
-              content: normalizedToolResults,
-            });
-
-            if (toolResultEvent) {
-              logger.info('Persisted tool results for interrupted session', {
-                sessionId: active.sessionId,
-                eventId: toolResultEvent.id,
-                resultCount: normalizedToolResults.length,
-              });
-            }
-          }
-        }
-
-        // Persist notification.interrupted event as first-class ledger entry
-        const interruptNotificationEvent = await active.sessionContext!.appendEvent('notification.interrupted', {
-          timestamp: new Date().toISOString(),
-          turn: runResult.turns || 1,
-        });
-
-        if (interruptNotificationEvent) {
-          logger.info('Persisted notification.interrupted event', {
-            sessionId: active.sessionId,
-            eventId: interruptNotificationEvent.id,
-          });
-        }
-
-        // Mark session as interrupted in metadata
-        active.wasInterrupted = true;
-
-        // Clear turn tracking state via SessionContext
-        active.sessionContext!.onAgentEnd();
-
-        return [runResult] as unknown as TurnResult[];
-      }
-
-      // Wait for all linearized events (turn_end creates message.assistant and tool_results per-turn)
-      // to complete before returning
-      await active.sessionContext!.flushEvents();
-
-      logger.debug('Agent run completed', {
-        sessionId: active.sessionId,
-        turns: runResult.turns,
-        stoppedReason: runResult.stoppedReason,
-      });
-
-      // Emit turn completion event
-      this.emit('agent_turn', {
-        type: 'turn_complete',
-        sessionId: options.sessionId,
-        timestamp: new Date().toISOString(),
-        data: runResult,
-      });
-
-      if (options.onEvent) {
-        options.onEvent({
-          type: 'turn_complete',
-          sessionId: options.sessionId,
-          timestamp: new Date().toISOString(),
-          data: runResult,
-        });
-      }
-
-      // Emit agent.complete AFTER all linearized events are persisted
-      // This ensures events (message.assistant, tool.call, tool.result)
-      // are in the database before iOS receives this and syncs
-      this.emit('agent_event', {
-        type: 'agent.complete',
-        sessionId: options.sessionId,
-        timestamp: new Date().toISOString(),
-        data: {
-          success: !runResult.error,
-          error: runResult.error,
-        },
-      });
-
-      return [runResult] as unknown as TurnResult[];
-    } catch (error) {
-      logger.error('Agent run error', { sessionId: options.sessionId, error });
-
-      // Store error.agent event for agent-level errors (linearized)
-      try {
-        // CRITICAL: Wait for any pending events before appending
-        await active.sessionContext!.flushEvents();
-        const errorEvent = await active.sessionContext!.appendEvent('error.agent', {
-          error: error instanceof Error ? error.message : String(error),
-          code: error instanceof Error ? error.name : undefined,
-          recoverable: false,
-        });
-        if (errorEvent) {
-          logger.debug('[LINEARIZE] error.agent appended', {
-            sessionId: active.sessionId,
-            eventId: errorEvent.id,
-          });
-        }
-      } catch (storeErr) {
-        // Wrap in PersistenceError for structured logging
-        // Note: We still throw the original error, but we want visibility into storage failures
-        const persistenceError = new PersistenceError('Failed to store error.agent event', {
-          table: 'events',
-          operation: 'write',
-          context: {
-            sessionId: options.sessionId,
-            eventType: 'error.agent',
-            originalError: error instanceof Error ? error.message : String(error),
-          },
-          cause: storeErr instanceof Error ? storeErr : undefined,
-        });
-        logger.error('Persistence error during error handling', persistenceError.toStructuredLog());
-        // Emit error event so callers can observe storage failures
-        this.emit('agent_event', {
-          type: 'error.persistence',
-          sessionId: options.sessionId,
-          timestamp: new Date().toISOString(),
-          data: {
-            message: 'Failed to persist error event',
-            eventType: 'error.agent',
-            code: persistenceError.code,
-          },
-        });
-      }
-
-      if (options.onEvent) {
-        options.onEvent({
-          type: 'error',
-          sessionId: options.sessionId,
-          timestamp: new Date().toISOString(),
-          data: { message: error instanceof Error ? error.message : 'Unknown error' },
-        });
-      }
-
-      // Emit agent.complete for error case (after pending events have been flushed)
-      this.emit('agent_event', {
-        type: 'agent.complete',
-        sessionId: options.sessionId,
-        timestamp: new Date().toISOString(),
-        data: {
-          success: false,
-          error: error instanceof Error ? error.message : String(error),
-        },
-      });
-
-      throw error;
+      // Delegate to AgentRunner for all execution logic
+      // AgentRunner handles: context injection, content building, agent execution,
+      // interrupt handling, completion handling, error handling, and event emission
+      return await this.agentRunner.run(active, options) as TurnResult[];
     } finally {
       // Clear processing state
       active.sessionContext.setProcessing(false);
     }
-      }); // End withLoggingContext
   }
 
   async cancelAgent(sessionId: string): Promise<boolean> {
@@ -1032,84 +661,11 @@ export class EventStoreOrchestrator extends EventEmitter {
   }
 
   // ===========================================================================
-  // Model Switching
+  // Model Switching (delegated to ModelController)
   // ===========================================================================
 
   async switchModel(sessionId: string, model: string): Promise<{ previousModel: string; newModel: string }> {
-    const session = await this.eventStore.getSession(sessionId as SessionId);
-    if (!session) {
-      throw new Error(`Session not found: ${sessionId}`);
-    }
-
-    const previousModel = session.latestModel;
-
-    // Get active session for linearized append (if session is active)
-    const active = this.activeSessions.get(sessionId);
-
-    // P0 FIX: Prevent model switch during active agent processing
-    // Modifying agent.model while agent.run() is in-flight causes inconsistent model usage
-    // NOTE: Use sessionContext.isProcessing() as the authoritative source of truth
-    if (active?.sessionContext.isProcessing()) {
-      throw new Error('Cannot switch model while agent is processing');
-    }
-
-    // Append model switch event (linearized via SessionContext for active sessions)
-    let modelSwitchEvent: TronSessionEvent | null = null;
-
-    if (active?.sessionContext) {
-      modelSwitchEvent = await active.sessionContext.appendEvent('config.model_switch', {
-        previousModel,
-        newModel: model,
-      });
-    } else {
-      // Session not active - direct append is safe (no concurrent events)
-      modelSwitchEvent = await this.eventStore.append({
-        sessionId: sessionId as SessionId,
-        type: 'config.model_switch',
-        payload: {
-          previousModel,
-          newModel: model,
-        },
-      });
-    }
-
-    if (modelSwitchEvent) {
-      logger.debug('[LINEARIZE] config.model_switch appended', {
-        sessionId,
-        eventId: modelSwitchEvent.id,
-      });
-    }
-
-    // CRITICAL: Persist model change to session in database
-    // Without this, the model reverts when session is reloaded
-    await this.eventStore.updateLatestModel(sessionId as SessionId, model);
-    logger.debug('[MODEL_SWITCH] Model persisted to database', { sessionId, model });
-
-    // Update active session if exists
-    if (active) {
-      // Get auth for the new model (handles Codex OAuth vs standard auth)
-      const newAuth = await this.authProvider.getAuthForProvider(model);
-      logger.debug('[MODEL_SWITCH] Auth loaded', { sessionId, authType: newAuth.type });
-
-      active.model = model;
-
-      // Update provider type for token normalization (resets baseline)
-      active.sessionContext.updateProviderTypeForModel(model);
-
-      // CRITICAL: Use agent's switchModel() to preserve conversation history
-      // Pass the new auth to ensure correct credentials for the new provider
-      // Normalize auth to UnifiedAuth format and preserve endpoint for Google models
-      const normalizedAuth = normalizeToUnifiedAuth(newAuth);
-      const authWithEndpoint = 'endpoint' in newAuth
-        ? { ...normalizedAuth, endpoint: newAuth.endpoint }
-        : normalizedAuth;
-      active.agent.switchModel(model, undefined, authWithEndpoint);
-      logger.debug('[MODEL_SWITCH] Agent model switched (preserving messages)', { sessionId, model });
-    }
-
-    logger.info('Model switched', { sessionId, previousModel, newModel: model });
-
-    return { previousModel, newModel: model };
+    return this.modelController.switchModel(sessionId, model);
   }
 
   // ===========================================================================

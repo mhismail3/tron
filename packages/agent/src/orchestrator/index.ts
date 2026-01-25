@@ -180,3 +180,18 @@ export {
   createAuthProvider,
   type AuthProviderConfig,
 } from './auth-provider.js';
+
+// Agent runner (extracted from runAgent god method)
+export {
+  AgentRunner,
+  createAgentRunner,
+  type AgentRunnerConfig,
+} from './agent-runner.js';
+
+// Model controller (extracted model switching)
+export {
+  ModelController,
+  createModelController,
+  type ModelControllerConfig,
+  type ModelSwitchResult,
+} from './model-controller.js';
