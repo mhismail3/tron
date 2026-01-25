@@ -50,16 +50,9 @@ struct ContentView: View {
             }
             .alert("Archive Session?", isPresented: $showArchiveConfirmation) {
                 Button("Cancel", role: .cancel) {
-                    // Rollback: restore the session to local array
+                    // Rollback: restore the session to local array (don't change selection)
                     if let (session, index) = removedSessionForRollback {
                         eventStoreManager.insertSessionLocally(session, at: index)
-                        // Restore selection if this was the selected/active session
-                        if selectedSessionId == nil || selectedSessionId == eventStoreManager.sessions.first?.id {
-                            selectedSessionId = session.id
-                        }
-                        if eventStoreManager.activeSessionId == nil || eventStoreManager.activeSessionId == eventStoreManager.sessions.first?.id {
-                            eventStoreManager.setActiveSession(session.id)
-                        }
                     }
                     sessionToArchive = nil
                     removedSessionForRollback = nil
@@ -186,16 +179,8 @@ struct ContentView: View {
                     onDeleteSession: { sessionId in
                         if confirmArchive {
                             // Optimistically remove from local array immediately (smooth animation)
+                            // Don't change selection yet - wait for user confirmation
                             removedSessionForRollback = eventStoreManager.removeSessionLocally(sessionId)
-
-                            // Update selection if this was the selected session
-                            if selectedSessionId == sessionId {
-                                selectedSessionId = eventStoreManager.sessions.first?.id
-                            }
-                            if eventStoreManager.activeSessionId == sessionId {
-                                eventStoreManager.setActiveSession(eventStoreManager.sessions.first?.id)
-                            }
-
                             sessionToArchive = sessionId
                             showArchiveConfirmation = true
                         } else {
