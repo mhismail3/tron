@@ -44,24 +44,41 @@ extension EventStoreManager {
     }
 
     /// Delete a session (local + server)
+    /// Uses optimistic UI update: removes from local array first, then persists
     func deleteSession(_ sessionId: String) async throws {
-        // Delete locally first
-        try eventDB.deleteSession(sessionId)
-        try eventDB.deleteEventsBySession(sessionId)
+        // 1. Optimistically remove from local array (triggers smooth List animation)
+        let removed = removeSessionLocally(sessionId)
 
-        // Try to delete from server (optional, may fail)
+        // 2. If this was the active session, update immediately
+        let wasActiveSession = activeSessionId == sessionId
+        if wasActiveSession {
+            setActiveSession(sessions.first?.id)
+        }
+
+        // 3. Attempt database deletion
+        do {
+            try eventDB.deleteSession(sessionId)
+            try eventDB.deleteEventsBySession(sessionId)
+        } catch {
+            // Rollback: restore the session to local array
+            if let (session, index) = removed {
+                insertSessionLocally(session, at: index)
+                if wasActiveSession {
+                    setActiveSession(sessionId)
+                }
+            }
+            logger.error("Failed to delete session from database: \(error.localizedDescription)", category: .session)
+            throw error
+        }
+
+        // 4. Try to delete from server (optional, don't rollback on failure)
         do {
             _ = try await rpcClient.deleteSession(sessionId)
         } catch {
             logger.warning("Server delete failed (continuing): \(error.localizedDescription)", category: .session)
         }
 
-        // If this was the active session, clear it
-        if activeSessionId == sessionId {
-            setActiveSession(sessions.first?.id)
-        }
-
-        loadSessions()
+        // 5. DON'T call loadSessions() - the local array is already correct
         logger.info("Deleted session: \(sessionId)", category: .session)
     }
 
@@ -76,6 +93,11 @@ extension EventStoreManager {
 
         logger.info("Archiving \(sessionsToArchive.count) sessions...", category: .session)
 
+        // Clear local array first (optimistic, all at once for smooth animation)
+        clearSessions()
+        setActiveSession(nil)
+
+        // Then persist deletions
         for session in sessionsToArchive {
             do {
                 try eventDB.deleteSession(session.id)
@@ -91,8 +113,7 @@ extension EventStoreManager {
             }
         }
 
-        setActiveSession(nil)
-        loadSessions()
+        // DON'T call loadSessions() - array is already cleared
         logger.info("Archived \(sessionsToArchive.count) sessions", category: .session)
     }
 

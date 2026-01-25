@@ -19,6 +19,8 @@ struct ContentView: View {
     @State private var showSettings = false
     @State private var showArchiveConfirmation = false
     @State private var sessionToArchive: String?
+    /// Stores the removed session and its original index for rollback if user cancels archive
+    @State private var removedSessionForRollback: (session: CachedSession, index: Int)?
     @AppStorage("confirmArchive") private var confirmArchive = true
 
     // Deleted workspace handling - tracks which sessions have deleted workspaces
@@ -48,13 +50,27 @@ struct ContentView: View {
             }
             .alert("Archive Session?", isPresented: $showArchiveConfirmation) {
                 Button("Cancel", role: .cancel) {
+                    // Rollback: restore the session to local array
+                    if let (session, index) = removedSessionForRollback {
+                        eventStoreManager.insertSessionLocally(session, at: index)
+                        // Restore selection if this was the selected/active session
+                        if selectedSessionId == nil || selectedSessionId == eventStoreManager.sessions.first?.id {
+                            selectedSessionId = session.id
+                        }
+                        if eventStoreManager.activeSessionId == nil || eventStoreManager.activeSessionId == eventStoreManager.sessions.first?.id {
+                            eventStoreManager.setActiveSession(session.id)
+                        }
+                    }
                     sessionToArchive = nil
+                    removedSessionForRollback = nil
                 }
                 Button("Archive", role: .destructive) {
                     if let sessionId = sessionToArchive {
-                        deleteSession(sessionId)
+                        // Session already removed from local array, just persist to DB
+                        deleteSessionPersistOnly(sessionId)
                     }
                     sessionToArchive = nil
+                    removedSessionForRollback = nil
                 }
             } message: {
                 Text("This will remove the session from your device. The session data on the server will remain.")
@@ -169,6 +185,17 @@ struct ContentView: View {
                     onNewSessionLongPress: { createQuickSession() },
                     onDeleteSession: { sessionId in
                         if confirmArchive {
+                            // Optimistically remove from local array immediately (smooth animation)
+                            removedSessionForRollback = eventStoreManager.removeSessionLocally(sessionId)
+
+                            // Update selection if this was the selected session
+                            if selectedSessionId == sessionId {
+                                selectedSessionId = eventStoreManager.sessions.first?.id
+                            }
+                            if eventStoreManager.activeSessionId == sessionId {
+                                eventStoreManager.setActiveSession(eventStoreManager.sessions.first?.id)
+                            }
+
                             sessionToArchive = sessionId
                             showArchiveConfirmation = true
                         } else {
@@ -405,6 +432,33 @@ struct ContentView: View {
             } catch {
                 logger.error("Failed to delete session: \(error)", category: .session)
             }
+
+            if selectedSessionId == sessionId {
+                selectedSessionId = eventStoreManager.sessions.first?.id
+            }
+        }
+    }
+
+    /// Persist-only deletion: session already removed from local array (optimistic update),
+    /// just delete from database and server. Used after confirmation dialog.
+    private func deleteSessionPersistOnly(_ sessionId: String) {
+        Task {
+            // Delete from database
+            do {
+                try eventStoreManager.eventDB.deleteSession(sessionId)
+                try eventStoreManager.eventDB.deleteEventsBySession(sessionId)
+            } catch {
+                logger.error("Failed to delete session from database: \(error)", category: .session)
+            }
+
+            // Try to delete from server (optional)
+            do {
+                _ = try await appState.rpcClient.deleteSession(sessionId)
+            } catch {
+                logger.warning("Server delete failed (continuing): \(error)", category: .session)
+            }
+
+            logger.info("Deleted session: \(sessionId)", category: .session)
 
             if selectedSessionId == sessionId {
                 selectedSessionId = eventStoreManager.sessions.first?.id

@@ -207,6 +207,23 @@ class EventStoreManager: ObservableObject {
         activeSessionId = sessionId
     }
 
+    /// Remove a session from the local array by ID (for optimistic UI updates)
+    /// Returns the removed session and its index for potential rollback
+    func removeSessionLocally(_ sessionId: String) -> (session: CachedSession, index: Int)? {
+        guard let index = sessions.firstIndex(where: { $0.id == sessionId }) else {
+            return nil
+        }
+        let session = sessions[index]
+        sessions.remove(at: index)
+        return (session, index)
+    }
+
+    /// Insert a session back into the local array at a specific index (for rollback)
+    func insertSessionLocally(_ session: CachedSession, at index: Int) {
+        let clampedIndex = min(index, sessions.count)
+        sessions.insert(session, at: clampedIndex)
+    }
+
     // MARK: - Session List (from EventDatabase)
 
     /// Load sessions from local EventDatabase

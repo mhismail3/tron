@@ -31,6 +31,10 @@ protocol SessionStoreProtocol: ObservableObject {
     func updateSession(at index: Int, _ update: (inout CachedSession) -> Void)
     func setActiveSessionId(_ sessionId: String?)
 
+    // MARK: - Optimistic Local Updates
+    func removeSessionLocally(_ sessionId: String) -> (session: CachedSession, index: Int)?
+    func insertSessionLocally(_ session: CachedSession, at index: Int)
+
     // MARK: - Session List
     func loadSessions()
     func setActiveSession(_ sessionId: String?)
