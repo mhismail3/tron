@@ -38,7 +38,7 @@ struct WorkspaceId: Hashable, Codable, CustomStringConvertible {
 // MARK: - Session Event
 
 /// A single event in the event-sourced session tree
-struct SessionEvent: Identifiable, Codable {
+struct SessionEvent: Identifiable, Codable, EventTransformable {
     let id: String
     let parentId: String?
     let sessionId: String
@@ -664,4 +664,4 @@ struct EventTreeNode: Identifiable {
 
 // MARK: - Session State
 // NOTE: Legacy types (ReconstructedSessionState, ReconstructedMessage)
-// have been removed. Use UnifiedEventTransformer.ReconstructedState instead.
+// have been removed. Use ReconstructedState from Core/Events/Transformer/Reconstruction/.

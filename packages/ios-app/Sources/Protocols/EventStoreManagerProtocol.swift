@@ -53,7 +53,7 @@ protocol EventStoreManagerProtocol: ObservableObject {
 
     // MARK: - State Reconstruction
     func getChatMessages(sessionId: String) throws -> [ChatMessage]
-    func getReconstructedState(sessionId: String) throws -> UnifiedEventTransformer.ReconstructedState
+    func getReconstructedState(sessionId: String) throws -> ReconstructedState
 
     // MARK: - Server Sync (from +Sync extension)
     func fullSync() async

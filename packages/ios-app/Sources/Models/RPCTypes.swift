@@ -721,7 +721,7 @@ struct EventsGetHistoryParams: Encodable {
 }
 
 /// Raw event from server (matches core/events/types.ts)
-struct RawEvent: Decodable {
+struct RawEvent: Decodable, EventTransformable {
     let id: String
     let parentId: String?
     let sessionId: String

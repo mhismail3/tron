@@ -1,0 +1,76 @@
+import Foundation
+
+/// Handlers for transforming error events into ChatMessages.
+///
+/// Handles: error.agent, error.tool, error.provider
+enum ErrorHandlers {
+
+    /// Transform error.agent event into a ChatMessage.
+    ///
+    /// Agent errors represent failures in the agent's processing logic.
+    /// Shows error code and message if available.
+    static func transformAgentError(
+        _ payload: [String: AnyCodable],
+        timestamp: Date
+    ) -> ChatMessage? {
+        guard let parsed = AgentErrorPayload(from: payload) else { return nil }
+
+        var errorText = parsed.error
+        if let code = parsed.code {
+            errorText = "[\(code)] \(errorText)"
+        }
+
+        return ChatMessage(
+            role: .assistant,
+            content: .error(errorText),
+            timestamp: timestamp
+        )
+    }
+
+    /// Transform error.tool event into a ChatMessage.
+    ///
+    /// Tool errors represent failures during tool execution.
+    /// Includes tool name, error message, and optional error code.
+    static func transformToolError(
+        _ payload: [String: AnyCodable],
+        timestamp: Date
+    ) -> ChatMessage? {
+        guard let parsed = ToolErrorPayload(from: payload) else { return nil }
+
+        var errorText = "Tool '\(parsed.toolName)' failed: \(parsed.error)"
+        if let code = parsed.code {
+            errorText = "[\(code)] \(errorText)"
+        }
+
+        return ChatMessage(
+            role: .assistant,
+            content: .error(errorText),
+            timestamp: timestamp
+        )
+    }
+
+    /// Transform error.provider event into a ChatMessage.
+    ///
+    /// Provider errors represent failures from the AI provider (e.g., API errors).
+    /// Includes retry information when available.
+    static func transformProviderError(
+        _ payload: [String: AnyCodable],
+        timestamp: Date
+    ) -> ChatMessage? {
+        guard let parsed = ProviderErrorPayload(from: payload) else { return nil }
+
+        var errorText = "\(parsed.provider) error: \(parsed.error)"
+        if let code = parsed.code {
+            errorText = "[\(code)] \(errorText)"
+        }
+        if parsed.retryable, let retryAfter = parsed.retryAfter {
+            errorText += " (retrying in \(retryAfter)ms)"
+        }
+
+        return ChatMessage(
+            role: .assistant,
+            content: .error(errorText),
+            timestamp: timestamp
+        )
+    }
+}

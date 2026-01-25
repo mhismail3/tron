@@ -732,4 +732,300 @@ final class UnifiedEventTransformerTests: XCTestCase {
             XCTAssertEqual(text3, "Third")
         }
     }
+
+    // MARK: - Characterization Tests (Phase 1 - Edge Cases)
+
+    func testEmptyContentBlocksAreSkipped() {
+        // Empty text blocks should not produce messages
+        let events = [
+            sessionEvent(type: "message.assistant", payload: [
+                "content": AnyCodable([
+                    ["type": "text", "text": ""],  // Empty text block
+                    ["type": "text", "text": "Hello"]  // Non-empty
+                ]),
+                "turn": AnyCodable(1)
+            ], timestamp: timestamp(0), sequence: 1)
+        ]
+
+        let messages = UnifiedEventTransformer.transformPersistedEvents(events)
+
+        // Should only produce one message (the non-empty text)
+        XCTAssertEqual(messages.count, 1)
+        if case .text(let text) = messages[0].content {
+            XCTAssertEqual(text, "Hello")
+        } else {
+            XCTFail("Expected text content")
+        }
+    }
+
+    func testThinkingBlocksAreTransformed() {
+        // Thinking blocks should produce thinking messages
+        let events = [
+            sessionEvent(type: "message.assistant", payload: [
+                "content": AnyCodable([
+                    ["type": "thinking", "thinking": "Let me think about this..."],
+                    ["type": "text", "text": "Here's my response"]
+                ]),
+                "turn": AnyCodable(1)
+            ], timestamp: timestamp(0), sequence: 1)
+        ]
+
+        let messages = UnifiedEventTransformer.transformPersistedEvents(events)
+
+        XCTAssertEqual(messages.count, 2)
+
+        // First: thinking message
+        if case .thinking(let visible, let isExpanded, let isStreaming) = messages[0].content {
+            XCTAssertEqual(visible, "Let me think about this...")
+            XCTAssertFalse(isExpanded)
+            XCTAssertFalse(isStreaming)
+        } else {
+            XCTFail("Expected thinking content")
+        }
+
+        // Second: text message
+        if case .text(let text) = messages[1].content {
+            XCTAssertEqual(text, "Here's my response")
+        } else {
+            XCTFail("Expected text content")
+        }
+    }
+
+    func testNormalizedUsageIsExtracted() {
+        // message.assistant with normalizedUsage should include incrementalTokens
+        let events = [
+            sessionEvent(type: "message.assistant", payload: [
+                "content": AnyCodable([["type": "text", "text": "Hello"]]),
+                "turn": AnyCodable(1),
+                "tokenUsage": AnyCodable([
+                    "inputTokens": 100,
+                    "outputTokens": 50
+                ]),
+                "normalizedUsage": AnyCodable([
+                    "newInputTokens": 25,
+                    "outputTokens": 50,
+                    "contextWindowTokens": 150,
+                    "rawInputTokens": 100,
+                    "cacheReadTokens": 75,
+                    "cacheCreationTokens": 0
+                ])
+            ], timestamp: timestamp(0), sequence: 1)
+        ]
+
+        let messages = UnifiedEventTransformer.transformPersistedEvents(events)
+
+        XCTAssertEqual(messages.count, 1)
+        // Verify incrementalTokens is set from normalizedUsage
+        XCTAssertNotNil(messages[0].incrementalTokens)
+        XCTAssertEqual(messages[0].incrementalTokens?.inputTokens, 25)  // newInputTokens
+        XCTAssertEqual(messages[0].incrementalTokens?.outputTokens, 50)
+    }
+
+    func testAskUserQuestionPendingStatus() {
+        // AskUserQuestion with no subsequent events should have pending status
+        let toolCallId = "auq-\(UUID().uuidString)"
+        // JSON must match AskUserQuestionParams exactly: id, question, options, mode (single/multi)
+        let questionsJson = """
+        {"questions":[{"id":"q1","question":"What is your name?","options":[{"label":"Alice"},{"label":"Bob"}],"mode":"single"}]}
+        """
+        let events = [
+            sessionEvent(type: "tool.call", payload: [
+                "name": AnyCodable("AskUserQuestion"),
+                "toolCallId": AnyCodable(toolCallId),
+                "arguments": AnyCodable(questionsJson),
+                "turn": AnyCodable(1)
+            ], timestamp: timestamp(0), sequence: 1),
+            sessionEvent(type: "message.assistant", payload: [
+                "content": AnyCodable([
+                    ["type": "tool_use", "id": toolCallId, "name": "AskUserQuestion", "input": [
+                        "questions": [
+                            ["id": "q1", "question": "What is your name?", "options": [["label": "Alice"], ["label": "Bob"]], "mode": "single"]
+                        ]
+                    ]]
+                ]),
+                "turn": AnyCodable(1)
+            ], timestamp: timestamp(1), sequence: 2)
+            // No subsequent message.user - question is pending
+        ]
+
+        let messages = UnifiedEventTransformer.transformPersistedEvents(events)
+
+        XCTAssertEqual(messages.count, 1)
+        if case .askUserQuestion(let data) = messages[0].content {
+            XCTAssertEqual(data.status, .pending)
+            XCTAssertEqual(data.params.questions.count, 1)
+            XCTAssertEqual(data.params.questions[0].question, "What is your name?")
+        } else {
+            XCTFail("Expected askUserQuestion content")
+        }
+    }
+
+    func testAskUserQuestionAnsweredStatus() {
+        // AskUserQuestion followed by answer message should have answered status
+        // NOTE: Status detection requires reconstructSessionState (not transformPersistedEvents)
+        // because it needs the full event array to detect subsequent user messages
+        let toolCallId = "auq-\(UUID().uuidString)"
+        let questionsJson = """
+        {"questions":[{"id":"q1","question":"What is your name?","options":[{"label":"Alice","description":"First option"},{"label":"Bob","description":"Second option"}],"mode":"single"}]}
+        """
+        let events = [
+            rawEvent(type: "tool.call", payload: [
+                "name": AnyCodable("AskUserQuestion"),
+                "toolCallId": AnyCodable(toolCallId),
+                "arguments": AnyCodable(questionsJson),
+                "turn": AnyCodable(1)
+            ], timestamp: timestamp(0), sequence: 1),
+            rawEvent(type: "message.assistant", payload: [
+                "content": AnyCodable([
+                    ["type": "tool_use", "id": toolCallId, "name": "AskUserQuestion", "input": [
+                        "questions": [
+                            ["id": "q1", "question": "What is your name?", "options": [["label": "Alice", "description": "First option"], ["label": "Bob", "description": "Second option"]], "mode": "single"]
+                        ]
+                    ]]
+                ]),
+                "turn": AnyCodable(1)
+            ], timestamp: timestamp(1), sequence: 2),
+            rawEvent(type: "message.user", payload: [
+                "content": AnyCodable("[Answers to your questions]\n\n**What is your name?**\nAnswer: Alice")
+            ], timestamp: timestamp(2), sequence: 3)
+        ]
+
+        // Use reconstructSessionState which passes allEvents to status detection
+        let state = UnifiedEventTransformer.reconstructSessionState(from: events)
+
+        // Should have AskUserQuestion (answered) + AnsweredQuestions chip
+        XCTAssertGreaterThanOrEqual(state.messages.count, 1)
+        if case .askUserQuestion(let data) = state.messages[0].content {
+            XCTAssertEqual(data.status, .answered)
+        } else {
+            XCTFail("Expected askUserQuestion content with answered status")
+        }
+    }
+
+    func testAskUserQuestionSupersededStatus() {
+        // AskUserQuestion followed by different user message should have superseded status
+        // NOTE: Status detection requires reconstructSessionState (not transformPersistedEvents)
+        let toolCallId = "auq-\(UUID().uuidString)"
+        let questionsJson = """
+        {"questions":[{"id":"q1","question":"Pick one?","options":[{"label":"A"},{"label":"B"}],"mode":"single"}]}
+        """
+        let events = [
+            rawEvent(type: "tool.call", payload: [
+                "name": AnyCodable("AskUserQuestion"),
+                "toolCallId": AnyCodable(toolCallId),
+                "arguments": AnyCodable(questionsJson),
+                "turn": AnyCodable(1)
+            ], timestamp: timestamp(0), sequence: 1),
+            rawEvent(type: "message.assistant", payload: [
+                "content": AnyCodable([
+                    ["type": "tool_use", "id": toolCallId, "name": "AskUserQuestion", "input": [
+                        "questions": [
+                            ["id": "q1", "question": "Pick one?", "options": [["label": "A"], ["label": "B"]], "mode": "single"]
+                        ]
+                    ]]
+                ]),
+                "turn": AnyCodable(1)
+            ], timestamp: timestamp(1), sequence: 2),
+            // User sends different message instead of answering
+            rawEvent(type: "message.user", payload: [
+                "content": AnyCodable("Never mind, let's do something else")
+            ], timestamp: timestamp(2), sequence: 3)
+        ]
+
+        // Use reconstructSessionState which passes allEvents to status detection
+        let state = UnifiedEventTransformer.reconstructSessionState(from: events)
+
+        XCTAssertGreaterThanOrEqual(state.messages.count, 1)
+        if case .askUserQuestion(let data) = state.messages[0].content {
+            XCTAssertEqual(data.status, .superseded)
+        } else {
+            XCTFail("Expected askUserQuestion content with superseded status")
+        }
+    }
+
+    func testReconstructSessionStateWithNormalizedUsage() {
+        // Reconstruction should extract contextWindowTokens from normalizedUsage
+        let events = [
+            rawEvent(type: "session.start", payload: [
+                "model": AnyCodable("claude-sonnet-4")
+            ], timestamp: timestamp(0), sequence: 1),
+            rawEvent(type: "message.assistant", payload: [
+                "content": AnyCodable([["type": "text", "text": "Hello"]]),
+                "turn": AnyCodable(1),
+                "tokenUsage": AnyCodable([
+                    "inputTokens": 100,
+                    "outputTokens": 50
+                ]),
+                "normalizedUsage": AnyCodable([
+                    "newInputTokens": 25,
+                    "outputTokens": 50,
+                    "contextWindowTokens": 150,
+                    "rawInputTokens": 100,
+                    "cacheReadTokens": 75,
+                    "cacheCreationTokens": 0
+                ])
+            ], timestamp: timestamp(1), sequence: 2)
+        ]
+
+        let state = UnifiedEventTransformer.reconstructSessionState(from: events)
+
+        // lastTurnInputTokens should come from normalizedUsage.contextWindowTokens
+        XCTAssertEqual(state.lastTurnInputTokens, 150)
+        // totalTokenUsage accumulates from tokenUsage
+        XCTAssertEqual(state.totalTokenUsage.inputTokens, 100)
+        XCTAssertEqual(state.totalTokenUsage.outputTokens, 50)
+    }
+
+    func testContentBlockWithMissingType() {
+        // Content blocks without type should be skipped gracefully
+        let events = [
+            sessionEvent(type: "message.assistant", payload: [
+                "content": AnyCodable([
+                    ["text": "No type field"],  // Missing type
+                    ["type": "text", "text": "Has type"]
+                ]),
+                "turn": AnyCodable(1)
+            ], timestamp: timestamp(0), sequence: 1)
+        ]
+
+        let messages = UnifiedEventTransformer.transformPersistedEvents(events)
+
+        // Should only produce one message (the one with type)
+        XCTAssertEqual(messages.count, 1)
+        if case .text(let text) = messages[0].content {
+            XCTAssertEqual(text, "Has type")
+        } else {
+            XCTFail("Expected text content")
+        }
+    }
+
+    func testReconstructionSkipsDeletedEvents() {
+        // Events targeted by message.deleted should be skipped in reconstruction
+        let userEventId = UUID().uuidString
+        let events = [
+            rawEvent(id: userEventId, type: "message.user", payload: [
+                "content": AnyCodable("Delete me")
+            ], timestamp: timestamp(0), sequence: 1),
+            rawEvent(type: "message.assistant", payload: [
+                "content": AnyCodable([["type": "text", "text": "Response"]]),
+                "turn": AnyCodable(1)
+            ], timestamp: timestamp(1), sequence: 2),
+            // message.deleted requires targetEventId AND targetType
+            rawEvent(type: "message.deleted", payload: [
+                "targetEventId": AnyCodable(userEventId),
+                "targetType": AnyCodable("message.user"),
+                "reason": AnyCodable("user_request")
+            ], timestamp: timestamp(2), sequence: 3)
+        ]
+
+        let state = UnifiedEventTransformer.reconstructSessionState(from: events)
+
+        // The deleted user message should not appear
+        // Only assistant message should remain (text content)
+        XCTAssertEqual(state.messages.count, 1)
+        XCTAssertEqual(state.messages[0].role, .assistant)
+        if case .text(let text) = state.messages[0].content {
+            XCTAssertEqual(text, "Response")
+        }
+    }
 }

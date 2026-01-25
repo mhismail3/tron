@@ -280,15 +280,15 @@ class EventStoreManager: ObservableObject {
     }
 
     /// Get full reconstructed session state using the unified transformer.
-    func getReconstructedState(sessionId: String) throws -> UnifiedEventTransformer.ReconstructedState {
+    func getReconstructedState(sessionId: String) throws -> ReconstructedState {
         guard let session = try eventDB.getSession(sessionId) else {
             logger.warning("[RECONSTRUCT] Session not found: \(sessionId)", category: .session)
-            return UnifiedEventTransformer.ReconstructedState()
+            return ReconstructedState()
         }
 
         guard let headEventId = session.headEventId else {
             logger.warning("[RECONSTRUCT] Session \(sessionId) has no headEventId", category: .session)
-            return UnifiedEventTransformer.ReconstructedState()
+            return ReconstructedState()
         }
 
         logger.info("[RECONSTRUCT] Loading state for session \(sessionId), headEventId=\(headEventId)", category: .session)
