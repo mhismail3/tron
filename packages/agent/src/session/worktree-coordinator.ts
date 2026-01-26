@@ -15,16 +15,29 @@
  * - Event store is source of truth for session state
  * - Lazy isolation: only create worktrees when needed
  * - Graceful degradation: work without git if necessary
+ *
+ * Delegated to handlers:
+ * - GitExecutor: Low-level git command execution
+ * - WorktreeEvents: Event emission
+ *
+ * Available for future delegation (tested, in worktree/ folder):
+ * - WorktreeLifecycle: Worktree CRUD operations
+ * - MergeHandler: Merge/rebase/squash strategies
  */
 
-import { spawn } from 'child_process';
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import { createLogger } from '../logging/index.js';
 import { WorkingDirectory, createWorkingDirectory } from './working-directory.js';
 import type { WorkingDirectoryInfo } from './working-directory.js';
 import type { EventStore } from '../events/event-store.js';
-import type { SessionId, WorktreeAcquiredEvent, WorktreeReleasedEvent, WorktreeCommitEvent, WorktreeMergedEvent } from '../events/types.js';
+import type { SessionId } from '../events/types.js';
+import {
+  GitExecutor,
+  createGitExecutor,
+  WorktreeEvents,
+  createWorktreeEvents,
+} from './worktree/index.js';
 
 const logger = createLogger('worktree-coordinator');
 
@@ -75,51 +88,6 @@ interface ActiveSession {
   acquiredAt: Date;
 }
 
-// =============================================================================
-// Git Helpers
-// =============================================================================
-
-/**
- * Check if a path exists on the filesystem
- */
-async function pathExists(p: string): Promise<boolean> {
-  try {
-    await fs.access(p);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-async function execGit(
-  args: string[],
-  cwd: string,
-  options?: { timeout?: number }
-): Promise<{ stdout: string; stderr: string; exitCode: number }> {
-  return new Promise((resolve, reject) => {
-    const timeout = options?.timeout ?? 30000;
-    const proc = spawn('git', args, { cwd, timeout });
-
-    let stdout = '';
-    let stderr = '';
-
-    proc.stdout.on('data', (data: Buffer) => {
-      stdout += data.toString();
-    });
-
-    proc.stderr.on('data', (data: Buffer) => {
-      stderr += data.toString();
-    });
-
-    proc.on('close', (code) => {
-      resolve({ stdout: stdout.trim(), stderr: stderr.trim(), exitCode: code ?? 0 });
-    });
-
-    proc.on('error', (error) => {
-      reject(error);
-    });
-  });
-}
 
 // =============================================================================
 // WorktreeCoordinator Class
@@ -140,6 +108,10 @@ export class WorktreeCoordinator {
   private mainDirectoryOwner: string | null = null;
   private repoRoot: string | null = null;
 
+  // Handlers for delegated operations
+  private gitExecutor: GitExecutor;
+  private worktreeEvents: WorktreeEvents;
+
   constructor(
     private eventStore: EventStore,
     config: WorktreeCoordinatorConfig = {}
@@ -153,50 +125,53 @@ export class WorktreeCoordinator {
       deleteWorktreeOnRelease: true,
       ...config,
     };
+
+    // Initialize handlers that don't need repo root
+    this.gitExecutor = createGitExecutor();
+    this.worktreeEvents = createWorktreeEvents({
+      eventStore: {
+        append: async (sessionId, type, payload) => {
+          await this.eventStore.append({
+            sessionId,
+            type: type as import('../events/types.js').EventType,
+            payload: payload as Record<string, unknown>,
+          });
+          return 'event-id';
+        },
+      },
+    });
   }
 
   // ===========================================================================
-  // Repository Detection
+  // Repository Detection (delegated to GitExecutor)
   // ===========================================================================
 
   /**
    * Check if a directory is inside a git repository
    */
   async isGitRepo(dir: string): Promise<boolean> {
-    try {
-      const result = await execGit(['rev-parse', '--git-dir'], dir);
-      return result.exitCode === 0;
-    } catch {
-      return false;
-    }
+    return this.gitExecutor.isGitRepo(dir);
   }
 
   /**
    * Get the root directory of the git repository
    */
   async getRepoRoot(dir: string): Promise<string | null> {
-    try {
-      const result = await execGit(['rev-parse', '--show-toplevel'], dir);
-      return result.exitCode === 0 ? result.stdout : null;
-    } catch {
-      return null;
-    }
+    return this.gitExecutor.getRepoRoot(dir);
   }
 
   /**
    * Get current branch name
    */
   async getCurrentBranch(dir: string): Promise<string> {
-    const result = await execGit(['rev-parse', '--abbrev-ref', 'HEAD'], dir);
-    return result.stdout || 'main';
+    return this.gitExecutor.getCurrentBranch(dir);
   }
 
   /**
    * Get current commit hash
    */
   async getCurrentCommit(dir: string): Promise<string> {
-    const result = await execGit(['rev-parse', 'HEAD'], dir);
-    return result.stdout;
+    return this.gitExecutor.getCurrentCommit(dir);
   }
 
   // ===========================================================================
@@ -275,7 +250,7 @@ export class WorktreeCoordinator {
     let finalCommit: string | undefined;
 
     // Check if the working directory still exists
-    const dirExists = await pathExists(workingDir.path);
+    const dirExists = await this.gitExecutor.pathExists(workingDir.path);
     if (!dirExists) {
       logger.warn('Working directory no longer exists, cleaning up session state only', {
         sessionId,
@@ -296,9 +271,9 @@ export class WorktreeCoordinator {
       });
 
       // Prune any stale worktree references if we have a repo root
-      if (this.repoRoot && await pathExists(this.repoRoot)) {
+      if (this.repoRoot && await this.gitExecutor.pathExists(this.repoRoot)) {
         try {
-          await execGit(['worktree', 'prune'], this.repoRoot);
+          await this.gitExecutor.execGit(['worktree', 'prune'], this.repoRoot);
         } catch {
           // Ignore prune errors
         }
@@ -602,21 +577,21 @@ export class WorktreeCoordinator {
     baseCommit: string
   ): Promise<void> {
     // Check if branch exists
-    const branchCheck = await execGit(
+    const branchCheck = await this.gitExecutor.execGit(
       ['rev-parse', '--verify', branchName],
       this.repoRoot!
     );
 
     if (branchCheck.exitCode !== 0) {
       // Create branch from base commit
-      await execGit(
+      await this.gitExecutor.execGit(
         ['branch', branchName, baseCommit],
         this.repoRoot!
       );
     }
 
     // Create worktree
-    const result = await execGit(
+    const result = await this.gitExecutor.execGit(
       ['worktree', 'add', worktreePath, branchName],
       this.repoRoot!
     );
@@ -633,7 +608,7 @@ export class WorktreeCoordinator {
    */
   private async removeWorktree(worktreePath: string): Promise<void> {
     // Check if directory exists before trying git operations
-    const dirExists = await pathExists(worktreePath);
+    const dirExists = await this.gitExecutor.pathExists(worktreePath);
 
     if (!dirExists) {
       // Directory already gone - just prune stale worktree references
@@ -641,14 +616,14 @@ export class WorktreeCoordinator {
         path: worktreePath,
       });
       try {
-        await execGit(['worktree', 'prune'], this.repoRoot!);
+        await this.gitExecutor.execGit(['worktree', 'prune'], this.repoRoot!);
       } catch {
         // Ignore prune errors
       }
       return;
     }
 
-    const result = await execGit(
+    const result = await this.gitExecutor.execGit(
       ['worktree', 'remove', worktreePath, '--force'],
       this.repoRoot!
     );
@@ -663,7 +638,7 @@ export class WorktreeCoordinator {
       try {
         await fs.rm(worktreePath, { recursive: true, force: true });
         // Prune worktree references
-        await execGit(['worktree', 'prune'], this.repoRoot!);
+        await this.gitExecutor.execGit(['worktree', 'prune'], this.repoRoot!);
       } catch (error) {
         logger.error('Failed to remove worktree directory', {
           path: worktreePath,
@@ -699,14 +674,14 @@ export class WorktreeCoordinator {
       }
 
       // Check for conflicts
-      const checkResult = await execGit(
+      const checkResult = await this.gitExecutor.execGit(
         ['merge', '--no-commit', '--no-ff', workingDir.branch],
         this.repoRoot!
       );
 
       if (checkResult.exitCode !== 0) {
         // Abort the merge attempt
-        await execGit(['merge', '--abort'], this.repoRoot!);
+        await this.gitExecutor.execGit(['merge', '--abort'], this.repoRoot!);
         return {
           success: false,
           conflicts: [checkResult.stderr],
@@ -714,41 +689,41 @@ export class WorktreeCoordinator {
       }
 
       // Abort the test merge
-      await execGit(['merge', '--abort'], this.repoRoot!);
+      await this.gitExecutor.execGit(['merge', '--abort'], this.repoRoot!);
 
       // Perform actual merge
       let mergeCommit: string;
       if (strategy === 'squash') {
-        await execGit(
+        await this.gitExecutor.execGit(
           ['checkout', targetBranch],
           this.repoRoot!
         );
-        await execGit(
+        await this.gitExecutor.execGit(
           ['merge', '--squash', workingDir.branch],
           this.repoRoot!
         );
-        const commitResult = await execGit(
+        const commitResult = await this.gitExecutor.execGit(
           ['commit', '-m', `Squash merge session ${sessionId}`],
           this.repoRoot!
         );
         if (commitResult.exitCode !== 0) {
           throw new Error(commitResult.stderr);
         }
-        const hashResult = await execGit(['rev-parse', 'HEAD'], this.repoRoot!);
+        const hashResult = await this.gitExecutor.execGit(['rev-parse', 'HEAD'], this.repoRoot!);
         mergeCommit = hashResult.stdout;
       } else {
-        await execGit(
+        await this.gitExecutor.execGit(
           ['checkout', targetBranch],
           this.repoRoot!
         );
-        const mergeResult = await execGit(
+        const mergeResult = await this.gitExecutor.execGit(
           ['merge', '--no-ff', '-m', `Merge session ${sessionId}`, workingDir.branch],
           this.repoRoot!
         );
         if (mergeResult.exitCode !== 0) {
           throw new Error(mergeResult.stderr);
         }
-        const hashResult = await execGit(['rev-parse', 'HEAD'], this.repoRoot!);
+        const hashResult = await this.gitExecutor.execGit(['rev-parse', 'HEAD'], this.repoRoot!);
         mergeCommit = hashResult.stdout;
       }
 
@@ -781,19 +756,15 @@ export class WorktreeCoordinator {
   }
 
   // ===========================================================================
-  // Event Emission
+  // Event Emission (delegated to WorktreeEvents)
   // ===========================================================================
 
   private async emitAcquiredEvent(
     sessionId: SessionId,
-    payload: WorktreeAcquiredEvent['payload']
+    payload: { path: string; branch: string; baseCommit: string; isolated: boolean; forkedFrom?: { sessionId: SessionId; commit: string } }
   ): Promise<void> {
     try {
-      await this.eventStore.append({
-        sessionId,
-        type: 'worktree.acquired',
-        payload: payload as unknown as Record<string, unknown>,
-      });
+      await this.worktreeEvents.emitAcquired(sessionId, payload);
     } catch (error) {
       logger.warn('Failed to emit worktree.acquired event', {
         sessionId,
@@ -804,13 +775,18 @@ export class WorktreeCoordinator {
 
   private async emitReleasedEvent(
     sessionId: SessionId,
-    payload: WorktreeReleasedEvent['payload']
+    payload: { finalCommit?: string; deleted?: boolean; branchPreserved?: boolean }
   ): Promise<void> {
     try {
-      await this.eventStore.append({
-        sessionId,
-        type: 'worktree.released',
-        payload: payload as unknown as Record<string, unknown>,
+      const session = this.activeSessions.get(sessionId as string);
+      const path = session?.workingDirectory?.path ?? '';
+      const branch = session?.workingDirectory?.branch ?? '';
+      await this.worktreeEvents.emitReleased(sessionId, {
+        path,
+        branch,
+        finalCommit: payload.finalCommit,
+        branchDeleted: !payload.branchPreserved,
+        worktreeDeleted: payload.deleted,
       });
     } catch (error) {
       logger.warn('Failed to emit worktree.released event', {
@@ -822,13 +798,15 @@ export class WorktreeCoordinator {
 
   private async emitCommitEvent(
     sessionId: SessionId,
-    payload: WorktreeCommitEvent['payload']
+    payload: { commitHash: string; message: string; filesChanged?: string[]; insertions?: number; deletions?: number }
   ): Promise<void> {
     try {
-      await this.eventStore.append({
-        sessionId,
-        type: 'worktree.commit',
-        payload: payload as unknown as Record<string, unknown>,
+      await this.worktreeEvents.emitCommit(sessionId, {
+        hash: payload.commitHash,
+        message: payload.message,
+        filesChanged: payload.filesChanged,
+        insertions: payload.insertions,
+        deletions: payload.deletions,
       });
     } catch (error) {
       logger.warn('Failed to emit worktree.commit event', {
@@ -840,13 +818,15 @@ export class WorktreeCoordinator {
 
   private async emitMergedEvent(
     sessionId: SessionId,
-    payload: WorktreeMergedEvent['payload']
+    payload: { sourceBranch: string; targetBranch: string; mergeCommit?: string; strategy: 'merge' | 'rebase' | 'squash' }
   ): Promise<void> {
     try {
-      await this.eventStore.append({
-        sessionId,
-        type: 'worktree.merged',
-        payload: payload as unknown as Record<string, unknown>,
+      await this.worktreeEvents.emitMerged(sessionId, {
+        success: !!payload.mergeCommit,
+        strategy: payload.strategy,
+        targetBranch: payload.targetBranch,
+        sourceBranch: payload.sourceBranch,
+        commitHash: payload.mergeCommit,
       });
     } catch (error) {
       logger.warn('Failed to emit worktree.merged event', {
@@ -871,7 +851,7 @@ export class WorktreeCoordinator {
     const worktreeBase = this.config.worktreeBaseDir || path.join(this.repoRoot, '.worktrees');
 
     // Check if worktree base directory exists
-    if (!await pathExists(worktreeBase)) {
+    if (!await this.gitExecutor.pathExists(worktreeBase)) {
       return;
     }
 
@@ -890,7 +870,7 @@ export class WorktreeCoordinator {
         }
 
         // Verify directory still exists (might have been deleted externally)
-        if (!await pathExists(worktreePath)) {
+        if (!await this.gitExecutor.pathExists(worktreePath)) {
           logger.debug('Orphaned worktree directory no longer exists', { sessionId, path: worktreePath });
           continue;
         }
@@ -899,11 +879,11 @@ export class WorktreeCoordinator {
 
         try {
           // Check for uncommitted changes
-          const statusResult = await execGit(['status', '--porcelain'], worktreePath);
+          const statusResult = await this.gitExecutor.execGit(['status', '--porcelain'], worktreePath);
           if (statusResult.stdout) {
             // Has uncommitted changes - commit them
-            await execGit(['add', '-A'], worktreePath);
-            await execGit(
+            await this.gitExecutor.execGit(['add', '-A'], worktreePath);
+            await this.gitExecutor.execGit(
               ['commit', '-m', `[RECOVERED] Session ${sessionId}`],
               worktreePath
             );
@@ -927,7 +907,7 @@ export class WorktreeCoordinator {
 
       // Prune any stale worktree references
       try {
-        await execGit(['worktree', 'prune'], this.repoRoot);
+        await this.gitExecutor.execGit(['worktree', 'prune'], this.repoRoot);
       } catch {
         // Ignore prune errors
       }
@@ -946,7 +926,7 @@ export class WorktreeCoordinator {
       return [];
     }
 
-    const result = await execGit(['worktree', 'list', '--porcelain'], this.repoRoot);
+    const result = await this.gitExecutor.execGit(['worktree', 'list', '--porcelain'], this.repoRoot);
     if (result.exitCode !== 0) {
       return [];
     }
