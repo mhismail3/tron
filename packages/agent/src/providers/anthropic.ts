@@ -23,6 +23,7 @@ import { shouldRefreshTokens, refreshOAuthToken, type OAuthTokens } from '../aut
 import { parseError, formatError } from '../utils/errors.js';
 import { calculateBackoffDelay, type RetryConfig } from '../utils/retry.js';
 import { getSettings } from '../settings/index.js';
+import { buildToolCallIdMapping, remapToolCallId } from './base/index.js';
 
 const logger = createLogger('anthropic');
 
@@ -869,22 +870,14 @@ export class AnthropicProvider {
     // Build a mapping of original tool call IDs to normalized IDs.
     // This is necessary when switching providers mid-session, as tool call IDs
     // from other providers (e.g., OpenAI's `call_...`) may not be recognized.
-    // Only remap IDs that don't already look like Anthropic format.
-    const idMapping = new Map<string, string>();
-    let idCounter = 0;
-
-    // First pass: collect tool call IDs that need remapping (non-Anthropic format)
+    const allToolCalls: ToolCall[] = [];
     for (const msg of messages) {
       if (msg.role === 'assistant') {
         const toolUses = msg.content.filter((c): c is ToolCall => c.type === 'tool_use');
-        for (const tc of toolUses) {
-          // Only remap IDs that don't look like Anthropic format (toolu_*)
-          if (!idMapping.has(tc.id) && !tc.id.startsWith('toolu_')) {
-            idMapping.set(tc.id, `toolu_remap_${idCounter++}`);
-          }
-        }
+        allToolCalls.push(...toolUses);
       }
     }
+    const idMapping = buildToolCallIdMapping(allToolCalls, 'anthropic');
 
     return messages
       .filter((msg): msg is Message => msg.role !== 'toolResult' || !!msg.toolCallId)
@@ -921,7 +914,7 @@ export class AnthropicProvider {
                 if (maybeToolResult.type === 'tool_result') {
                   return {
                     type: 'tool_result' as const,
-                    tool_use_id: idMapping.get(maybeToolResult.tool_use_id!) ?? maybeToolResult.tool_use_id!,
+                    tool_use_id: remapToolCallId(maybeToolResult.tool_use_id!, idMapping),
                     content: maybeToolResult.content,
                     is_error: maybeToolResult.is_error,
                   };
@@ -944,7 +937,7 @@ export class AnthropicProvider {
                 const input = c.arguments ?? (c as any).input ?? {};
                 return {
                   type: 'tool_use' as const,
-                  id: idMapping.get(c.id) ?? c.id,
+                  id: remapToolCallId(c.id, idMapping),
                   name: c.name,
                   input,
                 };
@@ -1002,7 +995,7 @@ export class AnthropicProvider {
             role: 'user' as const,
             content: [{
               type: 'tool_result' as const,
-              tool_use_id: idMapping.get(msg.toolCallId) ?? msg.toolCallId,
+              tool_use_id: remapToolCallId(msg.toolCallId, idMapping),
               content,
               is_error: msg.isError,
             }],

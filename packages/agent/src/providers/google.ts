@@ -24,7 +24,13 @@ import type {
   ToolCall,
 } from '../types/index.js';
 import { createLogger } from '../logging/index.js';
-import { withProviderRetry, type StreamRetryConfig } from './base/index.js';
+import {
+  withProviderRetry,
+  type StreamRetryConfig,
+  mapGoogleStopReason,
+  buildToolCallIdMapping,
+  remapToolCallId,
+} from './base/index.js';
 import {
   type GoogleOAuthEndpoint,
   refreshGoogleOAuthToken,
@@ -989,7 +995,7 @@ export class GoogleProvider {
                 role: 'assistant',
                 content,
                 usage: { inputTokens, outputTokens, providerType: 'google' as const },
-                stopReason: this.mapStopReason(candidate.finishReason),
+                stopReason: mapGoogleStopReason(candidate.finishReason),
               };
 
               yield {
@@ -1037,22 +1043,14 @@ export class GoogleProvider {
 
     // Build a mapping of original tool call IDs to normalized IDs.
     // This is necessary when switching providers mid-session.
-    // Only remap IDs that don't already look like the expected format.
-    const idMapping = new Map<string, string>();
-    let idCounter = 0;
-
-    // First pass: collect tool call IDs that need remapping (non-standard format)
+    const allToolCalls: ToolCall[] = [];
     for (const msg of context.messages) {
       if (msg.role === 'assistant') {
         const toolUses = msg.content.filter((c): c is ToolCall => c.type === 'tool_use');
-        for (const tc of toolUses) {
-          // Only remap IDs that don't look like call_* format
-          if (!idMapping.has(tc.id) && !tc.id.startsWith('call_')) {
-            idMapping.set(tc.id, `call_remap_${idCounter++}`);
-          }
-        }
+        allToolCalls.push(...toolUses);
       }
     }
+    const idMapping = buildToolCallIdMapping(allToolCalls, 'openai');
 
     for (const msg of context.messages) {
       if (msg.role === 'user') {
@@ -1111,7 +1109,7 @@ export class GoogleProvider {
               name: 'tool_result',
               response: {
                 result: content,
-                tool_call_id: idMapping.get(msg.toolCallId) ?? msg.toolCallId,
+                tool_call_id: remapToolCallId(msg.toolCallId, idMapping),
               },
             },
           }],
@@ -1170,23 +1168,4 @@ export class GoogleProvider {
     return result;
   }
 
-  /**
-   * Map Gemini stop reason to our format
-   */
-  private mapStopReason(reason: string): AssistantMessage['stopReason'] {
-    switch (reason) {
-      case 'STOP':
-        return 'end_turn';
-      case 'MAX_TOKENS':
-        return 'max_tokens';
-      case 'SAFETY':
-        return 'end_turn';
-      case 'RECITATION':
-        return 'end_turn';
-      case 'OTHER':
-        return 'end_turn';
-      default:
-        return 'end_turn';
-    }
-  }
 }

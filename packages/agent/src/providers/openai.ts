@@ -16,7 +16,13 @@ import type {
   ToolCall,
 } from '../types/index.js';
 import { createLogger } from '../logging/index.js';
-import { withProviderRetry, type StreamRetryConfig } from './base/index.js';
+import {
+  withProviderRetry,
+  type StreamRetryConfig,
+  mapOpenAIStopReason,
+  buildToolCallIdMapping,
+  remapToolCallId,
+} from './base/index.js';
 
 const logger = createLogger('openai');
 
@@ -498,7 +504,7 @@ export class OpenAIProvider {
                 role: 'assistant',
                 content,
                 usage: { inputTokens, outputTokens, cacheReadTokens, providerType: 'openai' as const },
-                stopReason: this.mapStopReason(choice.finish_reason),
+                stopReason: mapOpenAIStopReason(choice.finish_reason),
               };
 
               yield {
@@ -544,22 +550,14 @@ export class OpenAIProvider {
     // Build a mapping of original tool call IDs to normalized IDs.
     // This is necessary when switching providers mid-session, as tool call IDs
     // from other providers (e.g., Anthropic's `toolu_01...`) are not recognized.
-    // Only remap IDs that don't already look like OpenAI format.
-    const idMapping = new Map<string, string>();
-    let idCounter = 0;
-
-    // First pass: collect tool call IDs that need remapping (non-OpenAI format)
+    const allToolCalls: ToolCall[] = [];
     for (const msg of context.messages) {
       if (msg.role === 'assistant') {
         const toolUses = msg.content.filter((c): c is ToolCall => c.type === 'tool_use');
-        for (const tc of toolUses) {
-          // Only remap IDs that don't look like OpenAI format (call_*)
-          if (!idMapping.has(tc.id) && !tc.id.startsWith('call_')) {
-            idMapping.set(tc.id, `call_remap_${idCounter++}`);
-          }
-        }
+        allToolCalls.push(...toolUses);
       }
     }
+    const idMapping = buildToolCallIdMapping(allToolCalls, 'openai');
 
     // Add system prompt
     if (context.systemPrompt) {
@@ -593,7 +591,7 @@ export class OpenAIProvider {
         const toolCalls = msg.content
           .filter((c): c is ToolCall => c.type === 'tool_use')
           .map(tc => ({
-            id: idMapping.get(tc.id) ?? tc.id,
+            id: remapToolCallId(tc.id, idMapping),
             type: 'function' as const,
             function: {
               name: tc.name,
@@ -617,7 +615,7 @@ export class OpenAIProvider {
 
         messages.push({
           role: 'tool',
-          tool_call_id: idMapping.get(msg.toolCallId) ?? msg.toolCallId,
+          tool_call_id: remapToolCallId(msg.toolCallId, idMapping),
           content,
         });
       }
@@ -640,21 +638,4 @@ export class OpenAIProvider {
     }));
   }
 
-  /**
-   * Map OpenAI stop reason to our format
-   */
-  private mapStopReason(reason: string | null): AssistantMessage['stopReason'] {
-    switch (reason) {
-      case 'stop':
-        return 'end_turn';
-      case 'length':
-        return 'max_tokens';
-      case 'tool_calls':
-        return 'tool_use';
-      case 'content_filter':
-        return 'end_turn';
-      default:
-        return 'end_turn';
-    }
-  }
 }
