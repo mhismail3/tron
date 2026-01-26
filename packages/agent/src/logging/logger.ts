@@ -14,6 +14,7 @@ import pino from 'pino';
 import type Database from 'better-sqlite3';
 import { SQLiteTransport } from './sqlite-transport.js';
 import { getLoggingContext } from './log-context.js';
+import type { LoggerRegistry } from './logger-registry.js';
 
 // =============================================================================
 // Types
@@ -149,19 +150,22 @@ function createPinoLogger(options: LoggerOptions = {}): pino.Logger {
 export class TronLogger {
   private pino: pino.Logger;
   private context: LogContext;
+  private registry: LoggerRegistry | null;
 
-  constructor(options: LoggerOptions = {}, context: LogContext = {}) {
+  constructor(options: LoggerOptions = {}, context: LogContext = {}, registry?: LoggerRegistry) {
     this.pino = createPinoLogger(options);
     this.context = context;
+    this.registry = registry ?? null;
   }
 
   /**
    * Private constructor for child loggers - avoids creating new pino transport
    */
-  private static fromPino(pinoLogger: pino.Logger, context: LogContext): TronLogger {
+  private static fromPino(pinoLogger: pino.Logger, context: LogContext, registry: LoggerRegistry | null): TronLogger {
     const logger = Object.create(TronLogger.prototype) as TronLogger;
     logger.pino = pinoLogger;
     logger.context = context;
+    logger.registry = registry;
     return logger;
   }
 
@@ -171,20 +175,23 @@ export class TronLogger {
    */
   child(context: LogContext): TronLogger {
     const mergedContext = { ...this.context, ...context };
-    return TronLogger.fromPino(this.pino.child(context), mergedContext);
+    return TronLogger.fromPino(this.pino.child(context), mergedContext, this.registry);
   }
 
   /**
    * Write to SQLite transport with full context
+   * Uses registry transport if available, falls back to global transport
    */
   private writeToSqlite(level: LogLevel, msg: string, data?: Record<string, unknown>, err?: Error): void {
-    if (!globalSqliteTransport) return;
+    // Try registry transport first, then global transport for backward compatibility
+    const transport = this.registry?.getTransport() ?? globalSqliteTransport;
+    if (!transport) return;
 
     try {
       // Merge logger context with AsyncLocalStorage context
       const asyncContext = getLoggingContext();
 
-      globalSqliteTransport.write({
+      transport.write({
         level: LOG_LEVEL_NUM[level],
         time: Date.now(),
         msg,
