@@ -9,6 +9,9 @@
  */
 
 import type { BrowserSession, ActionResult, BrowserHandlerDeps } from './types.js';
+import { createLogger, categorizeError } from '../../../logging/index.js';
+
+const logger = createLogger('browser:state');
 
 // =============================================================================
 // Types
@@ -52,6 +55,15 @@ export class StateHandler {
         return { success: false, error: 'Either selector or timeout is required' };
       }
     } catch (error) {
+      const structuredError = categorizeError(error, { action: 'wait', selector: params.selector, timeout: params.timeout });
+      logger.error('Wait failed', {
+        selector: params.selector,
+        timeout: params.timeout,
+        code: structuredError.code,
+        category: structuredError.category,
+        error: structuredError.message,
+        retryable: structuredError.retryable,
+      });
       return {
         success: false,
         error: error instanceof Error ? error.message : 'Wait failed',
@@ -94,6 +106,15 @@ export class StateHandler {
 
       return { success: true, data: { direction, amount } };
     } catch (error) {
+      const structuredError = categorizeError(error, { action: 'scroll', direction: params.direction, selector: params.selector });
+      logger.error('Scroll failed', {
+        direction: params.direction,
+        selector: params.selector,
+        code: structuredError.code,
+        category: structuredError.category,
+        error: structuredError.message,
+        retryable: structuredError.retryable,
+      });
       return {
         success: false,
         error: error instanceof Error ? error.message : 'Scroll failed',

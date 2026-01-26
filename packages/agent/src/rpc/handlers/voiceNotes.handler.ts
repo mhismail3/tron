@@ -7,6 +7,7 @@
  * - voiceNotes.delete: Delete a voice note
  */
 
+import { createLogger, categorizeError, LogErrorCategory } from '../../logging/index.js';
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import type {
@@ -23,6 +24,8 @@ import type {
 import type { RpcContext } from '../handler.js';
 import { MethodRegistry, type MethodRegistration, type MethodHandler } from '../registry.js';
 import { getNotesDir } from '../../settings/loader.js';
+
+const logger = createLogger('rpc:voiceNotes');
 
 // =============================================================================
 // Handler Implementations
@@ -95,6 +98,13 @@ ${transcribeResult.text}
 
     return MethodRegistry.successResponse(request.id, result);
   } catch (error) {
+    const structured = categorizeError(error, { operation: 'save' });
+    logger.error('Failed to save voice note', {
+      code: structured.code,
+      category: LogErrorCategory.FILESYSTEM,
+      error: structured.message,
+      retryable: structured.retryable,
+    });
     const message = error instanceof Error ? error.message : 'Failed to save voice note';
     return MethodRegistry.errorResponse(request.id, 'VOICE_NOTE_SAVE_FAILED', message);
   }
@@ -207,6 +217,13 @@ export async function handleVoiceNotesList(
     const result: VoiceNotesListResult = { notes, totalCount, hasMore };
     return MethodRegistry.successResponse(request.id, result);
   } catch (error) {
+    const structured = categorizeError(error, { operation: 'list', limit, offset });
+    logger.error('Failed to list voice notes', {
+      code: structured.code,
+      category: LogErrorCategory.FILESYSTEM,
+      error: structured.message,
+      retryable: structured.retryable,
+    });
     const message = error instanceof Error ? error.message : 'Failed to list voice notes';
     return MethodRegistry.errorResponse(request.id, 'VOICE_NOTES_LIST_FAILED', message);
   }
@@ -255,6 +272,14 @@ export async function handleVoiceNotesDelete(
 
     return MethodRegistry.successResponse(request.id, result);
   } catch (error) {
+    const structured = categorizeError(error, { filename: params.filename, operation: 'delete' });
+    logger.error('Failed to delete voice note', {
+      filename: params.filename,
+      code: structured.code,
+      category: LogErrorCategory.FILESYSTEM,
+      error: structured.message,
+      retryable: structured.retryable,
+    });
     const message = error instanceof Error ? error.message : 'Failed to delete voice note';
     return MethodRegistry.errorResponse(request.id, 'VOICE_NOTE_DELETE_FAILED', message);
   }

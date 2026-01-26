@@ -11,6 +11,9 @@
  */
 
 import type { BrowserSession, ActionResult, BrowserHandlerDeps } from './types.js';
+import { createLogger, categorizeError } from '../../../logging/index.js';
+
+const logger = createLogger('browser:navigation');
 
 // =============================================================================
 // Types
@@ -51,6 +54,14 @@ export class NavigationHandler {
       await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
       return { success: true, data: { url } };
     } catch (error) {
+      const structuredError = categorizeError(error, { action: 'navigate', url });
+      logger.error('Navigation failed', {
+        url,
+        code: structuredError.code,
+        category: structuredError.category,
+        error: structuredError.message,
+        retryable: structuredError.retryable,
+      });
       return {
         success: false,
         error: error instanceof Error ? error.message : 'Navigation failed',
@@ -67,6 +78,13 @@ export class NavigationHandler {
       await page.goBack({ timeout: 10000 });
       return { success: true, data: {} };
     } catch (error) {
+      const structuredError = categorizeError(error, { action: 'goBack' });
+      logger.error('Go back failed', {
+        code: structuredError.code,
+        category: structuredError.category,
+        error: structuredError.message,
+        retryable: structuredError.retryable,
+      });
       return {
         success: false,
         error: error instanceof Error ? error.message : 'Go back failed',
@@ -83,6 +101,13 @@ export class NavigationHandler {
       await page.goForward({ timeout: 10000 });
       return { success: true, data: {} };
     } catch (error) {
+      const structuredError = categorizeError(error, { action: 'goForward' });
+      logger.error('Go forward failed', {
+        code: structuredError.code,
+        category: structuredError.category,
+        error: structuredError.message,
+        retryable: structuredError.retryable,
+      });
       return {
         success: false,
         error: error instanceof Error ? error.message : 'Go forward failed',
@@ -99,6 +124,13 @@ export class NavigationHandler {
       await page.reload({ timeout: 30000 });
       return { success: true, data: {} };
     } catch (error) {
+      const structuredError = categorizeError(error, { action: 'reload' });
+      logger.error('Reload failed', {
+        code: structuredError.code,
+        category: structuredError.category,
+        error: structuredError.message,
+        retryable: structuredError.retryable,
+      });
       return {
         success: false,
         error: error instanceof Error ? error.message : 'Reload failed',

@@ -8,6 +8,7 @@
  * - skill.remove: Remove a skill from a session
  */
 
+import { createLogger, categorizeError, LogErrorCategory } from '../../logging/index.js';
 import type {
   RpcRequest,
   RpcResponse,
@@ -18,6 +19,8 @@ import type {
 } from '../types.js';
 import type { RpcContext } from '../handler.js';
 import { MethodRegistry, type MethodRegistration, type MethodHandler } from '../registry.js';
+
+const logger = createLogger('rpc:skill');
 
 // =============================================================================
 // Handler Implementations
@@ -42,6 +45,13 @@ export async function handleSkillList(
     const result = await context.skillManager.listSkills(params);
     return MethodRegistry.successResponse(request.id, result);
   } catch (error) {
+    const structured = categorizeError(error, { operation: 'list' });
+    logger.error('Failed to list skills', {
+      code: structured.code,
+      category: LogErrorCategory.SKILL_LOAD,
+      error: structured.message,
+      retryable: structured.retryable,
+    });
     const message = error instanceof Error ? error.message : 'Failed to list skills';
     return MethodRegistry.errorResponse(request.id, 'SKILL_ERROR', message);
   }
@@ -70,6 +80,14 @@ export async function handleSkillGet(
     const result = await context.skillManager.getSkill(params);
     return MethodRegistry.successResponse(request.id, result);
   } catch (error) {
+    const structured = categorizeError(error, { skillName: params.name, operation: 'get' });
+    logger.error('Failed to get skill', {
+      skillName: params.name,
+      code: structured.code,
+      category: LogErrorCategory.SKILL_LOAD,
+      error: structured.message,
+      retryable: structured.retryable,
+    });
     const message = error instanceof Error ? error.message : 'Failed to get skill';
     return MethodRegistry.errorResponse(request.id, 'SKILL_ERROR', message);
   }
@@ -94,6 +112,13 @@ export async function handleSkillRefresh(
     const result = await context.skillManager.refreshSkills(params);
     return MethodRegistry.successResponse(request.id, result);
   } catch (error) {
+    const structured = categorizeError(error, { operation: 'refresh' });
+    logger.error('Failed to refresh skills', {
+      code: structured.code,
+      category: LogErrorCategory.SKILL_LOAD,
+      error: structured.message,
+      retryable: structured.retryable,
+    });
     const message = error instanceof Error ? error.message : 'Failed to refresh skills';
     return MethodRegistry.errorResponse(request.id, 'SKILL_ERROR', message);
   }
@@ -125,6 +150,15 @@ export async function handleSkillRemove(
     const result = await context.skillManager.removeSkill(params);
     return MethodRegistry.successResponse(request.id, result);
   } catch (error) {
+    const structured = categorizeError(error, { sessionId: params.sessionId, skillName: params.skillName, operation: 'remove' });
+    logger.error('Failed to remove skill', {
+      sessionId: params.sessionId,
+      skillName: params.skillName,
+      code: structured.code,
+      category: LogErrorCategory.SKILL_LOAD,
+      error: structured.message,
+      retryable: structured.retryable,
+    });
     const message = error instanceof Error ? error.message : 'Failed to remove skill';
     return MethodRegistry.errorResponse(request.id, 'SKILL_ERROR', message);
   }

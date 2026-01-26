@@ -9,6 +9,7 @@
  * These handlers interact directly with the filesystem via Node.js fs module.
  */
 
+import { createLogger, categorizeError, LogErrorCategory } from '../../logging/index.js';
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import * as os from 'os';
@@ -23,6 +24,8 @@ import type {
 } from '../types.js';
 import type { RpcContext } from '../handler.js';
 import { MethodRegistry, type MethodRegistration, type MethodHandler } from '../registry.js';
+
+const logger = createLogger('rpc:filesystem');
 
 // =============================================================================
 // Handler Implementations
@@ -108,6 +111,14 @@ export async function handleFilesystemListDir(
 
     return MethodRegistry.successResponse(request.id, result);
   } catch (error) {
+    const structured = categorizeError(error, { path: targetPath, operation: 'listDir' });
+    logger.error('Failed to list directory', {
+      path: targetPath,
+      code: structured.code,
+      category: LogErrorCategory.FILESYSTEM,
+      error: structured.message,
+      retryable: structured.retryable,
+    });
     const message = error instanceof Error ? error.message : 'Failed to list directory';
     return MethodRegistry.errorResponse(request.id, 'FILESYSTEM_ERROR', message);
   }
@@ -253,6 +264,14 @@ export async function handleFilesystemCreateDir(
       }
     }
 
+    const structured = categorizeError(error, { path: inputPath, operation: 'createDir' });
+    logger.error('Failed to create directory', {
+      path: inputPath,
+      code: structured.code,
+      category: LogErrorCategory.FILESYSTEM,
+      error: structured.message,
+      retryable: structured.retryable,
+    });
     return MethodRegistry.errorResponse(request.id, 'FILESYSTEM_ERROR', message);
   }
 }

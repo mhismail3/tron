@@ -11,7 +11,7 @@ import * as path from 'path';
 import * as os from 'os';
 import type { SkillScanResult, SkillScanError, SkillSource } from './types.js';
 import { parseSkillMd } from './skill-parser.js';
-import { createLogger } from '../logging/index.js';
+import { createLogger, categorizeError, LogErrorCategory } from '../logging/index.js';
 
 const logger = createLogger('skills:loader');
 
@@ -86,10 +86,18 @@ export async function scanSkillsDirectory(
   try {
     entries = await fs.readdir(dirPath, { withFileTypes: true });
   } catch (error) {
+    const structured = categorizeError(error, { dirPath, operation: 'readSkillsDirectory' });
     errors.push({
       path: dirPath,
-      message: `Failed to read directory: ${error instanceof Error ? error.message : String(error)}`,
+      message: `Failed to read directory: ${structured.message}`,
       recoverable: false,
+    });
+    logger.error('Failed to read skills directory', {
+      dirPath,
+      code: structured.code,
+      category: LogErrorCategory.SKILL_LOAD,
+      error: structured.message,
+      retryable: structured.retryable,
     });
     return { skills, errors };
   }
@@ -116,16 +124,19 @@ export async function scanSkillsDirectory(
       skills.push(skill);
       logger.debug('Skill loaded', { name: skill.name, source, path: skillPath });
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
+      const structured = categorizeError(error, { skillPath, source, operation: 'loadSkill' });
       errors.push({
         path: skillPath,
-        message: `Failed to load skill: ${errorMessage}`,
+        message: `Failed to load skill: ${structured.message}`,
         recoverable: true,
       });
       logger.warn('Failed to load skill', {
         path: skillPath,
         source,
-        error: errorMessage,
+        code: structured.code,
+        category: LogErrorCategory.SKILL_LOAD,
+        error: structured.message,
+        retryable: structured.retryable,
       });
     }
   }

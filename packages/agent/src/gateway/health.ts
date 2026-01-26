@@ -4,7 +4,7 @@
  * Simple HTTP server for health checks, metrics, and API endpoints.
  */
 import * as http from 'http';
-import { createLogger } from '../logging/index.js';
+import { createLogger, categorizeError, LogErrorCategory } from '../logging/index.js';
 import {
   getProviderAuthSync,
   saveProviderAuthSync,
@@ -88,7 +88,13 @@ export class HealthServer {
       });
 
       this.server.on('error', (error) => {
-        logger.error('Health server error', error);
+        const structured = categorizeError(error, { operation: 'health_server_start' });
+        logger.error('Health server error', {
+          code: structured.code,
+          category: LogErrorCategory.NETWORK,
+          error: structured.message,
+          retryable: structured.retryable,
+        });
         reject(error);
       });
 
@@ -294,7 +300,13 @@ export class HealthServer {
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ success: true }));
       } catch (error) {
-        logger.error('Failed to save Codex tokens', error as Error);
+        const structured = categorizeError(error, { operation: 'save_codex_tokens' });
+        logger.error('Failed to save Codex tokens', {
+          code: structured.code,
+          category: LogErrorCategory.PROVIDER_AUTH,
+          error: structured.message,
+          retryable: structured.retryable,
+        });
         res.writeHead(400, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ error: 'Invalid JSON' }));
       }
@@ -322,7 +334,13 @@ export class HealthServer {
         };
       }
     } catch (error) {
-      logger.warn('Failed to read Codex tokens', { error });
+      const structured = categorizeError(error, { operation: 'read_codex_tokens' });
+      logger.warn('Failed to read Codex tokens', {
+        code: structured.code,
+        category: LogErrorCategory.PROVIDER_AUTH,
+        error: structured.message,
+        retryable: structured.retryable,
+      });
     }
     return null;
   }
@@ -340,7 +358,13 @@ export class HealthServer {
         },
       });
     } catch (error) {
-      logger.warn('Failed to save Codex tokens', { error });
+      const structured = categorizeError(error, { operation: 'persist_codex_tokens' });
+      logger.warn('Failed to save Codex tokens', {
+        code: structured.code,
+        category: LogErrorCategory.PROVIDER_AUTH,
+        error: structured.message,
+        retryable: structured.retryable,
+      });
     }
   }
 
@@ -355,7 +379,13 @@ export class HealthServer {
         saveAuthStorageSync(auth);
       }
     } catch (error) {
-      logger.warn('Failed to delete Codex tokens', { error });
+      const structured = categorizeError(error, { operation: 'delete_codex_tokens' });
+      logger.warn('Failed to delete Codex tokens', {
+        code: structured.code,
+        category: LogErrorCategory.PROVIDER_AUTH,
+        error: structured.message,
+        retryable: structured.retryable,
+      });
     }
   }
 }

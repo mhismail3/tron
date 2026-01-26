@@ -6,9 +6,12 @@
  * - device.unregister: Unregister a device token
  */
 
+import { createLogger, categorizeError, LogErrorCategory } from '../../logging/index.js';
 import type { RpcRequest, RpcResponse } from '../types.js';
 import type { RpcContext } from '../handler.js';
 import { MethodRegistry, type MethodRegistration, type MethodHandler } from '../registry.js';
+
+const logger = createLogger('rpc:device');
 
 // =============================================================================
 // Handler Implementations
@@ -48,6 +51,13 @@ export async function handleDeviceRegister(
 
     return MethodRegistry.successResponse(request.id, result);
   } catch (error) {
+    const structured = categorizeError(error, { operation: 'register' });
+    logger.error('Failed to register device token', {
+      code: structured.code,
+      category: LogErrorCategory.DATABASE,
+      error: structured.message,
+      retryable: structured.retryable,
+    });
     if (error instanceof Error) {
       return MethodRegistry.errorResponse(request.id, 'REGISTRATION_FAILED', error.message);
     }
@@ -78,6 +88,13 @@ export async function handleDeviceUnregister(
     const result = await context.deviceManager.unregisterToken(params.deviceToken);
     return MethodRegistry.successResponse(request.id, result);
   } catch (error) {
+    const structured = categorizeError(error, { operation: 'unregister' });
+    logger.error('Failed to unregister device token', {
+      code: structured.code,
+      category: LogErrorCategory.DATABASE,
+      error: structured.message,
+      retryable: structured.retryable,
+    });
     if (error instanceof Error) {
       return MethodRegistry.errorResponse(request.id, 'UNREGISTRATION_FAILED', error.message);
     }

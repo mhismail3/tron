@@ -11,6 +11,7 @@
  * - context.clear: Clear session context
  */
 
+import { createLogger, categorizeError, LogErrorCategory } from '../../logging/index.js';
 import type {
   RpcRequest,
   RpcResponse,
@@ -25,6 +26,8 @@ import type {
 } from '../types.js';
 import type { RpcContext } from '../handler.js';
 import { MethodRegistry, type MethodRegistration, type MethodHandler } from '../registry.js';
+
+const logger = createLogger('rpc:context');
 
 // =============================================================================
 // Handler Implementations
@@ -56,6 +59,14 @@ export async function handleContextGetSnapshot(
     if (error instanceof Error && error.message.includes('not active')) {
       return MethodRegistry.errorResponse(request.id, 'SESSION_NOT_ACTIVE', 'Session is not active');
     }
+    const structured = categorizeError(error, { sessionId: params.sessionId, operation: 'getSnapshot' });
+    logger.error('Failed to get context snapshot', {
+      sessionId: params.sessionId,
+      code: structured.code,
+      category: structured.category,
+      error: structured.message,
+      retryable: structured.retryable,
+    });
     throw error;
   }
 }
@@ -86,6 +97,14 @@ export async function handleContextGetDetailedSnapshot(
     if (error instanceof Error && error.message.includes('not active')) {
       return MethodRegistry.errorResponse(request.id, 'SESSION_NOT_ACTIVE', 'Session is not active');
     }
+    const structured = categorizeError(error, { sessionId: params.sessionId, operation: 'getDetailedSnapshot' });
+    logger.error('Failed to get detailed context snapshot', {
+      sessionId: params.sessionId,
+      code: structured.code,
+      category: structured.category,
+      error: structured.message,
+      retryable: structured.retryable,
+    });
     throw error;
   }
 }
@@ -117,6 +136,14 @@ export async function handleContextShouldCompact(
     if (error instanceof Error && error.message.includes('not active')) {
       return MethodRegistry.errorResponse(request.id, 'SESSION_NOT_ACTIVE', 'Session is not active');
     }
+    const structured = categorizeError(error, { sessionId: params.sessionId, operation: 'shouldCompact' });
+    logger.error('Failed to check if session should compact', {
+      sessionId: params.sessionId,
+      code: structured.code,
+      category: structured.category,
+      error: structured.message,
+      retryable: structured.retryable,
+    });
     throw error;
   }
 }
@@ -147,6 +174,14 @@ export async function handleContextPreviewCompaction(
     if (error instanceof Error && error.message.includes('not active')) {
       return MethodRegistry.errorResponse(request.id, 'SESSION_NOT_ACTIVE', 'Session is not active');
     }
+    const structured = categorizeError(error, { sessionId: params.sessionId, operation: 'previewCompaction' });
+    logger.error('Failed to preview compaction', {
+      sessionId: params.sessionId,
+      code: structured.code,
+      category: structured.category,
+      error: structured.message,
+      retryable: structured.retryable,
+    });
     throw error;
   }
 }
@@ -180,6 +215,14 @@ export async function handleContextConfirmCompaction(
     if (error instanceof Error && error.message.includes('not active')) {
       return MethodRegistry.errorResponse(request.id, 'SESSION_NOT_ACTIVE', 'Session is not active');
     }
+    const structured = categorizeError(error, { sessionId: params.sessionId, operation: 'confirmCompaction' });
+    logger.error('Failed to confirm compaction', {
+      sessionId: params.sessionId,
+      code: structured.code,
+      category: LogErrorCategory.COMPACTION,
+      error: structured.message,
+      retryable: structured.retryable,
+    });
     throw error;
   }
 }
@@ -216,6 +259,14 @@ export async function handleContextCanAcceptTurn(
     if (error instanceof Error && error.message.includes('not active')) {
       return MethodRegistry.errorResponse(request.id, 'SESSION_NOT_ACTIVE', 'Session is not active');
     }
+    const structured = categorizeError(error, { sessionId: params.sessionId, operation: 'canAcceptTurn' });
+    logger.error('Failed to check if session can accept turn', {
+      sessionId: params.sessionId,
+      code: structured.code,
+      category: LogErrorCategory.TOKEN_LIMIT,
+      error: structured.message,
+      retryable: structured.retryable,
+    });
     throw error;
   }
 }
@@ -246,6 +297,14 @@ export async function handleContextClear(
     if (error instanceof Error && error.message.includes('not active')) {
       return MethodRegistry.errorResponse(request.id, 'SESSION_NOT_ACTIVE', 'Session is not active');
     }
+    const structured = categorizeError(error, { sessionId: params.sessionId, operation: 'clear' });
+    logger.error('Failed to clear context', {
+      sessionId: params.sessionId,
+      code: structured.code,
+      category: structured.category,
+      error: structured.message,
+      retryable: structured.retryable,
+    });
     throw error;
   }
 }

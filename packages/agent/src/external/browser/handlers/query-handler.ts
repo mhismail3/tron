@@ -9,6 +9,9 @@
  */
 
 import type { BrowserSession, ActionResult, BrowserHandlerDeps } from './types.js';
+import { createLogger, categorizeError } from '../../../logging/index.js';
+
+const logger = createLogger('browser:query');
 
 // =============================================================================
 // Types
@@ -46,6 +49,14 @@ export class QueryHandler {
       const text = await locator.innerText({ timeout: 10000 });
       return { success: true, data: { selector, text } };
     } catch (error) {
+      const structuredError = categorizeError(error, { action: 'getText', selector });
+      logger.error('Get text failed', {
+        selector,
+        code: structuredError.code,
+        category: structuredError.category,
+        error: structuredError.message,
+        retryable: structuredError.retryable,
+      });
       return {
         success: false,
         error: error instanceof Error ? error.message : 'Get text failed',
@@ -72,6 +83,15 @@ export class QueryHandler {
       const value = await locator.getAttribute(attribute, { timeout: 10000 });
       return { success: true, data: { selector, attribute, value } };
     } catch (error) {
+      const structuredError = categorizeError(error, { action: 'getAttribute', selector, attribute });
+      logger.error('Get attribute failed', {
+        selector,
+        attribute,
+        code: structuredError.code,
+        category: structuredError.category,
+        error: structuredError.message,
+        retryable: structuredError.retryable,
+      });
       return {
         success: false,
         error: error instanceof Error ? error.message : 'Get attribute failed',

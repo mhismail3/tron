@@ -23,7 +23,7 @@ import type {
   ThinkingContent,
   ToolCall,
 } from '../types/index.js';
-import { createLogger } from '../logging/index.js';
+import { createLogger, categorizeError, LogErrorCategory } from '../logging/index.js';
 import {
   withProviderRetry,
   type StreamRetryConfig,
@@ -339,7 +339,11 @@ export class GoogleProvider {
           }
           logger.debug('Loaded auth metadata from stored auth', { endpoint, projectId });
         } catch (e) {
-          logger.debug('Could not load auth metadata from stored auth');
+          const structured = categorizeError(e, { operation: 'loadAuthMetadata' });
+          logger.debug('Could not load auth metadata from stored auth', {
+            code: structured.code,
+            category: LogErrorCategory.PROVIDER_AUTH,
+          });
         }
       }
 
@@ -426,7 +430,13 @@ export class GoogleProvider {
         logger.warn('Could not discover Google project ID - requests may fail');
       }
     } catch (error) {
-      logger.error('Failed to discover Google project ID', { error });
+      const structured = categorizeError(error, { endpoint, operation: 'discoverGoogleProject' });
+      logger.error('Failed to discover Google project ID', {
+        code: structured.code,
+        category: LogErrorCategory.PROVIDER_API,
+        error: structured.message,
+        retryable: structured.retryable,
+      });
       // Don't throw - let the request proceed and potentially fail with a clearer error
     }
   }
@@ -440,8 +450,8 @@ export class GoogleProvider {
 
     logger.info('Refreshing Google OAuth tokens');
 
+    const endpoint = this.auth.endpoint ?? 'cloud-code-assist';
     try {
-      const endpoint = this.auth.endpoint ?? 'cloud-code-assist';
       const projectId = this.auth.projectId; // Preserve existing projectId
       const newTokens = await refreshGoogleOAuthToken(this.auth.refreshToken, endpoint);
 
@@ -460,8 +470,14 @@ export class GoogleProvider {
 
       logger.info('Google OAuth tokens refreshed successfully');
     } catch (error) {
-      logger.error('Failed to refresh Google OAuth tokens', { error });
-      throw new Error(`Failed to refresh Google OAuth tokens: ${error}`);
+      const structured = categorizeError(error, { endpoint, operation: 'refreshGoogleOAuthToken' });
+      logger.error('Failed to refresh Google OAuth tokens', {
+        code: structured.code,
+        category: LogErrorCategory.PROVIDER_AUTH,
+        error: structured.message,
+        retryable: structured.retryable,
+      });
+      throw new Error(`Failed to refresh Google OAuth tokens: ${structured.message}`);
     }
   }
 

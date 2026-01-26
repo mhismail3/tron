@@ -6,6 +6,7 @@
  */
 
 import { execSync } from 'child_process';
+import { categorizeError, LogErrorCategory } from '../logging/index.js';
 
 interface ClipboardCommand {
   copy: string;
@@ -74,9 +75,12 @@ export async function copyToClipboard(text: string): Promise<void> {
       stdio: ['pipe', 'pipe', 'pipe'],
     });
   } catch (error) {
-    throw new Error(
-      `Failed to copy to clipboard: ${error instanceof Error ? error.message : String(error)}`
-    );
+    const structured = categorizeError(error, { operation: 'copyToClipboard', platform: process.platform });
+    const err = new Error(`Failed to copy to clipboard: ${structured.message}`);
+    (err as any).code = structured.code;
+    (err as any).category = LogErrorCategory.TOOL_EXECUTION;
+    (err as any).retryable = structured.retryable;
+    throw err;
   }
 }
 
@@ -97,8 +101,11 @@ export async function readFromClipboard(): Promise<string> {
     const text = typeof result === 'string' ? result : result.toString('utf8');
     return text.trim();
   } catch (error) {
-    throw new Error(
-      `Failed to read from clipboard: ${error instanceof Error ? error.message : String(error)}`
-    );
+    const structured = categorizeError(error, { operation: 'readFromClipboard', platform: process.platform });
+    const err = new Error(`Failed to read from clipboard: ${structured.message}`);
+    (err as any).code = structured.code;
+    (err as any).category = LogErrorCategory.TOOL_EXECUTION;
+    (err as any).retryable = structured.retryable;
+    throw err;
   }
 }

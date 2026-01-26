@@ -7,6 +7,7 @@
  * - browser.getStatus: Get browser streaming status
  */
 
+import { createLogger, categorizeError, LogErrorCategory } from '../../logging/index.js';
 import type {
   RpcRequest,
   RpcResponse,
@@ -16,6 +17,8 @@ import type {
 } from '../types.js';
 import type { RpcContext } from '../handler.js';
 import { MethodRegistry, type MethodRegistration, type MethodHandler } from '../registry.js';
+
+const logger = createLogger('rpc:browser');
 
 // =============================================================================
 // Handler Implementations
@@ -44,6 +47,14 @@ export async function handleBrowserStartStream(
     const result = await context.browserManager.startStream(params);
     return MethodRegistry.successResponse(request.id, result);
   } catch (error) {
+    const structured = categorizeError(error, { sessionId: params.sessionId, operation: 'startStream' });
+    logger.error('Failed to start browser stream', {
+      sessionId: params.sessionId,
+      code: structured.code,
+      category: LogErrorCategory.TOOL_EXECUTION,
+      error: structured.message,
+      retryable: structured.retryable,
+    });
     const message = error instanceof Error ? error.message : 'Failed to start browser stream';
     return MethodRegistry.errorResponse(request.id, 'BROWSER_ERROR', message);
   }
@@ -72,6 +83,14 @@ export async function handleBrowserStopStream(
     const result = await context.browserManager.stopStream(params);
     return MethodRegistry.successResponse(request.id, result);
   } catch (error) {
+    const structured = categorizeError(error, { sessionId: params.sessionId, operation: 'stopStream' });
+    logger.error('Failed to stop browser stream', {
+      sessionId: params.sessionId,
+      code: structured.code,
+      category: LogErrorCategory.TOOL_EXECUTION,
+      error: structured.message,
+      retryable: structured.retryable,
+    });
     const message = error instanceof Error ? error.message : 'Failed to stop browser stream';
     return MethodRegistry.errorResponse(request.id, 'BROWSER_ERROR', message);
   }
@@ -100,6 +119,14 @@ export async function handleBrowserGetStatus(
     const result = await context.browserManager.getStatus(params);
     return MethodRegistry.successResponse(request.id, result);
   } catch (error) {
+    const structured = categorizeError(error, { sessionId: params.sessionId, operation: 'getStatus' });
+    logger.error('Failed to get browser status', {
+      sessionId: params.sessionId,
+      code: structured.code,
+      category: LogErrorCategory.TOOL_EXECUTION,
+      error: structured.message,
+      retryable: structured.retryable,
+    });
     const message = error instanceof Error ? error.message : 'Failed to get browser status';
     return MethodRegistry.errorResponse(request.id, 'BROWSER_ERROR', message);
   }

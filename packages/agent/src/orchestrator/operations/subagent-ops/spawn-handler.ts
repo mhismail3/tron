@@ -4,7 +4,7 @@
  * Handles spawning sub-agents both in-process (subsessions) and
  * out-of-process (tmux).
  */
-import { createLogger } from '../../../logging/index.js';
+import { createLogger, categorizeError, LogErrorCategory, LogErrorCodes } from '../../../logging/index.js';
 import type { EventStore } from '../../../events/index.js';
 import type { SessionId, EventType } from '../../../events/index.js';
 import type { SpawnSubagentParams } from '../../../tools/subagent/spawn-subagent.js';
@@ -144,10 +144,14 @@ export class SpawnHandler {
         params.task,
         params.maxTurns ?? 50
       ).catch((error) => {
+        const structured = categorizeError(error, { parentSessionId, subagentSessionId: subSession.sessionId, operation: 'subagent_execution' });
         logger.error('Subagent execution failed', {
           parentSessionId,
           subagentSessionId: subSession.sessionId,
-          error: (error as Error).message,
+          code: structured.code,
+          category: LogErrorCategory.SUBAGENT,
+          error: structured.message,
+          retryable: structured.retryable,
         });
       });
 
@@ -159,12 +163,15 @@ export class SpawnHandler {
 
       return { sessionId: subSession.sessionId, success: true };
     } catch (error) {
-      const err = error as Error;
+      const structured = categorizeError(error, { parentSessionId, operation: 'spawn_subsession' });
       logger.error('Failed to spawn subsession', {
         parentSessionId,
-        error: err.message,
+        code: LogErrorCodes.SUB_SPAWN,
+        category: LogErrorCategory.SUBAGENT,
+        error: structured.message,
+        retryable: structured.retryable,
       });
-      return { sessionId: '', success: false, error: err.message };
+      return { sessionId: '', success: false, error: structured.message };
     }
   }
 
@@ -258,16 +265,19 @@ export class SpawnHandler {
 
       return { sessionId: subSessionId, tmuxSessionName, success: true };
     } catch (error) {
-      const err = error as Error;
+      const structured = categorizeError(error, { parentSessionId, operation: 'spawn_tmux_agent' });
       logger.error('Failed to spawn tmux agent', {
         parentSessionId,
-        error: err.message,
+        code: LogErrorCodes.SUB_SPAWN,
+        category: LogErrorCategory.SUBAGENT,
+        error: structured.message,
+        retryable: structured.retryable,
       });
       return {
         sessionId: '',
         tmuxSessionName: '',
         success: false,
-        error: err.message,
+        error: structured.message,
       };
     }
   }
@@ -410,7 +420,7 @@ export class SpawnHandler {
         },
       });
     } catch (error) {
-      const err = error as Error;
+      const structured = categorizeError(error, { parentSessionId, subagentSessionId: sessionId, operation: 'run_subagent' });
       const duration = Date.now() - startTime;
 
       // Emit failure event
@@ -419,7 +429,7 @@ export class SpawnHandler {
         'subagent.failed' as EventType,
         {
           subagentSessionId: sessionId,
-          error: err.message,
+          error: structured.message,
           recoverable: false,
           duration,
         }
@@ -432,7 +442,7 @@ export class SpawnHandler {
         timestamp: new Date().toISOString(),
         data: {
           subagentSessionId: sessionId,
-          error: err.message,
+          error: structured.message,
           duration,
         },
       });
@@ -441,7 +451,7 @@ export class SpawnHandler {
       // Re-fetch parent since time has passed
       const currentParent = this.deps.getActiveSession(parentSessionId);
       if (currentParent) {
-        currentParent.subagentTracker.fail(sessionId as SessionId, err.message, {
+        currentParent.subagentTracker.fail(sessionId as SessionId, structured.message, {
           duration,
         });
       }
@@ -449,7 +459,10 @@ export class SpawnHandler {
       logger.error('Subagent failed', {
         parentSessionId,
         subagentSessionId: sessionId,
-        error: err.message,
+        code: LogErrorCodes.SUB_ERROR,
+        category: LogErrorCategory.SUBAGENT,
+        error: structured.message,
+        retryable: structured.retryable,
         duration,
       });
 
@@ -460,7 +473,7 @@ export class SpawnHandler {
         data: {
           subagentId: sessionId,
           stopReason: 'error',
-          result: { success: false, error: err.message },
+          result: { success: false, error: structured.message },
         },
       });
     }

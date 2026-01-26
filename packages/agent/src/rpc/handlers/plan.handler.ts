@@ -7,6 +7,7 @@
  * - plan.getState: Get plan mode state for a session
  */
 
+import { createLogger, categorizeError, LogErrorCategory } from '../../logging/index.js';
 import type {
   RpcRequest,
   RpcResponse,
@@ -16,6 +17,8 @@ import type {
 } from '../types.js';
 import type { RpcContext } from '../handler.js';
 import { MethodRegistry, type MethodRegistration, type MethodHandler } from '../registry.js';
+
+const logger = createLogger('rpc:plan');
 
 // =============================================================================
 // Handler Implementations
@@ -60,6 +63,15 @@ export async function handlePlanEnter(
         return MethodRegistry.errorResponse(request.id, 'SESSION_NOT_FOUND', 'Session does not exist');
       }
     }
+    const structured = categorizeError(error, { sessionId: params.sessionId, skillName: params.skillName, operation: 'enter' });
+    logger.error('Failed to enter plan mode', {
+      sessionId: params.sessionId,
+      skillName: params.skillName,
+      code: structured.code,
+      category: LogErrorCategory.SESSION_STATE,
+      error: structured.message,
+      retryable: structured.retryable,
+    });
     throw error;
   }
 }
@@ -103,6 +115,15 @@ export async function handlePlanExit(
         return MethodRegistry.errorResponse(request.id, 'SESSION_NOT_FOUND', 'Session does not exist');
       }
     }
+    const structured = categorizeError(error, { sessionId: params.sessionId, reason: params.reason, operation: 'exit' });
+    logger.error('Failed to exit plan mode', {
+      sessionId: params.sessionId,
+      reason: params.reason,
+      code: structured.code,
+      category: LogErrorCategory.SESSION_STATE,
+      error: structured.message,
+      retryable: structured.retryable,
+    });
     throw error;
   }
 }
@@ -135,6 +156,14 @@ export async function handlePlanGetState(
         return MethodRegistry.errorResponse(request.id, 'SESSION_NOT_FOUND', 'Session does not exist');
       }
     }
+    const structured = categorizeError(error, { sessionId: params.sessionId, operation: 'getState' });
+    logger.error('Failed to get plan mode state', {
+      sessionId: params.sessionId,
+      code: structured.code,
+      category: LogErrorCategory.SESSION_STATE,
+      error: structured.message,
+      retryable: structured.retryable,
+    });
     throw error;
   }
 }

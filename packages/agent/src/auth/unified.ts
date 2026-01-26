@@ -8,7 +8,7 @@
 import * as fs from 'fs';
 import * as fsPromises from 'fs/promises';
 import * as path from 'path';
-import { createLogger } from '../logging/index.js';
+import { createLogger, categorizeError, LogErrorCategory } from '../logging/index.js';
 import { getTronDataDir } from '../settings/index.js';
 import type { AuthStorage, ProviderAuth, ProviderId, OAuthTokens } from './types.js';
 
@@ -56,7 +56,13 @@ export async function loadAuthStorage(): Promise<AuthStorage | null> {
   } catch (error) {
     // File doesn't exist or is invalid
     if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
-      logger.warn('Failed to load unified auth', { error });
+      const structured = categorizeError(error, { path: authPath, operation: 'loadAuthStorage' });
+      logger.warn('Failed to load unified auth', {
+        code: structured.code,
+        category: LogErrorCategory.PROVIDER_AUTH,
+        error: structured.message,
+        retryable: structured.retryable,
+      });
     }
     return null;
   }
@@ -81,7 +87,13 @@ export function loadAuthStorageSync(): AuthStorage | null {
     return parsed;
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
-      logger.warn('Failed to load unified auth (sync)', { error });
+      const structured = categorizeError(error, { path: authPath, operation: 'loadAuthStorageSync' });
+      logger.warn('Failed to load unified auth (sync)', {
+        code: structured.code,
+        category: LogErrorCategory.PROVIDER_AUTH,
+        error: structured.message,
+        retryable: structured.retryable,
+      });
     }
     return null;
   }
@@ -254,7 +266,13 @@ export async function clearAllAuth(): Promise<void> {
     logger.info('Cleared all auth');
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
-      logger.warn('Failed to clear auth file', { error });
+      const structured = categorizeError(error, { path: authPath, operation: 'clearAllAuth' });
+      logger.warn('Failed to clear auth file', {
+        code: structured.code,
+        category: LogErrorCategory.PROVIDER_AUTH,
+        error: structured.message,
+        retryable: structured.retryable,
+      });
     }
   }
 }

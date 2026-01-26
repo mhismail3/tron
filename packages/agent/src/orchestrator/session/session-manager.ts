@@ -11,7 +11,7 @@
 import * as path from 'path';
 import * as os from 'os';
 // Direct imports to avoid circular dependencies through index.js
-import { createLogger } from '../../logging/index.js';
+import { createLogger, categorizeError, LogErrorCategory } from '../../logging/index.js';
 import { EventStore } from '../../events/event-store.js';
 import { WorktreeCoordinator } from '../../session/worktree-coordinator.js';
 import { SkillTracker, createSkillTracker, type SkillTrackingEvent } from '../../skills/skill-tracker.js';
@@ -195,7 +195,14 @@ export class SessionManager {
       }
     } catch (error) {
       // Log but don't fail session creation if rules loading fails
-      logger.warn('Failed to load rules files', { sessionId, error });
+      const structured = categorizeError(error, { sessionId, operation: 'rules_loading' });
+      logger.warn('Failed to load rules files', {
+        sessionId,
+        code: structured.code,
+        category: structured.category,
+        error: structured.message,
+        retryable: structured.retryable,
+      });
     }
 
     // Create SessionContext for modular state management
@@ -379,7 +386,14 @@ export class SessionManager {
           });
         }
       } catch (error) {
-        logger.warn('Failed to reload rules content for resumed session', { sessionId, error });
+        const structured = categorizeError(error, { sessionId, operation: 'rules_reload' });
+        logger.warn('Failed to reload rules content for resumed session', {
+          sessionId,
+          code: structured.code,
+          category: structured.category,
+          error: structured.message,
+          retryable: structured.retryable,
+        });
       }
     }
 
@@ -588,7 +602,14 @@ export class SessionManager {
       }
       return false;
     } catch (error) {
-      logger.error('Failed to check session interrupted status', { sessionId, error });
+      const structured = categorizeError(error, { sessionId, operation: 'check_interrupted' });
+      logger.error('Failed to check session interrupted status', {
+        sessionId,
+        code: structured.code,
+        category: LogErrorCategory.SESSION_STATE,
+        error: structured.message,
+        retryable: structured.retryable,
+      });
       return false;
     }
   }
@@ -682,7 +703,14 @@ export class SessionManager {
         try {
           await this.endSession(sessionId);
         } catch (err) {
-          logger.error('Failed to end inactive session, removing from memory only', { sessionId, err });
+          const structured = categorizeError(err, { sessionId, operation: 'cleanup_inactive' });
+          logger.error('Failed to end inactive session, removing from memory only', {
+            sessionId,
+            code: structured.code,
+            category: LogErrorCategory.SESSION_STATE,
+            error: structured.message,
+            retryable: structured.retryable,
+          });
           this.config.deleteActiveSession(sessionId);
         }
       }

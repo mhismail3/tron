@@ -19,7 +19,7 @@
 import { spawn, execSync } from 'child_process';
 import * as fs from 'fs/promises';
 import * as path from 'path';
-import { createLogger } from '../logging/index.js';
+import { createLogger, categorizeError, LogErrorCategory } from '../logging/index.js';
 
 const logger = createLogger('worktree');
 
@@ -243,7 +243,14 @@ export class WorktreeManager {
 
       return worktree;
     } catch (error) {
-      logger.error('Failed to create worktree', { sessionId, error });
+      const structured = categorizeError(error, { sessionId, operation: 'createWorktree' });
+      logger.error('Failed to create worktree', {
+        sessionId,
+        code: structured.code,
+        category: LogErrorCategory.SESSION_STATE,
+        error: structured.message,
+        retryable: structured.retryable,
+      });
       throw error;
     }
   }
@@ -364,7 +371,14 @@ export class WorktreeManager {
       logger.info('Changes committed', { sessionId, commit: commitHash });
       return commitHash;
     } catch (error) {
-      logger.error('Failed to commit', { sessionId, error });
+      const structured = categorizeError(error, { sessionId, operation: 'commit' });
+      logger.error('Failed to commit', {
+        sessionId,
+        code: structured.code,
+        category: LogErrorCategory.SESSION_STATE,
+        error: structured.message,
+        retryable: structured.retryable,
+      });
       throw error;
     }
   }
@@ -419,7 +433,14 @@ export class WorktreeManager {
       logger.info('Worktree cleaned up', { sessionId });
       return true;
     } catch (error) {
-      logger.error('Failed to cleanup worktree', { sessionId, error });
+      const structured = categorizeError(error, { sessionId, operation: 'cleanupWorktree' });
+      logger.error('Failed to cleanup worktree', {
+        sessionId,
+        code: structured.code,
+        category: LogErrorCategory.SESSION_STATE,
+        error: structured.message,
+        retryable: structured.retryable,
+      });
       return false;
     }
   }
@@ -455,7 +476,14 @@ export class WorktreeManager {
       logger.info('Session merged', { sessionId, target: targetBranch });
       return true;
     } catch (error) {
-      logger.error('Failed to merge session', { sessionId, error });
+      const structured = categorizeError(error, { sessionId, operation: 'mergeSession' });
+      logger.error('Failed to merge session', {
+        sessionId,
+        code: structured.code,
+        category: LogErrorCategory.SESSION_STATE,
+        error: structured.message,
+        retryable: structured.retryable,
+      });
       return false;
     }
   }

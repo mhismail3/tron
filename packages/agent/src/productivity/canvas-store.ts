@@ -11,7 +11,7 @@ import * as fs from 'fs';
 import * as fsAsync from 'fs/promises';
 import * as path from 'path';
 import { getTronDataDir } from '../settings/loader.js';
-import { createLogger } from '../logging/index.js';
+import { createLogger, categorizeError, LogErrorCategory } from '../logging/index.js';
 
 const logger = createLogger('canvas-store');
 
@@ -77,9 +77,13 @@ export async function saveCanvasArtifact(artifact: CanvasArtifact): Promise<void
       path: filePath,
     });
   } catch (error) {
+    const structured = categorizeError(error, { canvasId: artifact.canvasId, operation: 'saveCanvasArtifact' });
     logger.error('Failed to save canvas artifact', {
       canvasId: artifact.canvasId,
-      error: error instanceof Error ? error.message : String(error),
+      code: structured.code,
+      category: LogErrorCategory.DATABASE,
+      error: structured.message,
+      retryable: structured.retryable,
     });
     throw error;
   }
@@ -101,9 +105,13 @@ export async function loadCanvasArtifact(canvasId: string): Promise<CanvasArtifa
       logger.debug('Canvas artifact not found', { canvasId });
       return null;
     }
+    const structured = categorizeError(error, { canvasId, operation: 'loadCanvasArtifact' });
     logger.error('Failed to load canvas artifact', {
       canvasId,
-      error: error instanceof Error ? error.message : String(error),
+      code: structured.code,
+      category: LogErrorCategory.DATABASE,
+      error: structured.message,
+      retryable: structured.retryable,
     });
     return null;
   }
@@ -131,9 +139,13 @@ export async function deleteCanvasArtifact(canvasId: string): Promise<boolean> {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
       return false;
     }
+    const structured = categorizeError(error, { canvasId, operation: 'deleteCanvasArtifact' });
     logger.error('Failed to delete canvas artifact', {
       canvasId,
-      error: error instanceof Error ? error.message : String(error),
+      code: structured.code,
+      category: LogErrorCategory.DATABASE,
+      error: structured.message,
+      retryable: structured.retryable,
     });
     return false;
   }
@@ -155,8 +167,12 @@ export async function listCanvasArtifacts(): Promise<string[]> {
       .filter(f => f.endsWith('.json'))
       .map(f => f.replace('.json', ''));
   } catch (error) {
+    const structured = categorizeError(error, { operation: 'listCanvasArtifacts' });
     logger.error('Failed to list canvas artifacts', {
-      error: error instanceof Error ? error.message : String(error),
+      code: structured.code,
+      category: LogErrorCategory.DATABASE,
+      error: structured.message,
+      retryable: structured.retryable,
     });
     return [];
   }
@@ -200,8 +216,12 @@ export async function deleteOldCanvasArtifacts(olderThan: Date): Promise<number>
 
     return deletedCount;
   } catch (error) {
+    const structured = categorizeError(error, { operation: 'deleteOldCanvasArtifacts' });
     logger.error('Failed to clean up canvas artifacts', {
-      error: error instanceof Error ? error.message : String(error),
+      code: structured.code,
+      category: LogErrorCategory.DATABASE,
+      error: structured.message,
+      retryable: structured.retryable,
     });
     return 0;
   }

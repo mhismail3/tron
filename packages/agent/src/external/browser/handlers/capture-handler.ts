@@ -10,6 +10,9 @@
  */
 
 import type { BrowserSession, ActionResult, BrowserHandlerDeps } from './types.js';
+import { createLogger, categorizeError } from '../../../logging/index.js';
+
+const logger = createLogger('browser:capture');
 
 // =============================================================================
 // Types
@@ -55,6 +58,13 @@ export class CaptureHandler {
         },
       };
     } catch (error) {
+      const structuredError = categorizeError(error, { action: 'screenshot' });
+      logger.error('Screenshot failed', {
+        code: structuredError.code,
+        category: structuredError.category,
+        error: structuredError.message,
+        retryable: structuredError.retryable,
+      });
       return {
         success: false,
         error: error instanceof Error ? error.message : 'Screenshot failed',
@@ -102,6 +112,13 @@ export class CaptureHandler {
         },
       };
     } catch (error) {
+      const structuredError = categorizeError(error, { action: 'snapshot' });
+      logger.error('Snapshot failed', {
+        code: structuredError.code,
+        category: structuredError.category,
+        error: structuredError.message,
+        retryable: structuredError.retryable,
+      });
       return {
         success: false,
         error: error instanceof Error ? error.message : 'Snapshot failed',
@@ -128,6 +145,14 @@ export class CaptureHandler {
         return { success: true, data: { pdf: pdfBuffer.toString('base64') } };
       }
     } catch (error) {
+      const structuredError = categorizeError(error, { action: 'pdf', path: params.path as string | undefined });
+      logger.error('PDF generation failed', {
+        path: params.path,
+        code: structuredError.code,
+        category: structuredError.category,
+        error: structuredError.message,
+        retryable: structuredError.retryable,
+      });
       return {
         success: false,
         error: error instanceof Error ? error.message : 'PDF generation failed',

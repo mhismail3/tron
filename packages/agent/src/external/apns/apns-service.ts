@@ -5,7 +5,7 @@
  * Handles token generation, caching, and notification delivery.
  */
 
-import { createLogger } from '../../logging/index.js';
+import { createLogger, categorizeError } from '../../logging/index.js';
 import * as http2 from 'http2';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -56,7 +56,14 @@ export class APNSService {
       this.privateKey = fs.readFileSync(keyPath, 'utf8');
       logger.info('APNS private key loaded', { keyPath });
     } catch (error) {
-      logger.error('Failed to load APNS private key', { keyPath, error });
+      const structuredError = categorizeError(error, { operation: 'loadPrivateKey', keyPath });
+      logger.error('Failed to load APNS private key', {
+        keyPath,
+        code: structuredError.code,
+        category: structuredError.category,
+        error: structuredError.message,
+        retryable: structuredError.retryable,
+      });
       throw new Error(`Failed to load APNS private key from ${keyPath}`);
     }
   }
@@ -210,7 +217,14 @@ export class APNSService {
       });
 
       client.on('error', (err) => {
-        logger.error('APNS connection error', { error: err.message });
+        const structuredError = categorizeError(err, { operation: 'ensureConnection', host: this.host });
+        logger.error('APNS connection error', {
+          host: this.host,
+          code: structuredError.code,
+          category: structuredError.category,
+          error: structuredError.message,
+          retryable: structuredError.retryable,
+        });
         this.connecting = false;
         reject(err);
       });
@@ -330,7 +344,14 @@ export class APNSService {
         });
 
         req.on('error', (err) => {
-          logger.error('APNS request error', { error: err.message });
+          const structuredError = categorizeError(err, { operation: 'sendRequest', deviceToken: deviceToken.substring(0, 8) + '...' });
+          logger.error('APNS request error', {
+            deviceToken: deviceToken.substring(0, 8) + '...',
+            code: structuredError.code,
+            category: structuredError.category,
+            error: structuredError.message,
+            retryable: structuredError.retryable,
+          });
           resolve({
             success: false,
             deviceToken,
@@ -343,12 +364,18 @@ export class APNSService {
 
       return result;
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      logger.error('APNS send error', { deviceToken: deviceToken.substring(0, 8) + '...', error: message });
+      const structuredError = categorizeError(error, { operation: 'send', deviceToken: deviceToken.substring(0, 8) + '...' });
+      logger.error('APNS send error', {
+        deviceToken: deviceToken.substring(0, 8) + '...',
+        code: structuredError.code,
+        category: structuredError.category,
+        error: structuredError.message,
+        retryable: structuredError.retryable,
+      });
       return {
         success: false,
         deviceToken,
-        error: message,
+        error: structuredError.message,
       };
     }
   }
@@ -451,7 +478,14 @@ export function loadAPNSConfig(): APNSConfig | null {
       environment: config.environment || 'sandbox',
     };
   } catch (error) {
-    logger.error('Failed to load APNS config', { error });
+    const structuredError = categorizeError(error, { operation: 'loadAPNSConfig', configPath });
+    logger.error('Failed to load APNS config', {
+      configPath,
+      code: structuredError.code,
+      category: structuredError.category,
+      error: structuredError.message,
+      retryable: structuredError.retryable,
+    });
     return null;
   }
 }
@@ -468,7 +502,13 @@ export function createAPNSService(): APNSService | null {
   try {
     return new APNSService(config);
   } catch (error) {
-    logger.error('Failed to create APNS service', { error });
+    const structuredError = categorizeError(error, { operation: 'createAPNSService' });
+    logger.error('Failed to create APNS service', {
+      code: structuredError.code,
+      category: structuredError.category,
+      error: structuredError.message,
+      retryable: structuredError.retryable,
+    });
     return null;
   }
 }

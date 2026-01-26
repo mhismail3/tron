@@ -27,7 +27,7 @@ import * as fs from 'fs/promises';
 import * as path from 'path';
 import { spawn } from 'child_process';
 import type { HookDefinition, HookType, AnyHookContext, HookResult } from './types.js';
-import { createLogger } from '../logging/index.js';
+import { createLogger, categorizeError, LogErrorCategory } from '../logging/index.js';
 import { getSettings } from '../settings/index.js';
 
 const logger = createLogger('hooks:discovery');
@@ -171,9 +171,13 @@ export async function discoverHooks(
     } catch (error) {
       // Directory doesn't exist or isn't readable - that's fine
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+        const structured = categorizeError(error, { path: searchPath, operation: 'scanHookDirectory' });
         logger.warn('Error scanning hook directory', {
           path: searchPath,
-          error: error instanceof Error ? error.message : String(error),
+          code: structured.code,
+          category: LogErrorCategory.HOOK_EXECUTION,
+          error: structured.message,
+          retryable: structured.retryable,
         });
       }
     }
@@ -234,10 +238,14 @@ export async function loadDiscoveredHooks(
         logger.debug('Loaded hook', { name: info.name, type: info.type });
       }
     } catch (error) {
+      const structured = categorizeError(error, { name: info.name, path: info.path, operation: 'loadHook' });
       logger.error('Failed to load hook', {
         name: info.name,
         path: info.path,
-        error: error instanceof Error ? error.message : String(error),
+        code: structured.code,
+        category: LogErrorCategory.HOOK_EXECUTION,
+        error: structured.message,
+        retryable: structured.retryable,
       });
     }
   }
@@ -322,9 +330,13 @@ async function executeShellHook(
     });
 
     child.on('error', (error) => {
+      const structured = categorizeError(error, { path: scriptPath, operation: 'executeShellHook' });
       logger.error('Shell hook execution error', {
         path: scriptPath,
-        error: error.message,
+        code: structured.code,
+        category: LogErrorCategory.HOOK_EXECUTION,
+        error: structured.message,
+        retryable: structured.retryable,
       });
       resolve({ action: 'continue' });
     });
@@ -375,9 +387,13 @@ async function loadJavaScriptHook(
     logger.warn('No valid hook export found', { path: info.path });
     return null;
   } catch (error) {
+    const structured = categorizeError(error, { path: info.path, operation: 'importHookModule' });
     logger.error('Failed to import hook module', {
       path: info.path,
-      error: error instanceof Error ? error.message : String(error),
+      code: structured.code,
+      category: LogErrorCategory.HOOK_EXECUTION,
+      error: structured.message,
+      retryable: structured.retryable,
     });
     return null;
   }
@@ -427,9 +443,13 @@ export async function watchHooks(
       logger.debug('Hook watcher closed');
     };
   } catch (error) {
+    const structured = categorizeError(error, { path: hookDir, operation: 'watchHooks' });
     logger.warn('Could not watch hooks directory', {
       path: hookDir,
-      error: error instanceof Error ? error.message : String(error),
+      code: structured.code,
+      category: LogErrorCategory.HOOK_EXECUTION,
+      error: structured.message,
+      retryable: structured.retryable,
     });
     return () => {}; // No-op cleanup
   }

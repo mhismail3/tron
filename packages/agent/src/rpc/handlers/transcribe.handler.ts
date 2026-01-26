@@ -6,6 +6,7 @@
  * - transcribe.listModels: List available transcription models
  */
 
+import { createLogger, categorizeError, LogErrorCategory } from '../../logging/index.js';
 import type {
   RpcRequest,
   RpcResponse,
@@ -13,6 +14,8 @@ import type {
 } from '../types.js';
 import type { RpcContext } from '../handler.js';
 import { MethodRegistry, type MethodRegistration, type MethodHandler } from '../registry.js';
+
+const logger = createLogger('rpc:transcribe');
 
 // =============================================================================
 // Handler Implementations
@@ -41,6 +44,13 @@ export async function handleTranscribeAudio(
     const result = await context.transcriptionManager.transcribeAudio(params);
     return MethodRegistry.successResponse(request.id, result);
   } catch (error) {
+    const structured = categorizeError(error, { operation: 'transcribeAudio' });
+    logger.error('Failed to transcribe audio', {
+      code: structured.code,
+      category: LogErrorCategory.PROVIDER_API,
+      error: structured.message,
+      retryable: structured.retryable,
+    });
     const message = error instanceof Error ? error.message : 'Transcription failed';
     return MethodRegistry.errorResponse(request.id, 'TRANSCRIPTION_FAILED', message);
   }
@@ -63,6 +73,13 @@ export async function handleTranscribeListModels(
     const result = await context.transcriptionManager.listModels();
     return MethodRegistry.successResponse(request.id, result);
   } catch (error) {
+    const structured = categorizeError(error, { operation: 'listModels' });
+    logger.error('Failed to list transcription models', {
+      code: structured.code,
+      category: LogErrorCategory.PROVIDER_API,
+      error: structured.message,
+      retryable: structured.retryable,
+    });
     const message = error instanceof Error ? error.message : 'Failed to list transcription models';
     return MethodRegistry.errorResponse(request.id, 'TRANSCRIPTION_FAILED', message);
   }

@@ -27,7 +27,7 @@
 
 import * as fs from 'fs/promises';
 import * as path from 'path';
-import { createLogger } from '../logging/index.js';
+import { createLogger, categorizeError, LogErrorCategory, LogErrorCodes } from '../logging/index.js';
 import { WorkingDirectory, createWorkingDirectory } from './working-directory.js';
 import type { WorkingDirectoryInfo } from './working-directory.js';
 import type { EventStore } from '../events/event-store.js';
@@ -335,9 +335,13 @@ export class WorktreeCoordinator {
         isolated: workingDir.isolated,
       });
     } catch (error) {
+      const structured = categorizeError(error, { sessionId, operation: 'release' });
       logger.error('Failed to release working directory', {
         sessionId,
-        error: error instanceof Error ? error.message : String(error),
+        code: LogErrorCodes.SESS_INVALID,
+        category: LogErrorCategory.SESSION_STATE,
+        error: structured.message,
+        retryable: structured.retryable,
       });
 
       // Still remove from active sessions on error
@@ -640,9 +644,13 @@ export class WorktreeCoordinator {
         // Prune worktree references
         await this.gitExecutor.execGit(['worktree', 'prune'], this.repoRoot!);
       } catch (error) {
+        const structured = categorizeError(error, { path: worktreePath, operation: 'remove-worktree' });
         logger.error('Failed to remove worktree directory', {
           path: worktreePath,
-          error: error instanceof Error ? error.message : String(error),
+          code: structured.code,
+          category: LogErrorCategory.FILESYSTEM,
+          error: structured.message,
+          retryable: structured.retryable,
         });
       }
     }
@@ -744,13 +752,17 @@ export class WorktreeCoordinator {
 
       return { success: true, mergeCommit };
     } catch (error) {
+      const structured = categorizeError(error, { sessionId, operation: 'merge', targetBranch });
       logger.error('Merge failed', {
         sessionId,
-        error: error instanceof Error ? error.message : String(error),
+        code: LogErrorCodes.SESS_CONFLICT,
+        category: LogErrorCategory.SESSION_STATE,
+        error: structured.message,
+        retryable: structured.retryable,
       });
       return {
         success: false,
-        conflicts: [error instanceof Error ? error.message : String(error)],
+        conflicts: [structured.message],
       };
     }
   }
@@ -766,9 +778,12 @@ export class WorktreeCoordinator {
     try {
       await this.worktreeEvents.emitAcquired(sessionId, payload);
     } catch (error) {
+      const structured = categorizeError(error, { sessionId, event: 'worktree.acquired' });
       logger.warn('Failed to emit worktree.acquired event', {
         sessionId,
-        error: error instanceof Error ? error.message : String(error),
+        code: LogErrorCodes.EVNT_PERSIST,
+        category: LogErrorCategory.EVENT_PERSIST,
+        error: structured.message,
       });
     }
   }
@@ -789,9 +804,12 @@ export class WorktreeCoordinator {
         worktreeDeleted: payload.deleted,
       });
     } catch (error) {
+      const structured = categorizeError(error, { sessionId, event: 'worktree.released' });
       logger.warn('Failed to emit worktree.released event', {
         sessionId,
-        error: error instanceof Error ? error.message : String(error),
+        code: LogErrorCodes.EVNT_PERSIST,
+        category: LogErrorCategory.EVENT_PERSIST,
+        error: structured.message,
       });
     }
   }
@@ -809,9 +827,12 @@ export class WorktreeCoordinator {
         deletions: payload.deletions,
       });
     } catch (error) {
+      const structured = categorizeError(error, { sessionId, event: 'worktree.commit' });
       logger.warn('Failed to emit worktree.commit event', {
         sessionId,
-        error: error instanceof Error ? error.message : String(error),
+        code: LogErrorCodes.EVNT_PERSIST,
+        category: LogErrorCategory.EVENT_PERSIST,
+        error: structured.message,
       });
     }
   }
@@ -829,9 +850,12 @@ export class WorktreeCoordinator {
         commitHash: payload.mergeCommit,
       });
     } catch (error) {
+      const structured = categorizeError(error, { sessionId, event: 'worktree.merged' });
       logger.warn('Failed to emit worktree.merged event', {
         sessionId,
-        error: error instanceof Error ? error.message : String(error),
+        code: LogErrorCodes.EVNT_PERSIST,
+        category: LogErrorCategory.EVENT_PERSIST,
+        error: structured.message,
       });
     }
   }
@@ -897,10 +921,13 @@ export class WorktreeCoordinator {
           }
         } catch (error) {
           // Log but continue processing other worktrees
+          const structured = categorizeError(error, { sessionId, path: worktreePath, operation: 'recover' });
           logger.warn('Failed to recover orphaned worktree', {
             sessionId,
             path: worktreePath,
-            error: error instanceof Error ? error.message : String(error),
+            code: structured.code,
+            category: LogErrorCategory.SESSION_STATE,
+            error: structured.message,
           });
         }
       }
@@ -912,8 +939,11 @@ export class WorktreeCoordinator {
         // Ignore prune errors
       }
     } catch (error) {
+      const structured = categorizeError(error, { operation: 'scan-orphaned' });
       logger.warn('Failed to scan for orphaned worktrees', {
-        error: error instanceof Error ? error.message : String(error),
+        code: structured.code,
+        category: LogErrorCategory.SESSION_STATE,
+        error: structured.message,
       });
     }
   }

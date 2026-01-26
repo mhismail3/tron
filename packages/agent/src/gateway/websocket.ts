@@ -8,6 +8,8 @@ import { EventEmitter } from 'events';
 import { randomUUID } from 'crypto';
 import {
   createLogger,
+  categorizeError,
+  LogErrorCategory,
   RpcHandler,
   isRpcRequest,
   type RpcRequest,
@@ -93,7 +95,13 @@ export class TronWebSocketServer extends EventEmitter {
         });
 
         this.wss.on('error', (error) => {
-          logger.error('WebSocket server error', error);
+          const structured = categorizeError(error, { operation: 'websocket_server' });
+          logger.error('WebSocket server error', {
+            code: structured.code,
+            category: LogErrorCategory.NETWORK,
+            error: structured.message,
+            retryable: structured.retryable,
+          });
           this.emit('error', error);
         });
 
@@ -176,7 +184,14 @@ export class TronWebSocketServer extends EventEmitter {
       client.socket.send(message, (err) => {
         client.pendingMessages--;
         if (err) {
-          logger.error('Failed to send to client', { clientId: client.id, error: err.message });
+          const structured = categorizeError(err, { clientId: client.id, operation: 'send_message' });
+          logger.error('Failed to send to client', {
+            clientId: client.id,
+            code: structured.code,
+            category: LogErrorCategory.NETWORK,
+            error: structured.message,
+            retryable: structured.retryable,
+          });
         }
       });
     }
@@ -243,7 +258,14 @@ export class TronWebSocketServer extends EventEmitter {
 
     // Handle errors
     socket.on('error', (error) => {
-      logger.error('Client socket error', { clientId, error });
+      const structured = categorizeError(error, { clientId, operation: 'client_socket' });
+      logger.error('Client socket error', {
+        clientId,
+        code: structured.code,
+        category: LogErrorCategory.NETWORK,
+        error: structured.message,
+        retryable: structured.retryable,
+      });
       this.emit('client_error', { clientId, error });
     });
 
@@ -261,7 +283,14 @@ export class TronWebSocketServer extends EventEmitter {
         this.sendError(client, 'INVALID_FORMAT', 'Message must be a valid RPC request');
       }
     } catch (error) {
-      logger.error('Failed to parse message', { clientId: client.id, error });
+      const structured = categorizeError(error, { clientId: client.id, operation: 'parse_message' });
+      logger.error('Failed to parse message', {
+        clientId: client.id,
+        code: structured.code,
+        category: LogErrorCategory.NETWORK,
+        error: structured.message,
+        retryable: structured.retryable,
+      });
       this.sendError(client, 'PARSE_ERROR', 'Failed to parse message as JSON');
     }
   }
@@ -289,13 +318,21 @@ export class TronWebSocketServer extends EventEmitter {
       const response = await this.rpcHandler.handle(request);
       this.sendResponse(client, response);
     } catch (error) {
-      logger.error('RPC handler error', { clientId: client.id, error });
+      const structured = categorizeError(error, { clientId: client.id, method: request.method, operation: 'rpc_handler' });
+      logger.error('RPC handler error', {
+        clientId: client.id,
+        method: request.method,
+        code: structured.code,
+        category: LogErrorCategory.NETWORK,
+        error: structured.message,
+        retryable: structured.retryable,
+      });
       this.sendResponse(client, {
         id: request.id,
         success: false,
         error: {
           code: 'INTERNAL_ERROR',
-          message: error instanceof Error ? error.message : 'Unknown error',
+          message: structured.message,
         },
       });
     }

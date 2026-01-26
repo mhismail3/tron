@@ -9,9 +9,12 @@
  * - todo.getBacklogCount: Get count of unrestored backlogged tasks
  */
 
+import { createLogger, categorizeError, LogErrorCategory } from '../../logging/index.js';
 import type { RpcRequest, RpcResponse } from '../types.js';
 import type { RpcContext } from '../handler.js';
 import { MethodRegistry, type MethodRegistration, type MethodHandler } from '../registry.js';
+
+const logger = createLogger('rpc:todo');
 
 // =============================================================================
 // Handler Implementations
@@ -44,6 +47,14 @@ export async function handleTodoList(
     if (error instanceof Error && error.message.includes('not active')) {
       return MethodRegistry.errorResponse(request.id, 'SESSION_NOT_ACTIVE', 'Session is not active');
     }
+    const structured = categorizeError(error, { sessionId: params.sessionId, operation: 'list' });
+    logger.error('Failed to list todos', {
+      sessionId: params.sessionId,
+      code: structured.code,
+      category: LogErrorCategory.SESSION_STATE,
+      error: structured.message,
+      retryable: structured.retryable,
+    });
     throw error;
   }
 }
@@ -74,6 +85,14 @@ export async function handleTodoGetSummary(
     if (error instanceof Error && error.message.includes('not active')) {
       return MethodRegistry.errorResponse(request.id, 'SESSION_NOT_ACTIVE', 'Session is not active');
     }
+    const structured = categorizeError(error, { sessionId: params.sessionId, operation: 'getSummary' });
+    logger.error('Failed to get todo summary', {
+      sessionId: params.sessionId,
+      code: structured.code,
+      category: LogErrorCategory.SESSION_STATE,
+      error: structured.message,
+      retryable: structured.retryable,
+    });
     throw error;
   }
 }
@@ -111,6 +130,14 @@ export async function handleTodoGetBacklog(
       totalCount: tasks.length,
     });
   } catch (error) {
+    const structured = categorizeError(error, { workspaceId: params.workspaceId, operation: 'getBacklog' });
+    logger.error('Failed to get backlog', {
+      workspaceId: params.workspaceId,
+      code: structured.code,
+      category: LogErrorCategory.DATABASE,
+      error: structured.message,
+      retryable: structured.retryable,
+    });
     throw error;
   }
 }
@@ -150,6 +177,15 @@ export async function handleTodoRestore(
     if (error instanceof Error && error.message.includes('not active')) {
       return MethodRegistry.errorResponse(request.id, 'SESSION_NOT_ACTIVE', 'Session is not active');
     }
+    const structured = categorizeError(error, { sessionId: params.sessionId, taskIds: params.taskIds, operation: 'restore' });
+    logger.error('Failed to restore from backlog', {
+      sessionId: params.sessionId,
+      taskCount: params.taskIds?.length,
+      code: structured.code,
+      category: LogErrorCategory.SESSION_STATE,
+      error: structured.message,
+      retryable: structured.retryable,
+    });
     throw error;
   }
 }
@@ -177,6 +213,14 @@ export async function handleTodoGetBacklogCount(
     const count = context.todoManager.getBacklogCount(params.workspaceId);
     return MethodRegistry.successResponse(request.id, { count });
   } catch (error) {
+    const structured = categorizeError(error, { workspaceId: params.workspaceId, operation: 'getBacklogCount' });
+    logger.error('Failed to get backlog count', {
+      workspaceId: params.workspaceId,
+      code: structured.code,
+      category: LogErrorCategory.DATABASE,
+      error: structured.message,
+      retryable: structured.retryable,
+    });
     throw error;
   }
 }

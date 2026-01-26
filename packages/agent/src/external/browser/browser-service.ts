@@ -12,6 +12,7 @@
 import { EventEmitter } from 'node:events';
 import { BrowserManager, type ScreencastFrame } from 'agent-browser/dist/browser.js';
 
+import { createLogger, categorizeError } from '../../logging/index.js';
 import {
   type BrowserSession,
   type ActionResult,
@@ -30,6 +31,8 @@ import {
 } from './handlers/index.js';
 
 export type { BrowserSession, ActionResult, BrowserLocator };
+
+const logger = createLogger('browser:service');
 
 export interface BrowserConfig {
   headless?: boolean;
@@ -122,6 +125,14 @@ export class BrowserService extends EventEmitter {
 
       return { success: true, data: { sessionId } };
     } catch (error) {
+      const structuredError = categorizeError(error, { operation: 'createSession', sessionId });
+      logger.error('Failed to create browser session', {
+        sessionId,
+        code: structuredError.code,
+        category: structuredError.category,
+        error: structuredError.message,
+        retryable: structuredError.retryable,
+      });
       return {
         success: false,
         error: error instanceof Error ? error.message : 'Failed to create session',
@@ -163,6 +174,14 @@ export class BrowserService extends EventEmitter {
 
       return { success: true };
     } catch (error) {
+      const structuredError = categorizeError(error, { operation: 'closeSession', sessionId });
+      logger.error('Failed to close browser session', {
+        sessionId,
+        code: structuredError.code,
+        category: structuredError.category,
+        error: structuredError.message,
+        retryable: structuredError.retryable,
+      });
       return {
         success: false,
         error: error instanceof Error ? error.message : 'Failed to close session',
@@ -237,6 +256,15 @@ export class BrowserService extends EventEmitter {
           return { success: false, error: `Unknown action: ${action}` };
       }
     } catch (error) {
+      const structuredError = categorizeError(error, { operation: 'execute', sessionId, action });
+      logger.error('Browser action failed', {
+        sessionId,
+        action,
+        code: structuredError.code,
+        category: structuredError.category,
+        error: structuredError.message,
+        retryable: structuredError.retryable,
+      });
       return {
         success: false,
         error: error instanceof Error ? error.message : 'Action failed',
@@ -300,6 +328,14 @@ export class BrowserService extends EventEmitter {
 
       return { success: true, data: { streaming: true } };
     } catch (error) {
+      const structuredError = categorizeError(error, { operation: 'startScreencast', sessionId });
+      logger.error('Failed to start screencast', {
+        sessionId,
+        code: structuredError.code,
+        category: structuredError.category,
+        error: structuredError.message,
+        retryable: structuredError.retryable,
+      });
       return {
         success: false,
         error: error instanceof Error ? error.message : 'Failed to start screencast',
@@ -326,6 +362,14 @@ export class BrowserService extends EventEmitter {
 
       return { success: true, data: { streaming: false } };
     } catch (error) {
+      const structuredError = categorizeError(error, { operation: 'stopScreencast', sessionId });
+      logger.error('Failed to stop screencast', {
+        sessionId,
+        code: structuredError.code,
+        category: structuredError.category,
+        error: structuredError.message,
+        retryable: structuredError.retryable,
+      });
       return {
         success: false,
         error: error instanceof Error ? error.message : 'Failed to stop screencast',

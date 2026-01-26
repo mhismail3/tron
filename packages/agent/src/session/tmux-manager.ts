@@ -16,7 +16,7 @@
  */
 import { spawn, exec } from 'child_process';
 import { promisify } from 'util';
-import { createLogger } from '../logging/index.js';
+import { createLogger, categorizeError, LogErrorCategory } from '../logging/index.js';
 
 const execAsync = promisify(exec);
 const logger = createLogger('tmux');
@@ -248,7 +248,14 @@ export class TmuxManager {
       logger.info('tmux session killed', { sessionName });
       return true;
     } catch (error) {
-      logger.warn('Failed to kill session', { sessionName, error });
+      const structured = categorizeError(error, { sessionName, operation: 'killSession' });
+      logger.warn('Failed to kill session', {
+        sessionName,
+        code: structured.code,
+        category: LogErrorCategory.SESSION_STATE,
+        error: structured.message,
+        retryable: structured.retryable,
+      });
       return false;
     }
   }
@@ -602,7 +609,14 @@ export class TmuxManager {
     try {
       return await execAsync(cmd);
     } catch (error) {
-      logger.error('tmux command failed', { args: fullArgs, error });
+      const structured = categorizeError(error, { args: fullArgs, operation: 'execTmux' });
+      logger.error('tmux command failed', {
+        args: fullArgs,
+        code: structured.code,
+        category: LogErrorCategory.SESSION_STATE,
+        error: structured.message,
+        retryable: structured.retryable,
+      });
       throw error;
     }
   }

@@ -3,7 +3,7 @@
  *
  * Starts the local transcription sidecar when the Tron server boots.
  */
-import { createLogger } from '../logging/index.js';
+import { createLogger, categorizeError, LogErrorCategory } from '../logging/index.js';
 import { getSettings } from '../settings/index.js';
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { existsSync } from 'node:fs';
@@ -161,7 +161,13 @@ async function ensureVenvPython(sidecarDir: string): Promise<string | null> {
   try {
     await runCommand(systemPython, ['-m', 'venv', venvDir], sidecarDir, 'venv');
   } catch (error) {
-    logger.error('Failed to create transcription venv', error instanceof Error ? error : new Error(String(error)));
+    const structured = categorizeError(error, { venvDir, operation: 'createVenv' });
+    logger.error('Failed to create transcription venv', {
+      code: structured.code,
+      category: LogErrorCategory.NETWORK,
+      error: structured.message,
+      retryable: structured.retryable,
+    });
     return null;
   }
 
@@ -169,7 +175,13 @@ async function ensureVenvPython(sidecarDir: string): Promise<string | null> {
   try {
     await runCommand(venvPython, ['-m', 'pip', 'install', '-r', 'requirements.txt'], sidecarDir, 'pip');
   } catch (error) {
-    logger.error('Failed to install transcription dependencies', error instanceof Error ? error : new Error(String(error)));
+    const structured = categorizeError(error, { venvDir, operation: 'installDependencies' });
+    logger.error('Failed to install transcription dependencies', {
+      code: structured.code,
+      category: LogErrorCategory.NETWORK,
+      error: structured.message,
+      retryable: structured.retryable,
+    });
     return null;
   }
 

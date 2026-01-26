@@ -13,6 +13,9 @@
  */
 
 import type { BrowserSession, ActionResult, BrowserHandlerDeps } from './types.js';
+import { createLogger, categorizeError } from '../../../logging/index.js';
+
+const logger = createLogger('browser:input');
 
 // =============================================================================
 // Types
@@ -50,6 +53,14 @@ export class InputHandler {
       await locator.click({ timeout: 10000 });
       return { success: true, data: { selector } };
     } catch (error) {
+      const structuredError = categorizeError(error, { action: 'click', selector });
+      logger.error('Click failed', {
+        selector,
+        code: structuredError.code,
+        category: structuredError.category,
+        error: structuredError.message,
+        retryable: structuredError.retryable,
+      });
       return {
         success: false,
         error: error instanceof Error ? error.message : 'Click failed',
@@ -76,6 +87,14 @@ export class InputHandler {
       await locator.fill(value, { timeout: 10000 });
       return { success: true, data: { selector, value } };
     } catch (error) {
+      const structuredError = categorizeError(error, { action: 'fill', selector });
+      logger.error('Fill failed', {
+        selector,
+        code: structuredError.code,
+        category: structuredError.category,
+        error: structuredError.message,
+        retryable: structuredError.retryable,
+      });
       return {
         success: false,
         error: error instanceof Error ? error.message : 'Fill failed',
@@ -102,6 +121,14 @@ export class InputHandler {
       await locator.pressSequentially(text, { timeout: 10000 });
       return { success: true, data: { selector, text } };
     } catch (error) {
+      const structuredError = categorizeError(error, { action: 'type', selector });
+      logger.error('Type failed', {
+        selector,
+        code: structuredError.code,
+        category: structuredError.category,
+        error: structuredError.message,
+        retryable: structuredError.retryable,
+      });
       return {
         success: false,
         error: error instanceof Error ? error.message : 'Type failed',
@@ -129,6 +156,14 @@ export class InputHandler {
       await locator.selectOption(values, { timeout: 10000 });
       return { success: true, data: { selector, value } };
     } catch (error) {
+      const structuredError = categorizeError(error, { action: 'select', selector });
+      logger.error('Select failed', {
+        selector,
+        code: structuredError.code,
+        category: structuredError.category,
+        error: structuredError.message,
+        retryable: structuredError.retryable,
+      });
       return {
         success: false,
         error: error instanceof Error ? error.message : 'Select failed',
@@ -153,6 +188,14 @@ export class InputHandler {
       await locator.hover({ timeout: 10000 });
       return { success: true, data: { selector } };
     } catch (error) {
+      const structuredError = categorizeError(error, { action: 'hover', selector });
+      logger.error('Hover failed', {
+        selector,
+        code: structuredError.code,
+        category: structuredError.category,
+        error: structuredError.message,
+        retryable: structuredError.retryable,
+      });
       return {
         success: false,
         error: error instanceof Error ? error.message : 'Hover failed',
@@ -177,6 +220,14 @@ export class InputHandler {
       await page.keyboard.press(key);
       return { success: true, data: { key } };
     } catch (error) {
+      const structuredError = categorizeError(error, { action: 'pressKey', key });
+      logger.error('Press key failed', {
+        key,
+        code: structuredError.code,
+        category: structuredError.category,
+        error: structuredError.message,
+        retryable: structuredError.retryable,
+      });
       return {
         success: false,
         error: error instanceof Error ? error.message : 'Press key failed',
