@@ -147,6 +147,8 @@ class ChatViewModel: ObservableObject, ChatEventContext {
     let askUserQuestionCoordinator = AskUserQuestionCoordinator()
     /// Coordinates voice recording and transcription
     let transcriptionCoordinator = TranscriptionCoordinator()
+    /// Coordinates message sending, abort, and attachments
+    let messagingCoordinator = MessagingCoordinator()
     var currentToolMessages: [UUID: ChatMessage] = [:]
 
     /// Track tool calls for the current turn (for display purposes)
