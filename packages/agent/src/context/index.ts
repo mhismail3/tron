@@ -88,7 +88,26 @@ export {
   estimateMessageTokens,
   estimateMessagesTokens,
   estimateSystemTokens,
+  estimateSystemPromptTokens,
+  estimateToolsTokens,
   estimateRulesTokens,
   CHARS_PER_TOKEN,
   type ImageSource,
 } from './token-estimator.js';
+
+// Sub-components (for advanced use cases)
+export { MessageStore, createMessageStore, type MessageStoreConfig } from './message-store.js';
+export {
+  CompactionEngine,
+  createCompactionEngine,
+  type CompactionEngineConfig,
+  type CompactionDeps,
+} from './compaction-engine.js';
+export {
+  ContextSnapshotBuilder,
+  createContextSnapshotBuilder,
+  type SnapshotDeps,
+} from './context-snapshot-builder.js';
+
+// Type re-exports from types.ts
+export { THRESHOLDS } from './types.js';

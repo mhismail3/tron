@@ -225,6 +225,33 @@ export function estimateSystemTokens(systemPrompt: string, tools: Tool[]): numbe
 }
 
 /**
+ * Estimate tokens for system prompt.
+ *
+ * @param systemPrompt - System prompt text
+ * @param toolClarification - Optional tool clarification message (for Codex providers)
+ * @returns Estimated token count
+ */
+export function estimateSystemPromptTokens(
+  systemPrompt: string,
+  toolClarification?: string | null
+): number {
+  const totalLength = systemPrompt.length + (toolClarification?.length ?? 0);
+  return Math.ceil(totalLength / CHARS_PER_TOKEN);
+}
+
+/**
+ * Estimate tokens for tool definitions.
+ *
+ * @param tools - Array of tool definitions
+ * @returns Estimated token count
+ */
+export function estimateToolsTokens(tools: Tool[]): number {
+  return Math.ceil(
+    tools.reduce((sum, t) => sum + JSON.stringify(t).length / CHARS_PER_TOKEN, 0)
+  );
+}
+
+/**
  * Estimate tokens for rules content.
  *
  * Includes header overhead ("# Project Rules\n\n").
