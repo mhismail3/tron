@@ -3,12 +3,8 @@
  *
  * Handles querying sub-agent status, events, logs, and output.
  */
-import { createLogger } from '../../../logging/logger.js';
-import type { EventStore } from '../../../events/event-store.js';
-import type {
-  SessionId,
-  SessionEvent as TronSessionEvent,
-} from '../../../events/types.js';
+import { createLogger } from '../../../logging/index.js';
+import type { EventStore, SessionId, TronSessionEvent } from '../../../events/index.js';
 import type { SubagentQueryType } from '../../../tools/subagent/query-subagent.js';
 import type { ActiveSession } from '../../types.js';
 import type { QuerySubagentResult } from './types.js';

@@ -13,9 +13,9 @@
  * Extracted from AgentEventHandler to improve modularity and testability.
  */
 
-import { createLogger } from '../../../logging/logger.js';
+import { createLogger } from '../../../logging/index.js';
 import type { TronEvent } from '../../../types/events.js';
-import type { SessionId } from '../../../events/types.js';
+import type { SessionId } from '../../../events/index.js';
 import type { ActiveSession } from '../../types.js';
 import type { UIRenderHandler } from '../../ui-render-handler.js';
 

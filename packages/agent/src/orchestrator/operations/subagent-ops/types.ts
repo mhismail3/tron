@@ -3,8 +3,7 @@
  *
  * Defines common interfaces used by sub-agent handlers.
  */
-import type { EventStore } from '../../../events/event-store.js';
-import type { SessionId, EventType } from '../../../events/types.js';
+import type { EventStore, SessionId, EventType } from '../../../events/index.js';
 import type {
   SubagentStatusInfo,
   SubagentEventInfo,

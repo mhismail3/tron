@@ -13,7 +13,7 @@
  */
 
 import type { TronEvent } from '../../../types/events.js';
-import type { SessionId, EventType } from '../../../events/types.js';
+import type { SessionId, EventType } from '../../../events/index.js';
 import type { ActiveSession } from '../../types.js';
 import type { UIRenderHandler } from '../../ui-render-handler.js';
 

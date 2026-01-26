@@ -4,9 +4,9 @@
  * Handles spawning sub-agents both in-process (subsessions) and
  * out-of-process (tmux).
  */
-import { createLogger } from '../../../logging/logger.js';
-import type { EventStore } from '../../../events/event-store.js';
-import type { SessionId, EventType } from '../../../events/types.js';
+import { createLogger } from '../../../logging/index.js';
+import type { EventStore } from '../../../events/index.js';
+import type { SessionId, EventType } from '../../../events/index.js';
 import type { SpawnSubagentParams } from '../../../tools/subagent/spawn-subagent.js';
 import type { SpawnTmuxAgentParams } from '../../../tools/subagent/spawn-tmux-agent.js';
 import type {

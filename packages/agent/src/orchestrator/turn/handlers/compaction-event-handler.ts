@@ -10,9 +10,9 @@
  * Extracted from AgentEventHandler to improve modularity and testability.
  */
 
-import { createLogger } from '../../../logging/logger.js';
+import { createLogger } from '../../../logging/index.js';
 import type { TronEvent } from '../../../types/events.js';
-import type { SessionId, EventType } from '../../../events/types.js';
+import type { SessionId, EventType } from '../../../events/index.js';
 
 const logger = createLogger('compaction-event-handler');
 

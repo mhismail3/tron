@@ -9,9 +9,9 @@
  * Extracted from AgentEventHandler to improve modularity and testability.
  */
 
-import { createLogger } from '../../../logging/logger.js';
+import { createLogger } from '../../../logging/index.js';
 import type { TronEvent } from '../../../types/events.js';
-import type { SessionId, EventType, SessionEvent as TronSessionEvent } from '../../../events/types.js';
+import type { SessionId, EventType, TronSessionEvent } from '../../../events/index.js';
 import {
   normalizeContentBlocks,
   truncateString,

@@ -14,7 +14,7 @@
  */
 
 import type { TronEvent } from '../../../types/events.js';
-import type { SessionId } from '../../../events/types.js';
+import type { SessionId } from '../../../events/index.js';
 
 // =============================================================================
 // Types
