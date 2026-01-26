@@ -24,6 +24,10 @@
 		0F322C0000641A49E7A95012 /* AskUserQuestionViewer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CF575202DD166B3DF642F62 /* AskUserQuestionViewer.swift */; };
 		103540225CF7453441997AD4 /* ChatEventContext.swift in Sources */ = {isa = PBXBuildFile; fileRef = 59BF7B2CD7A1B5122CCE1331 /* ChatEventContext.swift */; };
 		1192E3F84F3AAE4245D0581E /* ChatViewModel+Events.swift in Sources */ = {isa = PBXBuildFile; fileRef = 07B83EBDF1E49D2E340DC9E3 /* ChatViewModel+Events.swift */; };
+		1A2B3C4D5E6F0A1B2C3D4E5F /* ChatViewModel+Browser.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F6A7B8C9D0E1F2 /* ChatViewModel+Browser.swift */; };
+		2B3C4D5E6F0A1B2C3D4E5F6A /* ChatViewModel+AskUserQuestion.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2C3D4E5F6A7B8C9D0E1F2A3 /* ChatViewModel+AskUserQuestion.swift */; };
+		3C4D5E6F0A1B2C3D4E5F6A7B /* ChatViewModel+PlanMode.swift in Sources */ = {isa = PBXBuildFile; fileRef = C3D4E5F6A7B8C9D0E1F2A3B4 /* ChatViewModel+PlanMode.swift */; };
+		4D5E6F0A1B2C3D4E5F6A7B8C /* ChatViewModel+DeepLinks.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4E5F6A7B8C9D0E1F2A3B4C5 /* ChatViewModel+DeepLinks.swift */; };
 		11AFA5645D976D4D73E39CB1 /* ContextStateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 99D0FBFA601E6C8A35615110 /* ContextStateTests.swift */; };
 		120A1418F8CC6475A2558B3F /* ReasoningLevelPicker.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4C350275A9F1CBDCF87D15E0 /* ReasoningLevelPicker.swift */; };
 		12E54E0F1CE0864B43C71B4C /* CameraPicker.swift in Sources */ = {isa = PBXBuildFile; fileRef = BC8CD0FB1CEAF0AD3FCB8F7C /* CameraPicker.swift */; };
@@ -276,6 +280,10 @@
 		061BDF53F3884B358EE67EB6 /* EventRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EventRepository.swift; sourceTree = "<group>"; };
 		0765D88B5586B7D58BFBEE90 /* DatabaseTransport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DatabaseTransport.swift; sourceTree = "<group>"; };
 		07B83EBDF1E49D2E340DC9E3 /* ChatViewModel+Events.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ChatViewModel+Events.swift"; sourceTree = "<group>"; };
+		A1B2C3D4E5F6A7B8C9D0E1F2 /* ChatViewModel+Browser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ChatViewModel+Browser.swift"; sourceTree = "<group>"; };
+		B2C3D4E5F6A7B8C9D0E1F2A3 /* ChatViewModel+AskUserQuestion.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ChatViewModel+AskUserQuestion.swift"; sourceTree = "<group>"; };
+		C3D4E5F6A7B8C9D0E1F2A3B4 /* ChatViewModel+PlanMode.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ChatViewModel+PlanMode.swift"; sourceTree = "<group>"; };
+		D4E5F6A7B8C9D0E1F2A3B4C5 /* ChatViewModel+DeepLinks.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ChatViewModel+DeepLinks.swift"; sourceTree = "<group>"; };
 		081C39F4A377A4E0808FCA02 /* SkillDetailSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SkillDetailSheet.swift; sourceTree = "<group>"; };
 		088BDE03F59D94AD1C60E382 /* TronFontLoader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TronFontLoader.swift; sourceTree = "<group>"; };
 		0BA5810A34C92084B89C6EA4 /* TronColors.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TronColors.swift; sourceTree = "<group>"; };
@@ -1327,10 +1335,14 @@
 			isa = PBXGroup;
 			children = (
 				66B009CA6162B3DE62CCAADC /* ChatViewModel.swift */,
+				B2C3D4E5F6A7B8C9D0E1F2A3 /* ChatViewModel+AskUserQuestion.swift */,
+				A1B2C3D4E5F6A7B8C9D0E1F2 /* ChatViewModel+Browser.swift */,
 				DE04482C85DF6EF6EAA8C0BF /* ChatViewModel+Connection.swift */,
+				D4E5F6A7B8C9D0E1F2A3B4C5 /* ChatViewModel+DeepLinks.swift */,
 				07B83EBDF1E49D2E340DC9E3 /* ChatViewModel+Events.swift */,
 				F92F6CAE7238A608B2D19BE1 /* ChatViewModel+Messaging.swift */,
 				EFC14EF0FDE28C78BDF20CA9 /* ChatViewModel+Pagination.swift */,
+				C3D4E5F6A7B8C9D0E1F2A3B4 /* ChatViewModel+PlanMode.swift */,
 				280E1D8B5CE2DDB88DFAB4A8 /* ChatViewModel+Subagent.swift */,
 				6A7B8C9D0E1F2A3B4C5D6E7F /* ChatViewModel+ToolEventContext.swift */,
 				5699A58C211B11D08B6C7737 /* ChatViewModel+Transcription.swift */,
@@ -1547,10 +1559,14 @@
 				F1A2B3C4D5E6F7A8B9C0D1E2 /* UICanvasCoordinator.swift in Sources */,
 				B3C4D5E6F7A8B9C0D1E2F3A4 /* ChatViewModel+UICanvasContext.swift in Sources */,
 				8262909B97AA787D3938755D /* ChatView.swift in Sources */,
+				2B3C4D5E6F0A1B2C3D4E5F6A /* ChatViewModel+AskUserQuestion.swift in Sources */,
+				1A2B3C4D5E6F0A1B2C3D4E5F /* ChatViewModel+Browser.swift in Sources */,
 				EB67206447A441B245917538 /* ChatViewModel+Connection.swift in Sources */,
+				4D5E6F0A1B2C3D4E5F6A7B8C /* ChatViewModel+DeepLinks.swift in Sources */,
 				1192E3F84F3AAE4245D0581E /* ChatViewModel+Events.swift in Sources */,
 				262F728F81322E55356E8958 /* ChatViewModel+Messaging.swift in Sources */,
 				2366A060C08EAC01873DE799 /* ChatViewModel+Pagination.swift in Sources */,
+				3C4D5E6F0A1B2C3D4E5F6A7B /* ChatViewModel+PlanMode.swift in Sources */,
 				57D701D0CB2C895B55987AE0 /* ChatViewModel+Subagent.swift in Sources */,
 				839937925AA1269987230D66 /* ChatViewModel+Transcription.swift in Sources */,
 				DEA7492C9198251ADE6B9C73 /* ChatViewModel.swift in Sources */,
