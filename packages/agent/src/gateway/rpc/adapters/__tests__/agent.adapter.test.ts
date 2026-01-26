@@ -54,12 +54,16 @@ describe('AgentAdapter', () => {
     };
 
     mockOrchestrator = {
-      runAgent: vi.fn().mockResolvedValue(undefined),
-      cancelAgent: vi.fn(),
+      agent: {
+        run: vi.fn().mockResolvedValue(undefined),
+        cancel: vi.fn(),
+      },
+      sessions: {
+        getSession: vi.fn(),
+        wasSessionInterrupted: vi.fn(),
+      },
       getActiveSession: vi.fn(),
-      getSession: vi.fn(),
-      wasSessionInterrupted: vi.fn(),
-    };
+    } as any;
   });
 
   describe('prompt', () => {
@@ -74,7 +78,7 @@ describe('AgentAdapter', () => {
       });
 
       expect(result).toEqual({ acknowledged: true });
-      expect(mockOrchestrator.runAgent).toHaveBeenCalledWith(
+      expect(mockOrchestrator.agent!.run).toHaveBeenCalledWith(
         expect.objectContaining({
           sessionId: 'sess-123',
           prompt: 'Hello, world!',
@@ -95,7 +99,7 @@ describe('AgentAdapter', () => {
         reasoningLevel: 'high',
       });
 
-      expect(mockOrchestrator.runAgent).toHaveBeenCalledWith(
+      expect(mockOrchestrator.agent!.run).toHaveBeenCalledWith(
         expect.objectContaining({
           sessionId: 'sess-123',
           prompt: 'Test prompt',
@@ -109,7 +113,7 @@ describe('AgentAdapter', () => {
     it('should handle agent run errors gracefully', async () => {
       // Mock console.error to suppress output
       const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
-      vi.mocked(mockOrchestrator.runAgent!).mockRejectedValue(new Error('Agent error'));
+      vi.mocked(mockOrchestrator.agent!.run).mockRejectedValue(new Error('Agent error'));
 
       const adapter = createAgentAdapter({
         orchestrator: mockOrchestrator as EventStoreOrchestrator,
@@ -133,7 +137,7 @@ describe('AgentAdapter', () => {
 
   describe('abort', () => {
     it('should cancel agent and return aborted true', async () => {
-      vi.mocked(mockOrchestrator.cancelAgent!).mockResolvedValue(true);
+      vi.mocked(mockOrchestrator.agent!.cancel).mockResolvedValue(true);
 
       const adapter = createAgentAdapter({
         orchestrator: mockOrchestrator as EventStoreOrchestrator,
@@ -141,12 +145,12 @@ describe('AgentAdapter', () => {
 
       const result = await adapter.abort('sess-123');
 
-      expect(mockOrchestrator.cancelAgent).toHaveBeenCalledWith('sess-123');
+      expect(mockOrchestrator.agent!.cancel).toHaveBeenCalledWith('sess-123');
       expect(result).toEqual({ aborted: true });
     });
 
     it('should return aborted false when cancel fails', async () => {
-      vi.mocked(mockOrchestrator.cancelAgent!).mockResolvedValue(false);
+      vi.mocked(mockOrchestrator.agent!.cancel).mockResolvedValue(false);
 
       const adapter = createAgentAdapter({
         orchestrator: mockOrchestrator as EventStoreOrchestrator,
@@ -166,11 +170,11 @@ describe('AgentAdapter', () => {
         agent: mockAgent,
         sessionContext: mockSessionContext,
       } as any);
-      vi.mocked(mockOrchestrator.getSession!).mockResolvedValue({
+      vi.mocked((mockOrchestrator as any).sessions.getSession).mockResolvedValue({
         model: 'claude-sonnet-4-20250514',
         messageCount: 5,
       } as any);
-      vi.mocked(mockOrchestrator.wasSessionInterrupted!).mockResolvedValue(false);
+      vi.mocked((mockOrchestrator as any).sessions.wasSessionInterrupted).mockResolvedValue(false);
 
       const adapter = createAgentAdapter({
         orchestrator: mockOrchestrator as EventStoreOrchestrator,
@@ -188,11 +192,11 @@ describe('AgentAdapter', () => {
 
     it('should return idle state when no active session', async () => {
       vi.mocked(mockOrchestrator.getActiveSession!).mockReturnValue(null);
-      vi.mocked(mockOrchestrator.getSession!).mockResolvedValue({
+      vi.mocked((mockOrchestrator as any).sessions.getSession).mockResolvedValue({
         model: 'claude-sonnet-4-20250514',
         messageCount: 5,
       } as any);
-      vi.mocked(mockOrchestrator.wasSessionInterrupted!).mockResolvedValue(false);
+      vi.mocked((mockOrchestrator as any).sessions.wasSessionInterrupted).mockResolvedValue(false);
 
       const adapter = createAgentAdapter({
         orchestrator: mockOrchestrator as EventStoreOrchestrator,
@@ -214,7 +218,7 @@ describe('AgentAdapter', () => {
         agent: mockAgent,
         sessionContext: mockSessionContext,
       } as any);
-      vi.mocked(mockOrchestrator.getSession!).mockResolvedValue({
+      vi.mocked((mockOrchestrator as any).sessions.getSession).mockResolvedValue({
         model: 'claude-sonnet-4-20250514',
         messageCount: 5,
       } as any);
@@ -230,11 +234,11 @@ describe('AgentAdapter', () => {
 
     it('should detect interrupted session from persisted events', async () => {
       vi.mocked(mockOrchestrator.getActiveSession!).mockReturnValue(null);
-      vi.mocked(mockOrchestrator.getSession!).mockResolvedValue({
+      vi.mocked((mockOrchestrator as any).sessions.getSession).mockResolvedValue({
         model: 'claude-sonnet-4-20250514',
         messageCount: 5,
       } as any);
-      vi.mocked(mockOrchestrator.wasSessionInterrupted!).mockResolvedValue(true);
+      vi.mocked((mockOrchestrator as any).sessions.wasSessionInterrupted).mockResolvedValue(true);
 
       const adapter = createAgentAdapter({
         orchestrator: mockOrchestrator as EventStoreOrchestrator,
@@ -243,12 +247,12 @@ describe('AgentAdapter', () => {
       const result = await adapter.getState('sess-123');
 
       expect(result.wasInterrupted).toBe(true);
-      expect(mockOrchestrator.wasSessionInterrupted).toHaveBeenCalledWith('sess-123');
+      expect((mockOrchestrator as any).sessions.wasSessionInterrupted).toHaveBeenCalledWith('sess-123');
     });
 
     it('should return unknown model when session not found', async () => {
       vi.mocked(mockOrchestrator.getActiveSession!).mockReturnValue(null);
-      vi.mocked(mockOrchestrator.getSession!).mockResolvedValue(null);
+      vi.mocked((mockOrchestrator as any).sessions.getSession).mockResolvedValue(null);
 
       const adapter = createAgentAdapter({
         orchestrator: mockOrchestrator as EventStoreOrchestrator,
@@ -267,7 +271,7 @@ describe('AgentAdapter', () => {
         agent: mockAgent,
         sessionContext: mockSessionContext,
       } as any);
-      vi.mocked(mockOrchestrator.getSession!).mockResolvedValue({
+      vi.mocked((mockOrchestrator as any).sessions.getSession).mockResolvedValue({
         model: 'claude-sonnet-4-20250514',
       } as any);
 

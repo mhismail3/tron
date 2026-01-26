@@ -37,20 +37,27 @@ describe('SessionAdapter', () => {
 
   beforeEach(() => {
     mockOrchestrator = {
-      createSession: vi.fn(),
-      getSession: vi.fn(),
-      getSessionMessages: vi.fn(),
-      resumeSession: vi.fn(),
-      listSessions: vi.fn(),
-      endSession: vi.fn(),
-      forkSession: vi.fn(),
-      switchModel: vi.fn(),
-    };
+      sessions: {
+        createSession: vi.fn(),
+        getSession: vi.fn(),
+        resumeSession: vi.fn(),
+        listSessions: vi.fn(),
+        endSession: vi.fn(),
+        forkSession: vi.fn(),
+        wasSessionInterrupted: vi.fn(),
+      },
+      models: {
+        switchModel: vi.fn(),
+      },
+      events: {
+        getMessages: vi.fn(),
+      },
+    } as any;
   });
 
   describe('createSession', () => {
     it('should create a new session and return basic info', async () => {
-      vi.mocked(mockOrchestrator.createSession!).mockResolvedValue({
+      vi.mocked((mockOrchestrator as any).sessions.createSession).mockResolvedValue({
         sessionId: 'new-sess',
         model: 'claude-sonnet-4-20250514',
         createdAt: '2024-01-01T00:00:00Z',
@@ -65,7 +72,7 @@ describe('SessionAdapter', () => {
         model: 'claude-sonnet-4-20250514',
       });
 
-      expect(mockOrchestrator.createSession).toHaveBeenCalledWith({
+      expect((mockOrchestrator as any).sessions.createSession).toHaveBeenCalledWith({
         workingDirectory: '/test/project',
         model: 'claude-sonnet-4-20250514',
       });
@@ -79,8 +86,8 @@ describe('SessionAdapter', () => {
 
   describe('getSession', () => {
     it('should return session info with messages', async () => {
-      vi.mocked(mockOrchestrator.getSession!).mockResolvedValue(mockSession);
-      vi.mocked(mockOrchestrator.getSessionMessages!).mockResolvedValue(mockMessages);
+      vi.mocked((mockOrchestrator as any).sessions.getSession).mockResolvedValue(mockSession);
+      vi.mocked(mockOrchestrator.events!.getMessages).mockResolvedValue(mockMessages);
 
       const adapter = createSessionAdapter({
         orchestrator: mockOrchestrator as EventStoreOrchestrator,
@@ -88,8 +95,8 @@ describe('SessionAdapter', () => {
 
       const result = await adapter.getSession('sess-123');
 
-      expect(mockOrchestrator.getSession).toHaveBeenCalledWith('sess-123');
-      expect(mockOrchestrator.getSessionMessages).toHaveBeenCalledWith('sess-123');
+      expect((mockOrchestrator as any).sessions.getSession).toHaveBeenCalledWith('sess-123');
+      expect(mockOrchestrator.events!.getMessages).toHaveBeenCalledWith('sess-123');
       expect(result).toMatchObject({
         sessionId: 'sess-123',
         workingDirectory: '/test/project',
@@ -102,7 +109,7 @@ describe('SessionAdapter', () => {
     });
 
     it('should return null for non-existent session', async () => {
-      vi.mocked(mockOrchestrator.getSession!).mockResolvedValue(null);
+      vi.mocked((mockOrchestrator as any).sessions.getSession).mockResolvedValue(null);
 
       const adapter = createSessionAdapter({
         orchestrator: mockOrchestrator as EventStoreOrchestrator,
@@ -111,14 +118,14 @@ describe('SessionAdapter', () => {
       const result = await adapter.getSession('non-existent');
 
       expect(result).toBeNull();
-      expect(mockOrchestrator.getSessionMessages).not.toHaveBeenCalled();
+      expect(mockOrchestrator.events!.getMessages).not.toHaveBeenCalled();
     });
   });
 
   describe('resumeSession', () => {
     it('should resume session and return full info with messages', async () => {
-      vi.mocked(mockOrchestrator.resumeSession!).mockResolvedValue(mockSession);
-      vi.mocked(mockOrchestrator.getSessionMessages!).mockResolvedValue(mockMessages);
+      vi.mocked((mockOrchestrator as any).sessions.resumeSession).mockResolvedValue(mockSession);
+      vi.mocked(mockOrchestrator.events!.getMessages).mockResolvedValue(mockMessages);
 
       const adapter = createSessionAdapter({
         orchestrator: mockOrchestrator as EventStoreOrchestrator,
@@ -126,8 +133,8 @@ describe('SessionAdapter', () => {
 
       const result = await adapter.resumeSession('sess-123');
 
-      expect(mockOrchestrator.resumeSession).toHaveBeenCalledWith('sess-123');
-      expect(mockOrchestrator.getSessionMessages).toHaveBeenCalledWith('sess-123');
+      expect((mockOrchestrator as any).sessions.resumeSession).toHaveBeenCalledWith('sess-123');
+      expect(mockOrchestrator.events!.getMessages).toHaveBeenCalledWith('sess-123');
       expect(result.sessionId).toBe('sess-123');
       expect(result.messages).toHaveLength(2);
     });
@@ -135,7 +142,7 @@ describe('SessionAdapter', () => {
 
   describe('listSessions', () => {
     it('should return list of sessions without full messages', async () => {
-      vi.mocked(mockOrchestrator.listSessions!).mockResolvedValue([
+      vi.mocked((mockOrchestrator as any).sessions.listSessions).mockResolvedValue([
         mockSession,
         { ...mockSession, sessionId: 'sess-456' },
       ]);
@@ -149,7 +156,7 @@ describe('SessionAdapter', () => {
         limit: 10,
       });
 
-      expect(mockOrchestrator.listSessions).toHaveBeenCalledWith({
+      expect((mockOrchestrator as any).sessions.listSessions).toHaveBeenCalledWith({
         workingDirectory: '/test/project',
         limit: 10,
       });
@@ -160,7 +167,7 @@ describe('SessionAdapter', () => {
     });
 
     it('should handle empty list', async () => {
-      vi.mocked(mockOrchestrator.listSessions!).mockResolvedValue([]);
+      vi.mocked((mockOrchestrator as any).sessions.listSessions).mockResolvedValue([]);
 
       const adapter = createSessionAdapter({
         orchestrator: mockOrchestrator as EventStoreOrchestrator,
@@ -174,7 +181,7 @@ describe('SessionAdapter', () => {
 
   describe('deleteSession', () => {
     it('should end session and return true', async () => {
-      vi.mocked(mockOrchestrator.endSession!).mockResolvedValue(undefined);
+      vi.mocked((mockOrchestrator as any).sessions.endSession).mockResolvedValue(undefined);
 
       const adapter = createSessionAdapter({
         orchestrator: mockOrchestrator as EventStoreOrchestrator,
@@ -182,7 +189,7 @@ describe('SessionAdapter', () => {
 
       const result = await adapter.deleteSession('sess-123');
 
-      expect(mockOrchestrator.endSession).toHaveBeenCalledWith('sess-123');
+      expect((mockOrchestrator as any).sessions.endSession).toHaveBeenCalledWith('sess-123');
       expect(result).toBe(true);
     });
   });
@@ -196,7 +203,7 @@ describe('SessionAdapter', () => {
         forkedFromSessionId: 'sess-123',
         worktree: '/test/worktrees/forked',
       };
-      vi.mocked(mockOrchestrator.forkSession!).mockResolvedValue(forkResult);
+      vi.mocked((mockOrchestrator as any).sessions.forkSession).mockResolvedValue(forkResult);
 
       const adapter = createSessionAdapter({
         orchestrator: mockOrchestrator as EventStoreOrchestrator,
@@ -204,7 +211,7 @@ describe('SessionAdapter', () => {
 
       const result = await adapter.forkSession('sess-123', 'evt-fork-point');
 
-      expect(mockOrchestrator.forkSession).toHaveBeenCalledWith('sess-123', 'evt-fork-point');
+      expect((mockOrchestrator as any).sessions.forkSession).toHaveBeenCalledWith('sess-123', 'evt-fork-point');
       expect(result).toEqual(forkResult);
     });
 
@@ -216,7 +223,7 @@ describe('SessionAdapter', () => {
         forkedFromSessionId: 'sess-123',
         worktree: undefined,
       };
-      vi.mocked(mockOrchestrator.forkSession!).mockResolvedValue(forkResult);
+      vi.mocked((mockOrchestrator as any).sessions.forkSession).mockResolvedValue(forkResult);
 
       const adapter = createSessionAdapter({
         orchestrator: mockOrchestrator as EventStoreOrchestrator,
@@ -224,7 +231,7 @@ describe('SessionAdapter', () => {
 
       const result = await adapter.forkSession('sess-123');
 
-      expect(mockOrchestrator.forkSession).toHaveBeenCalledWith('sess-123', undefined);
+      expect((mockOrchestrator as any).sessions.forkSession).toHaveBeenCalledWith('sess-123', undefined);
       expect(result.newSessionId).toBe('forked-sess');
     });
   });
@@ -236,7 +243,7 @@ describe('SessionAdapter', () => {
         previousModel: 'claude-sonnet-4-20250514',
         newModel: 'claude-opus-4-20250514',
       };
-      vi.mocked(mockOrchestrator.switchModel!).mockResolvedValue(switchResult);
+      vi.mocked((mockOrchestrator as any).models.switchModel).mockResolvedValue(switchResult);
 
       const adapter = createSessionAdapter({
         orchestrator: mockOrchestrator as EventStoreOrchestrator,
@@ -244,7 +251,7 @@ describe('SessionAdapter', () => {
 
       const result = await adapter.switchModel('sess-123', 'claude-opus-4-20250514');
 
-      expect(mockOrchestrator.switchModel).toHaveBeenCalledWith('sess-123', 'claude-opus-4-20250514');
+      expect((mockOrchestrator as any).models.switchModel).toHaveBeenCalledWith('sess-123', 'claude-opus-4-20250514');
       expect(result).toEqual(switchResult);
     });
   });

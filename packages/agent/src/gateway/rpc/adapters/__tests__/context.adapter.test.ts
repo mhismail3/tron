@@ -14,15 +14,17 @@ describe('ContextAdapter', () => {
 
   beforeEach(() => {
     mockOrchestrator = {
-      getContextSnapshot: vi.fn(),
-      getDetailedContextSnapshot: vi.fn(),
+      context: {
+        getContextSnapshot: vi.fn(),
+        getDetailedContextSnapshot: vi.fn(),
+        shouldCompact: vi.fn(),
+        previewCompaction: vi.fn(),
+        confirmCompaction: vi.fn(),
+        canAcceptTurn: vi.fn(),
+        clearContext: vi.fn(),
+      },
       getActiveSession: vi.fn(),
-      shouldCompact: vi.fn(),
-      previewCompaction: vi.fn(),
-      confirmCompaction: vi.fn(),
-      canAcceptTurn: vi.fn(),
-      clearContext: vi.fn(),
-    };
+    } as any;
   });
 
   describe('getContextSnapshot', () => {
@@ -39,7 +41,7 @@ describe('ContextAdapter', () => {
           messages: 33000,
         },
       };
-      vi.mocked(mockOrchestrator.getContextSnapshot!).mockReturnValue(mockSnapshot);
+      vi.mocked((mockOrchestrator as any).context.getContextSnapshot).mockReturnValue(mockSnapshot);
 
       const adapter = createContextAdapter({
         orchestrator: mockOrchestrator as EventStoreOrchestrator,
@@ -47,7 +49,7 @@ describe('ContextAdapter', () => {
 
       const result = adapter.getContextSnapshot('sess-123');
 
-      expect(mockOrchestrator.getContextSnapshot).toHaveBeenCalledWith('sess-123');
+      expect((mockOrchestrator as any).context.getContextSnapshot).toHaveBeenCalledWith('sess-123');
       expect(result).toEqual(mockSnapshot);
     });
   });
@@ -69,7 +71,7 @@ describe('ContextAdapter', () => {
           { index: 0, role: 'user', tokens: 100, summary: 'Hello', content: 'Hello' },
         ],
       };
-      vi.mocked(mockOrchestrator.getDetailedContextSnapshot!).mockReturnValue(mockSnapshot);
+      vi.mocked((mockOrchestrator as any).context.getDetailedContextSnapshot).mockReturnValue(mockSnapshot);
 
       const mockActiveSession = {
         skillTracker: {
@@ -94,7 +96,7 @@ describe('ContextAdapter', () => {
 
       const result = adapter.getDetailedContextSnapshot('sess-123');
 
-      expect(mockOrchestrator.getDetailedContextSnapshot).toHaveBeenCalledWith('sess-123');
+      expect((mockOrchestrator as any).context.getDetailedContextSnapshot).toHaveBeenCalledWith('sess-123');
       expect(mockOrchestrator.getActiveSession).toHaveBeenCalledWith('sess-123');
       expect(result.addedSkills).toHaveLength(1);
       expect(result.addedSkills[0]).toEqual({
@@ -119,7 +121,7 @@ describe('ContextAdapter', () => {
         breakdown: { systemPrompt: 0, tools: 0, rules: 0, messages: 0 },
         messages: [],
       };
-      vi.mocked(mockOrchestrator.getDetailedContextSnapshot!).mockReturnValue(mockSnapshot);
+      vi.mocked((mockOrchestrator as any).context.getDetailedContextSnapshot).mockReturnValue(mockSnapshot);
       vi.mocked(mockOrchestrator.getActiveSession!).mockReturnValue(undefined);
 
       const adapter = createContextAdapter({
@@ -135,7 +137,7 @@ describe('ContextAdapter', () => {
 
   describe('shouldCompact', () => {
     it('should return true when context is high', () => {
-      vi.mocked(mockOrchestrator.shouldCompact!).mockReturnValue(true);
+      vi.mocked((mockOrchestrator as any).context.shouldCompact).mockReturnValue(true);
 
       const adapter = createContextAdapter({
         orchestrator: mockOrchestrator as EventStoreOrchestrator,
@@ -143,12 +145,12 @@ describe('ContextAdapter', () => {
 
       const result = adapter.shouldCompact('sess-123');
 
-      expect(mockOrchestrator.shouldCompact).toHaveBeenCalledWith('sess-123');
+      expect((mockOrchestrator as any).context.shouldCompact).toHaveBeenCalledWith('sess-123');
       expect(result).toBe(true);
     });
 
     it('should return false when context is low', () => {
-      vi.mocked(mockOrchestrator.shouldCompact!).mockReturnValue(false);
+      vi.mocked((mockOrchestrator as any).context.shouldCompact).mockReturnValue(false);
 
       const adapter = createContextAdapter({
         orchestrator: mockOrchestrator as EventStoreOrchestrator,
@@ -169,7 +171,7 @@ describe('ContextAdapter', () => {
         messagesRemoved: 45,
         messagesKept: 5,
       };
-      vi.mocked(mockOrchestrator.previewCompaction!).mockResolvedValue(mockPreview);
+      vi.mocked((mockOrchestrator as any).context.previewCompaction).mockResolvedValue(mockPreview);
 
       const adapter = createContextAdapter({
         orchestrator: mockOrchestrator as EventStoreOrchestrator,
@@ -177,7 +179,7 @@ describe('ContextAdapter', () => {
 
       const result = await adapter.previewCompaction('sess-123');
 
-      expect(mockOrchestrator.previewCompaction).toHaveBeenCalledWith('sess-123');
+      expect((mockOrchestrator as any).context.previewCompaction).toHaveBeenCalledWith('sess-123');
       expect(result).toEqual(mockPreview);
     });
   });
@@ -189,7 +191,7 @@ describe('ContextAdapter', () => {
         tokensBefore: 150000,
         tokensAfter: 50000,
       };
-      vi.mocked(mockOrchestrator.confirmCompaction!).mockResolvedValue(mockResult);
+      vi.mocked((mockOrchestrator as any).context.confirmCompaction).mockResolvedValue(mockResult);
 
       const adapter = createContextAdapter({
         orchestrator: mockOrchestrator as EventStoreOrchestrator,
@@ -197,13 +199,13 @@ describe('ContextAdapter', () => {
 
       const result = await adapter.confirmCompaction('sess-123');
 
-      expect(mockOrchestrator.confirmCompaction).toHaveBeenCalledWith('sess-123', undefined);
+      expect((mockOrchestrator as any).context.confirmCompaction).toHaveBeenCalledWith('sess-123', undefined);
       expect(result).toEqual(mockResult);
     });
 
     it('should pass edited summary to orchestrator', async () => {
       const mockResult = { success: true, tokensBefore: 150000, tokensAfter: 50000 };
-      vi.mocked(mockOrchestrator.confirmCompaction!).mockResolvedValue(mockResult);
+      vi.mocked((mockOrchestrator as any).context.confirmCompaction).mockResolvedValue(mockResult);
 
       const adapter = createContextAdapter({
         orchestrator: mockOrchestrator as EventStoreOrchestrator,
@@ -211,7 +213,7 @@ describe('ContextAdapter', () => {
 
       await adapter.confirmCompaction('sess-123', { editedSummary: 'Custom summary' });
 
-      expect(mockOrchestrator.confirmCompaction).toHaveBeenCalledWith(
+      expect((mockOrchestrator as any).context.confirmCompaction).toHaveBeenCalledWith(
         'sess-123',
         { editedSummary: 'Custom summary' }
       );
@@ -226,7 +228,7 @@ describe('ContextAdapter', () => {
         estimatedTokens: 55000,
         contextLimit: 200000,
       };
-      vi.mocked(mockOrchestrator.canAcceptTurn!).mockReturnValue(mockResult);
+      vi.mocked((mockOrchestrator as any).context.canAcceptTurn).mockReturnValue(mockResult);
 
       const adapter = createContextAdapter({
         orchestrator: mockOrchestrator as EventStoreOrchestrator,
@@ -234,7 +236,7 @@ describe('ContextAdapter', () => {
 
       const result = adapter.canAcceptTurn('sess-123', { estimatedResponseTokens: 5000 });
 
-      expect(mockOrchestrator.canAcceptTurn).toHaveBeenCalledWith(
+      expect((mockOrchestrator as any).context.canAcceptTurn).toHaveBeenCalledWith(
         'sess-123',
         { estimatedResponseTokens: 5000 }
       );
@@ -248,7 +250,7 @@ describe('ContextAdapter', () => {
         estimatedTokens: 250000,
         contextLimit: 200000,
       };
-      vi.mocked(mockOrchestrator.canAcceptTurn!).mockReturnValue(mockResult);
+      vi.mocked((mockOrchestrator as any).context.canAcceptTurn).mockReturnValue(mockResult);
 
       const adapter = createContextAdapter({
         orchestrator: mockOrchestrator as EventStoreOrchestrator,
@@ -268,7 +270,7 @@ describe('ContextAdapter', () => {
         tokensBefore: 150000,
         tokensAfter: 5000,
       };
-      vi.mocked(mockOrchestrator.clearContext!).mockResolvedValue(mockResult);
+      vi.mocked((mockOrchestrator as any).context.clearContext).mockResolvedValue(mockResult);
 
       const adapter = createContextAdapter({
         orchestrator: mockOrchestrator as EventStoreOrchestrator,
@@ -276,7 +278,7 @@ describe('ContextAdapter', () => {
 
       const result = await adapter.clearContext('sess-123');
 
-      expect(mockOrchestrator.clearContext).toHaveBeenCalledWith('sess-123');
+      expect((mockOrchestrator as any).context.clearContext).toHaveBeenCalledWith('sess-123');
       expect(result).toEqual(mockResult);
     });
   });

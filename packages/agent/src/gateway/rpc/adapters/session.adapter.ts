@@ -76,7 +76,7 @@ export function createSessionAdapter(deps: AdapterDependencies): SessionManagerA
      * Create a new session
      */
     async createSession(params) {
-      const session = await orchestrator.createSession({
+      const session = await orchestrator.sessions.createSession({
         workingDirectory: params.workingDirectory,
         model: params.model,
       });
@@ -91,11 +91,11 @@ export function createSessionAdapter(deps: AdapterDependencies): SessionManagerA
      * Get session info by ID
      */
     async getSession(sessionId) {
-      const session = await orchestrator.getSession(sessionId);
+      const session = await orchestrator.sessions.getSession(sessionId);
       if (!session) return null;
 
       // Get messages from event store
-      const messages = await orchestrator.getSessionMessages(sessionId);
+      const messages = await orchestrator.events.getMessages(sessionId);
 
       return toSessionInfo(session, messages);
     },
@@ -104,10 +104,10 @@ export function createSessionAdapter(deps: AdapterDependencies): SessionManagerA
      * Resume an existing session (activates it in the orchestrator)
      */
     async resumeSession(sessionId) {
-      const session = await orchestrator.resumeSession(sessionId);
+      const session = await orchestrator.sessions.resumeSession(sessionId);
 
       // Get messages from event store
-      const messages = await orchestrator.getSessionMessages(sessionId);
+      const messages = await orchestrator.events.getMessages(sessionId);
 
       return toSessionInfo(session, messages);
     },
@@ -116,20 +116,20 @@ export function createSessionAdapter(deps: AdapterDependencies): SessionManagerA
      * List sessions, optionally filtered by working directory
      */
     async listSessions(params) {
-      const sessions = await orchestrator.listSessions({
+      const sessions = await orchestrator.sessions.listSessions({
         workingDirectory: params.workingDirectory,
         limit: params.limit,
       });
 
       // For list, we don't include full messages (empty array)
-      return sessions.map(s => toSessionInfo(s, []));
+      return sessions.map((s: typeof sessions[number]) => toSessionInfo(s, []));
     },
 
     /**
      * Delete (end) a session
      */
     async deleteSession(sessionId) {
-      await orchestrator.endSession(sessionId);
+      await orchestrator.sessions.endSession(sessionId);
       return true;
     },
 
@@ -137,7 +137,7 @@ export function createSessionAdapter(deps: AdapterDependencies): SessionManagerA
      * Fork a session from a specific event
      */
     async forkSession(sessionId, fromEventId) {
-      const result = await orchestrator.forkSession(sessionId, fromEventId);
+      const result = await orchestrator.sessions.forkSession(sessionId, fromEventId);
       return {
         newSessionId: result.newSessionId,
         rootEventId: result.rootEventId,
@@ -151,7 +151,7 @@ export function createSessionAdapter(deps: AdapterDependencies): SessionManagerA
      * Switch the model for a session
      */
     async switchModel(sessionId, model) {
-      return orchestrator.switchModel(sessionId, model);
+      return orchestrator.models.switchModel(sessionId, model);
     },
   };
 }

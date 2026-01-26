@@ -2,7 +2,7 @@
  * @fileoverview Tests for Worktree Adapter
  *
  * The worktree adapter delegates git worktree operations
- * to the EventStoreOrchestrator.
+ * to the EventStoreOrchestrator's WorktreeController.
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
@@ -14,15 +14,18 @@ describe('WorktreeAdapter', () => {
 
   beforeEach(() => {
     mockOrchestrator = {
-      getWorktreeStatus: vi.fn(),
-      commitWorktree: vi.fn(),
-      mergeWorktree: vi.fn(),
-      listWorktrees: vi.fn(),
-    };
+      worktree: {
+        getStatus: vi.fn(),
+        commit: vi.fn(),
+        merge: vi.fn(),
+        list: vi.fn(),
+        getCoordinator: vi.fn(),
+      },
+    } as any;
   });
 
   describe('getWorktreeStatus', () => {
-    it('should return worktree status from orchestrator', async () => {
+    it('should return worktree status from orchestrator.worktree.getStatus', async () => {
       const mockStatus = {
         isolated: true,
         branch: 'feature/test',
@@ -31,7 +34,7 @@ describe('WorktreeAdapter', () => {
         hasUncommittedChanges: true,
         commitCount: 3,
       };
-      vi.mocked(mockOrchestrator.getWorktreeStatus!).mockResolvedValue(mockStatus);
+      vi.mocked(mockOrchestrator.worktree!.getStatus).mockResolvedValue(mockStatus);
 
       const adapter = createWorktreeAdapter({
         orchestrator: mockOrchestrator as EventStoreOrchestrator,
@@ -39,12 +42,12 @@ describe('WorktreeAdapter', () => {
 
       const result = await adapter.getWorktreeStatus('sess-123');
 
-      expect(mockOrchestrator.getWorktreeStatus).toHaveBeenCalledWith('sess-123');
+      expect(mockOrchestrator.worktree!.getStatus).toHaveBeenCalledWith('sess-123');
       expect(result).toEqual(mockStatus);
     });
 
     it('should return null when no worktree exists', async () => {
-      vi.mocked(mockOrchestrator.getWorktreeStatus!).mockResolvedValue(null);
+      vi.mocked(mockOrchestrator.worktree!.getStatus).mockResolvedValue(null);
 
       const adapter = createWorktreeAdapter({
         orchestrator: mockOrchestrator as EventStoreOrchestrator,
@@ -57,13 +60,13 @@ describe('WorktreeAdapter', () => {
   });
 
   describe('commitWorktree', () => {
-    it('should delegate commit to orchestrator', async () => {
+    it('should delegate commit to orchestrator.worktree.commit', async () => {
       const mockResult = {
         success: true,
         commitHash: 'def456',
         filesChanged: ['file1.ts', 'file2.ts'],
       };
-      vi.mocked(mockOrchestrator.commitWorktree!).mockResolvedValue(mockResult);
+      vi.mocked(mockOrchestrator.worktree!.commit).mockResolvedValue(mockResult);
 
       const adapter = createWorktreeAdapter({
         orchestrator: mockOrchestrator as EventStoreOrchestrator,
@@ -71,7 +74,7 @@ describe('WorktreeAdapter', () => {
 
       const result = await adapter.commitWorktree('sess-123', 'Commit message');
 
-      expect(mockOrchestrator.commitWorktree).toHaveBeenCalledWith('sess-123', 'Commit message');
+      expect(mockOrchestrator.worktree!.commit).toHaveBeenCalledWith('sess-123', 'Commit message');
       expect(result).toEqual(mockResult);
     });
 
@@ -80,7 +83,7 @@ describe('WorktreeAdapter', () => {
         success: false,
         error: 'No changes to commit',
       };
-      vi.mocked(mockOrchestrator.commitWorktree!).mockResolvedValue(mockResult);
+      vi.mocked(mockOrchestrator.worktree!.commit).mockResolvedValue(mockResult);
 
       const adapter = createWorktreeAdapter({
         orchestrator: mockOrchestrator as EventStoreOrchestrator,
@@ -94,12 +97,12 @@ describe('WorktreeAdapter', () => {
   });
 
   describe('mergeWorktree', () => {
-    it('should delegate merge to orchestrator with default strategy', async () => {
+    it('should delegate merge to orchestrator.worktree.merge with default strategy', async () => {
       const mockResult = {
         success: true,
         mergeCommit: 'ghi789',
       };
-      vi.mocked(mockOrchestrator.mergeWorktree!).mockResolvedValue(mockResult);
+      vi.mocked(mockOrchestrator.worktree!.merge).mockResolvedValue(mockResult);
 
       const adapter = createWorktreeAdapter({
         orchestrator: mockOrchestrator as EventStoreOrchestrator,
@@ -107,13 +110,13 @@ describe('WorktreeAdapter', () => {
 
       const result = await adapter.mergeWorktree('sess-123', 'main');
 
-      expect(mockOrchestrator.mergeWorktree).toHaveBeenCalledWith('sess-123', 'main', undefined);
+      expect(mockOrchestrator.worktree!.merge).toHaveBeenCalledWith('sess-123', 'main', undefined);
       expect(result).toEqual(mockResult);
     });
 
-    it('should pass strategy to orchestrator', async () => {
+    it('should pass strategy to orchestrator.worktree.merge', async () => {
       const mockResult = { success: true, mergeCommit: 'jkl012' };
-      vi.mocked(mockOrchestrator.mergeWorktree!).mockResolvedValue(mockResult);
+      vi.mocked(mockOrchestrator.worktree!.merge).mockResolvedValue(mockResult);
 
       const adapter = createWorktreeAdapter({
         orchestrator: mockOrchestrator as EventStoreOrchestrator,
@@ -121,7 +124,7 @@ describe('WorktreeAdapter', () => {
 
       await adapter.mergeWorktree('sess-123', 'main', 'squash');
 
-      expect(mockOrchestrator.mergeWorktree).toHaveBeenCalledWith('sess-123', 'main', 'squash');
+      expect(mockOrchestrator.worktree!.merge).toHaveBeenCalledWith('sess-123', 'main', 'squash');
     });
 
     it('should return conflicts on merge failure', async () => {
@@ -129,7 +132,7 @@ describe('WorktreeAdapter', () => {
         success: false,
         conflicts: ['file1.ts', 'file2.ts'],
       };
-      vi.mocked(mockOrchestrator.mergeWorktree!).mockResolvedValue(mockResult);
+      vi.mocked(mockOrchestrator.worktree!.merge).mockResolvedValue(mockResult);
 
       const adapter = createWorktreeAdapter({
         orchestrator: mockOrchestrator as EventStoreOrchestrator,
@@ -143,12 +146,12 @@ describe('WorktreeAdapter', () => {
   });
 
   describe('listWorktrees', () => {
-    it('should return list of worktrees', async () => {
+    it('should return list of worktrees from orchestrator.worktree.list', async () => {
       const mockWorktrees = [
         { path: '/path/1', branch: 'feature/a', sessionId: 'sess-1' },
         { path: '/path/2', branch: 'feature/b', sessionId: 'sess-2' },
       ];
-      vi.mocked(mockOrchestrator.listWorktrees!).mockResolvedValue(mockWorktrees);
+      vi.mocked(mockOrchestrator.worktree!.list).mockResolvedValue(mockWorktrees);
 
       const adapter = createWorktreeAdapter({
         orchestrator: mockOrchestrator as EventStoreOrchestrator,
@@ -156,12 +159,12 @@ describe('WorktreeAdapter', () => {
 
       const result = await adapter.listWorktrees();
 
-      expect(mockOrchestrator.listWorktrees).toHaveBeenCalled();
+      expect(mockOrchestrator.worktree!.list).toHaveBeenCalled();
       expect(result).toEqual(mockWorktrees);
     });
 
     it('should return empty array when no worktrees exist', async () => {
-      vi.mocked(mockOrchestrator.listWorktrees!).mockResolvedValue([]);
+      vi.mocked(mockOrchestrator.worktree!.list).mockResolvedValue([]);
 
       const adapter = createWorktreeAdapter({
         orchestrator: mockOrchestrator as EventStoreOrchestrator,

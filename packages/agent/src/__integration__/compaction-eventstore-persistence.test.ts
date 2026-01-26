@@ -104,7 +104,7 @@ describe('Compaction EventStore Persistence', () => {
 
   describe('compact.boundary event', () => {
     it('contains correct token counts', async () => {
-      const session = await orchestrator.createSession({
+      const session = await orchestrator.sessions.createSession({
         workingDirectory: testDir,
       });
 
@@ -112,11 +112,11 @@ describe('Compaction EventStore Persistence', () => {
       injectMessagesIntoSession(orchestrator, session.sessionId, messages);
 
       // Get tokens before
-      const snapshotBefore = orchestrator.getContextSnapshot(session.sessionId);
+      const snapshotBefore = orchestrator.context.getContextSnapshot(session.sessionId);
       const tokensBefore = snapshotBefore.currentTokens;
 
       // Compact
-      await orchestrator.confirmCompaction(session.sessionId);
+      await orchestrator.context.confirmCompaction(session.sessionId);
 
       // Get boundary event
       const events = await eventStore.getEventsBySession(
@@ -132,7 +132,7 @@ describe('Compaction EventStore Persistence', () => {
     });
 
     it('contains accurate compression ratio', async () => {
-      const session = await orchestrator.createSession({
+      const session = await orchestrator.sessions.createSession({
         workingDirectory: testDir,
       });
 
@@ -142,7 +142,7 @@ describe('Compaction EventStore Persistence', () => {
         generateTestMessages(200)
       );
 
-      await orchestrator.confirmCompaction(session.sessionId);
+      await orchestrator.context.confirmCompaction(session.sessionId);
 
       const events = await eventStore.getEventsBySession(
         session.sessionId as SessionId
@@ -158,7 +158,7 @@ describe('Compaction EventStore Persistence', () => {
     });
 
     it('has correct sessionId and timestamp', async () => {
-      const session = await orchestrator.createSession({
+      const session = await orchestrator.sessions.createSession({
         workingDirectory: testDir,
       });
 
@@ -169,7 +169,7 @@ describe('Compaction EventStore Persistence', () => {
       );
 
       const beforeCompact = Date.now();
-      await orchestrator.confirmCompaction(session.sessionId);
+      await orchestrator.context.confirmCompaction(session.sessionId);
       const afterCompact = Date.now();
 
       const events = await eventStore.getEventsBySession(
@@ -189,7 +189,7 @@ describe('Compaction EventStore Persistence', () => {
 
   describe('compact.summary event', () => {
     it('contains summary content', async () => {
-      const session = await orchestrator.createSession({
+      const session = await orchestrator.sessions.createSession({
         workingDirectory: testDir,
       });
 
@@ -199,7 +199,7 @@ describe('Compaction EventStore Persistence', () => {
         generateTestMessages(100)
       );
 
-      await orchestrator.confirmCompaction(session.sessionId);
+      await orchestrator.context.confirmCompaction(session.sessionId);
 
       const events = await eventStore.getEventsBySession(
         session.sessionId as SessionId
@@ -213,7 +213,7 @@ describe('Compaction EventStore Persistence', () => {
     });
 
     it('stores custom edited summary when provided', async () => {
-      const session = await orchestrator.createSession({
+      const session = await orchestrator.sessions.createSession({
         workingDirectory: testDir,
       });
 
@@ -224,7 +224,7 @@ describe('Compaction EventStore Persistence', () => {
       );
 
       const customSummary = 'Custom user-edited summary for EventStore test';
-      await orchestrator.confirmCompaction(session.sessionId, {
+      await orchestrator.context.confirmCompaction(session.sessionId, {
         editedSummary: customSummary,
       });
 
@@ -238,7 +238,7 @@ describe('Compaction EventStore Persistence', () => {
     });
 
     it('chains from compact.boundary event', async () => {
-      const session = await orchestrator.createSession({
+      const session = await orchestrator.sessions.createSession({
         workingDirectory: testDir,
       });
 
@@ -248,7 +248,7 @@ describe('Compaction EventStore Persistence', () => {
         generateTestMessages(100)
       );
 
-      await orchestrator.confirmCompaction(session.sessionId);
+      await orchestrator.context.confirmCompaction(session.sessionId);
 
       const events = await eventStore.getEventsBySession(
         session.sessionId as SessionId
@@ -271,7 +271,7 @@ describe('Compaction EventStore Persistence', () => {
 
   describe('event ordering', () => {
     it('compaction events come after message events', async () => {
-      const session = await orchestrator.createSession({
+      const session = await orchestrator.sessions.createSession({
         workingDirectory: testDir,
       });
 
@@ -281,7 +281,7 @@ describe('Compaction EventStore Persistence', () => {
         generateTestMessages(50)
       );
 
-      await orchestrator.confirmCompaction(session.sessionId);
+      await orchestrator.context.confirmCompaction(session.sessionId);
 
       const events = await eventStore.getEventsBySession(
         session.sessionId as SessionId
@@ -301,7 +301,7 @@ describe('Compaction EventStore Persistence', () => {
     });
 
     it('multiple compactions create multiple event pairs', async () => {
-      const session = await orchestrator.createSession({
+      const session = await orchestrator.sessions.createSession({
         workingDirectory: testDir,
       });
 
@@ -311,7 +311,7 @@ describe('Compaction EventStore Persistence', () => {
         session.sessionId,
         generateTestMessages(150)
       );
-      await orchestrator.confirmCompaction(session.sessionId);
+      await orchestrator.context.confirmCompaction(session.sessionId);
 
       // Grow back and compact again
       const active = (orchestrator as any).activeSessions.get(session.sessionId);
@@ -323,7 +323,7 @@ describe('Compaction EventStore Persistence', () => {
       active.agent.getContextManager().setApiContextTokens(
         BASE_CONTEXT_OVERHEAD + estimateMessageTokens(combinedMessages.length / 2)
       );
-      await orchestrator.confirmCompaction(session.sessionId);
+      await orchestrator.context.confirmCompaction(session.sessionId);
 
       // Check events
       const events = await eventStore.getEventsBySession(
@@ -341,7 +341,7 @@ describe('Compaction EventStore Persistence', () => {
 
   describe('event data integrity', () => {
     it('events have valid UUIDs', async () => {
-      const session = await orchestrator.createSession({
+      const session = await orchestrator.sessions.createSession({
         workingDirectory: testDir,
       });
 
@@ -351,7 +351,7 @@ describe('Compaction EventStore Persistence', () => {
         generateTestMessages(100)
       );
 
-      await orchestrator.confirmCompaction(session.sessionId);
+      await orchestrator.context.confirmCompaction(session.sessionId);
 
       const events = await eventStore.getEventsBySession(
         session.sessionId as SessionId
@@ -367,7 +367,7 @@ describe('Compaction EventStore Persistence', () => {
     });
 
     it('events survive orchestrator restart', async () => {
-      const session = await orchestrator.createSession({
+      const session = await orchestrator.sessions.createSession({
         workingDirectory: testDir,
       });
 
@@ -377,7 +377,7 @@ describe('Compaction EventStore Persistence', () => {
         generateTestMessages(100)
       );
 
-      await orchestrator.confirmCompaction(session.sessionId);
+      await orchestrator.context.confirmCompaction(session.sessionId);
 
       // Get events before shutdown
       const eventsBefore = await eventStore.getEventsBySession(
@@ -411,7 +411,7 @@ describe('Compaction EventStore Persistence', () => {
 
   describe('compaction_completed event emission', () => {
     it('emits compaction_completed event on success', async () => {
-      const session = await orchestrator.createSession({
+      const session = await orchestrator.sessions.createSession({
         workingDirectory: testDir,
       });
 
@@ -424,7 +424,7 @@ describe('Compaction EventStore Persistence', () => {
       const emittedEvents: any[] = [];
       orchestrator.on('compaction_completed', e => emittedEvents.push(e));
 
-      await orchestrator.confirmCompaction(session.sessionId);
+      await orchestrator.context.confirmCompaction(session.sessionId);
 
       expect(emittedEvents.length).toBe(1);
       expect(emittedEvents[0].sessionId).toBe(session.sessionId);
@@ -433,7 +433,7 @@ describe('Compaction EventStore Persistence', () => {
     });
 
     it('includes compression ratio in emitted event', async () => {
-      const session = await orchestrator.createSession({
+      const session = await orchestrator.sessions.createSession({
         workingDirectory: testDir,
       });
 
@@ -446,7 +446,7 @@ describe('Compaction EventStore Persistence', () => {
       const emittedEvents: any[] = [];
       orchestrator.on('compaction_completed', e => emittedEvents.push(e));
 
-      await orchestrator.confirmCompaction(session.sessionId);
+      await orchestrator.context.confirmCompaction(session.sessionId);
 
       expect(emittedEvents[0].compressionRatio).toBeDefined();
       expect(emittedEvents[0].compressionRatio).toBeGreaterThan(0);
@@ -456,7 +456,7 @@ describe('Compaction EventStore Persistence', () => {
 
   describe('queryable metadata', () => {
     it('compaction events can be queried by type', async () => {
-      const session = await orchestrator.createSession({
+      const session = await orchestrator.sessions.createSession({
         workingDirectory: testDir,
       });
 
@@ -466,7 +466,7 @@ describe('Compaction EventStore Persistence', () => {
         generateTestMessages(100)
       );
 
-      await orchestrator.confirmCompaction(session.sessionId);
+      await orchestrator.context.confirmCompaction(session.sessionId);
 
       // Query all events and filter by type
       const events = await eventStore.getEventsBySession(
@@ -481,7 +481,7 @@ describe('Compaction EventStore Persistence', () => {
     });
 
     it('compaction stats can be aggregated from events', async () => {
-      const session = await orchestrator.createSession({
+      const session = await orchestrator.sessions.createSession({
         workingDirectory: testDir,
       });
 
@@ -493,7 +493,7 @@ describe('Compaction EventStore Persistence', () => {
         cm.setMessages(messages);
         // Set API tokens to simulate what happens after a turn completes
         cm.setApiContextTokens(BASE_CONTEXT_OVERHEAD + estimateMessageTokens(messages.length / 2));
-        await orchestrator.confirmCompaction(session.sessionId);
+        await orchestrator.context.confirmCompaction(session.sessionId);
       }
 
       // Query and aggregate

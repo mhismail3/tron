@@ -113,7 +113,7 @@ export function createSkillAdapter(deps: AdapterDependencies): SkillRpcManager {
    */
   async function getWorkingDirectoryForSession(sessionId?: string): Promise<string | null> {
     if (!sessionId) return null;
-    const session = await orchestrator.getSession(sessionId);
+    const session = await orchestrator.sessions.getSession(sessionId);
     return session?.workingDirectory ?? null;
   }
 
@@ -222,8 +222,8 @@ export function createSkillAdapter(deps: AdapterDependencies): SkillRpcManager {
       // Remove from skill tracker
       active.skillTracker.removeSkill(skillName);
 
-      // Emit skill.removed event (linearized via SessionContext's EventPersister)
-      await orchestrator.appendEvent({
+      // Emit skill.removed event (linearized via EventController)
+      await orchestrator.events.append({
         sessionId: sessionId as SessionId,
         type: 'skill.removed',
         payload: {

@@ -26,8 +26,8 @@ export function createTodoAdapter(deps: AdapterDependencies): TodoRpcManager {
      * Get todos for a session
      */
     getTodos(sessionId: string): RpcTodoItem[] {
-      const todos = orchestrator.getTodos(sessionId);
-      return todos.map(todo => ({
+      const todos = orchestrator.todos.getTodos(sessionId);
+      return todos.map((todo: typeof todos[number]) => ({
         id: todo.id,
         content: todo.content,
         activeForm: todo.activeForm,
@@ -43,15 +43,15 @@ export function createTodoAdapter(deps: AdapterDependencies): TodoRpcManager {
      * Get todo summary string for a session
      */
     getTodoSummary(sessionId: string): string {
-      return orchestrator.getTodoSummary(sessionId);
+      return orchestrator.todos.getTodoSummary(sessionId);
     },
 
     /**
      * Get backlogged tasks for a workspace
      */
     getBacklog(workspaceId: string, options?: { includeRestored?: boolean; limit?: number }): RpcBackloggedTask[] {
-      const tasks = orchestrator.getBacklog(workspaceId, options);
-      return tasks.map(task => ({
+      const tasks = orchestrator.todos.getBacklog(workspaceId, options);
+      return tasks.map((task: typeof tasks[number]) => ({
         id: task.id,
         content: task.content,
         activeForm: task.activeForm,
@@ -73,8 +73,8 @@ export function createTodoAdapter(deps: AdapterDependencies): TodoRpcManager {
      * Restore tasks from backlog to a session
      */
     async restoreFromBacklog(sessionId: string, taskIds: string[]): Promise<RpcTodoItem[]> {
-      const todos = await orchestrator.restoreFromBacklog(sessionId, taskIds);
-      return todos.map(todo => ({
+      const todos = await orchestrator.todos.restoreFromBacklog(sessionId, taskIds);
+      return todos.map((todo: typeof todos[number]) => ({
         id: todo.id,
         content: todo.content,
         activeForm: todo.activeForm,
@@ -90,7 +90,7 @@ export function createTodoAdapter(deps: AdapterDependencies): TodoRpcManager {
      * Get count of unrestored backlogged tasks for a workspace
      */
     getBacklogCount(workspaceId: string): number {
-      return orchestrator.getBacklogCount(workspaceId);
+      return orchestrator.todos.getBacklogCount(workspaceId);
     },
   };
 }

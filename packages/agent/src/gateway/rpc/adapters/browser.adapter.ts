@@ -15,13 +15,13 @@ export function createBrowserAdapter(deps: AdapterDependencies): BrowserManagerA
 
   return {
     async startStream(params) {
-      return orchestrator.startBrowserStream(params.sessionId);
+      return orchestrator.browser.startStream(params.sessionId);
     },
     async stopStream(params) {
-      return orchestrator.stopBrowserStream(params.sessionId);
+      return orchestrator.browser.stopStream(params.sessionId);
     },
     async getStatus(params) {
-      return orchestrator.getBrowserStatus(params.sessionId);
+      return orchestrator.browser.getStatus(params.sessionId);
     },
   };
 }

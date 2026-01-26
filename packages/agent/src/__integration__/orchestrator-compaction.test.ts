@@ -92,12 +92,12 @@ describe('Orchestrator Compaction', () => {
   describe('getContextSnapshot', () => {
     it('returns context snapshot for active session', async () => {
       // Create a session
-      const session = await orchestrator.createSession({
+      const session = await orchestrator.sessions.createSession({
         workingDirectory: testDir,
       });
       sessionId = session.sessionId;
 
-      const snapshot = orchestrator.getContextSnapshot(sessionId);
+      const snapshot = orchestrator.context.getContextSnapshot(sessionId);
 
       expect(snapshot).toBeDefined();
       expect(snapshot.currentTokens).toBeGreaterThanOrEqual(0);
@@ -109,7 +109,7 @@ describe('Orchestrator Compaction', () => {
     it('returns default snapshot for non-existent session', () => {
       // Changed behavior: returns default snapshot instead of throwing
       // This supports iOS Context Audit view for new/inactive sessions
-      const snapshot = orchestrator.getContextSnapshot('non-existent');
+      const snapshot = orchestrator.context.getContextSnapshot('non-existent');
 
       expect(snapshot.currentTokens).toBe(0);
       expect(snapshot.contextLimit).toBe(200_000);
@@ -124,7 +124,7 @@ describe('Orchestrator Compaction', () => {
     });
 
     it('returns warning threshold when context is high', async () => {
-      const session = await orchestrator.createSession({
+      const session = await orchestrator.sessions.createSession({
         workingDirectory: testDir,
       });
       sessionId = session.sessionId;
@@ -134,7 +134,7 @@ describe('Orchestrator Compaction', () => {
       const messages = generateTestMessages(500); // Lots of messages
       injectMessagesWithTokens(active.agent.getContextManager(), messages);
 
-      const snapshot = orchestrator.getContextSnapshot(sessionId);
+      const snapshot = orchestrator.context.getContextSnapshot(sessionId);
 
       expect(snapshot.usagePercent).toBeGreaterThan(0);
     });
@@ -142,18 +142,18 @@ describe('Orchestrator Compaction', () => {
 
   describe('shouldCompact', () => {
     it('returns false for low context', async () => {
-      const session = await orchestrator.createSession({
+      const session = await orchestrator.sessions.createSession({
         workingDirectory: testDir,
       });
       sessionId = session.sessionId;
 
-      const shouldCompact = orchestrator.shouldCompact(sessionId);
+      const shouldCompact = orchestrator.context.shouldCompact(sessionId);
 
       expect(shouldCompact).toBe(false);
     });
 
     it('returns true for high context', async () => {
-      const session = await orchestrator.createSession({
+      const session = await orchestrator.sessions.createSession({
         workingDirectory: testDir,
       });
       sessionId = session.sessionId;
@@ -165,7 +165,7 @@ describe('Orchestrator Compaction', () => {
       const messages = generateTestMessages(1000);
       injectMessagesWithTokens(active.agent.getContextManager(), messages);
 
-      const shouldCompact = orchestrator.shouldCompact(sessionId);
+      const shouldCompact = orchestrator.context.shouldCompact(sessionId);
 
       // Note: May or may not trigger depending on actual token calculation
       // This tests the method exists and returns a boolean
@@ -175,7 +175,7 @@ describe('Orchestrator Compaction', () => {
 
   describe('previewCompaction', () => {
     it('returns preview for high context session', async () => {
-      const session = await orchestrator.createSession({
+      const session = await orchestrator.sessions.createSession({
         workingDirectory: testDir,
       });
       sessionId = session.sessionId;
@@ -185,7 +185,7 @@ describe('Orchestrator Compaction', () => {
       const messages = generateTestMessages(100);
       injectMessagesWithTokens(active.agent.getContextManager(), messages);
 
-      const preview = await orchestrator.previewCompaction(sessionId);
+      const preview = await orchestrator.context.previewCompaction(sessionId);
 
       expect(preview).toBeDefined();
       expect(preview.tokensBefore).toBeGreaterThan(0);
@@ -196,7 +196,7 @@ describe('Orchestrator Compaction', () => {
     });
 
     it('does not modify session state', async () => {
-      const session = await orchestrator.createSession({
+      const session = await orchestrator.sessions.createSession({
         workingDirectory: testDir,
       });
       sessionId = session.sessionId;
@@ -208,7 +208,7 @@ describe('Orchestrator Compaction', () => {
       const tokensBefore = active.agent.getContextManager().getCurrentTokens();
       const messagesBefore = active.agent.getContextManager().getMessages().length;
 
-      await orchestrator.previewCompaction(sessionId);
+      await orchestrator.context.previewCompaction(sessionId);
 
       const tokensAfter = active.agent.getContextManager().getCurrentTokens();
       const messagesAfter = active.agent.getContextManager().getMessages().length;
@@ -220,7 +220,7 @@ describe('Orchestrator Compaction', () => {
 
   describe('confirmCompaction', () => {
     it('executes compaction and reduces context', async () => {
-      const session = await orchestrator.createSession({
+      const session = await orchestrator.sessions.createSession({
         workingDirectory: testDir,
       });
       sessionId = session.sessionId;
@@ -231,7 +231,7 @@ describe('Orchestrator Compaction', () => {
 
       const tokensBefore = active.agent.getContextManager().getCurrentTokens();
 
-      const result = await orchestrator.confirmCompaction(sessionId);
+      const result = await orchestrator.context.confirmCompaction(sessionId);
 
       expect(result.success).toBe(true);
       expect(result.tokensAfter).toBeLessThan(result.tokensBefore);
@@ -241,7 +241,7 @@ describe('Orchestrator Compaction', () => {
     });
 
     it('supports custom edited summary', async () => {
-      const session = await orchestrator.createSession({
+      const session = await orchestrator.sessions.createSession({
         workingDirectory: testDir,
       });
       sessionId = session.sessionId;
@@ -251,7 +251,7 @@ describe('Orchestrator Compaction', () => {
       injectMessagesWithTokens(active.agent.getContextManager(), messages);
 
       const customSummary = 'User-edited custom summary for testing purposes.';
-      const result = await orchestrator.confirmCompaction(sessionId, {
+      const result = await orchestrator.context.confirmCompaction(sessionId, {
         editedSummary: customSummary,
       });
 
@@ -264,7 +264,7 @@ describe('Orchestrator Compaction', () => {
     });
 
     it('stores compaction events in EventStore', async () => {
-      const session = await orchestrator.createSession({
+      const session = await orchestrator.sessions.createSession({
         workingDirectory: testDir,
       });
       sessionId = session.sessionId;
@@ -273,7 +273,7 @@ describe('Orchestrator Compaction', () => {
       const messages = generateTestMessages(50);
       injectMessagesWithTokens(active.agent.getContextManager(), messages);
 
-      await orchestrator.confirmCompaction(sessionId);
+      await orchestrator.context.confirmCompaction(sessionId);
 
       // Query events from EventStore
       const events = await eventStore.getEventsBySession(sessionId as SessionId);
@@ -296,7 +296,7 @@ describe('Orchestrator Compaction', () => {
     });
 
     it('emits compaction_completed event', async () => {
-      const session = await orchestrator.createSession({
+      const session = await orchestrator.sessions.createSession({
         workingDirectory: testDir,
       });
       sessionId = session.sessionId;
@@ -308,7 +308,7 @@ describe('Orchestrator Compaction', () => {
       const events: any[] = [];
       orchestrator.on('compaction_completed', (e) => events.push(e));
 
-      await orchestrator.confirmCompaction(sessionId);
+      await orchestrator.context.confirmCompaction(sessionId);
 
       expect(events.length).toBe(1);
       expect(events[0].sessionId).toBe(sessionId);
@@ -319,12 +319,12 @@ describe('Orchestrator Compaction', () => {
 
   describe('canAcceptTurn', () => {
     it('returns true for low context', async () => {
-      const session = await orchestrator.createSession({
+      const session = await orchestrator.sessions.createSession({
         workingDirectory: testDir,
       });
       sessionId = session.sessionId;
 
-      const validation = orchestrator.canAcceptTurn(sessionId, {
+      const validation = orchestrator.context.canAcceptTurn(sessionId, {
         estimatedResponseTokens: 4000,
       });
 
@@ -333,12 +333,12 @@ describe('Orchestrator Compaction', () => {
     });
 
     it('provides validation details', async () => {
-      const session = await orchestrator.createSession({
+      const session = await orchestrator.sessions.createSession({
         workingDirectory: testDir,
       });
       sessionId = session.sessionId;
 
-      const validation = orchestrator.canAcceptTurn(sessionId, {
+      const validation = orchestrator.context.canAcceptTurn(sessionId, {
         estimatedResponseTokens: 4000,
       });
 

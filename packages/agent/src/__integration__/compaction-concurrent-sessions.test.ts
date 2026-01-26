@@ -110,10 +110,10 @@ describe('Concurrent Session Compaction', () => {
   describe('session isolation', () => {
     it('compacting one session does not affect another', async () => {
       // Create two sessions
-      const session1 = await orchestrator.createSession({
+      const session1 = await orchestrator.sessions.createSession({
         workingDirectory: path.join(testDir, 'session1'),
       });
-      const session2 = await orchestrator.createSession({
+      const session2 = await orchestrator.sessions.createSession({
         workingDirectory: path.join(testDir, 'session2'),
       });
 
@@ -125,33 +125,33 @@ describe('Concurrent Session Compaction', () => {
       injectMessagesIntoSession(orchestrator, session2.sessionId, messages2);
 
       // Verify both are at high utilization
-      const snapshot1Before = orchestrator.getContextSnapshot(session1.sessionId);
-      const snapshot2Before = orchestrator.getContextSnapshot(session2.sessionId);
+      const snapshot1Before = orchestrator.context.getContextSnapshot(session1.sessionId);
+      const snapshot2Before = orchestrator.context.getContextSnapshot(session2.sessionId);
 
       expect(snapshot1Before.usagePercent).toBeGreaterThan(0.5);
       expect(snapshot2Before.usagePercent).toBeGreaterThan(0.5);
 
       // Compact only session 1
-      const result = await orchestrator.confirmCompaction(session1.sessionId);
+      const result = await orchestrator.context.confirmCompaction(session1.sessionId);
       expect(result.success).toBe(true);
 
       // Session 1 should be reduced
-      const snapshot1After = orchestrator.getContextSnapshot(session1.sessionId);
+      const snapshot1After = orchestrator.context.getContextSnapshot(session1.sessionId);
       expect(snapshot1After.usagePercent).toBeLessThan(0.3);
       expect(snapshot1After.currentTokens).toBeLessThan(snapshot1Before.currentTokens);
 
       // Session 2 should be unchanged
-      const snapshot2After = orchestrator.getContextSnapshot(session2.sessionId);
+      const snapshot2After = orchestrator.context.getContextSnapshot(session2.sessionId);
       expect(snapshot2After.currentTokens).toBe(snapshot2Before.currentTokens);
       expect(snapshot2After.usagePercent).toBe(snapshot2Before.usagePercent);
     });
 
     it('compacting both sessions independently works correctly', async () => {
       // Create two sessions
-      const session1 = await orchestrator.createSession({
+      const session1 = await orchestrator.sessions.createSession({
         workingDirectory: path.join(testDir, 'session1'),
       });
-      const session2 = await orchestrator.createSession({
+      const session2 = await orchestrator.sessions.createSession({
         workingDirectory: path.join(testDir, 'session2'),
       });
 
@@ -169,16 +169,16 @@ describe('Concurrent Session Compaction', () => {
 
       // Compact both
       const [result1, result2] = await Promise.all([
-        orchestrator.confirmCompaction(session1.sessionId),
-        orchestrator.confirmCompaction(session2.sessionId),
+        orchestrator.context.confirmCompaction(session1.sessionId),
+        orchestrator.context.confirmCompaction(session2.sessionId),
       ]);
 
       expect(result1.success).toBe(true);
       expect(result2.success).toBe(true);
 
       // Both should be reduced
-      const snapshot1 = orchestrator.getContextSnapshot(session1.sessionId);
-      const snapshot2 = orchestrator.getContextSnapshot(session2.sessionId);
+      const snapshot1 = orchestrator.context.getContextSnapshot(session1.sessionId);
+      const snapshot2 = orchestrator.context.getContextSnapshot(session2.sessionId);
 
       expect(snapshot1.usagePercent).toBeLessThan(0.3);
       expect(snapshot2.usagePercent).toBeLessThan(0.3);
@@ -186,10 +186,10 @@ describe('Concurrent Session Compaction', () => {
 
     it('getContextSnapshot returns correct session data', async () => {
       // Create two sessions with different context sizes
-      const session1 = await orchestrator.createSession({
+      const session1 = await orchestrator.sessions.createSession({
         workingDirectory: path.join(testDir, 'session1'),
       });
-      const session2 = await orchestrator.createSession({
+      const session2 = await orchestrator.sessions.createSession({
         workingDirectory: path.join(testDir, 'session2'),
       });
 
@@ -205,8 +205,8 @@ describe('Concurrent Session Compaction', () => {
         generateTestMessages(300) // ~180k tokens
       );
 
-      const snapshot1 = orchestrator.getContextSnapshot(session1.sessionId);
-      const snapshot2 = orchestrator.getContextSnapshot(session2.sessionId);
+      const snapshot1 = orchestrator.context.getContextSnapshot(session1.sessionId);
+      const snapshot2 = orchestrator.context.getContextSnapshot(session2.sessionId);
 
       // Session 2 should have more tokens
       expect(snapshot2.currentTokens).toBeGreaterThan(snapshot1.currentTokens);
@@ -214,10 +214,10 @@ describe('Concurrent Session Compaction', () => {
     });
 
     it('shouldCompact returns correct value per session', async () => {
-      const session1 = await orchestrator.createSession({
+      const session1 = await orchestrator.sessions.createSession({
         workingDirectory: path.join(testDir, 'session1'),
       });
-      const session2 = await orchestrator.createSession({
+      const session2 = await orchestrator.sessions.createSession({
         workingDirectory: path.join(testDir, 'session2'),
       });
 
@@ -235,14 +235,14 @@ describe('Concurrent Session Compaction', () => {
         generateTestMessages(300) // ~180k tokens
       );
 
-      expect(orchestrator.shouldCompact(session1.sessionId)).toBe(false);
-      expect(orchestrator.shouldCompact(session2.sessionId)).toBe(true);
+      expect(orchestrator.context.shouldCompact(session1.sessionId)).toBe(false);
+      expect(orchestrator.context.shouldCompact(session2.sessionId)).toBe(true);
     });
   });
 
   describe('parallel compaction requests', () => {
     it('multiple preview requests on same session return consistent results', async () => {
-      const session = await orchestrator.createSession({
+      const session = await orchestrator.sessions.createSession({
         workingDirectory: testDir,
       });
 
@@ -254,9 +254,9 @@ describe('Concurrent Session Compaction', () => {
 
       // Request multiple previews in parallel
       const [preview1, preview2, preview3] = await Promise.all([
-        orchestrator.previewCompaction(session.sessionId),
-        orchestrator.previewCompaction(session.sessionId),
-        orchestrator.previewCompaction(session.sessionId),
+        orchestrator.context.previewCompaction(session.sessionId),
+        orchestrator.context.previewCompaction(session.sessionId),
+        orchestrator.context.previewCompaction(session.sessionId),
       ]);
 
       // All should return same values
@@ -266,7 +266,7 @@ describe('Concurrent Session Compaction', () => {
     });
 
     it('parallel compaction requests on same session serialize correctly', async () => {
-      const session = await orchestrator.createSession({
+      const session = await orchestrator.sessions.createSession({
         workingDirectory: testDir,
       });
 
@@ -279,8 +279,8 @@ describe('Concurrent Session Compaction', () => {
       // Fire two compaction requests in parallel
       // One should succeed immediately, the other should see already-compacted state
       const [result1, result2] = await Promise.all([
-        orchestrator.confirmCompaction(session.sessionId),
-        orchestrator.confirmCompaction(session.sessionId),
+        orchestrator.context.confirmCompaction(session.sessionId),
+        orchestrator.context.confirmCompaction(session.sessionId),
       ]);
 
       // Both should succeed
@@ -290,12 +290,12 @@ describe('Concurrent Session Compaction', () => {
       // The second one should see much lower tokensBefore (already compacted)
       // OR they should both see the same high value if properly serialized
       // Either way, final state should be compacted
-      const finalSnapshot = orchestrator.getContextSnapshot(session.sessionId);
+      const finalSnapshot = orchestrator.context.getContextSnapshot(session.sessionId);
       expect(finalSnapshot.usagePercent).toBeLessThan(0.3);
     });
 
     it('preview then confirm maintains consistency', async () => {
-      const session = await orchestrator.createSession({
+      const session = await orchestrator.sessions.createSession({
         workingDirectory: testDir,
       });
 
@@ -306,10 +306,10 @@ describe('Concurrent Session Compaction', () => {
       );
 
       // Preview first
-      const preview = await orchestrator.previewCompaction(session.sessionId);
+      const preview = await orchestrator.context.previewCompaction(session.sessionId);
 
       // Then confirm
-      const result = await orchestrator.confirmCompaction(session.sessionId);
+      const result = await orchestrator.context.confirmCompaction(session.sessionId);
 
       expect(result.success).toBe(true);
       expect(result.tokensBefore).toBe(preview.tokensBefore);
@@ -323,10 +323,10 @@ describe('Concurrent Session Compaction', () => {
 
   describe('session event isolation', () => {
     it('compaction events are stored in correct session', async () => {
-      const session1 = await orchestrator.createSession({
+      const session1 = await orchestrator.sessions.createSession({
         workingDirectory: path.join(testDir, 'session1'),
       });
-      const session2 = await orchestrator.createSession({
+      const session2 = await orchestrator.sessions.createSession({
         workingDirectory: path.join(testDir, 'session2'),
       });
 
@@ -336,7 +336,7 @@ describe('Concurrent Session Compaction', () => {
         session1.sessionId,
         generateTestMessages(150)
       );
-      await orchestrator.confirmCompaction(session1.sessionId);
+      await orchestrator.context.confirmCompaction(session1.sessionId);
 
       // Check events for session 1
       const events1 = await eventStore.getEventsBySession(
@@ -358,10 +358,10 @@ describe('Concurrent Session Compaction', () => {
     });
 
     it('canAcceptTurn is independent per session', async () => {
-      const session1 = await orchestrator.createSession({
+      const session1 = await orchestrator.sessions.createSession({
         workingDirectory: path.join(testDir, 'session1'),
       });
-      const session2 = await orchestrator.createSession({
+      const session2 = await orchestrator.sessions.createSession({
         workingDirectory: path.join(testDir, 'session2'),
       });
 
@@ -379,10 +379,10 @@ describe('Concurrent Session Compaction', () => {
         generateTestMessages(50) // ~30k tokens
       );
 
-      const validation1 = orchestrator.canAcceptTurn(session1.sessionId, {
+      const validation1 = orchestrator.context.canAcceptTurn(session1.sessionId, {
         estimatedResponseTokens: 4000,
       });
-      const validation2 = orchestrator.canAcceptTurn(session2.sessionId, {
+      const validation2 = orchestrator.context.canAcceptTurn(session2.sessionId, {
         estimatedResponseTokens: 4000,
       });
 
@@ -398,21 +398,21 @@ describe('Concurrent Session Compaction', () => {
   describe('error handling', () => {
     it('compaction on non-existent session throws', async () => {
       await expect(
-        orchestrator.confirmCompaction('non-existent-session')
+        orchestrator.context.confirmCompaction('non-existent-session')
       ).rejects.toThrow('Session not active');
     });
 
     it('preview on non-existent session throws', async () => {
       await expect(
-        orchestrator.previewCompaction('non-existent-session')
+        orchestrator.context.previewCompaction('non-existent-session')
       ).rejects.toThrow();
     });
 
     it('compaction failure on one session does not affect others', async () => {
-      const session1 = await orchestrator.createSession({
+      const session1 = await orchestrator.sessions.createSession({
         workingDirectory: path.join(testDir, 'session1'),
       });
-      const session2 = await orchestrator.createSession({
+      const session2 = await orchestrator.sessions.createSession({
         workingDirectory: path.join(testDir, 'session2'),
       });
 
@@ -429,26 +429,26 @@ describe('Concurrent Session Compaction', () => {
       );
 
       // Compact session 1 successfully
-      const result1 = await orchestrator.confirmCompaction(session1.sessionId);
+      const result1 = await orchestrator.context.confirmCompaction(session1.sessionId);
       expect(result1.success).toBe(true);
 
       // Try to compact a non-existent session - should throw
       await expect(
-        orchestrator.confirmCompaction('bad-session')
+        orchestrator.context.confirmCompaction('bad-session')
       ).rejects.toThrow('Session not active');
 
       // Session 2 should still be compactable
-      const result2 = await orchestrator.confirmCompaction(session2.sessionId);
+      const result2 = await orchestrator.context.confirmCompaction(session2.sessionId);
       expect(result2.success).toBe(true);
     });
   });
 
   describe('detailed context snapshot isolation', () => {
     it('getDetailedContextSnapshot returns correct per-session data', async () => {
-      const session1 = await orchestrator.createSession({
+      const session1 = await orchestrator.sessions.createSession({
         workingDirectory: path.join(testDir, 'session1'),
       });
-      const session2 = await orchestrator.createSession({
+      const session2 = await orchestrator.sessions.createSession({
         workingDirectory: path.join(testDir, 'session2'),
       });
 
@@ -464,8 +464,8 @@ describe('Concurrent Session Compaction', () => {
         generateTestMessages(50)
       );
 
-      const detailed1 = orchestrator.getDetailedContextSnapshot(session1.sessionId);
-      const detailed2 = orchestrator.getDetailedContextSnapshot(session2.sessionId);
+      const detailed1 = orchestrator.context.getDetailedContextSnapshot(session1.sessionId);
+      const detailed2 = orchestrator.context.getDetailedContextSnapshot(session2.sessionId);
 
       // Message counts should differ
       expect(detailed1.messages.length).toBe(20); // 10 pairs

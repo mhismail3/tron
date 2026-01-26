@@ -184,7 +184,7 @@ describe('Skill Content Injection', () => {
 
   describe('loadSkillContextForPrompt', () => {
     it('returns empty string when no skills', async () => {
-      const session = await orchestrator.createSession({
+      const session = await orchestrator.sessions.createSession({
         workingDirectory: testDir,
       });
       const active = orchestrator.getActiveSession(session.sessionId);
@@ -200,7 +200,7 @@ describe('Skill Content Injection', () => {
     });
 
     it('loads skill content from explicit skills array', async () => {
-      const session = await orchestrator.createSession({
+      const session = await orchestrator.sessions.createSession({
         workingDirectory: testDir,
       });
       const active = orchestrator.getActiveSession(session.sessionId);
@@ -223,7 +223,7 @@ describe('Skill Content Injection', () => {
 
     it('ignores @mentions in prompt (client-side responsibility)', async () => {
       // @mentions in prompt text are handled client-side - server ignores them
-      const session = await orchestrator.createSession({
+      const session = await orchestrator.sessions.createSession({
         workingDirectory: testDir,
       });
       const active = orchestrator.getActiveSession(session.sessionId);
@@ -246,7 +246,7 @@ describe('Skill Content Injection', () => {
 
     it('only uses explicit skills array, ignoring @mentions in prompt', async () => {
       // Server only processes options.skills, not @mentions in prompt text
-      const session = await orchestrator.createSession({
+      const session = await orchestrator.sessions.createSession({
         workingDirectory: testDir,
       });
       const active = orchestrator.getActiveSession(session.sessionId);
@@ -269,7 +269,7 @@ describe('Skill Content Injection', () => {
     });
 
     it('loads multiple explicit skills', async () => {
-      const session = await orchestrator.createSession({
+      const session = await orchestrator.sessions.createSession({
         workingDirectory: testDir,
       });
       const active = orchestrator.getActiveSession(session.sessionId);
@@ -297,7 +297,7 @@ describe('Skill Content Injection', () => {
     });
 
     it('returns empty string when skillLoader not provided but skills are', async () => {
-      const session = await orchestrator.createSession({
+      const session = await orchestrator.sessions.createSession({
         workingDirectory: testDir,
       });
       const active = orchestrator.getActiveSession(session.sessionId);
@@ -313,7 +313,7 @@ describe('Skill Content Injection', () => {
     });
 
     it('returns empty string when skillLoader returns empty array', async () => {
-      const session = await orchestrator.createSession({
+      const session = await orchestrator.sessions.createSession({
         workingDirectory: testDir,
       });
       const active = orchestrator.getActiveSession(session.sessionId);
@@ -334,7 +334,7 @@ describe('Skill Content Injection', () => {
 
   describe('skill.added events', () => {
     it('creates skill.added event when sending prompt with skills', async () => {
-      const session = await orchestrator.createSession({
+      const session = await orchestrator.sessions.createSession({
         workingDirectory: testDir,
       });
       const active = orchestrator.getActiveSession(session.sessionId);
@@ -348,14 +348,14 @@ describe('Skill Content Injection', () => {
       });
 
       // Flush events and check
-      await (orchestrator as any).flushPendingEvents(active);
+      await orchestrator.events.flush(session.sessionId);
 
       // The skill tracker should now have the skill
       expect(active!.skillTracker.hasSkill('test-skill')).toBe(true);
     });
 
     it('does not duplicate events for already-added skills', async () => {
-      const session = await orchestrator.createSession({
+      const session = await orchestrator.sessions.createSession({
         workingDirectory: testDir,
       });
       const active = orchestrator.getActiveSession(session.sessionId);
@@ -385,7 +385,7 @@ describe('Skill Content Injection', () => {
 
   describe('skill.removed events', () => {
     it('removes skill from tracker when removeSkill is called', async () => {
-      const session = await orchestrator.createSession({
+      const session = await orchestrator.sessions.createSession({
         workingDirectory: testDir,
       });
       const active = orchestrator.getActiveSession(session.sessionId);
@@ -397,7 +397,7 @@ describe('Skill Content Injection', () => {
         prompt: 'Test',
         skills: [{ name: 'removable-skill', source: 'global' }],
       });
-      await (orchestrator as any).flushPendingEvents(active);
+      await orchestrator.events.flush(session.sessionId);
 
       expect(active!.skillTracker.hasSkill('removable-skill')).toBe(true);
 
@@ -409,7 +409,7 @@ describe('Skill Content Injection', () => {
     });
 
     it('returns false when removing non-existent skill', async () => {
-      const session = await orchestrator.createSession({
+      const session = await orchestrator.sessions.createSession({
         workingDirectory: testDir,
       });
       const active = orchestrator.getActiveSession(session.sessionId);
@@ -420,7 +420,7 @@ describe('Skill Content Injection', () => {
     });
 
     it('only removes specified skill, keeping others', async () => {
-      const session = await orchestrator.createSession({
+      const session = await orchestrator.sessions.createSession({
         workingDirectory: testDir,
       });
       const active = orchestrator.getActiveSession(session.sessionId);
@@ -435,7 +435,7 @@ describe('Skill Content Injection', () => {
           { name: 'skill-c', source: 'global' },
         ],
       });
-      await (orchestrator as any).flushPendingEvents(active);
+      await orchestrator.events.flush(session.sessionId);
 
       // Remove only skill-b
       active!.skillTracker.removeSkill('skill-b');
@@ -449,7 +449,7 @@ describe('Skill Content Injection', () => {
 
   describe('skill tracker clear on context operations', () => {
     it('clears skills when tracker clear is called', async () => {
-      const session = await orchestrator.createSession({
+      const session = await orchestrator.sessions.createSession({
         workingDirectory: testDir,
       });
       const active = orchestrator.getActiveSession(session.sessionId);
@@ -463,7 +463,7 @@ describe('Skill Content Injection', () => {
           { name: 'skill-b', source: 'project' },
         ],
       });
-      await (orchestrator as any).flushPendingEvents(active);
+      await orchestrator.events.flush(session.sessionId);
 
       expect(active!.skillTracker.getAddedSkills()).toHaveLength(2);
 
@@ -478,7 +478,7 @@ describe('Skill Content Injection', () => {
 
   describe('getDetailedContextSnapshot with skills', () => {
     it('includes addedSkills in snapshot', async () => {
-      const session = await orchestrator.createSession({
+      const session = await orchestrator.sessions.createSession({
         workingDirectory: testDir,
       });
       const active = orchestrator.getActiveSession(session.sessionId);
@@ -489,10 +489,10 @@ describe('Skill Content Injection', () => {
         prompt: 'Test',
         skills: [{ name: 'snapshot-skill', source: 'global' }],
       });
-      await (orchestrator as any).flushPendingEvents(active);
+      await orchestrator.events.flush(session.sessionId);
 
       // Get snapshot
-      const snapshot = orchestrator.getDetailedContextSnapshot(session.sessionId);
+      const snapshot = orchestrator.context.getDetailedContextSnapshot(session.sessionId);
 
       // Verify skills are tracked (snapshot may not include addedSkills directly,
       // that's added by the RPC layer - but we can check the tracker)
@@ -500,7 +500,7 @@ describe('Skill Content Injection', () => {
     });
 
     it('reflects skill removal in tracker', async () => {
-      const session = await orchestrator.createSession({
+      const session = await orchestrator.sessions.createSession({
         workingDirectory: testDir,
       });
       const active = orchestrator.getActiveSession(session.sessionId);
@@ -511,7 +511,7 @@ describe('Skill Content Injection', () => {
         prompt: 'Test',
         skills: [{ name: 'to-remove', source: 'global' }],
       });
-      await (orchestrator as any).flushPendingEvents(active);
+      await orchestrator.events.flush(session.sessionId);
 
       expect(active!.skillTracker.hasSkill('to-remove')).toBe(true);
 

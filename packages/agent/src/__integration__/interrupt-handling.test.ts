@@ -147,7 +147,7 @@ describe('Interrupt Handling', () => {
     });
 
     it('should return false for session with no assistant messages', async () => {
-      const wasInterrupted = await orchestrator.wasSessionInterrupted(sessionId);
+      const wasInterrupted = await orchestrator.sessions.wasSessionInterrupted(sessionId);
       expect(wasInterrupted).toBe(false);
     });
 
@@ -169,7 +169,7 @@ describe('Interrupt Handling', () => {
         },
       });
 
-      const wasInterrupted = await orchestrator.wasSessionInterrupted(sessionId);
+      const wasInterrupted = await orchestrator.sessions.wasSessionInterrupted(sessionId);
       expect(wasInterrupted).toBe(false);
     });
 
@@ -192,7 +192,7 @@ describe('Interrupt Handling', () => {
         },
       });
 
-      const wasInterrupted = await orchestrator.wasSessionInterrupted(sessionId);
+      const wasInterrupted = await orchestrator.sessions.wasSessionInterrupted(sessionId);
       expect(wasInterrupted).toBe(true);
     });
 
@@ -230,12 +230,12 @@ describe('Interrupt Handling', () => {
       });
 
       // Should be false since the LAST assistant message is not interrupted
-      const wasInterrupted = await orchestrator.wasSessionInterrupted(sessionId);
+      const wasInterrupted = await orchestrator.sessions.wasSessionInterrupted(sessionId);
       expect(wasInterrupted).toBe(false);
     });
 
     it('should return false for non-existent session', async () => {
-      const wasInterrupted = await orchestrator.wasSessionInterrupted('sess_nonexistent' as SessionId);
+      const wasInterrupted = await orchestrator.sessions.wasSessionInterrupted('sess_nonexistent' as SessionId);
       expect(wasInterrupted).toBe(false);
     });
   });
@@ -532,7 +532,7 @@ describe('Interrupt Handling', () => {
       });
 
       // Final state should NOT be interrupted since last assistant message is normal
-      expect(await orchestrator.wasSessionInterrupted(sessionId)).toBe(false);
+      expect(await orchestrator.sessions.wasSessionInterrupted(sessionId)).toBe(false);
     });
   });
 

@@ -2,7 +2,7 @@
  * @fileoverview Tests for Browser Adapter
  *
  * The browser adapter delegates browser automation operations
- * to the EventStoreOrchestrator.
+ * to the EventStoreOrchestrator's BrowserController.
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
@@ -14,16 +14,18 @@ describe('BrowserAdapter', () => {
 
   beforeEach(() => {
     mockOrchestrator = {
-      startBrowserStream: vi.fn(),
-      stopBrowserStream: vi.fn(),
-      getBrowserStatus: vi.fn(),
-    };
+      browser: {
+        startStream: vi.fn(),
+        stopStream: vi.fn(),
+        getStatus: vi.fn(),
+      },
+    } as any;
   });
 
   describe('startStream', () => {
-    it('should delegate to orchestrator.startBrowserStream', async () => {
+    it('should delegate to orchestrator.browser.startStream', async () => {
       const mockResult = { success: true, streamId: 'stream-123' };
-      vi.mocked(mockOrchestrator.startBrowserStream!).mockResolvedValue(mockResult);
+      vi.mocked(mockOrchestrator.browser!.startStream).mockResolvedValue(mockResult);
 
       const adapter = createBrowserAdapter({
         orchestrator: mockOrchestrator as EventStoreOrchestrator,
@@ -31,15 +33,15 @@ describe('BrowserAdapter', () => {
 
       const result = await adapter.startStream({ sessionId: 'sess-123' });
 
-      expect(mockOrchestrator.startBrowserStream).toHaveBeenCalledWith('sess-123');
+      expect(mockOrchestrator.browser!.startStream).toHaveBeenCalledWith('sess-123');
       expect(result).toEqual(mockResult);
     });
   });
 
   describe('stopStream', () => {
-    it('should delegate to orchestrator.stopBrowserStream', async () => {
+    it('should delegate to orchestrator.browser.stopStream', async () => {
       const mockResult = { success: true };
-      vi.mocked(mockOrchestrator.stopBrowserStream!).mockResolvedValue(mockResult);
+      vi.mocked(mockOrchestrator.browser!.stopStream).mockResolvedValue(mockResult);
 
       const adapter = createBrowserAdapter({
         orchestrator: mockOrchestrator as EventStoreOrchestrator,
@@ -47,19 +49,19 @@ describe('BrowserAdapter', () => {
 
       const result = await adapter.stopStream({ sessionId: 'sess-123' });
 
-      expect(mockOrchestrator.stopBrowserStream).toHaveBeenCalledWith('sess-123');
+      expect(mockOrchestrator.browser!.stopStream).toHaveBeenCalledWith('sess-123');
       expect(result).toEqual(mockResult);
     });
   });
 
   describe('getStatus', () => {
-    it('should delegate to orchestrator.getBrowserStatus', async () => {
+    it('should delegate to orchestrator.browser.getStatus', async () => {
       const mockResult = {
         isStreaming: true,
         streamId: 'stream-123',
         frameCount: 42,
       };
-      vi.mocked(mockOrchestrator.getBrowserStatus!).mockResolvedValue(mockResult);
+      vi.mocked(mockOrchestrator.browser!.getStatus).mockResolvedValue(mockResult);
 
       const adapter = createBrowserAdapter({
         orchestrator: mockOrchestrator as EventStoreOrchestrator,
@@ -67,7 +69,7 @@ describe('BrowserAdapter', () => {
 
       const result = await adapter.getStatus({ sessionId: 'sess-123' });
 
-      expect(mockOrchestrator.getBrowserStatus).toHaveBeenCalledWith('sess-123');
+      expect(mockOrchestrator.browser!.getStatus).toHaveBeenCalledWith('sess-123');
       expect(result).toEqual(mockResult);
     });
   });

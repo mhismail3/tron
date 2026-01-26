@@ -38,7 +38,7 @@ export function createAgentAdapter(deps: AdapterDependencies): AgentManagerAdapt
 
       try {
         // Get session's working directory
-        const session = await orchestrator.getSession(sessionId);
+        const session = await orchestrator.sessions.getSession(sessionId);
         if (!session?.workingDirectory) {
           logger.warn('[SKILL-LOADER] Cannot load skills - no working directory', { sessionId });
           return [];
@@ -119,7 +119,7 @@ export function createAgentAdapter(deps: AdapterDependencies): AgentManagerAdapt
       const skillLoader = createSkillLoader(params.sessionId);
 
       // Start the agent run asynchronously - response will be streamed via events
-      orchestrator.runAgent({
+      orchestrator.agent.run({
         sessionId: params.sessionId,
         prompt: params.prompt,
         reasoningLevel: params.reasoningLevel,
@@ -140,7 +140,7 @@ export function createAgentAdapter(deps: AdapterDependencies): AgentManagerAdapt
      * Abort a running agent
      */
     async abort(sessionId) {
-      const cancelled = await orchestrator.cancelAgent(sessionId);
+      const cancelled = await orchestrator.agent.cancel(sessionId);
       return { aborted: cancelled };
     },
 
@@ -149,7 +149,7 @@ export function createAgentAdapter(deps: AdapterDependencies): AgentManagerAdapt
      */
     async getState(sessionId) {
       const active = orchestrator.getActiveSession(sessionId);
-      const session = await orchestrator.getSession(sessionId);
+      const session = await orchestrator.sessions.getSession(sessionId);
 
       // Get ACTUAL agent message count (not just DB count) for debugging
       const agentState = active?.agent.getState();
@@ -158,7 +158,7 @@ export function createAgentAdapter(deps: AdapterDependencies): AgentManagerAdapt
       let wasInterrupted = active?.wasInterrupted ?? false;
       if (!wasInterrupted && session) {
         // Check if the last assistant message was interrupted
-        wasInterrupted = await orchestrator.wasSessionInterrupted(sessionId);
+        wasInterrupted = await orchestrator.sessions.wasSessionInterrupted(sessionId);
       }
 
       const isRunning = active?.sessionContext?.isProcessing() ?? false;

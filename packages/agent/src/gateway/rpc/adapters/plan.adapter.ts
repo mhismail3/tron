@@ -19,7 +19,7 @@ export function createPlanAdapter(deps: AdapterDependencies): PlanManagerAdapter
     async enterPlanMode(sessionId: string, skillName: string, blockedTools?: string[]) {
       const effectiveBlockedTools = blockedTools ?? DEFAULT_PLAN_MODE_BLOCKED_TOOLS;
 
-      await orchestrator.enterPlanMode(sessionId, {
+      await orchestrator.planMode.enterPlanMode(sessionId, {
         skillName,
         blockedTools: effectiveBlockedTools,
       });
@@ -31,7 +31,7 @@ export function createPlanAdapter(deps: AdapterDependencies): PlanManagerAdapter
     },
 
     async exitPlanMode(sessionId: string, reason: 'approved' | 'cancelled', planPath?: string) {
-      await orchestrator.exitPlanMode(sessionId, {
+      await orchestrator.planMode.exitPlanMode(sessionId, {
         reason,
         planPath,
       });
@@ -42,8 +42,8 @@ export function createPlanAdapter(deps: AdapterDependencies): PlanManagerAdapter
     },
 
     getPlanModeState(sessionId: string) {
-      const isActive = orchestrator.isInPlanMode(sessionId);
-      const blockedTools = orchestrator.getBlockedTools(sessionId);
+      const isActive = orchestrator.planMode.isInPlanMode(sessionId);
+      const blockedTools = orchestrator.planMode.getBlockedTools(sessionId);
 
       // Get skill name from SessionContext if active
       const active = orchestrator.getActiveSession(sessionId);

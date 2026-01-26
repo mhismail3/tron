@@ -37,16 +37,20 @@ describe('SkillAdapter', () => {
     };
 
     mockOrchestrator = {
-      getSession: vi.fn(),
+      sessions: {
+        getSession: vi.fn(),
+      },
       getActiveSession: vi.fn(),
-      appendEvent: vi.fn(),
       emit: vi.fn(),
-    };
+      events: {
+        append: vi.fn(),
+      },
+    } as any;
   });
 
   describe('listSkills', () => {
     it('should return empty list when no skills exist', async () => {
-      vi.mocked(mockOrchestrator.getSession!).mockResolvedValue({
+      vi.mocked((mockOrchestrator as any).sessions.getSession).mockResolvedValue({
         workingDirectory: '/test/project',
       } as any);
 
@@ -70,12 +74,12 @@ describe('SkillAdapter', () => {
 
       const result = await adapter.listSkills({});
 
-      expect(mockOrchestrator.getSession).not.toHaveBeenCalled();
+      expect((mockOrchestrator as any).sessions.getSession).not.toHaveBeenCalled();
       expect(result.skills).toEqual([]);
     });
 
     it('should return null for session when session not found', async () => {
-      vi.mocked(mockOrchestrator.getSession!).mockResolvedValue(null);
+      vi.mocked((mockOrchestrator as any).sessions.getSession).mockResolvedValue(null);
 
       const adapter = createSkillAdapter({
         orchestrator: mockOrchestrator as EventStoreOrchestrator,
@@ -92,7 +96,7 @@ describe('SkillAdapter', () => {
 
   describe('getSkill', () => {
     it('should return not found for non-existent skill', async () => {
-      vi.mocked(mockOrchestrator.getSession!).mockResolvedValue({
+      vi.mocked((mockOrchestrator as any).sessions.getSession).mockResolvedValue({
         workingDirectory: '/test/project',
       } as any);
 
@@ -112,7 +116,7 @@ describe('SkillAdapter', () => {
 
   describe('refreshSkills', () => {
     it('should refresh skills and return success', async () => {
-      vi.mocked(mockOrchestrator.getSession!).mockResolvedValue({
+      vi.mocked((mockOrchestrator as any).sessions.getSession).mockResolvedValue({
         workingDirectory: '/test/project',
       } as any);
 
@@ -180,7 +184,7 @@ describe('SkillAdapter', () => {
       vi.mocked(mockOrchestrator.getActiveSession!).mockReturnValue({
         skillTracker: mockSkillTracker,
       } as any);
-      vi.mocked(mockOrchestrator.appendEvent!).mockResolvedValue({ id: 'evt-1' } as any);
+      vi.mocked(mockOrchestrator.events!.append).mockResolvedValue({ id: 'evt-1' } as any);
 
       const adapter = createSkillAdapter({
         orchestrator: mockOrchestrator as EventStoreOrchestrator,
@@ -193,7 +197,7 @@ describe('SkillAdapter', () => {
 
       expect(result.success).toBe(true);
       expect(mockSkillTracker.removeSkill).toHaveBeenCalledWith('some-skill');
-      expect(mockOrchestrator.appendEvent).toHaveBeenCalledWith({
+      expect(mockOrchestrator.events!.append).toHaveBeenCalledWith({
         sessionId: 'sess-123',
         type: 'skill.removed',
         payload: {

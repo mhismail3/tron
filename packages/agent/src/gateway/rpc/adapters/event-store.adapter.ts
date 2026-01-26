@@ -84,7 +84,7 @@ export function createEventStoreAdapter(deps: AdapterDependencies): EventStoreMa
 
   return {
     async getEventHistory(sessionId, options) {
-      const events = await orchestrator.getSessionEvents(sessionId);
+      const events = await orchestrator.events.getEvents(sessionId);
 
       let filtered = events;
       if (options?.types?.length) {
@@ -104,7 +104,7 @@ export function createEventStoreAdapter(deps: AdapterDependencies): EventStoreMa
 
     async getEventsSince(options) {
       const events = options.sessionId
-        ? await orchestrator.getSessionEvents(options.sessionId)
+        ? await orchestrator.events.getEvents(options.sessionId)
         : [];
 
       let filtered = events;
@@ -128,7 +128,7 @@ export function createEventStoreAdapter(deps: AdapterDependencies): EventStoreMa
     },
 
     async appendEvent(sessionId, type, payload, parentId) {
-      const event = await orchestrator.appendEvent({
+      const event = await orchestrator.events.append({
         sessionId: sessionId as any,
         type: type as any,
         payload,
@@ -149,7 +149,7 @@ export function createEventStoreAdapter(deps: AdapterDependencies): EventStoreMa
         throw new Error(`Session not found: ${sessionId}`);
       }
 
-      const events = await orchestrator.getSessionEvents(sessionId);
+      const events = await orchestrator.events.getEvents(sessionId);
 
       const nodes = events.map(e => ({
         id: e.id,
@@ -178,7 +178,7 @@ export function createEventStoreAdapter(deps: AdapterDependencies): EventStoreMa
     },
 
     async getBranches(sessionId) {
-      const events = await orchestrator.getSessionEvents(sessionId);
+      const events = await orchestrator.events.getEvents(sessionId);
       const session = await eventStore.getSession(sessionId as any);
 
       const branchPoints = events.filter(e =>
@@ -213,7 +213,7 @@ export function createEventStoreAdapter(deps: AdapterDependencies): EventStoreMa
 
     async getSubtree(eventId, options) {
       if (options?.direction === 'ancestors') {
-        const ancestors = await orchestrator.getAncestors(eventId);
+        const ancestors = await orchestrator.events.getAncestors(eventId);
         return { nodes: ancestors };
       }
 
@@ -222,12 +222,12 @@ export function createEventStoreAdapter(deps: AdapterDependencies): EventStoreMa
     },
 
     async getAncestors(eventId) {
-      const ancestors = await orchestrator.getAncestors(eventId);
+      const ancestors = await orchestrator.events.getAncestors(eventId);
       return { events: ancestors };
     },
 
     async searchContent(query, options) {
-      const results = await orchestrator.searchEvents(query, {
+      const results = await orchestrator.events.search(query, {
         sessionId: options?.sessionId,
         workspaceId: options?.workspaceId,
         types: options?.types,
@@ -241,7 +241,8 @@ export function createEventStoreAdapter(deps: AdapterDependencies): EventStoreMa
     },
 
     async deleteMessage(sessionId, targetEventId, reason) {
-      return orchestrator.deleteMessage(sessionId, targetEventId, reason);
+      const event = await orchestrator.events.deleteMessage(sessionId, targetEventId, reason);
+      return { id: event.id, payload: event.payload };
     },
   };
 }

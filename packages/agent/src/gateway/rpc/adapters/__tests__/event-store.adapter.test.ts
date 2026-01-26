@@ -21,11 +21,13 @@ describe('EventStoreAdapter', () => {
 
     mockOrchestrator = {
       getEventStore: vi.fn().mockReturnValue(mockEventStore),
-      getSessionEvents: vi.fn(),
-      appendEvent: vi.fn(),
-      getAncestors: vi.fn(),
-      searchEvents: vi.fn(),
-      deleteMessage: vi.fn(),
+      events: {
+        getEvents: vi.fn(),
+        append: vi.fn(),
+        getAncestors: vi.fn(),
+        search: vi.fn(),
+        deleteMessage: vi.fn(),
+      },
     };
   });
 
@@ -36,7 +38,7 @@ describe('EventStoreAdapter', () => {
         { id: 'evt-2', type: 'message.user', timestamp: '2024-01-01T00:01:00Z' },
         { id: 'evt-3', type: 'message.assistant', timestamp: '2024-01-01T00:02:00Z' },
       ];
-      vi.mocked(mockOrchestrator.getSessionEvents!).mockResolvedValue(mockEvents);
+      vi.mocked(mockOrchestrator.events!.getEvents).mockResolvedValue(mockEvents);
 
       const adapter = createEventStoreAdapter({
         orchestrator: mockOrchestrator as EventStoreOrchestrator,
@@ -44,7 +46,7 @@ describe('EventStoreAdapter', () => {
 
       const result = await adapter.getEventHistory('sess-123');
 
-      expect(mockOrchestrator.getSessionEvents).toHaveBeenCalledWith('sess-123');
+      expect(mockOrchestrator.events!.getEvents).toHaveBeenCalledWith('sess-123');
       expect(result.events).toHaveLength(3);
       // Should be reversed (most recent first)
       expect(result.events[0].id).toBe('evt-3');
@@ -58,7 +60,7 @@ describe('EventStoreAdapter', () => {
         { id: 'evt-3', type: 'message.assistant' },
         { id: 'evt-4', type: 'tool.call' },
       ];
-      vi.mocked(mockOrchestrator.getSessionEvents!).mockResolvedValue(mockEvents);
+      vi.mocked(mockOrchestrator.events!.getEvents).mockResolvedValue(mockEvents);
 
       const adapter = createEventStoreAdapter({
         orchestrator: mockOrchestrator as EventStoreOrchestrator,
@@ -77,7 +79,7 @@ describe('EventStoreAdapter', () => {
         id: `evt-${i}`,
         type: 'message.user',
       }));
-      vi.mocked(mockOrchestrator.getSessionEvents!).mockResolvedValue(mockEvents);
+      vi.mocked(mockOrchestrator.events!.getEvents).mockResolvedValue(mockEvents);
 
       const adapter = createEventStoreAdapter({
         orchestrator: mockOrchestrator as EventStoreOrchestrator,
@@ -94,7 +96,7 @@ describe('EventStoreAdapter', () => {
         { id: 'evt-1', type: 'message.user' },
         { id: 'evt-2', type: 'message.assistant' },
       ];
-      vi.mocked(mockOrchestrator.getSessionEvents!).mockResolvedValue(mockEvents);
+      vi.mocked(mockOrchestrator.events!.getEvents).mockResolvedValue(mockEvents);
 
       const adapter = createEventStoreAdapter({
         orchestrator: mockOrchestrator as EventStoreOrchestrator,
@@ -113,7 +115,7 @@ describe('EventStoreAdapter', () => {
         { id: 'evt-2', type: 'message.user' },
         { id: 'evt-3', type: 'message.assistant' },
       ];
-      vi.mocked(mockOrchestrator.getSessionEvents!).mockResolvedValue(mockEvents);
+      vi.mocked(mockOrchestrator.events!.getEvents).mockResolvedValue(mockEvents);
 
       const adapter = createEventStoreAdapter({
         orchestrator: mockOrchestrator as EventStoreOrchestrator,
@@ -134,7 +136,7 @@ describe('EventStoreAdapter', () => {
         { id: 'evt-2', type: 'message.user', timestamp: '2024-01-01T00:01:00Z' },
         { id: 'evt-3', type: 'message.assistant', timestamp: '2024-01-01T00:02:00Z' },
       ];
-      vi.mocked(mockOrchestrator.getSessionEvents!).mockResolvedValue(mockEvents);
+      vi.mocked(mockOrchestrator.events!.getEvents).mockResolvedValue(mockEvents);
 
       const adapter = createEventStoreAdapter({
         orchestrator: mockOrchestrator as EventStoreOrchestrator,
@@ -162,7 +164,7 @@ describe('EventStoreAdapter', () => {
   describe('appendEvent', () => {
     it('should append event and return new head', async () => {
       const mockEvent = { id: 'evt-new', type: 'message.user', payload: { content: 'Hello' } };
-      vi.mocked(mockOrchestrator.appendEvent!).mockResolvedValue(mockEvent as any);
+      vi.mocked(mockOrchestrator.events!.append).mockResolvedValue(mockEvent as any);
       mockEventStore.getSession.mockResolvedValue({ headEventId: 'evt-new' });
 
       const adapter = createEventStoreAdapter({
@@ -171,7 +173,7 @@ describe('EventStoreAdapter', () => {
 
       const result = await adapter.appendEvent('sess-123', 'message.user', { content: 'Hello' });
 
-      expect(mockOrchestrator.appendEvent).toHaveBeenCalledWith({
+      expect(mockOrchestrator.events!.append).toHaveBeenCalledWith({
         sessionId: 'sess-123',
         type: 'message.user',
         payload: { content: 'Hello' },
@@ -183,7 +185,7 @@ describe('EventStoreAdapter', () => {
 
     it('should pass parentId when provided', async () => {
       const mockEvent = { id: 'evt-new', type: 'custom.event' };
-      vi.mocked(mockOrchestrator.appendEvent!).mockResolvedValue(mockEvent as any);
+      vi.mocked(mockOrchestrator.events!.append).mockResolvedValue(mockEvent as any);
       mockEventStore.getSession.mockResolvedValue({ headEventId: 'evt-new' });
 
       const adapter = createEventStoreAdapter({
@@ -192,7 +194,7 @@ describe('EventStoreAdapter', () => {
 
       await adapter.appendEvent('sess-123', 'custom.event', { data: 'test' }, 'evt-parent');
 
-      expect(mockOrchestrator.appendEvent).toHaveBeenCalledWith({
+      expect(mockOrchestrator.events!.append).toHaveBeenCalledWith({
         sessionId: 'sess-123',
         type: 'custom.event',
         payload: { data: 'test' },
@@ -208,7 +210,7 @@ describe('EventStoreAdapter', () => {
         { id: 'evt-2', parentId: 'evt-1', type: 'message.user', timestamp: '2024-01-01T00:01:00Z', payload: { content: 'Hello' } },
         { id: 'evt-3', parentId: 'evt-2', type: 'message.assistant', timestamp: '2024-01-01T00:02:00Z' },
       ];
-      vi.mocked(mockOrchestrator.getSessionEvents!).mockResolvedValue(mockEvents);
+      vi.mocked(mockOrchestrator.events!.getEvents).mockResolvedValue(mockEvents);
       mockEventStore.getSession.mockResolvedValue({
         rootEventId: 'evt-1',
         headEventId: 'evt-3',
@@ -239,7 +241,7 @@ describe('EventStoreAdapter', () => {
         { id: 'evt-3', parentId: 'evt-2', type: 'tool.call', timestamp: '2024-01-01T00:02:00Z' },
         { id: 'evt-4', parentId: 'evt-3', type: 'message.assistant', timestamp: '2024-01-01T00:03:00Z' },
       ];
-      vi.mocked(mockOrchestrator.getSessionEvents!).mockResolvedValue(mockEvents);
+      vi.mocked(mockOrchestrator.events!.getEvents).mockResolvedValue(mockEvents);
       mockEventStore.getSession.mockResolvedValue({ rootEventId: 'evt-1', headEventId: 'evt-4' });
 
       const adapter = createEventStoreAdapter({
@@ -269,7 +271,7 @@ describe('EventStoreAdapter', () => {
         { id: 'evt-2', parentId: 'evt-1', type: 'message.user' },
         { id: 'evt-3', parentId: 'evt-1', type: 'message.user' }, // Branch!
       ];
-      vi.mocked(mockOrchestrator.getSessionEvents!).mockResolvedValue(mockEvents);
+      vi.mocked(mockOrchestrator.events!.getEvents).mockResolvedValue(mockEvents);
       mockEventStore.getSession.mockResolvedValue({ headEventId: 'evt-2' });
 
       const adapter = createEventStoreAdapter({
@@ -287,7 +289,7 @@ describe('EventStoreAdapter', () => {
         { id: 'evt-1', parentId: null, type: 'session.start' },
         { id: 'evt-2', parentId: 'evt-1', type: 'message.user' },
       ];
-      vi.mocked(mockOrchestrator.getSessionEvents!).mockResolvedValue(mockEvents);
+      vi.mocked(mockOrchestrator.events!.getEvents).mockResolvedValue(mockEvents);
       mockEventStore.getSession.mockResolvedValue({ headEventId: 'evt-2' });
 
       const adapter = createEventStoreAdapter({
@@ -308,7 +310,7 @@ describe('EventStoreAdapter', () => {
         { id: 'evt-1', type: 'session.start' },
         { id: 'evt-2', type: 'message.user' },
       ];
-      vi.mocked(mockOrchestrator.getAncestors!).mockResolvedValue(mockAncestors);
+      vi.mocked(mockOrchestrator.events!.getAncestors).mockResolvedValue(mockAncestors);
 
       const adapter = createEventStoreAdapter({
         orchestrator: mockOrchestrator as EventStoreOrchestrator,
@@ -316,7 +318,7 @@ describe('EventStoreAdapter', () => {
 
       const result = await adapter.getSubtree('evt-3', { direction: 'ancestors' });
 
-      expect(mockOrchestrator.getAncestors).toHaveBeenCalledWith('evt-3');
+      expect(mockOrchestrator.events!.getAncestors).toHaveBeenCalledWith('evt-3');
       expect(result.nodes).toEqual(mockAncestors);
     });
 
@@ -341,7 +343,7 @@ describe('EventStoreAdapter', () => {
         { id: 'evt-1', type: 'session.start' },
         { id: 'evt-2', type: 'message.user' },
       ];
-      vi.mocked(mockOrchestrator.getAncestors!).mockResolvedValue(mockAncestors);
+      vi.mocked(mockOrchestrator.events!.getAncestors).mockResolvedValue(mockAncestors);
 
       const adapter = createEventStoreAdapter({
         orchestrator: mockOrchestrator as EventStoreOrchestrator,
@@ -349,7 +351,7 @@ describe('EventStoreAdapter', () => {
 
       const result = await adapter.getAncestors('evt-3');
 
-      expect(mockOrchestrator.getAncestors).toHaveBeenCalledWith('evt-3');
+      expect(mockOrchestrator.events!.getAncestors).toHaveBeenCalledWith('evt-3');
       expect(result.events).toEqual(mockAncestors);
     });
   });
@@ -359,7 +361,7 @@ describe('EventStoreAdapter', () => {
       const mockResults = [
         { id: 'evt-1', type: 'message.user', payload: { content: 'Hello world' } },
       ];
-      vi.mocked(mockOrchestrator.searchEvents!).mockResolvedValue(mockResults);
+      vi.mocked(mockOrchestrator.events!.search).mockResolvedValue(mockResults);
 
       const adapter = createEventStoreAdapter({
         orchestrator: mockOrchestrator as EventStoreOrchestrator,
@@ -367,7 +369,7 @@ describe('EventStoreAdapter', () => {
 
       const result = await adapter.searchContent('hello', { sessionId: 'sess-123', limit: 10 });
 
-      expect(mockOrchestrator.searchEvents).toHaveBeenCalledWith('hello', {
+      expect(mockOrchestrator.events!.search).toHaveBeenCalledWith('hello', {
         sessionId: 'sess-123',
         workspaceId: undefined,
         types: undefined,
@@ -381,7 +383,7 @@ describe('EventStoreAdapter', () => {
   describe('deleteMessage', () => {
     it('should delegate to orchestrator', async () => {
       const mockResult = { id: 'evt-deleted', payload: { targetEventId: 'evt-1' } };
-      vi.mocked(mockOrchestrator.deleteMessage!).mockResolvedValue(mockResult);
+      vi.mocked(mockOrchestrator.events!.deleteMessage).mockResolvedValue(mockResult);
 
       const adapter = createEventStoreAdapter({
         orchestrator: mockOrchestrator as EventStoreOrchestrator,
@@ -389,7 +391,7 @@ describe('EventStoreAdapter', () => {
 
       const result = await adapter.deleteMessage('sess-123', 'evt-1', 'user_request');
 
-      expect(mockOrchestrator.deleteMessage).toHaveBeenCalledWith('sess-123', 'evt-1', 'user_request');
+      expect(mockOrchestrator.events!.deleteMessage).toHaveBeenCalledWith('sess-123', 'evt-1', 'user_request');
       expect(result).toEqual(mockResult);
     });
   });

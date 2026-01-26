@@ -1,7 +1,7 @@
 /**
  * @fileoverview Worktree Adapter
  *
- * Adapts EventStoreOrchestrator worktree methods to the WorktreeRpcManager
+ * Adapts EventStoreOrchestrator's WorktreeController to the WorktreeRpcManager
  * interface expected by RpcContext.
  */
 
@@ -15,16 +15,16 @@ export function createWorktreeAdapter(deps: AdapterDependencies): WorktreeManage
 
   return {
     async getWorktreeStatus(sessionId) {
-      return orchestrator.getWorktreeStatus(sessionId);
+      return orchestrator.worktree.getStatus(sessionId);
     },
     async commitWorktree(sessionId, message) {
-      return orchestrator.commitWorktree(sessionId, message);
+      return orchestrator.worktree.commit(sessionId, message);
     },
     async mergeWorktree(sessionId, targetBranch, strategy) {
-      return orchestrator.mergeWorktree(sessionId, targetBranch, strategy);
+      return orchestrator.worktree.merge(sessionId, targetBranch, strategy);
     },
     async listWorktrees() {
-      return orchestrator.listWorktrees();
+      return orchestrator.worktree.list();
     },
   };
 }

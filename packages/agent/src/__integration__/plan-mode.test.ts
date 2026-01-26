@@ -452,7 +452,7 @@ describe('Plan Mode Orchestrator Integration', () => {
     orchestrator = result.orchestrator;
     eventStore = result.eventStore;
 
-    const session = await orchestrator.createSession({
+    const session = await orchestrator.sessions.createSession({
       workingDirectory: testDir,
     });
     sessionId = session.sessionId;
@@ -466,67 +466,67 @@ describe('Plan Mode Orchestrator Integration', () => {
 
   describe('isInPlanMode', () => {
     it('should return false for new session', () => {
-      expect(orchestrator.isInPlanMode(sessionId)).toBe(false);
+      expect(orchestrator.planMode.isInPlanMode(sessionId)).toBe(false);
     });
 
     it('should return true after entering plan mode', async () => {
-      await orchestrator.enterPlanMode(sessionId, {
+      await orchestrator.planMode.enterPlanMode(sessionId, {
         skillName: 'plan',
         blockedTools: ['Write', 'Edit', 'Bash'],
       });
 
-      expect(orchestrator.isInPlanMode(sessionId)).toBe(true);
+      expect(orchestrator.planMode.isInPlanMode(sessionId)).toBe(true);
     });
 
     it('should return false after exiting plan mode', async () => {
-      await orchestrator.enterPlanMode(sessionId, {
+      await orchestrator.planMode.enterPlanMode(sessionId, {
         skillName: 'plan',
         blockedTools: ['Write', 'Edit', 'Bash'],
       });
 
-      await orchestrator.exitPlanMode(sessionId, {
+      await orchestrator.planMode.exitPlanMode(sessionId, {
         reason: 'approved',
       });
 
-      expect(orchestrator.isInPlanMode(sessionId)).toBe(false);
+      expect(orchestrator.planMode.isInPlanMode(sessionId)).toBe(false);
     });
 
     it('should return false for non-existent session', () => {
-      expect(orchestrator.isInPlanMode('non-existent')).toBe(false);
+      expect(orchestrator.planMode.isInPlanMode('non-existent')).toBe(false);
     });
   });
 
   describe('getBlockedTools', () => {
     it('should return empty array for new session', () => {
-      expect(orchestrator.getBlockedTools(sessionId)).toEqual([]);
+      expect(orchestrator.planMode.getBlockedTools(sessionId)).toEqual([]);
     });
 
     it('should return blocked tools when in plan mode', async () => {
-      await orchestrator.enterPlanMode(sessionId, {
+      await orchestrator.planMode.enterPlanMode(sessionId, {
         skillName: 'plan',
         blockedTools: ['Write', 'Edit', 'Bash'],
       });
 
-      expect(orchestrator.getBlockedTools(sessionId)).toEqual(['Write', 'Edit', 'Bash']);
+      expect(orchestrator.planMode.getBlockedTools(sessionId)).toEqual(['Write', 'Edit', 'Bash']);
     });
 
     it('should return empty array after exiting plan mode', async () => {
-      await orchestrator.enterPlanMode(sessionId, {
+      await orchestrator.planMode.enterPlanMode(sessionId, {
         skillName: 'plan',
         blockedTools: ['Write', 'Edit', 'Bash'],
       });
 
-      await orchestrator.exitPlanMode(sessionId, {
+      await orchestrator.planMode.exitPlanMode(sessionId, {
         reason: 'cancelled',
       });
 
-      expect(orchestrator.getBlockedTools(sessionId)).toEqual([]);
+      expect(orchestrator.planMode.getBlockedTools(sessionId)).toEqual([]);
     });
   });
 
   describe('enterPlanMode', () => {
     it('should emit plan.mode_entered event', async () => {
-      await orchestrator.enterPlanMode(sessionId, {
+      await orchestrator.planMode.enterPlanMode(sessionId, {
         skillName: 'plan',
         blockedTools: ['Write', 'Edit', 'Bash'],
       });
@@ -542,13 +542,13 @@ describe('Plan Mode Orchestrator Integration', () => {
     });
 
     it('should not allow entering plan mode twice', async () => {
-      await orchestrator.enterPlanMode(sessionId, {
+      await orchestrator.planMode.enterPlanMode(sessionId, {
         skillName: 'plan',
         blockedTools: ['Write', 'Edit', 'Bash'],
       });
 
       await expect(
-        orchestrator.enterPlanMode(sessionId, {
+        orchestrator.planMode.enterPlanMode(sessionId, {
           skillName: 'another-plan',
           blockedTools: ['Write'],
         })
@@ -558,12 +558,12 @@ describe('Plan Mode Orchestrator Integration', () => {
 
   describe('exitPlanMode', () => {
     it('should emit plan.mode_exited event with approved reason', async () => {
-      await orchestrator.enterPlanMode(sessionId, {
+      await orchestrator.planMode.enterPlanMode(sessionId, {
         skillName: 'plan',
         blockedTools: ['Write', 'Edit', 'Bash'],
       });
 
-      await orchestrator.exitPlanMode(sessionId, {
+      await orchestrator.planMode.exitPlanMode(sessionId, {
         reason: 'approved',
         planPath: '/path/to/plan.md',
       });
@@ -579,12 +579,12 @@ describe('Plan Mode Orchestrator Integration', () => {
     });
 
     it('should emit plan.mode_exited event with cancelled reason', async () => {
-      await orchestrator.enterPlanMode(sessionId, {
+      await orchestrator.planMode.enterPlanMode(sessionId, {
         skillName: 'plan',
         blockedTools: ['Write', 'Edit', 'Bash'],
       });
 
-      await orchestrator.exitPlanMode(sessionId, {
+      await orchestrator.planMode.exitPlanMode(sessionId, {
         reason: 'cancelled',
       });
 
@@ -599,7 +599,7 @@ describe('Plan Mode Orchestrator Integration', () => {
 
     it('should not allow exiting plan mode when not in plan mode', async () => {
       await expect(
-        orchestrator.exitPlanMode(sessionId, {
+        orchestrator.planMode.exitPlanMode(sessionId, {
           reason: 'approved',
         })
       ).rejects.toThrow(/not in plan mode/i);
@@ -608,39 +608,39 @@ describe('Plan Mode Orchestrator Integration', () => {
 
   describe('isToolBlocked', () => {
     it('should return false for tools when not in plan mode', () => {
-      expect(orchestrator.isToolBlocked(sessionId, 'Write')).toBe(false);
-      expect(orchestrator.isToolBlocked(sessionId, 'Edit')).toBe(false);
-      expect(orchestrator.isToolBlocked(sessionId, 'Bash')).toBe(false);
-      expect(orchestrator.isToolBlocked(sessionId, 'Read')).toBe(false);
+      expect(orchestrator.planMode.isToolBlocked(sessionId, 'Write')).toBe(false);
+      expect(orchestrator.planMode.isToolBlocked(sessionId, 'Edit')).toBe(false);
+      expect(orchestrator.planMode.isToolBlocked(sessionId, 'Bash')).toBe(false);
+      expect(orchestrator.planMode.isToolBlocked(sessionId, 'Read')).toBe(false);
     });
 
     it('should return true for blocked tools when in plan mode', async () => {
-      await orchestrator.enterPlanMode(sessionId, {
+      await orchestrator.planMode.enterPlanMode(sessionId, {
         skillName: 'plan',
         blockedTools: ['Write', 'Edit', 'Bash'],
       });
 
-      expect(orchestrator.isToolBlocked(sessionId, 'Write')).toBe(true);
-      expect(orchestrator.isToolBlocked(sessionId, 'Edit')).toBe(true);
-      expect(orchestrator.isToolBlocked(sessionId, 'Bash')).toBe(true);
+      expect(orchestrator.planMode.isToolBlocked(sessionId, 'Write')).toBe(true);
+      expect(orchestrator.planMode.isToolBlocked(sessionId, 'Edit')).toBe(true);
+      expect(orchestrator.planMode.isToolBlocked(sessionId, 'Bash')).toBe(true);
     });
 
     it('should return false for allowed tools when in plan mode', async () => {
-      await orchestrator.enterPlanMode(sessionId, {
+      await orchestrator.planMode.enterPlanMode(sessionId, {
         skillName: 'plan',
         blockedTools: ['Write', 'Edit', 'Bash'],
       });
 
-      expect(orchestrator.isToolBlocked(sessionId, 'Read')).toBe(false);
-      expect(orchestrator.isToolBlocked(sessionId, 'Glob')).toBe(false);
-      expect(orchestrator.isToolBlocked(sessionId, 'Grep')).toBe(false);
-      expect(orchestrator.isToolBlocked(sessionId, 'AskUserQuestion')).toBe(false);
+      expect(orchestrator.planMode.isToolBlocked(sessionId, 'Read')).toBe(false);
+      expect(orchestrator.planMode.isToolBlocked(sessionId, 'Glob')).toBe(false);
+      expect(orchestrator.planMode.isToolBlocked(sessionId, 'Grep')).toBe(false);
+      expect(orchestrator.planMode.isToolBlocked(sessionId, 'AskUserQuestion')).toBe(false);
     });
   });
 
   describe('state reconstruction on resume', () => {
     it('should reconstruct plan mode state from events', async () => {
-      await orchestrator.enterPlanMode(sessionId, {
+      await orchestrator.planMode.enterPlanMode(sessionId, {
         skillName: 'plan',
         blockedTools: ['Write', 'Edit', 'Bash'],
       });
@@ -652,21 +652,21 @@ describe('Plan Mode Orchestrator Integration', () => {
       const orchestrator2 = result2.orchestrator;
 
       // Resume the session
-      await orchestrator2.resumeSession(sessionId);
+      await orchestrator2.sessions.resumeSession(sessionId);
 
-      expect(orchestrator2.isInPlanMode(sessionId)).toBe(true);
-      expect(orchestrator2.getBlockedTools(sessionId)).toEqual(['Write', 'Edit', 'Bash']);
+      expect(orchestrator2.planMode.isInPlanMode(sessionId)).toBe(true);
+      expect(orchestrator2.planMode.getBlockedTools(sessionId)).toEqual(['Write', 'Edit', 'Bash']);
 
       await orchestrator2.shutdown();
     });
 
     it('should not be in plan mode after exited event on resume', async () => {
-      await orchestrator.enterPlanMode(sessionId, {
+      await orchestrator.planMode.enterPlanMode(sessionId, {
         skillName: 'plan',
         blockedTools: ['Write', 'Edit', 'Bash'],
       });
 
-      await orchestrator.exitPlanMode(sessionId, {
+      await orchestrator.planMode.exitPlanMode(sessionId, {
         reason: 'approved',
       });
 
@@ -676,18 +676,18 @@ describe('Plan Mode Orchestrator Integration', () => {
       const result2 = await createTestOrchestrator(testDir);
       const orchestrator2 = result2.orchestrator;
 
-      await orchestrator2.resumeSession(sessionId);
+      await orchestrator2.sessions.resumeSession(sessionId);
 
-      expect(orchestrator2.isInPlanMode(sessionId)).toBe(false);
-      expect(orchestrator2.getBlockedTools(sessionId)).toEqual([]);
+      expect(orchestrator2.planMode.isInPlanMode(sessionId)).toBe(false);
+      expect(orchestrator2.planMode.getBlockedTools(sessionId)).toEqual([]);
 
       await orchestrator2.shutdown();
     });
   });
 
-  describe('getPlanModeBlockedToolMessage', () => {
+  describe('getBlockedToolMessage', () => {
     it('should return descriptive error message', () => {
-      const message = orchestrator.getPlanModeBlockedToolMessage('Write');
+      const message = orchestrator.planMode.getBlockedToolMessage('Write');
 
       expect(message).toContain('plan mode');
       expect(message).toContain('Write');

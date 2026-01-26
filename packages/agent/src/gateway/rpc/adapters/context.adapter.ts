@@ -16,11 +16,11 @@ export function createContextAdapter(deps: AdapterDependencies): ContextManagerA
 
   return {
     getContextSnapshot(sessionId) {
-      return orchestrator.getContextSnapshot(sessionId);
+      return orchestrator.context.getContextSnapshot(sessionId);
     },
 
     getDetailedContextSnapshot(sessionId) {
-      const snapshot = orchestrator.getDetailedContextSnapshot(sessionId);
+      const snapshot = orchestrator.context.getDetailedContextSnapshot(sessionId);
       const active = orchestrator.getActiveSession(sessionId);
 
       // Add skill tracking info from session
@@ -54,23 +54,23 @@ export function createContextAdapter(deps: AdapterDependencies): ContextManagerA
     },
 
     shouldCompact(sessionId) {
-      return orchestrator.shouldCompact(sessionId);
+      return orchestrator.context.shouldCompact(sessionId);
     },
 
     async previewCompaction(sessionId) {
-      return orchestrator.previewCompaction(sessionId);
+      return orchestrator.context.previewCompaction(sessionId);
     },
 
     async confirmCompaction(sessionId, opts) {
-      return orchestrator.confirmCompaction(sessionId, opts);
+      return orchestrator.context.confirmCompaction(sessionId, opts);
     },
 
     canAcceptTurn(sessionId, opts) {
-      return orchestrator.canAcceptTurn(sessionId, opts);
+      return orchestrator.context.canAcceptTurn(sessionId, opts);
     },
 
     async clearContext(sessionId) {
-      return orchestrator.clearContext(sessionId);
+      return orchestrator.context.clearContext(sessionId);
     },
   };
 }
