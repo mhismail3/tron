@@ -60,14 +60,17 @@ final class EventRepository {
             throw EventDatabaseError.executeFailed("Database transport not available")
         }
 
+        logger.debug("Starting batch insert of \(events.count) events", category: .database)
         try transport.execute("BEGIN TRANSACTION")
         do {
             for event in events {
                 try insert(event)
             }
             try transport.execute("COMMIT")
+            logger.info("Batch insert committed: \(events.count) events", category: .database)
         } catch {
             try transport.execute("ROLLBACK")
+            logger.error("Batch insert rolled back: \(error.localizedDescription)", category: .database)
             throw error
         }
     }
@@ -79,6 +82,8 @@ final class EventRepository {
         guard let transport = transport else {
             throw EventDatabaseError.executeFailed("Database transport not available")
         }
+
+        logger.debug("Starting insertIgnoringDuplicates for \(events.count) events", category: .database)
 
         let sql = """
             INSERT OR IGNORE INTO events
@@ -125,8 +130,10 @@ final class EventRepository {
                 }
             }
             try transport.execute("COMMIT")
+            logger.info("Inserted \(insertedCount) of \(events.count) events (duplicates ignored)", category: .database)
         } catch {
             try transport.execute("ROLLBACK")
+            logger.error("insertIgnoringDuplicates rolled back: \(error.localizedDescription)", category: .database)
             throw error
         }
 
@@ -181,13 +188,15 @@ final class EventRepository {
         sqlite3_bind_text(stmt, 1, sessionId, -1, SQLITE_TRANSIENT_DESTRUCTOR)
 
         var events: [SessionEvent] = []
+        var rowIndex = 0
         while sqlite3_step(stmt) == SQLITE_ROW {
             do {
                 let event = try parseEventRow(stmt, transport: transport)
                 events.append(event)
             } catch {
-                logger.warning("Failed to parse event row in getBySession: \(error.localizedDescription)", category: .session)
+                logger.warning("Failed to parse event row: sessionId=\(sessionId.prefix(12))..., rowIndex=\(rowIndex), error=\(error.localizedDescription)", category: .database)
             }
+            rowIndex += 1
         }
 
         return events
@@ -230,13 +239,15 @@ final class EventRepository {
         sqlite3_bind_text(stmt, 1, eventId, -1, SQLITE_TRANSIENT_DESTRUCTOR)
 
         var children: [SessionEvent] = []
+        var rowIndex = 0
         while sqlite3_step(stmt) == SQLITE_ROW {
             do {
                 let event = try parseEventRow(stmt, transport: transport)
                 children.append(event)
             } catch {
-                logger.warning("Failed to parse event row in getChildren: \(error.localizedDescription)", category: .session)
+                logger.warning("Failed to parse event row: parentId=\(eventId.prefix(12))..., rowIndex=\(rowIndex), error=\(error.localizedDescription)", category: .database)
             }
+            rowIndex += 1
         }
 
         return children
@@ -269,6 +280,8 @@ final class EventRepository {
             throw EventDatabaseError.executeFailed("Database transport not available")
         }
 
+        logger.debug("Deleting all events for session: \(sessionId.prefix(12))...", category: .database)
+
         let sql = "DELETE FROM events WHERE session_id = ?"
 
         var stmt: OpaquePointer?
@@ -282,6 +295,9 @@ final class EventRepository {
         guard sqlite3_step(stmt) == SQLITE_DONE else {
             throw EventDatabaseError.deleteFailed(transport.errorMessage)
         }
+
+        let deletedCount = Int(sqlite3_changes(transport.db))
+        logger.info("Deleted \(deletedCount) events for session: \(sessionId.prefix(12))...", category: .database)
     }
 
     /// Delete events by their IDs
@@ -290,6 +306,8 @@ final class EventRepository {
         guard let transport = transport else {
             throw EventDatabaseError.executeFailed("Database transport not available")
         }
+
+        logger.debug("Deleting \(ids.count) events by ID", category: .database)
 
         try transport.execute("BEGIN TRANSACTION")
         do {
@@ -310,8 +328,10 @@ final class EventRepository {
                 }
             }
             try transport.execute("COMMIT")
+            logger.info("Deleted \(ids.count) events by ID", category: .database)
         } catch {
             try transport.execute("ROLLBACK")
+            logger.error("Delete by IDs rolled back: \(error.localizedDescription)", category: .database)
             throw error
         }
     }
@@ -333,10 +353,11 @@ final class EventRepository {
             do {
                 payload = try JSONDecoder().decode([String: AnyCodable].self, from: data)
             } catch {
-                logger.warning("Failed to decode event payload for id=\(id): \(error.localizedDescription)", category: .session)
+                logger.warning("Failed to decode event payload: eventId=\(id.prefix(12))..., type=\(type), error=\(error.localizedDescription)", category: .database)
                 payload = [:]
             }
         } else {
+            logger.warning("Failed to convert payload to UTF-8 data: eventId=\(id.prefix(12))..., type=\(type)", category: .database)
             payload = [:]
         }
 

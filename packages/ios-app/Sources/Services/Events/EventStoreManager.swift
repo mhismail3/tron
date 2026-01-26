@@ -31,7 +31,13 @@ class EventStoreManager: ObservableObject {
     @Published private(set) var sessions: [CachedSession] = []
     @Published private(set) var isSyncing = false
     @Published private(set) var lastSyncError: String?
-    @Published private(set) var activeSessionId: String?
+    @Published private(set) var activeSessionId: String? {
+        didSet {
+            if activeSessionId != oldValue {
+                logger.info("Active session changed: \(oldValue ?? "nil") → \(activeSessionId ?? "nil")", category: .session)
+            }
+        }
+    }
 
     /// Whether to filter sessions by current server origin
     @Published var filterByOrigin: Bool = true
@@ -72,6 +78,16 @@ class EventStoreManager: ObservableObject {
 
     var processingSessionIds: Set<String> = [] {
         didSet {
+            if processingSessionIds != oldValue {
+                let added = processingSessionIds.subtracting(oldValue)
+                let removed = oldValue.subtracting(processingSessionIds)
+                if !added.isEmpty {
+                    logger.debug("Processing started for sessions: \(added.map { String($0.prefix(12)) + "..." }.joined(separator: ", "))", category: .session)
+                }
+                if !removed.isEmpty {
+                    logger.debug("Processing completed for sessions: \(removed.map { String($0.prefix(12)) + "..." }.joined(separator: ", "))", category: .session)
+                }
+            }
             UserDefaults.standard.set(Array(processingSessionIds), forKey: "tron.processingSessionIds")
         }
     }

@@ -217,9 +217,13 @@ extension ChatViewModel {
         // Format arguments as string for display
         var argsString = "{}"
         if let args = toolCall.arguments {
-            if let argsData = try? JSONEncoder().encode(args),
-               let argsJson = String(data: argsData, encoding: .utf8) {
-                argsString = argsJson
+            do {
+                let argsData = try JSONEncoder().encode(args)
+                if let argsJson = String(data: argsData, encoding: .utf8) {
+                    argsString = argsJson
+                }
+            } catch {
+                logger.warning("Failed to encode tool arguments for \(toolCall.toolName): \(error.localizedDescription)", category: .events)
             }
         }
 

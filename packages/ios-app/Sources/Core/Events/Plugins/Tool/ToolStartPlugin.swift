@@ -31,11 +31,13 @@ enum ToolStartPlugin: EventPlugin {
             guard let args = arguments else { return "" }
             let encoder = JSONEncoder()
             encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-            guard let jsonData = try? encoder.encode(args),
-                  let string = String(data: jsonData, encoding: .utf8) else {
+            do {
+                let jsonData = try encoder.encode(args)
+                return String(data: jsonData, encoding: .utf8) ?? ""
+            } catch {
+                logger.warning("Failed to format tool arguments for \(toolName): \(error.localizedDescription)", category: .events)
                 return ""
             }
-            return string
         }
     }
 

@@ -44,7 +44,7 @@ final class SyncRepository {
             do {
                 pendingEventIds = try JSONDecoder().decode([String].self, from: jsonData)
             } catch {
-                logger.warning("Failed to decode sync state pendingEventIds: \(error.localizedDescription)", category: .session)
+                logger.warning("Failed to decode sync state pendingEventIds: key=\(key), error=\(error.localizedDescription)", category: .database)
             }
         }
 
@@ -84,7 +84,7 @@ final class SyncRepository {
         do {
             pendingIdsJson = try JSONEncoder().encode(state.pendingEventIds)
         } catch {
-            logger.warning("Failed to encode sync state pendingEventIds: \(error.localizedDescription)", category: .session)
+            logger.warning("Failed to encode sync state pendingEventIds: key=\(state.key), count=\(state.pendingEventIds.count), error=\(error.localizedDescription)", category: .database)
         }
         sqlite3_bind_text(stmt, 4, String(data: pendingIdsJson, encoding: .utf8), -1, SQLITE_TRANSIENT_DESTRUCTOR)
 

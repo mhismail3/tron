@@ -77,13 +77,18 @@ extension ChatViewModel {
     func closeBrowserSession() {
         logger.info("Closing browser session", category: .session)
         Task {
-            // Stop streaming first
-            await stopBrowserStream()
-            // Clear all browser state
-            await MainActor.run {
-                browserState.browserFrame = nil
-                browserState.browserStatus = nil
-                browserState.showBrowserWindow = false
+            do {
+                // Stop streaming first
+                await stopBrowserStream()
+                // Clear all browser state
+                await MainActor.run {
+                    browserState.browserFrame = nil
+                    browserState.browserStatus = nil
+                    browserState.showBrowserWindow = false
+                }
+                logger.debug("Browser session closed successfully", category: .session)
+            } catch {
+                logger.error("Failed to close browser session: \(error.localizedDescription)", category: .session)
             }
         }
     }

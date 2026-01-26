@@ -49,6 +49,7 @@ enum LogCategory: String, CaseIterable {
     case events = "Events"
     case notification = "Notification"
     case general = "General"
+    case database = "Database"
 
     var subsystem: String { "com.tron.mobile" }
 }
@@ -76,6 +77,8 @@ final class TronLogger: @unchecked Sendable {
         switch category {
         case .websocket, .rpc:
             return 1000
+        case .database:
+            return 500  // Moderate retention for DB operations
         default:
             return 250
         }
@@ -171,14 +174,34 @@ final class TronLogger: @unchecked Sendable {
     // MARK: - Specialized Logging
 
     func logRPCRequest(method: String, params: Any?, id: Int) {
-        let paramsStr = params.map { String(describing: $0).prefix(500) } ?? "nil"
+        let paramsStr: String
+        if let p = params {
+            let full = String(describing: p)
+            if full.count > 500 {
+                paramsStr = String(full.prefix(500)) + " [TRUNCATED:\(full.count) chars]"
+            } else {
+                paramsStr = full
+            }
+        } else {
+            paramsStr = "nil"
+        }
         verbose("→ RPC Request [\(id)] \(method): \(paramsStr)", category: .rpc)
     }
 
     func logRPCResponse(method: String, id: Int, success: Bool, duration: TimeInterval, result: Any? = nil, error: String? = nil) {
         let durationMs = String(format: "%.1fms", duration * 1000)
         if success {
-            let resultStr = result.map { String(describing: $0).prefix(500) } ?? "nil"
+            let resultStr: String
+            if let r = result {
+                let full = String(describing: r)
+                if full.count > 500 {
+                    resultStr = String(full.prefix(500)) + " [TRUNCATED:\(full.count) chars]"
+                } else {
+                    resultStr = full
+                }
+            } else {
+                resultStr = "nil"
+            }
             debug("← RPC Response [\(id)] \(method) ✓ (\(durationMs)): \(resultStr)", category: .rpc)
         } else {
             self.error("← RPC Response [\(id)] \(method) ✗ (\(durationMs)): \(error ?? "unknown error")", category: .rpc)

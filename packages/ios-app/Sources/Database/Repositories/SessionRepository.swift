@@ -257,6 +257,7 @@ final class SessionRepository {
         defer { sqlite3_finalize(stmt) }
 
         var forkedSessionIds: [String] = []
+        var rowIndex = 0
         while sqlite3_step(stmt) == SQLITE_ROW {
             do {
                 let event = try parseEventRow(stmt, transport: transport)
@@ -265,8 +266,9 @@ final class SessionRepository {
                     forkedSessionIds.append(event.sessionId)
                 }
             } catch {
-                logger.warning("Failed to parse event row in getForked: \(error.localizedDescription)", category: .session)
+                logger.warning("Failed to parse event row: getForked eventId=\(eventId.prefix(12))..., rowIndex=\(rowIndex), error=\(error.localizedDescription)", category: .database)
             }
+            rowIndex += 1
         }
 
         var sessions: [CachedSession] = []
@@ -350,10 +352,11 @@ final class SessionRepository {
             do {
                 payload = try JSONDecoder().decode([String: AnyCodable].self, from: data)
             } catch {
-                logger.warning("Failed to decode event payload for id=\(id): \(error.localizedDescription)", category: .session)
+                logger.warning("Failed to decode event payload: eventId=\(id.prefix(12))..., type=\(type), error=\(error.localizedDescription)", category: .database)
                 payload = [:]
             }
         } else {
+            logger.warning("Failed to convert payload to UTF-8 data: eventId=\(id.prefix(12))..., type=\(type)", category: .database)
             payload = [:]
         }
 

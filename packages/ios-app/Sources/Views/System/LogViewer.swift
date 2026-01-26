@@ -247,6 +247,7 @@ struct LogViewer: View {
         case .events: return .yellow
         case .general: return .gray
         case .notification: return .red
+        case .database: return .indigo
         }
     }
 }
@@ -329,6 +330,7 @@ struct LogRow: View {
         case .events: return .yellow
         case .general: return .gray
         case .notification: return .red
+        case .database: return .indigo
         }
     }
 

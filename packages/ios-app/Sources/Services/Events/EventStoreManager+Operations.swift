@@ -343,7 +343,11 @@ extension EventStoreManager {
             if removed > 0 {
                 logger.info("Repaired session \(sessionId): removed \(removed) duplicate events", category: .session)
                 Task {
-                    try? await updateSessionMetadata(sessionId: sessionId)
+                    do {
+                        try await updateSessionMetadata(sessionId: sessionId)
+                    } catch {
+                        logger.warning("Failed to update metadata after repair for session \(sessionId.prefix(12))...: \(error.localizedDescription)", category: .session)
+                    }
                     sessionUpdated.send(sessionId)
                 }
             }

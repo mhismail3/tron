@@ -126,9 +126,10 @@ final class ErrorHandler {
         showError = false
     }
 
-    /// Wrap an async throwing operation with error handling
+    /// Wrap an async throwing operation with error handling.
+    /// Context is required to ensure meaningful error messages.
     func withErrorHandling<T>(
-        context: String? = nil,
+        context: String,
         operation: () async throws -> T
     ) async -> T? {
         do {
@@ -139,9 +140,10 @@ final class ErrorHandler {
         }
     }
 
-    /// Wrap a throwing operation with error handling (non-async)
+    /// Wrap a throwing operation with error handling (non-async).
+    /// Context is required to ensure meaningful error messages.
     func withErrorHandling<T>(
-        context: String? = nil,
+        context: String,
         operation: () throws -> T
     ) -> T? {
         do {
@@ -150,6 +152,20 @@ final class ErrorHandler {
             handle(error, context: context)
             return nil
         }
+    }
+
+    /// Log an error silently without showing to user.
+    /// Context is required to ensure meaningful error messages.
+    func logError(_ error: Error, context: String) {
+        let message = "\(context): \(error.localizedDescription)"
+        logger.error(message, category: .session)
+    }
+
+    /// Log an error silently without showing to user (with category).
+    /// Context is required to ensure meaningful error messages.
+    func logError(_ error: Error, context: String, category: LogCategory) {
+        let message = "\(context): \(error.localizedDescription)"
+        logger.error(message, category: category)
     }
 }
 
