@@ -25,7 +25,7 @@ export {
   type SpawnTmuxAgentResult,
   type QuerySubagentResult,
   type WaitForSubagentsResult,
-} from './subagent-ops.js';
+} from './subagent-ops/index.js';
 
 // Worktree operations
 export {

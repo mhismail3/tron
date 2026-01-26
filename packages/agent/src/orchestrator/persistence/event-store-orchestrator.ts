@@ -81,7 +81,7 @@ import { SessionError } from '../../utils/errors.js';
 import {
   SubagentOperations,
   createSubagentOperations,
-} from '../operations/subagent-ops.js';
+} from '../operations/subagent-ops/index.js';
 import {
   AgentEventHandler,
   createAgentEventHandler,
