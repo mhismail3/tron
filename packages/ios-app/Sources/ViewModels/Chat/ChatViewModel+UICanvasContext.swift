@@ -7,7 +7,7 @@ import Foundation
 extension ChatViewModel: UICanvasContext {
 
     // MARK: - Canvas State Objects (Protocol Properties)
-    // Most properties are already defined in ChatViewModel.swift:
+    // All properties are already defined in ChatViewModel.swift:
     // - messages: [ChatMessage]
     // - renderAppUIChipTracker: RenderAppUIChipTracker
     // - uiCanvasState: UICanvasState
@@ -15,11 +15,6 @@ extension ChatViewModel: UICanvasContext {
     // - messageWindowManager: MessageWindowManager
 
     // MARK: - Logging (Protocol Methods)
-
-    /// Log verbose message (UICanvasContext)
-    func logVerbose(_ message: String) {
-        logger.verbose(message, category: .events)
-    }
-
-    // logDebug, logInfo, logWarning, logError are already defined in ChatViewModel.swift
+    // All logging methods are defined in ChatViewModel.swift via LoggingContext:
+    // - logVerbose, logDebug, logInfo, logWarning, logError
 }

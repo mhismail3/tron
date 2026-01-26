@@ -357,6 +357,7 @@ final class MockAskUserQuestionContext: AskUserQuestionContext {
     }
 
     // MARK: - Logging (no-op for tests)
+    func logVerbose(_ message: String) {}
     func logDebug(_ message: String) {}
     func logInfo(_ message: String) {}
     func logWarning(_ message: String) {}

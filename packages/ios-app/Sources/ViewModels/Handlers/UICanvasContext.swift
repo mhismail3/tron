@@ -3,7 +3,7 @@ import Foundation
 /// Protocol defining the context required by UICanvasCoordinator.
 /// Allows ChatViewModel to be abstracted for independent testing of UI canvas rendering.
 @MainActor
-protocol UICanvasContext: AnyObject {
+protocol UICanvasContext: LoggingContext {
 
     // MARK: - Messages State
 
@@ -23,12 +23,4 @@ protocol UICanvasContext: AnyObject {
 
     /// Message window manager for appending messages
     var messageWindowManager: MessageWindowManager { get }
-
-    // MARK: - Logging
-
-    func logVerbose(_ message: String)
-    func logDebug(_ message: String)
-    func logInfo(_ message: String)
-    func logWarning(_ message: String)
-    func logError(_ message: String)
 }

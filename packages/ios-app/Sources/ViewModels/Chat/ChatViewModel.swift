@@ -91,7 +91,11 @@ class ChatViewModel: ObservableObject, ChatEventContext {
         animationCoordinator.makeToolVisible(toolCallId)
     }
 
-    /// Logging methods (ChatEventContext)
+    /// Logging methods (LoggingContext)
+    func logVerbose(_ message: String) {
+        logger.verbose(message, category: .events)
+    }
+
     func logDebug(_ message: String) {
         logger.debug(message, category: .events)
     }

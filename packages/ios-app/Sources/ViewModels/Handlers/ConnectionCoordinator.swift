@@ -5,7 +5,7 @@ import Foundation
 /// This protocol allows ConnectionCoordinator to be tested independently from ChatViewModel
 /// by defining the minimum interface it needs to interact with connection and session state.
 @MainActor
-protocol ConnectionContext: AnyObject {
+protocol ConnectionContext: LoggingContext {
     /// Current session ID
     var sessionId: String { get }
 
@@ -47,13 +47,6 @@ protocol ConnectionContext: AnyObject {
 
     /// Show error alert to user
     func showErrorAlert(_ message: String)
-
-    /// Logging methods
-    func logVerbose(_ message: String)
-    func logDebug(_ message: String)
-    func logInfo(_ message: String)
-    func logWarning(_ message: String)
-    func logError(_ message: String)
 }
 
 /// Coordinates session connection, reconnection, and catch-up for ChatViewModel.

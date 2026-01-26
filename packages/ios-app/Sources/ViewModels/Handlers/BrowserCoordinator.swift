@@ -6,7 +6,7 @@ import UIKit
 /// This protocol allows BrowserCoordinator to be tested independently from ChatViewModel
 /// by defining the minimum interface it needs to interact with browser state and RPC calls.
 @MainActor
-protocol BrowserEventContext: AnyObject {
+protocol BrowserEventContext: LoggingContext {
     /// Browser state container
     var browserState: BrowserState { get }
 
@@ -24,12 +24,6 @@ protocol BrowserEventContext: AnyObject {
 
     /// Show error alert to user
     func showError(_ message: String)
-
-    /// Logging methods
-    func logDebug(_ message: String)
-    func logInfo(_ message: String)
-    func logWarning(_ message: String)
-    func logError(_ message: String)
 }
 
 /// Coordinates browser event handling and session lifecycle for ChatViewModel.

@@ -7,7 +7,7 @@ import SwiftUI
 /// This protocol allows MessagingCoordinator to be tested independently from ChatViewModel
 /// by defining the minimum interface it needs to interact with message sending and state.
 @MainActor
-protocol MessagingContext: AnyObject {
+protocol MessagingContext: LoggingContext {
     /// The current input text
     var inputText: String { get set }
 
@@ -70,13 +70,6 @@ protocol MessagingContext: AnyObject {
 
     /// Show error alert to user
     func showErrorAlert(_ message: String)
-
-    /// Logging methods
-    func logVerbose(_ message: String)
-    func logDebug(_ message: String)
-    func logInfo(_ message: String)
-    func logWarning(_ message: String)
-    func logError(_ message: String)
 }
 
 /// Coordinates message sending, agent abort, and attachment management for ChatViewModel.

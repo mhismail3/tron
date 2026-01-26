@@ -3,7 +3,7 @@ import Foundation
 /// Protocol defining the context required by TurnLifecycleCoordinator.
 /// Allows ChatViewModel to be abstracted for independent testing of turn lifecycle handling.
 @MainActor
-protocol TurnLifecycleContext: AnyObject {
+protocol TurnLifecycleContext: LoggingContext {
 
     // MARK: - Messages State
 
@@ -121,11 +121,4 @@ protocol TurnLifecycleContext: AnyObject {
 
     /// Update session dashboard info in database
     func updateSessionDashboardInfo(lastAssistantResponse: String?, lastToolCount: Int?)
-
-    // MARK: - Logging
-
-    func logDebug(_ message: String)
-    func logInfo(_ message: String)
-    func logWarning(_ message: String)
-    func logError(_ message: String)
 }

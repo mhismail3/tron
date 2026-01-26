@@ -4,7 +4,7 @@ import SwiftUI
 /// Protocol defining the context required by ChatEventHandler
 /// Allows ChatViewModel to be abstracted for testing
 @MainActor
-protocol ChatEventContext: AnyObject {
+protocol ChatEventContext: LoggingContext {
     /// Whether AskUserQuestion was called in the current turn
     var askUserQuestionCalledInTurn: Bool { get set }
 
@@ -19,11 +19,4 @@ protocol ChatEventContext: AnyObject {
 
     /// Make a tool visible for rendering
     func makeToolVisible(_ toolCallId: String)
-
-    // MARK: - Logging
-
-    func logDebug(_ message: String)
-    func logInfo(_ message: String)
-    func logWarning(_ message: String)
-    func logError(_ message: String)
 }

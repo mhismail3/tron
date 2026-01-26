@@ -523,6 +523,10 @@ final class MockChatEventContext: ChatEventContext {
         // No-op for tests
     }
 
+    func logVerbose(_ message: String) {
+        // No-op for tests
+    }
+
     func logDebug(_ message: String) {
         // No-op for tests
     }

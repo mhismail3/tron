@@ -5,7 +5,7 @@ import Foundation
 /// This protocol allows AskUserQuestionCoordinator to be tested independently from ChatViewModel
 /// by defining the minimum interface it needs to interact with state and dependencies.
 @MainActor
-protocol AskUserQuestionContext: AnyObject {
+protocol AskUserQuestionContext: LoggingContext {
     /// AskUserQuestion state container
     var askUserQuestionState: AskUserQuestionState { get }
 
@@ -17,12 +17,6 @@ protocol AskUserQuestionContext: AnyObject {
 
     /// Send the formatted answer as a new prompt
     func sendAnswerPrompt(_ text: String)
-
-    /// Logging methods
-    func logDebug(_ message: String)
-    func logInfo(_ message: String)
-    func logWarning(_ message: String)
-    func logError(_ message: String)
 }
 
 /// Coordinates AskUserQuestion event handling and user interaction for ChatViewModel.

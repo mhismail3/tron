@@ -5,7 +5,7 @@ import Foundation
 /// This protocol allows TranscriptionCoordinator to be tested independently from ChatViewModel
 /// by defining the minimum interface it needs to interact with audio recording and transcription.
 @MainActor
-protocol TranscriptionContext: AnyObject {
+protocol TranscriptionContext: LoggingContext {
     /// Whether audio is currently being recorded
     var isRecording: Bool { get }
 
@@ -46,12 +46,6 @@ protocol TranscriptionContext: AnyObject {
 
     /// Show no speech detected notification in chat
     func appendNoSpeechDetectedNotification()
-
-    /// Logging methods
-    func logDebug(_ message: String)
-    func logInfo(_ message: String)
-    func logWarning(_ message: String)
-    func logError(_ message: String)
 }
 
 /// Coordinates voice recording and transcription for ChatViewModel.
