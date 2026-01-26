@@ -128,29 +128,29 @@ class EventStoreManager: ObservableObject {
         // Clear existing subscriptions to prevent duplicates when RPC client is updated
         eventCancellables.removeAll()
 
-        // Subscribe to event stream for global events
+        // Subscribe to plugin-based event stream for global events
         // We don't filter by session ID here - we want events from ALL sessions
-        rpcClient.eventPublisher
+        rpcClient.eventPublisherV2
             .receive(on: DispatchQueue.main)
             .sink { [weak self] event in
-                self?.handleGlobalEvent(event)
+                self?.handleGlobalEventV2(event)
             }
             .store(in: &eventCancellables)
     }
 
-    /// Handle global events for dashboard updates
-    private func handleGlobalEvent(_ event: ParsedEvent) {
-        switch event {
-        case .turnStart(let e):
+    /// Handle global events for dashboard updates (plugin-based)
+    private func handleGlobalEventV2(_ event: ParsedEventV2) {
+        switch event.eventType {
+        case TurnStartPlugin.eventType:
             // Processing started for a session
-            if let sessionId = e.sessionId {
+            if let sessionId = event.sessionId {
                 logger.info("Global: Session \(sessionId) started processing", category: .session)
                 setSessionProcessing(sessionId, isProcessing: true)
             }
 
-        case .complete(let e):
+        case CompletePlugin.eventType:
             // Processing completed for a session
-            if let sessionId = e.sessionId {
+            if let sessionId = event.sessionId {
                 logger.info("Global: Session \(sessionId) completed processing", category: .session)
                 setSessionProcessing(sessionId, isProcessing: false)
                 Task {
@@ -159,14 +159,15 @@ class EventStoreManager: ObservableObject {
                 }
             }
 
-        case .error(let e):
+        case ErrorPlugin.eventType:
             // Error occurred in a session
-            if let sessionId = e.sessionId {
-                logger.info("Global: Session \(sessionId) error: \(e.message)", category: .session)
+            if let sessionId = event.sessionId,
+               let result = event.getResult() as? ErrorPlugin.Result {
+                logger.info("Global: Session \(sessionId) error: \(result.message)", category: .session)
                 setSessionProcessing(sessionId, isProcessing: false)
                 updateSessionDashboardInfo(
                     sessionId: sessionId,
-                    lastAssistantResponse: "Error: \(String(e.message.prefix(100)))"
+                    lastAssistantResponse: "Error: \(String(result.message.prefix(100)))"
                 )
             }
 

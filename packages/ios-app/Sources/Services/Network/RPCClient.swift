@@ -56,21 +56,21 @@ class RPCClient: ObservableObject, RPCTransport {
 
     // MARK: - Unified Event Stream
     //
-    // Single event stream replaces 30+ individual callbacks.
-    // Consumers subscribe once and handle events via switch:
+    // Plugin-based event system replaces 30+ individual callbacks.
+    // Consumers subscribe once and handle events via switch on eventType:
     //
-    //   rpcClient.eventPublisher
-    //       .filter { event in event.sessionId == mySessionId }
+    //   rpcClient.eventPublisherV2
+    //       .filter { event in event.matchesSession(mySessionId) }
     //       .sink { event in
-    //           switch event { ... }
+    //           switch event.eventType { ... }
     //       }
     //
-    private let _eventPublisher = PassthroughSubject<ParsedEvent, Never>()
+    private let _eventPublisherV2 = PassthroughSubject<ParsedEventV2, Never>()
 
-    /// Publisher for all parsed WebSocket events.
+    /// Publisher for plugin-based parsed WebSocket events.
     /// Events are published without session filtering - consumers filter as needed.
-    var eventPublisher: AnyPublisher<ParsedEvent, Never> {
-        _eventPublisher.eraseToAnyPublisher()
+    var eventPublisherV2: AnyPublisher<ParsedEventV2, Never> {
+        _eventPublisherV2.eraseToAnyPublisher()
     }
 
     private let serverURL: URL
@@ -199,19 +199,36 @@ class RPCClient: ObservableObject, RPCTransport {
     // MARK: - Event Handling
 
     private func handleEventData(_ data: Data) {
-        guard let event = ParsedEvent.parse(from: data) else {
-            logger.warning("Failed to parse event data", category: .events)
+        // Extract event type for plugin dispatch
+        guard let eventType = Self.extractEventType(from: data) else {
+            logger.warning("Failed to extract event type from data", category: .events)
+            return
+        }
+
+        // Parse event using plugin system
+        guard let eventV2 = EventRegistry.shared.parse(type: eventType, data: data) else {
+            logger.warning("Failed to parse event: \(eventType)", category: .events)
             return
         }
 
         // Log connection events
-        if case .connected(let e) = event {
-            logger.info("Server version: \(e.version ?? "unknown")", category: .rpc)
+        if eventType == ConnectedPlugin.eventType,
+           let result = eventV2.getResult() as? ConnectedPlugin.Result {
+            logger.info("Server version: \(result.version ?? "unknown")", category: .rpc)
         }
 
-        // Publish all events to the unified stream
-        // Consumers handle session filtering via their own subscription filters
-        _eventPublisher.send(event)
+        // Publish event to unified stream
+        _eventPublisherV2.send(eventV2)
+    }
+
+    /// Extract event type string from raw JSON data without full parsing.
+    /// Used for efficient plugin dispatch.
+    private static func extractEventType(from data: Data) -> String? {
+        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let type = json["type"] as? String else {
+            return nil
+        }
+        return type
     }
 
     // MARK: - State Accessors

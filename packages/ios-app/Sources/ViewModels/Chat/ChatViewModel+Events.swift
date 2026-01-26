@@ -368,4 +368,336 @@ extension ChatViewModel {
         // Update todo state from server event
         todoState.handleTodosUpdated(event)
     }
+
+    // MARK: - Plugin Result Handlers
+    // These handlers accept plugin Result types directly, bridging the plugin system
+    // to the existing event handler infrastructure.
+
+    func handleToolStartResult(_ result: ToolStartPlugin.Result) {
+        // Convert plugin result to legacy event for existing infrastructure
+        let event = ToolStartEvent(
+            toolName: result.toolName,
+            toolCallId: result.toolCallId,
+            arguments: result.arguments,
+            formattedArguments: result.formattedArguments
+        )
+        handleToolStart(event)
+    }
+
+    func handleToolEndResult(_ result: ToolEndPlugin.Result) {
+        // Convert plugin result to legacy event for existing infrastructure
+        let event = ToolEndEvent(
+            toolCallId: result.toolCallId,
+            success: result.success,
+            displayResult: result.displayResult,
+            durationMs: result.durationMs,
+            details: result.details.map { ToolEndEvent.ToolDetails(screenshot: $0.screenshot, format: $0.format) }
+        )
+        handleToolEnd(event)
+    }
+
+    func handleTurnStartResult(_ result: TurnStartPlugin.Result) {
+        let event = TurnStartEvent(turnNumber: result.turnNumber)
+        handleTurnStart(event)
+    }
+
+    func handleTurnEndResult(_ result: TurnEndPlugin.Result) {
+        let event = TurnEndEvent(
+            turnNumber: result.turnNumber,
+            stopReason: result.stopReason,
+            tokenUsage: result.tokenUsage,
+            normalizedUsage: result.normalizedUsage,
+            contextLimit: result.contextLimit,
+            data: TurnEndData(
+                turn: result.turnNumber,
+                duration: result.duration,
+                tokenUsage: result.tokenUsage,
+                normalizedUsage: result.normalizedUsage,
+                stopReason: result.stopReason,
+                cost: result.cost,
+                contextLimit: result.contextLimit
+            ),
+            cost: result.cost
+        )
+        handleTurnEnd(event)
+    }
+
+    func handleAgentTurnResult(_ result: AgentTurnPlugin.Result) {
+        logger.info("Agent turn received: \(result.messages.count) messages, \(result.toolUses.count) tool uses, \(result.toolResults.count) tool results", category: .events)
+
+        guard let manager = eventStoreManager else {
+            logger.warning("No EventStoreManager to cache agent turn content", category: .events)
+            return
+        }
+
+        // Convert AgentTurnPlugin messages to cacheable format
+        var turnMessages: [[String: Any]] = []
+        for msg in result.messages {
+            var messageDict: [String: Any] = ["role": msg.role]
+
+            switch msg.content {
+            case .text(let text):
+                messageDict["content"] = text
+            case .blocks(let blocks):
+                var contentBlocks: [[String: Any]] = []
+                for block in blocks {
+                    switch block {
+                    case .text(let text):
+                        contentBlocks.append(["type": "text", "text": text])
+                    case .toolUse(let id, let name, let input):
+                        var inputDict: [String: Any] = [:]
+                        for (key, value) in input {
+                            inputDict[key] = value.value
+                        }
+                        contentBlocks.append([
+                            "type": "tool_use",
+                            "id": id,
+                            "name": name,
+                            "input": inputDict
+                        ])
+                    case .toolResult(let toolUseId, let content, let isError):
+                        contentBlocks.append([
+                            "type": "tool_result",
+                            "tool_use_id": toolUseId,
+                            "content": content,
+                            "is_error": isError
+                        ])
+                    case .thinking(let text):
+                        contentBlocks.append(["type": "thinking", "thinking": text])
+                    case .unknown:
+                        break
+                    }
+                }
+                messageDict["content"] = contentBlocks
+            }
+            turnMessages.append(messageDict)
+        }
+
+        // Cache the turn content for merging with server events
+        manager.turnContentCache.store(
+            sessionId: sessionId,
+            turnNumber: result.turnNumber,
+            messages: turnMessages
+        )
+
+        // Trigger sync AFTER caching content
+        logger.info("Triggering sync after caching agent turn content", category: .events)
+        Task {
+            await syncSessionEventsFromServer()
+        }
+    }
+
+    func handleCompactionResult(_ result: CompactionPlugin.Result) {
+        let event = CompactionEvent(
+            tokensBefore: result.tokensBefore,
+            tokensAfter: result.tokensAfter,
+            reason: result.reason,
+            summary: result.summary
+        )
+        handleCompaction(event)
+    }
+
+    func handleContextClearedResult(_ result: ContextClearedPlugin.Result) {
+        let event = ContextClearedEvent(
+            tokensBefore: result.tokensBefore,
+            tokensAfter: result.tokensAfter
+        )
+        handleContextCleared(event)
+    }
+
+    func handleMessageDeletedResult(_ result: MessageDeletedPlugin.Result) {
+        let event = MessageDeletedEvent(
+            targetEventId: result.targetEventId,
+            targetType: result.targetType
+        )
+        handleMessageDeleted(event)
+    }
+
+    func handleSkillRemovedResult(_ result: SkillRemovedPlugin.Result) {
+        let event = SkillRemovedEvent(skillName: result.skillName)
+        handleSkillRemoved(event)
+    }
+
+    func handlePlanModeEnteredResult(_ result: PlanModeEnteredPlugin.Result) {
+        let event = PlanModeEnteredEvent(
+            skillName: result.skillName,
+            blockedTools: result.blockedTools
+        )
+        handlePlanModeEntered(event)
+    }
+
+    func handlePlanModeExitedResult(_ result: PlanModeExitedPlugin.Result) {
+        let event = PlanModeExitedEvent(
+            reason: result.reason,
+            planPath: result.planPath
+        )
+        handlePlanModeExited(event)
+    }
+
+    func handleBrowserFrameResult(_ result: BrowserFramePlugin.Result) {
+        // Decode base64 frame data directly
+        guard let imageData = Data(base64Encoded: result.frameData),
+              let image = UIImage(data: imageData) else {
+            logger.warning("Failed to decode browser frame data", category: .events)
+            return
+        }
+
+        browserState.browserFrame = image
+        browserState.browserStatus = BrowserGetStatusResult(
+            hasBrowser: true,
+            isStreaming: true,
+            currentUrl: nil
+        )
+
+        // Auto-show browser window if not dismissed
+        if !browserState.userDismissedBrowserThisTurn && !browserState.showBrowserWindow {
+            browserState.showBrowserWindow = true
+        }
+    }
+
+    func handleSubagentSpawnedResult(_ result: SubagentSpawnedPlugin.Result) {
+        logger.info("Subagent spawned: \(result.subagentSessionId) for task: \(result.task.prefix(50))...", category: .chat)
+
+        // Track in subagent state
+        subagentState.trackSpawn(
+            toolCallId: result.toolCallId ?? result.subagentSessionId,
+            subagentSessionId: result.subagentSessionId,
+            task: result.task,
+            model: result.model
+        )
+
+        // Find and update the SpawnSubagent tool call message to show as subagent chip
+        updateToolMessageToSubagentChip(
+            toolCallId: result.toolCallId ?? result.subagentSessionId,
+            subagentSessionId: result.subagentSessionId
+        )
+    }
+
+    func handleSubagentStatusResult(_ result: SubagentStatusPlugin.Result) {
+        logger.debug("Subagent status: \(result.subagentSessionId) - \(result.status) turn \(result.currentTurn)", category: .chat)
+
+        let status: SubagentStatus = result.status == "running" ? .running : .spawning
+        subagentState.updateStatus(
+            subagentSessionId: result.subagentSessionId,
+            status: status,
+            currentTurn: result.currentTurn
+        )
+
+        updateSubagentMessageContent(subagentSessionId: result.subagentSessionId)
+    }
+
+    func handleSubagentCompletedResult(_ result: SubagentCompletedPlugin.Result) {
+        logger.info("Subagent completed: \(result.subagentSessionId) in \(result.totalTurns) turns, \(result.duration)ms", category: .chat)
+
+        subagentState.complete(
+            subagentSessionId: result.subagentSessionId,
+            resultSummary: result.resultSummary,
+            fullOutput: result.fullOutput,
+            totalTurns: result.totalTurns,
+            duration: result.duration,
+            tokenUsage: result.tokenUsage
+        )
+
+        updateSubagentMessageContent(subagentSessionId: result.subagentSessionId)
+    }
+
+    func handleSubagentFailedResult(_ result: SubagentFailedPlugin.Result) {
+        logger.error("Subagent failed: \(result.subagentSessionId) - \(result.error)", category: .chat)
+
+        subagentState.fail(
+            subagentSessionId: result.subagentSessionId,
+            error: result.error,
+            duration: result.duration
+        )
+
+        updateSubagentMessageContent(subagentSessionId: result.subagentSessionId)
+    }
+
+    func handleSubagentForwardedEventResult(_ result: SubagentEventPlugin.Result) {
+        logger.debug("Subagent forwarded event: \(result.subagentSessionId) - \(result.innerEventType)", category: .chat)
+
+        subagentState.addForwardedEvent(
+            subagentSessionId: result.subagentSessionId,
+            eventType: result.innerEventType,
+            eventData: result.innerEventData,
+            timestamp: result.innerEventTimestamp
+        )
+    }
+
+    func handleUIRenderStartResult(_ result: UIRenderStartPlugin.Result) {
+        let event = UIRenderStartEvent(
+            canvasId: result.canvasId,
+            title: result.title,
+            toolCallId: result.toolCallId
+        )
+        handleUIRenderStart(event)
+    }
+
+    func handleUIRenderChunkResult(_ result: UIRenderChunkPlugin.Result) {
+        let event = UIRenderChunkEvent(
+            canvasId: result.canvasId,
+            chunk: result.chunk,
+            accumulated: result.accumulated
+        )
+        handleUIRenderChunk(event)
+    }
+
+    func handleUIRenderCompleteResult(_ result: UIRenderCompletePlugin.Result) {
+        let event = UIRenderCompleteEvent(
+            canvasId: result.canvasId,
+            ui: result.ui,
+            state: result.state
+        )
+        handleUIRenderComplete(event)
+    }
+
+    func handleUIRenderErrorResult(_ result: UIRenderErrorPlugin.Result) {
+        let event = UIRenderErrorEvent(
+            canvasId: result.canvasId,
+            error: result.error
+        )
+        handleUIRenderError(event)
+    }
+
+    func handleUIRenderRetryResult(_ result: UIRenderRetryPlugin.Result) {
+        let event = UIRenderRetryEvent(
+            canvasId: result.canvasId,
+            attempt: result.attempt,
+            errors: result.errors
+        )
+        handleUIRenderRetry(event)
+    }
+
+    func handleTodosUpdatedResult(_ result: TodosUpdatedPlugin.Result) {
+        logger.debug("Todos updated: count=\(result.todos.count), restoredCount=\(result.restoredCount)", category: .events)
+
+        // Update todo state directly from plugin result
+        todoState.updateTodos(result.todos)
+    }
+
+    // MARK: - Subagent Helpers
+
+    private func updateToolMessageToSubagentChip(toolCallId: String, subagentSessionId: String) {
+        guard let data = subagentState.getSubagent(sessionId: subagentSessionId) else {
+            logger.warning("No subagent data found for session \(subagentSessionId)", category: .chat)
+            return
+        }
+
+        if let index = MessageFinder.indexOfSpawnSubagentTool(toolCallId: toolCallId, in: messages) {
+            messages[index].content = .subagent(data)
+            messageWindowManager.updateMessage(messages[index])
+            logger.debug("Converted tool message to subagent chip for \(subagentSessionId)", category: .chat)
+        }
+    }
+
+    private func updateSubagentMessageContent(subagentSessionId: String) {
+        guard let data = subagentState.getSubagent(sessionId: subagentSessionId) else {
+            return
+        }
+
+        if let index = MessageFinder.indexBySubagentSessionId(subagentSessionId, in: messages) {
+            messages[index].content = .subagent(data)
+            messageWindowManager.updateMessage(messages[index])
+        }
+    }
 }

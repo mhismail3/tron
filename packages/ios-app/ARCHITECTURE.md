@@ -87,7 +87,6 @@ ViewModels/
     ├── ChatViewModel+Events.swift     # Event handling
     ├── ChatViewModel+Messaging.swift  # Message sending
     ├── ChatViewModel+Pagination.swift # History pagination
-    ├── ChatViewModel+Subagent.swift   # Subagent logic
     └── ChatViewModel+Transcription.swift  # Voice transcription
 ```
 

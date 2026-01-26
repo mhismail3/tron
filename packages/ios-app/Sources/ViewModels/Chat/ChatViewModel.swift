@@ -336,109 +336,184 @@ class ChatViewModel: ObservableObject, ChatEventContext {
         setupUIUpdateQueueCallback()
         setupStreamingManagerCallbacks()
 
-        // Subscribe to unified event stream from RPCClient
+        // Subscribe to plugin-based event stream from RPCClient
         // Filter to only handle events for this session
-        rpcClient.eventPublisher
+        rpcClient.eventPublisherV2
             .filter { [weak self] event in
                 event.matchesSession(self?.sessionId)
             }
             .receive(on: DispatchQueue.main)
             .sink { [weak self] event in
-                self?.handleEvent(event)
+                self?.handleEventV2(event)
             }
             .store(in: &cancellables)
     }
 
-    /// Unified event handler - dispatches ParsedEvent to specific handlers
-    private func handleEvent(_ event: ParsedEvent) {
+    /// Unified event handler - dispatches ParsedEventV2 to specific handlers
+    private func handleEventV2(_ event: ParsedEventV2) {
         switch event {
-        case .textDelta(let e):
-            handleTextDelta(e.delta)
+        case .plugin(let type, _, _, let transform):
+            handlePluginEvent(type: type, transform: transform)
 
-        case .thinkingDelta(let e):
-            handleThinkingDelta(e.delta)
+        case .unknown(let type):
+            logger.debug("Unknown event type: \(type)", category: .events)
+        }
+    }
 
-        case .toolStart(let e):
-            handleToolStart(e)
+    /// Handle a plugin-based event by extracting its Result and dispatching to the appropriate handler
+    private func handlePluginEvent(type: String, transform: @Sendable () -> (any EventResult)?) {
+        guard let result = transform() else {
+            logger.warning("Failed to transform event: \(type)", category: .events)
+            return
+        }
 
-        case .toolEnd(let e):
-            handleToolEnd(e)
+        switch type {
+        case TextDeltaPlugin.eventType:
+            if let r = result as? TextDeltaPlugin.Result {
+                handleTextDelta(r.delta)
+            }
 
-        case .turnStart(let e):
-            handleTurnStart(e)
+        case ThinkingDeltaPlugin.eventType:
+            if let r = result as? ThinkingDeltaPlugin.Result {
+                handleThinkingDelta(r.delta)
+            }
 
-        case .turnEnd(let e):
-            handleTurnEnd(e)
+        case ToolStartPlugin.eventType:
+            if let r = result as? ToolStartPlugin.Result {
+                handleToolStartResult(r)
+            }
 
-        case .agentTurn(let e):
-            handleAgentTurn(e)
+        case ToolEndPlugin.eventType:
+            if let r = result as? ToolEndPlugin.Result {
+                handleToolEndResult(r)
+            }
 
-        case .complete:
+        case TurnStartPlugin.eventType:
+            if let r = result as? TurnStartPlugin.Result {
+                handleTurnStartResult(r)
+            }
+
+        case TurnEndPlugin.eventType:
+            if let r = result as? TurnEndPlugin.Result {
+                handleTurnEndResult(r)
+            }
+
+        case AgentTurnPlugin.eventType:
+            if let r = result as? AgentTurnPlugin.Result {
+                handleAgentTurnResult(r)
+            }
+
+        case CompletePlugin.eventType:
             handleComplete()
 
-        case .error(let e):
-            handleAgentError(e.message)
+        case ErrorPlugin.eventType:
+            if let r = result as? ErrorPlugin.Result {
+                handleAgentError(r.message)
+            }
 
-        case .compaction(let e):
-            handleCompaction(e)
+        case CompactionPlugin.eventType:
+            if let r = result as? CompactionPlugin.Result {
+                handleCompactionResult(r)
+            }
 
-        case .contextCleared(let e):
-            handleContextCleared(e)
+        case ContextClearedPlugin.eventType:
+            if let r = result as? ContextClearedPlugin.Result {
+                handleContextClearedResult(r)
+            }
 
-        case .messageDeleted(let e):
-            handleMessageDeleted(e)
+        case MessageDeletedPlugin.eventType:
+            if let r = result as? MessageDeletedPlugin.Result {
+                handleMessageDeletedResult(r)
+            }
 
-        case .skillRemoved(let e):
-            handleSkillRemoved(e)
+        case SkillRemovedPlugin.eventType:
+            if let r = result as? SkillRemovedPlugin.Result {
+                handleSkillRemovedResult(r)
+            }
 
-        case .planModeEntered(let e):
-            handlePlanModeEntered(e)
+        case PlanModeEnteredPlugin.eventType:
+            if let r = result as? PlanModeEnteredPlugin.Result {
+                handlePlanModeEnteredResult(r)
+            }
 
-        case .planModeExited(let e):
-            handlePlanModeExited(e)
+        case PlanModeExitedPlugin.eventType:
+            if let r = result as? PlanModeExitedPlugin.Result {
+                handlePlanModeExitedResult(r)
+            }
 
-        case .browserFrame(let e):
-            handleBrowserFrame(e)
+        case BrowserFramePlugin.eventType:
+            if let r = result as? BrowserFramePlugin.Result {
+                handleBrowserFrameResult(r)
+            }
 
-        case .browserClosed(let closedSessionId):
-            handleBrowserClosed(closedSessionId)
+        case BrowserClosedPlugin.eventType:
+            if let r = result as? BrowserClosedPlugin.Result {
+                if let sessionId = r.closedSessionId {
+                    handleBrowserClosed(sessionId)
+                }
+            }
 
-        case .subagentSpawned(let e):
-            handleSubagentSpawned(e)
+        case SubagentSpawnedPlugin.eventType:
+            if let r = result as? SubagentSpawnedPlugin.Result {
+                handleSubagentSpawnedResult(r)
+            }
 
-        case .subagentStatus(let e):
-            handleSubagentStatus(e)
+        case SubagentStatusPlugin.eventType:
+            if let r = result as? SubagentStatusPlugin.Result {
+                handleSubagentStatusResult(r)
+            }
 
-        case .subagentCompleted(let e):
-            handleSubagentCompleted(e)
+        case SubagentCompletedPlugin.eventType:
+            if let r = result as? SubagentCompletedPlugin.Result {
+                handleSubagentCompletedResult(r)
+            }
 
-        case .subagentFailed(let e):
-            handleSubagentFailed(e)
+        case SubagentFailedPlugin.eventType:
+            if let r = result as? SubagentFailedPlugin.Result {
+                handleSubagentFailedResult(r)
+            }
 
-        case .subagentEvent(let e):
-            handleSubagentForwardedEvent(e)
+        case SubagentEventPlugin.eventType:
+            if let r = result as? SubagentEventPlugin.Result {
+                handleSubagentForwardedEventResult(r)
+            }
 
-        case .uiRenderStart(let e):
-            handleUIRenderStart(e)
+        case UIRenderStartPlugin.eventType:
+            if let r = result as? UIRenderStartPlugin.Result {
+                handleUIRenderStartResult(r)
+            }
 
-        case .uiRenderChunk(let e):
-            handleUIRenderChunk(e)
+        case UIRenderChunkPlugin.eventType:
+            if let r = result as? UIRenderChunkPlugin.Result {
+                handleUIRenderChunkResult(r)
+            }
 
-        case .uiRenderComplete(let e):
-            handleUIRenderComplete(e)
+        case UIRenderCompletePlugin.eventType:
+            if let r = result as? UIRenderCompletePlugin.Result {
+                handleUIRenderCompleteResult(r)
+            }
 
-        case .uiRenderError(let e):
-            handleUIRenderError(e)
+        case UIRenderErrorPlugin.eventType:
+            if let r = result as? UIRenderErrorPlugin.Result {
+                handleUIRenderErrorResult(r)
+            }
 
-        case .uiRenderRetry(let e):
-            handleUIRenderRetry(e)
+        case UIRenderRetryPlugin.eventType:
+            if let r = result as? UIRenderRetryPlugin.Result {
+                handleUIRenderRetryResult(r)
+            }
 
-        case .todosUpdated(let e):
-            handleTodosUpdated(e)
+        case TodosUpdatedPlugin.eventType:
+            if let r = result as? TodosUpdatedPlugin.Result {
+                handleTodosUpdatedResult(r)
+            }
 
-        case .connected, .unknown:
-            // These events are handled elsewhere or ignored
+        case ConnectedPlugin.eventType:
+            // Connection events are handled elsewhere
             break
+
+        default:
+            logger.debug("Unhandled plugin event type: \(type)", category: .events)
         }
     }
 

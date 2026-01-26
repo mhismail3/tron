@@ -21,6 +21,9 @@ struct TronMobileApp: App {
 
     init() {
         TronFontLoader.registerFonts()
+
+        // Register all event plugins for the new event system
+        EventRegistry.shared.registerAll()
     }
 
     var body: some Scene {

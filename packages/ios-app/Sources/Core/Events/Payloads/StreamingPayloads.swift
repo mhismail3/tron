@@ -5,7 +5,7 @@ import Foundation
 // These payloads parse persisted events from SQLite database.
 // They extract data from [String: AnyCodable] dictionaries stored in event payloads.
 //
-// Note: Live WebSocket events use the Decodable types in Events.swift with ParsedEvent.parse().
+// Note: Live WebSocket events use the plugin system in Core/Events/Plugins/ with EventRegistry.
 
 /// Payload for stream.turn_end persisted event
 /// Used to extract token usage from turn end events stored in SQLite

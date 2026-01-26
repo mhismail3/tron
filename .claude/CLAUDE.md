@@ -105,3 +105,67 @@ Reconstruction:
 | `packages/agent/src/tools/subagent/query-subagent.ts` | Query sub-agent state |
 | `packages/agent/src/tools/subagent/wait-for-subagent.ts` | Wait for sub-agent completion |
 | `packages/agent/src/orchestrator/event-store-orchestrator.ts` | Orchestrates session lifecycle |
+
+---
+
+## iOS App Event Plugin System
+
+The iOS app uses an Event Plugin System for handling WebSocket events. Each event type is self-contained in a single plugin file.
+
+### Adding a New Event
+
+1. **Create plugin file** in `packages/ios-app/Sources/Core/Events/Plugins/<Category>/`:
+```swift
+enum MyNewEventPlugin: EventPlugin {
+    static let eventType = "agent.my_new_event"
+
+    struct EventData: Decodable {
+        let type: String
+        let sessionId: String?
+        // ... fields matching server JSON
+    }
+
+    struct Result: EventResult {
+        // ... UI-ready fields
+    }
+
+    static func sessionId(from event: EventData) -> String? { event.sessionId }
+    static func transform(_ event: EventData) -> (any EventResult)? {
+        Result(/* map fields */)
+    }
+}
+```
+
+2. **Register** in `EventRegistry.swift`:
+```swift
+register(MyNewEventPlugin.self)
+```
+
+3. **Handle** in `ChatViewModel.swift` `handlePluginEvent()`:
+```swift
+case MyNewEventPlugin.eventType:
+    if let r = transform() as? MyNewEventPlugin.Result {
+        handleMyNewEventResult(r)
+    }
+```
+
+4. **Add handler** in `ChatViewModel+Events.swift` if needed.
+
+### Key Files
+
+| File | Purpose |
+|------|---------|
+| `Sources/Core/Events/Plugins/EventPlugin.swift` | Protocol definition |
+| `Sources/Core/Events/Plugins/EventRegistry.swift` | Central registration |
+| `Sources/Core/Events/Plugins/ParsedEventV2.swift` | Event wrapper enum |
+| `Sources/ViewModels/Chat/ChatViewModel.swift` | Event dispatch (`handlePluginEvent`) |
+| `Sources/ViewModels/Chat/ChatViewModel+Events.swift` | Handler implementations |
+
+### Guidelines
+
+- **DO NOT** modify `Events.swift` for new WebSocket events — use the plugin system
+- **DO NOT** create parallel event handling paths — all events flow through `eventPublisherV2`
+- **Plugin categories**: Streaming, Tool, Lifecycle, Session, Subagent, PlanMode, UICanvas, Browser, Todo
+- **Custom Decodable**: Override `parse(from:)` only when JSON structure requires special handling (e.g., `ToolEndPlugin` handles output as String OR ContentBlock array)
+- **Result structs**: Keep flat and UI-ready; complex transformations belong in the handler, not the plugin
+- **Deleting plugins**: Remove from registry, remove handler case, delete file — grep for the event type string to ensure no stale references

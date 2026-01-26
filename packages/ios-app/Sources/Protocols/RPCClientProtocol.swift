@@ -10,9 +10,9 @@ protocol RPCClientProtocol: ObservableObject {
     var currentModel: String { get }
 
     // MARK: - Unified Event Stream
-    /// Publisher for all parsed WebSocket events.
+    /// Publisher for plugin-based parsed WebSocket events.
     /// Consumers subscribe and filter by session ID as needed.
-    var eventPublisher: AnyPublisher<ParsedEvent, Never> { get }
+    var eventPublisherV2: AnyPublisher<ParsedEventV2, Never> { get }
 
     // MARK: - Computed Properties
     var isConnected: Bool { get }
