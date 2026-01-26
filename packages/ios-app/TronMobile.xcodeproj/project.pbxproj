@@ -34,6 +34,7 @@
 		14A2748B25BADA97EB0B906E /* MessagingCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE255AADDFC9B06277562F78 /* MessagingCoordinator.swift */; };
 		153A6E736ACB4A66AC4E5CC8 /* ConfigPayloads.swift in Sources */ = {isa = PBXBuildFile; fileRef = 19201A745774A4FE8633AE2D /* ConfigPayloads.swift */; };
 		16087C087E44F2F231DA46AA /* RPCClientTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F3198853F56167392171167E /* RPCClientTests.swift */; };
+		8D54C16A22CD4ED8AE0E7741 /* RPCTransportHelpersTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 720E1653B78A4EFBB7F417BE /* RPCTransportHelpersTests.swift */; };
 		16BB155150F5C710EA5E3CE3 /* PlanModeViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3323652D5807CE661BB511A2 /* PlanModeViews.swift */; };
 		177445F940D884752690461E /* ScrollStateCoordinatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 826E44EFB65678346CCC84BC /* ScrollStateCoordinatorTests.swift */; };
 		17B5974A12F8C119953C3D4C /* NotifyAppDetailSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 93B0D0EBE752ACE1C4B9B567 /* NotifyAppDetailSheet.swift */; };
@@ -638,6 +639,7 @@
 		F25EA9767ADB2C8628135491 /* BashToolViewer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BashToolViewer.swift; sourceTree = "<group>"; };
 		F2B298578C85F2293B9568BA /* TronMobile.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = TronMobile.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		F3198853F56167392171167E /* RPCClientTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RPCClientTests.swift; sourceTree = "<group>"; };
+		720E1653B78A4EFBB7F417BE /* RPCTransportHelpersTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RPCTransportHelpersTests.swift; sourceTree = "<group>"; };
 		F3984D131F07C099480816DD /* RPCClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RPCClient.swift; sourceTree = "<group>"; };
 		F4C6348A82F197609B6FCECA /* MessageBubble.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MessageBubble.swift; sourceTree = "<group>"; };
 		F4CFC0C58B7F643E839F5FCA /* CameraCaptureSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraCaptureSheet.swift; sourceTree = "<group>"; };
@@ -1121,6 +1123,7 @@
 			children = (
 				22F2EBC0031AC3D96E60D41D /* EventStoreManagerTests.swift */,
 				F3198853F56167392171167E /* RPCClientTests.swift */,
+				720E1653B78A4EFBB7F417BE /* RPCTransportHelpersTests.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -2129,6 +2132,7 @@
 				5449B9F01FFC844564ED5049 /* MockRPCClient.swift in Sources */,
 				07F85630097A0278DD87610D /* PlanModeStateTests.swift in Sources */,
 				16087C087E44F2F231DA46AA /* RPCClientTests.swift in Sources */,
+				8D54C16A22CD4ED8AE0E7741 /* RPCTransportHelpersTests.swift in Sources */,
 				573A78F322A8150ABB02D74E /* RPCTypesTests.swift in Sources */,
 				A30DB8557BB5D3E5CFD61ADD /* RecentSessionsTests.swift in Sources */,
 				177445F940D884752690461E /* ScrollStateCoordinatorTests.swift in Sources */,

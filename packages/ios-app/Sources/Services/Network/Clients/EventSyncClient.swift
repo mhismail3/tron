@@ -19,9 +19,8 @@ final class EventSyncClient {
         limit: Int? = nil,
         beforeEventId: String? = nil
     ) async throws -> EventsGetHistoryResult {
-        guard let transport = transport, let ws = transport.webSocket else {
-            throw RPCClientError.connectionNotEstablished
-        }
+        guard let transport else { throw RPCClientError.connectionNotEstablished }
+        let ws = try transport.requireConnection()
 
         let params = EventsGetHistoryParams(
             sessionId: sessionId,
@@ -41,9 +40,8 @@ final class EventSyncClient {
         afterTimestamp: String? = nil,
         limit: Int? = nil
     ) async throws -> EventsGetSinceResult {
-        guard let transport = transport, let ws = transport.webSocket else {
-            throw RPCClientError.connectionNotEstablished
-        }
+        guard let transport else { throw RPCClientError.connectionNotEstablished }
+        let ws = try transport.requireConnection()
 
         let params = EventsGetSinceParams(
             sessionId: sessionId,
@@ -81,9 +79,8 @@ final class EventSyncClient {
 
     /// Get ancestor events for an event (traverses across session boundaries via parent_id chain)
     func getAncestors(_ eventId: String) async throws -> [RawEvent] {
-        guard let transport = transport, let ws = transport.webSocket else {
-            throw RPCClientError.connectionNotEstablished
-        }
+        guard let transport else { throw RPCClientError.connectionNotEstablished }
+        let ws = try transport.requireConnection()
 
         let params = TreeGetAncestorsParams(eventId: eventId)
         logger.info("[ANCESTORS] Fetching ancestors for eventId=\(eventId)", category: .session)

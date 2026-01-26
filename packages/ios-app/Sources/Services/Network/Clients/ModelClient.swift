@@ -18,9 +18,8 @@ final class ModelClient {
     // MARK: - Model Methods
 
     func switchModel(_ sessionId: String, model: String) async throws -> ModelSwitchResult {
-        guard let transport = transport, let ws = transport.webSocket else {
-            throw RPCClientError.connectionNotEstablished
-        }
+        guard let transport else { throw RPCClientError.connectionNotEstablished }
+        let ws = try transport.requireConnection()
 
         let params = ModelSwitchParams(sessionId: sessionId, model: model)
         let result: ModelSwitchResult = try await ws.send(
@@ -47,9 +46,8 @@ final class ModelClient {
             return cached
         }
 
-        guard let transport = transport, let ws = transport.webSocket else {
-            throw RPCClientError.connectionNotEstablished
-        }
+        guard let transport else { throw RPCClientError.connectionNotEstablished }
+        let ws = try transport.requireConnection()
 
         let result: ModelListResult = try await ws.send(
             method: "model.list",

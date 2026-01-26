@@ -22,3 +22,31 @@ protocol RPCTransport: AnyObject {
     /// Update the current model
     func setCurrentModel(_ model: String)
 }
+
+// MARK: - Connection Helpers
+
+extension RPCTransport {
+    /// Get the WebSocket service, throwing if not connected.
+    /// Use this to replace: `guard let ws = transport.webSocket else { throw ... }`
+    ///
+    /// - Throws: `RPCClientError.connectionNotEstablished` if webSocket is nil
+    /// - Returns: The active WebSocketService
+    func requireConnection() throws -> WebSocketService {
+        guard let ws = webSocket else {
+            throw RPCClientError.connectionNotEstablished
+        }
+        return ws
+    }
+
+    /// Get the WebSocket service and current session ID, throwing if either is unavailable.
+    /// Use this to replace: `guard let ws = ..., let sessionId = ... else { throw ... }`
+    ///
+    /// - Throws: `RPCClientError.noActiveSession` if webSocket or sessionId is nil
+    /// - Returns: Tuple of (WebSocketService, sessionId)
+    func requireSession() throws -> (WebSocketService, String) {
+        guard let ws = webSocket, let sessionId = currentSessionId else {
+            throw RPCClientError.noActiveSession
+        }
+        return (ws, sessionId)
+    }
+}

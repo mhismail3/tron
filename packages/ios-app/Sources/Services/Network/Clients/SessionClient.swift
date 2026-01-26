@@ -16,9 +16,8 @@ final class SessionClient {
         workingDirectory: String,
         model: String? = nil
     ) async throws -> SessionCreateResult {
-        guard let transport = transport, let ws = transport.webSocket else {
-            throw RPCClientError.connectionNotEstablished
-        }
+        guard let transport else { throw RPCClientError.connectionNotEstablished }
+        let ws = try transport.requireConnection()
 
         let params = SessionCreateParams(
             workingDirectory: workingDirectory,
@@ -43,9 +42,8 @@ final class SessionClient {
         limit: Int = 50,
         includeEnded: Bool = false
     ) async throws -> [SessionInfo] {
-        guard let transport = transport, let ws = transport.webSocket else {
-            throw RPCClientError.connectionNotEstablished
-        }
+        guard let transport else { throw RPCClientError.connectionNotEstablished }
+        let ws = try transport.requireConnection()
 
         let params = SessionListParams(
             workingDirectory: workingDirectory,
@@ -62,9 +60,8 @@ final class SessionClient {
     }
 
     func resume(sessionId: String) async throws {
-        guard let transport = transport, let ws = transport.webSocket else {
-            throw RPCClientError.connectionNotEstablished
-        }
+        guard let transport else { throw RPCClientError.connectionNotEstablished }
+        let ws = try transport.requireConnection()
 
         let params = SessionResumeParams(sessionId: sessionId)
         let result: SessionResumeResult = try await ws.send(
@@ -78,11 +75,8 @@ final class SessionClient {
     }
 
     func end() async throws {
-        guard let transport = transport,
-              let ws = transport.webSocket,
-              let sessionId = transport.currentSessionId else {
-            return
-        }
+        guard let transport else { return }
+        guard let (ws, sessionId) = try? transport.requireSession() else { return }
 
         let params = SessionEndParams(sessionId: sessionId)
         let _: EmptyParams = try await ws.send(method: "session.end", params: params)
@@ -92,11 +86,8 @@ final class SessionClient {
     }
 
     func getHistory(limit: Int = 100) async throws -> [HistoryMessage] {
-        guard let transport = transport,
-              let ws = transport.webSocket,
-              let sessionId = transport.currentSessionId else {
-            throw RPCClientError.noActiveSession
-        }
+        guard let transport else { throw RPCClientError.noActiveSession }
+        let (ws, sessionId) = try transport.requireSession()
 
         let params = SessionHistoryParams(
             sessionId: sessionId,
@@ -113,9 +104,8 @@ final class SessionClient {
     }
 
     func delete(_ sessionId: String) async throws -> Bool {
-        guard let transport = transport, let ws = transport.webSocket else {
-            throw RPCClientError.connectionNotEstablished
-        }
+        guard let transport else { throw RPCClientError.connectionNotEstablished }
+        let ws = try transport.requireConnection()
 
         let params = SessionDeleteParams(sessionId: sessionId)
         let result: SessionDeleteResult = try await ws.send(
@@ -132,10 +122,11 @@ final class SessionClient {
     }
 
     func fork(_ sessionId: String, fromEventId: String? = nil) async throws -> SessionForkResult {
-        guard let transport = transport, let ws = transport.webSocket else {
+        guard let transport else {
             logger.error("[FORK] Cannot fork - WebSocket not connected", category: .session)
             throw RPCClientError.connectionNotEstablished
         }
+        let ws = try transport.requireConnection()
 
         let params = SessionForkParams(sessionId: sessionId, fromEventId: fromEventId)
         logger.info("[FORK] Sending fork request: sessionId=\(sessionId), fromEventId=\(fromEventId ?? "HEAD")", category: .session)

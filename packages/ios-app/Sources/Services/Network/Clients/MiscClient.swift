@@ -13,9 +13,8 @@ final class MiscClient {
     // MARK: - System Methods
 
     func ping() async throws {
-        guard let transport = transport, let ws = transport.webSocket else {
-            throw RPCClientError.connectionNotEstablished
-        }
+        guard let transport else { throw RPCClientError.connectionNotEstablished }
+        let ws = try transport.requireConnection()
 
         let _: SystemPingResult = try await ws.send(
             method: "system.ping",
@@ -24,9 +23,8 @@ final class MiscClient {
     }
 
     func getSystemInfo() async throws -> SystemInfoResult {
-        guard let transport = transport, let ws = transport.webSocket else {
-            throw RPCClientError.connectionNotEstablished
-        }
+        guard let transport else { throw RPCClientError.connectionNotEstablished }
+        let ws = try transport.requireConnection()
 
         return try await ws.send(
             method: "system.getInfo",
@@ -40,10 +38,11 @@ final class MiscClient {
     /// This appends a message.deleted event to the event log.
     /// The message will be filtered out during reconstruction (two-pass).
     func deleteMessage(_ sessionId: String, targetEventId: String, reason: String? = "user_request") async throws -> MessageDeleteResult {
-        guard let transport = transport, let ws = transport.webSocket else {
+        guard let transport else {
             logger.error("[DELETE] Cannot delete message - WebSocket not connected", category: .session)
             throw RPCClientError.connectionNotEstablished
         }
+        let ws = try transport.requireConnection()
 
         let params = MessageDeleteParams(sessionId: sessionId, targetEventId: targetEventId, reason: reason)
         logger.info("[DELETE] Sending delete request: sessionId=\(sessionId), targetEventId=\(targetEventId)", category: .session)
@@ -65,9 +64,8 @@ final class MiscClient {
         source: String? = nil,
         limit: Int = 20
     ) async throws -> MemorySearchResult {
-        guard let transport = transport, let ws = transport.webSocket else {
-            throw RPCClientError.connectionNotEstablished
-        }
+        guard let transport else { throw RPCClientError.connectionNotEstablished }
+        let ws = try transport.requireConnection()
 
         let params = MemorySearchParams(
             searchText: query,
@@ -83,9 +81,8 @@ final class MiscClient {
     }
 
     func getHandoffs(workingDirectory: String? = nil, limit: Int = 10) async throws -> [Handoff] {
-        guard let transport = transport, let ws = transport.webSocket else {
-            throw RPCClientError.connectionNotEstablished
-        }
+        guard let transport else { throw RPCClientError.connectionNotEstablished }
+        let ws = try transport.requireConnection()
 
         let params = HandoffsParams(workingDirectory: workingDirectory, limit: limit)
         let result: HandoffsResult = try await ws.send(
@@ -100,9 +97,8 @@ final class MiscClient {
 
     /// Get worktree status for a session
     func getWorktreeStatus(sessionId: String) async throws -> WorktreeGetStatusResult {
-        guard let transport = transport, let ws = transport.webSocket else {
-            throw RPCClientError.connectionNotEstablished
-        }
+        guard let transport else { throw RPCClientError.connectionNotEstablished }
+        let ws = try transport.requireConnection()
 
         let params = WorktreeGetStatusParams(sessionId: sessionId)
         return try await ws.send(method: "worktree.getStatus", params: params)
@@ -110,17 +106,15 @@ final class MiscClient {
 
     /// Get worktree status for current session
     func getWorktreeStatus() async throws -> WorktreeGetStatusResult {
-        guard let transport = transport, let sessionId = transport.currentSessionId else {
-            throw RPCClientError.noActiveSession
-        }
+        guard let transport else { throw RPCClientError.noActiveSession }
+        let (_, sessionId) = try transport.requireSession()
         return try await getWorktreeStatus(sessionId: sessionId)
     }
 
     /// Commit changes in a session's worktree
     func commitWorktree(sessionId: String, message: String) async throws -> WorktreeCommitResult {
-        guard let transport = transport, let ws = transport.webSocket else {
-            throw RPCClientError.connectionNotEstablished
-        }
+        guard let transport else { throw RPCClientError.connectionNotEstablished }
+        let ws = try transport.requireConnection()
 
         let params = WorktreeCommitParams(sessionId: sessionId, message: message)
         let result: WorktreeCommitResult = try await ws.send(method: "worktree.commit", params: params)
@@ -134,9 +128,8 @@ final class MiscClient {
 
     /// Commit changes in current session's worktree
     func commitWorktree(message: String) async throws -> WorktreeCommitResult {
-        guard let transport = transport, let sessionId = transport.currentSessionId else {
-            throw RPCClientError.noActiveSession
-        }
+        guard let transport else { throw RPCClientError.noActiveSession }
+        let (_, sessionId) = try transport.requireSession()
         return try await commitWorktree(sessionId: sessionId, message: message)
     }
 
@@ -146,9 +139,8 @@ final class MiscClient {
         targetBranch: String,
         strategy: String? = nil
     ) async throws -> WorktreeMergeResult {
-        guard let transport = transport, let ws = transport.webSocket else {
-            throw RPCClientError.connectionNotEstablished
-        }
+        guard let transport else { throw RPCClientError.connectionNotEstablished }
+        let ws = try transport.requireConnection()
 
         let params = WorktreeMergeParams(
             sessionId: sessionId,
@@ -166,17 +158,15 @@ final class MiscClient {
 
     /// Merge current session's worktree to a target branch
     func mergeWorktree(targetBranch: String, strategy: String? = nil) async throws -> WorktreeMergeResult {
-        guard let transport = transport, let sessionId = transport.currentSessionId else {
-            throw RPCClientError.noActiveSession
-        }
+        guard let transport else { throw RPCClientError.noActiveSession }
+        let (_, sessionId) = try transport.requireSession()
         return try await mergeWorktree(sessionId: sessionId, targetBranch: targetBranch, strategy: strategy)
     }
 
     /// List all worktrees
     func listWorktrees() async throws -> [WorktreeListItem] {
-        guard let transport = transport, let ws = transport.webSocket else {
-            throw RPCClientError.connectionNotEstablished
-        }
+        guard let transport else { throw RPCClientError.connectionNotEstablished }
+        let ws = try transport.requireConnection()
 
         let result: WorktreeListResult = try await ws.send(
             method: "worktree.list",
@@ -190,9 +180,8 @@ final class MiscClient {
 
     /// List available skills
     func listSkills(sessionId: String? = nil, source: String? = nil) async throws -> SkillListResponse {
-        guard let transport = transport, let ws = transport.webSocket else {
-            throw RPCClientError.connectionNotEstablished
-        }
+        guard let transport else { throw RPCClientError.connectionNotEstablished }
+        let ws = try transport.requireConnection()
 
         let params = SkillListParams(
             sessionId: sessionId ?? transport.currentSessionId,
@@ -203,9 +192,8 @@ final class MiscClient {
 
     /// Get a skill by name
     func getSkill(name: String, sessionId: String? = nil) async throws -> SkillGetResponse {
-        guard let transport = transport, let ws = transport.webSocket else {
-            throw RPCClientError.connectionNotEstablished
-        }
+        guard let transport else { throw RPCClientError.connectionNotEstablished }
+        let ws = try transport.requireConnection()
 
         let params = SkillGetParams(
             sessionId: sessionId ?? transport.currentSessionId,
@@ -216,9 +204,8 @@ final class MiscClient {
 
     /// Refresh skills cache
     func refreshSkills(sessionId: String? = nil) async throws -> SkillRefreshResponse {
-        guard let transport = transport, let ws = transport.webSocket else {
-            throw RPCClientError.connectionNotEstablished
-        }
+        guard let transport else { throw RPCClientError.connectionNotEstablished }
+        let ws = try transport.requireConnection()
 
         let params = SkillRefreshParams(sessionId: sessionId ?? transport.currentSessionId)
         return try await ws.send(method: "skill.refresh", params: params)
@@ -226,9 +213,8 @@ final class MiscClient {
 
     /// Remove a skill from session context
     func removeSkill(sessionId: String, skillName: String) async throws -> SkillRemoveResponse {
-        guard let transport = transport, let ws = transport.webSocket else {
-            throw RPCClientError.connectionNotEstablished
-        }
+        guard let transport else { throw RPCClientError.connectionNotEstablished }
+        let ws = try transport.requireConnection()
 
         let params = SkillRemoveParams(sessionId: sessionId, skillName: skillName)
         return try await ws.send(method: "skill.remove", params: params)
@@ -238,9 +224,8 @@ final class MiscClient {
 
     /// Get a persisted canvas artifact from the server
     func getCanvas(canvasId: String) async throws -> CanvasGetResult {
-        guard let transport = transport, let ws = transport.webSocket else {
-            throw RPCClientError.connectionNotEstablished
-        }
+        guard let transport else { throw RPCClientError.connectionNotEstablished }
+        let ws = try transport.requireConnection()
 
         let params = CanvasGetParams(canvasId: canvasId)
         return try await ws.send(method: "canvas.get", params: params)
@@ -250,13 +235,15 @@ final class MiscClient {
 
     /// Get todos for a session
     func listTodos(sessionId: String? = nil) async throws -> TodoListResult {
-        guard let transport = transport, let ws = transport.webSocket else {
-            throw RPCClientError.connectionNotEstablished
-        }
+        guard let transport else { throw RPCClientError.connectionNotEstablished }
+        let ws = try transport.requireConnection()
 
-        let effectiveSessionId = sessionId ?? transport.currentSessionId
-        guard let sid = effectiveSessionId else {
-            throw RPCClientError.noActiveSession
+        let sid: String
+        if let sessionId {
+            sid = sessionId
+        } else {
+            let (_, currentSessionId) = try transport.requireSession()
+            sid = currentSessionId
         }
 
         let params = TodoListParams(sessionId: sid)
@@ -265,9 +252,8 @@ final class MiscClient {
 
     /// Get backlogged tasks for a workspace
     func getBacklog(workspaceId: String, includeRestored: Bool? = nil, limit: Int? = nil) async throws -> TodoGetBacklogResult {
-        guard let transport = transport, let ws = transport.webSocket else {
-            throw RPCClientError.connectionNotEstablished
-        }
+        guard let transport else { throw RPCClientError.connectionNotEstablished }
+        let ws = try transport.requireConnection()
 
         let params = TodoGetBacklogParams(
             workspaceId: workspaceId,
@@ -279,13 +265,15 @@ final class MiscClient {
 
     /// Restore tasks from backlog to a session
     func restoreFromBacklog(sessionId: String? = nil, taskIds: [String]) async throws -> TodoRestoreResult {
-        guard let transport = transport, let ws = transport.webSocket else {
-            throw RPCClientError.connectionNotEstablished
-        }
+        guard let transport else { throw RPCClientError.connectionNotEstablished }
+        let ws = try transport.requireConnection()
 
-        let effectiveSessionId = sessionId ?? transport.currentSessionId
-        guard let sid = effectiveSessionId else {
-            throw RPCClientError.noActiveSession
+        let sid: String
+        if let sessionId {
+            sid = sessionId
+        } else {
+            let (_, currentSessionId) = try transport.requireSession()
+            sid = currentSessionId
         }
 
         let params = TodoRestoreParams(sessionId: sid, taskIds: taskIds)
@@ -294,9 +282,8 @@ final class MiscClient {
 
     /// Get count of unrestored backlogged tasks for a workspace
     func getBacklogCount(workspaceId: String) async throws -> Int {
-        guard let transport = transport, let ws = transport.webSocket else {
-            throw RPCClientError.connectionNotEstablished
-        }
+        guard let transport else { throw RPCClientError.connectionNotEstablished }
+        let ws = try transport.requireConnection()
 
         let params = TodoGetBacklogCountParams(workspaceId: workspaceId)
         let result: TodoGetBacklogCountResult = try await ws.send(method: "todo.getBacklogCount", params: params)
@@ -316,9 +303,8 @@ final class MiscClient {
 
     /// Register a device token for push notifications
     func registerDeviceToken(_ deviceToken: String, sessionId: String? = nil, workspaceId: String? = nil) async throws {
-        guard let transport = transport, let ws = transport.webSocket else {
-            throw RPCClientError.connectionNotEstablished
-        }
+        guard let transport else { throw RPCClientError.connectionNotEstablished }
+        let ws = try transport.requireConnection()
 
         let effectiveSessionId = sessionId ?? transport.currentSessionId
 
@@ -339,9 +325,8 @@ final class MiscClient {
 
     /// Unregister a device token
     func unregisterDeviceToken(_ deviceToken: String) async throws {
-        guard let transport = transport, let ws = transport.webSocket else {
-            throw RPCClientError.connectionNotEstablished
-        }
+        guard let transport else { throw RPCClientError.connectionNotEstablished }
+        let ws = try transport.requireConnection()
 
         let params = DeviceTokenUnregisterParams(deviceToken: deviceToken)
         let result: DeviceTokenUnregisterResult = try await ws.send(

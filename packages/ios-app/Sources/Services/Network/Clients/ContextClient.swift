@@ -14,9 +14,8 @@ final class ContextClient {
 
     /// Get context snapshot for a session
     func getSnapshot(sessionId: String) async throws -> ContextSnapshotResult {
-        guard let transport = transport, let ws = transport.webSocket else {
-            throw RPCClientError.connectionNotEstablished
-        }
+        guard let transport else { throw RPCClientError.connectionNotEstablished }
+        let ws = try transport.requireConnection()
 
         let params = ContextGetSnapshotParams(sessionId: sessionId)
         return try await ws.send(
@@ -27,9 +26,8 @@ final class ContextClient {
 
     /// Get detailed context snapshot with per-message token breakdown
     func getDetailedSnapshot(sessionId: String) async throws -> DetailedContextSnapshotResult {
-        guard let transport = transport, let ws = transport.webSocket else {
-            throw RPCClientError.connectionNotEstablished
-        }
+        guard let transport else { throw RPCClientError.connectionNotEstablished }
+        let ws = try transport.requireConnection()
 
         let params = ContextGetSnapshotParams(sessionId: sessionId)
         return try await ws.send(
@@ -40,9 +38,8 @@ final class ContextClient {
 
     /// Clear all messages from context, preserving system prompt and tools
     func clear(sessionId: String) async throws -> ContextClearResult {
-        guard let transport = transport, let ws = transport.webSocket else {
-            throw RPCClientError.connectionNotEstablished
-        }
+        guard let transport else { throw RPCClientError.connectionNotEstablished }
+        let ws = try transport.requireConnection()
 
         let params = ContextClearParams(sessionId: sessionId)
         return try await ws.send(
@@ -53,9 +50,8 @@ final class ContextClient {
 
     /// Compact context by summarizing older messages
     func compact(sessionId: String) async throws -> ContextCompactResult {
-        guard let transport = transport, let ws = transport.webSocket else {
-            throw RPCClientError.connectionNotEstablished
-        }
+        guard let transport else { throw RPCClientError.connectionNotEstablished }
+        let ws = try transport.requireConnection()
 
         let params = ContextCompactParams(sessionId: sessionId)
         return try await ws.send(

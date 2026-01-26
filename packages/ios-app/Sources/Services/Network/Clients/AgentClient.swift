@@ -20,11 +20,8 @@ final class AgentClient {
         skills: [Skill]? = nil,
         spells: [Skill]? = nil
     ) async throws {
-        guard let transport = transport,
-              let ws = transport.webSocket,
-              let sessionId = transport.currentSessionId else {
-            throw RPCClientError.noActiveSession
-        }
+        guard let transport else { throw RPCClientError.noActiveSession }
+        let (ws, sessionId) = try transport.requireSession()
 
         let params = AgentPromptParams(
             sessionId: sessionId,
@@ -47,11 +44,8 @@ final class AgentClient {
     }
 
     func abort() async throws {
-        guard let transport = transport,
-              let ws = transport.webSocket,
-              let sessionId = transport.currentSessionId else {
-            return
-        }
+        guard let transport else { return }
+        guard let (ws, sessionId) = try? transport.requireSession() else { return }
 
         let params = AgentAbortParams(sessionId: sessionId)
         let _: EmptyParams = try await ws.send(method: "agent.abort", params: params)
@@ -59,11 +53,8 @@ final class AgentClient {
     }
 
     func getState() async throws -> AgentStateResult {
-        guard let transport = transport,
-              let ws = transport.webSocket,
-              let sessionId = transport.currentSessionId else {
-            throw RPCClientError.noActiveSession
-        }
+        guard let transport else { throw RPCClientError.noActiveSession }
+        let (ws, sessionId) = try transport.requireSession()
 
         let params = AgentStateParams(sessionId: sessionId)
         return try await ws.send(method: "agent.getState", params: params)
@@ -71,9 +62,8 @@ final class AgentClient {
 
     /// Get agent state for a specific session (used for dashboard polling)
     func getState(sessionId: String) async throws -> AgentStateResult {
-        guard let transport = transport, let ws = transport.webSocket else {
-            throw RPCClientError.connectionNotEstablished
-        }
+        guard let transport else { throw RPCClientError.connectionNotEstablished }
+        let ws = try transport.requireConnection()
 
         let params = AgentStateParams(sessionId: sessionId)
         return try await ws.send(method: "agent.getState", params: params)
@@ -84,10 +74,11 @@ final class AgentClient {
     /// Send a tool result for interactive tools like AskUserQuestion.
     /// This unblocks the agent which is waiting for user input.
     func sendToolResult(sessionId: String, toolCallId: String, result: AskUserQuestionResult) async throws {
-        guard let transport = transport, let ws = transport.webSocket else {
+        guard let transport else {
             logger.error("[TOOL_RESULT] Cannot send tool result - WebSocket not connected", category: .session)
             throw RPCClientError.connectionNotEstablished
         }
+        let ws = try transport.requireConnection()
 
         let params = ToolResultParams(sessionId: sessionId, toolCallId: toolCallId, result: result)
         logger.info("[TOOL_RESULT] Sending tool result: sessionId=\(sessionId), toolCallId=\(toolCallId)", category: .session)

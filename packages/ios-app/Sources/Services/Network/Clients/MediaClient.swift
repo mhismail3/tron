@@ -20,9 +20,8 @@ final class MediaClient {
         cleanupMode: String? = nil,
         language: String? = nil
     ) async throws -> TranscribeAudioResult {
-        guard let transport = transport, let ws = transport.webSocket else {
-            throw RPCClientError.connectionNotEstablished
-        }
+        guard let transport else { throw RPCClientError.connectionNotEstablished }
+        let ws = try transport.requireConnection()
 
         let audioBase64 = await Task.detached(priority: .utility) {
             audioData.base64EncodedString()
@@ -48,9 +47,8 @@ final class MediaClient {
     }
 
     func listTranscriptionModels() async throws -> TranscribeListModelsResult {
-        guard let transport = transport, let ws = transport.webSocket else {
-            throw RPCClientError.connectionNotEstablished
-        }
+        guard let transport else { throw RPCClientError.connectionNotEstablished }
+        let ws = try transport.requireConnection()
 
         return try await ws.send(
             method: "transcribe.listModels",
@@ -67,9 +65,8 @@ final class MediaClient {
         fileName: String? = nil,
         transcriptionModelId: String? = nil
     ) async throws -> VoiceNotesSaveResult {
-        guard let transport = transport, let ws = transport.webSocket else {
-            throw RPCClientError.connectionNotEstablished
-        }
+        guard let transport else { throw RPCClientError.connectionNotEstablished }
+        let ws = try transport.requireConnection()
 
         // Encode audio to base64 off main thread
         let audioBase64 = await Task.detached(priority: .utility) {
@@ -92,9 +89,8 @@ final class MediaClient {
 
     /// List saved voice notes
     func listVoiceNotes(limit: Int = 50, offset: Int = 0) async throws -> VoiceNotesListResult {
-        guard let transport = transport, let ws = transport.webSocket else {
-            throw RPCClientError.connectionNotEstablished
-        }
+        guard let transport else { throw RPCClientError.connectionNotEstablished }
+        let ws = try transport.requireConnection()
 
         let params = VoiceNotesListParams(limit: limit, offset: offset)
         return try await ws.send(method: "voiceNotes.list", params: params)
@@ -102,9 +98,8 @@ final class MediaClient {
 
     /// Delete a voice note
     func deleteVoiceNote(filename: String) async throws -> VoiceNotesDeleteResult {
-        guard let transport = transport, let ws = transport.webSocket else {
-            throw RPCClientError.connectionNotEstablished
-        }
+        guard let transport else { throw RPCClientError.connectionNotEstablished }
+        let ws = try transport.requireConnection()
 
         let params = VoiceNotesDeleteParams(filename: filename)
         return try await ws.send(method: "voiceNotes.delete", params: params)
@@ -126,9 +121,8 @@ final class MediaClient {
         maxHeight: Int = 800,
         everyNthFrame: Int = 2
     ) async throws -> BrowserStartStreamResult {
-        guard let transport = transport, let ws = transport.webSocket else {
-            throw RPCClientError.connectionNotEstablished
-        }
+        guard let transport else { throw RPCClientError.connectionNotEstablished }
+        let ws = try transport.requireConnection()
 
         let params = BrowserStartStreamParams(
             sessionId: sessionId,
@@ -144,9 +138,8 @@ final class MediaClient {
 
     /// Stop browser frame streaming for a session
     func stopBrowserStream(sessionId: String) async throws -> BrowserStopStreamResult {
-        guard let transport = transport, let ws = transport.webSocket else {
-            throw RPCClientError.connectionNotEstablished
-        }
+        guard let transport else { throw RPCClientError.connectionNotEstablished }
+        let ws = try transport.requireConnection()
 
         let params = BrowserStopStreamParams(sessionId: sessionId)
         return try await ws.send(method: "browser.stopStream", params: params)
@@ -154,9 +147,8 @@ final class MediaClient {
 
     /// Get browser status for a session
     func getBrowserStatus(sessionId: String) async throws -> BrowserGetStatusResult {
-        guard let transport = transport, let ws = transport.webSocket else {
-            throw RPCClientError.connectionNotEstablished
-        }
+        guard let transport else { throw RPCClientError.connectionNotEstablished }
+        let ws = try transport.requireConnection()
 
         let params = BrowserGetStatusParams(sessionId: sessionId)
         return try await ws.send(method: "browser.getStatus", params: params)
@@ -164,9 +156,8 @@ final class MediaClient {
 
     /// Get browser status for current session
     func getBrowserStatus() async throws -> BrowserGetStatusResult {
-        guard let transport = transport, let sessionId = transport.currentSessionId else {
-            throw RPCClientError.noActiveSession
-        }
+        guard let transport else { throw RPCClientError.noActiveSession }
+        let (_, sessionId) = try transport.requireSession()
         return try await getBrowserStatus(sessionId: sessionId)
     }
 }
