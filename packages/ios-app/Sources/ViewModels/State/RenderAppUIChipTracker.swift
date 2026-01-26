@@ -35,8 +35,8 @@ final class RenderAppUIChipTracker {
         /// Title extracted from arguments
         var title: String?
 
-        /// Pending UI render start event (if ui_render_start arrived before tool_start)
-        var pendingRenderStart: UIRenderStartEvent?
+        /// Pending UI render start result (if ui_render_start arrived before tool_start)
+        var pendingRenderStart: UIRenderStartPlugin.Result?
     }
 
     // MARK: - State
@@ -75,26 +75,26 @@ final class RenderAppUIChipTracker {
         )
     }
 
-    /// Store a pending ui_render_start event (arrived before tool_start).
-    func storePendingRenderStart(_ event: UIRenderStartEvent) {
+    /// Store a pending ui_render_start result (arrived before tool_start).
+    func storePendingRenderStart(_ result: UIRenderStartPlugin.Result) {
         // Check if we have a chip for this canvas already
-        if var chip = chips[event.canvasId] {
-            chip.pendingRenderStart = event
-            chips[event.canvasId] = chip
+        if var chip = chips[result.canvasId] {
+            chip.pendingRenderStart = result
+            chips[result.canvasId] = chip
         } else {
-            // No chip yet - create a temporary entry with the event
+            // No chip yet - create a temporary entry with the result
             // This will be completed when createChipFromToolStart is called
             // Actually, we need to track by toolCallId for the legacy path
             // Store in a separate lookup
-            pendingRenderStartsByToolCallId[event.toolCallId] = event
+            pendingRenderStartsByToolCallId[result.toolCallId] = result
         }
     }
 
     /// Pending render starts stored by toolCallId (for legacy path)
-    private var pendingRenderStartsByToolCallId: [String: UIRenderStartEvent] = [:]
+    private var pendingRenderStartsByToolCallId: [String: UIRenderStartPlugin.Result] = [:]
 
     /// Get and remove pending render start for a toolCallId
-    func consumePendingRenderStart(toolCallId: String) -> UIRenderStartEvent? {
+    func consumePendingRenderStart(toolCallId: String) -> UIRenderStartPlugin.Result? {
         pendingRenderStartsByToolCallId.removeValue(forKey: toolCallId)
     }
 

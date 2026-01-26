@@ -394,27 +394,27 @@ class ChatViewModel: ObservableObject, ChatEventContext {
 
         case ToolStartPlugin.eventType:
             if let r = result as? ToolStartPlugin.Result {
-                handleToolStartResult(r)
+                handleToolStart(r)
             }
 
         case ToolEndPlugin.eventType:
             if let r = result as? ToolEndPlugin.Result {
-                handleToolEndResult(r)
+                handleToolEnd(r)
             }
 
         case TurnStartPlugin.eventType:
             if let r = result as? TurnStartPlugin.Result {
-                handleTurnStartResult(r)
+                handleTurnStart(r)
             }
 
         case TurnEndPlugin.eventType:
             if let r = result as? TurnEndPlugin.Result {
-                handleTurnEndResult(r)
+                handleTurnEnd(r)
             }
 
         case AgentTurnPlugin.eventType:
             if let r = result as? AgentTurnPlugin.Result {
-                handleAgentTurnResult(r)
+                handleAgentTurn(r)
             }
 
         case CompletePlugin.eventType:
@@ -427,32 +427,32 @@ class ChatViewModel: ObservableObject, ChatEventContext {
 
         case CompactionPlugin.eventType:
             if let r = result as? CompactionPlugin.Result {
-                handleCompactionResult(r)
+                handleCompaction(r)
             }
 
         case ContextClearedPlugin.eventType:
             if let r = result as? ContextClearedPlugin.Result {
-                handleContextClearedResult(r)
+                handleContextCleared(r)
             }
 
         case MessageDeletedPlugin.eventType:
             if let r = result as? MessageDeletedPlugin.Result {
-                handleMessageDeletedResult(r)
+                handleMessageDeleted(r)
             }
 
         case SkillRemovedPlugin.eventType:
             if let r = result as? SkillRemovedPlugin.Result {
-                handleSkillRemovedResult(r)
+                handleSkillRemoved(r)
             }
 
         case PlanModeEnteredPlugin.eventType:
             if let r = result as? PlanModeEnteredPlugin.Result {
-                handlePlanModeEnteredResult(r)
+                handlePlanModeEntered(r)
             }
 
         case PlanModeExitedPlugin.eventType:
             if let r = result as? PlanModeExitedPlugin.Result {
-                handlePlanModeExitedResult(r)
+                handlePlanModeExited(r)
             }
 
         case BrowserFramePlugin.eventType:
@@ -494,32 +494,32 @@ class ChatViewModel: ObservableObject, ChatEventContext {
 
         case UIRenderStartPlugin.eventType:
             if let r = result as? UIRenderStartPlugin.Result {
-                handleUIRenderStartResult(r)
+                handleUIRenderStart(r)
             }
 
         case UIRenderChunkPlugin.eventType:
             if let r = result as? UIRenderChunkPlugin.Result {
-                handleUIRenderChunkResult(r)
+                handleUIRenderChunk(r)
             }
 
         case UIRenderCompletePlugin.eventType:
             if let r = result as? UIRenderCompletePlugin.Result {
-                handleUIRenderCompleteResult(r)
+                handleUIRenderComplete(r)
             }
 
         case UIRenderErrorPlugin.eventType:
             if let r = result as? UIRenderErrorPlugin.Result {
-                handleUIRenderErrorResult(r)
+                handleUIRenderError(r)
             }
 
         case UIRenderRetryPlugin.eventType:
             if let r = result as? UIRenderRetryPlugin.Result {
-                handleUIRenderRetryResult(r)
+                handleUIRenderRetry(r)
             }
 
         case TodosUpdatedPlugin.eventType:
             if let r = result as? TodosUpdatedPlugin.Result {
-                handleTodosUpdatedResult(r)
+                handleTodosUpdated(r)
             }
 
         case ConnectedPlugin.eventType:

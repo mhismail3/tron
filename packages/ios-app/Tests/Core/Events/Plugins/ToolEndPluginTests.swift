@@ -194,35 +194,4 @@ final class ToolEndPluginTests: XCTestCase {
 
         XCTAssertEqual(result?.displayResult, "Something went wrong")
     }
-
-    // MARK: - Parity Tests
-
-    func testParityWithLegacyToolEndEvent() throws {
-        let json = """
-        {
-            "type": "agent.tool_end",
-            "sessionId": "parity-session",
-            "data": {
-                "toolCallId": "parity-tool-call",
-                "toolName": "Bash",
-                "success": true,
-                "result": "Command output",
-                "durationMs": 350
-            }
-        }
-        """.data(using: .utf8)!
-
-        // Parse with plugin system
-        let pluginEvent = try ToolEndPlugin.parse(from: json)
-
-        // Parse with legacy system
-        let legacyEvent = try JSONDecoder().decode(ToolEndEvent.self, from: json)
-
-        // Verify parity
-        XCTAssertEqual(ToolEndPlugin.sessionId(from: pluginEvent), legacyEvent.sessionId)
-        XCTAssertEqual(pluginEvent.data.toolCallId, legacyEvent.toolCallId)
-        XCTAssertEqual(pluginEvent.data.toolName, legacyEvent.toolName)
-        XCTAssertEqual(pluginEvent.data.success, legacyEvent.success)
-        XCTAssertEqual(pluginEvent.data.durationMs, legacyEvent.durationMs)
-    }
 }

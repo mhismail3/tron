@@ -83,7 +83,6 @@
 		3CD4946EAE2CAEE0CC90E37B /* TurnContentCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = 58B654CAC83AF8E4FA816EFF /* TurnContentCache.swift */; };
 		3D7FCD4E71F3784FF152347C /* TodoState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 463001C0D20507A73DE057C1 /* TodoState.swift */; };
 		3DCA57E6CB7A8340CEFA123B /* FloatingVoiceNotesButton.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0C5436D45890922947458785 /* FloatingVoiceNotesButton.swift */; };
-		3EF63FB5E4FF6A76716B2881 /* Events.swift in Sources */ = {isa = PBXBuildFile; fileRef = F30BB040DE85F66822E48888 /* Events.swift */; };
 		3FA1EAF8BC40432B3D8C3254 /* PlanModeState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7F6868DDC1D5CE1C366F5E74 /* PlanModeState.swift */; };
 		3FF108401784F98C1F26A6A4 /* ConfigHandlers.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD6AFA332997143C504C733B /* ConfigHandlers.swift */; };
 		410A12359B1A50994D59624F /* SubagentFailedPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = 075202841B4A49CB41C8E4A5 /* SubagentFailedPlugin.swift */; };
@@ -636,7 +635,6 @@
 		F1F8D60CEFD0E621EB2D564D /* SubagentDetailSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SubagentDetailSheet.swift; sourceTree = "<group>"; };
 		F25EA9767ADB2C8628135491 /* BashToolViewer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BashToolViewer.swift; sourceTree = "<group>"; };
 		F2B298578C85F2293B9568BA /* TronMobile.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = TronMobile.app; sourceTree = BUILT_PRODUCTS_DIR; };
-		F30BB040DE85F66822E48888 /* Events.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Events.swift; sourceTree = "<group>"; };
 		F3198853F56167392171167E /* RPCClientTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RPCClientTests.swift; sourceTree = "<group>"; };
 		F3984D131F07C099480816DD /* RPCClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RPCClient.swift; sourceTree = "<group>"; };
 		F4C6348A82F197609B6FCECA /* MessageBubble.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MessageBubble.swift; sourceTree = "<group>"; };
@@ -1494,7 +1492,6 @@
 		C777A20017843EB7F4171C6E /* Events */ = {
 			isa = PBXGroup;
 			children = (
-				F30BB040DE85F66822E48888 /* Events.swift */,
 				13C882175CD63CFDC25905E1 /* EventTypeRegistry.swift */,
 			);
 			path = Events;
@@ -1925,7 +1922,6 @@
 				6C91A735B07E78CE065621D4 /* EventTreeBuilder.swift in Sources */,
 				4EEFF2555FCED42D52D53F69 /* EventTypeRegistry.swift in Sources */,
 				C0629A9C0BD76E3873E8C114 /* EventTypes.swift in Sources */,
-				3EF63FB5E4FF6A76716B2881 /* Events.swift in Sources */,
 				3253A783FA5635BB0B0B787A /* ExtendedPayloads.swift in Sources */,
 				2EC135E0CF9C843AC683CA4D /* FileToolViewer.swift in Sources */,
 				2DDA522D924AEFF85A95D895 /* FilesystemClient.swift in Sources */,

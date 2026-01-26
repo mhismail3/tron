@@ -26,7 +26,7 @@ final class TurnLifecycleCoordinatorTests: XCTestCase {
         mockContext.askUserQuestionCalledInTurn = true
 
         // When
-        let event = TurnStartEvent(turnNumber: 1)
+        let event = TurnStartPlugin.Result(turnNumber: 1)
         let result = TurnStartResult(turnNumber: 1, stateReset: false)
         coordinator.handleTurnStart(event, result: result, context: mockContext)
 
@@ -40,7 +40,7 @@ final class TurnLifecycleCoordinatorTests: XCTestCase {
         mockContext.streamingText = "Some text"
 
         // When
-        let event = TurnStartEvent(turnNumber: 1)
+        let event = TurnStartPlugin.Result(turnNumber: 1)
         let result = TurnStartResult(turnNumber: 1, stateReset: false)
         coordinator.handleTurnStart(event, result: result, context: mockContext)
 
@@ -54,7 +54,7 @@ final class TurnLifecycleCoordinatorTests: XCTestCase {
         mockContext.thinkingMessageId = UUID()
 
         // When
-        let event = TurnStartEvent(turnNumber: 1)
+        let event = TurnStartPlugin.Result(turnNumber: 1)
         let result = TurnStartResult(turnNumber: 1, stateReset: false)
         coordinator.handleTurnStart(event, result: result, context: mockContext)
 
@@ -67,7 +67,7 @@ final class TurnLifecycleCoordinatorTests: XCTestCase {
         mockContext.currentModel = "claude-3-opus"
 
         // When
-        let event = TurnStartEvent(turnNumber: 3)
+        let event = TurnStartPlugin.Result(turnNumber: 3)
         let result = TurnStartResult(turnNumber: 3, stateReset: false)
         coordinator.handleTurnStart(event, result: result, context: mockContext)
 
@@ -84,7 +84,7 @@ final class TurnLifecycleCoordinatorTests: XCTestCase {
         mockContext.currentToolMessages = [UUID(): makeTextMessage("test")]
 
         // When
-        let event = TurnStartEvent(turnNumber: 2)
+        let event = TurnStartPlugin.Result(turnNumber: 2)
         let result = TurnStartResult(turnNumber: 2, stateReset: false)
         coordinator.handleTurnStart(event, result: result, context: mockContext)
 
@@ -95,7 +95,7 @@ final class TurnLifecycleCoordinatorTests: XCTestCase {
 
     func testTurnStartEnqueuesTurnBoundary() {
         // When
-        let event = TurnStartEvent(turnNumber: 5)
+        let event = TurnStartPlugin.Result(turnNumber: 5)
         let result = TurnStartResult(turnNumber: 5, stateReset: false)
         coordinator.handleTurnStart(event, result: result, context: mockContext)
 
@@ -106,7 +106,7 @@ final class TurnLifecycleCoordinatorTests: XCTestCase {
 
     func testTurnStartResetsAnimationCoordinatorToolState() {
         // When
-        let event = TurnStartEvent(turnNumber: 1)
+        let event = TurnStartPlugin.Result(turnNumber: 1)
         let result = TurnStartResult(turnNumber: 1, stateReset: false)
         coordinator.handleTurnStart(event, result: result, context: mockContext)
 
@@ -122,7 +122,7 @@ final class TurnLifecycleCoordinatorTests: XCTestCase {
         ]
 
         // When
-        let event = TurnStartEvent(turnNumber: 1)
+        let event = TurnStartPlugin.Result(turnNumber: 1)
         let result = TurnStartResult(turnNumber: 1, stateReset: false)
         coordinator.handleTurnStart(event, result: result, context: mockContext)
 
@@ -142,7 +142,7 @@ final class TurnLifecycleCoordinatorTests: XCTestCase {
         ]
 
         // When
-        let event = makeTurnEndEvent(turnNumber: 1)
+        let event = makeTurnEndResult(turnNumber: 1)
         let result = TurnEndResult(
             turnNumber: 1,
             stopReason: "end_turn",
@@ -172,7 +172,7 @@ final class TurnLifecycleCoordinatorTests: XCTestCase {
         ]
 
         // When
-        let event = makeTurnEndEvent(turnNumber: 2)
+        let event = makeTurnEndResult(turnNumber: 2)
         let result = TurnEndResult(
             turnNumber: 2,
             stopReason: "end_turn",
@@ -205,7 +205,7 @@ final class TurnLifecycleCoordinatorTests: XCTestCase {
         ]
 
         // When
-        let event = makeTurnEndEvent(turnNumber: 1)
+        let event = makeTurnEndResult(turnNumber: 1)
         let result = TurnEndResult(
             turnNumber: 1,
             stopReason: "end_turn",
@@ -239,7 +239,7 @@ final class TurnLifecycleCoordinatorTests: XCTestCase {
         )
 
         // When
-        let event = makeTurnEndEvent(turnNumber: 1)
+        let event = makeTurnEndResult(turnNumber: 1)
         let result = TurnEndResult(
             turnNumber: 1,
             stopReason: "end_turn",
@@ -269,7 +269,7 @@ final class TurnLifecycleCoordinatorTests: XCTestCase {
         ]
 
         // When
-        let event = makeTurnEndEvent(turnNumber: 1)
+        let event = makeTurnEndResult(turnNumber: 1)
         let result = TurnEndResult(
             turnNumber: 1,
             stopReason: "end_turn",
@@ -298,7 +298,7 @@ final class TurnLifecycleCoordinatorTests: XCTestCase {
         )
 
         // When
-        let event = makeTurnEndEvent(turnNumber: 1)
+        let event = makeTurnEndResult(turnNumber: 1)
         let result = TurnEndResult(
             turnNumber: 1,
             stopReason: "end_turn",
@@ -316,7 +316,7 @@ final class TurnLifecycleCoordinatorTests: XCTestCase {
 
     func testTurnEndUpdatesContextLimit() {
         // When
-        let event = makeTurnEndEvent(turnNumber: 1)
+        let event = makeTurnEndResult(turnNumber: 1)
         let result = TurnEndResult(
             turnNumber: 1,
             stopReason: "end_turn",
@@ -338,7 +338,7 @@ final class TurnLifecycleCoordinatorTests: XCTestCase {
         mockContext.firstTextMessageIdForTurn = UUID()
 
         // When
-        let event = makeTurnEndEvent(turnNumber: 1)
+        let event = makeTurnEndResult(turnNumber: 1)
         let result = TurnEndResult(
             turnNumber: 1,
             stopReason: "end_turn",
@@ -444,8 +444,8 @@ final class TurnLifecycleCoordinatorTests: XCTestCase {
 
     // MARK: - Helpers
 
-    private func makeTurnEndEvent(turnNumber: Int) -> TurnEndEvent {
-        TurnEndEvent(
+    private func makeTurnEndResult(turnNumber: Int) -> TurnEndPlugin.Result {
+        TurnEndPlugin.Result(
             turnNumber: turnNumber,
             stopReason: "end_turn",
             tokenUsage: nil,
@@ -580,4 +580,29 @@ final class MockTurnLifecycleContext: TurnLifecycleContext {
     func logInfo(_ message: String) {}
     func logWarning(_ message: String) {}
     func logError(_ message: String) {}
+}
+
+// MARK: - Test Helper Extensions
+
+/// Test-only initializer matching legacy TurnEndEvent constructor
+extension TurnEndPlugin.Result {
+    init(
+        turnNumber: Int,
+        stopReason: String?,
+        tokenUsage: TokenUsage?,
+        normalizedUsage: NormalizedTokenUsage?,
+        contextLimit: Int?,
+        data: Any?, // Ignored - was internal data in legacy event
+        cost: Double?
+    ) {
+        self.init(
+            turnNumber: turnNumber,
+            duration: nil,
+            tokenUsage: tokenUsage,
+            normalizedUsage: normalizedUsage,
+            stopReason: stopReason,
+            cost: cost,
+            contextLimit: contextLimit
+        )
+    }
 }

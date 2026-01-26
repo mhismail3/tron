@@ -138,31 +138,4 @@ final class TextDeltaPluginTests: XCTestCase {
 
         XCTAssertEqual(result?.delta, "Hello 👋 World 🌍")
     }
-
-    // MARK: - Parity Tests
-
-    func testParityWithLegacyTextDeltaEvent() throws {
-        let json = """
-        {
-            "type": "agent.text_delta",
-            "sessionId": "parity-test-session",
-            "timestamp": "2025-01-26T12:00:00Z",
-            "data": {
-                "delta": "Parity test content",
-                "messageIndex": 42
-            }
-        }
-        """.data(using: .utf8)!
-
-        // Parse with plugin system
-        let pluginEvent = try TextDeltaPlugin.parse(from: json)
-
-        // Parse with legacy system
-        let legacyEvent = try JSONDecoder().decode(TextDeltaEvent.self, from: json)
-
-        // Verify parity
-        XCTAssertEqual(TextDeltaPlugin.sessionId(from: pluginEvent), legacyEvent.sessionId)
-        XCTAssertEqual(pluginEvent.data.delta, legacyEvent.delta)
-        XCTAssertEqual(pluginEvent.data.messageIndex, legacyEvent.data.messageIndex)
-    }
 }

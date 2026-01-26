@@ -24,11 +24,11 @@ final class TurnLifecycleCoordinator {
     /// Handle a turn start event.
     ///
     /// - Parameters:
-    ///   - event: The raw turn start event from the server
+    ///   - pluginResult: The plugin result with turn start data
     ///   - result: The processed result from ChatEventHandler
     ///   - context: The context providing access to state and dependencies
     func handleTurnStart(
-        _ event: TurnStartEvent,
+        _ pluginResult: TurnStartPlugin.Result,
         result: TurnStartResult,
         context: TurnLifecycleContext
     ) {
@@ -79,11 +79,11 @@ final class TurnLifecycleCoordinator {
     /// Handle a turn end event.
     ///
     /// - Parameters:
-    ///   - event: The raw turn end event from the server
+    ///   - pluginResult: The plugin result with turn end data
     ///   - result: The processed result from ChatEventHandler
     ///   - context: The context providing access to state and dependencies
     func handleTurnEnd(
-        _ event: TurnEndEvent,
+        _ pluginResult: TurnEndPlugin.Result,
         result: TurnEndResult,
         context: TurnLifecycleContext
     ) {

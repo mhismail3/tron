@@ -23,7 +23,7 @@ final class ToolEventCoordinatorTests: XCTestCase {
 
     func testToolStartCreatesToolMessage() async throws {
         // Given: A tool start event and result
-        let event = ToolStartEvent(
+        let event = ToolStartPlugin.Result(
             toolName: "Bash",
             toolCallId: "tool_123",
             arguments: nil,
@@ -60,7 +60,7 @@ final class ToolEventCoordinatorTests: XCTestCase {
 
     func testToolStartFlushesStreamingTextFirst() async throws {
         // Given: A tool start event
-        let event = ToolStartEvent(
+        let event = ToolStartPlugin.Result(
             toolName: "Read",
             toolCallId: "tool_456",
             arguments: nil,
@@ -90,7 +90,7 @@ final class ToolEventCoordinatorTests: XCTestCase {
 
     func testToolStartTracksToolCall() async throws {
         // Given: A tool start event
-        let event = ToolStartEvent(
+        let event = ToolStartPlugin.Result(
             toolName: "Grep",
             toolCallId: "tool_789",
             arguments: nil,
@@ -121,7 +121,7 @@ final class ToolEventCoordinatorTests: XCTestCase {
 
     func testToolStartMakesToolVisible() async throws {
         // Given: A tool start event
-        let event = ToolStartEvent(
+        let event = ToolStartPlugin.Result(
             toolName: "Edit",
             toolCallId: "tool_visible",
             arguments: nil,
@@ -150,7 +150,7 @@ final class ToolEventCoordinatorTests: XCTestCase {
 
     func testToolStartEnqueuesForUIUpdateQueue() async throws {
         // Given: A tool start event
-        let event = ToolStartEvent(
+        let event = ToolStartPlugin.Result(
             toolName: "Write",
             toolCallId: "tool_queue",
             arguments: nil,
@@ -198,7 +198,7 @@ final class ToolEventCoordinatorTests: XCTestCase {
             ],
             context: nil
         )
-        let event = ToolStartEvent(
+        let event = ToolStartPlugin.Result(
             toolName: "AskUserQuestion",
             toolCallId: "ask_123",
             arguments: nil,
@@ -237,7 +237,7 @@ final class ToolEventCoordinatorTests: XCTestCase {
 
     func testAskUserQuestionToolStartFallsBackOnParseFailure() async throws {
         // Given: An AskUserQuestion tool start WITHOUT params (parse failed)
-        let event = ToolStartEvent(
+        let event = ToolStartPlugin.Result(
             toolName: "AskUserQuestion",
             toolCallId: "ask_fail",
             arguments: nil,
@@ -274,7 +274,7 @@ final class ToolEventCoordinatorTests: XCTestCase {
     func testOpenBrowserToolStart() async throws {
         // Given: An OpenBrowser tool start
         let url = URL(string: "https://example.com")!
-        let event = ToolStartEvent(
+        let event = ToolStartPlugin.Result(
             toolName: "OpenBrowser",
             toolCallId: "browser_123",
             arguments: ["url": AnyCodable("https://example.com")],
@@ -313,7 +313,7 @@ final class ToolEventCoordinatorTests: XCTestCase {
 
     func testBrowserToolStartUpdatesBrowserStatus() async throws {
         // Given: A browser tool start
-        let event = ToolStartEvent(
+        let event = ToolStartPlugin.Result(
             toolName: "browser_snapshot",
             toolCallId: "browser_snap",
             arguments: nil,
@@ -346,7 +346,7 @@ final class ToolEventCoordinatorTests: XCTestCase {
 
     func testRenderAppUIToolStartCreatesChip() async throws {
         // Given: A RenderAppUI tool start
-        let event = ToolStartEvent(
+        let event = ToolStartPlugin.Result(
             toolName: "RenderAppUI",
             toolCallId: "render_123",
             arguments: ["canvasId": AnyCodable("canvas_abc"), "title": AnyCodable("My App")],
@@ -406,7 +406,7 @@ final class ToolEventCoordinatorTests: XCTestCase {
         )
 
         // Given: Tool start arrives with real toolCallId
-        let event = ToolStartEvent(
+        let event = ToolStartPlugin.Result(
             toolName: "RenderAppUI",
             toolCallId: "render_real_456",
             arguments: ["canvasId": AnyCodable("canvas_xyz"), "title": AnyCodable("My App")],
@@ -444,7 +444,7 @@ final class ToolEventCoordinatorTests: XCTestCase {
 
     func testToolEndEnqueuesForProcessing() async throws {
         // Given: A tool end event
-        let event = ToolEndEvent(
+        let event = ToolEndPlugin.Result(
             toolCallId: "tool_end_123",
             success: true,
             displayResult: "Success!",
@@ -477,7 +477,7 @@ final class ToolEventCoordinatorTests: XCTestCase {
         ))
 
         // Given: A tool end event
-        let event = ToolEndEvent(
+        let event = ToolEndPlugin.Result(
             toolCallId: "tool_track_123",
             success: false,
             displayResult: "Command failed",
@@ -529,7 +529,7 @@ final class ToolEventCoordinatorTests: XCTestCase {
         ))
 
         // Given: Tool end arrives
-        let event = ToolEndEvent(
+        let event = ToolEndPlugin.Result(
             toolCallId: "ask_sheet_123",
             success: true,
             displayResult: "",
@@ -580,7 +580,7 @@ final class ToolEventCoordinatorTests: XCTestCase {
         ))
 
         // Given: Tool end arrives
-        let event = ToolEndEvent(
+        let event = ToolEndPlugin.Result(
             toolCallId: "ask_no_enqueue",
             success: true,
             displayResult: "",
@@ -671,4 +671,36 @@ final class MockToolEventContext: ToolEventContext {
     func logInfo(_ message: String) {}
     func logWarning(_ message: String) {}
     func logError(_ message: String) {}
+}
+
+// MARK: - Test Helper Extensions
+
+/// Test-only initializer matching legacy ToolStartEvent constructor
+extension ToolStartPlugin.Result {
+    init(toolName: String, toolCallId: String, arguments: [String: AnyCodable]?, formattedArguments: String) {
+        // Parse formattedArguments back to arguments if arguments is nil
+        var args = arguments
+        if args == nil && !formattedArguments.isEmpty {
+            if let data = formattedArguments.data(using: .utf8),
+               let parsed = try? JSONDecoder().decode([String: AnyCodable].self, from: data) {
+                args = parsed
+            }
+        }
+        self.init(toolName: toolName, toolCallId: toolCallId, arguments: args)
+    }
+}
+
+/// Test-only initializer matching legacy ToolEndEvent constructor
+extension ToolEndPlugin.Result {
+    init(toolCallId: String, success: Bool, displayResult: String, durationMs: Int?, details: ToolEndPlugin.EventData.ToolDetails?) {
+        self.init(
+            toolCallId: toolCallId,
+            toolName: nil,
+            success: success,
+            result: success ? displayResult : nil,
+            error: success ? nil : displayResult,
+            durationMs: durationMs,
+            details: details
+        )
+    }
 }

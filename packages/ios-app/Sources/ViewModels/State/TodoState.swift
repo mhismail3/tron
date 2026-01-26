@@ -123,11 +123,6 @@ final class TodoState {
         }
     }
 
-    /// Update todos from WebSocket event
-    func handleTodosUpdated(_ event: TodosUpdatedEvent) {
-        updateTodos(event.todos)
-    }
-
     /// Update backlog from server
     func updateBacklog(_ tasks: [RpcBackloggedTask]) {
         withAnimation(.easeInOut(duration: 0.2)) {

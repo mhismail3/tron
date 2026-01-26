@@ -143,36 +143,4 @@ final class TurnEndPluginTests: XCTestCase {
         XCTAssertNil(result?.stopReason)
         XCTAssertNil(result?.cost)
     }
-
-    // MARK: - Parity Tests
-
-    func testParityWithLegacyTurnEndEvent() throws {
-        let json = """
-        {
-            "type": "agent.turn_end",
-            "sessionId": "parity-session",
-            "data": {
-                "turn": 4,
-                "duration": 2500,
-                "stopReason": "end_turn",
-                "cost": 0.015,
-                "contextLimit": 100000
-            }
-        }
-        """.data(using: .utf8)!
-
-        // Parse with plugin system
-        let pluginEvent = try TurnEndPlugin.parse(from: json)
-
-        // Parse with legacy system
-        let legacyEvent = try JSONDecoder().decode(TurnEndEvent.self, from: json)
-
-        // Verify parity
-        XCTAssertEqual(TurnEndPlugin.sessionId(from: pluginEvent), legacyEvent.sessionId)
-        XCTAssertEqual(pluginEvent.data?.number, legacyEvent.turnNumber)
-        XCTAssertEqual(pluginEvent.data?.duration, legacyEvent.data?.duration)
-        XCTAssertEqual(pluginEvent.data?.stopReason, legacyEvent.stopReason)
-        XCTAssertEqual(pluginEvent.data?.cost, legacyEvent.cost)
-        XCTAssertEqual(pluginEvent.data?.contextLimit, legacyEvent.contextLimit)
-    }
 }

@@ -40,7 +40,7 @@ final class UICanvasCoordinatorTests: XCTestCase {
         )
 
         // When
-        let event = UIRenderStartEvent(
+        let event = UIRenderStartPlugin.Result(
             canvasId: "canvas_1",
             title: "Test App",
             toolCallId: "tool_123"
@@ -61,7 +61,7 @@ final class UICanvasCoordinatorTests: XCTestCase {
         mockContext.messages = []
 
         // When
-        let event = UIRenderStartEvent(
+        let event = UIRenderStartPlugin.Result(
             canvasId: "canvas_1",
             title: "Test App",
             toolCallId: "tool_123"
@@ -93,7 +93,7 @@ final class UICanvasCoordinatorTests: XCTestCase {
         )
 
         // When
-        let event = UIRenderStartEvent(
+        let event = UIRenderStartPlugin.Result(
             canvasId: "canvas_1",
             title: "Test App",
             toolCallId: "tool_123"
@@ -111,7 +111,7 @@ final class UICanvasCoordinatorTests: XCTestCase {
         mockContext.messages = []
 
         // When
-        let event = UIRenderChunkEvent(
+        let event = UIRenderChunkPlugin.Result(
             canvasId: "canvas_1",
             chunk: "{\"type\":",
             accumulated: "{\"canvasId\": \"canvas_1\", \"title\": \"My App\", \"type\":"
@@ -135,7 +135,7 @@ final class UICanvasCoordinatorTests: XCTestCase {
         mockContext.messages = []
 
         // When
-        let event = UIRenderChunkEvent(
+        let event = UIRenderChunkPlugin.Result(
             canvasId: "canvas_1",
             chunk: "chunk",
             accumulated: "{\"canvasId\": \"canvas_1\", \"title\": \"Extracted Title\", \"ui\":"
@@ -155,7 +155,7 @@ final class UICanvasCoordinatorTests: XCTestCase {
         mockContext.messages = []
 
         // When
-        let event = UIRenderChunkEvent(
+        let event = UIRenderChunkPlugin.Result(
             canvasId: "canvas_1",
             chunk: "chunk",
             accumulated: "{\"canvasId\": \"canvas_1\"}"
@@ -171,7 +171,7 @@ final class UICanvasCoordinatorTests: XCTestCase {
         mockContext.messages = []
 
         // When
-        let event = UIRenderChunkEvent(
+        let event = UIRenderChunkPlugin.Result(
             canvasId: "canvas_1",
             chunk: "chunk",
             accumulated: "{\"canvasId\": \"canvas_1\"}"
@@ -207,7 +207,7 @@ final class UICanvasCoordinatorTests: XCTestCase {
         // Note: NOT calling uiCanvasState.startRender - simulating tool_start not creating canvas
 
         // When
-        let event = UIRenderChunkEvent(
+        let event = UIRenderChunkPlugin.Result(
             canvasId: "canvas_1",
             chunk: "chunk",
             accumulated: "{\"canvasId\": \"canvas_1\"}"
@@ -229,7 +229,7 @@ final class UICanvasCoordinatorTests: XCTestCase {
         )
 
         // When
-        let event = UIRenderChunkEvent(
+        let event = UIRenderChunkPlugin.Result(
             canvasId: "canvas_1",
             chunk: "new chunk",
             accumulated: "{\"canvasId\": \"canvas_1\", \"data\": \"accumulated\"}"
@@ -262,7 +262,7 @@ final class UICanvasCoordinatorTests: XCTestCase {
         mockContext.uiCanvasState.startRender(canvasId: "canvas_1", title: "Test App", toolCallId: "tool_123")
 
         // When
-        let event = UIRenderCompleteEvent(
+        let event = UIRenderCompletePlugin.Result(
             canvasId: "canvas_1",
             ui: ["type": AnyCodable("text"), "text": AnyCodable("Hello")],
             state: nil
@@ -297,7 +297,7 @@ final class UICanvasCoordinatorTests: XCTestCase {
         )
 
         // When
-        let event = UIRenderCompleteEvent(
+        let event = UIRenderCompletePlugin.Result(
             canvasId: "canvas_1",
             ui: nil,
             state: nil
@@ -330,7 +330,7 @@ final class UICanvasCoordinatorTests: XCTestCase {
         mockContext.uiCanvasState.startRender(canvasId: "canvas_1", title: "Test App", toolCallId: "tool_123")
 
         // When
-        let event = UIRenderErrorEvent(
+        let event = UIRenderErrorPlugin.Result(
             canvasId: "canvas_1",
             error: "Render failed"
         )
@@ -350,7 +350,7 @@ final class UICanvasCoordinatorTests: XCTestCase {
         mockContext.uiCanvasState.startRender(canvasId: "canvas_1", title: "Test", toolCallId: "tool_123")
 
         // When
-        let event = UIRenderErrorEvent(
+        let event = UIRenderErrorPlugin.Result(
             canvasId: "canvas_1",
             error: "Render failed"
         )
@@ -387,7 +387,7 @@ final class UICanvasCoordinatorTests: XCTestCase {
         mockContext.uiCanvasState.startRender(canvasId: "canvas_1", title: "Test App", toolCallId: "tool_123")
 
         // When
-        let event = UIRenderRetryEvent(
+        let event = UIRenderRetryPlugin.Result(
             canvasId: "canvas_1",
             attempt: 2,
             errors: "Validation failed"
@@ -408,7 +408,7 @@ final class UICanvasCoordinatorTests: XCTestCase {
         mockContext.uiCanvasState.startRender(canvasId: "canvas_1", title: "Test", toolCallId: "tool_123")
 
         // When
-        let event = UIRenderRetryEvent(
+        let event = UIRenderRetryPlugin.Result(
             canvasId: "canvas_1",
             attempt: 2,
             errors: "Validation failed"
@@ -431,7 +431,7 @@ final class UICanvasCoordinatorTests: XCTestCase {
         mockContext.messages = []
 
         // When
-        let event = UIRenderChunkEvent(
+        let event = UIRenderChunkPlugin.Result(
             canvasId: "canvas_1",
             chunk: "chunk",
             accumulated: "{\"title\": \"Title with \\\"quotes\\\" and \\nnewlines\"}"
@@ -451,7 +451,7 @@ final class UICanvasCoordinatorTests: XCTestCase {
         mockContext.messages = []
 
         // When
-        let event = UIRenderChunkEvent(
+        let event = UIRenderChunkPlugin.Result(
             canvasId: "canvas_1",
             chunk: "chunk",
             accumulated: "{\"canvasId\": \"canvas_1\", \"ui\": {}}"
@@ -488,62 +488,5 @@ final class MockUICanvasContext: UICanvasContext {
     func logWarning(_ message: String) {}
     func logError(_ message: String) {
         logErrorCalled = true
-    }
-}
-
-// MARK: - Test Event Constructors
-
-extension UIRenderStartEvent {
-    init(canvasId: String, title: String?, toolCallId: String) {
-        self.init(
-            type: "ui.render.start",
-            sessionId: nil,
-            timestamp: nil,
-            data: UIRenderStartData(canvasId: canvasId, title: title, toolCallId: toolCallId)
-        )
-    }
-}
-
-extension UIRenderChunkEvent {
-    init(canvasId: String, chunk: String, accumulated: String) {
-        self.init(
-            type: "ui.render.chunk",
-            sessionId: nil,
-            timestamp: nil,
-            data: UIRenderChunkData(canvasId: canvasId, chunk: chunk, accumulated: accumulated)
-        )
-    }
-}
-
-extension UIRenderCompleteEvent {
-    init(canvasId: String, ui: [String: AnyCodable]?, state: [String: AnyCodable]?) {
-        self.init(
-            type: "ui.render.complete",
-            sessionId: nil,
-            timestamp: nil,
-            data: UIRenderCompleteData(canvasId: canvasId, ui: ui, state: state)
-        )
-    }
-}
-
-extension UIRenderErrorEvent {
-    init(canvasId: String, error: String) {
-        self.init(
-            type: "ui.render.error",
-            sessionId: nil,
-            timestamp: nil,
-            data: UIRenderErrorData(canvasId: canvasId, error: error)
-        )
-    }
-}
-
-extension UIRenderRetryEvent {
-    init(canvasId: String, attempt: Int, errors: String) {
-        self.init(
-            type: "ui.render.retry",
-            sessionId: nil,
-            timestamp: nil,
-            data: UIRenderRetryData(canvasId: canvasId, attempt: attempt, errors: errors)
-        )
     }
 }

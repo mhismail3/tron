@@ -19,34 +19,34 @@ enum BrowserScreenshotService {
 
     // MARK: - Main Extraction Methods
 
-    /// Extract screenshot from a ToolEndEvent.
-    /// Prefers the full screenshot from event.details, falls back to parsing text output.
-    /// - Parameter event: The tool end event to extract screenshot from
+    /// Extract screenshot from a ToolEndPlugin.Result.
+    /// Prefers the full screenshot from result.details, falls back to parsing text output.
+    /// - Parameter result: The tool end plugin result to extract screenshot from
     /// - Returns: ExtractionResult if a screenshot was found, nil otherwise
-    static func extractScreenshot(from event: ToolEndEvent) -> ExtractionResult? {
+    static func extractScreenshot(from result: ToolEndPlugin.Result) -> ExtractionResult? {
         // First, try to get the full screenshot from details (preferred - untruncated)
-        if let image = extractFromEventDetails(event) {
+        if let image = extractFromResultDetails(result) {
             return ExtractionResult(image: image, source: .eventDetails)
         }
 
         // Fallback: try to extract from text result (may be truncated)
-        if let image = extractFromTextResult(event.displayResult) {
+        if let image = extractFromTextResult(result.displayResult) {
             return image
         }
 
         // Final fallback: check if result is raw base64
-        if let image = extractFromRawBase64(event.displayResult) {
+        if let image = extractFromRawBase64(result.displayResult) {
             return ExtractionResult(image: image, source: .rawBase64)
         }
 
         return nil
     }
 
-    /// Extract screenshot from event details (preferred method - untruncated).
-    /// - Parameter event: The tool end event with potential details
+    /// Extract screenshot from result details (preferred method - untruncated).
+    /// - Parameter result: The tool end plugin result with potential details
     /// - Returns: UIImage if found in details, nil otherwise
-    static func extractFromEventDetails(_ event: ToolEndEvent) -> UIImage? {
-        guard let details = event.details,
+    static func extractFromResultDetails(_ result: ToolEndPlugin.Result) -> UIImage? {
+        guard let details = result.details,
               let screenshotBase64 = details.screenshot,
               let imageData = Data(base64Encoded: screenshotBase64),
               let image = UIImage(data: imageData) else {

@@ -77,16 +77,15 @@ final class ChatEventHandlerTests: XCTestCase {
     // MARK: - Tool Start Tests
 
     func testToolStartCreatesToolData() async throws {
-        // Given: a tool start event
-        let event = ToolStartEvent(
+        // Given: a tool start plugin result
+        let pluginResult = ToolStartPlugin.Result(
             toolName: "Bash",
             toolCallId: "tool_123",
-            arguments: nil,
-            formattedArguments: "{\"command\": \"ls -la\"}"
+            arguments: nil
         )
 
         // When: handling tool start
-        let result = handler.handleToolStart(event, context: mockContext)
+        let result = handler.handleToolStart(pluginResult, context: mockContext)
 
         // Then: tool data should be created
         XCTAssertEqual(result.tool.toolName, "Bash")
@@ -95,35 +94,43 @@ final class ChatEventHandlerTests: XCTestCase {
     }
 
     func testToolStartDetectsAskUserQuestion() async throws {
-        // Given: an AskUserQuestion tool start
-        let params = """
-        {"questions":[{"question":"Pick one?","header":"Test","options":[{"label":"A","description":"Option A"},{"label":"B","description":"Option B"}],"multiSelect":false}]}
-        """
-        let event = ToolStartEvent(
+        // Given: an AskUserQuestion tool start plugin result
+        let params: [String: AnyCodable] = [
+            "questions": AnyCodable([
+                [
+                    "question": "Pick one?",
+                    "header": "Test",
+                    "options": [
+                        ["label": "A", "description": "Option A"],
+                        ["label": "B", "description": "Option B"]
+                    ],
+                    "multiSelect": false
+                ]
+            ])
+        ]
+        let pluginResult = ToolStartPlugin.Result(
             toolName: "AskUserQuestion",
             toolCallId: "tool_456",
-            arguments: nil,
-            formattedArguments: params
+            arguments: params
         )
 
         // When: handling tool start
-        let result = handler.handleToolStart(event, context: mockContext)
+        let result = handler.handleToolStart(pluginResult, context: mockContext)
 
         // Then: should be marked as AskUserQuestion
         XCTAssertTrue(result.isAskUserQuestion)
     }
 
     func testToolStartDetectsBrowserTool() async throws {
-        // Given: a browser tool start
-        let event = ToolStartEvent(
+        // Given: a browser tool start plugin result
+        let pluginResult = ToolStartPlugin.Result(
             toolName: "browser_snapshot",
             toolCallId: "tool_789",
-            arguments: nil,
-            formattedArguments: "{}"
+            arguments: nil
         )
 
         // When: handling tool start
-        let result = handler.handleToolStart(event, context: mockContext)
+        let result = handler.handleToolStart(pluginResult, context: mockContext)
 
         // Then: should be marked as browser tool
         XCTAssertTrue(result.isBrowserTool)
@@ -132,17 +139,19 @@ final class ChatEventHandlerTests: XCTestCase {
     // MARK: - Tool End Tests
 
     func testToolEndUpdatesStatus() async throws {
-        // Given: a tool end event
-        let event = ToolEndEvent(
+        // Given: a tool end plugin result
+        let pluginResult = ToolEndPlugin.Result(
             toolCallId: "tool_123",
+            toolName: "Bash",
             success: true,
-            displayResult: "Success!",
+            result: "Success!",
+            error: nil,
             durationMs: 150,
             details: nil
         )
 
         // When: handling tool end
-        let result = handler.handleToolEnd(event)
+        let result = handler.handleToolEnd(pluginResult)
 
         // Then: status should be updated
         XCTAssertEqual(result.status, .success)
@@ -151,17 +160,19 @@ final class ChatEventHandlerTests: XCTestCase {
     }
 
     func testToolEndWithError() async throws {
-        // Given: a failed tool end event
-        let event = ToolEndEvent(
+        // Given: a failed tool end plugin result
+        let pluginResult = ToolEndPlugin.Result(
             toolCallId: "tool_123",
+            toolName: "Bash",
             success: false,
-            displayResult: "Command failed",
+            result: nil,
+            error: "Command failed",
             durationMs: 50,
             details: nil
         )
 
         // When: handling tool end
-        let result = handler.handleToolEnd(event)
+        let result = handler.handleToolEnd(pluginResult)
 
         // Then: should be marked as error
         XCTAssertEqual(result.status, .error)
@@ -176,8 +187,8 @@ final class ChatEventHandlerTests: XCTestCase {
         _ = handler.handleThinkingDelta("Previous thinking")
 
         // When: handling turn start
-        let event = TurnStartEvent(turnNumber: 2)
-        let result = handler.handleTurnStart(event)
+        let pluginResult = TurnStartPlugin.Result(turnNumber: 2)
+        let result = handler.handleTurnStart(pluginResult)
 
         // Then: state should be reset
         XCTAssertEqual(result.turnNumber, 2)
@@ -187,7 +198,7 @@ final class ChatEventHandlerTests: XCTestCase {
     // MARK: - Turn End Tests
 
     func testTurnEndPassesThroughServerValues() async throws {
-        // Given: a turn end event with token usage and normalizedUsage
+        // Given: a turn end plugin result with token usage and normalizedUsage
         let tokenUsage = TokenUsage(
             inputTokens: 1000,
             outputTokens: 500,
@@ -202,22 +213,18 @@ final class ChatEventHandlerTests: XCTestCase {
             cacheReadTokens: 8000,
             cacheCreationTokens: 50
         )
-        let turnData = TurnEndData(
+        let pluginResult = TurnEndPlugin.Result(
             turnNumber: 1,
-            duration: 1500
-        )
-        let event = TurnEndEvent(
-            turnNumber: 1,
-            stopReason: "end_turn",
+            duration: 1500,
             tokenUsage: tokenUsage,
             normalizedUsage: normalizedUsage,
-            contextLimit: 200000,
-            data: turnData,
-            cost: 0.05
+            stopReason: "end_turn",
+            cost: 0.05,
+            contextLimit: 200000
         )
 
         // When: handling turn end (no previousInputTokens parameter - uses server values)
-        let result = handler.handleTurnEnd(event)
+        let result = handler.handleTurnEnd(pluginResult)
 
         // Then: server values should be passed through (no local calculation)
         XCTAssertEqual(result.turnNumber, 1)
@@ -230,25 +237,25 @@ final class ChatEventHandlerTests: XCTestCase {
     }
 
     func testTurnEndWithoutNormalizedUsage() async throws {
-        // Given: a turn end event without normalizedUsage (backward compatibility)
+        // Given: a turn end plugin result without normalizedUsage (backward compatibility)
         let tokenUsage = TokenUsage(
             inputTokens: 1500,
             outputTokens: 200,
             cacheReadTokens: nil,
             cacheCreationTokens: nil
         )
-        let event = TurnEndEvent(
+        let pluginResult = TurnEndPlugin.Result(
             turnNumber: 2,
-            stopReason: "end_turn",
+            duration: nil,
             tokenUsage: tokenUsage,
             normalizedUsage: nil,
-            contextLimit: nil,
-            data: nil,
-            cost: nil
+            stopReason: "end_turn",
+            cost: nil,
+            contextLimit: nil
         )
 
         // When: handling turn end
-        let result = handler.handleTurnEnd(event)
+        let result = handler.handleTurnEnd(pluginResult)
 
         // Then: normalizedUsage should be nil, tokenUsage should be present
         XCTAssertNil(result.normalizedUsage)
@@ -258,18 +265,18 @@ final class ChatEventHandlerTests: XCTestCase {
 
     func testTurnEndDoesNotRequirePreviousInputTokens() async throws {
         // Verify the method signature no longer requires previousInputTokens
-        let event = TurnEndEvent(
+        let pluginResult = TurnEndPlugin.Result(
             turnNumber: 1,
-            stopReason: "end_turn",
+            duration: nil,
             tokenUsage: TokenUsage(inputTokens: 500, outputTokens: 100, cacheReadTokens: nil, cacheCreationTokens: nil),
             normalizedUsage: nil,
-            contextLimit: nil,
-            data: nil,
-            cost: nil
+            stopReason: "end_turn",
+            cost: nil,
+            contextLimit: nil
         )
 
         // This should compile without previousInputTokens parameter
-        let result = handler.handleTurnEnd(event)
+        let result = handler.handleTurnEnd(pluginResult)
 
         XCTAssertNotNil(result)
         XCTAssertEqual(result.turnNumber, 1)
@@ -294,16 +301,17 @@ final class ChatEventHandlerTests: XCTestCase {
     // MARK: - Compaction Tests
 
     func testCompactionReturnsTokenCounts() async throws {
-        // Given: a compaction event
-        let event = CompactionEvent(
+        // Given: a compaction plugin result
+        let pluginResult = CompactionPlugin.Result(
             tokensBefore: 50000,
             tokensAfter: 25000,
+            compressionRatio: 0.5,
             reason: "auto",
             summary: "Summarized context"
         )
 
         // When: handling compaction
-        let result = handler.handleCompaction(event)
+        let result = handler.handleCompaction(pluginResult)
 
         // Then: token counts should be returned
         XCTAssertEqual(result.tokensBefore, 50000)
@@ -316,14 +324,14 @@ final class ChatEventHandlerTests: XCTestCase {
     // MARK: - Context Cleared Tests
 
     func testContextClearedReturnsTokenCounts() async throws {
-        // Given: a context cleared event
-        let event = ContextClearedEvent(
+        // Given: a context cleared plugin result
+        let pluginResult = ContextClearedPlugin.Result(
             tokensBefore: 100000,
             tokensAfter: 5000
         )
 
         // When: handling context cleared
-        let result = handler.handleContextCleared(event)
+        let result = handler.handleContextCleared(pluginResult)
 
         // Then: token counts should be returned
         XCTAssertEqual(result.tokensBefore, 100000)
@@ -334,14 +342,16 @@ final class ChatEventHandlerTests: XCTestCase {
     // MARK: - Message Deleted Tests
 
     func testMessageDeletedReturnsInfo() async throws {
-        // Given: a message deleted event
-        let event = MessageDeletedEvent(
+        // Given: a message deleted plugin result
+        let pluginResult = MessageDeletedPlugin.Result(
             targetEventId: "evt_123",
-            targetType: "user"
+            targetType: "user",
+            targetTurn: nil,
+            reason: nil
         )
 
         // When: handling message deleted
-        let result = handler.handleMessageDeleted(event)
+        let result = handler.handleMessageDeleted(pluginResult)
 
         // Then: deletion info should be returned
         XCTAssertEqual(result.targetEventId, "evt_123")
@@ -351,11 +361,11 @@ final class ChatEventHandlerTests: XCTestCase {
     // MARK: - Skill Removed Tests
 
     func testSkillRemovedReturnsSkillName() async throws {
-        // Given: a skill removed event
-        let event = SkillRemovedEvent(skillName: "web-search")
+        // Given: a skill removed plugin result
+        let pluginResult = SkillRemovedPlugin.Result(skillName: "web-search")
 
         // When: handling skill removed
-        let result = handler.handleSkillRemoved(event)
+        let result = handler.handleSkillRemoved(pluginResult)
 
         // Then: skill name should be returned
         XCTAssertEqual(result.skillName, "web-search")
@@ -364,14 +374,14 @@ final class ChatEventHandlerTests: XCTestCase {
     // MARK: - Plan Mode Tests
 
     func testPlanModeEnteredReturnsInfo() async throws {
-        // Given: a plan mode entered event
-        let event = PlanModeEnteredEvent(
+        // Given: a plan mode entered plugin result
+        let pluginResult = PlanModeEnteredPlugin.Result(
             skillName: "architect",
             blockedTools: ["Edit", "Write"]
         )
 
         // When: handling plan mode entered
-        let result = handler.handlePlanModeEntered(event)
+        let result = handler.handlePlanModeEntered(pluginResult)
 
         // Then: plan mode info should be returned
         XCTAssertEqual(result.skillName, "architect")
@@ -379,14 +389,14 @@ final class ChatEventHandlerTests: XCTestCase {
     }
 
     func testPlanModeExitedReturnsInfo() async throws {
-        // Given: a plan mode exited event
-        let event = PlanModeExitedEvent(
+        // Given: a plan mode exited plugin result
+        let pluginResult = PlanModeExitedPlugin.Result(
             reason: "approved",
             planPath: "/path/to/plan.md"
         )
 
         // When: handling plan mode exited
-        let result = handler.handlePlanModeExited(event)
+        let result = handler.handlePlanModeExited(pluginResult)
 
         // Then: exit info should be returned
         XCTAssertEqual(result.reason, "approved")
@@ -430,15 +440,15 @@ final class ChatEventHandlerTests: XCTestCase {
     // MARK: - UI Render Tests
 
     func testUIRenderStartReturnsCanvasInfo() async throws {
-        // Given: a UI render start event
-        let event = UIRenderStartEvent(
+        // Given: a UI render start plugin result
+        let pluginResult = UIRenderStartPlugin.Result(
             canvasId: "canvas_123",
             title: "My Canvas",
             toolCallId: "tool_456"
         )
 
         // When: handling UI render start
-        let result = handler.handleUIRenderStart(event)
+        let result = handler.handleUIRenderStart(pluginResult)
 
         // Then: canvas info should be returned
         XCTAssertEqual(result.canvasId, "canvas_123")
@@ -447,15 +457,15 @@ final class ChatEventHandlerTests: XCTestCase {
     }
 
     func testUIRenderChunkReturnsChunkData() async throws {
-        // Given: a UI render chunk event
-        let event = UIRenderChunkEvent(
+        // Given: a UI render chunk plugin result
+        let pluginResult = UIRenderChunkPlugin.Result(
             canvasId: "canvas_123",
             chunk: "{\"type\":\"text\",",
             accumulated: "{\"type\":\"text\","
         )
 
         // When: handling UI render chunk
-        let result = handler.handleUIRenderChunk(event)
+        let result = handler.handleUIRenderChunk(pluginResult)
 
         // Then: chunk data should be returned
         XCTAssertEqual(result.canvasId, "canvas_123")
@@ -464,14 +474,14 @@ final class ChatEventHandlerTests: XCTestCase {
     }
 
     func testUIRenderErrorReturnsErrorInfo() async throws {
-        // Given: a UI render error event
-        let event = UIRenderErrorEvent(
+        // Given: a UI render error plugin result
+        let pluginResult = UIRenderErrorPlugin.Result(
             canvasId: "canvas_123",
             error: "Invalid JSON structure"
         )
 
         // When: handling UI render error
-        let result = handler.handleUIRenderError(event)
+        let result = handler.handleUIRenderError(pluginResult)
 
         // Then: error info should be returned
         XCTAssertEqual(result.canvasId, "canvas_123")
@@ -479,15 +489,15 @@ final class ChatEventHandlerTests: XCTestCase {
     }
 
     func testUIRenderRetryReturnsRetryInfo() async throws {
-        // Given: a UI render retry event
-        let event = UIRenderRetryEvent(
+        // Given: a UI render retry plugin result
+        let pluginResult = UIRenderRetryPlugin.Result(
             canvasId: "canvas_123",
             attempt: 2,
             errors: "Validation failed: missing required field"
         )
 
         // When: handling UI render retry
-        let result = handler.handleUIRenderRetry(event)
+        let result = handler.handleUIRenderRetry(pluginResult)
 
         // Then: retry info should be returned
         XCTAssertEqual(result.canvasId, "canvas_123")

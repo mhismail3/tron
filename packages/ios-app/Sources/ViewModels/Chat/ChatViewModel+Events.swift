@@ -55,42 +55,42 @@ extension ChatViewModel {
         logger.verbose("Thinking delta: +\(delta.count) chars, total: \(result.thinkingText.count)", category: .events)
     }
 
-    func handleToolStart(_ event: ToolStartEvent) {
+    func handleToolStart(_ pluginResult: ToolStartPlugin.Result) {
         // Process through handler (classifies tool type, parses params)
-        let result = eventHandler.handleToolStart(event, context: self)
+        let result = eventHandler.handleToolStart(pluginResult, context: self)
 
         // Delegate to coordinator for all tool start handling
-        toolEventCoordinator.handleToolStart(event, result: result, context: self)
+        toolEventCoordinator.handleToolStart(pluginResult, result: result, context: self)
     }
 
-    func handleToolEnd(_ event: ToolEndEvent) {
+    func handleToolEnd(_ pluginResult: ToolEndPlugin.Result) {
         // Process through handler (extracts status and result)
-        let result = eventHandler.handleToolEnd(event)
+        let result = eventHandler.handleToolEnd(pluginResult)
 
         // Check if this is a browser tool result with screenshot data
         // (Extract screenshot before coordinator - needs access to BrowserScreenshotService)
         if let index = MessageFinder.lastIndexOfToolUse(toolCallId: result.toolCallId, in: messages) {
             if case .toolUse(let tool) = messages[index].content {
                 if tool.toolName.lowercased().contains("browser") {
-                    // Pass original event for screenshot extraction (needs event.details)
-                    extractAndDisplayBrowserScreenshot(from: event)
+                    // Pass plugin result for screenshot extraction (needs result.details)
+                    extractAndDisplayBrowserScreenshot(from: pluginResult)
                 }
             }
         }
 
         // Delegate to coordinator for all tool end handling
-        toolEventCoordinator.handleToolEnd(event, result: result, context: self)
+        toolEventCoordinator.handleToolEnd(pluginResult, result: result, context: self)
     }
 
     /// Extract screenshot from browser tool result and display it.
-    /// Uses BrowserScreenshotService for extraction, handling event details and text patterns.
-    private func extractAndDisplayBrowserScreenshot(from event: ToolEndEvent) {
-        guard let result = BrowserScreenshotService.extractScreenshot(from: event) else {
+    /// Uses BrowserScreenshotService for extraction, handling result details and text patterns.
+    private func extractAndDisplayBrowserScreenshot(from pluginResult: ToolEndPlugin.Result) {
+        guard let extractionResult = BrowserScreenshotService.extractScreenshot(from: pluginResult) else {
             return
         }
 
-        logger.info("Browser screenshot from \(result.source.rawValue) (\(result.image.size.width)x\(result.image.size.height))", category: .events)
-        browserState.browserFrame = result.image
+        logger.info("Browser screenshot from \(extractionResult.source.rawValue) (\(extractionResult.image.size.width)x\(extractionResult.image.size.height))", category: .events)
+        browserState.browserFrame = extractionResult.image
 
         // Only auto-show if user hasn't manually dismissed this turn
         if !browserState.userDismissedBrowserThisTurn && !browserState.showBrowserWindow {
@@ -98,85 +98,20 @@ extension ChatViewModel {
         }
     }
 
-    func handleTurnStart(_ event: TurnStartEvent) {
+    func handleTurnStart(_ pluginResult: TurnStartPlugin.Result) {
         // Process through handler (resets handler streaming state)
-        let result = eventHandler.handleTurnStart(event)
+        let result = eventHandler.handleTurnStart(pluginResult)
 
         // Delegate to coordinator for all turn start handling
-        turnLifecycleCoordinator.handleTurnStart(event, result: result, context: self)
+        turnLifecycleCoordinator.handleTurnStart(pluginResult, result: result, context: self)
     }
 
-    func handleTurnEnd(_ event: TurnEndEvent) {
+    func handleTurnEnd(_ pluginResult: TurnEndPlugin.Result) {
         // Process through handler (extracts normalized values)
-        let result = eventHandler.handleTurnEnd(event)
+        let result = eventHandler.handleTurnEnd(pluginResult)
 
         // Delegate to coordinator for all turn end handling
-        turnLifecycleCoordinator.handleTurnEnd(event, result: result, context: self)
-    }
-
-    func handleAgentTurn(_ event: AgentTurnEvent) {
-        logger.info("Agent turn received: \(event.messages.count) messages, \(event.toolUses.count) tool uses, \(event.toolResults.count) tool results", category: .events)
-
-        guard let manager = eventStoreManager else {
-            logger.warning("No EventStoreManager to cache agent turn content", category: .events)
-            return
-        }
-
-        // Convert AgentTurnEvent messages to cacheable format
-        var turnMessages: [[String: Any]] = []
-        for msg in event.messages {
-            var messageDict: [String: Any] = ["role": msg.role]
-
-            switch msg.content {
-            case .text(let text):
-                messageDict["content"] = text
-            case .blocks(let blocks):
-                var contentBlocks: [[String: Any]] = []
-                for block in blocks {
-                    switch block {
-                    case .text(let text):
-                        contentBlocks.append(["type": "text", "text": text])
-                    case .toolUse(let id, let name, let input):
-                        var inputDict: [String: Any] = [:]
-                        for (key, value) in input {
-                            inputDict[key] = value.value
-                        }
-                        contentBlocks.append([
-                            "type": "tool_use",
-                            "id": id,
-                            "name": name,
-                            "input": inputDict
-                        ])
-                    case .toolResult(let toolUseId, let content, let isError):
-                        contentBlocks.append([
-                            "type": "tool_result",
-                            "tool_use_id": toolUseId,
-                            "content": content,
-                            "is_error": isError
-                        ])
-                    case .thinking(let text):
-                        contentBlocks.append(["type": "thinking", "thinking": text])
-                    case .unknown:
-                        break
-                    }
-                }
-                messageDict["content"] = contentBlocks
-            }
-            turnMessages.append(messageDict)
-        }
-
-        // Cache the turn content for merging with server events
-        manager.turnContentCache.store(
-            sessionId: sessionId,
-            turnNumber: event.turnNumber,
-            messages: turnMessages
-        )
-
-        // Trigger sync AFTER caching content
-        logger.info("Triggering sync after caching agent turn content", category: .events)
-        Task {
-            await syncSessionEventsFromServer()
-        }
+        turnLifecycleCoordinator.handleTurnEnd(pluginResult, result: result, context: self)
     }
 
     func handleComplete() {
@@ -190,9 +125,9 @@ extension ChatViewModel {
         turnLifecycleCoordinator.handleComplete(streamingText: finalStreamingText, context: self)
     }
 
-    func handleCompaction(_ event: CompactionEvent) {
+    func handleCompaction(_ pluginResult: CompactionPlugin.Result) {
         // Process event through handler
-        let result = eventHandler.handleCompaction(event)
+        let result = eventHandler.handleCompaction(pluginResult)
         logger.info("Context compacted: \(result.tokensBefore) -> \(result.tokensAfter) tokens (saved \(result.tokensSaved), reason: \(result.reason))", category: .events)
 
         // Finalize any current streaming before adding notification
@@ -218,9 +153,9 @@ extension ChatViewModel {
         }
     }
 
-    func handleContextCleared(_ event: ContextClearedEvent) {
+    func handleContextCleared(_ pluginResult: ContextClearedPlugin.Result) {
         // Process event through handler
-        let result = eventHandler.handleContextCleared(event)
+        let result = eventHandler.handleContextCleared(pluginResult)
         logger.info("Context cleared: \(result.tokensBefore) -> \(result.tokensAfter) tokens (freed \(result.tokensFreed))", category: .events)
 
         // Finalize any current streaming before adding notification
@@ -244,9 +179,9 @@ extension ChatViewModel {
         }
     }
 
-    func handleMessageDeleted(_ event: MessageDeletedEvent) {
+    func handleMessageDeleted(_ pluginResult: MessageDeletedPlugin.Result) {
         // Process event through handler
-        let result = eventHandler.handleMessageDeleted(event)
+        let result = eventHandler.handleMessageDeleted(pluginResult)
         logger.info("Message deleted: targetType=\(result.targetType), eventId=\(result.targetEventId)", category: .events)
 
         // Add message deleted notification pill to chat
@@ -254,9 +189,9 @@ extension ChatViewModel {
         messages.append(deletedMessage)
     }
 
-    func handleSkillRemoved(_ event: SkillRemovedEvent) {
+    func handleSkillRemoved(_ pluginResult: SkillRemovedPlugin.Result) {
         // Process event through handler
-        let result = eventHandler.handleSkillRemoved(event)
+        let result = eventHandler.handleSkillRemoved(pluginResult)
         logger.info("Skill removed: \(result.skillName)", category: .events)
 
         // Add skill removed notification pill to chat
@@ -270,18 +205,18 @@ extension ChatViewModel {
         }
     }
 
-    func handlePlanModeEntered(_ event: PlanModeEnteredEvent) {
+    func handlePlanModeEntered(_ pluginResult: PlanModeEnteredPlugin.Result) {
         // Process event through handler
-        let result = eventHandler.handlePlanModeEntered(event)
+        let result = eventHandler.handlePlanModeEntered(pluginResult)
         logger.info("Plan mode entered: skill=\(result.skillName), blocked=\(result.blockedTools.joined(separator: ", "))", category: .events)
 
         // Update state and add notification to chat
         enterPlanMode(skillName: result.skillName, blockedTools: result.blockedTools)
     }
 
-    func handlePlanModeExited(_ event: PlanModeExitedEvent) {
+    func handlePlanModeExited(_ pluginResult: PlanModeExitedPlugin.Result) {
         // Process event through handler
-        let result = eventHandler.handlePlanModeExited(event)
+        let result = eventHandler.handlePlanModeExited(pluginResult)
         logger.info("Plan mode exited: reason=\(result.reason), planPath=\(result.planPath ?? "none")", category: .events)
 
         // Update state and add notification to chat
@@ -333,96 +268,48 @@ extension ChatViewModel {
 
     // MARK: - UI Canvas Event Handlers
 
-    func handleUIRenderStart(_ event: UIRenderStartEvent) {
+    func handleUIRenderStart(_ pluginResult: UIRenderStartPlugin.Result) {
         // Delegate to coordinator for all UI render start handling
-        uiCanvasCoordinator.handleUIRenderStart(event, context: self)
+        uiCanvasCoordinator.handleUIRenderStart(pluginResult, context: self)
     }
 
-    func handleUIRenderChunk(_ event: UIRenderChunkEvent) {
+    func handleUIRenderChunk(_ pluginResult: UIRenderChunkPlugin.Result) {
         // Delegate to coordinator for all UI render chunk handling
-        uiCanvasCoordinator.handleUIRenderChunk(event, context: self)
+        uiCanvasCoordinator.handleUIRenderChunk(pluginResult, context: self)
     }
 
-    func handleUIRenderComplete(_ event: UIRenderCompleteEvent) {
+    func handleUIRenderComplete(_ pluginResult: UIRenderCompletePlugin.Result) {
         // Delegate to coordinator for all UI render complete handling
-        uiCanvasCoordinator.handleUIRenderComplete(event, context: self)
+        uiCanvasCoordinator.handleUIRenderComplete(pluginResult, context: self)
     }
 
-    func handleUIRenderError(_ event: UIRenderErrorEvent) {
+    func handleUIRenderError(_ pluginResult: UIRenderErrorPlugin.Result) {
         // Delegate to coordinator for all UI render error handling
-        uiCanvasCoordinator.handleUIRenderError(event, context: self)
+        uiCanvasCoordinator.handleUIRenderError(pluginResult, context: self)
     }
 
-    func handleUIRenderRetry(_ event: UIRenderRetryEvent) {
+    func handleUIRenderRetry(_ pluginResult: UIRenderRetryPlugin.Result) {
         // Delegate to coordinator for all UI render retry handling
-        uiCanvasCoordinator.handleUIRenderRetry(event, context: self)
+        uiCanvasCoordinator.handleUIRenderRetry(pluginResult, context: self)
     }
 
     // MARK: - Todo Event Handlers
 
-    func handleTodosUpdated(_ event: TodosUpdatedEvent) {
+    func handleTodosUpdated(_ pluginResult: TodosUpdatedPlugin.Result) {
         // Process through handler (extracts todos)
-        let result = eventHandler.handleTodosUpdated(event)
+        let result = eventHandler.handleTodosUpdated(pluginResult)
         logger.debug("Todos updated: count=\(result.todos.count), restoredCount=\(result.restoredCount)", category: .events)
 
-        // Update todo state from server event
-        todoState.handleTodosUpdated(event)
+        // Update todo state directly from plugin result
+        todoState.updateTodos(pluginResult.todos)
     }
 
     // MARK: - Plugin Result Handlers
     // These handlers accept plugin Result types directly, bridging the plugin system
     // to the existing event handler infrastructure.
 
-    func handleToolStartResult(_ result: ToolStartPlugin.Result) {
-        // Convert plugin result to legacy event for existing infrastructure
-        let event = ToolStartEvent(
-            toolName: result.toolName,
-            toolCallId: result.toolCallId,
-            arguments: result.arguments,
-            formattedArguments: result.formattedArguments
-        )
-        handleToolStart(event)
-    }
 
-    func handleToolEndResult(_ result: ToolEndPlugin.Result) {
-        // Convert plugin result to legacy event for existing infrastructure
-        let event = ToolEndEvent(
-            toolCallId: result.toolCallId,
-            success: result.success,
-            displayResult: result.displayResult,
-            durationMs: result.durationMs,
-            details: result.details.map { ToolEndEvent.ToolDetails(screenshot: $0.screenshot, format: $0.format) }
-        )
-        handleToolEnd(event)
-    }
-
-    func handleTurnStartResult(_ result: TurnStartPlugin.Result) {
-        let event = TurnStartEvent(turnNumber: result.turnNumber)
-        handleTurnStart(event)
-    }
-
-    func handleTurnEndResult(_ result: TurnEndPlugin.Result) {
-        let event = TurnEndEvent(
-            turnNumber: result.turnNumber,
-            stopReason: result.stopReason,
-            tokenUsage: result.tokenUsage,
-            normalizedUsage: result.normalizedUsage,
-            contextLimit: result.contextLimit,
-            data: TurnEndData(
-                turn: result.turnNumber,
-                duration: result.duration,
-                tokenUsage: result.tokenUsage,
-                normalizedUsage: result.normalizedUsage,
-                stopReason: result.stopReason,
-                cost: result.cost,
-                contextLimit: result.contextLimit
-            ),
-            cost: result.cost
-        )
-        handleTurnEnd(event)
-    }
-
-    func handleAgentTurnResult(_ result: AgentTurnPlugin.Result) {
+    func handleAgentTurn(_ result: AgentTurnPlugin.Result) {
         logger.info("Agent turn received: \(result.messages.count) messages, \(result.toolUses.count) tool uses, \(result.toolResults.count) tool results", category: .events)
 
         guard let manager = eventStoreManager else {
@@ -487,52 +374,6 @@ extension ChatViewModel {
         }
     }
 
-    func handleCompactionResult(_ result: CompactionPlugin.Result) {
-        let event = CompactionEvent(
-            tokensBefore: result.tokensBefore,
-            tokensAfter: result.tokensAfter,
-            reason: result.reason,
-            summary: result.summary
-        )
-        handleCompaction(event)
-    }
-
-    func handleContextClearedResult(_ result: ContextClearedPlugin.Result) {
-        let event = ContextClearedEvent(
-            tokensBefore: result.tokensBefore,
-            tokensAfter: result.tokensAfter
-        )
-        handleContextCleared(event)
-    }
-
-    func handleMessageDeletedResult(_ result: MessageDeletedPlugin.Result) {
-        let event = MessageDeletedEvent(
-            targetEventId: result.targetEventId,
-            targetType: result.targetType
-        )
-        handleMessageDeleted(event)
-    }
-
-    func handleSkillRemovedResult(_ result: SkillRemovedPlugin.Result) {
-        let event = SkillRemovedEvent(skillName: result.skillName)
-        handleSkillRemoved(event)
-    }
-
-    func handlePlanModeEnteredResult(_ result: PlanModeEnteredPlugin.Result) {
-        let event = PlanModeEnteredEvent(
-            skillName: result.skillName,
-            blockedTools: result.blockedTools
-        )
-        handlePlanModeEntered(event)
-    }
-
-    func handlePlanModeExitedResult(_ result: PlanModeExitedPlugin.Result) {
-        let event = PlanModeExitedEvent(
-            reason: result.reason,
-            planPath: result.planPath
-        )
-        handlePlanModeExited(event)
-    }
 
     func handleBrowserFrameResult(_ result: BrowserFramePlugin.Result) {
         // Delegate to browser coordinator for frame handling
@@ -608,56 +449,6 @@ extension ChatViewModel {
         )
     }
 
-    func handleUIRenderStartResult(_ result: UIRenderStartPlugin.Result) {
-        let event = UIRenderStartEvent(
-            canvasId: result.canvasId,
-            title: result.title,
-            toolCallId: result.toolCallId
-        )
-        handleUIRenderStart(event)
-    }
-
-    func handleUIRenderChunkResult(_ result: UIRenderChunkPlugin.Result) {
-        let event = UIRenderChunkEvent(
-            canvasId: result.canvasId,
-            chunk: result.chunk,
-            accumulated: result.accumulated
-        )
-        handleUIRenderChunk(event)
-    }
-
-    func handleUIRenderCompleteResult(_ result: UIRenderCompletePlugin.Result) {
-        let event = UIRenderCompleteEvent(
-            canvasId: result.canvasId,
-            ui: result.ui,
-            state: result.state
-        )
-        handleUIRenderComplete(event)
-    }
-
-    func handleUIRenderErrorResult(_ result: UIRenderErrorPlugin.Result) {
-        let event = UIRenderErrorEvent(
-            canvasId: result.canvasId,
-            error: result.error
-        )
-        handleUIRenderError(event)
-    }
-
-    func handleUIRenderRetryResult(_ result: UIRenderRetryPlugin.Result) {
-        let event = UIRenderRetryEvent(
-            canvasId: result.canvasId,
-            attempt: result.attempt,
-            errors: result.errors
-        )
-        handleUIRenderRetry(event)
-    }
-
-    func handleTodosUpdatedResult(_ result: TodosUpdatedPlugin.Result) {
-        logger.debug("Todos updated: count=\(result.todos.count), restoredCount=\(result.restoredCount)", category: .events)
-
-        // Update todo state directly from plugin result
-        todoState.updateTodos(result.todos)
-    }
 
     // MARK: - Subagent Helpers
 

@@ -212,11 +212,11 @@ final class ChatEventHandler {
 
     /// Handle a tool start event
     /// - Parameters:
-    ///   - event: The tool start event
+    ///   - pluginResult: The plugin result with tool start data
     ///   - context: The event context
     /// - Returns: Result with tool data and classification
-    func handleToolStart(_ event: ToolStartEvent, context: ChatEventContext) -> ToolStartResult {
-        let toolNameLower = event.toolName.lowercased()
+    func handleToolStart(_ pluginResult: ToolStartPlugin.Result, context: ChatEventContext) -> ToolStartResult {
+        let toolNameLower = pluginResult.toolName.lowercased()
 
         // Detect tool types
         let isAskUserQuestion = toolNameLower == "askuserquestion"
@@ -226,7 +226,7 @@ final class ChatEventHandler {
         // Parse AskUserQuestion params if applicable
         var askUserQuestionParams: AskUserQuestionParams?
         if isAskUserQuestion {
-            if let paramsData = event.formattedArguments.data(using: .utf8) {
+            if let paramsData = pluginResult.formattedArguments.data(using: .utf8) {
                 askUserQuestionParams = try? JSONDecoder().decode(AskUserQuestionParams.self, from: paramsData)
             }
         }
@@ -234,7 +234,7 @@ final class ChatEventHandler {
         // Parse OpenBrowser URL if applicable
         var openBrowserURL: URL?
         if isOpenBrowser {
-            if let args = event.arguments,
+            if let args = pluginResult.arguments,
                let urlValue = args["url"],
                let urlString = urlValue.value as? String {
                 openBrowserURL = URL(string: urlString)
@@ -243,13 +243,13 @@ final class ChatEventHandler {
 
         // Create tool data
         let tool = ToolUseData(
-            toolName: event.toolName,
-            toolCallId: event.toolCallId,
-            arguments: event.formattedArguments,
+            toolName: pluginResult.toolName,
+            toolCallId: pluginResult.toolCallId,
+            arguments: pluginResult.formattedArguments,
             status: .running
         )
 
-        context.logInfo("Tool started: \(event.toolName) [\(event.toolCallId)]")
+        context.logInfo("Tool started: \(pluginResult.toolName) [\(pluginResult.toolCallId)]")
 
         return ToolStartResult(
             tool: tool,
@@ -262,16 +262,16 @@ final class ChatEventHandler {
     }
 
     /// Handle a tool end event
-    /// - Parameter event: The tool end event
+    /// - Parameter pluginResult: The plugin result with tool end data
     /// - Returns: Result with updated status and result
-    func handleToolEnd(_ event: ToolEndEvent) -> ToolEndResult {
-        let status: ToolStatus = event.success ? .success : .error
+    func handleToolEnd(_ pluginResult: ToolEndPlugin.Result) -> ToolEndResult {
+        let status: ToolStatus = pluginResult.success ? .success : .error
 
         return ToolEndResult(
-            toolCallId: event.toolCallId,
+            toolCallId: pluginResult.toolCallId,
             status: status,
-            result: event.displayResult,
-            durationMs: event.durationMs,
+            result: pluginResult.displayResult,
+            durationMs: pluginResult.durationMs,
             isAskUserQuestion: false  // Caller determines this from message content
         )
     }
@@ -279,31 +279,31 @@ final class ChatEventHandler {
     // MARK: - Turn Handling
 
     /// Handle a turn start event
-    /// - Parameter event: The turn start event
+    /// - Parameter result: The plugin result with turn start data
     /// - Returns: Result indicating turn number and state reset
-    func handleTurnStart(_ event: TurnStartEvent) -> TurnStartResult {
+    func handleTurnStart(_ result: TurnStartPlugin.Result) -> TurnStartResult {
         // Reset streaming state for new turn
         resetStreamingState()
 
         return TurnStartResult(
-            turnNumber: event.turnNumber,
+            turnNumber: result.turnNumber,
             stateReset: true
         )
     }
 
     /// Handle a turn end event
-    /// - Parameter event: The turn end event
+    /// - Parameter result: The plugin result with turn end data
     /// - Returns: Result with server-provided values (no local calculation)
-    func handleTurnEnd(_ event: TurnEndEvent) -> TurnEndResult {
+    func handleTurnEnd(_ result: TurnEndPlugin.Result) -> TurnEndResult {
         // Pass through server values - NO LOCAL CALCULATION
         return TurnEndResult(
-            turnNumber: event.turnNumber,
-            stopReason: event.stopReason,
-            normalizedUsage: event.normalizedUsage,
-            tokenUsage: event.tokenUsage,
-            contextLimit: event.contextLimit,
-            cost: event.cost,
-            durationMs: event.data?.duration
+            turnNumber: result.turnNumber,
+            stopReason: result.stopReason,
+            normalizedUsage: result.normalizedUsage,
+            tokenUsage: result.tokenUsage,
+            contextLimit: result.contextLimit,
+            cost: result.cost,
+            durationMs: result.duration
         )
     }
 
@@ -336,69 +336,69 @@ final class ChatEventHandler {
     // MARK: - Compaction Handling
 
     /// Handle a compaction event
-    /// - Parameter event: The compaction event
+    /// - Parameter result: The plugin result with compaction data
     /// - Returns: Result with token counts
-    func handleCompaction(_ event: CompactionEvent) -> CompactionResult {
+    func handleCompaction(_ result: CompactionPlugin.Result) -> CompactionResult {
         return CompactionResult(
-            tokensBefore: event.tokensBefore,
-            tokensAfter: event.tokensAfter,
-            reason: event.reason,
-            summary: event.summary
+            tokensBefore: result.tokensBefore,
+            tokensAfter: result.tokensAfter,
+            reason: result.reason,
+            summary: result.summary
         )
     }
 
     // MARK: - Context Cleared Handling
 
     /// Handle a context cleared event
-    /// - Parameter event: The context cleared event
+    /// - Parameter result: The plugin result with context cleared data
     /// - Returns: Result with token counts
-    func handleContextCleared(_ event: ContextClearedEvent) -> ContextClearedResult {
+    func handleContextCleared(_ result: ContextClearedPlugin.Result) -> ContextClearedResult {
         return ContextClearedResult(
-            tokensBefore: event.tokensBefore,
-            tokensAfter: event.tokensAfter
+            tokensBefore: result.tokensBefore,
+            tokensAfter: result.tokensAfter
         )
     }
 
     // MARK: - Message Deleted Handling
 
     /// Handle a message deleted event
-    /// - Parameter event: The message deleted event
+    /// - Parameter result: The plugin result with deletion info
     /// - Returns: Result with deletion info
-    func handleMessageDeleted(_ event: MessageDeletedEvent) -> MessageDeletedResult {
+    func handleMessageDeleted(_ result: MessageDeletedPlugin.Result) -> MessageDeletedResult {
         return MessageDeletedResult(
-            targetType: event.targetType,
-            targetEventId: event.targetEventId
+            targetType: result.targetType,
+            targetEventId: result.targetEventId
         )
     }
 
     // MARK: - Skill Removed Handling
 
     /// Handle a skill removed event
-    /// - Parameter event: The skill removed event
+    /// - Parameter result: The plugin result with skill name
     /// - Returns: Result with skill name
-    func handleSkillRemoved(_ event: SkillRemovedEvent) -> SkillRemovedResult {
-        return SkillRemovedResult(skillName: event.skillName)
+    func handleSkillRemoved(_ result: SkillRemovedPlugin.Result) -> SkillRemovedResult {
+        return SkillRemovedResult(skillName: result.skillName)
     }
 
     // MARK: - Plan Mode Handling
 
     /// Handle plan mode entered event
-    /// - Parameter event: The plan mode entered event
+    /// - Parameter result: The plugin result with plan mode entered data
     /// - Returns: Result with skill name and blocked tools
-    func handlePlanModeEntered(_ event: PlanModeEnteredEvent) -> PlanModeEnteredResult {
+    func handlePlanModeEntered(_ result: PlanModeEnteredPlugin.Result) -> PlanModeEnteredResult {
         return PlanModeEnteredResult(
-            skillName: event.skillName,
-            blockedTools: event.blockedTools
+            skillName: result.skillName,
+            blockedTools: result.blockedTools
         )
     }
 
     /// Handle plan mode exited event
-    /// - Parameter event: The plan mode exited event
+    /// - Parameter result: The plugin result with plan mode exited data
     /// - Returns: Result with exit reason and plan path
-    func handlePlanModeExited(_ event: PlanModeExitedEvent) -> PlanModeExitedResult {
+    func handlePlanModeExited(_ result: PlanModeExitedPlugin.Result) -> PlanModeExitedResult {
         return PlanModeExitedResult(
-            reason: event.reason,
-            planPath: event.planPath
+            reason: result.reason,
+            planPath: result.planPath
         )
     }
 
@@ -426,68 +426,68 @@ final class ChatEventHandler {
     // MARK: - UI Canvas Handling
 
     /// Handle UI render start event
-    /// - Parameter event: The UI render start event
+    /// - Parameter result: The plugin result with canvas info
     /// - Returns: Result with canvas info
-    func handleUIRenderStart(_ event: UIRenderStartEvent) -> UIRenderStartResult {
+    func handleUIRenderStart(_ result: UIRenderStartPlugin.Result) -> UIRenderStartResult {
         return UIRenderStartResult(
-            canvasId: event.canvasId,
-            title: event.title,
-            toolCallId: event.toolCallId
+            canvasId: result.canvasId,
+            title: result.title,
+            toolCallId: result.toolCallId
         )
     }
 
     /// Handle UI render chunk event
-    /// - Parameter event: The UI render chunk event
+    /// - Parameter result: The plugin result with chunk data
     /// - Returns: Result with chunk data
-    func handleUIRenderChunk(_ event: UIRenderChunkEvent) -> UIRenderChunkResult {
+    func handleUIRenderChunk(_ result: UIRenderChunkPlugin.Result) -> UIRenderChunkResult {
         return UIRenderChunkResult(
-            canvasId: event.canvasId,
-            chunk: event.chunk,
-            accumulated: event.accumulated
+            canvasId: result.canvasId,
+            chunk: result.chunk,
+            accumulated: result.accumulated
         )
     }
 
     /// Handle UI render complete event
-    /// - Parameter event: The UI render complete event
+    /// - Parameter result: The plugin result with final UI
     /// - Returns: Result with final UI
-    func handleUIRenderComplete(_ event: UIRenderCompleteEvent) -> UIRenderCompleteResult {
+    func handleUIRenderComplete(_ result: UIRenderCompletePlugin.Result) -> UIRenderCompleteResult {
         return UIRenderCompleteResult(
-            canvasId: event.canvasId,
-            ui: event.ui,
-            state: event.state
+            canvasId: result.canvasId,
+            ui: result.ui,
+            state: result.state
         )
     }
 
     /// Handle UI render error event
-    /// - Parameter event: The UI render error event
+    /// - Parameter result: The plugin result with error info
     /// - Returns: Result with error info
-    func handleUIRenderError(_ event: UIRenderErrorEvent) -> UIRenderErrorResult {
+    func handleUIRenderError(_ result: UIRenderErrorPlugin.Result) -> UIRenderErrorResult {
         return UIRenderErrorResult(
-            canvasId: event.canvasId,
-            error: event.error
+            canvasId: result.canvasId,
+            error: result.error
         )
     }
 
     /// Handle UI render retry event
-    /// - Parameter event: The UI render retry event
+    /// - Parameter result: The plugin result with retry info
     /// - Returns: Result with retry info
-    func handleUIRenderRetry(_ event: UIRenderRetryEvent) -> UIRenderRetryResult {
+    func handleUIRenderRetry(_ result: UIRenderRetryPlugin.Result) -> UIRenderRetryResult {
         return UIRenderRetryResult(
-            canvasId: event.canvasId,
-            attempt: event.attempt,
-            errors: event.errors
+            canvasId: result.canvasId,
+            attempt: result.attempt,
+            errors: result.errors
         )
     }
 
     // MARK: - Todo Handling
 
     /// Handle todos updated event
-    /// - Parameter event: The todos updated event
+    /// - Parameter result: The plugin result with todos
     /// - Returns: Result with todos
-    func handleTodosUpdated(_ event: TodosUpdatedEvent) -> TodosUpdatedResult {
+    func handleTodosUpdated(_ result: TodosUpdatedPlugin.Result) -> TodosUpdatedResult {
         return TodosUpdatedResult(
-            todos: event.todos,
-            restoredCount: event.restoredCount
+            todos: result.todos,
+            restoredCount: result.restoredCount
         )
     }
 }

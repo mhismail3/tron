@@ -40,7 +40,7 @@ protocol EventPlugin {
 
     /// Parse raw JSON data into typed event.
     /// Default implementation uses JSONDecoder.
-    /// Override for custom parsing (e.g., ToolEndEvent with flexible output formats).
+    /// Override for custom parsing (e.g., ToolEndPlugin with flexible output formats).
     static func parse(from data: Data) throws -> EventData
 
     /// Extract sessionId from the parsed event for filtering.

@@ -23,15 +23,15 @@ final class ToolEventCoordinator {
     /// Handle a tool start event.
     ///
     /// - Parameters:
-    ///   - event: The raw tool start event from the server
+    ///   - pluginResult: The plugin result with tool start data
     ///   - result: The processed result from ChatEventHandler
     ///   - context: The context providing access to state and dependencies
     func handleToolStart(
-        _ event: ToolStartEvent,
+        _ pluginResult: ToolStartPlugin.Result,
         result: ToolStartResult,
         context: ToolEventContext
     ) {
-        context.logDebug("Tool args: \(event.formattedArguments.prefix(200))")
+        context.logDebug("Tool args: \(pluginResult.formattedArguments.prefix(200))")
 
         // Finalize any current streaming text before tool starts
         context.flushPendingTextUpdates()
@@ -39,7 +39,7 @@ final class ToolEventCoordinator {
 
         // Handle AskUserQuestion specially
         if result.isAskUserQuestion {
-            handleAskUserQuestionToolStart(event, params: result.askUserQuestionParams, context: context)
+            handleAskUserQuestionToolStart(pluginResult, params: result.askUserQuestionParams, context: context)
             return
         }
 
@@ -53,16 +53,16 @@ final class ToolEventCoordinator {
         var message = ChatMessage(role: .assistant, content: .toolUse(result.tool))
 
         // Special handling for RenderAppUI
-        if event.toolName.lowercased() == "renderappui" {
-            let handled = handleRenderAppUIToolStart(event, message: &message, context: context)
+        if pluginResult.toolName.lowercased() == "renderappui" {
+            let handled = handleRenderAppUIToolStart(pluginResult, message: &message, context: context)
             if handled {
                 // Existing chip was updated, don't create new message
                 return
             }
-        } else if let pendingRender = context.renderAppUIChipTracker.consumePendingRenderStart(toolCallId: event.toolCallId) {
+        } else if let pendingRender = context.renderAppUIChipTracker.consumePendingRenderStart(toolCallId: pluginResult.toolCallId) {
             // Handle pending UI render start (legacy path) - via tracker
             let chipData = RenderAppUIChipData(
-                toolCallId: event.toolCallId,
+                toolCallId: pluginResult.toolCallId,
                 canvasId: pendingRender.canvasId,
                 title: pendingRender.title,
                 status: .rendering,
@@ -74,7 +74,7 @@ final class ToolEventCoordinator {
             context.renderAppUIChipTracker.createChipFromToolStart(
                 canvasId: pendingRender.canvasId,
                 messageId: message.id,
-                toolCallId: event.toolCallId,
+                toolCallId: pluginResult.toolCallId,
                 title: pendingRender.title
             )
             context.logDebug("Applied pending UI render start to new tool message: \(pendingRender.canvasId)")
@@ -85,16 +85,16 @@ final class ToolEventCoordinator {
         context.currentToolMessages[message.id] = message
 
         // Make tool immediately visible for rendering
-        context.makeToolVisible(event.toolCallId)
+        context.makeToolVisible(pluginResult.toolCallId)
 
         // Sync to MessageWindowManager for virtual scrolling
         context.appendToMessageWindow(message)
 
         // Track tool call for persistence
         let record = ToolCallRecord(
-            toolCallId: event.toolCallId,
-            toolName: event.toolName,
-            arguments: event.formattedArguments
+            toolCallId: pluginResult.toolCallId,
+            toolName: pluginResult.toolName,
+            arguments: pluginResult.formattedArguments
         )
         context.currentTurnToolCalls.append(record)
 
@@ -106,9 +106,9 @@ final class ToolEventCoordinator {
 
         // Enqueue tool start for ordered processing and staggered animation
         let toolStartData = UIUpdateQueue.ToolStartData(
-            toolCallId: event.toolCallId,
-            toolName: event.toolName,
-            arguments: event.formattedArguments,
+            toolCallId: pluginResult.toolCallId,
+            toolName: pluginResult.toolName,
+            arguments: pluginResult.formattedArguments,
             timestamp: Date()
         )
         context.enqueueToolStart(toolStartData)
@@ -119,11 +119,11 @@ final class ToolEventCoordinator {
     /// Handle a tool end event.
     ///
     /// - Parameters:
-    ///   - event: The raw tool end event from the server
+    ///   - pluginResult: The plugin result with tool end data
     ///   - result: The processed result from ChatEventHandler
     ///   - context: The context providing access to state and dependencies
     func handleToolEnd(
-        _ event: ToolEndEvent,
+        _ pluginResult: ToolEndPlugin.Result,
         result: ToolEndResult,
         context: ToolEventContext
     ) {
@@ -173,7 +173,7 @@ final class ToolEventCoordinator {
 
     /// Handle AskUserQuestion tool start - creates special message
     private func handleAskUserQuestionToolStart(
-        _ event: ToolStartEvent,
+        _ pluginResult: ToolStartPlugin.Result,
         params: AskUserQuestionParams?,
         context: ToolEventContext
     ) {
@@ -185,23 +185,23 @@ final class ToolEventCoordinator {
 
         // Use pre-parsed params, fall back to regular tool display if parsing failed
         guard let params = params else {
-            context.logError("Failed to parse AskUserQuestion params: \(event.formattedArguments.prefix(500))")
+            context.logError("Failed to parse AskUserQuestion params: \(pluginResult.formattedArguments.prefix(500))")
             // Fall back to regular tool display
             let tool = ToolUseData(
-                toolName: event.toolName,
-                toolCallId: event.toolCallId,
-                arguments: event.formattedArguments,
+                toolName: pluginResult.toolName,
+                toolCallId: pluginResult.toolCallId,
+                arguments: pluginResult.formattedArguments,
                 status: .running
             )
             let message = ChatMessage(role: .assistant, content: .toolUse(tool))
             context.messages.append(message)
-            context.makeToolVisible(event.toolCallId)
+            context.makeToolVisible(pluginResult.toolCallId)
             return
         }
 
         // Create AskUserQuestion tool data with pending status
         let toolData = AskUserQuestionToolData(
-            toolCallId: event.toolCallId,
+            toolCallId: pluginResult.toolCallId,
             params: params,
             answers: [:],
             status: .pending,
@@ -214,9 +214,9 @@ final class ToolEventCoordinator {
 
         // Track tool call for persistence
         let record = ToolCallRecord(
-            toolCallId: event.toolCallId,
-            toolName: event.toolName,
-            arguments: event.formattedArguments
+            toolCallId: pluginResult.toolCallId,
+            toolName: pluginResult.toolName,
+            arguments: pluginResult.formattedArguments
         )
         context.currentTurnToolCalls.append(record)
 
@@ -241,12 +241,12 @@ final class ToolEventCoordinator {
     /// - Returns: `true` if an existing chip was updated (caller should not create new message),
     ///            `false` if a new chip was created in the message (caller should add the message)
     private func handleRenderAppUIToolStart(
-        _ event: ToolStartEvent,
+        _ pluginResult: ToolStartPlugin.Result,
         message: inout ChatMessage,
         context: ToolEventContext
     ) -> Bool {
         // Parse arguments to get canvasId
-        guard let argsData = event.formattedArguments.data(using: .utf8),
+        guard let argsData = pluginResult.formattedArguments.data(using: .utf8),
               let argsJson = try? JSONSerialization.jsonObject(with: argsData) as? [String: Any],
               let canvasId = argsJson["canvasId"] as? String else {
             return false
@@ -258,24 +258,24 @@ final class ToolEventCoordinator {
            case .renderAppUI(var chipData) = context.messages[index].content {
             // Chip already exists - update toolCallId to real one
             let oldToolCallId = chipData.toolCallId
-            chipData.toolCallId = event.toolCallId
+            chipData.toolCallId = pluginResult.toolCallId
             context.messages[index].content = .renderAppUI(chipData)
 
             // Update tracker atomically
-            context.renderAppUIChipTracker.updateToolCallId(canvasId: canvasId, realToolCallId: event.toolCallId)
+            context.renderAppUIChipTracker.updateToolCallId(canvasId: canvasId, realToolCallId: pluginResult.toolCallId)
 
             // Update currentToolMessages with correct ID
             context.currentToolMessages[context.messages[index].id] = context.messages[index]
 
             // Track tool call for persistence
             let record = ToolCallRecord(
-                toolCallId: event.toolCallId,
-                toolName: event.toolName,
-                arguments: event.formattedArguments
+                toolCallId: pluginResult.toolCallId,
+                toolName: pluginResult.toolName,
+                arguments: pluginResult.formattedArguments
             )
             context.currentTurnToolCalls.append(record)
 
-            context.logInfo("Updated existing RenderAppUI chip toolCallId: \(canvasId), \(oldToolCallId) → \(event.toolCallId)")
+            context.logInfo("Updated existing RenderAppUI chip toolCallId: \(canvasId), \(oldToolCallId) → \(pluginResult.toolCallId)")
 
             // Signal to caller that existing chip was updated, don't create new message
             return true
@@ -284,7 +284,7 @@ final class ToolEventCoordinator {
         // No existing chip - create one now
         let title = argsJson["title"] as? String
         let chipData = RenderAppUIChipData(
-            toolCallId: event.toolCallId,
+            toolCallId: pluginResult.toolCallId,
             canvasId: canvasId,
             title: title,
             status: .rendering,
@@ -296,7 +296,7 @@ final class ToolEventCoordinator {
         context.renderAppUIChipTracker.createChipFromToolStart(
             canvasId: canvasId,
             messageId: message.id,
-            toolCallId: event.toolCallId,
+            toolCallId: pluginResult.toolCallId,
             title: title
         )
         context.logDebug("Created RenderAppUI chip from tool_start: \(canvasId)")
