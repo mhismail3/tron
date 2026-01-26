@@ -7,7 +7,7 @@ enum TurnEndPlugin: EventPlugin {
 
     // MARK: - Event Data
 
-    struct EventData: Decodable, Sendable {
+    struct EventData: StandardEventData {
         let type: String
         let sessionId: String?
         let timestamp: String?
@@ -66,10 +66,6 @@ enum TurnEndPlugin: EventPlugin {
     }
 
     // MARK: - Protocol Implementation
-
-    static func sessionId(from event: EventData) -> String? {
-        event.sessionId
-    }
 
     static func transform(_ event: EventData) -> (any EventResult)? {
         guard let data = event.data else {

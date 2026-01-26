@@ -6,8 +6,16 @@ import SwiftUI
 ///
 /// This protocol allows MessagingCoordinator to be tested independently from ChatViewModel
 /// by defining the minimum interface it needs to interact with message sending and state.
+///
+/// Inherits from:
+/// - LoggingContext: Logging and error display (showError)
+/// - SessionIdentifiable: Session ID access
+/// - ProcessingTrackable: Processing state and dashboard updates
+/// - StreamingManaging: Streaming state management
+/// - BrowserManaging: Browser session management
+/// - DashboardUpdating: Dashboard info updates
 @MainActor
-protocol MessagingContext: LoggingContext {
+protocol MessagingContext: LoggingContext, SessionIdentifiable, ProcessingTrackable, StreamingManaging, BrowserManaging, DashboardUpdating {
     /// The current input text
     var inputText: String { get set }
 
@@ -17,14 +25,8 @@ protocol MessagingContext: LoggingContext {
     /// Selected images from photo picker
     var selectedImages: [PhotosPickerItem] { get set }
 
-    /// Whether the agent is currently processing
-    var isProcessing: Bool { get set }
-
     /// Current turn number
     var currentTurn: Int { get set }
-
-    /// Current session ID
-    var sessionId: String { get }
 
     /// Whether the user dismissed the browser this turn
     var userDismissedBrowserThisTurn: Bool { get set }
@@ -50,26 +52,8 @@ protocol MessagingContext: LoggingContext {
     /// Mark pending AskUserQuestion chips as superseded
     func markPendingQuestionsAsSuperseded()
 
-    /// Reset the streaming manager state
-    func resetStreamingManager()
-
-    /// Finalize any streaming message
-    func finalizeStreamingMessage()
-
-    /// Close the browser session
-    func closeBrowserSession()
-
-    /// Set session processing state in dashboard
-    func setSessionProcessing(_ isProcessing: Bool)
-
-    /// Update session dashboard info
-    func updateSessionDashboardInfo(lastUserPrompt: String?, lastAssistantResponse: String?)
-
     /// Handle agent error
     func handleAgentError(_ message: String)
-
-    /// Show error alert to user
-    func showErrorAlert(_ message: String)
 }
 
 /// Coordinates message sending, agent abort, and attachment management for ChatViewModel.
@@ -206,7 +190,7 @@ final class MessagingCoordinator {
             context.closeBrowserSession()
         } catch {
             context.logError("Failed to abort agent: \(error.localizedDescription)")
-            context.showErrorAlert(error.localizedDescription)
+            context.showError(error.localizedDescription)
         }
     }
 

@@ -2,27 +2,22 @@ import Foundation
 
 /// Protocol defining the context required by ToolEventCoordinator.
 /// Allows ChatViewModel to be abstracted for independent testing of tool event handling.
+///
+/// Inherits from:
+/// - LoggingContext: Logging and error display
+/// - ToolStateTracking: Tool call state (currentToolMessages, currentTurnToolCalls, etc.)
+///
+/// Note: Streaming methods (flushPendingTextUpdates, finalizeStreamingMessage) are declared
+/// directly rather than inheriting StreamingManaging, since resetStreamingManager is not needed.
 @MainActor
-protocol ToolEventContext: LoggingContext {
+protocol ToolEventContext: LoggingContext, ToolStateTracking {
 
     // MARK: - Messages State
 
     /// Messages array to append tool messages to
     var messages: [ChatMessage] { get set }
 
-    /// Map of current tool messages by message ID
-    var currentToolMessages: [UUID: ChatMessage] { get set }
-
-    /// Tool calls tracked for the current turn
-    var currentTurnToolCalls: [ToolCallRecord] { get set }
-
     // MARK: - State Objects
-
-    /// Whether AskUserQuestion was called in the current turn
-    var askUserQuestionCalledInTurn: Bool { get set }
-
-    /// Current browser status
-    var browserStatus: BrowserGetStatusResult? { get set }
 
     /// Safari URL for in-app browser
     var safariURL: URL? { get set }

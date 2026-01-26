@@ -1,8 +1,11 @@
 import Foundation
 import SwiftUI
 
-/// Protocol defining the context required by ChatEventHandler
-/// Allows ChatViewModel to be abstracted for testing
+/// Protocol defining the context required by ChatEventHandler.
+/// Allows ChatViewModel to be abstracted for testing.
+///
+/// Inherits from:
+/// - LoggingContext: Logging and error display
 @MainActor
 protocol ChatEventContext: LoggingContext {
     /// Whether AskUserQuestion was called in the current turn

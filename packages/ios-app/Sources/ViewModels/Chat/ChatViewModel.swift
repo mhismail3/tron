@@ -112,7 +112,7 @@ class ChatViewModel: ObservableObject, ChatEventContext {
         logger.error(message, category: .events)
     }
 
-    /// Show error to user (shared by BrowserEventContext and AskUserQuestionContext)
+    /// Show error to user (required by LoggingContext, used by all coordinators)
     func showError(_ message: String) {
         showErrorAlert(message)
     }

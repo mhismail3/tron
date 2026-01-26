@@ -7,7 +7,7 @@ enum MessageDeletedPlugin: EventPlugin {
 
     // MARK: - Event Data
 
-    struct EventData: Decodable, Sendable {
+    struct EventData: StandardEventData {
         let type: String
         let sessionId: String?
         let timestamp: String?
@@ -31,10 +31,6 @@ enum MessageDeletedPlugin: EventPlugin {
     }
 
     // MARK: - Protocol Implementation
-
-    static func sessionId(from event: EventData) -> String? {
-        event.sessionId
-    }
 
     static func transform(_ event: EventData) -> (any EventResult)? {
         Result(

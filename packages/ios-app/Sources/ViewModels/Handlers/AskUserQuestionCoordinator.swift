@@ -4,6 +4,9 @@ import Foundation
 ///
 /// This protocol allows AskUserQuestionCoordinator to be tested independently from ChatViewModel
 /// by defining the minimum interface it needs to interact with state and dependencies.
+///
+/// Inherits from:
+/// - LoggingContext: Logging and error display (showError)
 @MainActor
 protocol AskUserQuestionContext: LoggingContext {
     /// AskUserQuestion state container
@@ -11,9 +14,6 @@ protocol AskUserQuestionContext: LoggingContext {
 
     /// Messages array for updating tool status
     var messages: [ChatMessage] { get set }
-
-    /// Show error alert to user
-    func showError(_ message: String)
 
     /// Send the formatted answer as a new prompt
     func sendAnswerPrompt(_ text: String)

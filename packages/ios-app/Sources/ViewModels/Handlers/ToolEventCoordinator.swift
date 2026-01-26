@@ -60,7 +60,7 @@ final class ToolEventCoordinator {
                 return
             }
         } else if let pendingRender = context.renderAppUIChipTracker.consumePendingRenderStart(toolCallId: pluginResult.toolCallId) {
-            // Handle pending UI render start (legacy path) - via tracker
+            // Handle pending UI render (race condition: chunk arrived before tool start)
             let chipData = RenderAppUIChipData(
                 toolCallId: pluginResult.toolCallId,
                 canvasId: pendingRender.canvasId,

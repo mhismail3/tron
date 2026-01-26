@@ -2,6 +2,9 @@ import Foundation
 
 /// Protocol defining the context required by UICanvasCoordinator.
 /// Allows ChatViewModel to be abstracted for independent testing of UI canvas rendering.
+///
+/// Inherits from:
+/// - LoggingContext: Logging and error display
 @MainActor
 protocol UICanvasContext: LoggingContext {
 

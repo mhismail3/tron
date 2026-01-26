@@ -4,14 +4,13 @@ import Foundation
 ///
 /// This protocol allows ConnectionCoordinator to be tested independently from ChatViewModel
 /// by defining the minimum interface it needs to interact with connection and session state.
+///
+/// Inherits from:
+/// - LoggingContext: Logging and error display (showError)
+/// - SessionIdentifiable: Session ID access
+/// - ProcessingTrackable: Processing state and dashboard updates
 @MainActor
-protocol ConnectionContext: LoggingContext {
-    /// Current session ID
-    var sessionId: String { get }
-
-    /// Whether the agent is currently processing
-    var isProcessing: Bool { get set }
-
+protocol ConnectionContext: LoggingContext, SessionIdentifiable, ProcessingTrackable {
     /// Whether the view should dismiss (e.g., session not found)
     var shouldDismiss: Bool { get set }
 
@@ -36,17 +35,11 @@ protocol ConnectionContext: LoggingContext {
     /// Update todos in the todo state
     func updateTodos(_ todos: [RpcTodoItem], summary: String?)
 
-    /// Set session processing state in dashboard
-    func setSessionProcessing(_ isProcessing: Bool)
-
     /// Append a "catching up" message and return its ID
     func appendCatchingUpMessage() -> UUID
 
     /// Process catch-up content from resumed session
     func processCatchUpContent(accumulatedText: String, toolCalls: [CurrentTurnToolCall]) async
-
-    /// Show error alert to user
-    func showErrorAlert(_ message: String)
 }
 
 /// Coordinates session connection, reconnection, and catch-up for ChatViewModel.
@@ -104,7 +97,7 @@ final class ConnectionCoordinator {
             if errorString.contains("not found") || errorString.contains("does not exist") {
                 context.logWarning("Session \(context.sessionId) not found on server - dismissing view")
                 context.shouldDismiss = true
-                context.showErrorAlert("Session not found on server")
+                context.showError("Session not found on server")
             }
             // Don't show error alert for connection failures - the reconnection UI handles that
             return

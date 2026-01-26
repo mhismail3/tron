@@ -4,6 +4,29 @@ import Foundation
 /// Each plugin can define its own Result type conforming to this protocol.
 protocol EventResult: Sendable {}
 
+// MARK: - Standard Event Data
+
+/// Protocol for event data with standard session identification fields.
+/// ALL EventPlugin.EventData types MUST conform to this protocol.
+/// Provides default sessionId extraction - override only if returning nil or different field.
+protocol StandardEventData: Decodable, Sendable {
+    var type: String { get }
+    var sessionId: String? { get }
+    var timestamp: String? { get }
+}
+
+// MARK: - Default Implementations
+
+extension EventPlugin where EventData: StandardEventData {
+    /// Default implementation extracts sessionId from standard field.
+    /// Override in plugin ONLY if sessionId should return nil or comes from different field.
+    static func sessionId(from event: EventData) -> String? {
+        event.sessionId
+    }
+}
+
+// MARK: - Event Plugin Protocol
+
 /// Protocol for self-contained event types.
 /// Each event type is defined as a single conforming type that handles:
 /// - Parsing from raw JSON data
@@ -15,16 +38,17 @@ protocol EventResult: Sendable {}
 /// enum TextDeltaPlugin: EventPlugin {
 ///     static let eventType = "agent.text_delta"
 ///
-///     struct EventData: Decodable, Sendable {
+///     struct EventData: StandardEventData {
 ///         let type: String
 ///         let sessionId: String?
+///         let timestamp: String?
 ///         let data: DataPayload
 ///         struct DataPayload: Decodable, Sendable { let delta: String }
 ///     }
 ///
 ///     struct Result: EventResult { let delta: String }
 ///
-///     static func sessionId(from event: EventData) -> String? { event.sessionId }
+///     // sessionId(from:) is provided by default extension
 ///     static func transform(_ event: EventData) -> (any EventResult)? {
 ///         Result(delta: event.data.delta)
 ///     }

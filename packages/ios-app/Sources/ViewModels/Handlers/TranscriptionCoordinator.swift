@@ -4,12 +4,15 @@ import Foundation
 ///
 /// This protocol allows TranscriptionCoordinator to be tested independently from ChatViewModel
 /// by defining the minimum interface it needs to interact with audio recording and transcription.
+///
+/// Inherits from:
+/// - LoggingContext: Logging and error display
 @MainActor
 protocol TranscriptionContext: LoggingContext {
     /// Whether audio is currently being recorded
     var isRecording: Bool { get }
 
-    /// Whether the agent is currently processing
+    /// Whether the agent is currently processing (read-only for transcription)
     var isProcessing: Bool { get }
 
     /// Whether transcription is currently in progress

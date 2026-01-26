@@ -5,6 +5,9 @@ import UIKit
 ///
 /// This protocol allows BrowserCoordinator to be tested independently from ChatViewModel
 /// by defining the minimum interface it needs to interact with browser state and RPC calls.
+///
+/// Inherits from:
+/// - LoggingContext: Logging and error display (showError)
 @MainActor
 protocol BrowserEventContext: LoggingContext {
     /// Browser state container
@@ -21,9 +24,6 @@ protocol BrowserEventContext: LoggingContext {
 
     /// RPC: Stop browser streaming
     func stopBrowserStreamRPC() async throws
-
-    /// Show error alert to user
-    func showError(_ message: String)
 }
 
 /// Coordinates browser event handling and session lifecycle for ChatViewModel.

@@ -2,24 +2,23 @@ import Foundation
 
 /// Protocol defining the context required by TurnLifecycleCoordinator.
 /// Allows ChatViewModel to be abstracted for independent testing of turn lifecycle handling.
+///
+/// Inherits from:
+/// - LoggingContext: Logging and error display
+/// - SessionIdentifiable: Session ID access
+/// - ProcessingTrackable: Processing state and setSessionProcessing
+/// - StreamingManaging: Streaming state management
+/// - ToolStateTracking: Tool call state (currentToolMessages, currentTurnToolCalls, etc.)
+/// - BrowserManaging: Browser session management
 @MainActor
-protocol TurnLifecycleContext: LoggingContext {
+protocol TurnLifecycleContext: LoggingContext, SessionIdentifiable, ProcessingTrackable, StreamingManaging, ToolStateTracking, BrowserManaging {
 
     // MARK: - Messages State
 
     /// Messages array to update with metadata
     var messages: [ChatMessage] { get set }
 
-    /// Map of current tool messages by message ID
-    var currentToolMessages: [UUID: ChatMessage] { get set }
-
-    /// Tool calls tracked for the current turn
-    var currentTurnToolCalls: [ToolCallRecord] { get set }
-
     // MARK: - Turn Tracking State
-
-    /// Whether AskUserQuestion was called in the current turn
-    var askUserQuestionCalledInTurn: Bool { get set }
 
     /// ID of the thinking message for the current turn
     var thinkingMessageId: UUID? { get set }
@@ -44,28 +43,11 @@ protocol TurnLifecycleContext: LoggingContext {
     /// Current model being used
     var currentModel: String { get }
 
-    /// Whether the agent is currently processing
-    var isProcessing: Bool { get set }
-
     /// ID of the catching-up notification message
     var catchingUpMessageId: UUID? { get set }
 
     /// Whether user dismissed browser this turn
     var userDismissedBrowserThisTurn: Bool { get set }
-
-    /// Current session ID
-    var sessionId: String { get }
-
-    // MARK: - Streaming Management
-
-    /// Flush any pending text updates before state changes
-    func flushPendingTextUpdates()
-
-    /// Finalize the current streaming message
-    func finalizeStreamingMessage()
-
-    /// Reset the streaming manager
-    func resetStreamingManager()
 
     // MARK: - Thinking State
 
@@ -89,11 +71,6 @@ protocol TurnLifecycleContext: LoggingContext {
     /// Reset the UI update queue
     func resetUIUpdateQueue()
 
-    // MARK: - Browser
-
-    /// Close the browser session
-    func closeBrowserSession()
-
     // MARK: - Context State
 
     /// Update context state from normalized usage
@@ -115,9 +92,6 @@ protocol TurnLifecycleContext: LoggingContext {
 
     /// Update session tokens in database
     func updateSessionTokens(inputTokens: Int, outputTokens: Int, lastTurnInputTokens: Int, cacheReadTokens: Int, cacheCreationTokens: Int, cost: Double) throws
-
-    /// Set session processing state in database
-    func setSessionProcessing(_ isProcessing: Bool)
 
     /// Update session dashboard info in database
     func updateSessionDashboardInfo(lastAssistantResponse: String?, lastToolCount: Int?)

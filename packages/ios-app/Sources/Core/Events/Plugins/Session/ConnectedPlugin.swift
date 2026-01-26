@@ -8,10 +8,13 @@ enum ConnectedPlugin: EventPlugin {
 
     // MARK: - Event Data
 
-    struct EventData: Decodable, Sendable {
+    struct EventData: StandardEventData {
         let type: String
         let timestamp: String?
         let data: DataPayload?
+
+        /// Connection events don't have a sessionId field - always nil.
+        var sessionId: String? { nil }
 
         struct DataPayload: Decodable, Sendable {
             let clientId: String?
@@ -30,8 +33,9 @@ enum ConnectedPlugin: EventPlugin {
 
     // MARK: - Protocol Implementation
 
+    /// Override: Connection events always return nil for sessionId.
     static func sessionId(from event: EventData) -> String? {
-        nil  // Connection events don't have sessionId
+        nil
     }
 
     static func transform(_ event: EventData) -> (any EventResult)? {
