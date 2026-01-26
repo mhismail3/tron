@@ -5,7 +5,7 @@
  */
 
 import type { TronTool, TronToolResult } from '../../types/index.js';
-import { createLogger } from '../../logging/logger.js';
+import { createLogger } from '../../logging/index.js';
 
 const logger = createLogger('tool:query-subagent');
 
@@ -195,18 +195,31 @@ Use this to monitor sub-agents you've spawned with SpawnSubagent or SpawnTmuxAge
       };
     }
 
+    const startTime = Date.now();
     logger.debug('Querying subagent', { sessionId, queryType, limit });
 
     try {
       const result = await this.config.onQuery(sessionId, queryType, limit ?? 20);
 
       if (!result.success) {
+        logger.warn('Subagent query failed', { sessionId, queryType, error: result.error });
         return {
           content: `Failed to query sub-agent: ${result.error ?? 'Unknown error'}`,
           isError: true,
           details: result,
         };
       }
+
+      const duration = Date.now() - startTime;
+      logger.info('Subagent query completed', {
+        sessionId,
+        queryType,
+        duration,
+        hasStatus: !!result.status,
+        eventsCount: result.events?.length,
+        logsCount: result.logs?.length,
+        hasOutput: !!result.output,
+      });
 
       // Format response based on query type
       let content: string;

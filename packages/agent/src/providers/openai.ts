@@ -15,7 +15,7 @@ import type {
   TextContent,
   ToolCall,
 } from '../types/index.js';
-import { createLogger } from '../logging/logger.js';
+import { createLogger } from '../logging/index.js';
 import { withProviderRetry, type StreamRetryConfig } from './base/index.js';
 
 const logger = createLogger('openai');

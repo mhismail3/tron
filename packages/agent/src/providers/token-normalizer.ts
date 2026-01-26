@@ -41,7 +41,7 @@
  */
 
 import type { TokenUsage, ProviderType } from '../types/messages.js';
-import { createLogger } from '../logging/logger.js';
+import { createLogger } from '../logging/index.js';
 
 const logger = createLogger('token-normalizer');
 

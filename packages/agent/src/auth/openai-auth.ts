@@ -5,7 +5,7 @@
  * from OAuth to API key, matching the pattern used by Anthropic and Google.
  */
 
-import { createLogger } from '../logging/logger.js';
+import { createLogger } from '../logging/index.js';
 import { loadAuthStorage, saveProviderOAuthTokens } from './unified.js';
 import type { ServerAuth } from './types.js';
 

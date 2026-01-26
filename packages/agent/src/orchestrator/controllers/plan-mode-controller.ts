@@ -13,7 +13,7 @@
  * - Persist plan mode transitions as events
  */
 
-import { createLogger } from '../../logging/logger.js';
+import { createLogger } from '../../logging/index.js';
 import type { ActiveSession } from '../types.js';
 
 const logger = createLogger('plan-mode-controller');

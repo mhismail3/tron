@@ -17,7 +17,7 @@
  * - Reduces coupling to orchestrator
  * - Makes the model switching flow explicit and traceable
  */
-import { createLogger } from '../../logging/logger.js';
+import { createLogger } from '../../logging/index.js';
 import type { EventStore } from '../../events/event-store.js';
 import type { SessionId } from '../../events/types.js';
 import type { AuthProvider } from '../session/auth-provider.js';

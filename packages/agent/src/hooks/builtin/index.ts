@@ -13,7 +13,7 @@
  */
 
 import type { HookEngine } from '../engine.js';
-import { createLogger } from '../../logging/logger.js';
+import { createLogger } from '../../logging/index.js';
 
 // Export individual hook creators
 export {

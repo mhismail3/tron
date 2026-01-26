@@ -6,7 +6,7 @@
  */
 
 import type { TronTool, TronToolResult } from '../../types/index.js';
-import { createLogger } from '../../logging/logger.js';
+import { createLogger } from '../../logging/index.js';
 
 const logger = createLogger('tool:spawn-tmux-agent');
 

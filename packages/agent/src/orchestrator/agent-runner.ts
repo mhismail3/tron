@@ -27,7 +27,7 @@
  * handles linearization automatically.
  */
 // Direct imports to avoid circular dependencies through index.js
-import { createLogger } from '../logging/logger.js';
+import { createLogger } from '../logging/index.js';
 import { withLoggingContext } from '../logging/log-context.js';
 import { normalizeContentBlocks } from '../utils/content-normalizer.js';
 import { PersistenceError } from '../utils/errors.js';

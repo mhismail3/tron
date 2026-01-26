@@ -23,7 +23,7 @@ import type {
   ThinkingContent,
   ToolCall,
 } from '../types/index.js';
-import { createLogger } from '../logging/logger.js';
+import { createLogger } from '../logging/index.js';
 import { withProviderRetry, type StreamRetryConfig } from './base/index.js';
 import {
   type GoogleOAuthEndpoint,

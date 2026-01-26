@@ -7,7 +7,7 @@
 
 import * as fs from 'fs/promises';
 import type { TronTool, TronToolResult } from '../../types/index.js';
-import { createLogger } from '../../logging/logger.js';
+import { createLogger, categorizeError } from '../../logging/index.js';
 import {
   resolvePath,
   validateRequiredString,
@@ -147,6 +147,7 @@ export class EditTool implements TronTool {
     const newString = args.new_string as string;
     const replaceAll = (args.replace_all as boolean) ?? false;
 
+    const startTime = Date.now();
     logger.debug('Editing file', { filePath, replaceAll });
 
     // Validate inputs
@@ -196,9 +197,13 @@ export class EditTool implements TronTool {
       // Write the file
       await fs.writeFile(filePath, newContent, 'utf-8');
 
-      logger.info('File edited successfully', {
+      const duration = Date.now() - startTime;
+      logger.info('File edit completed', {
         filePath,
         replacements,
+        oldStringLength: oldString.length,
+        newStringLength: newString.length,
+        duration,
       });
 
       // Generate unified diff for display
@@ -223,7 +228,15 @@ export class EditTool implements TronTool {
         },
       };
     } catch (error) {
-      logger.error('File edit failed', { filePath, error: (error as Error).message });
+      const duration = Date.now() - startTime;
+      const structuredError = categorizeError(error, { filePath, operation: 'edit' });
+      logger.error('File edit failed', {
+        filePath,
+        error: structuredError.message,
+        code: structuredError.code,
+        category: structuredError.category,
+        duration,
+      });
       return formatFsError(error, filePath, 'editing');
     }
   }

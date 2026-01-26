@@ -7,7 +7,7 @@
 
 import type { TronTool, TronToolResult } from '../../types/index.js';
 import type { TodoItem } from '../../todos/types.js';
-import { createLogger } from '../../logging/logger.js';
+import { createLogger } from '../../logging/index.js';
 
 const logger = createLogger('tool:todo-write');
 

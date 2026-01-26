@@ -3,7 +3,7 @@
  *
  * Sends audio to the local transcription sidecar and returns the result.
  */
-import { createLogger } from '../logging/logger.js';
+import { createLogger } from '../logging/index.js';
 import { getSettings } from '../settings/index.js';
 import type {
   TranscribeAudioParams,

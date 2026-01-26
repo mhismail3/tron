@@ -7,7 +7,7 @@
 
 import type Database from 'better-sqlite3';
 import type { TodoItem, BackloggedTask, BacklogReason } from './types.js';
-import { createLogger } from '../logging/logger.js';
+import { createLogger } from '../logging/index.js';
 
 const logger = createLogger('backlog-service');
 

@@ -29,7 +29,7 @@ import {
 import { CLAUDE_MODELS, DEFAULT_MODEL } from './anthropic.js';
 import { OPENAI_MODELS } from './openai.js';
 import { GEMINI_MODELS } from './google.js';
-import { createLogger } from '../logging/logger.js';
+import { createLogger } from '../logging/index.js';
 
 const logger = createLogger('provider-factory');
 

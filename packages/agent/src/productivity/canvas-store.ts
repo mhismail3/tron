@@ -11,7 +11,7 @@ import * as fs from 'fs';
 import * as fsAsync from 'fs/promises';
 import * as path from 'path';
 import { getTronDataDir } from '../settings/loader.js';
-import { createLogger } from '../logging/logger.js';
+import { createLogger } from '../logging/index.js';
 
 const logger = createLogger('canvas-store');
 

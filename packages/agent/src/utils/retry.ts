@@ -5,7 +5,7 @@
  * Handles rate limits, network errors, and transient failures.
  */
 
-import { createLogger } from '../logging/logger.js';
+import { createLogger } from '../logging/index.js';
 import { parseError, type ParsedError } from './errors.js';
 
 const logger = createLogger('retry');

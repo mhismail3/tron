@@ -11,7 +11,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import type { ProviderType } from '../providers/index.js';
-import { createLogger } from '../logging/logger.js';
+import { createLogger } from '../logging/index.js';
 
 const logger = createLogger('context:system-prompts');
 

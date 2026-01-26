@@ -34,7 +34,7 @@
  * const rulesTracker = RulesTracker.fromEvents(events);
  * ```
  */
-import { createLogger } from '../../logging/logger.js';
+import { createLogger } from '../../logging/index.js';
 import type { SessionEvent as TronSessionEvent } from '../../events/types.js';
 import { PlanModeHandler, type PlanModeState } from '../handlers/plan-mode.js';
 

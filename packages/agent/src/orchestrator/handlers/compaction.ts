@@ -30,7 +30,7 @@
  * await persister.appendMultiple(events);
  * ```
  */
-import { createLogger } from '../../logging/logger.js';
+import { createLogger } from '../../logging/index.js';
 import type { EventType } from '../../events/types.js';
 
 const logger = createLogger('compaction-handler');

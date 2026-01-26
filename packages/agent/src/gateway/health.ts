@@ -4,7 +4,7 @@
  * Simple HTTP server for health checks, metrics, and API endpoints.
  */
 import * as http from 'http';
-import { createLogger } from '../logging/logger.js';
+import { createLogger } from '../logging/index.js';
 import {
   getProviderAuthSync,
   saveProviderAuthSync,

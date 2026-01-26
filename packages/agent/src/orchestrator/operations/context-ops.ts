@@ -10,7 +10,7 @@
  * Phase 6 of orchestrator refactoring.
  */
 // Direct imports to avoid circular dependencies through index.js
-import { createLogger } from '../../logging/logger.js';
+import { createLogger } from '../../logging/index.js';
 import { KeywordSummarizer, type Summarizer } from '../../context/summarizer.js';
 import type {
   ContextSnapshot,

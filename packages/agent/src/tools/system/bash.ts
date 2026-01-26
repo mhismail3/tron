@@ -6,7 +6,7 @@
 
 import { spawn } from 'child_process';
 import type { TronTool, TronToolResult } from '../../types/index.js';
-import { createLogger } from '../../logging/logger.js';
+import { createLogger } from '../../logging/index.js';
 import { getSettings } from '../../settings/index.js';
 
 const logger = createLogger('tool:bash');

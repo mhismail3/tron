@@ -9,7 +9,7 @@
  * Phase 8 of orchestrator refactoring.
  */
 // Direct imports to avoid circular dependencies through index.js
-import { createLogger } from '../../logging/logger.js';
+import { createLogger } from '../../logging/index.js';
 import { loadServerAuth } from '../../auth/oauth.js';
 import { loadGoogleServerAuth, type GoogleAuth } from '../../auth/google-oauth.js';
 import { loadOpenAIServerAuth } from '../../auth/openai-auth.js';

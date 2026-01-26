@@ -5,7 +5,7 @@
  * Handles tool_use, tool_result, text, and thinking block types with appropriate
  * truncation for large content.
  */
-import { createLogger } from '../logging/logger.js';
+import { createLogger } from '../logging/index.js';
 import {
   normalizeToolArguments,
   normalizeToolResultId,

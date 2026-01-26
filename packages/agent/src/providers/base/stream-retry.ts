@@ -9,7 +9,7 @@
  */
 
 import type { StreamEvent } from '../../types/index.js';
-import { createLogger } from '../../logging/logger.js';
+import { createLogger } from '../../logging/index.js';
 import { parseError, formatError } from '../../utils/errors.js';
 import {
   calculateBackoffDelay,

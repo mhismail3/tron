@@ -16,7 +16,7 @@
  */
 import { spawn, exec } from 'child_process';
 import { promisify } from 'util';
-import { createLogger } from '../logging/logger.js';
+import { createLogger } from '../logging/index.js';
 
 const execAsync = promisify(exec);
 const logger = createLogger('tmux');

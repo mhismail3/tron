@@ -8,7 +8,7 @@
 
 import * as os from 'os';
 import * as path from 'path';
-import { createLogger } from '../logging/logger.js';
+import { createLogger } from '../logging/index.js';
 import type {
   GuardrailRule,
   PatternRule,

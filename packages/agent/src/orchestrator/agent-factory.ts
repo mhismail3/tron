@@ -9,7 +9,7 @@
  * Phase 7 of orchestrator refactoring.
  */
 // Direct imports to avoid circular dependencies through index.js
-import { createLogger } from '../logging/logger.js';
+import { createLogger } from '../logging/index.js';
 import { TronAgent } from '../agent/tron-agent.js';
 import type { AgentConfig } from '../agent/types.js';
 import {

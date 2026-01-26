@@ -8,7 +8,7 @@
 import * as fs from 'fs';
 import * as fsPromises from 'fs/promises';
 import * as path from 'path';
-import { createLogger } from '../logging/logger.js';
+import { createLogger } from '../logging/index.js';
 import { getTronDataDir } from '../settings/index.js';
 import type { AuthStorage, ProviderAuth, ProviderId, OAuthTokens } from './types.js';
 

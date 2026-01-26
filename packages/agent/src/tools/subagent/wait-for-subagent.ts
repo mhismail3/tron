@@ -7,7 +7,7 @@
 
 import type { TronTool, TronToolResult } from '../../types/index.js';
 import type { SubagentResult } from './subagent-tracker.js';
-import { createLogger } from '../../logging/logger.js';
+import { createLogger } from '../../logging/index.js';
 
 const logger = createLogger('tool:wait-for-subagent');
 

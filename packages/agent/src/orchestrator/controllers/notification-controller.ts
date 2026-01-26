@@ -11,7 +11,7 @@
  * - Handle notification delivery results
  */
 
-import { createLogger } from '../../logging/logger.js';
+import { createLogger } from '../../logging/index.js';
 import type { EventStore } from '../../events/event-store.js';
 import type { APNSService, APNSNotification } from '../../external/apns/index.js';
 import type { NotifyAppResult } from '../../tools/ui/notify-app.js';

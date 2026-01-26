@@ -14,7 +14,7 @@
  */
 
 import * as crypto from 'crypto';
-import { createLogger } from '../../logging/logger.js';
+import { createLogger } from '../../logging/index.js';
 import { BacklogService, createBacklogService } from '../../todos/backlog-service.js';
 import type { TodoItem, BackloggedTask } from '../../todos/types.js';
 import type { EventStore } from '../../events/event-store.js';

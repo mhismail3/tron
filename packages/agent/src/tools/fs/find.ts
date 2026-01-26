@@ -8,7 +8,7 @@
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import type { TronTool, TronToolResult } from '../../types/index.js';
-import { createLogger } from '../../logging/logger.js';
+import { createLogger, categorizeError } from '../../logging/index.js';
 import { getSettings } from '../../settings/index.js';
 import {
   resolvePath,
@@ -108,6 +108,7 @@ export class FindTool implements TronTool {
     const sortByTime = (args.sortByTime as boolean) ?? false;
     const maxResults = (args.maxResults as number) ?? settings.defaultMaxResults;
 
+    const startTime = Date.now();
     logger.debug('Find search', { pattern: patternStr, searchPath, typeFilter, maxDepth });
 
     try {
@@ -157,7 +158,14 @@ export class FindTool implements TronTool {
       const truncated = entries.length >= maxResults;
       const output = this.formatEntries(entries, searchPath, showSize);
 
-      logger.debug('Find completed', { fileCount: entries.length, truncated });
+      const duration = Date.now() - startTime;
+      logger.info('Find search completed', {
+        pattern: patternStr,
+        searchPath,
+        fileCount: entries.length,
+        truncated,
+        duration,
+      });
 
       return {
         content: output,
@@ -170,7 +178,16 @@ export class FindTool implements TronTool {
         },
       };
     } catch (error) {
-      logger.error('Find failed', { searchPath, error: (error as Error).message });
+      const duration = Date.now() - startTime;
+      const structuredError = categorizeError(error, { searchPath, pattern: patternStr, operation: 'find' });
+      logger.error('Find search failed', {
+        searchPath,
+        pattern: patternStr,
+        error: structuredError.message,
+        code: structuredError.code,
+        category: structuredError.category,
+        duration,
+      });
       return formatFsError(error, searchPath, 'searching');
     }
   }

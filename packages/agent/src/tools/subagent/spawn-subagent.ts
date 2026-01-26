@@ -8,7 +8,7 @@
 import type { TronTool, TronToolResult } from '../../types/index.js';
 import type { SubAgentTracker } from './subagent-tracker.js';
 import type { SessionId } from '../../events/types.js';
-import { createLogger } from '../../logging/logger.js';
+import { createLogger } from '../../logging/index.js';
 
 const logger = createLogger('tool:spawn-subagent');
 

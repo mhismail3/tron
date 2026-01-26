@@ -5,7 +5,7 @@
  * Handles token generation, caching, and notification delivery.
  */
 
-import { createLogger } from '../../logging/logger.js';
+import { createLogger } from '../../logging/index.js';
 import * as http2 from 'http2';
 import * as fs from 'fs';
 import * as path from 'path';

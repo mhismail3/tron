@@ -10,7 +10,7 @@ import type {
   PreCompactHookContext,
   HookResult,
 } from '../types.js';
-import { createLogger } from '../../logging/logger.js';
+import { createLogger } from '../../logging/index.js';
 
 const logger = createLogger('hooks:pre-compact');
 

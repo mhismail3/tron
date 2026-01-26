@@ -6,7 +6,7 @@
 
 import * as fs from 'fs/promises';
 import type { TronTool, TronToolResult } from '../../types/index.js';
-import { createLogger } from '../../logging/logger.js';
+import { createLogger, categorizeError } from '../../logging/index.js';
 import { getSettings } from '../../settings/index.js';
 import {
   truncateOutput,
@@ -72,6 +72,7 @@ export class ReadTool implements TronTool {
     const offset = (args.offset as number | undefined) ?? 0;
     const limit = (args.limit as number | undefined) ?? settings.defaultLimitLines;
 
+    const startTime = Date.now();
     logger.debug('Reading file', { filePath, offset, limit });
 
     try {
@@ -101,11 +102,14 @@ export class ReadTool implements TronTool {
         truncationMessage: `\n\n... [Output truncated: ${totalLines} total lines, showing ${selectedLines.length} lines. Output exceeded ${maxOutputTokens.toLocaleString()} token limit. Use offset/limit parameters to read specific sections.]`,
       });
 
-      logger.debug('File read successfully', {
+      const duration = Date.now() - startTime;
+      logger.info('File read completed', {
         filePath,
+        bytesRead: content.length,
         totalLines,
         linesReturned: selectedLines.length,
         truncated: truncateResult.truncated,
+        duration,
       });
 
       return {
@@ -125,7 +129,15 @@ export class ReadTool implements TronTool {
         },
       };
     } catch (error) {
-      logger.error('File read failed', { filePath, error: (error as Error).message });
+      const duration = Date.now() - startTime;
+      const structuredError = categorizeError(error, { filePath, operation: 'read' });
+      logger.error('File read failed', {
+        filePath,
+        error: structuredError.message,
+        code: structuredError.code,
+        category: structuredError.category,
+        duration,
+      });
       return formatFsError(error, filePath, 'reading');
     }
   }

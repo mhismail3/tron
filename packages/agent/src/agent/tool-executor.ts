@@ -17,7 +17,7 @@ import type {
 import type { ToolExecutionRequest, ToolExecutionResponse } from './types.js';
 import type { GuardrailEngine } from '../guardrails/engine.js';
 import type { SessionState } from '../guardrails/types.js';
-import { createLogger } from '../logging/logger.js';
+import { createLogger, categorizeError } from '../logging/index.js';
 
 const logger = createLogger('agent:tools');
 
@@ -69,7 +69,21 @@ export class AgentToolExecutor implements IToolExecutor {
     const tool = this.tools.get(request.toolName);
     this.activeTool = request.toolName;
 
+    // Log tool execution start
+    logger.debug('Tool execution starting', {
+      toolName: request.toolName,
+      toolCallId: request.toolCallId,
+      sessionId: this.sessionId,
+      hasArguments: Object.keys(request.arguments).length > 0,
+    });
+
     if (!tool) {
+      logger.warn('Tool not found', {
+        toolName: request.toolName,
+        toolCallId: request.toolCallId,
+        sessionId: this.sessionId,
+        availableTools: Array.from(this.tools.keys()).slice(0, 10),
+      });
       this.activeTool = null;
       return {
         toolCallId: request.toolCallId,
@@ -149,6 +163,20 @@ export class AgentToolExecutor implements IToolExecutor {
     try {
       result = await this.invokeToolFunction(tool, request.toolCallId, args);
     } catch (error) {
+      const structuredError = categorizeError(error, {
+        toolName: request.toolName,
+        toolCallId: request.toolCallId,
+        sessionId: this.sessionId,
+      });
+      logger.error('Tool execution failed', {
+        toolName: request.toolName,
+        toolCallId: request.toolCallId,
+        sessionId: this.sessionId,
+        error: structuredError.message,
+        code: structuredError.code,
+        category: structuredError.category,
+        recoverable: structuredError.recoverable,
+      });
       result = {
         content: `Tool execution error: ${error instanceof Error ? error.message : String(error)}`,
         isError: true,
@@ -191,6 +219,17 @@ export class AgentToolExecutor implements IToolExecutor {
     await this.executePostHooks(request, result, duration);
 
     this.activeTool = null;
+
+    // Log successful completion
+    if (!result.isError) {
+      logger.info('Tool execution completed', {
+        toolName: request.toolName,
+        toolCallId: request.toolCallId,
+        sessionId: this.sessionId,
+        duration,
+        resultSize: finalContent.length,
+      });
+    }
 
     return {
       toolCallId: request.toolCallId,
@@ -245,10 +284,23 @@ export class AgentToolExecutor implements IToolExecutor {
     }
 
     if (preResult.action === 'block') {
+      logger.info('Tool blocked by PreToolUse hook', {
+        toolName: request.toolName,
+        toolCallId: request.toolCallId,
+        sessionId: this.sessionId,
+        reason: preResult.reason,
+        hooks: preHooks.map(h => h.name),
+      });
       return { blocked: true, reason: preResult.reason };
     }
 
     if (preResult.action === 'modify' && preResult.modifications) {
+      logger.debug('Tool arguments modified by PreToolUse hook', {
+        toolName: request.toolName,
+        toolCallId: request.toolCallId,
+        sessionId: this.sessionId,
+        modifiedKeys: Object.keys(preResult.modifications),
+      });
       return {
         blocked: false,
         modifiedArgs: { ...request.arguments, ...preResult.modifications },

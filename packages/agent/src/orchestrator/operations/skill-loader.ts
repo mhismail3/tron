@@ -9,7 +9,7 @@
  * Phase 3 of orchestrator refactoring - skill/context loading logic.
  */
 // Direct imports to avoid circular dependencies through index.js
-import { createLogger } from '../../logging/logger.js';
+import { createLogger } from '../../logging/index.js';
 import { buildSkillContext } from '../../skills/skill-injector.js';
 import { DEFAULT_PLAN_MODE_BLOCKED_TOOLS } from '../../rpc/types.js';
 import type {

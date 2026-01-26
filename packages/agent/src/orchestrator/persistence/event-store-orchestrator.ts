@@ -61,7 +61,7 @@ import * as crypto from 'crypto';
 import * as path from 'path';
 import * as os from 'os';
 // Direct imports to avoid circular dependencies through index.js
-import { createLogger } from '../../logging/logger.js';
+import { createLogger } from '../../logging/index.js';
 import { TronAgent } from '../../agent/tron-agent.js';
 import { EventStore } from '../../events/event-store.js';
 import {

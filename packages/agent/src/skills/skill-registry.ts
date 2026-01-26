@@ -13,7 +13,7 @@ import type {
   SkillRegistryOptions,
 } from './types.js';
 import { scanAllSkills, getGlobalSkillsDir, getProjectSkillsDir } from './skill-loader.js';
-import { createLogger } from '../logging/logger.js';
+import { createLogger } from '../logging/index.js';
 
 const logger = createLogger('skill-registry');
 

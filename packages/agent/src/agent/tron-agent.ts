@@ -34,7 +34,7 @@ import { HookEngine } from '../hooks/engine.js';
 import { ContextManager, createContextManager } from '../context/context-manager.js';
 import type { Summarizer } from '../context/summarizer.js';
 import type { HookDefinition } from '../hooks/types.js';
-import { createLogger } from '../logging/logger.js';
+import { createLogger } from '../logging/index.js';
 import type {
   AgentConfig,
   AgentOptions,

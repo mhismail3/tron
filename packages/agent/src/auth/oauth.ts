@@ -6,7 +6,7 @@
  */
 
 import crypto from 'crypto';
-import { createLogger } from '../logging/logger.js';
+import { createLogger } from '../logging/index.js';
 import { getSettings } from '../settings/index.js';
 
 const logger = createLogger('oauth');

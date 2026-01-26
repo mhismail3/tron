@@ -27,7 +27,7 @@ import * as fs from 'fs/promises';
 import * as path from 'path';
 import { spawn } from 'child_process';
 import type { HookDefinition, HookType, AnyHookContext, HookResult } from './types.js';
-import { createLogger } from '../logging/logger.js';
+import { createLogger } from '../logging/index.js';
 import { getSettings } from '../settings/index.js';
 
 const logger = createLogger('hooks:discovery');

@@ -5,7 +5,7 @@
  * log of all evaluations for debugging and analysis.
  */
 
-import { createLogger } from '../../logging/logger.js';
+import { createLogger } from '../../logging/index.js';
 import type { AuditEntry, GuardrailEvaluation } from '../types.js';
 import { DEFAULT_GUARDRAIL_AUDIT } from '../../settings/defaults.js';
 

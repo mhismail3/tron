@@ -11,7 +11,7 @@ import type {
   RegisteredHook,
   AnyHookContext,
 } from './types.js';
-import { createLogger } from '../logging/logger.js';
+import { createLogger } from '../logging/index.js';
 import { getSettings } from '../settings/index.js';
 
 const logger = createLogger('hooks:engine');

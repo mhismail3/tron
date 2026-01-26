@@ -6,7 +6,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import * as loggerModule from '../../logging/logger.js';
+import * as loggerModule from '../../logging/index.js';
 
 describe('TronAgent Turn Logging', () => {
   let traceSpy: ReturnType<typeof vi.spyOn>;

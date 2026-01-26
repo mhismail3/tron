@@ -11,7 +11,7 @@
 import * as path from 'path';
 import * as os from 'os';
 // Direct imports to avoid circular dependencies through index.js
-import { createLogger } from '../../logging/logger.js';
+import { createLogger } from '../../logging/index.js';
 import { EventStore } from '../../events/event-store.js';
 import { WorktreeCoordinator } from '../../session/worktree-coordinator.js';
 import { SkillTracker, createSkillTracker, type SkillTrackingEvent } from '../../skills/skill-tracker.js';

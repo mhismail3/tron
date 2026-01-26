@@ -8,7 +8,7 @@
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import type { TronTool, TronToolResult } from '../../types/index.js';
-import { createLogger } from '../../logging/logger.js';
+import { createLogger } from '../../logging/index.js';
 import { getSettings } from '../../settings/index.js';
 import {
   truncateOutput,

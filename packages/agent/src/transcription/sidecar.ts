@@ -3,7 +3,7 @@
  *
  * Starts the local transcription sidecar when the Tron server boots.
  */
-import { createLogger } from '../logging/logger.js';
+import { createLogger } from '../logging/index.js';
 import { getSettings } from '../settings/index.js';
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { existsSync } from 'node:fs';

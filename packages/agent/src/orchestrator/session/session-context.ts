@@ -41,7 +41,7 @@
  * ```
  */
 // Direct imports to avoid circular dependencies through index.js
-import { createLogger } from '../../logging/logger.js';
+import { createLogger } from '../../logging/index.js';
 import type { EventStore } from '../../events/event-store.js';
 import type {
   EventType,

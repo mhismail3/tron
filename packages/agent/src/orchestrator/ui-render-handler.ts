@@ -20,7 +20,7 @@
  * 3. tool_execution_end (RenderAppUI) → Emit ui_render_complete/error/retry, persist artifact
  */
 
-import { createLogger } from '../logging/logger.js';
+import { createLogger } from '../logging/index.js';
 import { saveCanvasArtifact } from '../productivity/canvas-store.js';
 import type { SessionId } from '../events/types.js';
 

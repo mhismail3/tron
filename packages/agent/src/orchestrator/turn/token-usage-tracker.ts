@@ -20,7 +20,7 @@
  *
  * @see token-normalizer.ts for detailed documentation on provider differences
  */
-import { createLogger } from '../../logging/logger.js';
+import { createLogger } from '../../logging/index.js';
 import type { ProviderType } from '../../types/messages.js';
 import { normalizeTokenUsage, type NormalizedTokenUsage } from '../../providers/token-normalizer.js';
 

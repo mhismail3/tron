@@ -14,7 +14,7 @@ import type {
   PostToolHookContext,
   HookResult,
 } from '../types.js';
-import { createLogger } from '../../logging/logger.js';
+import { createLogger } from '../../logging/index.js';
 
 const logger = createLogger('hooks:post-tool-use');
 

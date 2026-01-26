@@ -11,6 +11,9 @@ import * as path from 'path';
 import * as os from 'os';
 import type { SkillScanResult, SkillScanError, SkillSource } from './types.js';
 import { parseSkillMd } from './skill-parser.js';
+import { createLogger } from '../logging/index.js';
+
+const logger = createLogger('skills:loader');
 
 // =============================================================================
 // Constants
@@ -63,14 +66,18 @@ export async function scanSkillsDirectory(
   dirPath: string,
   source: SkillSource
 ): Promise<SkillScanResult> {
+  const startTime = Date.now();
   const skills: SkillScanResult['skills'] = [];
   const errors: SkillScanError[] = [];
+
+  logger.debug('Scanning skills directory', { dirPath, source });
 
   // Check if directory exists
   try {
     await fs.access(dirPath);
   } catch {
     // Directory doesn't exist - return empty result (not an error)
+    logger.debug('Skills directory does not exist', { dirPath, source });
     return { skills, errors };
   }
 
@@ -107,14 +114,30 @@ export async function scanSkillsDirectory(
     try {
       const skill = await loadSkill(skillPath, skillMdPath, entryName, source);
       skills.push(skill);
+      logger.debug('Skill loaded', { name: skill.name, source, path: skillPath });
     } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
       errors.push({
         path: skillPath,
-        message: `Failed to load skill: ${error instanceof Error ? error.message : String(error)}`,
+        message: `Failed to load skill: ${errorMessage}`,
         recoverable: true,
+      });
+      logger.warn('Failed to load skill', {
+        path: skillPath,
+        source,
+        error: errorMessage,
       });
     }
   }
+
+  const duration = Date.now() - startTime;
+  logger.info('Skills directory scan completed', {
+    dirPath,
+    source,
+    skillsFound: skills.length,
+    errorsCount: errors.length,
+    duration,
+  });
 
   return { skills, errors };
 }
@@ -180,6 +203,9 @@ export async function scanAllSkills(
   globalResult: SkillScanResult;
   projectResult: SkillScanResult;
 }> {
+  const startTime = Date.now();
+  logger.debug('Scanning all skills', { workingDirectory });
+
   // Get all global directories to scan
   const globalDirs = options?.globalSkillsDir
     ? [options.globalSkillsDir]
@@ -200,6 +226,15 @@ export async function scanAllSkills(
   // Merge results, deduplicating by skill name (first occurrence wins)
   const globalResult = mergeSkillResults(globalResults);
   const projectResult = mergeSkillResults(projectResults);
+
+  const duration = Date.now() - startTime;
+  logger.info('All skills scan completed', {
+    workingDirectory,
+    globalSkills: globalResult.skills.length,
+    projectSkills: projectResult.skills.length,
+    totalErrors: globalResult.errors.length + projectResult.errors.length,
+    duration,
+  });
 
   return { globalResult, projectResult };
 }

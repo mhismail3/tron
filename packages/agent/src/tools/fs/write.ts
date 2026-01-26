@@ -7,7 +7,7 @@
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import type { TronTool, TronToolResult } from '../../types/index.js';
-import { createLogger } from '../../logging/logger.js';
+import { createLogger, categorizeError } from '../../logging/index.js';
 import {
   resolvePath,
   validateRequiredString,
@@ -59,6 +59,7 @@ export class WriteTool implements TronTool {
     const filePath = resolvePath(args.file_path as string, this.config.workingDirectory);
     const content = args.content as string;
 
+    const startTime = Date.now();
     logger.debug('Writing file', { filePath, contentLength: content.length });
 
     try {
@@ -80,10 +81,12 @@ export class WriteTool implements TronTool {
 
       const bytesWritten = Buffer.byteLength(content);
 
-      logger.info('File written successfully', {
+      const duration = Date.now() - startTime;
+      logger.info('File write completed', {
         filePath,
         bytesWritten,
         created: !fileExists,
+        duration,
       });
 
       return {
@@ -98,7 +101,15 @@ export class WriteTool implements TronTool {
         },
       };
     } catch (error) {
-      logger.error('File write failed', { filePath, error: (error as Error).message });
+      const duration = Date.now() - startTime;
+      const structuredError = categorizeError(error, { filePath, operation: 'write' });
+      logger.error('File write failed', {
+        filePath,
+        error: structuredError.message,
+        code: structuredError.code,
+        category: structuredError.category,
+        duration,
+      });
       return formatFsError(error, filePath, 'writing');
     }
   }

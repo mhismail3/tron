@@ -7,7 +7,7 @@
  * Part of Phase 4 of EventStoreOrchestrator refactoring.
  */
 
-import { createLogger } from '../../logging/logger.js';
+import { createLogger } from '../../logging/index.js';
 import type { TurnResult } from '../../agent/types.js';
 import type { AgentRunner } from '../agent-runner.js';
 import type { ActiveSession, AgentRunOptions } from '../types.js';

@@ -15,7 +15,7 @@
 import type { TronTool, TronToolResult } from '../../types/index.js';
 import type { AskUserQuestionParams } from '../../types/ask-user-question.js';
 import { validateAskUserQuestionParams } from '../../types/ask-user-question.js';
-import { createLogger } from '../../logging/logger.js';
+import { createLogger } from '../../logging/index.js';
 
 const logger = createLogger('tool:ask-user-question');
 

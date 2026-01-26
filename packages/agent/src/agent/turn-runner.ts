@@ -25,7 +25,7 @@ import type {
 import type { AgentCompactionHandler } from './compaction-handler.js';
 import type { TurnResult } from './types.js';
 import { calculateCost } from '../usage/index.js';
-import { createLogger } from '../logging/logger.js';
+import { createLogger } from '../logging/index.js';
 
 const logger = createLogger('agent:turn');
 

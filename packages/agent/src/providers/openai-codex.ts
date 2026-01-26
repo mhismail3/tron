@@ -21,7 +21,7 @@ import type {
   ThinkingContent,
   ToolCall,
 } from '../types/index.js';
-import { createLogger } from '../logging/logger.js';
+import { createLogger } from '../logging/index.js';
 import { getSettings } from '../settings/index.js';
 import { saveProviderOAuthTokens, type OAuthTokens } from '../auth/index.js';
 import { withProviderRetry, type StreamRetryConfig } from './base/index.js';

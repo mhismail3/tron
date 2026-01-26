@@ -8,7 +8,7 @@
  * See handlers/ directory for individual handler implementations.
  */
 import { EventEmitter } from 'events';
-import { createLogger } from '../logging/logger.js';
+import { createLogger } from '../logging/index.js';
 import type {
   RpcRequest,
   RpcResponse,

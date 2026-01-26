@@ -7,7 +7,7 @@
 
 import type { TronEvent } from '../types/index.js';
 import type { EventEmitter as IEventEmitter } from './internal-types.js';
-import { createLogger } from '../logging/logger.js';
+import { createLogger } from '../logging/index.js';
 
 const logger = createLogger('agent:events');
 

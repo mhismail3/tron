@@ -8,7 +8,7 @@
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import type { TronTool, TronToolResult } from '../../types/index.js';
-import { createLogger } from '../../logging/logger.js';
+import { createLogger, categorizeError } from '../../logging/index.js';
 import { getSettings } from '../../settings/index.js';
 import {
   truncateOutput,
@@ -113,6 +113,7 @@ export class GrepTool implements TronTool {
     const contextLines = (args.context as number) ?? 0;
     const maxResults = (args.maxResults as number) ?? settings.defaultMaxResults;
 
+    const startTime = Date.now();
     logger.debug('Grep search', { pattern: patternStr, searchPath, globPattern, ignoreCase });
 
     try {
@@ -149,10 +150,13 @@ export class GrepTool implements TronTool {
 
       const resultsTruncated = truncated || truncateResult.truncated;
 
-      logger.debug('Grep completed', {
+      const duration = Date.now() - startTime;
+      logger.info('Grep search completed', {
+        pattern: patternStr,
+        searchPath,
         matchCount: matches.length,
         truncated: resultsTruncated,
-        tokensTruncated: truncateResult.truncated,
+        duration,
       });
 
       return {
@@ -170,7 +174,16 @@ export class GrepTool implements TronTool {
         },
       };
     } catch (error) {
-      logger.error('Grep failed', { searchPath, error: (error as Error).message });
+      const duration = Date.now() - startTime;
+      const structuredError = categorizeError(error, { searchPath, pattern: patternStr, operation: 'grep' });
+      logger.error('Grep search failed', {
+        searchPath,
+        pattern: patternStr,
+        error: structuredError.message,
+        code: structuredError.code,
+        category: structuredError.category,
+        duration,
+      });
       return formatFsError(error, searchPath, 'searching');
     }
   }

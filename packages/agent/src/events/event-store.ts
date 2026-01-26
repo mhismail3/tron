@@ -23,7 +23,7 @@ import {
 } from './types.js';
 import { reconstructFromEvents } from './message-reconstructor.js';
 import { calculateCost } from '../usage/index.js';
-import { createLogger } from '../logging/logger.js';
+import { createLogger } from '../logging/index.js';
 
 const logger = createLogger('event-store');
 
@@ -124,6 +124,13 @@ export class EventStore {
   // ===========================================================================
 
   async createSession(options: CreateSessionOptions): Promise<CreateSessionResult> {
+    const startTime = Date.now();
+    logger.debug('Creating session', {
+      workspacePath: options.workspacePath,
+      model: options.model,
+      title: options.title,
+    });
+
     // Get or create workspace
     const workspace = await this.backend.getOrCreateWorkspace(
       options.workspacePath,
@@ -162,6 +169,15 @@ export class EventStore {
     await this.backend.updateSessionRoot(session.id, rootEvent.id);
     await this.backend.updateSessionHead(session.id, rootEvent.id);
     await this.backend.incrementSessionCounters(session.id, { eventCount: 1 });
+
+    const duration = Date.now() - startTime;
+    logger.info('Session created in EventStore', {
+      sessionId: session.id,
+      workspaceId: workspace.id,
+      model: options.model,
+      rootEventId: rootEvent.id,
+      duration,
+    });
 
     return {
       session: { ...session, rootEventId: rootEvent.id, headEventId: rootEvent.id },
@@ -349,13 +365,21 @@ export class EventStore {
   // ===========================================================================
 
   async fork(fromEventId: EventId, options?: ForkOptions): Promise<ForkResult> {
+    const startTime = Date.now();
+    logger.debug('Forking session', { fromEventId, name: options?.name });
+
     const sourceEvent = await this.backend.getEvent(fromEventId);
     if (!sourceEvent) {
+      logger.error('Fork failed: source event not found', { fromEventId });
       throw new Error(`Event not found: ${fromEventId}`);
     }
 
     const sourceSession = await this.backend.getSession(sourceEvent.sessionId);
     if (!sourceSession) {
+      logger.error('Fork failed: source session not found', {
+        fromEventId,
+        sessionId: sourceEvent.sessionId,
+      });
       throw new Error(`Source session not found: ${sourceEvent.sessionId}`);
     }
 
@@ -392,6 +416,15 @@ export class EventStore {
       await this.backend.updateSessionRoot(forkedSession.id, forkEvent.id);
       await this.backend.updateSessionHead(forkedSession.id, forkEvent.id);
       await this.backend.incrementSessionCounters(forkedSession.id, { eventCount: 1 });
+
+      const duration = Date.now() - startTime;
+      logger.info('Session forked successfully', {
+        sourceSessionId: sourceSession.id,
+        sourceEventId: fromEventId,
+        forkedSessionId: forkedSession.id,
+        forkEventId: forkEvent.id,
+        duration,
+      });
 
       return {
         session: { ...forkedSession, rootEventId: forkEvent.id, headEventId: forkEvent.id },

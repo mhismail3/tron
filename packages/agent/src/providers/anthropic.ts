@@ -18,7 +18,7 @@ import type {
   ThinkingContent,
   ToolCall,
 } from '../types/index.js';
-import { createLogger } from '../logging/logger.js';
+import { createLogger } from '../logging/index.js';
 import { shouldRefreshTokens, refreshOAuthToken, type OAuthTokens } from '../auth/oauth.js';
 import { parseError, formatError } from '../utils/errors.js';
 import { calculateBackoffDelay, type RetryConfig } from '../utils/retry.js';

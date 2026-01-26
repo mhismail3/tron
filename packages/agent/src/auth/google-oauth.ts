@@ -10,7 +10,7 @@
  */
 
 import crypto from 'crypto';
-import { createLogger } from '../logging/logger.js';
+import { createLogger } from '../logging/index.js';
 import { getSettings } from '../settings/index.js';
 import { loadAuthStorage, saveProviderOAuthTokens, getProviderAuth, saveProviderAuth } from './unified.js';
 import type { OAuthTokens, GoogleProviderAuth } from './types.js';
