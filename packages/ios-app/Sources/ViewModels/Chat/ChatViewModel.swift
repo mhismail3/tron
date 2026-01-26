@@ -145,6 +145,8 @@ class ChatViewModel: ObservableObject, ChatEventContext {
     let browserCoordinator = BrowserCoordinator()
     /// Coordinates AskUserQuestion event handling and user interaction
     let askUserQuestionCoordinator = AskUserQuestionCoordinator()
+    /// Coordinates voice recording and transcription
+    let transcriptionCoordinator = TranscriptionCoordinator()
     var currentToolMessages: [UUID: ChatMessage] = [:]
 
     /// Track tool calls for the current turn (for display purposes)
@@ -163,7 +165,6 @@ class ChatViewModel: ObservableObject, ChatEventContext {
     /// Track the first text message ID of the current turn
     /// This message gets the token/model/latency metadata at turn_end
     var firstTextMessageIdForTurn: UUID?
-    let maxRecordingDuration: TimeInterval = 120
 
     // MARK: - Performance Optimization: Batched Updates
     // Note: Batching state moved to StreamingManager which uses CADisplayLink for efficient updates

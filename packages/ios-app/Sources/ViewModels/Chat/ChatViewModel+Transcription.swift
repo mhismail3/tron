@@ -1,113 +1,61 @@
 import Foundation
 
-// MARK: - Voice Transcription
+// MARK: - TranscriptionContext Conformance
 
-private enum AudioProcessingError: Error {
-    case tooSmall(Int)
-}
+extension ChatViewModel: TranscriptionContext {
+    var maxRecordingDuration: TimeInterval { 120 }
 
-extension ChatViewModel {
-
-    func toggleRecording() {
-        if isRecording {
-            audioRecorder.stopRecording()
-        } else {
-            Task {
-                await startRecording()
-            }
-        }
+    func startRecording() async throws {
+        try await audioRecorder.startRecording(maxDuration: maxRecordingDuration)
     }
 
-    private func startRecording() async {
-        guard !isProcessing && !isTranscribing else { return }
-        do {
-            try await audioRecorder.startRecording(maxDuration: maxRecordingDuration)
-        } catch {
-            logger.error("Failed to start recording: \(error.localizedDescription)", category: .chat)
-            appendTranscriptionFailedNotification()
-        }
+    func stopRecording() {
+        audioRecorder.stopRecording()
     }
 
-    func handleRecordingFinished(url: URL?, success: Bool) async {
-        guard success, let url else {
-            appendTranscriptionFailedNotification()
-            return
-        }
-
-        isTranscribing = true
-        defer { isTranscribing = false }
-
-        do {
-            let audioData = try await Task.detached(priority: .utility) { () throws -> Data in
-                defer { try? FileManager.default.removeItem(at: url) }
-                let fileAttributes = try FileManager.default.attributesOfItem(atPath: url.path)
-                let fileSize = (fileAttributes[.size] as? NSNumber)?.intValue ?? 0
-                if fileSize < 1024 {
-                    throw AudioProcessingError.tooSmall(fileSize)
-                }
-                return try Data(contentsOf: url)
-            }.value
-
-            let result = try await rpcClient.media.transcribeAudio(
-                audioData: audioData,
-                mimeType: mimeType(for: url),
-                fileName: url.lastPathComponent
-            )
-
-            let transcript = result.text.trimmingCharacters(in: CharacterSet.whitespacesAndNewlines)
-            guard !transcript.isEmpty else {
-                appendNoSpeechDetectedNotification()
-                return
-            }
-
-            if inputText.trimmingCharacters(in: CharacterSet.whitespacesAndNewlines).isEmpty {
-                inputText = transcript
-            } else {
-                inputText += "\n" + transcript
-            }
-        } catch AudioProcessingError.tooSmall(let fileSize) {
-            logger.error("Recorded audio too small (\(fileSize) bytes)", category: .chat)
-            appendNoSpeechDetectedNotification()
-        } catch {
-            if isNoSpeechDetectedError(error) {
-                logger.info("No speech detected in transcription: \(error.localizedDescription)", category: .chat)
-                appendNoSpeechDetectedNotification()
-                return
-            }
-            logger.error("Transcription failed: \(error.localizedDescription)", category: .chat)
-            appendTranscriptionFailedNotification()
-        }
+    func transcribeAudio(data: Data, mimeType: String, fileName: String) async throws -> String {
+        let result = try await rpcClient.media.transcribeAudio(
+            audioData: data,
+            mimeType: mimeType,
+            fileName: fileName
+        )
+        return result.text
     }
 
-    private func appendTranscriptionFailedNotification() {
+    func loadAudioData(from url: URL) async throws -> Data {
+        try await Task.detached(priority: .utility) { () throws -> Data in
+            defer { try? FileManager.default.removeItem(at: url) }
+            let fileAttributes = try FileManager.default.attributesOfItem(atPath: url.path)
+            let fileSize = (fileAttributes[.size] as? NSNumber)?.intValue ?? 0
+            if fileSize < 1024 {
+                throw AudioFileTooSmallError(size: fileSize)
+            }
+            return try Data(contentsOf: url)
+        }.value
+    }
+
+    func appendTranscriptionFailedNotification() {
         messages.append(.transcriptionFailed())
     }
 
-    private func appendNoSpeechDetectedNotification() {
+    func appendNoSpeechDetectedNotification() {
         messages.append(.transcriptionNoSpeech())
     }
+}
 
-    private func isNoSpeechDetectedError(_ error: Error) -> Bool {
-        let message: String
-        if let rpcError = error as? RPCError {
-            message = rpcError.message
-        } else {
-            message = error.localizedDescription
+// MARK: - Voice Transcription Methods
+
+extension ChatViewModel {
+
+    /// Toggle voice recording on/off
+    func toggleRecording() {
+        Task {
+            await transcriptionCoordinator.toggleRecording(context: self)
         }
-        let normalized = message.lowercased()
-        return normalized.contains("no speech") || normalized.contains("no text")
     }
 
-    private func mimeType(for url: URL) -> String {
-        switch url.pathExtension.lowercased() {
-        case "wav":
-            return "audio/wav"
-        case "m4a":
-            return "audio/m4a"
-        case "caf":
-            return "audio/x-caf"
-        default:
-            return "application/octet-stream"
-        }
+    /// Handle recording finished callback from AudioRecorder
+    func handleRecordingFinished(url: URL?, success: Bool) async {
+        await transcriptionCoordinator.handleRecordingFinished(url: url, success: success, context: self)
     }
 }
