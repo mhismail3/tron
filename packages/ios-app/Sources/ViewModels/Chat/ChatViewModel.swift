@@ -108,6 +108,11 @@ class ChatViewModel: ObservableObject, ChatEventContext {
         logger.error(message, category: .events)
     }
 
+    /// Show error to user (shared by BrowserEventContext and AskUserQuestionContext)
+    func showError(_ message: String) {
+        showErrorAlert(message)
+    }
+
     // MARK: - Internal State (accessible to extensions)
 
     let rpcClient: RPCClient
@@ -138,6 +143,8 @@ class ChatViewModel: ObservableObject, ChatEventContext {
     let uiCanvasCoordinator = UICanvasCoordinator()
     /// Coordinates browser event handling and session lifecycle
     let browserCoordinator = BrowserCoordinator()
+    /// Coordinates AskUserQuestion event handling and user interaction
+    let askUserQuestionCoordinator = AskUserQuestionCoordinator()
     var currentToolMessages: [UUID: ChatMessage] = [:]
 
     /// Track tool calls for the current turn (for display purposes)

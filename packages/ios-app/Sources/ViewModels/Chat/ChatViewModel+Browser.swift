@@ -30,9 +30,7 @@ extension ChatViewModel: BrowserEventContext {
         _ = try await rpcClient.media.stopBrowserStream(sessionId: sessionId)
     }
 
-    func showError(_ message: String) {
-        showErrorAlert(message)
-    }
+    // showError is implemented in ChatViewModel.swift (shared with AskUserQuestionContext)
 }
 
 /// Errors that can occur in browser coordinator operations
