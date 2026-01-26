@@ -535,24 +535,8 @@ extension ChatViewModel {
     }
 
     func handleBrowserFrameResult(_ result: BrowserFramePlugin.Result) {
-        // Decode base64 frame data directly
-        guard let imageData = Data(base64Encoded: result.frameData),
-              let image = UIImage(data: imageData) else {
-            logger.warning("Failed to decode browser frame data", category: .events)
-            return
-        }
-
-        browserState.browserFrame = image
-        browserState.browserStatus = BrowserGetStatusResult(
-            hasBrowser: true,
-            isStreaming: true,
-            currentUrl: nil
-        )
-
-        // Auto-show browser window if not dismissed
-        if !browserState.userDismissedBrowserThisTurn && !browserState.showBrowserWindow {
-            browserState.showBrowserWindow = true
-        }
+        // Delegate to browser coordinator for frame handling
+        handleBrowserFrame(frameData: result.frameData)
     }
 
     func handleSubagentSpawnedResult(_ result: SubagentSpawnedPlugin.Result) {

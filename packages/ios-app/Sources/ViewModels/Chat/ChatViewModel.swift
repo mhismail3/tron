@@ -136,6 +136,8 @@ class ChatViewModel: ObservableObject, ChatEventContext {
     let turnLifecycleCoordinator = TurnLifecycleCoordinator()
     /// Coordinates UI canvas rendering event handling
     let uiCanvasCoordinator = UICanvasCoordinator()
+    /// Coordinates browser event handling and session lifecycle
+    let browserCoordinator = BrowserCoordinator()
     var currentToolMessages: [UUID: ChatMessage] = [:]
 
     /// Track tool calls for the current turn (for display purposes)
