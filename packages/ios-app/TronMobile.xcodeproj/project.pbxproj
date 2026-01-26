@@ -269,6 +269,12 @@
 		FE3D89D152521876D2DDF464 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 8347F0B7D54B1F1EAA6C762C /* Assets.xcassets */; };
 		FEFEB6F2F6B479F5D422E56A /* EventIconProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = E0B23C91EE877275B8030EE0 /* EventIconProvider.swift */; };
 		FF1A0457E4CC2CFBF9B77CD0 /* UICanvasSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6EF52F3FB3022561565CEA58 /* UICanvasSheet.swift */; };
+		H1A2B3C4D5E6F7A8B9C0D1E2 /* CachedSession+HumanReadable.swift in Sources */ = {isa = PBXBuildFile; fileRef = G1A2B3C4D5E6F7A8B9C0D1E2 /* CachedSession+HumanReadable.swift */; };
+		H2B3C4D5E6F7A8B9C0D1E2F3 /* ChatView+Helpers.swift in Sources */ = {isa = PBXBuildFile; fileRef = G2B3C4D5E6F7A8B9C0D1E2F3 /* ChatView+Helpers.swift */; };
+		H3C4D5E6F7A8B9C0D1E2F3A4 /* ChatView+Toolbar.swift in Sources */ = {isa = PBXBuildFile; fileRef = G3C4D5E6F7A8B9C0D1E2F3A4 /* ChatView+Toolbar.swift */; };
+		H4D5E6F7A8B9C0D1E2F3A4B5 /* InteractivePopGestureEnabler.swift in Sources */ = {isa = PBXBuildFile; fileRef = G4D5E6F7A8B9C0D1E2F3A4B5 /* InteractivePopGestureEnabler.swift */; };
+		H5E6F7A8B9C0D1E2F3A4B5C6 /* ProcessingIndicator.swift in Sources */ = {isa = PBXBuildFile; fileRef = G5E6F7A8B9C0D1E2F3A4B5C6 /* ProcessingIndicator.swift */; };
+		H6F7A8B9C0D1E2F3A4B5C6D7 /* ThinkingBanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = G6F7A8B9C0D1E2F3A4B5C6D7 /* ThinkingBanner.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -555,6 +561,12 @@
 		FEA6CFF3F143AE2A118B1798 /* DashboardPoller.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DashboardPoller.swift; sourceTree = "<group>"; };
 		FF47AB510527898053F52C7F /* UIComponentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UIComponentView.swift; sourceTree = "<group>"; };
 		FFEA9A5CBCE731DD8A47130C /* BrowserState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrowserState.swift; sourceTree = "<group>"; };
+		G1A2B3C4D5E6F7A8B9C0D1E2 /* CachedSession+HumanReadable.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "CachedSession+HumanReadable.swift"; sourceTree = "<group>"; };
+		G2B3C4D5E6F7A8B9C0D1E2F3 /* ChatView+Helpers.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ChatView+Helpers.swift"; sourceTree = "<group>"; };
+		G3C4D5E6F7A8B9C0D1E2F3A4 /* ChatView+Toolbar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ChatView+Toolbar.swift"; sourceTree = "<group>"; };
+		G4D5E6F7A8B9C0D1E2F3A4B5 /* InteractivePopGestureEnabler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InteractivePopGestureEnabler.swift; sourceTree = "<group>"; };
+		G5E6F7A8B9C0D1E2F3A4B5C6 /* ProcessingIndicator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProcessingIndicator.swift; sourceTree = "<group>"; };
+		G6F7A8B9C0D1E2F3A4B5C6D7 /* ThinkingBanner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThinkingBanner.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXGroup section */
@@ -1365,9 +1377,15 @@
 		DF57665BEE0DB27DD80FC8AE /* Chat */ = {
 			isa = PBXGroup;
 			children = (
+				G1A2B3C4D5E6F7A8B9C0D1E2 /* CachedSession+HumanReadable.swift */,
 				ED0C1BBA0825C927DC8A345A /* ChatView.swift */,
+				G2B3C4D5E6F7A8B9C0D1E2F3 /* ChatView+Helpers.swift */,
+				G3C4D5E6F7A8B9C0D1E2F3A4 /* ChatView+Toolbar.swift */,
 				C0CDC9922B58D9AB366386EA /* ContentView.swift */,
+				G4D5E6F7A8B9C0D1E2F3A4B5 /* InteractivePopGestureEnabler.swift */,
+				G5E6F7A8B9C0D1E2F3A4B5C6 /* ProcessingIndicator.swift */,
 				4EAF3CC5CEDDEE4223E641CC /* SessionSidebar.swift */,
+				G6F7A8B9C0D1E2F3A4B5C6D7 /* ThinkingBanner.swift */,
 			);
 			path = Chat;
 			sourceTree = "<group>";
@@ -1599,7 +1617,13 @@
 				D9E0F1A2B3C4D5E6F7A8B9C0 /* UICanvasContext.swift in Sources */,
 				F1A2B3C4D5E6F7A8B9C0D1E2 /* UICanvasCoordinator.swift in Sources */,
 				B3C4D5E6F7A8B9C0D1E2F3A4 /* ChatViewModel+UICanvasContext.swift in Sources */,
+				H1A2B3C4D5E6F7A8B9C0D1E2 /* CachedSession+HumanReadable.swift in Sources */,
 				8262909B97AA787D3938755D /* ChatView.swift in Sources */,
+				H2B3C4D5E6F7A8B9C0D1E2F3 /* ChatView+Helpers.swift in Sources */,
+				H3C4D5E6F7A8B9C0D1E2F3A4 /* ChatView+Toolbar.swift in Sources */,
+				H4D5E6F7A8B9C0D1E2F3A4B5 /* InteractivePopGestureEnabler.swift in Sources */,
+				H5E6F7A8B9C0D1E2F3A4B5C6 /* ProcessingIndicator.swift in Sources */,
+				H6F7A8B9C0D1E2F3A4B5C6D7 /* ThinkingBanner.swift in Sources */,
 				2B3C4D5E6F0A1B2C3D4E5F6A /* ChatViewModel+AskUserQuestion.swift in Sources */,
 				1A2B3C4D5E6F0A1B2C3D4E5F /* ChatViewModel+Browser.swift in Sources */,
 				EB67206447A441B245917538 /* ChatViewModel+Connection.swift in Sources */,

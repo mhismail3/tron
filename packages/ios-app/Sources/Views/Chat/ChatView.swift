@@ -2,27 +2,6 @@ import SwiftUI
 import PhotosUI
 import UIKit
 
-// MARK: - Interactive Pop Gesture Enabler
-
-/// Enables the native iOS interactive pop gesture even when the back button is hidden.
-/// Add this as a background to any view that hides the navigation back button.
-private struct InteractivePopGestureEnabler: UIViewControllerRepresentable {
-    func makeUIViewController(context: Context) -> UIViewController {
-        InteractivePopGestureController()
-    }
-
-    func updateUIViewController(_ uiViewController: UIViewController, context: Context) {}
-
-    private class InteractivePopGestureController: UIViewController {
-        override func viewDidAppear(_ animated: Bool) {
-            super.viewDidAppear(animated)
-            // Re-enable the interactive pop gesture
-            navigationController?.interactivePopGestureRecognizer?.isEnabled = true
-            navigationController?.interactivePopGestureRecognizer?.delegate = nil
-        }
-    }
-}
-
 // MARK: - Scroll Position Tracking
 
 /// Tracks scroll state for detecting user scroll vs content growth
@@ -35,66 +14,51 @@ private struct ScrollState: Equatable {
 
 @available(iOS 26.0, *)
 struct ChatView: View {
-    @Environment(\.dismiss) private var dismiss
+    // MARK: - Environment & State Objects (internal for extension access)
+    @Environment(\.dismiss) var dismiss
     @EnvironmentObject var eventStoreManager: EventStoreManager
-    @StateObject private var viewModel: ChatViewModel
+    @StateObject var viewModel: ChatViewModel
     @StateObject private var inputHistory = InputHistoryStore()
-    @StateObject private var scrollCoordinator = ScrollStateCoordinator()
-    @State private var showContextAudit = false
-    @State private var showSessionHistory = false
-    /// Cached models for model picker menu
-    @State private var cachedModels: [ModelInfo] = []
-    @State private var isLoadingModels = false
-    /// Optimistic model name for instant UI update
-    @State private var optimisticModelName: String?
-    // Note: reasoningLevel, selectedSkills, and selectedSpells are now in viewModel.inputBarState
-    /// Skill to show in detail sheet (when skill chip is tapped in a message)
-    @State private var skillForDetailSheet: Skill?
-    /// Mode for skill detail sheet (skill = cyan, spell = pink)
-    @State private var skillDetailMode: ChipMode = .skill
-    /// Whether to show the skill detail sheet
-    @State private var showSkillDetailSheet = false
-    /// Whether to show the compaction detail sheet
-    @State private var showCompactionDetail = false
-    /// Data for compaction detail sheet (tokensBefore, tokensAfter, reason, summary)
-    @State private var compactionDetailData: (tokensBefore: Int, tokensAfter: Int, reason: String, summary: String?)?
-    /// Data for NotifyApp detail sheet
-    @State private var notifyAppSheetData: NotifyAppChipData?
-    /// Content for thinking detail sheet (when a thinking block is tapped)
-    @State private var thinkingSheetContent: String?
+    @StateObject var scrollCoordinator = ScrollStateCoordinator()
 
-    // MARK: - Connection Interaction State
-    /// Debounced interaction state to prevent flicker during reconnection attempts.
-    /// Only becomes true after connection is stable, not during optimistic connection.
+    // MARK: - Sheet State (internal for ChatView+Sheets)
+    @State var showContextAudit = false
+    @State var showSessionHistory = false
+    @State var skillForDetailSheet: Skill?
+    @State var skillDetailMode: ChipMode = .skill
+    @State var showSkillDetailSheet = false
+    @State var showCompactionDetail = false
+    @State var compactionDetailData: (tokensBefore: Int, tokensAfter: Int, reason: String, summary: String?)?
+    @State var notifyAppSheetData: NotifyAppChipData?
+    @State var thinkingSheetContent: String?
+
+    // MARK: - Model State (internal for ChatView+Helpers)
+    @State var cachedModels: [ModelInfo] = []
+    @State var isLoadingModels = false
+    @State var optimisticModelName: String?
+
+    // MARK: - Connection Interaction State (private - body only)
     @State private var isInteractionEnabled = true
-    /// Task for debouncing interaction state changes
     @State private var interactionDebounceTask: Task<Void, Never>?
 
-    /// UserDefaults key for storing reasoning level per session
-    private var reasoningLevelKey: String { "tron.reasoningLevel.\(sessionId)" }
+    // MARK: - Legacy Scroll State (internal for extension access)
+    @State var scrollProxy: ScrollViewProxy?
 
-    // MARK: - Legacy Scroll State (for ScrollViewProxy compatibility)
-    /// Scroll proxy for ScrollViewReader-based scrolling during transition to ScrollPosition
-    @State private var scrollProxy: ScrollViewProxy?
-
-    // MARK: - Entry Morph Animation (from left)
+    // MARK: - Entry Morph Animation (private - body only)
     @State private var showEntryContent = false
-    /// Delay for entry morph: 180ms
     private let entryMorphDelay: UInt64 = 180_000_000
 
-    // MARK: - Message Loading State
-    /// Whether initial message load is complete (prevents auto-scroll during initial render)
+    // MARK: - Message Loading State (private - body only)
     @State private var initialLoadComplete = false
 
-    // MARK: - Deep Link Scroll Target
-    /// Scroll target from deep link navigation (binding to parent)
+    // MARK: - Deep Link Scroll Target (internal for extension access)
     @Binding var scrollTarget: ScrollTarget?
 
-    private let sessionId: String
-    private let rpcClient: RPCClient
-    private let skillStore: SkillStore?
+    // MARK: - Stored Properties (internal for extension access)
+    let sessionId: String
+    let rpcClient: RPCClient
+    let skillStore: SkillStore?
     let workspaceDeleted: Bool
-    /// Callback to toggle sidebar visibility (iPad only)
     var onToggleSidebar: (() -> Void)?
 
     init(rpcClient: RPCClient, sessionId: String, skillStore: SkillStore? = nil, workspaceDeleted: Bool = false, scrollTarget: Binding<ScrollTarget?> = .constant(nil), onToggleSidebar: (() -> Void)? = nil) {
@@ -107,38 +71,7 @@ struct ChatView: View {
         _viewModel = StateObject(wrappedValue: ChatViewModel(rpcClient: rpcClient, sessionId: sessionId))
     }
 
-    /// Current model name (optimistic if pending, else actual)
-    private var displayModelName: String {
-        optimisticModelName ?? viewModel.currentModel
-    }
-
-    /// Current model info (for reasoning level support detection)
-    private var currentModelInfo: ModelInfo? {
-        cachedModels.first { $0.id == displayModelName }
-    }
-
-    // MARK: - State Object Bindings (extracted for type-checker performance)
-
-    private var safariURLPresented: Binding<Bool> {
-        Binding(
-            get: { viewModel.browserState.safariURL != nil },
-            set: { if !$0 { viewModel.browserState.safariURL = nil } }
-        )
-    }
-
-    private var browserWindowPresented: Binding<Bool> {
-        Binding(
-            get: { viewModel.browserState.showBrowserWindow },
-            set: { viewModel.browserState.showBrowserWindow = $0 }
-        )
-    }
-
-    private var askUserQuestionPresented: Binding<Bool> {
-        Binding(
-            get: { viewModel.askUserQuestionState.showSheet },
-            set: { viewModel.askUserQuestionState.showSheet = $0 }
-        )
-    }
+    // MARK: - Body
 
     var body: some View {
         // Main content
@@ -236,74 +169,9 @@ struct ChatView: View {
         .navigationBarBackButtonHidden(true)
         .background(InteractivePopGestureEnabler())
         .toolbar {
-            ToolbarItem(placement: .topBarLeading) {
-                if let onToggleSidebar = onToggleSidebar {
-                    // iPad - show sidebar toggle
-                    Button(action: onToggleSidebar) {
-                        Image(systemName: "sidebar.leading")
-                            .font(TronTypography.sans(size: TronTypography.sizeTitle, weight: .medium))
-                            .foregroundStyle(.tronEmerald)
-                    }
-                } else {
-                    // iPhone - show back button
-                    Button {
-                        dismiss()
-                    } label: {
-                        Image(systemName: "chevron.left")
-                            .font(TronTypography.button)
-                            .foregroundStyle(.tronEmerald)
-                    }
-                }
-            }
-            ToolbarItem(placement: .principal) {
-                VStack(spacing: 2) {
-                    Text(eventStoreManager.activeSession?.displayTitle ?? "Chat")
-                        .font(TronTypography.mono(size: TronTypography.sizeTitle, weight: .semibold))
-                        .foregroundStyle(.tronEmerald)
-                    if eventStoreManager.activeSession?.isFork == true {
-                        Text("forked")
-                            .font(TronTypography.pillValue)
-                            .foregroundStyle(.tronEmerald.opacity(0.6))
-                    }
-                }
-            }
-            ToolbarItem(placement: .topBarTrailing) {
-                HStack(spacing: 16) {
-                    // Browser button - only visible when browser session is active
-                    if viewModel.hasBrowserSession {
-                        Button {
-                            viewModel.toggleBrowserWindow()
-                        } label: {
-                            Image(systemName: "globe")
-                                .font(TronTypography.sans(size: TronTypography.sizeTitle, weight: .medium))
-                                .foregroundStyle(.tronEmerald)
-                        }
-                    }
-
-                    // iOS 26 fix: Use NotificationCenter to decouple button action from state mutation
-                    Menu {
-                        Button { NotificationCenter.default.post(name: .chatMenuAction, object: "history") } label: {
-                            Label("Session History", systemImage: "clock.arrow.circlepath")
-                        }
-                        Button { NotificationCenter.default.post(name: .chatMenuAction, object: "context") } label: {
-                            Label("Context Manager", systemImage: "brain")
-                        }
-                        if viewModel.todoState.hasTodos {
-                            Button { NotificationCenter.default.post(name: .chatMenuAction, object: "tasks") } label: {
-                                Label("Tasks (\(viewModel.todoState.incompleteCount))", systemImage: "checklist")
-                            }
-                        }
-                        Divider()
-                        Button { NotificationCenter.default.post(name: .chatMenuAction, object: "settings") } label: {
-                            Label("Settings", systemImage: "gearshape")
-                        }
-                    } label: {
-                        Image(systemName: "gearshape")
-                            .font(TronTypography.sans(size: TronTypography.sizeTitle, weight: .medium))
-                            .foregroundStyle(.tronEmerald)
-                    }
-                }
-            }
+            leadingToolbarItem
+            principalToolbarItem
+            trailingToolbarItem
         }
         // Safari sheet (OpenBrowser tool)
         .sheet(isPresented: safariURLPresented) {
@@ -612,89 +480,6 @@ struct ChatView: View {
         }
     }
 
-    /// Perform scroll to deep link target
-    private func performDeepLinkScroll(to target: ScrollTarget) {
-        if let messageId = viewModel.findMessageId(for: target) {
-            scrollCoordinator.scrollToTarget(messageId: messageId, using: scrollProxy)
-            logger.info("Deep link scroll to message: \(messageId)", category: .notification)
-        } else {
-            logger.warning("Deep link target not found: \(target)", category: .notification)
-        }
-        // Clear the scroll target after processing
-        scrollTarget = nil
-    }
-
-    /// Pre-fetch models for model picker menu
-    private func prefetchModels() async {
-        isLoadingModels = true
-        if let models = try? await rpcClient.model.list() {
-            cachedModels = models
-            // Update context window from server-provided model info
-            viewModel.updateContextWindow(from: models)
-        }
-        isLoadingModels = false
-    }
-
-    /// Switch model with optimistic UI update for instant feedback
-    private func switchModel(to model: ModelInfo) {
-        let previousModel = viewModel.currentModel
-
-        // Optimistic update - UI updates instantly
-        optimisticModelName = model.id
-        // Update context window immediately with new model's value
-        viewModel.contextState.currentContextWindow = model.contextWindow
-
-        // Fire the actual switch in background
-        Task {
-            do {
-                let result = try await rpcClient.model.switchModel(sessionId, model: model.id)
-                await MainActor.run {
-                    // Clear optimistic update - real value now in viewModel.currentModel
-                    optimisticModelName = nil
-
-                    // Add in-chat notification for model change
-                    viewModel.addModelChangeNotification(
-                        from: previousModel,
-                        to: result.newModel
-                    )
-                    // Note: Model switch event is created by server and syncs automatically
-                }
-                // Refresh context from server to ensure accuracy after model switch
-                // This validates context limit and current token count
-                await viewModel.refreshContextFromServer()
-            } catch {
-                await MainActor.run {
-                    // Revert optimistic update on failure
-                    optimisticModelName = nil
-                    // Revert context window on failure
-                    if let originalModel = cachedModels.first(where: { $0.id == previousModel }) {
-                        viewModel.contextState.currentContextWindow = originalModel.contextWindow
-                    }
-                    viewModel.showErrorAlert("Failed to switch model: \(error.localizedDescription)")
-                }
-            }
-        }
-    }
-
-    // MARK: - Commands Menu
-
-    private var commandsMenu: some View {
-        // NOTE: iOS 26 Menu requires simple Button("text") { } syntax
-        // Label views and Divider break gesture handling
-        Menu {
-            Button("Session History") { showSessionHistory = true }
-            Button("Context Manager") { showContextAudit = true }
-            Button("Settings") { viewModel.showSettings = true }
-        } label: {
-            Image(systemName: "gearshape")
-                .font(TronTypography.sans(size: TronTypography.sizeTitle, weight: .medium))
-                .foregroundStyle(.tronEmerald)
-        }
-    }
-
-    // Note: Status bar (model pill, token stats) is now integrated into InputBar
-    // with iOS 26 liquid glass styling
-
     // MARK: - Messages Scroll View
 
     private var messagesScrollView: some View {
@@ -964,172 +749,6 @@ struct ChatView: View {
         .padding(.bottom, 8)
     }
 }
-
-// MARK: - Processing Indicator
-
-struct ProcessingIndicator: View {
-    @State private var animating = false
-
-    var body: some View {
-        HStack(spacing: 4) {
-            Text("Processing")
-                .font(TronTypography.caption)
-                .foregroundStyle(.tronEmerald)
-
-            HStack(spacing: 3) {
-                ForEach(0..<3, id: \.self) { index in
-                    Circle()
-                        .fill(Color.tronEmerald)
-                        .frame(width: 4, height: 4)
-                        .opacity(animating ? 0.3 : 1.0)
-                        .animation(
-                            .easeInOut(duration: 0.6)
-                                .repeatForever(autoreverses: true)
-                                .delay(Double(index) * 0.2),
-                            value: animating
-                        )
-                }
-            }
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .onAppear { animating = true }
-    }
-}
-
-// MARK: - Thinking Banner
-
-struct ThinkingBanner: View {
-    let text: String
-    @Binding var isExpanded: Bool
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Button {
-                withAnimation(.tronStandard) {
-                    isExpanded.toggle()
-                }
-            } label: {
-                HStack(spacing: 6) {
-                    RotatingIcon(icon: .thinking, size: 12, color: .tronTextMuted)
-                    Text("Thinking")
-                        .font(TronTypography.caption)
-                        .foregroundStyle(.tronTextMuted)
-                    Spacer()
-                    Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
-                        .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .medium))
-                        .foregroundStyle(.tronTextMuted)
-                }
-            }
-
-            if isExpanded {
-                Text(text)
-                    .font(TronTypography.caption)
-                    .foregroundStyle(.tronTextSecondary)
-                    .italic()
-                    .lineLimit(10)
-            }
-        }
-        .padding(10)
-        .background(Color.tronSurface)
-        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .stroke(Color.tronBorder, lineWidth: 0.5)
-        )
-        .padding(.horizontal)
-    }
-}
-
-// MARK: - Human-Readable Dates
-extension CachedSession {
-    // Cached formatters (creating these is expensive)
-    // nonisolated(unsafe) because ISO8601DateFormatter is not Sendable, but we only read from them
-    private static nonisolated(unsafe) let isoFormatterWithFractional: ISO8601DateFormatter = {
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        return formatter
-    }()
-
-    private static nonisolated(unsafe) let isoFormatterBasic: ISO8601DateFormatter = {
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withInternetDateTime]
-        return formatter
-    }()
-
-    var humanReadableCreatedAt: String {
-        // Parse ISO date and format nicely
-        if let date = Self.isoFormatterWithFractional.date(from: createdAt) {
-            return date.humanReadable
-        }
-        // Try without fractional seconds
-        if let date = Self.isoFormatterBasic.date(from: createdAt) {
-            return date.humanReadable
-        }
-        return createdAt
-    }
-
-    var humanReadableLastActivity: String {
-        if let date = Self.isoFormatterWithFractional.date(from: lastActivityAt) {
-            return date.humanReadable
-        }
-        if let date = Self.isoFormatterBasic.date(from: lastActivityAt) {
-            return date.humanReadable
-        }
-        return formattedDate
-    }
-}
-
-extension Date {
-    // Cached formatters (creating these is expensive)
-    private static let dayFormatter: DateFormatter = {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "EEEE"
-        return formatter
-    }()
-
-    private static let dateFormatter: DateFormatter = {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "MMM d, yyyy"
-        return formatter
-    }()
-
-    var humanReadable: String {
-        let now = Date()
-        let calendar = Calendar.current
-        let components = calendar.dateComponents([.minute, .hour, .day], from: self, to: now)
-
-        if let days = components.day, days > 0 {
-            if days == 1 { return "Yesterday" }
-            if days < 7 {
-                return Self.dayFormatter.string(from: self)
-            }
-            return Self.dateFormatter.string(from: self)
-        } else if let hours = components.hour, hours > 0 {
-            return "\(hours) hour\(hours == 1 ? "" : "s") ago"
-        } else if let minutes = components.minute, minutes > 0 {
-            return "\(minutes) min ago"
-        }
-        return "Just now"
-    }
-}
-
-// MARK: - Preview
-
-// Note: Preview requires EventStoreManager which needs RPCClient and EventDatabase
-// Previews can be enabled by creating mock instances
-/*
-#Preview {
-    NavigationStack {
-        ChatView(
-            rpcClient: RPCClient(serverURL: URL(string: "ws://localhost:8080/ws")!),
-            sessionId: "test-session"
-        )
-        .environmentObject(EventStoreManager(...))
-    }
-}
-*/
 
 // MARK: - iOS 26 Menu Workaround
 // Menu button actions that mutate @State break gesture handling in iOS 26
