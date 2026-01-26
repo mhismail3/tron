@@ -149,6 +149,8 @@ class ChatViewModel: ObservableObject, ChatEventContext {
     let transcriptionCoordinator = TranscriptionCoordinator()
     /// Coordinates message sending, abort, and attachments
     let messagingCoordinator = MessagingCoordinator()
+    /// Coordinates session connection, reconnection, and catch-up
+    let connectionCoordinator = ConnectionCoordinator()
     var currentToolMessages: [UUID: ChatMessage] = [:]
 
     /// Track tool calls for the current turn (for display purposes)
