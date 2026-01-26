@@ -6,6 +6,7 @@
 import { WebSocketServer, WebSocket } from 'ws';
 import { EventEmitter } from 'events';
 import { randomUUID } from 'crypto';
+import type { IncomingMessage } from 'http';
 import {
   createLogger,
   categorizeError,
@@ -213,7 +214,7 @@ export class TronWebSocketServer extends EventEmitter {
   // Private Methods
   // ===========================================================================
 
-  private handleConnection(socket: WebSocket, request: any): void {
+  private handleConnection(socket: WebSocket, request: IncomingMessage): void {
     const clientId = `client_${randomUUID().replace(/-/g, '').slice(0, 12)}`;
 
     const client: ClientConnection = {

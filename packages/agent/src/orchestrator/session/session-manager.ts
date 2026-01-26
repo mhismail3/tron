@@ -40,6 +40,7 @@ import type {
   SessionInfo,
   ForkResult,
 } from '../types.js';
+import type { SessionRow } from '../../events/sqlite/repositories/session.repo.js';
 
 const logger = createLogger('session-manager');
 
@@ -722,7 +723,7 @@ export class SessionManager {
   // ===========================================================================
 
   private sessionRowToInfo(
-    row: any,
+    row: SessionRow,
     isActive: boolean,
     workingDir?: WorkingDirectory,
     preview?: { lastUserPrompt?: string; lastAssistantResponse?: string }

@@ -73,6 +73,19 @@ export type HarmBlockThreshold =
   | 'OFF';
 
 /**
+ * Safety rating probability from API response
+ */
+export type HarmProbability = 'NEGLIGIBLE' | 'LOW' | 'MEDIUM' | 'HIGH';
+
+/**
+ * Safety rating returned by API
+ */
+export interface SafetyRating {
+  category: HarmCategory;
+  probability: HarmProbability;
+}
+
+/**
  * Safety setting for a specific harm category
  */
 export interface SafetySetting {
@@ -878,10 +891,10 @@ export class GoogleProvider {
             if (!candidate?.content?.parts) {
               // Handle finish reason without content (e.g., SAFETY block)
               if (candidate?.finishReason === 'SAFETY') {
-                const safetyRatings = (candidate as any).safetyRatings ?? [];
+                const safetyRatings = (candidate as { safetyRatings?: SafetyRating[] }).safetyRatings ?? [];
                 const blockedCategories = safetyRatings
-                  .filter((r: any) => r.probability === 'HIGH' || r.probability === 'MEDIUM')
-                  .map((r: any) => r.category);
+                  .filter(r => r.probability === 'HIGH' || r.probability === 'MEDIUM')
+                  .map(r => r.category);
 
                 yield {
                   type: 'safety_block',
@@ -970,10 +983,10 @@ export class GoogleProvider {
 
               // Handle SAFETY finish reason
               if (candidate.finishReason === 'SAFETY') {
-                const safetyRatings = (candidate as any).safetyRatings ?? [];
+                const safetyRatings = (candidate as { safetyRatings?: SafetyRating[] }).safetyRatings ?? [];
                 const blockedCategories = safetyRatings
-                  .filter((r: any) => r.probability === 'HIGH' || r.probability === 'MEDIUM')
-                  .map((r: any) => r.category);
+                  .filter(r => r.probability === 'HIGH' || r.probability === 'MEDIUM')
+                  .map(r => r.category);
 
                 yield {
                   type: 'safety_block',

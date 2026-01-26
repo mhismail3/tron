@@ -28,10 +28,18 @@ export interface BrowserDelegate {
   hasSession(sessionId: string): boolean;
 }
 
+/** Snapshot structure from agent-browser */
+interface BrowserSnapshot {
+  url?: string;
+  title?: string;
+  content?: string;
+  [key: string]: unknown;
+}
+
 interface BrowserSession {
   sessionId: string;
   elementRefs: Map<string, string>;
-  lastSnapshot?: any;
+  lastSnapshot?: BrowserSnapshot;
 }
 
 /**

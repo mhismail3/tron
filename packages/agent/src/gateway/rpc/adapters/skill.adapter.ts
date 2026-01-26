@@ -20,6 +20,8 @@ import type {
   RpcSkillInfo,
   RpcSkillMetadata,
   SessionId,
+  SkillInfo,
+  SkillMetadata,
 } from '../../../index.js';
 import type { AdapterDependencies } from '../types.js';
 
@@ -28,37 +30,43 @@ import type { AdapterDependencies } from '../types.js';
 // =============================================================================
 
 /**
+ * Union type for skill data from registry (can be either SkillInfo or SkillMetadata)
+ */
+type RegistrySkill = SkillInfo | SkillMetadata;
+
+/**
+ * Type guard to check if skill is SkillMetadata (has frontmatter)
+ */
+function isSkillMetadata(s: RegistrySkill): s is SkillMetadata {
+  return 'frontmatter' in s;
+}
+
+/**
  * Extract autoInject from either SkillInfo or SkillMetadata
  */
-function getAutoInject(s: any): boolean {
-  return 'frontmatter' in s ? (s.frontmatter?.autoInject ?? false) : (s.autoInject ?? false);
+function getAutoInject(s: RegistrySkill): boolean {
+  return isSkillMetadata(s) ? (s.frontmatter?.autoInject ?? false) : s.autoInject;
 }
 
 /**
  * Extract tags from either SkillInfo or SkillMetadata
  */
-function getTags(s: any): string[] | undefined {
-  return 'frontmatter' in s ? s.frontmatter?.tags : s.tags;
+function getTags(s: RegistrySkill): string[] | undefined {
+  return isSkillMetadata(s) ? s.frontmatter?.tags : s.tags;
 }
 
 /**
- * Get display name, falling back to name
+ * Transform SkillMetadata to RpcSkillMetadata (with content)
+ * Only call this with SkillMetadata (from listFull), not SkillInfo
  */
-function getDisplayName(s: any): string {
-  return s.displayName ?? s.name;
-}
-
-/**
- * Transform skill to RpcSkillMetadata (with content)
- */
-function toSkillMetadata(s: any): RpcSkillMetadata {
+function toSkillMetadata(s: SkillMetadata): RpcSkillMetadata {
   return {
     name: s.name,
-    displayName: getDisplayName(s),
+    displayName: s.displayName,
     description: s.description,
     source: s.source,
-    autoInject: getAutoInject(s),
-    tags: getTags(s),
+    autoInject: s.frontmatter?.autoInject ?? false,
+    tags: s.frontmatter?.tags,
     content: s.content,
     path: s.path,
     additionalFiles: s.additionalFiles,
@@ -68,10 +76,10 @@ function toSkillMetadata(s: any): RpcSkillMetadata {
 /**
  * Transform skill to RpcSkillInfo (without content)
  */
-function toSkillInfo(s: any): RpcSkillInfo {
+function toSkillInfo(s: RegistrySkill): RpcSkillInfo {
   return {
     name: s.name,
-    displayName: getDisplayName(s),
+    displayName: s.displayName,
     description: s.description,
     source: s.source,
     autoInject: getAutoInject(s),
@@ -127,35 +135,44 @@ export function createSkillAdapter(deps: AdapterDependencies): SkillRpcManager {
       if (!workingDir) {
         // No session - return global skills only from default registry
         const registry = await getOrCreateRegistry(process.cwd());
-        const skills = params.includeContent
-          ? registry.listFull({ source: 'global', autoInjectOnly: params.autoInjectOnly })
-          : registry.list({ source: 'global', autoInjectOnly: params.autoInjectOnly });
 
-        const autoInjectCount = skills.filter(s => getAutoInject(s)).length;
+        if (params.includeContent) {
+          const skills = registry.listFull({ source: 'global', autoInjectOnly: params.autoInjectOnly });
+          const autoInjectCount = skills.filter(s => s.frontmatter?.autoInject ?? false).length;
+          return {
+            skills: skills.map(toSkillMetadata),
+            totalCount: skills.length,
+            autoInjectCount,
+          };
+        } else {
+          const skills = registry.list({ source: 'global', autoInjectOnly: params.autoInjectOnly });
+          const autoInjectCount = skills.filter(s => s.autoInject).length;
+          return {
+            skills: skills.map(toSkillInfo),
+            totalCount: skills.length,
+            autoInjectCount,
+          };
+        }
+      }
 
+      const registry = await getOrCreateRegistry(workingDir);
+      const autoInjectCount = registry.list({ autoInjectOnly: true }).length;
+
+      if (params.includeContent) {
+        const skills = registry.listFull({ source: params.source, autoInjectOnly: params.autoInjectOnly });
         return {
-          skills: skills.map(s =>
-            params.includeContent ? toSkillMetadata(s) : toSkillInfo(s),
-          ),
+          skills: skills.map(toSkillMetadata),
+          totalCount: skills.length,
+          autoInjectCount,
+        };
+      } else {
+        const skills = registry.list({ source: params.source, autoInjectOnly: params.autoInjectOnly });
+        return {
+          skills: skills.map(toSkillInfo),
           totalCount: skills.length,
           autoInjectCount,
         };
       }
-
-      const registry = await getOrCreateRegistry(workingDir);
-      const skills = params.includeContent
-        ? registry.listFull({ source: params.source, autoInjectOnly: params.autoInjectOnly })
-        : registry.list({ source: params.source, autoInjectOnly: params.autoInjectOnly });
-
-      const autoInjectCount = registry.list({ autoInjectOnly: true }).length;
-
-      return {
-        skills: skills.map(s =>
-          params.includeContent ? toSkillMetadata(s) : toSkillInfo(s),
-        ),
-        totalCount: skills.length,
-        autoInjectCount,
-      };
     },
 
     /**

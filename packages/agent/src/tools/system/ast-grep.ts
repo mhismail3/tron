@@ -391,7 +391,7 @@ Examples:
             if (obj.metaVariables.multi) {
               for (const [key, values] of Object.entries(obj.metaVariables.multi)) {
                 if (Array.isArray(values)) {
-                  captured[key] = values.map((v: any) => v.text || '').join(', ');
+                  captured[key] = values.map((v: { text?: string }) => v.text || '').join(', ');
                 }
               }
             }

@@ -105,6 +105,19 @@ interface ResponsesTool {
 
 
 /**
+ * Output item from Responses API (shared between item and response.output)
+ */
+interface ResponsesOutputItem {
+  type: 'function_call' | 'message' | 'reasoning' | string;
+  id?: string;
+  call_id?: string;
+  name?: string;
+  arguments?: string;
+  content?: Array<{ type: string; text?: string }>;
+  summary?: Array<{ type: string; text?: string }>;  // For reasoning items
+}
+
+/**
  * SSE event types from Responses API
  */
 interface ResponsesStreamEvent {
@@ -115,29 +128,13 @@ interface ResponsesStreamEvent {
   summary_index?: number;
   content_index?: number;
   // For response.output_item.added
-  item?: {
-    type: string;  // 'function_call' | 'message' | 'reasoning'
-    id?: string;
-    call_id?: string;
-    name?: string;
-    arguments?: string;
-    content?: Array<{ type: string; text?: string }>;
-    summary?: Array<{ type: string; text?: string }>;  // For reasoning items
-  };
+  item?: ResponsesOutputItem;
   // For response.function_call_arguments.delta
   call_id?: string;
   // For response.completed
   response?: {
     id: string;
-    output: Array<{
-      type: string;
-      id?: string;
-      call_id?: string;
-      name?: string;
-      arguments?: string;
-      content?: Array<{ type: string; text?: string }>;
-      summary?: Array<{ type: string; text?: string }>;  // For reasoning items
-    }>;
+    output: ResponsesOutputItem[];
     usage?: {
       input_tokens: number;
       output_tokens: number;
@@ -574,28 +571,27 @@ export class OpenAICodexProvider {
             const event = JSON.parse(data) as ResponsesStreamEvent;
 
             // Log SSE events at trace level for debugging reasoning/streaming issues
-            const eventItem = (event as any).item;
             logger.trace('Codex SSE event received', {
               type: event.type,
               hasDelta: !!event.delta,
               deltaPreview: event.delta?.substring(0, 50),
-              hasItem: !!eventItem,
-              itemType: eventItem?.type,
+              hasItem: !!event.item,
+              itemType: event.item?.type,
               // Capture reasoning summary if present in item
-              hasSummary: !!eventItem?.summary,
-              summaryLength: eventItem?.summary?.length,
-              summaryPreview: eventItem?.summary?.[0]?.text?.substring(0, 100),
+              hasSummary: !!event.item?.summary,
+              summaryLength: event.item?.summary?.length,
+              summaryPreview: event.item?.summary?.[0]?.text?.substring(0, 100),
             });
 
             // Log all events for debugging tool call issues
             if (event.type?.includes('function') || event.type?.includes('output_item')) {
               logger.debug('Codex SSE event', {
                 type: event.type,
-                hasItem: !!(event as any).item,
-                itemType: (event as any).item?.type,
-                callId: (event as any).call_id || (event as any).item?.call_id,
-                hasArguments: !!(event as any).item?.arguments || !!(event as any).delta,
-                argumentsPreview: ((event as any).item?.arguments || (event as any).delta || '').substring(0, 100),
+                hasItem: !!event.item,
+                itemType: event.item?.type,
+                callId: event.call_id ?? event.item?.call_id,
+                hasArguments: !!event.item?.arguments || !!event.delta,
+                argumentsPreview: (event.item?.arguments ?? event.delta ?? '').substring(0, 100),
               });
             }
 
@@ -704,23 +700,23 @@ export class OpenAICodexProvider {
               case 'response.completed':
                 if (event.response) {
                   // Log the full response for debugging - include reasoning items
-                  const reasoningItems = event.response.output?.filter((o: any) => o.type === 'reasoning') ?? [];
+                  const reasoningItems = event.response.output.filter(o => o.type === 'reasoning');
                   logger.trace('Codex response.completed', {
-                    outputCount: event.response.output?.length ?? 0,
-                    outputTypes: event.response.output?.map((o: any) => o.type) ?? [],
+                    outputCount: event.response.output.length,
+                    outputTypes: event.response.output.map(o => o.type),
                     reasoningItemCount: reasoningItems.length,
-                    reasoningItems: reasoningItems.map((r: any) => ({
+                    reasoningItems: reasoningItems.map(r => ({
                       hasSummary: !!r.summary,
                       summaryLength: r.summary?.length,
-                      summaryTexts: r.summary?.map((s: any) => s.text?.substring(0, 200)),
+                      summaryTexts: r.summary?.map(s => s.text?.substring(0, 200)),
                     })),
-                    functionCalls: event.response.output?.filter((o: any) => o.type === 'function_call').map((fc: any) => ({
+                    functionCalls: event.response.output.filter(o => o.type === 'function_call').map(fc => ({
                       name: fc.name,
                       callId: fc.call_id,
                       hasArguments: !!fc.arguments,
                       argumentsLength: fc.arguments?.length ?? 0,
                       argumentsPreview: fc.arguments?.substring(0, 200),
-                    })) ?? [],
+                    })),
                   });
 
                   // Get usage

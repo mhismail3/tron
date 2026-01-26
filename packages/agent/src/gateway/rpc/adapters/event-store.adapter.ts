@@ -7,6 +7,26 @@
  */
 
 import type { AdapterDependencies, EventStoreManagerAdapter } from '../types.js';
+import type { SessionEvent } from '../../../events/types/index.js';
+
+// =============================================================================
+// Types
+// =============================================================================
+
+/**
+ * Event store interface for recursive operations
+ */
+interface EventStoreWithChildren {
+  getChildren(eventId: string): Promise<SessionEvent[]>;
+}
+
+/**
+ * Helper to safely get payload property from event
+ */
+function getPayloadProp<T>(event: SessionEvent, key: string): T | undefined {
+  const payload = (event as { payload?: Record<string, unknown> }).payload;
+  return payload?.[key] as T | undefined;
+}
 
 // =============================================================================
 // Helper Functions
@@ -15,22 +35,24 @@ import type { AdapterDependencies, EventStoreManagerAdapter } from '../types.js'
 /**
  * Get a human-readable summary of an event for tree visualization
  */
-export function getEventSummary(event: any): string {
+export function getEventSummary(event: SessionEvent): string {
   switch (event.type) {
     case 'session.start':
       return 'Session started';
     case 'session.end':
       return 'Session ended';
     case 'session.fork':
-      return `Forked: ${event.payload?.name ?? 'unnamed'}`;
-    case 'message.user':
-      return event.payload?.content ? String(event.payload.content).slice(0, 50) : 'User message';
+      return `Forked: ${getPayloadProp<string>(event, 'name') ?? 'unnamed'}`;
+    case 'message.user': {
+      const content = getPayloadProp<unknown>(event, 'content');
+      return content ? String(content).slice(0, 50) : 'User message';
+    }
     case 'message.assistant':
       return 'Assistant response';
     case 'tool.call':
-      return `Tool: ${event.payload?.name ?? 'unknown'}`;
+      return `Tool: ${getPayloadProp<string>(event, 'name') ?? 'unknown'}`;
     case 'tool.result':
-      return `Tool result (${event.payload?.isError ? 'error' : 'success'})`;
+      return `Tool result (${getPayloadProp<boolean>(event, 'isError') ? 'error' : 'success'})`;
     default:
       return event.type;
   }
@@ -39,12 +61,12 @@ export function getEventSummary(event: any): string {
 /**
  * Calculate the depth of an event in the tree
  */
-export function getEventDepth(event: any, allEvents: any[]): number {
+export function getEventDepth(event: SessionEvent, allEvents: SessionEvent[]): number {
   let depth = 0;
-  let current = event;
+  let current: SessionEvent | undefined = event;
   while (current?.parentId) {
     depth++;
-    current = allEvents.find(e => e.id === current.parentId);
+    current = allEvents.find(e => e.id === current!.parentId);
   }
   return depth;
 }
@@ -52,7 +74,7 @@ export function getEventDepth(event: any, allEvents: any[]): number {
 /**
  * Count descendants of an event recursively
  */
-function getDescendantCount(eventId: string, allEvents: any[]): number {
+function getDescendantCount(eventId: string, allEvents: SessionEvent[]): number {
   const children = allEvents.filter(e => e.parentId === eventId);
   return children.length + children.reduce((sum, child) =>
     sum + getDescendantCount(child.id, allEvents), 0);
@@ -61,7 +83,7 @@ function getDescendantCount(eventId: string, allEvents: any[]): number {
 /**
  * Get all descendants of an event recursively
  */
-async function getDescendantsRecursive(eventId: string, eventStore: any): Promise<any[]> {
+async function getDescendantsRecursive(eventId: string, eventStore: EventStoreWithChildren): Promise<SessionEvent[]> {
   const children = await eventStore.getChildren(eventId);
   const descendants = [...children];
   for (const child of children) {

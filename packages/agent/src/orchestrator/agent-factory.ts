@@ -111,9 +111,13 @@ export interface AgentFactoryConfig {
   ) => Promise<NotifyAppResult>;
   /** Browser service (optional) */
   browserService?: {
-    execute: (sessionId: string, action: string, params: any) => Promise<any>;
+    execute: (sessionId: string, action: string, params: Record<string, unknown>) => Promise<{
+      success: boolean;
+      data?: Record<string, unknown>;
+      error?: string;
+    }>;
     createSession: (sessionId: string) => Promise<void>;
-    startScreencast: (sessionId: string, options: any) => Promise<void>;
+    startScreencast: (sessionId: string, options: Record<string, unknown>) => Promise<void>;
     hasSession: (sessionId: string) => boolean;
   };
 }
@@ -152,7 +156,7 @@ export class AgentFactory {
     if (this.config.browserService) {
       const service = this.config.browserService;
       browserDelegate = {
-        execute: (sid, action, params) => service.execute(sid, action as any, params),
+        execute: (sid, action, params) => service.execute(sid, action, params),
         ensureSession: async (sid) => {
           await service.createSession(sid);
           // Auto-start streaming so frames flow to iOS immediately
