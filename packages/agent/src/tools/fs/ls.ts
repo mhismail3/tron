@@ -8,7 +8,7 @@
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import type { TronTool, TronToolResult } from '../../types/index.js';
-import { createLogger } from '../../logging/index.js';
+import { createLogger, categorizeError } from '../../logging/index.js';
 import { getSettings } from '../../settings/index.js';
 import {
   truncateOutput,
@@ -212,7 +212,13 @@ export class LsTool implements TronTool {
         },
       };
     } catch (error) {
-      logger.error('Ls failed', { listPath, error: (error as Error).message });
+      const structured = categorizeError(error, { path: listPath, operation: 'ls' });
+      logger.error('Ls failed', {
+        path: listPath,
+        error: structured.message,
+        code: structured.code,
+        category: structured.category,
+      });
       return formatFsError(error, listPath, 'listing');
     }
   }

@@ -11,7 +11,7 @@ import type {
   RegisteredHook,
   AnyHookContext,
 } from './types.js';
-import { createLogger } from '../logging/index.js';
+import { createLogger, categorizeError, LogErrorCategory, LogErrorCodes } from '../logging/index.js';
 import { getSettings } from '../settings/index.js';
 
 const logger = createLogger('hooks:engine');
@@ -137,9 +137,13 @@ export class HookEngine {
         }
       } catch (error) {
         // Log error but continue (fail-open)
+        const structured = categorizeError(error, { hookName: hook.name, hookType: type });
         logger.error('Hook execution error', {
           name: hook.name,
-          error: error instanceof Error ? error.message : String(error),
+          code: LogErrorCodes.HOOK_ERROR,
+          category: LogErrorCategory.HOOK_EXECUTION,
+          error: structured.message,
+          retryable: structured.retryable,
         });
       }
     }
@@ -182,9 +186,13 @@ export class HookEngine {
       logger.debug('Hook executed', { name: hook.name, action: result.action });
       return result;
     } catch (error) {
+      const structured = categorizeError(error, { hookName: hook.name });
       logger.warn('Hook failed', {
         name: hook.name,
-        error: error instanceof Error ? error.message : String(error),
+        code: structured.code,
+        category: LogErrorCategory.HOOK_EXECUTION,
+        error: structured.message,
+        retryable: structured.retryable,
       });
       // Fail-open: return continue on error
       return { action: 'continue' };

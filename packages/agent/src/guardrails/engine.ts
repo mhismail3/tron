@@ -8,7 +8,7 @@
 
 import * as os from 'os';
 import * as path from 'path';
-import { createLogger } from '../logging/index.js';
+import { createLogger, categorizeError, LogErrorCategory, LogErrorCodes } from '../logging/index.js';
 import type {
   GuardrailRule,
   PatternRule,
@@ -239,9 +239,13 @@ export class GuardrailEngine {
         }
       }
     } catch (error) {
+      const structured = categorizeError(error, { ruleId: rule.id, ruleType: rule.type });
       logger.error('Rule evaluation error', {
         ruleId: rule.id,
-        error: error instanceof Error ? error.message : String(error),
+        code: LogErrorCodes.GUARD_BLOCKED,
+        category: LogErrorCategory.GUARDRAIL,
+        error: structured.message,
+        retryable: structured.retryable,
       });
       return { ruleId: rule.id, triggered: false };
     }

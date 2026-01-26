@@ -11,6 +11,10 @@ import type {
   TokenUsage,
   SubagentSpawnType,
 } from '../../events/types.js';
+import { createLogger } from '../../logging/index.js';
+import { categorizeError, LogErrorCategory, LogErrorCodes } from '../../logging/error-codes.js';
+
+const logger = createLogger('subagent-tracker');
 
 /**
  * Status of a tracked sub-agent
@@ -536,7 +540,14 @@ export class SubAgentTracker {
           cb(result);
         } catch (err) {
           // Log but don't throw - we don't want callback errors to break the flow
-          console.error('Error in subagent completion callback:', err);
+          const structured = categorizeError(err, { sessionId, callbackType: 'session-specific' });
+          logger.error('Subagent completion callback error', {
+            code: LogErrorCodes.SUB_ERROR,
+            category: LogErrorCategory.SUBAGENT,
+            sessionId,
+            error: structured.message,
+            retryable: structured.retryable,
+          });
         }
       }
       // Clear callbacks after firing
@@ -548,7 +559,14 @@ export class SubAgentTracker {
       try {
         cb(result);
       } catch (err) {
-        console.error('Error in global subagent completion callback:', err);
+        const structured = categorizeError(err, { sessionId, callbackType: 'global' });
+        logger.error('Global subagent completion callback error', {
+          code: LogErrorCodes.SUB_ERROR,
+          category: LogErrorCategory.SUBAGENT,
+          sessionId,
+          error: structured.message,
+          retryable: structured.retryable,
+        });
       }
     }
   }

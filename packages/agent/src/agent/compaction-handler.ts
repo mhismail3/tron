@@ -14,7 +14,7 @@ import type {
   CompactionAttemptResult,
   EventEmitter,
 } from './internal-types.js';
-import { createLogger } from '../logging/index.js';
+import { createLogger, categorizeError, LogErrorCategory, LogErrorCodes } from '../logging/index.js';
 
 const logger = createLogger('agent:compaction');
 
@@ -137,7 +137,12 @@ export class AgentCompactionHandler implements ICompactionHandler {
         compressionRatio: result.compressionRatio,
       };
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
+      const structured = categorizeError(error, {
+        sessionId: this.sessionId,
+        operation: 'compaction',
+        reason,
+        tokensBefore,
+      });
 
       this.eventEmitter.emit({
         type: 'compaction_complete',
@@ -150,11 +155,17 @@ export class AgentCompactionHandler implements ICompactionHandler {
         reason,
       });
 
-      logger.error('Auto-compaction failed', { error: errorMessage });
+      logger.error('Auto-compaction failed', {
+        sessionId: this.sessionId,
+        code: LogErrorCodes.COMP_FAILED,
+        category: LogErrorCategory.COMPACTION,
+        error: structured.message,
+        retryable: structured.retryable,
+      });
 
       return {
         success: false,
-        error: errorMessage,
+        error: structured.message,
         tokensBefore,
       };
     }
