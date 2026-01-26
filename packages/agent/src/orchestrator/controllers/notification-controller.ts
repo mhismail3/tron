@@ -11,10 +11,10 @@
  * - Handle notification delivery results
  */
 
-import { createLogger } from '../logging/logger.js';
-import type { EventStore } from '../events/event-store.js';
-import type { APNSService, APNSNotification } from '../external/apns/index.js';
-import type { NotifyAppResult } from '../tools/ui/notify-app.js';
+import { createLogger } from '../../logging/logger.js';
+import type { EventStore } from '../../events/event-store.js';
+import type { APNSService, APNSNotification } from '../../external/apns/index.js';
+import type { NotifyAppResult } from '../../tools/ui/notify-app.js';
 
 const logger = createLogger('notification-controller');
 

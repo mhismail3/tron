@@ -13,8 +13,8 @@
  */
 import { describe, it, expect, beforeEach, vi, type Mock } from 'vitest';
 import { ModelController, createModelController, type ModelControllerConfig } from '../model-controller.js';
-import type { ActiveSession } from '../types.js';
-import type { SessionId } from '../../events/types.js';
+import type { ActiveSession } from '../../types.js';
+import type { SessionId } from '../../../events/types.js';
 
 // =============================================================================
 // Test Fixtures

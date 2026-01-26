@@ -31,15 +31,15 @@
  * ```
  */
 // Direct imports to avoid circular dependencies through index.js
-import { createLogger } from '../logging/logger.js';
-import { EventStore } from '../events/event-store.js';
+import { createLogger } from '../../logging/logger.js';
+import { EventStore } from '../../events/event-store.js';
 import type {
   EventType,
   EventId,
   SessionId,
   SessionEvent as TronSessionEvent,
-} from '../events/types.js';
-import { PersistenceError, TronError } from '../utils/errors.js';
+} from '../../events/types.js';
+import { PersistenceError, TronError } from '../../utils/errors.js';
 
 const logger = createLogger('event-persister');
 

@@ -14,7 +14,7 @@ import type { SkillTracker } from '../skills/skill-tracker.js';
 import type { RulesTracker } from '../context/rules-tracker.js';
 import type { SubAgentTracker } from '../tools/subagent/subagent-tracker.js';
 import type { TodoTracker } from '../todos/todo-tracker.js';
-import type { SessionContext } from './session-context.js';
+import type { SessionContext } from './session/session-context.js';
 
 // =============================================================================
 // Configuration

@@ -33,7 +33,7 @@ import { normalizeContentBlocks } from '../utils/content-normalizer.js';
 import { PersistenceError } from '../utils/errors.js';
 import type { RunResult } from '../agent/types.js';
 import type { UserContent } from '../types/messages.js';
-import type { SkillLoader, PlanModeCallback } from './skill-loader.js';
+import type { SkillLoader, PlanModeCallback } from './operations/skill-loader.js';
 import type {
   ActiveSession,
   AgentRunOptions,

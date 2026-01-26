@@ -41,39 +41,39 @@
  * ```
  */
 // Direct imports to avoid circular dependencies through index.js
-import { createLogger } from '../logging/logger.js';
-import type { EventStore } from '../events/event-store.js';
+import { createLogger } from '../../logging/logger.js';
+import type { EventStore } from '../../events/event-store.js';
 import type {
   EventType,
   EventId,
   SessionId,
   SessionEvent as TronSessionEvent,
-} from '../events/types.js';
-import type { WorkingDirectory } from '../session/working-directory.js';
-import type { ProviderType } from '../types/messages.js';
-import { detectProviderType } from '../providers/token-normalizer.js';
+} from '../../events/types.js';
+import type { WorkingDirectory } from '../../session/working-directory.js';
+import type { ProviderType } from '../../types/messages.js';
+import { detectProviderType } from '../../providers/token-normalizer.js';
 import {
   EventPersister,
   createEventPersister,
-} from './event-persister.js';
+} from '../persistence/event-persister.js';
 import {
   TurnManager,
   createTurnManager,
   type TokenUsage,
   type EndTurnResult,
   type AssistantContentBlock,
-} from './turn-manager.js';
+} from '../turn/turn-manager.js';
 import {
   PlanModeHandler,
   createPlanModeHandler,
   type PlanModeState,
-} from './handlers/plan-mode.js';
+} from '../handlers/plan-mode.js';
 import {
   SessionReconstructor,
   createSessionReconstructor,
 } from './session-reconstructor.js';
-import type { AccumulatedContent, InterruptedContent } from './turn-content-tracker.js';
-import type { MessageWithEventId } from '../events/types.js';
+import type { AccumulatedContent, InterruptedContent } from '../turn/turn-content-tracker.js';
+import type { MessageWithEventId } from '../../events/types.js';
 
 const logger = createLogger('session-context');
 

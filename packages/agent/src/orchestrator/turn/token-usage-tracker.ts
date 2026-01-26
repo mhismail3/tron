@@ -20,14 +20,14 @@
  *
  * @see token-normalizer.ts for detailed documentation on provider differences
  */
-import { createLogger } from '../logging/logger.js';
-import type { ProviderType } from '../types/messages.js';
-import { normalizeTokenUsage, type NormalizedTokenUsage } from '../providers/token-normalizer.js';
+import { createLogger } from '../../logging/logger.js';
+import type { ProviderType } from '../../types/messages.js';
+import { normalizeTokenUsage, type NormalizedTokenUsage } from '../../providers/token-normalizer.js';
 
 const logger = createLogger('token-usage-tracker');
 
 // Re-export NormalizedTokenUsage for convenience
-export type { NormalizedTokenUsage } from '../providers/token-normalizer.js';
+export type { NormalizedTokenUsage } from '../../providers/token-normalizer.js';
 
 // =============================================================================
 // Types

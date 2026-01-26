@@ -5,7 +5,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { AgentEventHandler } from '../../agent-event-handler.js';
+import { AgentEventHandler } from '../../turn/agent-event-handler.js';
 
 describe('AgentEventHandler - UI Render Events', () => {
   let handler: AgentEventHandler;

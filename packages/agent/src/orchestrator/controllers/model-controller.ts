@@ -17,12 +17,12 @@
  * - Reduces coupling to orchestrator
  * - Makes the model switching flow explicit and traceable
  */
-import { createLogger } from '../logging/logger.js';
-import type { EventStore } from '../events/event-store.js';
-import type { SessionId } from '../events/types.js';
-import type { AuthProvider } from './auth-provider.js';
-import type { ActiveSession } from './types.js';
-import { normalizeToUnifiedAuth } from './agent-factory.js';
+import { createLogger } from '../../logging/logger.js';
+import type { EventStore } from '../../events/event-store.js';
+import type { SessionId } from '../../events/types.js';
+import type { AuthProvider } from '../session/auth-provider.js';
+import type { ActiveSession } from '../types.js';
+import { normalizeToUnifiedAuth } from '../agent-factory.js';
 
 const logger = createLogger('model-controller');
 

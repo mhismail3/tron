@@ -23,26 +23,26 @@
  * - Handles cost calculation for turn events
  */
 // Direct imports to avoid circular dependencies through index.js
-import { createLogger } from '../logging/logger.js';
-import { calculateCost } from '../usage/index.js';
-import type { TronEvent } from '../types/events.js';
+import { createLogger } from '../../logging/logger.js';
+import { calculateCost } from '../../usage/index.js';
+import type { TronEvent } from '../../types/events.js';
 import type {
   SessionId,
   EventType,
   SessionEvent as TronSessionEvent,
-} from '../events/types.js';
+} from '../../events/types.js';
 import {
   normalizeContentBlocks,
   truncateString,
   MAX_TOOL_RESULT_SIZE,
-} from '../utils/content-normalizer.js';
-import type { ActiveSession } from './types.js';
+} from '../../utils/content-normalizer.js';
+import type { ActiveSession } from '../types.js';
 import {
   UIRenderHandler,
   createUIRenderHandler,
   type ToolStartArgs,
   type ToolEndDetails,
-} from './ui-render-handler.js';
+} from '../ui-render-handler.js';
 import type { NormalizedTokenUsage } from './turn-content-tracker.js';
 
 const logger = createLogger('agent-event-handler');

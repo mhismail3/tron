@@ -21,7 +21,7 @@ import {
   SessionManager,
   createSessionManager,
   type SessionManagerConfig,
-} from '../../orchestrator/session-manager.js';
+} from '../../orchestrator/session/session-manager.js';
 import type {
   ActiveSession,
   CreateSessionOptions,

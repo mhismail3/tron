@@ -20,23 +20,23 @@
  * - SubAgentTracker managed by ActiveSession, accessed via callbacks
  */
 // Direct imports to avoid circular dependencies through index.js
-import { createLogger } from '../logging/logger.js';
-import type { EventStore } from '../events/event-store.js';
+import { createLogger } from '../../logging/logger.js';
+import type { EventStore } from '../../events/event-store.js';
 import type {
   SessionId,
   EventType,
   SessionEvent as TronSessionEvent,
-} from '../events/types.js';
-import type { SpawnSubagentParams } from '../tools/subagent/spawn-subagent.js';
-import type { SpawnTmuxAgentParams } from '../tools/subagent/spawn-tmux-agent.js';
+} from '../../events/types.js';
+import type { SpawnSubagentParams } from '../../tools/subagent/spawn-subagent.js';
+import type { SpawnTmuxAgentParams } from '../../tools/subagent/spawn-tmux-agent.js';
 import type {
   SubagentQueryType,
   SubagentStatusInfo,
   SubagentEventInfo,
   SubagentLogInfo,
-} from '../tools/subagent/query-subagent.js';
-import type { SubagentResult } from '../tools/subagent/subagent-tracker.js';
-import type { ActiveSession, AgentRunOptions, SessionInfo, CreateSessionOptions } from './types.js';
+} from '../../tools/subagent/query-subagent.js';
+import type { SubagentResult } from '../../tools/subagent/subagent-tracker.js';
+import type { ActiveSession, AgentRunOptions, SessionInfo, CreateSessionOptions } from '../types.js';
 
 const logger = createLogger('subagent-ops');
 

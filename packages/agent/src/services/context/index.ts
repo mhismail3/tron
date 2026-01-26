@@ -23,7 +23,7 @@ import {
   ContextOps,
   createContextOps,
   type ContextOpsConfig,
-} from '../../orchestrator/context-ops.js';
+} from '../../orchestrator/operations/context-ops.js';
 import type {
   ContextSnapshot,
   DetailedContextSnapshot,

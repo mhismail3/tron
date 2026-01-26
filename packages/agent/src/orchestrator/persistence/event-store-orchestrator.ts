@@ -61,10 +61,10 @@ import * as crypto from 'crypto';
 import * as path from 'path';
 import * as os from 'os';
 // Direct imports to avoid circular dependencies through index.js
-import { createLogger } from '../logging/logger.js';
-import { TronAgent } from '../agent/tron-agent.js';
-import type { TurnResult } from '../agent/types.js';
-import { EventStore, type AppendEventOptions, type SearchOptions } from '../events/event-store.js';
+import { createLogger } from '../../logging/logger.js';
+import { TronAgent } from '../../agent/tron-agent.js';
+import type { TurnResult } from '../../agent/types.js';
+import { EventStore, type AppendEventOptions, type SearchOptions } from '../../events/event-store.js';
 import {
   type SessionEvent as TronSessionEvent,
   type SessionState as EventSessionState,
@@ -73,68 +73,68 @@ import {
   type SessionId,
   type WorkspaceId,
   type EventType,
-} from '../events/types.js';
+} from '../../events/types.js';
 import {
   WorktreeCoordinator,
   createWorktreeCoordinator,
-} from '../session/worktree-coordinator.js';
-import { loadServerAuth } from '../auth/oauth.js';
-import { SubAgentTracker, type SubagentResult } from '../tools/subagent/subagent-tracker.js';
-import type { TronEvent } from '../types/events.js';
+} from '../../session/worktree-coordinator.js';
+import { loadServerAuth } from '../../auth/oauth.js';
+import { SubAgentTracker, type SubagentResult } from '../../tools/subagent/subagent-tracker.js';
+import type { TronEvent } from '../../types/events.js';
 import type {
   ContextSnapshot,
   DetailedContextSnapshot,
   PreTurnValidation,
   CompactionPreview,
   CompactionResult,
-} from '../context/context-manager.js';
-import type { SpawnSubagentParams } from '../tools/subagent/spawn-subagent.js';
-import type { SpawnTmuxAgentParams } from '../tools/subagent/spawn-tmux-agent.js';
+} from '../../context/context-manager.js';
+import type { SpawnSubagentParams } from '../../tools/subagent/spawn-subagent.js';
+import type { SpawnTmuxAgentParams } from '../../tools/subagent/spawn-tmux-agent.js';
 import type {
   SubagentQueryType,
   SubagentStatusInfo,
   SubagentEventInfo,
   SubagentLogInfo,
-} from '../tools/subagent/query-subagent.js';
-import type { TodoItem, BackloggedTask } from '../todos/types.js';
-import { BrowserService } from '../external/browser/index.js';
-import { SessionError } from '../utils/errors.js';
+} from '../../tools/subagent/query-subagent.js';
+import type { TodoItem, BackloggedTask } from '../../todos/types.js';
+import { BrowserService } from '../../external/browser/index.js';
+import { SessionError } from '../../utils/errors.js';
 import {
   buildWorktreeInfoWithStatus,
   commitWorkingDirectory,
-} from './worktree-ops.js';
+} from '../operations/worktree-ops.js';
 import {
   SubagentOperations,
   createSubagentOperations,
-} from './subagent-ops.js';
+} from '../operations/subagent-ops.js';
 import {
   AgentEventHandler,
   createAgentEventHandler,
-} from './agent-event-handler.js';
+} from '../turn/agent-event-handler.js';
 import {
   SkillLoader,
   createSkillLoader,
-} from './skill-loader.js';
+} from '../operations/skill-loader.js';
 import {
   SessionManager,
   createSessionManager,
-} from './session-manager.js';
+} from '../session/session-manager.js';
 import {
   ContextOps,
   createContextOps,
-} from './context-ops.js';
+} from '../operations/context-ops.js';
 import {
   AgentFactory,
   createAgentFactory,
-} from './agent-factory.js';
+} from '../agent-factory.js';
 import {
   AuthProvider,
   createAuthProvider,
-} from './auth-provider.js';
+} from '../session/auth-provider.js';
 import {
   APNSService,
   createAPNSService,
-} from '../external/apns/index.js';
+} from '../../external/apns/index.js';
 import {
   type EventStoreOrchestratorConfig,
   type ActiveSession,
@@ -144,27 +144,27 @@ import {
   type SessionInfo,
   type ForkResult,
   type WorktreeInfo,
-} from './types.js';
+} from '../types.js';
 import {
   PlanModeController,
   createPlanModeController,
-} from './plan-mode-controller.js';
+} from '../controllers/plan-mode-controller.js';
 import {
   TodoController,
   createTodoController,
-} from './todo-controller.js';
+} from '../controllers/todo-controller.js';
 import {
   NotificationController,
   createNotificationController,
-} from './notification-controller.js';
+} from '../controllers/notification-controller.js';
 import {
   AgentRunner,
   createAgentRunner,
-} from './agent-runner.js';
+} from '../agent-runner.js';
 import {
   ModelController,
   createModelController,
-} from './model-controller.js';
+} from '../controllers/model-controller.js';
 
 // Re-export types for consumers
 export type {

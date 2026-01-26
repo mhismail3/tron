@@ -37,29 +37,72 @@
  */
 
 // =============================================================================
-// New Modular Components
+// Event Persistence (organized in persistence/ subfolder)
 // =============================================================================
 
-// Event persistence (Phase 1)
+// Event persistence
 export {
   EventPersister,
   createEventPersister,
   type EventPersisterConfig,
   type AppendRequest,
-} from './event-persister.js';
+} from './persistence/index.js';
 
-// Turn lifecycle management (Phase 2)
+// Event store orchestrator
+export { EventStoreOrchestrator } from './persistence/index.js';
+
+// =============================================================================
+// Turn Execution (organized in turn/ subfolder)
+// =============================================================================
+
+// Turn lifecycle management
 export {
   TurnManager,
   createTurnManager,
   type TokenUsage,
   type TextContentBlock,
+  type ThinkingContentBlock,
   type ToolUseContentBlock,
   type AssistantContentBlock,
   type ToolResultBlock,
   type EndTurnResult,
+} from './turn/index.js';
+
+// Turn content tracking
+export { TurnContentTracker } from './turn/index.js';
+
+// Token usage tracking (extracted from TurnContentTracker)
+export {
+  TokenUsageTracker,
+  createTokenUsageTracker,
+  type RawTokenUsage,
+  type TokenUsageTrackerConfig,
   type NormalizedTokenUsage,
-} from './turn-manager.js';
+} from './turn/index.js';
+
+// Content block building utilities (extracted from TurnContentTracker)
+export {
+  buildPreToolContentBlocks,
+  buildInterruptedContentBlocks,
+  buildThinkingBlock,
+  buildToolUseBlock,
+  buildToolResultBlock,
+  type ContentSequenceItem,
+  type ToolCallData,
+  type PreToolContentBlock,
+  type InterruptedContentBlocks,
+  type ThinkingBlock,
+  type ToolUseBlock,
+  type ToolUseMeta,
+  type ToolResultMeta,
+} from './turn/index.js';
+
+// Agent event handling
+export {
+  AgentEventHandler,
+  createAgentEventHandler,
+  type AgentEventHandlerConfig,
+} from './turn/index.js';
 
 // Handlers (Phase 3)
 export {
@@ -83,53 +126,114 @@ export {
   type ClearReason,
 } from './handlers/index.js';
 
-// Session state reconstruction (Phase 4)
+// =============================================================================
+// Session Lifecycle (organized in session/ subfolder)
+// =============================================================================
+
+// Session state reconstruction
 export {
   SessionReconstructor,
   createSessionReconstructor,
   type ReconstructedState,
-} from './session-reconstructor.js';
+} from './session/index.js';
 
-// Session context (Phase 5)
+// Session context
 export {
   SessionContext,
   createSessionContext,
   type SessionContextConfig,
-} from './session-context.js';
+} from './session/index.js';
+
+// Session management
+export {
+  SessionManager,
+  createSessionManager,
+  type SessionManagerConfig,
+} from './session/index.js';
+
+// Auth provider
+export {
+  AuthProvider,
+  createAuthProvider,
+  type AuthProviderConfig,
+} from './session/index.js';
+
+// =============================================================================
+// Feature Controllers (organized in controllers/ subfolder)
+// =============================================================================
+
+// Model switching
+export {
+  ModelController,
+  createModelController,
+  type ModelControllerConfig,
+  type ModelSwitchResult,
+} from './controllers/index.js';
+
+// Plan mode management
+export {
+  PlanModeController,
+  createPlanModeController,
+  type PlanModeControllerConfig,
+  type EnterPlanModeOptions,
+  type ExitPlanModeOptions,
+} from './controllers/index.js';
+
+// Push notifications
+export {
+  NotificationController,
+  createNotificationController,
+  type NotificationControllerConfig,
+  type NotificationPayload,
+} from './controllers/index.js';
+
+// Todo and backlog management
+export {
+  TodoController,
+  createTodoController,
+  type TodoControllerConfig,
+} from './controllers/index.js';
+
+// =============================================================================
+// Domain Operations (organized in operations/ subfolder)
+// =============================================================================
+
+// Context operations
+export {
+  ContextOps,
+  createContextOps,
+  type ContextOpsConfig,
+} from './operations/index.js';
+
+// Sub-agent operations
+export {
+  SubagentOperations,
+  createSubagentOperations,
+  type SubagentOperationsConfig,
+  type SpawnSubagentResult,
+  type SpawnTmuxAgentResult,
+  type QuerySubagentResult,
+  type WaitForSubagentsResult,
+} from './operations/index.js';
+
+// Worktree operations
+export {
+  buildWorktreeInfo,
+  buildWorktreeInfoWithStatus,
+  commitWorkingDirectory,
+} from './operations/index.js';
+
+// Skill loading
+export {
+  SkillLoader,
+  createSkillLoader,
+  type SkillLoaderConfig,
+  type SkillLoadContext,
+} from './operations/index.js';
 
 // =============================================================================
 // Existing Components
 // =============================================================================
-
-// Turn content tracking
-export { TurnContentTracker } from './turn-content-tracker.js';
-
-// Token usage tracking (extracted from TurnContentTracker)
-export {
-  TokenUsageTracker,
-  createTokenUsageTracker,
-  type RawTokenUsage,
-  type TokenUsageTrackerConfig,
-} from './token-usage-tracker.js';
-
-// Content block building utilities (extracted from TurnContentTracker)
-export {
-  buildPreToolContentBlocks,
-  buildInterruptedContentBlocks,
-  buildThinkingBlock,
-  buildToolUseBlock,
-  buildToolResultBlock,
-  type ContentSequenceItem,
-  type ToolCallData,
-  type PreToolContentBlock,
-  type InterruptedContentBlocks,
-  type ThinkingBlock,
-  type ToolUseBlock,
-  type ToolUseMeta,
-  type ToolResultMeta,
-  // Note: ToolResultBlock not exported to avoid conflict with turn-manager.ts
-  // Use the builder function return type or InterruptedContentBlocks['toolResultContent'][0]
-} from './content-block-builder.js';
 
 // Types
 export type {
@@ -147,53 +251,6 @@ export type {
   ForkResult,
 } from './types.js';
 
-// Worktree operations
-export {
-  buildWorktreeInfo,
-  buildWorktreeInfoWithStatus,
-  commitWorkingDirectory,
-} from './worktree-ops.js';
-
-// Sub-agent operations (Phase 1 extraction)
-export {
-  SubagentOperations,
-  createSubagentOperations,
-  type SubagentOperationsConfig,
-  type SpawnSubagentResult,
-  type SpawnTmuxAgentResult,
-  type QuerySubagentResult,
-  type WaitForSubagentsResult,
-} from './subagent-ops.js';
-
-// Agent event handling (Phase 2 extraction)
-export {
-  AgentEventHandler,
-  createAgentEventHandler,
-  type AgentEventHandlerConfig,
-} from './agent-event-handler.js';
-
-// Skill loading (Phase 3 extraction)
-export {
-  SkillLoader,
-  createSkillLoader,
-  type SkillLoaderConfig,
-  type SkillLoadContext,
-} from './skill-loader.js';
-
-// Session management (Phase 5 extraction)
-export {
-  SessionManager,
-  createSessionManager,
-  type SessionManagerConfig,
-} from './session-manager.js';
-
-// Context operations (Phase 6 extraction)
-export {
-  ContextOps,
-  createContextOps,
-  type ContextOpsConfig,
-} from './context-ops.js';
-
 // Agent factory (Phase 7 extraction)
 export {
   AgentFactory,
@@ -201,24 +258,9 @@ export {
   type AgentFactoryConfig,
 } from './agent-factory.js';
 
-// Auth provider (Phase 8 extraction)
-export {
-  AuthProvider,
-  createAuthProvider,
-  type AuthProviderConfig,
-} from './auth-provider.js';
-
 // Agent runner (extracted from runAgent god method)
 export {
   AgentRunner,
   createAgentRunner,
   type AgentRunnerConfig,
 } from './agent-runner.js';
-
-// Model controller (extracted model switching)
-export {
-  ModelController,
-  createModelController,
-  type ModelControllerConfig,
-  type ModelSwitchResult,
-} from './model-controller.js';

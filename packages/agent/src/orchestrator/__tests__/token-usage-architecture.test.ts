@@ -23,7 +23,7 @@
  */
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { TurnContentTracker } from '../turn-content-tracker.js';
+import { TurnContentTracker } from '../turn/turn-content-tracker.js';
 import { normalizeTokenUsage } from '../../providers/token-normalizer.js';
 import type { ProviderType } from '../../types/messages.js';
 

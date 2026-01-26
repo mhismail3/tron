@@ -10,16 +10,16 @@
  * Phase 6 of orchestrator refactoring.
  */
 // Direct imports to avoid circular dependencies through index.js
-import { createLogger } from '../logging/logger.js';
-import { KeywordSummarizer, type Summarizer } from '../context/summarizer.js';
+import { createLogger } from '../../logging/logger.js';
+import { KeywordSummarizer, type Summarizer } from '../../context/summarizer.js';
 import type {
   ContextSnapshot,
   DetailedContextSnapshot,
   PreTurnValidation,
   CompactionPreview,
   CompactionResult,
-} from '../context/context-manager.js';
-import type { ActiveSession } from './types.js';
+} from '../../context/context-manager.js';
+import type { ActiveSession } from '../types.js';
 
 const logger = createLogger('context-ops');
 

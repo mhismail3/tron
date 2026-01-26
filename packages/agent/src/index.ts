@@ -77,7 +77,7 @@ export * from './usage/index.js';
 
 // Re-export server components
 export { TronServer, type TronServerConfig } from './server.js';
-export { EventStoreOrchestrator } from './orchestrator/event-store-orchestrator.js';
+export { EventStoreOrchestrator } from './orchestrator/persistence/event-store-orchestrator.js';
 export type {
   EventStoreOrchestratorConfig,
   ActiveSession,
@@ -86,7 +86,7 @@ export type {
   CreateSessionOptions,
   SessionInfo,
   ForkResult,
-} from './orchestrator/event-store-orchestrator.js';
+} from './orchestrator/persistence/event-store-orchestrator.js';
 
 // Re-export gateway components
 export * from './gateway/index.js';

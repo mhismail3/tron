@@ -14,7 +14,7 @@ import {
   type RpcContext,
 } from './index.js';
 import { TronWebSocketServer, type WebSocketServerConfig } from './gateway/websocket.js';
-import { EventStoreOrchestrator, type EventStoreOrchestratorConfig } from './orchestrator/event-store-orchestrator.js';
+import { EventStoreOrchestrator, type EventStoreOrchestratorConfig } from './orchestrator/persistence/event-store-orchestrator.js';
 import { HealthServer, type HealthServerConfig } from './gateway/health.js';
 import { ensureTranscriptionSidecar, stopTranscriptionSidecar } from './transcription/index.js';
 import { createRpcContext } from './gateway/rpc/index.js';

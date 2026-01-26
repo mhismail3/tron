@@ -6,8 +6,8 @@
  * depend on orchestrator state.
  */
 // Direct import to avoid circular dependencies through index.js
-import type { WorkingDirectory } from '../session/working-directory.js';
-import type { WorktreeInfo } from './types.js';
+import type { WorkingDirectory } from '../../session/working-directory.js';
+import type { WorktreeInfo } from '../types.js';
 
 /**
  * Build WorktreeInfo from a WorkingDirectory (synchronous, basic info only)
