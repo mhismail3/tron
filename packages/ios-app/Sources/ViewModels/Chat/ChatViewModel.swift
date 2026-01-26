@@ -130,6 +130,12 @@ class ChatViewModel: ObservableObject, ChatEventContext {
     let streamingManager = StreamingManager()
     /// Extracts and processes event data from agent streaming (stateless handler)
     let eventHandler = ChatEventHandler()
+    /// Coordinates tool event handling (start/end) for tool messages and UI updates
+    let toolEventCoordinator = ToolEventCoordinator()
+    /// Coordinates turn lifecycle handling (start/end, complete)
+    let turnLifecycleCoordinator = TurnLifecycleCoordinator()
+    /// Coordinates UI canvas rendering event handling
+    let uiCanvasCoordinator = UICanvasCoordinator()
     var currentToolMessages: [UUID: ChatMessage] = [:]
 
     /// Track tool calls for the current turn (for display purposes)
