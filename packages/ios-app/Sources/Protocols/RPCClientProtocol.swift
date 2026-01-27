@@ -1,18 +1,19 @@
 import Foundation
-import Combine
 
 /// Protocol for RPC client enabling dependency injection and mocking
 @MainActor
-protocol RPCClientProtocol: ObservableObject {
-    // MARK: - Published State
+protocol RPCClientProtocol: AnyObject {
+    // MARK: - Observable State
     var connectionState: ConnectionState { get }
     var currentSessionId: String? { get }
     var currentModel: String { get }
 
-    // MARK: - Unified Event Stream
-    /// Publisher for plugin-based parsed WebSocket events.
-    /// Consumers subscribe and filter by session ID as needed.
-    var eventPublisherV2: AnyPublisher<ParsedEventV2, Never> { get }
+    // MARK: - Async Event Stream API
+    /// Async stream of all events
+    var events: AsyncStream<ParsedEventV2> { get }
+
+    /// Async stream of events for a specific session
+    func events(for sessionId: String?) -> AsyncStream<ParsedEventV2>
 
     // MARK: - Computed Properties
     var isConnected: Bool { get }

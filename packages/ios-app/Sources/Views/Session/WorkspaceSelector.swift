@@ -69,9 +69,9 @@ struct WorkspaceSelector: View {
             .task {
                 await loadHome()
             }
-            .onReceive(rpcClient.$connectionState.receive(on: DispatchQueue.main)) { state in
+            .onChange(of: rpcClient.connectionState) { oldState, newState in
                 // React when connection transitions to connected
-                if state.isConnected && errorMessage != nil {
+                if newState.isConnected && !oldState.isConnected && errorMessage != nil {
                     // Connection established and we had an error - retry
                     errorMessage = nil
                     Task {

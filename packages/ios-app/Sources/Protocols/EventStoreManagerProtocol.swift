@@ -1,19 +1,19 @@
 import Foundation
-import Combine
 
 // MARK: - Session Store Protocol
 
 /// Protocol for core session state management and CRUD operations
 @MainActor
-protocol SessionStoreProtocol: ObservableObject {
-    // MARK: - Published State
+protocol SessionStoreProtocol: AnyObject {
+    // MARK: - Observable State
     var sessions: [CachedSession] { get }
     var isSyncing: Bool { get }
     var lastSyncError: String? { get }
     var activeSessionId: String? { get }
 
-    // MARK: - Session Change Notification
-    var sessionUpdated: PassthroughSubject<String, Never> { get }
+    // MARK: - Session Change Notification (Async Stream API)
+    /// Async stream of session IDs that have been updated
+    var sessionUpdates: AsyncStream<String> { get }
 
     // MARK: - Processing State
     var processingSessionIds: Set<String> { get set }

@@ -348,7 +348,7 @@ extension EventStoreManager {
                     } catch {
                         logger.warning("Failed to update metadata after repair for session \(sessionId.prefix(12))...: \(error.localizedDescription)", category: .session)
                     }
-                    sessionUpdated.send(sessionId)
+                    notifySessionUpdated(sessionId)
                 }
             }
         } catch {

@@ -87,9 +87,9 @@ struct ContentView: View {
                 // Stop polling when leaving the dashboard
                 eventStoreManager.stopDashboardPolling()
             }
-            .onReceive(rpcClient.$connectionState.receive(on: DispatchQueue.main)) { state in
+            .onChange(of: rpcClient.connectionState) { oldState, newState in
                 // When connection is established, trigger dashboard refresh
-                if state.isConnected {
+                if newState.isConnected && !oldState.isConnected {
                     eventStoreManager.startDashboardPolling()
                 }
             }

@@ -68,9 +68,9 @@ struct TronMobileApp: App {
                     await registerDeviceToken(token)
                 }
             }
-            .onReceive(container.rpcClient.$connectionState) { state in
+            .onChange(of: container.rpcClient.connectionState) { oldState, newState in
                 // When connection is established, register pending device token
-                guard state.isConnected else { return }
+                guard newState.isConnected && !oldState.isConnected else { return }
                 guard let token = container.pushNotificationService.deviceToken else { return }
                 Task {
                     await registerDeviceToken(token)

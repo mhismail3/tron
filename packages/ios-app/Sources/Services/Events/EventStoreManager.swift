@@ -1,5 +1,4 @@
 import Foundation
-import Combine
 
 // NOTE: Uses global `logger` from TronLogger.swift (TronLogger.shared)
 // Do NOT define a local logger property - it would shadow the global one
@@ -19,19 +18,20 @@ struct ToolCallRecord {
 
 /// Central manager for event-sourced session state
 /// Coordinates between EventDatabase (local SQLite) and RPCClient (server sync)
+@Observable
 @MainActor
-class EventStoreManager: ObservableObject {
+final class EventStoreManager {
     // Uses global `logger` from TronLogger.swift
 
     let eventDB: EventDatabase
     private(set) var rpcClient: RPCClient
 
-    // MARK: - Published State
+    // MARK: - Observable State
 
-    @Published private(set) var sessions: [CachedSession] = []
-    @Published private(set) var isSyncing = false
-    @Published private(set) var lastSyncError: String?
-    @Published private(set) var activeSessionId: String? {
+    private(set) var sessions: [CachedSession] = []
+    private(set) var isSyncing = false
+    private(set) var lastSyncError: String?
+    private(set) var activeSessionId: String? {
         didSet {
             if activeSessionId != oldValue {
                 logger.info("Active session changed: \(oldValue ?? "nil") → \(activeSessionId ?? "nil")", category: .session)
@@ -40,15 +40,28 @@ class EventStoreManager: ObservableObject {
     }
 
     /// Whether to filter sessions by current server origin
-    @Published var filterByOrigin: Bool = true
+    var filterByOrigin: Bool = true
 
     /// Current server origin from the RPC client
     var currentServerOrigin: String {
         rpcClient.serverOrigin
     }
 
-    // Session change notification for views that need to react
-    let sessionUpdated = PassthroughSubject<String, Never>()
+    // MARK: - Session Update Stream
+
+    /// Async event stream for session update notifications
+    @ObservationIgnored
+    private let _sessionUpdates = AsyncEventStream<String>()
+
+    /// Async stream of session IDs that have been updated
+    var sessionUpdates: AsyncStream<String> {
+        _sessionUpdates.events
+    }
+
+    /// Send a session update notification
+    func notifySessionUpdated(_ sessionId: String) {
+        _sessionUpdates.send(sessionId)
+    }
 
     // MARK: - Turn Content Cache
 
@@ -58,6 +71,7 @@ class EventStoreManager: ObservableObject {
     // MARK: - Polling Components
 
     /// Manages dashboard polling lifecycle with background suspension
+    @ObservationIgnored
     private(set) lazy var dashboardPoller: DashboardPoller = {
         let poller = DashboardPoller()
         poller.delegate = self
@@ -65,11 +79,13 @@ class EventStoreManager: ObservableObject {
     }()
 
     /// Checks session processing states from the server
+    @ObservationIgnored
     private(set) lazy var sessionStateChecker: SessionStateChecker = {
         SessionStateChecker(rpcClient: rpcClient)
     }()
 
     /// Handles synchronization of session events with the server
+    @ObservationIgnored
     private(set) lazy var sessionSynchronizer: SessionSynchronizer = {
         SessionSynchronizer(rpcClient: rpcClient, eventDB: eventDB, cache: turnContentCache)
     }()
@@ -92,8 +108,9 @@ class EventStoreManager: ObservableObject {
         }
     }
 
-    /// Cancellables for event stream subscription
-    private var eventCancellables = Set<AnyCancellable>()
+    /// Task for global event handling
+    @ObservationIgnored
+    private var globalEventTask: Task<Void, Never>?
 
     // MARK: - Initialization
 
@@ -113,17 +130,18 @@ class EventStoreManager: ObservableObject {
     /// Set up handlers for global events (events from all sessions)
     /// These events update dashboard state for ALL sessions, not just the active one.
     private func setupGlobalEventHandlers() {
-        // Clear existing subscriptions to prevent duplicates when RPC client is updated
-        eventCancellables.removeAll()
+        // Cancel existing task to prevent duplicates when RPC client is updated
+        globalEventTask?.cancel()
 
-        // Subscribe to plugin-based event stream for global events
+        // Subscribe to async event stream for global events
         // We don't filter by session ID here - we want events from ALL sessions
-        rpcClient.eventPublisherV2
-            .receive(on: DispatchQueue.main)
-            .sink { [weak self] event in
-                self?.handleGlobalEventV2(event)
+        globalEventTask = Task { [weak self] in
+            guard let self else { return }
+            for await event in rpcClient.events {
+                guard !Task.isCancelled else { break }
+                self.handleGlobalEventV2(event)
             }
-            .store(in: &eventCancellables)
+        }
     }
 
     /// Handle global events for dashboard updates (plugin-based)

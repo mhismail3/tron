@@ -280,9 +280,9 @@ struct NewSessionFlow: View {
                 await loadServerSessions()
                 await validateWorkspacePaths()
             }
-            .onReceive(rpcClient.$connectionState.receive(on: DispatchQueue.main)) { state in
+            .onChange(of: rpcClient.connectionState) { oldState, newState in
                 // React when connection transitions to connected
-                if state.isConnected && serverSessionsError != nil {
+                if newState.isConnected && !oldState.isConnected && serverSessionsError != nil {
                     // Connection established and we had an error - reload data
                     serverSessionsError = nil
                     _ = Task {

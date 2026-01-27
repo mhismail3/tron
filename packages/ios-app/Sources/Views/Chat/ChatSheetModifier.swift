@@ -10,7 +10,6 @@ struct ChatSheetModifier: ViewModifier {
     let sessionId: String
     let skillStore: SkillStore?
     let workspaceDeleted: Bool
-    let eventStoreManager: EventStoreManager
 
     func body(content: Content) -> some View {
         content
@@ -23,7 +22,6 @@ struct ChatSheetModifier: ViewModifier {
                     skillStore: skillStore,
                     workspaceDeleted: workspaceDeleted
                 )
-                .environmentObject(eventStoreManager)
             }
             .onChange(of: viewModel.browserState.safariURL) { _, url in
                 if let url = url, sheetCoordinator.activeSheet == nil {
@@ -89,8 +87,7 @@ extension View {
         rpcClient: RPCClient,
         sessionId: String,
         skillStore: SkillStore?,
-        workspaceDeleted: Bool,
-        eventStoreManager: EventStoreManager
+        workspaceDeleted: Bool
     ) -> some View {
         modifier(ChatSheetModifier(
             sheetCoordinator: coordinator,
@@ -98,8 +95,7 @@ extension View {
             rpcClient: rpcClient,
             sessionId: sessionId,
             skillStore: skillStore,
-            workspaceDeleted: workspaceDeleted,
-            eventStoreManager: eventStoreManager
+            workspaceDeleted: workspaceDeleted
         ))
     }
 }

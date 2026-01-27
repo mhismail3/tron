@@ -14,10 +14,10 @@ private struct ScrollState: Equatable {
 
 @available(iOS 26.0, *)
 struct ChatView: View {
-    // MARK: - Environment & State Objects (internal for extension access)
+    // MARK: - Environment & State (internal for extension access)
     @Environment(\.dismiss) var dismiss
     @Environment(\.dependencies) var dependencies
-    @StateObject var viewModel: ChatViewModel
+    @State var viewModel: ChatViewModel
 
     // Convenience accessor
     var eventStoreManager: EventStoreManager { dependencies!.eventStoreManager }
@@ -63,7 +63,7 @@ struct ChatView: View {
         self.workspaceDeleted = workspaceDeleted
         self._scrollTarget = scrollTarget
         self.onToggleSidebar = onToggleSidebar
-        _viewModel = StateObject(wrappedValue: ChatViewModel(rpcClient: rpcClient, sessionId: sessionId))
+        _viewModel = State(wrappedValue: ChatViewModel(rpcClient: rpcClient, sessionId: sessionId))
     }
 
     // MARK: - Body
@@ -171,8 +171,7 @@ struct ChatView: View {
             rpcClient: rpcClient,
             sessionId: sessionId,
             skillStore: skillStore,
-            workspaceDeleted: workspaceDeleted,
-            eventStoreManager: eventStoreManager
+            workspaceDeleted: workspaceDeleted
         )
         .alert("Error", isPresented: $viewModel.showError) {
             Button("OK") { viewModel.clearError() }

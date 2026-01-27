@@ -79,7 +79,7 @@ extension EventStoreManager {
     func fullSyncSession(_ sessionId: String) async throws {
         _ = try await sessionSynchronizer.fullSync(sessionId: sessionId)
         try await updateSessionMetadata(sessionId: sessionId)
-        sessionUpdated.send(sessionId)
+        notifySessionUpdated(sessionId)
     }
 
     /// Update session metadata from event database.

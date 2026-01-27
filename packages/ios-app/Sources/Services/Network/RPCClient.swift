@@ -1,5 +1,4 @@
 import Foundation
-import Combine
 
 // MARK: - RPC Client Errors
 
@@ -19,59 +18,60 @@ enum RPCClientError: Error, LocalizedError {
 
 // MARK: - RPC Client
 
+@Observable
 @MainActor
-class RPCClient: ObservableObject, RPCTransport {
+final class RPCClient: RPCTransport {
     private(set) var webSocket: WebSocketService?
-    private var cancellables = Set<AnyCancellable>()
 
-    @Published private(set) var connectionState: ConnectionState = .disconnected
-    @Published private(set) var currentSessionId: String?
-    @Published private(set) var currentModel: String = "claude-opus-4-5-20251101"
+    private(set) var connectionState: ConnectionState = .disconnected
+    private(set) var currentSessionId: String?
+    private(set) var currentModel: String = "claude-opus-4-5-20251101"
 
     // MARK: - Domain Clients
 
     /// Session management client
+    @ObservationIgnored
     lazy var session: SessionClient = SessionClient(transport: self)
 
     /// Agent operations client
+    @ObservationIgnored
     lazy var agent: AgentClient = AgentClient(transport: self)
 
     /// Model operations client
+    @ObservationIgnored
     lazy var model: ModelClient = ModelClient(transport: self)
 
     /// Filesystem operations client
+    @ObservationIgnored
     lazy var filesystem: FilesystemClient = FilesystemClient(transport: self)
 
     /// Event sync operations client
+    @ObservationIgnored
     lazy var eventSync: EventSyncClient = EventSyncClient(transport: self)
 
     /// Context management client
+    @ObservationIgnored
     lazy var context: ContextClient = ContextClient(transport: self)
 
     /// Media operations client (transcription, voice notes, browser)
+    @ObservationIgnored
     lazy var media: MediaClient = MediaClient(transport: self)
 
     /// Miscellaneous operations client (system, skills, canvas, worktree, todo, device, memory, message)
+    @ObservationIgnored
     lazy var misc: MiscClient = MiscClient(transport: self)
 
     // MARK: - Unified Event Stream
     //
     // Plugin-based event system replaces 30+ individual callbacks.
-    // Consumers subscribe once and handle events via switch on eventType:
+    // Consumers subscribe via async stream:
     //
-    //   rpcClient.eventPublisherV2
-    //       .filter { event in event.matchesSession(mySessionId) }
-    //       .sink { event in
-    //           switch event.eventType { ... }
-    //       }
+    //   for await event in rpcClient.events(for: mySessionId) {
+    //       switch event.eventType { ... }
+    //   }
     //
-    private let _eventPublisherV2 = PassthroughSubject<ParsedEventV2, Never>()
-
-    /// Publisher for plugin-based parsed WebSocket events.
-    /// Events are published without session filtering - consumers filter as needed.
-    var eventPublisherV2: AnyPublisher<ParsedEventV2, Never> {
-        _eventPublisherV2.eraseToAnyPublisher()
-    }
+    @ObservationIgnored
+    private let _eventStream = AsyncEventStream<ParsedEventV2>()
 
     private let serverURL: URL
 
@@ -84,6 +84,21 @@ class RPCClient: ObservableObject, RPCTransport {
 
     init(serverURL: URL) {
         self.serverURL = serverURL
+    }
+
+    // MARK: - Async Event Stream API
+
+    /// Get an async stream of all events.
+    /// Each call creates a new subscription.
+    var events: AsyncStream<ParsedEventV2> {
+        _eventStream.events
+    }
+
+    /// Get an async stream of events for a specific session.
+    /// - Parameter sessionId: The session ID to filter events for
+    /// - Returns: Filtered async stream of events
+    func events(for sessionId: String?) -> AsyncStream<ParsedEventV2> {
+        _eventStream.events(for: sessionId)
     }
 
     // MARK: - Connection
@@ -179,7 +194,6 @@ class RPCClient: ObservableObject, RPCTransport {
         // Clean up existing connection
         webSocket?.disconnect()
         webSocket = nil
-        cancellables.removeAll()
         connectionState = .disconnected
 
         // Small delay for cleanup
@@ -225,8 +239,8 @@ class RPCClient: ObservableObject, RPCTransport {
             logger.info("Server version: \(result.version ?? "unknown")", category: .rpc)
         }
 
-        // Publish event to unified stream
-        _eventPublisherV2.send(eventV2)
+        // Publish event to async stream
+        _eventStream.send(eventV2)
     }
 
     /// Extract event type string from raw JSON data without full parsing.

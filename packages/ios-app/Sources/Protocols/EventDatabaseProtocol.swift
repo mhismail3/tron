@@ -2,8 +2,8 @@ import Foundation
 
 /// Protocol for EventDatabase enabling dependency injection and mocking
 @MainActor
-protocol EventDatabaseProtocol: ObservableObject {
-    // MARK: - Published State
+protocol EventDatabaseProtocol: AnyObject {
+    // MARK: - Observable State
     var isInitialized: Bool { get }
 
     // MARK: - Domain Repositories

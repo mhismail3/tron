@@ -1,5 +1,4 @@
 import SwiftUI
-import Combine
 import os
 import PhotosUI
 import UIKit
@@ -7,26 +6,27 @@ import UIKit
 // MARK: - Chat View Model
 // Note: ToolCallRecord is defined in EventStoreManager.swift
 
+@Observable
 @MainActor
-class ChatViewModel: ObservableObject, ChatEventContext {
+final class ChatViewModel: ChatEventContext {
 
-    // MARK: - Published State
+    // MARK: - Observable State
 
-    @Published var messages: [ChatMessage] = []
-    @Published var isProcessing = false
-    @Published var connectionState: ConnectionState = .disconnected
-    @Published var showSettings = false
-    @Published var errorMessage: String?
-    @Published var showError = false
+    var messages: [ChatMessage] = []
+    var isProcessing = false
+    var connectionState: ConnectionState = .disconnected
+    var showSettings = false
+    var errorMessage: String?
+    var showError = false
     /// Set to true when the session doesn't exist on server and view should navigate back
-    @Published var shouldDismiss = false
-    @Published var isThinkingExpanded = false
-    @Published var isRecording = false
-    @Published var isTranscribing = false
+    var shouldDismiss = false
+    var isThinkingExpanded = false
+    var isRecording = false
+    var isTranscribing = false
     /// Whether more older messages are available for loading
-    @Published var hasMoreMessages = false
+    var hasMoreMessages = false
     /// Whether currently loading more messages
-    @Published var isLoadingMoreMessages = false
+    var isLoadingMoreMessages = false
 
     // MARK: - Input State (delegated to InputBarState for backward compatibility)
 
@@ -124,7 +124,9 @@ class ChatViewModel: ObservableObject, ChatEventContext {
 
     let rpcClient: RPCClient
     let sessionId: String
-    var cancellables = Set<AnyCancellable>()
+    /// Task for handling event stream from RPCClient
+    @ObservationIgnored
+    private var eventTask: Task<Void, Never>?
     /// ID of the thinking message for the current turn (thinking appears before text response)
     var thinkingMessageId: UUID?
     /// ID of the catching-up notification message (removed on turn_end/complete)
@@ -219,9 +221,8 @@ class ChatViewModel: ObservableObject, ChatEventContext {
     }
 
     private func setupBindings() {
-        rpcClient.$connectionState
-            .receive(on: DispatchQueue.main)
-            .assign(to: &$connectionState)
+        // Observe RPCClient connection state using Swift Observation
+        observeConnectionStateChanges()
 
         // Handle image picker changes - observe inputBarState.selectedImages
         // Using withObservationTracking to react to @Observable changes
@@ -229,6 +230,21 @@ class ChatViewModel: ObservableObject, ChatEventContext {
 
         // Observe audio recorder state changes
         observeAudioRecorderChanges()
+    }
+
+    /// Observe changes to rpcClient.connectionState using Swift Observation
+    private func observeConnectionStateChanges() {
+        withObservationTracking {
+            // Access the property to register for tracking
+            _ = rpcClient.connectionState
+        } onChange: { [weak self] in
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                self.connectionState = self.rpcClient.connectionState
+                // Re-register for the next change
+                self.observeConnectionStateChanges()
+            }
+        }
     }
 
     /// Observe changes to audioRecorder.isRecording using Swift Observation
@@ -379,17 +395,20 @@ class ChatViewModel: ObservableObject, ChatEventContext {
         setupUIUpdateQueueCallback()
         setupStreamingManagerCallbacks()
 
-        // Subscribe to plugin-based event stream from RPCClient
+        // Subscribe to plugin-based event stream from RPCClient using async stream
         // Filter to only handle events for this session
-        rpcClient.eventPublisherV2
-            .filter { [weak self] event in
-                event.matchesSession(self?.sessionId)
+        eventTask?.cancel()
+        eventTask = Task { [weak self] in
+            guard let self else { return }
+            for await event in rpcClient.events(for: sessionId) {
+                guard !Task.isCancelled else { break }
+                handleEventV2(event)
             }
-            .receive(on: DispatchQueue.main)
-            .sink { [weak self] event in
-                self?.handleEventV2(event)
-            }
-            .store(in: &cancellables)
+        }
+    }
+
+    deinit {
+        eventTask?.cancel()
     }
 
     /// Unified event handler - dispatches ParsedEventV2 to specific handlers
