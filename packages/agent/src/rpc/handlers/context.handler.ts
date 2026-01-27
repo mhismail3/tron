@@ -12,6 +12,7 @@
  */
 
 import { createLogger, categorizeError, LogErrorCategory } from '../../logging/index.js';
+import { RpcHandlerError } from '../../utils/index.js';
 import type {
   RpcRequest,
   RpcResponse,
@@ -324,9 +325,7 @@ export function createContextHandlers(): MethodRegistration[] {
     if (response.success && response.result) {
       return response.result;
     }
-    const err = new Error(response.error?.message || 'Unknown error');
-    (err as any).code = response.error?.code;
-    throw err;
+    throw RpcHandlerError.fromResponse(response);
   };
 
   const getDetailedSnapshotHandler: MethodHandler = async (request, context) => {
@@ -334,9 +333,7 @@ export function createContextHandlers(): MethodRegistration[] {
     if (response.success && response.result) {
       return response.result;
     }
-    const err = new Error(response.error?.message || 'Unknown error');
-    (err as any).code = response.error?.code;
-    throw err;
+    throw RpcHandlerError.fromResponse(response);
   };
 
   const shouldCompactHandler: MethodHandler = async (request, context) => {
@@ -344,9 +341,7 @@ export function createContextHandlers(): MethodRegistration[] {
     if (response.success && response.result) {
       return response.result;
     }
-    const err = new Error(response.error?.message || 'Unknown error');
-    (err as any).code = response.error?.code;
-    throw err;
+    throw RpcHandlerError.fromResponse(response);
   };
 
   const previewCompactionHandler: MethodHandler = async (request, context) => {
@@ -354,9 +349,7 @@ export function createContextHandlers(): MethodRegistration[] {
     if (response.success && response.result) {
       return response.result;
     }
-    const err = new Error(response.error?.message || 'Unknown error');
-    (err as any).code = response.error?.code;
-    throw err;
+    throw RpcHandlerError.fromResponse(response);
   };
 
   const confirmCompactionHandler: MethodHandler = async (request, context) => {
@@ -364,9 +357,7 @@ export function createContextHandlers(): MethodRegistration[] {
     if (response.success && response.result) {
       return response.result;
     }
-    const err = new Error(response.error?.message || 'Unknown error');
-    (err as any).code = response.error?.code;
-    throw err;
+    throw RpcHandlerError.fromResponse(response);
   };
 
   const canAcceptTurnHandler: MethodHandler = async (request, context) => {
@@ -374,9 +365,7 @@ export function createContextHandlers(): MethodRegistration[] {
     if (response.success && response.result) {
       return response.result;
     }
-    const err = new Error(response.error?.message || 'Unknown error');
-    (err as any).code = response.error?.code;
-    throw err;
+    throw RpcHandlerError.fromResponse(response);
   };
 
   const clearHandler: MethodHandler = async (request, context) => {
@@ -384,9 +373,7 @@ export function createContextHandlers(): MethodRegistration[] {
     if (response.success && response.result) {
       return response.result;
     }
-    const err = new Error(response.error?.message || 'Unknown error');
-    (err as any).code = response.error?.code;
-    throw err;
+    throw RpcHandlerError.fromResponse(response);
   };
 
   return [

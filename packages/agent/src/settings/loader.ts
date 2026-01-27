@@ -16,6 +16,9 @@ import * as path from 'path';
 import * as os from 'os';
 import type { TronSettings, UserSettings, DeepPartial } from './types.js';
 import { DEFAULT_SETTINGS } from './defaults.js';
+import { createLogger, categorizeError, LogErrorCategory } from '../logging/index.js';
+
+const logger = createLogger('settings');
 
 // =============================================================================
 // Constants
@@ -103,7 +106,13 @@ export function loadUserSettings(settingsPath?: string): UserSettings | null {
     return parsed;
   } catch (error) {
     // Log warning but don't fail - use defaults
-    console.warn(`Failed to load settings from ${filePath}:`, error);
+    const structured = categorizeError(error, { filePath, operation: 'load_settings_sync' });
+    logger.warn('Failed to load settings, using defaults', {
+      filePath,
+      code: structured.code,
+      category: LogErrorCategory.FILESYSTEM,
+      error: structured.message,
+    });
     return null;
   }
 }
@@ -126,7 +135,13 @@ export async function loadUserSettingsAsync(settingsPath?: string): Promise<User
       return null;
     }
     // Log warning but don't fail - use defaults
-    console.warn(`Failed to load settings from ${filePath}:`, error);
+    const structured = categorizeError(error, { filePath, operation: 'load_settings_async' });
+    logger.warn('Failed to load settings, using defaults', {
+      filePath,
+      code: structured.code,
+      category: LogErrorCategory.FILESYSTEM,
+      error: structured.message,
+    });
     return null;
   }
 }

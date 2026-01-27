@@ -8,23 +8,41 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { createAgentAdapter } from '../agent.adapter.js';
 import type { EventStoreOrchestrator } from '../../../../orchestrator/event-store-orchestrator.js';
 
-// Mock the SkillRegistry and logger
-vi.mock('../../../index.js', async () => {
-  const actual = await vi.importActual('../../../index.js');
-  return {
-    ...actual,
-    logger: {
-      info: vi.fn(),
-      warn: vi.fn(),
-      error: vi.fn(),
-    },
-    SkillRegistry: vi.fn().mockImplementation(() => ({
-      initialize: vi.fn().mockResolvedValue(undefined),
-      list: vi.fn().mockReturnValue([]),
-      get: vi.fn().mockReturnValue(null),
-    })),
-  };
-});
+// Use vi.hoisted to define mocks before they're hoisted
+const { mockLogger } = vi.hoisted(() => ({
+  mockLogger: {
+    info: vi.fn(),
+    warn: vi.fn(),
+    error: vi.fn(),
+    debug: vi.fn(),
+    trace: vi.fn(),
+  },
+}));
+
+// Mock the SkillRegistry
+vi.mock('../../../../skills/index.js', () => ({
+  SkillRegistry: vi.fn().mockImplementation(() => ({
+    initialize: vi.fn().mockResolvedValue(undefined),
+    list: vi.fn().mockReturnValue([]),
+    get: vi.fn().mockReturnValue(null),
+  })),
+}));
+
+// Mock the logging module
+vi.mock('../../../../logging/index.js', () => ({
+  createLogger: vi.fn(() => mockLogger),
+  categorizeError: vi.fn((err: Error, ctx?: Record<string, unknown>) => ({
+    code: 'TEST_ERROR',
+    message: err.message,
+    category: 'SESSION_STATE',
+    retryable: false,
+    context: ctx,
+  })),
+  LogErrorCategory: {
+    SESSION_STATE: 'SESSION_STATE',
+    FILESYSTEM: 'FILESYSTEM',
+  },
+}));
 
 describe('AgentAdapter', () => {
   let mockOrchestrator: Partial<EventStoreOrchestrator>;
@@ -33,6 +51,11 @@ describe('AgentAdapter', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    mockLogger.info.mockClear();
+    mockLogger.warn.mockClear();
+    mockLogger.error.mockClear();
+    mockLogger.debug.mockClear();
+    mockLogger.trace.mockClear();
 
     mockAgent = {
       getState: vi.fn().mockReturnValue({
@@ -111,8 +134,6 @@ describe('AgentAdapter', () => {
     });
 
     it('should handle agent run errors gracefully', async () => {
-      // Mock console.error to suppress output
-      const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
       vi.mocked(mockOrchestrator.agent!.run).mockRejectedValue(new Error('Agent error'));
 
       const adapter = createAgentAdapter({
@@ -130,8 +151,15 @@ describe('AgentAdapter', () => {
       // Wait for the rejected promise to be handled
       await new Promise(resolve => setTimeout(resolve, 10));
 
-      expect(consoleSpy).toHaveBeenCalledWith('Agent run error:', expect.any(Error));
-      consoleSpy.mockRestore();
+      // Verify structured error was logged
+      expect(mockLogger.error).toHaveBeenCalledWith(
+        'Agent run error',
+        expect.objectContaining({
+          sessionId: 'sess-123',
+          code: 'TEST_ERROR',
+          error: 'Agent error',
+        }),
+      );
     });
   });
 

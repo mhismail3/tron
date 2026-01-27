@@ -7,6 +7,7 @@
  * - memory.getHandoffs: List session handoffs
  */
 
+import { RpcHandlerError } from '../../utils/index.js';
 import type {
   RpcRequest,
   RpcResponse,
@@ -129,7 +130,7 @@ export function createMemoryHandlers(): MethodRegistration[] {
     if (response.success && response.result) {
       return response.result;
     }
-    throw new Error(response.error?.message || 'Unknown error');
+    throw RpcHandlerError.fromResponse(response);
   };
 
   const addEntryHandler: MethodHandler = async (request, context) => {
@@ -137,9 +138,7 @@ export function createMemoryHandlers(): MethodRegistration[] {
     if (response.success && response.result) {
       return response.result;
     }
-    const err = new Error(response.error?.message || 'Unknown error');
-    (err as any).code = response.error?.code;
-    throw err;
+    throw RpcHandlerError.fromResponse(response);
   };
 
   const getHandoffsHandler: MethodHandler = async (request, context) => {
@@ -147,7 +146,7 @@ export function createMemoryHandlers(): MethodRegistration[] {
     if (response.success && response.result) {
       return response.result;
     }
-    throw new Error(response.error?.message || 'Unknown error');
+    throw RpcHandlerError.fromResponse(response);
   };
 
   return [

@@ -5,6 +5,7 @@
  * - message.delete: Delete a message from a session
  */
 
+import { RpcHandlerError } from '../../utils/index.js';
 import type {
   RpcRequest,
   RpcResponse,
@@ -84,9 +85,7 @@ export function createMessageHandlers(): MethodRegistration[] {
     if (response.success && response.result) {
       return response.result;
     }
-    const err = new Error(response.error?.message || 'Unknown error');
-    (err as any).code = response.error?.code;
-    throw err;
+    throw RpcHandlerError.fromResponse(response);
   };
 
   return [

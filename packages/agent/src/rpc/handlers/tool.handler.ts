@@ -5,6 +5,7 @@
  * - tool.result: Submit a result for a pending tool call
  */
 
+import { RpcHandlerError } from '../../utils/index.js';
 import type {
   RpcRequest,
   RpcResponse,
@@ -83,9 +84,7 @@ export function createToolHandlers(): MethodRegistration[] {
     if (response.success && response.result) {
       return response.result;
     }
-    const err = new Error(response.error?.message || 'Unknown error');
-    (err as any).code = response.error?.code;
-    throw err;
+    throw RpcHandlerError.fromResponse(response);
   };
 
   return [

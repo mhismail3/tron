@@ -9,6 +9,7 @@
  */
 
 import { createLogger, categorizeError, LogErrorCategory } from '../../logging/index.js';
+import { RpcHandlerError } from '../../utils/index.js';
 import type {
   RpcRequest,
   RpcResponse,
@@ -179,9 +180,7 @@ export function createSkillHandlers(): MethodRegistration[] {
     if (response.success && response.result) {
       return response.result;
     }
-    const err = new Error(response.error?.message || 'Unknown error');
-    (err as any).code = response.error?.code;
-    throw err;
+    throw RpcHandlerError.fromResponse(response);
   };
 
   const getHandler: MethodHandler = async (request, context) => {
@@ -189,9 +188,7 @@ export function createSkillHandlers(): MethodRegistration[] {
     if (response.success && response.result) {
       return response.result;
     }
-    const err = new Error(response.error?.message || 'Unknown error');
-    (err as any).code = response.error?.code;
-    throw err;
+    throw RpcHandlerError.fromResponse(response);
   };
 
   const refreshHandler: MethodHandler = async (request, context) => {
@@ -199,9 +196,7 @@ export function createSkillHandlers(): MethodRegistration[] {
     if (response.success && response.result) {
       return response.result;
     }
-    const err = new Error(response.error?.message || 'Unknown error');
-    (err as any).code = response.error?.code;
-    throw err;
+    throw RpcHandlerError.fromResponse(response);
   };
 
   const removeHandler: MethodHandler = async (request, context) => {
@@ -209,9 +204,7 @@ export function createSkillHandlers(): MethodRegistration[] {
     if (response.success && response.result) {
       return response.result;
     }
-    const err = new Error(response.error?.message || 'Unknown error');
-    (err as any).code = response.error?.code;
-    throw err;
+    throw RpcHandlerError.fromResponse(response);
   };
 
   return [

@@ -10,6 +10,7 @@
 import * as path from 'path';
 import * as fs from 'fs/promises';
 import { spawn } from 'child_process';
+import { RpcHandlerError } from '../../utils/index.js';
 import type {
   RpcRequest,
   RpcResponse,
@@ -221,9 +222,7 @@ export function createGitHandlers(): MethodRegistration[] {
       return response.result;
     }
     // Re-throw with original error code info
-    const err = new Error(response.error?.message || 'Unknown error');
-    (err as any).code = response.error?.code;
-    throw err;
+    throw RpcHandlerError.fromResponse(response);
   };
 
   return [

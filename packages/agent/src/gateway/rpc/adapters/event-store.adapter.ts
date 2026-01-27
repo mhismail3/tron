@@ -7,7 +7,8 @@
  */
 
 import type { AdapterDependencies, EventStoreManagerAdapter } from '../types.js';
-import type { SessionEvent } from '../../../events/types/index.js';
+import type { SessionEvent, EventType } from '../../../events/types/index.js';
+import { SessionId, EventId } from '../../../events/types/index.js';
 
 // =============================================================================
 // Types
@@ -151,13 +152,13 @@ export function createEventStoreAdapter(deps: AdapterDependencies): EventStoreMa
 
     async appendEvent(sessionId, type, payload, parentId) {
       const event = await orchestrator.events.append({
-        sessionId: sessionId as any,
-        type: type as any,
+        sessionId: SessionId(sessionId),
+        type: type as EventType,
         payload,
-        parentId: parentId as any,
+        parentId: parentId ? EventId(parentId) : undefined,
       });
 
-      const session = await eventStore.getSession(sessionId as any);
+      const session = await eventStore.getSession(SessionId(sessionId));
 
       return {
         event,
@@ -166,7 +167,7 @@ export function createEventStoreAdapter(deps: AdapterDependencies): EventStoreMa
     },
 
     async getTreeVisualization(sessionId, options) {
-      const session = await eventStore.getSession(sessionId as any);
+      const session = await eventStore.getSession(SessionId(sessionId));
       if (!session) {
         throw new Error(`Session not found: ${sessionId}`);
       }
@@ -201,7 +202,7 @@ export function createEventStoreAdapter(deps: AdapterDependencies): EventStoreMa
 
     async getBranches(sessionId) {
       const events = await orchestrator.events.getEvents(sessionId);
-      const session = await eventStore.getSession(sessionId as any);
+      const session = await eventStore.getSession(SessionId(sessionId));
 
       const branchPoints = events.filter(e =>
         events.filter(other => other.parentId === e.id).length > 1

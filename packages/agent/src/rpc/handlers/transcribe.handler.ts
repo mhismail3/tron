@@ -7,6 +7,7 @@
  */
 
 import { createLogger, categorizeError, LogErrorCategory } from '../../logging/index.js';
+import { RpcHandlerError } from '../../utils/index.js';
 import type {
   RpcRequest,
   RpcResponse,
@@ -100,9 +101,7 @@ export function createTranscribeHandlers(): MethodRegistration[] {
     if (response.success && response.result) {
       return response.result;
     }
-    const err = new Error(response.error?.message || 'Unknown error');
-    (err as any).code = response.error?.code;
-    throw err;
+    throw RpcHandlerError.fromResponse(response);
   };
 
   const listModelsHandler: MethodHandler = async (request, context) => {
@@ -110,9 +109,7 @@ export function createTranscribeHandlers(): MethodRegistration[] {
     if (response.success && response.result) {
       return response.result;
     }
-    const err = new Error(response.error?.message || 'Unknown error');
-    (err as any).code = response.error?.code;
-    throw err;
+    throw RpcHandlerError.fromResponse(response);
   };
 
   return [

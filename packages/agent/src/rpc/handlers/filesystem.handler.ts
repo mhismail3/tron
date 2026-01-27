@@ -10,6 +10,7 @@
  */
 
 import { createLogger, categorizeError, LogErrorCategory } from '../../logging/index.js';
+import { RpcHandlerError } from '../../utils/index.js';
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import * as os from 'os';
@@ -293,7 +294,7 @@ export function createFilesystemHandlers(): MethodRegistration[] {
       return response.result;
     }
     // For errors, throw to let registry handle
-    throw new Error(response.error?.message || 'Unknown error');
+    throw RpcHandlerError.fromResponse(response);
   };
 
   const getHomeHandler: MethodHandler = async (request, context) => {
@@ -301,7 +302,7 @@ export function createFilesystemHandlers(): MethodRegistration[] {
     if (response.success && response.result) {
       return response.result;
     }
-    throw new Error(response.error?.message || 'Unknown error');
+    throw RpcHandlerError.fromResponse(response);
   };
 
   const createDirHandler: MethodHandler = async (request, context) => {
@@ -310,9 +311,7 @@ export function createFilesystemHandlers(): MethodRegistration[] {
       return response.result;
     }
     // Re-throw with original error code info
-    const err = new Error(response.error?.message || 'Unknown error');
-    (err as any).code = response.error?.code;
-    throw err;
+    throw RpcHandlerError.fromResponse(response);
   };
 
   return [

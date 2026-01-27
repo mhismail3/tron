@@ -6,7 +6,8 @@
  */
 
 import { execSync } from 'child_process';
-import { categorizeError, LogErrorCategory } from '../logging/index.js';
+import { categorizeError } from '../logging/index.js';
+import { TronError } from './errors.js';
 
 interface ClipboardCommand {
   copy: string;
@@ -76,11 +77,13 @@ export async function copyToClipboard(text: string): Promise<void> {
     });
   } catch (error) {
     const structured = categorizeError(error, { operation: 'copyToClipboard', platform: process.platform });
-    const err = new Error(`Failed to copy to clipboard: ${structured.message}`);
-    (err as any).code = structured.code;
-    (err as any).category = LogErrorCategory.TOOL_EXECUTION;
-    (err as any).retryable = structured.retryable;
-    throw err;
+    throw new TronError(`Failed to copy to clipboard: ${structured.message}`, {
+      code: structured.code,
+      category: 'unknown',
+      severity: structured.retryable ? 'transient' : 'error',
+      context: { operation: 'copyToClipboard', platform: process.platform },
+      cause: error instanceof Error ? error : undefined,
+    });
   }
 }
 
@@ -102,10 +105,12 @@ export async function readFromClipboard(): Promise<string> {
     return text.trim();
   } catch (error) {
     const structured = categorizeError(error, { operation: 'readFromClipboard', platform: process.platform });
-    const err = new Error(`Failed to read from clipboard: ${structured.message}`);
-    (err as any).code = structured.code;
-    (err as any).category = LogErrorCategory.TOOL_EXECUTION;
-    (err as any).retryable = structured.retryable;
-    throw err;
+    throw new TronError(`Failed to read from clipboard: ${structured.message}`, {
+      code: structured.code,
+      category: 'unknown',
+      severity: structured.retryable ? 'transient' : 'error',
+      context: { operation: 'readFromClipboard', platform: process.platform },
+      cause: error instanceof Error ? error : undefined,
+    });
   }
 }

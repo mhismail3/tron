@@ -727,3 +727,39 @@ export class ErrorCollector {
     return this.errors.length;
   }
 }
+
+/**
+ * RPC handler errors with error codes
+ *
+ * Used by RPC handlers when converting response errors to exceptions.
+ * Provides proper typing for the error code property.
+ */
+export class RpcHandlerError extends TronError {
+  constructor(
+    message: string,
+    options: {
+      code?: string;
+      context?: Record<string, unknown>;
+      cause?: Error;
+    } = {}
+  ) {
+    super(message, {
+      code: options.code ?? 'RPC_ERROR',
+      category: 'unknown',
+      severity: 'error',
+      context: options.context,
+      cause: options.cause,
+    });
+    this.name = 'RpcHandlerError';
+  }
+
+  /**
+   * Create an RpcHandlerError from an RPC response error
+   */
+  static fromResponse(response: { error?: { message?: string; code?: string } }): RpcHandlerError {
+    return new RpcHandlerError(
+      response.error?.message ?? 'Unknown error',
+      { code: response.error?.code }
+    );
+  }
+}

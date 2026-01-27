@@ -8,6 +8,7 @@
  * - tree.getAncestors: Get ancestors of an event
  */
 
+import { RpcHandlerError } from '../../utils/index.js';
 import type { RpcRequest, RpcResponse } from '../types.js';
 import type { RpcContext } from '../context-types.js';
 import { MethodRegistry, type MethodRegistration, type MethodHandler } from '../registry.js';
@@ -155,9 +156,7 @@ export function createTreeHandlers(): MethodRegistration[] {
     if (response.success && response.result) {
       return response.result;
     }
-    const err = new Error(response.error?.message || 'Unknown error');
-    (err as any).code = response.error?.code;
-    throw err;
+    throw RpcHandlerError.fromResponse(response);
   };
 
   const getBranchesHandler: MethodHandler = async (request, context) => {
@@ -165,9 +164,7 @@ export function createTreeHandlers(): MethodRegistration[] {
     if (response.success && response.result) {
       return response.result;
     }
-    const err = new Error(response.error?.message || 'Unknown error');
-    (err as any).code = response.error?.code;
-    throw err;
+    throw RpcHandlerError.fromResponse(response);
   };
 
   const getSubtreeHandler: MethodHandler = async (request, context) => {
@@ -175,9 +172,7 @@ export function createTreeHandlers(): MethodRegistration[] {
     if (response.success && response.result) {
       return response.result;
     }
-    const err = new Error(response.error?.message || 'Unknown error');
-    (err as any).code = response.error?.code;
-    throw err;
+    throw RpcHandlerError.fromResponse(response);
   };
 
   const getAncestorsHandler: MethodHandler = async (request, context) => {
@@ -185,9 +180,7 @@ export function createTreeHandlers(): MethodRegistration[] {
     if (response.success && response.result) {
       return response.result;
     }
-    const err = new Error(response.error?.message || 'Unknown error');
-    (err as any).code = response.error?.code;
-    throw err;
+    throw RpcHandlerError.fromResponse(response);
   };
 
   return [

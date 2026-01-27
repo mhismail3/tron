@@ -9,6 +9,7 @@
  * - session.fork: Fork a session from a specific point
  */
 
+import { RpcHandlerError } from '../../utils/index.js';
 import type {
   RpcRequest,
   RpcResponse,
@@ -175,9 +176,7 @@ export function createSessionHandlers(): MethodRegistration[] {
     if (response.success && response.result) {
       return response.result;
     }
-    const err = new Error(response.error?.message || 'Unknown error');
-    (err as any).code = response.error?.code;
-    throw err;
+    throw RpcHandlerError.fromResponse(response);
   };
 
   const resumeHandler: MethodHandler = async (request, context) => {
@@ -185,9 +184,7 @@ export function createSessionHandlers(): MethodRegistration[] {
     if (response.success && response.result) {
       return response.result;
     }
-    const err = new Error(response.error?.message || 'Unknown error');
-    (err as any).code = response.error?.code;
-    throw err;
+    throw RpcHandlerError.fromResponse(response);
   };
 
   const listHandler: MethodHandler = async (request, context) => {
@@ -195,7 +192,7 @@ export function createSessionHandlers(): MethodRegistration[] {
     if (response.success && response.result) {
       return response.result;
     }
-    throw new Error(response.error?.message || 'Unknown error');
+    throw RpcHandlerError.fromResponse(response);
   };
 
   const deleteHandler: MethodHandler = async (request, context) => {
@@ -203,9 +200,7 @@ export function createSessionHandlers(): MethodRegistration[] {
     if (response.success && response.result) {
       return response.result;
     }
-    const err = new Error(response.error?.message || 'Unknown error');
-    (err as any).code = response.error?.code;
-    throw err;
+    throw RpcHandlerError.fromResponse(response);
   };
 
   const forkHandler: MethodHandler = async (request, context) => {
@@ -213,9 +208,7 @@ export function createSessionHandlers(): MethodRegistration[] {
     if (response.success && response.result) {
       return response.result;
     }
-    const err = new Error(response.error?.message || 'Unknown error');
-    (err as any).code = response.error?.code;
-    throw err;
+    throw RpcHandlerError.fromResponse(response);
   };
 
   return [

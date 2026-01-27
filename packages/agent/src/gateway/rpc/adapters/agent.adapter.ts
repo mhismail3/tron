@@ -6,7 +6,7 @@
  * and state retrieval.
  */
 
-import { createLogger } from '../../../logging/index.js';
+import { createLogger, categorizeError, LogErrorCategory } from '../../../logging/index.js';
 import { SkillRegistry } from '../../../skills/index.js';
 import type { AdapterDependencies, AgentManagerAdapter } from '../types.js';
 
@@ -129,7 +129,14 @@ export function createAgentAdapter(deps: AdapterDependencies): AgentManagerAdapt
         spells: params.spells,
         skillLoader,
       }).catch(err => {
-        console.error('Agent run error:', err);
+        const structured = categorizeError(err, { sessionId: params.sessionId, operation: 'agent_run' });
+        logger.error('Agent run error', {
+          sessionId: params.sessionId,
+          code: structured.code,
+          category: LogErrorCategory.SESSION_STATE,
+          error: structured.message,
+          retryable: structured.retryable,
+        });
       });
 
       // Return acknowledgement immediately

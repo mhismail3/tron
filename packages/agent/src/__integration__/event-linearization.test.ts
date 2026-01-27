@@ -706,7 +706,7 @@ describe('Concurrent Model Switches', () => {
     // This demonstrates the bug: without linearization, we may get spurious branches
     // The test doesn't assert a specific value because timing varies,
     // but documents that this pattern is vulnerable
-    console.log(`Bug demo: Found ${branchPoints} branch points (should be 0 with fix)`);
+    // Bug demo: branchPoints should be 0 with proper linearization
     expect(events.length).toBe(3); // root + 2 model switches
   });
 
@@ -806,7 +806,7 @@ describe('Bug Demonstration (without linearization)', () => {
     // creating spurious branch points
     // Note: This test may occasionally pass if timing works out,
     // but it demonstrates the race condition vulnerability
-    console.log(`Bug demo: Found ${branchPoints} branch points (should be 0 with fix)`);
+    // Bug demo: branchPoints should be 0 with proper linearization
 
     // We don't assert the exact value because timing varies,
     // but we document that this pattern is vulnerable to the bug
