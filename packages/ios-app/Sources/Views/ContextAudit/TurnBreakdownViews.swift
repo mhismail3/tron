@@ -7,13 +7,6 @@ struct TurnBreakdownContainer: View {
     let turns: [ConsolidatedAnalytics.TurnData]
     @State private var isExpanded = false
 
-    private func formatTokens(_ count: Int) -> String {
-        if count >= 1000 {
-            return String(format: "%.1fk", Double(count) / 1000)
-        }
-        return "\(count)"
-    }
-
     private var totalTokens: Int {
         turns.reduce(0) { $0 + $1.totalTokens }
     }
@@ -41,7 +34,7 @@ struct TurnBreakdownContainer: View {
 
                 Spacer()
 
-                Text(formatTokens(totalTokens))
+                Text(TokenFormatter.format(totalTokens))
                     .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
                     .foregroundStyle(.white.opacity(0.6))
 
@@ -93,13 +86,6 @@ struct TurnRow: View {
     let turn: ConsolidatedAnalytics.TurnData
     @State private var isExpanded = false
 
-    private func formatTokens(_ count: Int) -> String {
-        if count >= 1000 {
-            return String(format: "%.1fk", Double(count) / 1000)
-        }
-        return "\(count)"
-    }
-
     private func formatCost(_ cost: Double) -> String {
         if cost < 0.00001 { return "$0.00" }
         if cost < 0.0001 { return String(format: "$%.5f", cost) }
@@ -133,7 +119,7 @@ struct TurnRow: View {
                 VStack(alignment: .leading, spacing: 2) {
                     HStack(spacing: 8) {
                         // Tokens
-                        Text("\(formatTokens(turn.totalTokens)) tokens")
+                        Text("\(TokenFormatter.format(turn.totalTokens)) tokens")
                             .font(TronTypography.codeCaption)
                             .foregroundStyle(.white.opacity(0.7))
 
@@ -205,7 +191,7 @@ struct TurnRow: View {
                             Text("Input")
                                 .font(TronTypography.pill)
                                 .foregroundStyle(.white.opacity(0.4))
-                            Text(formatTokens(turn.inputTokens))
+                            Text(TokenFormatter.format(turn.inputTokens))
                                 .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
                                 .foregroundStyle(.tronOrange)
                         }
@@ -214,7 +200,7 @@ struct TurnRow: View {
                             Text("Output")
                                 .font(TronTypography.pill)
                                 .foregroundStyle(.white.opacity(0.4))
-                            Text(formatTokens(turn.outputTokens))
+                            Text(TokenFormatter.format(turn.outputTokens))
                                 .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
                                 .foregroundStyle(.tronRed)
                         }
@@ -227,12 +213,12 @@ struct TurnRow: View {
                                     .foregroundStyle(.white.opacity(0.4))
                                 HStack(spacing: 4) {
                                     if turn.cacheReadTokens > 0 {
-                                        Text("↓\(formatTokens(turn.cacheReadTokens))")
+                                        Text("↓\(TokenFormatter.format(turn.cacheReadTokens))")
                                             .font(TronTypography.codeSM)
                                             .foregroundStyle(.tronEmerald)
                                     }
                                     if turn.cacheCreationTokens > 0 {
-                                        Text("↑\(formatTokens(turn.cacheCreationTokens))")
+                                        Text("↑\(TokenFormatter.format(turn.cacheCreationTokens))")
                                             .font(TronTypography.codeSM)
                                             .foregroundStyle(.tronPurple)
                                     }

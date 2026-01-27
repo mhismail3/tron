@@ -8,13 +8,6 @@ struct RulesSection: View {
     var onFetchContent: ((String) async throws -> String)?
     @State private var isExpanded = false
 
-    private func formatTokens(_ count: Int) -> String {
-        if count >= 1000 {
-            return String(format: "%.1fk", Double(count) / 1000)
-        }
-        return "\(count)"
-    }
-
     var body: some View {
         VStack(spacing: 0) {
             // Header row (tappable)
@@ -38,7 +31,7 @@ struct RulesSection: View {
 
                 Spacer()
 
-                Text(formatTokens(rules.tokens))
+                Text(TokenFormatter.format(rules.tokens))
                     .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
                     .foregroundStyle(.white.opacity(0.6))
 

@@ -68,7 +68,7 @@ struct CompactionDetailSheet: View {
 
                 // Stats row - all badges use mint for subtle distinction from cyan boxes
                 HStack(spacing: 16) {
-                    CompactionStatBadge(label: "Saved", value: formatTokens(tokensSaved), color: .mint)
+                    CompactionStatBadge(label: "Saved", value: TokenFormatter.format(tokensSaved), color: .mint)
                     CompactionStatBadge(label: "Reduction", value: "\(compressionPercent)%", color: .mint)
                     CompactionStatBadge(label: reasonLabel, value: "", color: .mint)
                 }
@@ -154,13 +154,6 @@ struct CompactionDetailSheet: View {
         default: return reason
         }
     }
-
-    private func formatTokens(_ tokens: Int) -> String {
-        if tokens >= 1000 {
-            return String(format: "%.1fk", Double(tokens) / 1000)
-        }
-        return "\(tokens)"
-    }
 }
 
 // MARK: - Helper Views
@@ -176,7 +169,7 @@ private struct CompactionTokenBox: View {
             Text(label)
                 .font(TronTypography.codeSM)
                 .foregroundStyle(.white.opacity(0.5))
-            Text(formatTokens(tokens))
+            Text(TokenFormatter.format(tokens))
                 .font(TronTypography.sans(size: TronTypography.sizeXL, weight: .semibold))
                 .foregroundStyle(color)
         }
@@ -187,13 +180,6 @@ private struct CompactionTokenBox: View {
                 .fill(.clear)
                 .glassEffect(.regular.tint(color.opacity(0.15)), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
         }
-    }
-
-    private func formatTokens(_ tokens: Int) -> String {
-        if tokens >= 1000 {
-            return String(format: "%.1fk", Double(tokens) / 1000)
-        }
-        return "\(tokens)"
     }
 }
 

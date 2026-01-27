@@ -8,13 +8,6 @@ struct SystemPromptSection: View {
     let content: String
     @State private var isExpanded = false
 
-    private func formatTokens(_ count: Int) -> String {
-        if count >= 1000 {
-            return String(format: "%.1fk", Double(count) / 1000)
-        }
-        return "\(count)"
-    }
-
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             // Header
@@ -27,7 +20,7 @@ struct SystemPromptSection: View {
                     .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
                     .foregroundStyle(.tronPurple)
                 Spacer()
-                Text(formatTokens(tokens))
+                Text(TokenFormatter.format(tokens))
                     .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
                     .foregroundStyle(.white.opacity(0.6))
                 Image(systemName: "chevron.down")

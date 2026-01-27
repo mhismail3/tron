@@ -125,7 +125,7 @@ struct SessionEvent: Identifiable, Codable, EventTransformable {
             if let tokenUsage = payload.dict("tokenUsage"),
                let input = tokenUsage["inputTokens"] as? Int,
                let output = tokenUsage["outputTokens"] as? Int {
-                return "Turn \(turn) • \(formatTokens(input + output)) tokens"
+                return "Turn \(turn) • \(TokenFormatter.format(input + output, style: .uppercase)) tokens"
             }
             return "Turn \(turn) ended"
 
@@ -278,14 +278,6 @@ struct SessionEvent: Identifiable, Codable, EventTransformable {
         }
     }
 
-    private func formatTokens(_ tokens: Int) -> String {
-        if tokens < 1000 {
-            return "\(tokens)"
-        } else {
-            return String(format: "%.1fK", Double(tokens) / 1000.0)
-        }
-    }
-
     /// Extended content for expanded view (Phase 3 enhanced)
     var expandedContent: String? {
         switch eventType {
@@ -321,7 +313,7 @@ struct SessionEvent: Identifiable, Codable, EventTransformable {
             if let tokenUsage = payload["tokenUsage"]?.value as? [String: Any] {
                 if let input = tokenUsage["inputTokens"] as? Int,
                    let output = tokenUsage["outputTokens"] as? Int {
-                    lines.append("Tokens: ↓\(formatTokens(input)) ↑\(formatTokens(output))")
+                    lines.append("Tokens: ↓\(TokenFormatter.format(input, style: .uppercase)) ↑\(TokenFormatter.format(output, style: .uppercase))")
                 }
             }
 
@@ -404,10 +396,10 @@ struct SessionEvent: Identifiable, Codable, EventTransformable {
 
             if let tokenUsage = payload["tokenUsage"]?.value as? [String: Any] {
                 if let input = tokenUsage["inputTokens"] as? Int {
-                    lines.append("Input tokens: \(formatTokens(input))")
+                    lines.append("Input tokens: \(TokenFormatter.format(input, style: .uppercase))")
                 }
                 if let output = tokenUsage["outputTokens"] as? Int {
-                    lines.append("Output tokens: \(formatTokens(output))")
+                    lines.append("Output tokens: \(TokenFormatter.format(output, style: .uppercase))")
                 }
             }
             return lines.isEmpty ? nil : lines.joined(separator: "\n")

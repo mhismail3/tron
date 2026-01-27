@@ -8,13 +8,6 @@ struct ToolsSection: View {
     let tokens: Int
     @State private var isExpanded = false
 
-    private func formatTokens(_ count: Int) -> String {
-        if count >= 1000 {
-            return String(format: "%.1fk", Double(count) / 1000)
-        }
-        return "\(count)"
-    }
-
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             // Header - using onTapGesture to avoid any button highlight behavior
@@ -37,7 +30,7 @@ struct ToolsSection: View {
                     .clipShape(Capsule())
 
                 Spacer()
-                Text(formatTokens(tokens))
+                Text(TokenFormatter.format(tokens))
                     .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
                     .foregroundStyle(.white.opacity(0.6))
                 Image(systemName: "chevron.down")
@@ -134,13 +127,6 @@ struct ExpandableContentSection: View {
     let content: String
     @Binding var isExpanded: Bool
 
-    private func formatTokens(_ count: Int) -> String {
-        if count >= 1000 {
-            return String(format: "%.1fk", Double(count) / 1000)
-        }
-        return "\(count)"
-    }
-
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             // Header
@@ -152,7 +138,7 @@ struct ExpandableContentSection: View {
                     .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
                     .foregroundStyle(.white.opacity(0.7))
                 Spacer()
-                Text(formatTokens(tokens))
+                Text(TokenFormatter.format(tokens))
                     .font(TronTypography.codeCaption)
                     .foregroundStyle(.white.opacity(0.5))
                 Image(systemName: "chevron.down")

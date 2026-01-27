@@ -18,13 +18,6 @@ struct SkillReferencesSection: View {
         }
     }
 
-    private func formatTokens(_ count: Int) -> String {
-        if count >= 1000 {
-            return String(format: "%.1fk", Double(count) / 1000)
-        }
-        return "\(count)"
-    }
-
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             // Header
@@ -49,7 +42,7 @@ struct SkillReferencesSection: View {
                 Spacer()
 
                 // Token count
-                Text(formatTokens(estimatedTokens))
+                Text(TokenFormatter.format(estimatedTokens))
                     .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
                     .foregroundStyle(.white.opacity(0.6))
 

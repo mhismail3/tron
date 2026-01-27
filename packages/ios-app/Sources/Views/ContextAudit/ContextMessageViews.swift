@@ -44,13 +44,6 @@ struct DetailedMessageRow: View {
         }
     }
 
-    private func formatTokens(_ count: Int) -> String {
-        if count >= 1000 {
-            return String(format: "%.1fk", Double(count) / 1000)
-        }
-        return "\(count)"
-    }
-
     var body: some View {
         VStack(spacing: 0) {
             // Header row (tappable)
@@ -78,7 +71,7 @@ struct DetailedMessageRow: View {
 
                 Spacer()
 
-                Text(formatTokens(message.tokens))
+                Text(TokenFormatter.format(message.tokens))
                     .font(TronTypography.mono(size: TronTypography.sizeCaption))
                     .foregroundStyle(.white.opacity(0.5))
                     .padding(.top, 2)
@@ -114,7 +107,7 @@ struct DetailedMessageRow: View {
                                         .font(TronTypography.codeCaption)
                                         .foregroundStyle(.tronAmber)
                                     Spacer()
-                                    Text(formatTokens(toolCall.tokens))
+                                    Text(TokenFormatter.format(toolCall.tokens))
                                         .font(TronTypography.pill)
                                         .foregroundStyle(.white.opacity(0.4))
                                 }
@@ -185,13 +178,6 @@ struct MessagesContainer: View {
 
     @State private var isExpanded = false
 
-    private func formatTokens(_ count: Int) -> String {
-        if count >= 1000 {
-            return String(format: "%.1fk", Double(count) / 1000)
-        }
-        return "\(count)"
-    }
-
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             // Header row (tappable)
@@ -215,7 +201,7 @@ struct MessagesContainer: View {
 
                 Spacer()
 
-                Text(formatTokens(totalTokens))
+                Text(TokenFormatter.format(totalTokens))
                     .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
                     .foregroundStyle(.white.opacity(0.6))
 
@@ -308,13 +294,6 @@ struct AddedSkillsContainer: View {
         skills.count * 200
     }
 
-    private func formatTokens(_ count: Int) -> String {
-        if count >= 1000 {
-            return String(format: "%.1fk", Double(count) / 1000)
-        }
-        return "\(count)"
-    }
-
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             // Header
@@ -338,7 +317,7 @@ struct AddedSkillsContainer: View {
 
                 Spacer()
 
-                Text("~\(formatTokens(estimatedTokens))")
+                Text("~\(TokenFormatter.format(estimatedTokens))")
                     .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
                     .foregroundStyle(.white.opacity(0.6))
 
