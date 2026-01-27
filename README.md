@@ -1,58 +1,101 @@
 # Tron
 
-**A persistent, dual-interface coding agent with memory-first architecture**
+**A persistent, event-sourced AI coding agent with multi-client architecture**
 
-Tron is a production-quality AI coding agent that supports both terminal UI and chat interfaces as first-class citizens. It features sophisticated memory management for maintaining context across sessions, multi-model support, and a comprehensive hook system for extensibility.
+Tron is an AI coding agent that runs as a persistent service, supporting multiple client interfaces (terminal, web, iOS). It features event-sourced session persistence, multi-model support, sub-agent spawning, and a comprehensive hook system.
+
+## Table of Contents
+
+- [Features](#features)
+- [Architecture](#architecture)
+- [Quick Start](#quick-start)
+- [Packages](#packages)
+- [Tools](#tools)
+- [Event System](#event-system)
+- [Customization](#customization)
+- [Development](#development)
+- [Deployment](#deployment)
+- [iOS App](#ios-app)
+- [API Reference](#api-reference)
+- [License](#license)
+
+---
 
 ## Features
 
-- **Dual Interface**: Terminal UI for developers, web/mobile chat for everyone
-- **Memory-First Architecture**: Four-level memory hierarchy with lossless context preservation
-- **Always-On Service**: Runs persistently on your server for instant access
-- **Multi-Model Support**: Claude (with Max OAuth), OpenAI, Google, and more
-- **Comprehensive Hooks**: Lifecycle events for customization and automation
-- **Productivity Tools**: Task tracking, inbox monitoring, notes integration
+- **Multi-Client Architecture**: Terminal UI, web chat, and iOS app connect to a single persistent server
+- **Event-Sourced Persistence**: All state stored as immutable events with fork/rewind operations
+- **Multi-Model Support**: Claude (Anthropic), GPT-4o (OpenAI), Gemini (Google)
+- **Sub-Agent Spawning**: Spawn child agents for parallel task execution
+- **Hook System**: PreToolUse/PostToolUse hooks for automation and safety
+- **Skills System**: Reusable context packages for domain-specific knowledge
+- **Context Compaction**: Intelligent context management to stay within token limits
+
+---
 
 ## Architecture
 
 ```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                              Client Interfaces                               │
+├─────────────────────┬─────────────────────┬─────────────────────────────────┤
+│   Terminal (TUI)    │     Web Chat        │          iOS App                │
+│   packages/tui      │   packages/chat-web │      packages/ios-app           │
+└─────────┬───────────┴─────────┬───────────┴─────────────┬───────────────────┘
+          │                     │                         │
+          └─────────────────────┼─────────────────────────┘
+                                │ WebSocket (JSON-RPC 2.0)
+                                ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                          Agent Server                                        │
+│                       packages/agent                                         │
+├─────────────────────────────────────────────────────────────────────────────┤
+│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────┐ │
+│  │  Providers  │  │    Tools    │  │   Context   │  │    Orchestrator     │ │
+│  │  Anthropic  │  │  read/write │  │   loader    │  │  Session lifecycle  │ │
+│  │  OpenAI     │  │  edit/bash  │  │  compaction │  │  Turn management    │ │
+│  │  Google     │  │  grep/find  │  │  skills     │  │  Event routing      │ │
+│  └─────────────┘  └─────────────┘  └─────────────┘  └─────────────────────┘ │
+└────────────────────────────────────┬────────────────────────────────────────┘
+                                     │
+                                     ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                         Event Store (SQLite)                                 │
+│   - Immutable event log with tree structure                                  │
+│   - Fork/rewind operations                                                   │
+│   - Session state reconstruction via ancestor traversal                      │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### Package Structure
+
+```
 tron/
 ├── packages/
-│   ├── core/       # Agent loop, memory, hooks, tools, providers
-│   ├── server/     # WebSocket server for dual-interface support
-│   ├── tui/        # Terminal user interface
-│   └── chat-web/   # Web chat interface
-├── docs/           # Documentation
-│   └── skills.md   # Skills system guide
-├── .tron/          # User configuration and data
-│   ├── skills/     # Built-in and custom skills
-│   ├── hooks/      # User-defined hooks
-│   ├── sessions/   # Session persistence
-│   └── memory/     # Episodic memory and learnings
-└── thoughts/       # Session-scoped working memory
+│   ├── agent/       # Core agent server (providers, tools, events, RPC)
+│   ├── tui/         # Terminal user interface
+│   ├── chat-web/    # React web chat interface
+│   └── ios-app/     # SwiftUI iOS application
+├── scripts/         # CLI and deployment scripts
+└── .claude/         # Agent configuration
 ```
+
+---
 
 ## Quick Start
 
-**One-command setup:**
+### One-Command Setup
 
 ```bash
-tron setup
-# or from the project directory:
 ./scripts/tron setup
 ```
 
-This will:
-- Check prerequisites (Node.js 20+)
-- Install Bun if needed
-- Install all dependencies
-- Build all packages
-- Create default configuration
+This will check prerequisites, install Bun, install dependencies, build all packages, and create default configuration.
 
-**Manual setup:**
+### Manual Setup
 
 ```bash
-# Install Bun (if not already installed)
+# Install Bun (required)
 curl -fsSL https://bun.sh/install | bash
 
 # Install dependencies and build
@@ -62,32 +105,376 @@ bun run build
 # Start the TUI
 bun run dev:tui
 
-# Start the server (for chat interfaces)
+# Or start the server for web/iOS clients
 bun run dev:server
 ```
 
-**Why Bun?**
-- ⚡ **3-6x faster** package installation than npm/pnpm/yarn
-- 🗄️ **Built-in SQLite** (bun:sqlite) 3-6x faster than better-sqlite3
-- 🚀 **Native TypeScript** support without transpilation
-- 📦 **Workspace support** with automatic dependency resolution
-- ✅ **Zero configuration** - works out of the box with monorepos
+### Why Bun?
 
-**Note:** This project uses Bun exclusively. The `preinstall` hook prevents accidental use of npm or yarn.
+- **3-6x faster** package installation than npm/pnpm/yarn
+- **Built-in SQLite** (bun:sqlite) for fast database operations
+- **Native TypeScript** support without transpilation
+- **Workspace support** with automatic dependency resolution
 
-## Production Deployment
+---
 
-Install Tron as a persistent service that starts automatically on boot:
+## Packages
+
+### Agent (`packages/agent`)
+
+The core backend server. Handles LLM communication, tool execution, and event persistence.
+
+```
+src/
+├── agent/           # TronAgent, turn execution
+├── providers/       # Anthropic, OpenAI, Google LLM adapters
+├── tools/           # read, write, edit, bash, grep, subagent, etc.
+├── events/          # Event store, SQLite backend, reconstruction
+├── context/         # AGENTS.md loader, system prompts, compaction
+├── orchestrator/    # Session lifecycle, turn management
+├── gateway/         # WebSocket server, RPC handlers
+├── hooks/           # PreToolUse, PostToolUse hooks
+└── skills/          # Skill loader, registry
+```
+
+**Documentation:** See `packages/agent/docs/`
+
+### TUI (`packages/tui`)
+
+Terminal user interface for interactive sessions.
+
+```bash
+bun run dev:tui        # Development mode
+bun run login          # Authenticate with Claude Max
+```
+
+### Chat Web (`packages/chat-web`)
+
+React-based web interface.
+
+```bash
+bun run dev:chat       # Development server at localhost:5173
+```
+
+### iOS App (`packages/ios-app`)
+
+Native SwiftUI app with real-time streaming, session management, and push notifications.
+
+**Requirements:** Xcode 16+, iOS 18 SDK, XcodeGen
+
+```bash
+cd packages/ios-app
+xcodegen generate
+open TronMobile.xcodeproj
+```
+
+**Documentation:** See `packages/ios-app/docs/`
+
+---
+
+## Tools
+
+### Filesystem Tools
+
+| Tool | Description |
+|------|-------------|
+| `read` | Read file contents with line numbers |
+| `write` | Write content to files |
+| `edit` | Search and replace within files |
+| `ls` | List directory contents |
+| `find` | Find files by pattern |
+| `grep` | Search file contents with regex |
+
+### System Tools
+
+| Tool | Description |
+|------|-------------|
+| `bash` | Execute shell commands with timeout |
+| `ast_grep` | Structural code search with AST patterns |
+
+### Browser Tools
+
+| Tool | Description |
+|------|-------------|
+| `open_browser` | Open URLs in browser |
+| `agent_web_browser` | Automated browser interaction |
+
+### Sub-Agent Tools
+
+| Tool | Description |
+|------|-------------|
+| `spawn_subagent` | Spawn child agent for parallel tasks |
+| `query_subagent` | Check sub-agent status and progress |
+| `wait_for_subagent` | Wait for sub-agent completion |
+
+### UI Tools
+
+| Tool | Description |
+|------|-------------|
+| `ask_user_question` | Prompt user for input |
+| `notify_app` | Send push notification to mobile app |
+| `todo_write` | Create/update task list |
+| `render_app_ui` | Render custom UI in mobile app |
+
+---
+
+## Event System
+
+Tron uses **event sourcing** for all state persistence. Events form a tree via `parentId` references, enabling fork/rewind operations.
+
+### Event Structure
+
+```typescript
+interface BaseEvent {
+  id: string;              // UUID v7 (time-sortable)
+  parentId: string | null; // Previous event (null for root)
+  sessionId: string;
+  sequence: number;        // Monotonic within session
+  type: string;            // Event discriminator
+  timestamp: string;       // ISO 8601
+  payload: Record<string, unknown>;
+}
+```
+
+### Event Types
+
+| Type | Description |
+|------|-------------|
+| `session.start` | Session created |
+| `session.end` | Session ended |
+| `session.fork` | Session forked from another |
+| `message.user` | User message |
+| `message.assistant` | Assistant response |
+| `tool.call` | Tool invoked |
+| `tool.result` | Tool completed |
+| `subagent.spawn` | Sub-agent created |
+| `subagent.complete` | Sub-agent finished |
+| `context.compaction` | Context compacted |
+
+### Database Schema
+
+```sql
+CREATE TABLE events (
+  id TEXT PRIMARY KEY,
+  session_id TEXT NOT NULL,
+  parent_id TEXT,
+  sequence INTEGER NOT NULL,
+  depth INTEGER NOT NULL DEFAULT 0,
+  type TEXT NOT NULL,
+  timestamp TEXT NOT NULL,
+  payload TEXT NOT NULL,
+  workspace_id TEXT NOT NULL
+);
+
+CREATE TABLE sessions (
+  id TEXT PRIMARY KEY,
+  workspace_id TEXT NOT NULL,
+  head_event_id TEXT,
+  root_event_id TEXT,
+  status TEXT DEFAULT 'active',
+  model TEXT NOT NULL,
+  provider TEXT NOT NULL,
+  working_directory TEXT NOT NULL
+);
+
+CREATE TABLE workspaces (
+  id TEXT PRIMARY KEY,
+  path TEXT NOT NULL UNIQUE,
+  name TEXT NOT NULL
+);
+```
+
+---
+
+## Customization
+
+### Settings
+
+**Location:** `~/.tron/settings.json`
+
+```json
+{
+  "models": {
+    "default": "claude-sonnet-4-20250514",
+    "defaultMaxTokens": 4096
+  },
+  "tools": {
+    "bash": { "defaultTimeoutMs": 300000 }
+  },
+  "server": {
+    "wsPort": 8080,
+    "healthPort": 8081
+  }
+}
+```
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| `models.default` | `claude-opus-4-5-20251101` | Default model |
+| `models.defaultMaxTokens` | `4096` | Max output tokens |
+| `tools.bash.defaultTimeoutMs` | `120000` | Command timeout |
+| `tools.read.defaultLimitLines` | `2000` | Lines per read |
+| `server.wsPort` | `8080` | WebSocket port |
+| `server.healthPort` | `8081` | Health endpoint |
+
+### Environment Variables
+
+| Variable | Overrides |
+|----------|-----------|
+| `TRON_WS_PORT` | `server.wsPort` |
+| `TRON_HEALTH_PORT` | `server.healthPort` |
+| `TRON_DEFAULT_MODEL` | `models.default` |
+| `TRON_LOG_LEVEL` | Logging verbosity |
+
+### Skills
+
+Skills are reusable context packages with optional YAML frontmatter.
+
+**Locations:**
+- `~/.tron/skills/` — Global (all projects)
+- `.claude/skills/` or `.tron/skills/` — Project (higher precedence)
+
+**Creating a skill:**
+
+```bash
+mkdir -p ~/.tron/skills/my-rules
+cat > ~/.tron/skills/my-rules/SKILL.md << 'EOF'
+---
+autoInject: true
+tags: [rules, typescript]
+---
+Project coding standards.
+
+- Use strict TypeScript
+- No `any` types
+- Write tests for new code
+EOF
+```
+
+**Usage:** Reference with `@skill-name` in prompts:
+
+```
+@api-design Create a new endpoint for users
+```
+
+**Frontmatter options:**
+
+| Option | Type | Description |
+|--------|------|-------------|
+| `autoInject` | boolean | Include in every prompt |
+| `version` | string | Semantic version |
+| `tools` | string[] | Associated tools |
+| `tags` | string[] | Categorization |
+
+### System Prompt
+
+Custom system prompts override the built-in default.
+
+**Priority order:**
+1. Programmatic `systemPrompt` parameter
+2. Project `.claude/SYSTEM.md` or `.tron/SYSTEM.md`
+3. Global `~/.tron/SYSTEM.md`
+4. Built-in default
+
+### Context Rules
+
+Path-scoped instructions loaded into every prompt.
+
+| Location | Scope |
+|----------|-------|
+| `~/.tron/rules/AGENTS.md` | Global |
+| `.claude/AGENTS.md` | Project |
+| `subdir/AGENTS.md` | Subdirectory (loads when working in that path) |
+
+### Hooks
+
+Hooks allow custom logic before/after tool execution.
+
+**PreToolUse** — Runs before a tool executes. Can block or modify.
+
+```typescript
+// .claude/hooks/pre-tool-use.ts
+export default async function(tool: ToolCall) {
+  if (tool.name === 'bash' && tool.arguments.command.includes('rm -rf')) {
+    return { blocked: true, reason: 'Dangerous command blocked' };
+  }
+  return { proceed: true };
+}
+```
+
+**PostToolUse** — Runs after a tool completes. Can log or transform.
+
+```typescript
+// .claude/hooks/post-tool-use.ts
+export default async function(tool: ToolCall, result: ToolResult) {
+  console.log(`Tool ${tool.name} completed in ${result.duration}ms`);
+}
+```
+
+---
+
+## Development
+
+### Commands
+
+```bash
+# Build all packages
+bun run build
+
+# Run all tests
+bun run test
+
+# Watch mode
+bun run test:watch
+
+# Type check
+bun run typecheck
+
+# Lint
+bun run lint
+
+# Clean build artifacts
+bun run clean
+```
+
+### Package-Specific Commands
+
+```bash
+# Agent
+bun run --cwd packages/agent build
+bun run --cwd packages/agent test
+
+# TUI
+bun run dev:tui
+
+# Web Chat
+bun run dev:chat
+
+# iOS (requires Xcode)
+cd packages/ios-app && xcodegen generate && open TronMobile.xcodeproj
+```
+
+### Database Debugging
+
+```bash
+# Query events
+sqlite3 ~/.tron/db/prod.db "SELECT type, substr(payload, 1, 100) FROM events ORDER BY rowid DESC LIMIT 10"
+
+# Query sessions
+sqlite3 ~/.tron/db/prod.db "SELECT id, status, model FROM sessions ORDER BY rowid DESC LIMIT 5"
+```
+
+---
+
+## Deployment
+
+### Install as Service
 
 ```bash
 ./scripts/tron install
 ```
 
-This will:
-- Build and deploy the production version
-- Create a launchd service for auto-start
-- Install the `tron` CLI to `~/.local/bin/`
-- Start the server on ports 8080/8081
+Creates a launchd service, installs `tron` CLI to `~/.local/bin/`, and starts the server.
 
 ### Service Management
 
@@ -100,206 +487,167 @@ tron logs        # Tail production logs
 tron errors      # Show error log
 ```
 
-### Deploying Updates
+### Deploy Updates
 
 ```bash
 tron deploy      # Test → build → deploy with commit tracking
 tron rollback    # Restore to last deployed commit
 ```
 
-The deploy command:
-1. Checks for uncommitted changes
-2. Builds the project (includes type checking)
-3. Runs all tests
-4. Stops the service, installs the new build, restarts
+### Dual Environment
 
-### Dual Environment (Beta + Production)
-
-Run beta and production simultaneously on different ports:
+Run beta and production simultaneously:
 
 | Environment | WebSocket | Health | Database |
 |-------------|-----------|--------|----------|
-| Production  | 8080      | 8081   | `~/.tron/db/prod.db` |
-| Beta        | 8082      | 8083   | `~/.tron/db/beta.db` |
+| Production | 8080 | 8081 | `~/.tron/db/prod.db` |
+| Beta | 8082 | 8083 | `~/.tron/db/beta.db` |
 
 ```bash
-tron dev        # Run beta server in terminal (Ctrl+C to stop)
+tron dev         # Run beta server (Ctrl+C to stop)
 ```
-
-Beta uses a separate database so you can test changes without affecting production data.
-
-### Development Workflow
-
-```bash
-# 1. Make changes
-
-# 2. Run tests (uses Vitest, not Bun's test runner)
-bun run test          # Run all tests once
-bun run test:watch    # Watch mode
-
-# 3. Test live with beta server
-tron dev             # Starts on 8082/8083, Ctrl+C to stop
-
-# 4. Deploy when ready
-tron deploy
-```
-
-**Note:** Always use `bun run test`, not `bun test`. This project uses Vitest.
 
 ### Logs
 
-Server logs are stored with hourly timestamps:
-
 ```
 ~/.tron/logs/
-├── prod/    # Production logs
-│   └── 2024-01-15-09-prod-server.log
-└── beta/    # Beta logs
-    └── 2024-01-15-10-beta-server.log
+├── prod/        # Production logs
+└── beta/        # Beta logs
 ```
 
-- Format: `YYYY-MM-DD-HH-<tier>-server.log`
-- Retention: 90 days (auto-cleanup)
-- View logs: `tron logs` (prod) or `tron logs beta`
+Format: `YYYY-MM-DD-HH-<tier>-server.log`
+Retention: 90 days (auto-cleanup)
 
-## Memory Architecture
-
-Tron uses a four-level memory hierarchy:
-
-1. **Immediate (In-Context)**: Current task, recent messages
-2. **Session (Ledger)**: Goal, focus, decisions, working files
-3. **Project (Handoffs)**: Past sessions with FTS5 search
-4. **Global (Learnings)**: Cross-project patterns
-
-The key insight: **Clear, don't compact**. Save state to a ledger, wipe context, resume fresh.
-
-## Skills
-
-Skills are reusable context packages that extend Tron's capabilities. Create a `SKILL.md` file with optional YAML frontmatter:
-
-```markdown
 ---
-autoInject: true
-tags: [rules, typescript]
----
-TypeScript coding standards for this project.
 
-## Rules
+## iOS App
 
-- Use strict mode
-- No `any` types
-- Prefer `const` over `let`
-```
-
-**Locations:**
-- `~/.tron/skills/` — Global skills (all projects)
-- `.tron/skills/` — Project skills (override global)
-
-**Usage:**
-- Auto-inject skills (`autoInject: true`) are included in every prompt
-- Reference skills explicitly with `@skill-name` in prompts
-
-**Frontmatter options:**
-| Option | Type | Description |
-|--------|------|-------------|
-| `autoInject` | boolean | Include in every prompt |
-| `version` | string | Semantic version |
-| `tools` | string[] | Associated tools |
-| `tags` | string[] | Categorization tags |
-
-See [docs/skills.md](docs/skills.md) for the complete guide.
-
-## System Prompt Customization
-
-Customize Tron's core identity and behavior using `SYSTEM.md` files:
-
-**Locations:**
-- `~/.tron/rules/SYSTEM.md` — Global default prompt (all projects)
-- `.tron/SYSTEM.md` — Project-specific prompt (overrides global)
-
-**Priority:**
-1. Programmatic `systemPrompt` parameter (highest)
-2. Project `.tron/SYSTEM.md`
-3. Global `~/.tron/rules/SYSTEM.md`
-4. Built-in default prompt (fallback)
-
-**Example `SYSTEM.md`:**
-```markdown
-You are Tron, a specialized TypeScript assistant for this project.
-
-You have access to these tools:
-- read, write, edit: File operations
-- bash: Execute commands
-- grep, find: Search and discovery
-
-Guidelines:
-- Follow project's TypeScript strict mode
-- Prefer composition over inheritance
-- Write tests for all new features
-```
-
-**Best practices:**
-- Keep prompts concise (<1000 tokens recommended)
-- Focus on project-specific patterns and constraints
-- Avoid redundant information (tools are described elsewhere)
-- Update as project conventions evolve
-
-## Development
-
-This project uses **Bun** with **Vitest** for testing:
+### Setup
 
 ```bash
-# Run tests (always use "bun run test", not "bun test")
-bun run test          # Run all tests once
-bun run test:watch    # Watch mode
-bun run test:coverage # With coverage
-
-# Other commands
-bun run typecheck     # Check types
-bun run lint          # Lint code
-bun run clean         # Clean build artifacts
+brew install xcodegen
+cd packages/ios-app
+xcodegen generate
+open TronMobile.xcodeproj
 ```
 
-### Working with workspace packages
+### Build Configurations
 
-```bash
-# Build a specific package
-cd packages/agent && bun run build
+| Config | Server | Use Case |
+|--------|--------|----------|
+| Debug-Beta | localhost:8082 | Development |
+| Release-Beta | localhost:8082 | TestFlight |
+| Debug-Prod | localhost:8080 | Production testing |
+| Release-Prod | localhost:8080 | App Store |
 
-# Run dev for a specific package
-cd packages/tui && bun run dev
+### Features
 
-# Install a dependency to a specific package
-bun add some-package --cwd packages/agent
+- Real-time chat with streaming responses
+- Session management (create, fork, resume)
+- Event-sourced state reconstruction
+- Push notifications for background alerts
+- Voice transcription input
+
+### Push Notifications
+
+Requires Apple Developer account with APNS key. See `packages/ios-app/docs/apns.md`.
+
+---
+
+## API Reference
+
+### WebSocket Connection
+
+```
+ws://localhost:8080  (production)
+ws://localhost:8082  (development)
 ```
 
-### Bun Performance Benefits
+All messages use JSON-RPC 2.0 format.
 
-- **Installation**: 70% faster than pnpm, 3x faster than npm
-- **Script execution**: Native binary execution without Node.js overhead
-- **SQLite operations**: Use `bun:sqlite` for 3-6x faster database queries
-- **TypeScript**: Direct execution without transpilation step
+### RPC Methods
 
-## Configuration
+#### Session Management
 
-Create `~/.tron/settings.json`:
+| Method | Params | Returns |
+|--------|--------|---------|
+| `session.create` | `{ workingDirectory, model }` | `{ sessionId }` |
+| `session.list` | `{ workspaceId?, limit? }` | `{ sessions }` |
+| `session.get` | `{ sessionId }` | `{ session }` |
+| `session.fork` | `{ sessionId, eventId? }` | `{ newSessionId }` |
+| `session.delete` | `{ sessionId }` | `{ success }` |
 
-```json
-{
-  "model": "claude-sonnet-4-20250514",
-  "providers": {
-    "anthropic": {
-      "auth": "oauth"
-    }
-  },
-  "autoCompaction": false,
-  "cleanupPeriodDays": 99999
-}
+#### Agent Control
+
+| Method | Params | Returns |
+|--------|--------|---------|
+| `agent.message` | `{ sessionId, content, attachments? }` | Stream of events |
+| `agent.abort` | `{ sessionId }` | `{ aborted }` |
+| `agent.respond` | `{ sessionId, response }` | Stream of events |
+
+#### Model
+
+| Method | Params | Returns |
+|--------|--------|---------|
+| `model.list` | `{}` | `{ models }` |
+| `model.switch` | `{ sessionId, model }` | `{ success }` |
+
+### Event Notifications
+
+Server sends notifications for real-time updates:
+
+```typescript
+// Text streaming
+{ method: "agent.text_delta", params: { sessionId, delta } }
+
+// Tool lifecycle
+{ method: "agent.tool_start", params: { sessionId, toolName, toolId } }
+{ method: "agent.tool_end", params: { sessionId, toolId, result } }
+
+// Turn complete
+{ method: "agent.turn_complete", params: { sessionId, tokenUsage } }
+
+// Sub-agent events
+{ method: "subagent.spawn", params: { parentSessionId, subagentSessionId, task } }
+{ method: "subagent.complete", params: { subagentSessionId, result } }
 ```
+
+### Health Endpoint
+
+```
+GET http://localhost:8081/health  (production)
+GET http://localhost:8083/health  (development)
+
+Response: { status: "ok", version: "1.0.0" }
+```
+
+---
+
+## File Locations
+
+```
+~/.tron/
+├── db/                 # SQLite databases (prod.db, beta.db)
+├── logs/               # Server logs
+├── settings.json       # Global settings
+├── SYSTEM.md           # Global system prompt
+├── skills/             # Global skills
+└── rules/
+    └── AGENTS.md       # Global context rules
+
+.claude/                # Project config (or .tron/)
+├── CLAUDE.md           # Project context rules
+├── SYSTEM.md           # Project system prompt
+└── skills/             # Project skills
+```
+
+---
 
 ## License
 
 MIT
+
+---
 
 ## Credits
 

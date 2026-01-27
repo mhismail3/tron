@@ -1,16 +1,5 @@
 # Customization
 
-<!--
-PURPOSE: How to configure Tron's behavior via settings, skills, and system prompts.
-AUDIENCE: Users customizing Tron for their workflow.
-
-AGENT MAINTENANCE:
-- Update settings when new options added to packages/agent/src/settings/
-- Update skill frontmatter fields if schema changes
-- Verify file locations match actual loader behavior
-- Last verified: 2026-01-22
--->
-
 ## Settings
 
 **Location:** `~/.tron/settings.json`
@@ -44,9 +33,14 @@ Only specify overrides. Unspecified values use defaults.
 
 ### Environment Overrides
 
-`TRON_WS_PORT`, `TRON_HEALTH_PORT`, `TRON_DEFAULT_MODEL` override settings.json.
+Environment variables override settings.json:
 
----
+| Variable | Overrides |
+|----------|-----------|
+| `TRON_WS_PORT` | `server.wsPort` |
+| `TRON_HEALTH_PORT` | `server.healthPort` |
+| `TRON_DEFAULT_MODEL` | `models.default` |
+| `TRON_LOG_LEVEL` | Logging verbosity |
 
 ## Skills
 
@@ -113,11 +107,9 @@ The prompt `@api-design Create endpoint` becomes:
 Create endpoint
 ```
 
----
-
 ## System Prompt
 
-The system prompt defines Tron's core identity. Custom prompts override the built-in default.
+The system prompt defines the agent's core identity. Custom prompts override the built-in default.
 
 ### Locations (Priority Order)
 
@@ -146,11 +138,34 @@ EOF
 ### Guidelines
 
 - Keep under 1000 tokens (~4KB)
-- Don't repeat tool descriptions (Tron knows them)
+- Don't repeat tool descriptions (agent knows them)
 - Put domain knowledge in Skills instead
 - System prompt = identity, Skills = capabilities
 
----
+## Context Rules
+
+Context rules (AGENTS.md/CLAUDE.md) provide project-specific instructions loaded into every prompt.
+
+### Locations
+
+| Location | Scope |
+|----------|-------|
+| `~/.tron/rules/AGENTS.md` | Global |
+| `.claude/AGENTS.md` or `.tron/AGENTS.md` | Project |
+| `subdir/AGENTS.md` | Subdirectory (path-scoped) |
+
+### Path-Scoped Rules
+
+Rules in subdirectories only load when working with files in that path:
+
+```
+project/
+├── .claude/AGENTS.md          # Always loaded
+├── src/
+│   └── AGENTS.md              # Loaded for src/ files
+└── tests/
+    └── AGENTS.md              # Loaded for tests/ files
+```
 
 ## File Locations Summary
 
@@ -168,4 +183,33 @@ EOF
 ├── SYSTEM.md           # Project system prompt
 ├── AGENTS.md           # Project context rules
 └── skills/             # Project skills
+```
+
+## Hooks
+
+Hooks allow custom logic before/after tool execution.
+
+### PreToolUse
+
+Runs before a tool executes. Can block or modify the call.
+
+```typescript
+// In .claude/hooks/pre-tool-use.ts
+export default async function(tool: ToolCall) {
+  if (tool.name === 'bash' && tool.arguments.command.includes('rm -rf')) {
+    return { blocked: true, reason: 'Dangerous command blocked' };
+  }
+  return { proceed: true };
+}
+```
+
+### PostToolUse
+
+Runs after a tool completes. Can log or transform results.
+
+```typescript
+// In .claude/hooks/post-tool-use.ts
+export default async function(tool: ToolCall, result: ToolResult) {
+  console.log(`Tool ${tool.name} completed in ${result.duration}ms`);
+}
 ```

@@ -1,29 +1,16 @@
-# Architecture
+# Agent Architecture
 
-<!--
-PURPOSE: System architecture and internals for developers.
-AUDIENCE: Developers working on the Tron codebase.
+## Overview
 
-AGENT MAINTENANCE:
-- Update diagrams if package structure changes
-- Update event types when new ones added to packages/agent/src/events/types.ts
-- Verify schemas match actual SQLite tables
-- Last verified: 2026-01-22
--->
-
-## System Overview
+The agent package (`@tron/agent`) is the core backend for Tron. It handles:
+- LLM communication via providers (Anthropic, OpenAI, Google)
+- Tool execution (read, write, edit, bash, grep, etc.)
+- Event-sourced session persistence
+- Context management and compaction
+- Sub-agent spawning and coordination
+- WebSocket server for clients
 
 ```
-┌─────────────────────────────────────────────────────────────────────┐
-│                         User Interfaces                              │
-├──────────────────────┬──────────────────────┬──────────────────────┤
-│     Terminal UI      │      Web Chat        │     iOS App          │
-│   (React/Ink CLI)    │     (React SPA)      │     (SwiftUI)        │
-└──────────┬───────────┴──────────┬───────────┴──────────┬───────────┘
-           │                      │                      │
-           │ Direct               │ WebSocket            │ WebSocket
-           │                      │                      │
-           ▼                      ▼                      ▼
 ┌─────────────────────────────────────────────────────────────────────┐
 │                    Event Store Orchestrator                          │
 │   - Multi-session management                                         │
@@ -50,28 +37,25 @@ AGENT MAINTENANCE:
 └─────────────────────────────────────────────────────────────────────┘
 ```
 
-## Packages
-
-| Package | Purpose | Entry |
-|---------|---------|-------|
-| `@tron/agent` | Agent logic, tools, events, context, server | `packages/agent/src/` |
-| `@tron/tui` | Terminal UI (React/Ink) | `packages/tui/src/` |
-| `@tron/chat-web` | Web chat (React SPA) | `packages/chat-web/src/` |
-| `@tron/ios-app` | iOS app (SwiftUI) | `packages/ios-app/Sources/` |
-
-### Agent Package Structure
+## Package Structure
 
 ```
-packages/agent/src/
+src/
 ├── agent/           # TronAgent, turn execution
-├── providers/       # Anthropic, OpenAI, Google
-├── tools/           # read, write, edit, bash, grep, find
-├── events/          # Event store, SQLite backend
-├── context/         # AGENTS.md loader, system prompts
+├── providers/       # Anthropic, OpenAI, Google LLM adapters
+├── tools/           # read, write, edit, bash, grep, find, subagent
+│   ├── fs/          # Filesystem tools
+│   ├── browser/     # Browser automation
+│   ├── subagent/    # Sub-agent spawning
+│   ├── ui/          # User interaction (ask, notify, todo)
+│   └── system/      # Bash, thinking
+├── events/          # Event store, SQLite backend, reconstruction
+├── context/         # AGENTS.md loader, system prompts, compaction
+├── orchestrator/    # Session lifecycle, turn management
+├── gateway/         # WebSocket server, RPC handlers
+├── hooks/           # PreToolUse, PostToolUse hooks
 ├── skills/          # Skill loader, registry
-├── subagents/       # Sub-agent spawning and tracking
-├── gateway/         # WebSocket server, RPC adapters
-└── server.ts        # Server entry point
+└── rpc/             # RPC protocol, handlers, schemas
 ```
 
 ## Event Sourcing
@@ -124,6 +108,8 @@ State is reconstructed by walking ancestors from head to root.
 | `message.assistant` | content, tokenUsage |
 | `tool.call` | name, arguments |
 | `tool.result` | content, isError, duration |
+| `subagent.spawn` | sessionId, task, model |
+| `subagent.complete` | sessionId, result, tokenUsage |
 
 ### Operations
 
@@ -156,6 +142,12 @@ CREATE TABLE sessions (
   provider TEXT NOT NULL,
   working_directory TEXT NOT NULL
 );
+
+CREATE TABLE workspaces (
+  id TEXT PRIMARY KEY,
+  path TEXT NOT NULL UNIQUE,
+  name TEXT NOT NULL
+);
 ```
 
 ## Tool Execution Flow
@@ -180,6 +172,16 @@ Hierarchical loading with multi-directory support:
 2. Project: `.claude/AGENTS.md` or `.tron/AGENTS.md`
 3. Subdirectory: `subdir/AGENTS.md` files
 
+## Providers
+
+| Provider | Models | File |
+|----------|--------|------|
+| Anthropic | Claude 3.5/4 variants | `providers/anthropic.ts` |
+| OpenAI | GPT-4o, o1, o3 | `providers/openai.ts` |
+| Google | Gemini 2.x | `providers/google.ts` |
+
+Token usage is normalized across providers via `token-normalizer.ts`.
+
 ## Design Decisions
 
 | Decision | Rationale |
@@ -187,3 +189,4 @@ Hierarchical loading with multi-directory support:
 | SQLite | Single file, ACID, FTS5, portable |
 | Event sourcing | Auditability, fork/rewind, reproducibility |
 | Multi-directory | Support both Claude Code and Tron conventions |
+| WebSocket | Bidirectional, real-time streaming |

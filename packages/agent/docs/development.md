@@ -1,0 +1,153 @@
+# Agent Development
+
+## Setup
+
+```bash
+# From monorepo root
+bun install
+bun run build
+```
+
+## Commands
+
+```bash
+# Build agent package
+bun run --cwd packages/agent build
+
+# Run tests
+bun run --cwd packages/agent test
+
+# Watch mode
+bun run --cwd packages/agent test:watch
+
+# Type check
+bun run --cwd packages/agent typecheck
+```
+
+## Development Workflow
+
+```bash
+# Full monorepo build + test
+bun run build && bun run test
+
+# Start development server (beta)
+tron dev
+# WebSocket: localhost:8082
+# Health: localhost:8083
+
+# Start production server
+tron start
+# WebSocket: localhost:8080
+# Health: localhost:8081
+```
+
+## Testing
+
+### Running Tests
+
+```bash
+bun run test                    # All tests
+bun run test src/tools/         # Specific directory
+bun run test:watch              # Watch mode
+```
+
+### Test Structure
+
+```
+src/
+├── tools/__tests__/            # Tool tests
+├── events/__tests__/           # Event store tests
+├── providers/__tests__/        # Provider tests
+├── orchestrator/__tests__/     # Orchestrator tests
+└── __integration__/            # Integration tests
+```
+
+### Writing Tests
+
+```typescript
+import { describe, it, expect, beforeEach } from 'vitest';
+
+describe('MyFeature', () => {
+  beforeEach(() => {
+    // Setup
+  });
+
+  it('should do something', () => {
+    expect(result).toBe(expected);
+  });
+});
+```
+
+## File Locations
+
+| Location | Purpose |
+|----------|---------|
+| `~/.tron/db/` | SQLite databases |
+| `~/.tron/skills/` | Global skills |
+| `~/.tron/rules/` | Global context rules |
+| `~/.tron/settings.json` | User settings |
+
+## Debugging
+
+### Log Levels
+
+```bash
+TRON_LOG_LEVEL=debug bun run dev
+```
+
+### Database Queries
+
+```bash
+# Query events
+sqlite3 ~/.tron/db/prod.db "SELECT type, json_extract(payload, '$.name') FROM events WHERE type LIKE 'tool.%' LIMIT 10"
+
+# Query sessions
+sqlite3 ~/.tron/db/prod.db "SELECT id, status, model FROM sessions ORDER BY rowid DESC LIMIT 5"
+```
+
+### Event Inspection
+
+```bash
+# View recent events for a session
+sqlite3 ~/.tron/db/prod.db "SELECT sequence, type, substr(payload, 1, 100) FROM events WHERE session_id='sess_xxx' ORDER BY sequence"
+```
+
+## Troubleshooting
+
+### Port in Use
+
+```bash
+kill $(lsof -t -i :8082)
+```
+
+### Native Module Errors (better-sqlite3)
+
+```bash
+cd node_modules/.bun/better-sqlite3@*/node_modules/better-sqlite3
+rm -rf build
+PYTHON=/opt/homebrew/bin/python3 npx node-gyp rebuild --release
+```
+
+### Memory Issues
+
+Vitest may occasionally fail with heap memory errors. This is a known Vitest issue, not a test failure.
+
+## Code Organization
+
+### Adding a New Tool
+
+See `adding-tools.md` for the complete checklist.
+
+### Adding Event Types
+
+1. Define in `src/events/types/union.ts`
+2. Add payload interface in `src/events/types/`
+3. Handle in `src/events/message-reconstructor.ts` if affects messages
+4. Emit via `eventStore.appendEvent()`
+
+### Adding a Provider
+
+1. Create `src/providers/<name>.ts` implementing Provider interface
+2. Add to `src/providers/factory.ts` switch
+3. Add model IDs to `src/providers/models.ts`
+4. Add token normalization in `src/providers/token-normalizer.ts`
