@@ -10,7 +10,7 @@ export {
   type AnthropicConfig,
   type StreamOptions,
   type ClaudeModelId,
-} from './anthropic.js';
+} from './anthropic/index.js';
 
 export {
   OpenAIProvider,
@@ -26,7 +26,7 @@ export {
   type GoogleConfig,
   type GoogleStreamOptions,
   type GeminiModelId,
-} from './google.js';
+} from './google/index.js';
 
 // Unified provider factory and types
 export {

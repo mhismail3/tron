@@ -9,8 +9,8 @@ import type {
   AnthropicProvider,
   AnthropicConfig,
   StreamOptions,
-} from '../anthropic.js';
-import type { Context, Message, StreamEvent, ThinkingContent, TextContent, ToolCall } from '../types/index.js';
+} from '../anthropic/index.js';
+import type { Context, Message, StreamEvent, ThinkingContent, TextContent, ToolCall } from '../../types/index.js';
 
 // Mock the Anthropic SDK
 vi.mock('@anthropic-ai/sdk', () => ({

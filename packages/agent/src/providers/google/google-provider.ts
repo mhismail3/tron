@@ -1,18 +1,13 @@
 /**
  * @fileoverview Google Gemini Provider
  *
- * Provides streaming support for Google Gemini models with:
+ * Core provider implementation for Gemini models with:
  * - OAuth authentication (Cloud Code Assist / Antigravity - PREFERRED)
  * - API key authentication (fallback)
  * - Function/tool calling
  * - Streaming responses
  * - Thinking mode support (thinkingLevel for Gemini 3, thinkingBudget for Gemini 2.5)
  * - Safety settings for agentic use
- * - Compatible interface with other providers
- *
- * Authentication Priority:
- * 1. OAuth (via Cloud Code Assist or Antigravity) - always preferred
- * 2. API Key - fallback only
  */
 
 import type {
@@ -22,305 +17,41 @@ import type {
   TextContent,
   ThinkingContent,
   ToolCall,
-} from '../types/index.js';
-import { createLogger, categorizeError, LogErrorCategory } from '../logging/index.js';
+} from '../../types/index.js';
+import { createLogger, categorizeError, LogErrorCategory } from '../../logging/index.js';
 import {
   withProviderRetry,
   type StreamRetryConfig,
   mapGoogleStopReason,
-  buildToolCallIdMapping,
-  remapToolCallId,
-} from './base/index.js';
+} from '../base/index.js';
 import {
-  type GoogleOAuthEndpoint,
   refreshGoogleOAuthToken,
   shouldRefreshGoogleTokens,
   discoverGoogleProject,
   CLOUD_CODE_ASSIST_CONFIG,
   ANTIGRAVITY_CONFIG,
-} from '../auth/google-oauth.js';
-import { saveProviderOAuthTokens, saveProviderAuth, getProviderAuthSync } from '../auth/unified.js';
+} from '../../auth/google-oauth.js';
+import { saveProviderOAuthTokens, saveProviderAuth, getProviderAuthSync } from '../../auth/unified.js';
+import type {
+  GoogleConfig,
+  GoogleStreamOptions,
+  GoogleProviderAuth,
+  GoogleOAuthAuth,
+  GeminiStreamChunk,
+  SafetyRating,
+} from './types.js';
+import {
+  GEMINI_MODELS,
+  DEFAULT_SAFETY_SETTINGS,
+  isGemini3Model,
+} from './types.js';
+import { convertMessages, convertTools } from './message-converter.js';
 
 const logger = createLogger('google');
 
 // =============================================================================
-// Types
-// =============================================================================
-
-/**
- * Gemini 3 thinking levels (discrete levels for Gemini 3.x models)
- */
-export type GeminiThinkingLevel = 'minimal' | 'low' | 'medium' | 'high';
-
-/**
- * Safety setting category
- */
-export type HarmCategory =
-  | 'HARM_CATEGORY_HARASSMENT'
-  | 'HARM_CATEGORY_HATE_SPEECH'
-  | 'HARM_CATEGORY_SEXUALLY_EXPLICIT'
-  | 'HARM_CATEGORY_DANGEROUS_CONTENT'
-  | 'HARM_CATEGORY_CIVIC_INTEGRITY';
-
-/**
- * Safety setting threshold
- */
-export type HarmBlockThreshold =
-  | 'BLOCK_NONE'
-  | 'BLOCK_ONLY_HIGH'
-  | 'BLOCK_MEDIUM_AND_ABOVE'
-  | 'BLOCK_LOW_AND_ABOVE'
-  | 'OFF';
-
-/**
- * Safety rating probability from API response
- */
-export type HarmProbability = 'NEGLIGIBLE' | 'LOW' | 'MEDIUM' | 'HIGH';
-
-/**
- * Safety rating returned by API
- */
-export interface SafetyRating {
-  category: HarmCategory;
-  probability: HarmProbability;
-}
-
-/**
- * Safety setting for a specific harm category
- */
-export interface SafetySetting {
-  category: HarmCategory;
-  threshold: HarmBlockThreshold;
-}
-
-/**
- * OAuth authentication for Google (PREFERRED)
- */
-export interface GoogleOAuthAuth {
-  type: 'oauth';
-  accessToken: string;
-  refreshToken: string;
-  expiresAt: number;
-  /** Which OAuth endpoint was used */
-  endpoint?: GoogleOAuthEndpoint;
-  /** Project ID for x-goog-user-project header (required for Cloud Code Assist) */
-  projectId?: string;
-}
-
-/**
- * API key authentication for Google (fallback)
- */
-export interface GoogleApiKeyAuth {
-  type: 'api_key';
-  apiKey: string;
-}
-
-/**
- * Unified Google auth type - OAuth always takes priority when both are available
- */
-export type GoogleProviderAuth = GoogleOAuthAuth | GoogleApiKeyAuth;
-
-/**
- * Configuration for Google provider
- */
-export interface GoogleConfig {
-  model: string;
-  /** Authentication - OAuth is ALWAYS preferred over API key */
-  auth: GoogleProviderAuth;
-  maxTokens?: number;
-  temperature?: number;
-  /** Base URL override (only used with API key auth) */
-  baseURL?: string;
-  /** Thinking level for Gemini 3 models (minimal/low/medium/high) */
-  thinkingLevel?: GeminiThinkingLevel;
-  /** Thinking budget in tokens for Gemini 2.5 models (0-32768) */
-  thinkingBudget?: number;
-  /** Custom safety settings (defaults to OFF for agentic use) */
-  safetySettings?: SafetySetting[];
-  /** Retry configuration for transient failures (default: enabled with 3 retries) */
-  retry?: StreamRetryConfig | false;
-}
-
-/**
- * Options for streaming requests
- */
-export interface GoogleStreamOptions {
-  maxTokens?: number;
-  temperature?: number;
-  topP?: number;
-  topK?: number;
-  stopSequences?: string[];
-  /** Thinking level for Gemini 3 models */
-  thinkingLevel?: GeminiThinkingLevel;
-  /** Thinking budget for Gemini 2.5 models */
-  thinkingBudget?: number;
-}
-
-/**
- * Gemini API content format
- */
-interface GeminiContent {
-  role: 'user' | 'model';
-  parts: GeminiPart[];
-}
-
-type GeminiPart =
-  | { text: string; thought?: boolean; thoughtSignature?: string }
-  | { functionCall: { name: string; args: Record<string, unknown> }; thoughtSignature?: string }
-  | { functionResponse: { name: string; response: Record<string, unknown> } };
-
-interface GeminiTool {
-  functionDeclarations: Array<{
-    name: string;
-    description: string;
-    parameters: Record<string, unknown>;
-  }>;
-}
-
-interface GeminiStreamChunk {
-  candidates?: Array<{
-    content?: {
-      parts?: GeminiPart[];
-      role?: string;
-    };
-    finishReason?: string;
-  }>;
-  usageMetadata?: {
-    promptTokenCount: number;
-    candidatesTokenCount: number;
-    totalTokenCount: number;
-  };
-  error?: {
-    code: number;
-    message: string;
-  };
-}
-
-// =============================================================================
-// Model Constants
-// =============================================================================
-
-/**
- * Gemini model information with thinking support
- */
-export interface GeminiModelInfo {
-  name: string;
-  shortName: string;
-  contextWindow: number;
-  maxOutput: number;
-  supportsTools: boolean;
-  /** Whether this model supports thinking mode */
-  supportsThinking: boolean;
-  /** Tier for UI categorization */
-  tier: 'pro' | 'flash' | 'flash-lite';
-  /** Whether this is a preview model */
-  preview?: boolean;
-  /** Default thinking level for Gemini 3 models */
-  defaultThinkingLevel?: GeminiThinkingLevel;
-  /** Supported thinking levels (for UI) */
-  supportedThinkingLevels?: GeminiThinkingLevel[];
-  /** Input cost per 1k tokens */
-  inputCostPer1k: number;
-  /** Output cost per 1k tokens */
-  outputCostPer1k: number;
-}
-
-export const GEMINI_MODELS: Record<string, GeminiModelInfo> = {
-  // Gemini 3 series (December 2025 - latest preview)
-  // Note: Gemini 3 uses thinkingLevel instead of thinkingBudget
-  // Temperature MUST be 1.0 for Gemini 3 models
-  'gemini-3-pro-preview': {
-    name: 'Gemini 3 Pro (Preview)',
-    shortName: 'Gemini 3 Pro',
-    contextWindow: 1048576,
-    maxOutput: 65536,
-    supportsTools: true,
-    supportsThinking: true,
-    tier: 'pro',
-    preview: true,
-    defaultThinkingLevel: 'high',
-    supportedThinkingLevels: ['low', 'medium', 'high'],
-    inputCostPer1k: 0.00125,
-    outputCostPer1k: 0.005,
-  },
-  'gemini-3-flash-preview': {
-    name: 'Gemini 3 Flash (Preview)',
-    shortName: 'Gemini 3 Flash',
-    contextWindow: 1048576,
-    maxOutput: 65536,
-    supportsTools: true,
-    supportsThinking: true,
-    tier: 'flash',
-    preview: true,
-    defaultThinkingLevel: 'high',
-    supportedThinkingLevels: ['minimal', 'low', 'medium', 'high'],
-    inputCostPer1k: 0.000075,
-    outputCostPer1k: 0.0003,
-  },
-  // Gemini 2.5 series (stable production)
-  // Note: Gemini 2.5 uses thinkingBudget (0-32768 tokens)
-  'gemini-2.5-pro': {
-    name: 'Gemini 2.5 Pro',
-    shortName: 'Gemini 2.5 Pro',
-    contextWindow: 2097152,
-    maxOutput: 16384,
-    supportsTools: true,
-    supportsThinking: true,
-    tier: 'pro',
-    defaultThinkingLevel: 'high',
-    supportedThinkingLevels: ['low', 'medium', 'high'],
-    inputCostPer1k: 0.00125,
-    outputCostPer1k: 0.005,
-  },
-  'gemini-2.5-flash': {
-    name: 'Gemini 2.5 Flash',
-    shortName: 'Gemini 2.5 Flash',
-    contextWindow: 1048576,
-    maxOutput: 16384,
-    supportsTools: true,
-    supportsThinking: true,
-    tier: 'flash',
-    defaultThinkingLevel: 'low',
-    supportedThinkingLevels: ['minimal', 'low', 'medium', 'high'],
-    inputCostPer1k: 0.000075,
-    outputCostPer1k: 0.0003,
-  },
-  'gemini-2.5-flash-lite': {
-    name: 'Gemini 2.5 Flash Lite',
-    shortName: 'Gemini 2.5 Flash Lite',
-    contextWindow: 1048576,
-    maxOutput: 8192,
-    supportsTools: true,
-    supportsThinking: false,
-    tier: 'flash-lite',
-    inputCostPer1k: 0.0000375,
-    outputCostPer1k: 0.00015,
-  },
-};
-
-export type GeminiModelId = keyof typeof GEMINI_MODELS;
-
-// =============================================================================
 // Provider Class
 // =============================================================================
-
-/**
- * Default safety settings for agentic use (all categories OFF)
- */
-const DEFAULT_SAFETY_SETTINGS: SafetySetting[] = [
-  { category: 'HARM_CATEGORY_HARASSMENT', threshold: 'OFF' },
-  { category: 'HARM_CATEGORY_HATE_SPEECH', threshold: 'OFF' },
-  { category: 'HARM_CATEGORY_SEXUALLY_EXPLICIT', threshold: 'OFF' },
-  { category: 'HARM_CATEGORY_DANGEROUS_CONTENT', threshold: 'OFF' },
-  { category: 'HARM_CATEGORY_CIVIC_INTEGRITY', threshold: 'OFF' },
-];
-
-/**
- * Check if a model is Gemini 3 (uses thinkingLevel instead of thinkingBudget)
- */
-function isGemini3Model(model: string): boolean {
-  return model.includes('gemini-3');
-}
 
 export class GoogleProvider {
   readonly id = 'google';
@@ -345,10 +76,10 @@ export class GoogleProvider {
         try {
           const storedAuth = getProviderAuthSync('google');
           if (!endpoint) {
-            endpoint = (storedAuth as any)?.endpoint as GoogleOAuthEndpoint | undefined;
+            endpoint = (storedAuth as GoogleOAuthAuth | null)?.endpoint;
           }
           if (!projectId) {
-            projectId = (storedAuth as any)?.projectId as string | undefined;
+            projectId = (storedAuth as GoogleOAuthAuth | null)?.projectId;
           }
           logger.debug('Loaded auth metadata from stored auth', { endpoint, projectId });
         } catch (e) {
@@ -393,6 +124,13 @@ export class GoogleProvider {
   }
 
   /**
+   * Get the model ID
+   */
+  get model(): string {
+    return this.config.model;
+  }
+
+  /**
    * Check if OAuth tokens need refresh
    */
   private shouldRefreshTokens(): boolean {
@@ -430,6 +168,7 @@ export class GoogleProvider {
         // Persist the discovered projectId
         const storedAuth = getProviderAuthSync('google');
         if (storedAuth) {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
           await saveProviderAuth('google', {
             ...storedAuth,
             projectId,
@@ -591,13 +330,6 @@ export class GoogleProvider {
   }
 
   /**
-   * Get the model ID
-   */
-  get model(): string {
-    return this.config.model;
-  }
-
-  /**
    * Non-streaming completion
    */
   async complete(
@@ -678,8 +410,8 @@ export class GoogleProvider {
 
     try {
       // Convert messages to Gemini format
-      const contents = this.convertMessages(context);
-      const tools = context.tools ? this.convertTools(context.tools) : undefined;
+      const contents = convertMessages(context);
+      const tools = context.tools ? convertTools(context.tools) : undefined;
 
       // Build generation config
       const generationConfig: Record<string, unknown> = {
@@ -698,13 +430,13 @@ export class GoogleProvider {
       if (isGemini3 && thinkingLevel) {
         // Gemini 3 uses thinkingLevel (discrete levels)
         // includeThoughts: true enables thought summaries in the response
-        generationConfig.thinkingConfig = {
+        (generationConfig as Record<string, unknown>).thinkingConfig = {
           thinkingLevel: thinkingLevel.toUpperCase(), // API expects MINIMAL, LOW, MEDIUM, HIGH
           includeThoughts: true,
         };
       } else if (!isGemini3 && thinkingBudget !== undefined) {
         // Gemini 2.5 uses thinkingBudget (token count 0-32768)
-        generationConfig.thinkingConfig = {
+        (generationConfig as Record<string, unknown>).thinkingConfig = {
           thinkingBudget,
           includeThoughts: true,
         };
@@ -891,16 +623,16 @@ export class GoogleProvider {
             if (!candidate?.content?.parts) {
               // Handle finish reason without content (e.g., SAFETY block)
               if (candidate?.finishReason === 'SAFETY') {
-                const safetyRatings = (candidate as { safetyRatings?: SafetyRating[] }).safetyRatings ?? [];
+                const safetyRatings = candidate.safetyRatings ?? [];
                 const blockedCategories = safetyRatings
-                  .filter(r => r.probability === 'HIGH' || r.probability === 'MEDIUM')
-                  .map(r => r.category);
+                  .filter((r: SafetyRating) => r.probability === 'HIGH' || r.probability === 'MEDIUM')
+                  .map((r: SafetyRating) => r.category);
 
                 yield {
                   type: 'safety_block',
                   blockedCategories,
                   error: new Error('Response blocked by safety filters'),
-                };
+                } as StreamEvent;
                 continue;
               }
               continue;
@@ -983,16 +715,16 @@ export class GoogleProvider {
 
               // Handle SAFETY finish reason
               if (candidate.finishReason === 'SAFETY') {
-                const safetyRatings = (candidate as { safetyRatings?: SafetyRating[] }).safetyRatings ?? [];
+                const safetyRatings = candidate.safetyRatings ?? [];
                 const blockedCategories = safetyRatings
-                  .filter(r => r.probability === 'HIGH' || r.probability === 'MEDIUM')
-                  .map(r => r.category);
+                  .filter((r: SafetyRating) => r.probability === 'HIGH' || r.probability === 'MEDIUM')
+                  .map((r: SafetyRating) => r.category);
 
                 yield {
                   type: 'safety_block',
                   blockedCategories,
                   error: new Error('Response blocked by safety filters'),
-                };
+                } as StreamEvent;
                 continue;
               }
 
@@ -1060,141 +792,4 @@ export class GoogleProvider {
       yield { type: 'error', error: error instanceof Error ? error : new Error(String(error)) };
     }
   }
-
-  /**
-   * Convert Tron messages to Gemini format
-   *
-   * Note: Tool call IDs from other providers are remapped to ensure consistency
-   * when switching providers mid-session.
-   */
-  private convertMessages(context: Context): GeminiContent[] {
-    const contents: GeminiContent[] = [];
-
-    // Build a mapping of original tool call IDs to normalized IDs.
-    // This is necessary when switching providers mid-session.
-    const allToolCalls: ToolCall[] = [];
-    for (const msg of context.messages) {
-      if (msg.role === 'assistant') {
-        const toolUses = msg.content.filter((c): c is ToolCall => c.type === 'tool_use');
-        allToolCalls.push(...toolUses);
-      }
-    }
-    const idMapping = buildToolCallIdMapping(allToolCalls, 'openai');
-
-    for (const msg of context.messages) {
-      if (msg.role === 'user') {
-        const parts: GeminiPart[] = [];
-
-        if (typeof msg.content === 'string') {
-          parts.push({ text: msg.content });
-        } else {
-          for (const c of msg.content) {
-            if (c.type === 'text') {
-              parts.push({ text: c.text });
-            }
-            // Note: Image handling would go here for multimodal
-          }
-        }
-
-        if (parts.length > 0) {
-          contents.push({ role: 'user', parts });
-        }
-      } else if (msg.role === 'assistant') {
-        const parts: GeminiPart[] = [];
-
-        for (const c of msg.content) {
-          if (c.type === 'text') {
-            parts.push({ text: c.text });
-          } else if (c.type === 'tool_use') {
-            // For Gemini 3, function calls require thoughtSignature at the part level.
-            // Use the stored signature if available (from previous Gemini responses),
-            // otherwise use the skip validator for historical function calls from other providers.
-            const thoughtSig = c.thoughtSignature || 'skip_thought_signature_validator';
-            parts.push({
-              functionCall: {
-                name: c.name,
-                args: c.arguments,
-              },
-              thoughtSignature: thoughtSig,
-            } as GeminiPart);
-          }
-        }
-
-        contents.push({ role: 'model', parts });
-      } else if (msg.role === 'toolResult') {
-        const content = typeof msg.content === 'string'
-          ? msg.content
-          : msg.content
-              .filter(c => c.type === 'text')
-              .map(c => (c as TextContent).text)
-              .join('\n');
-
-        // Gemini expects function responses as model turns followed by user turns
-        // This is a simplification - actual implementation may need adjustment
-        contents.push({
-          role: 'user',
-          parts: [{
-            functionResponse: {
-              name: 'tool_result',
-              response: {
-                result: content,
-                tool_call_id: remapToolCallId(msg.toolCallId, idMapping),
-              },
-            },
-          }],
-        });
-      }
-    }
-
-    return contents;
-  }
-
-  /**
-   * Convert Tron tools to Gemini format
-   */
-  private convertTools(tools: NonNullable<Context['tools']>): GeminiTool[] {
-    return [{
-      functionDeclarations: tools.map(tool => ({
-        name: tool.name,
-        description: tool.description,
-        parameters: this.sanitizeSchemaForGemini(tool.parameters as Record<string, unknown>),
-      })),
-    }];
-  }
-
-  /**
-   * Sanitize JSON Schema for Gemini API compatibility.
-   * Gemini doesn't support certain JSON Schema properties like additionalProperties.
-   */
-  private sanitizeSchemaForGemini(schema: Record<string, unknown>): Record<string, unknown> {
-    if (!schema || typeof schema !== 'object') {
-      return schema;
-    }
-
-    const result: Record<string, unknown> = {};
-
-    for (const [key, value] of Object.entries(schema)) {
-      // Skip unsupported properties
-      if (key === 'additionalProperties' || key === '$schema') {
-        continue;
-      }
-
-      // Recursively sanitize nested objects
-      if (value && typeof value === 'object' && !Array.isArray(value)) {
-        result[key] = this.sanitizeSchemaForGemini(value as Record<string, unknown>);
-      } else if (Array.isArray(value)) {
-        // Sanitize arrays (e.g., items in allOf, anyOf, oneOf)
-        result[key] = value.map(item =>
-          item && typeof item === 'object'
-            ? this.sanitizeSchemaForGemini(item as Record<string, unknown>)
-            : item
-        );
-      } else {
-        result[key] = value;
-      }
-    }
-
-    return result;
-  }
-
 }

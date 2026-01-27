@@ -6,7 +6,7 @@
  */
 
 import type { Context, StreamEvent } from '../types/index.js';
-import { AnthropicProvider, type AnthropicConfig, type StreamOptions } from './anthropic.js';
+import { AnthropicProvider, type AnthropicConfig, type StreamOptions } from './anthropic/index.js';
 import { OpenAIProvider, type OpenAIConfig, type OpenAIStreamOptions } from './openai.js';
 import {
   GoogleProvider,
@@ -17,7 +17,7 @@ import {
   type GoogleProviderAuth,
   type GoogleOAuthAuth,
   type GoogleApiKeyAuth,
-} from './google.js';
+} from './google/index.js';
 import type { GoogleOAuthEndpoint } from '../auth/google-oauth.js';
 import {
   OpenAICodexProvider,
@@ -26,9 +26,9 @@ import {
   type ReasoningEffort,
   OPENAI_CODEX_MODELS,
 } from './openai-codex.js';
-import { CLAUDE_MODELS, DEFAULT_MODEL } from './anthropic.js';
+import { CLAUDE_MODELS, DEFAULT_MODEL } from './anthropic/index.js';
 import { OPENAI_MODELS } from './openai.js';
-import { GEMINI_MODELS } from './google.js';
+import { GEMINI_MODELS } from './google/index.js';
 import { createLogger } from '../logging/index.js';
 
 const logger = createLogger('provider-factory');

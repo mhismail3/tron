@@ -14,7 +14,7 @@ import { describe, it, expect } from 'vitest';
 import type { Message, ToolCall } from '../../types/index.js';
 import { OpenAICodexProvider } from '../openai-codex.js';
 import { OpenAIProvider } from '../openai.js';
-import { GoogleProvider } from '../google.js';
+import { GoogleProvider, convertMessages as convertGoogleMessages } from '../google/index.js';
 
 /**
  * Test helper: Create a minimal context with messages
@@ -216,12 +216,8 @@ describe('Message Format Robustness', () => {
         },
       ];
 
-      const provider = new GoogleProvider({
-        model: 'gemini-2.5-pro',
-        auth: { type: 'api_key', apiKey: 'test-key' },
-      });
-
-      const converted = (provider as any).convertMessages(createContext(messages));
+      // Use the exported convertMessages function directly
+      const converted = convertGoogleMessages(createContext(messages));
 
       // Should include functionResponse
       const userWithFunctionResponse = converted.find(

@@ -14,7 +14,7 @@ import {
   type GoogleConfig,
   type GoogleApiKeyAuth,
   type GoogleOAuthAuth,
-} from '../google.js';
+} from '../google/index.js';
 
 // Helper to create API key auth config
 function createApiKeyAuth(apiKey: string = 'test-api-key'): GoogleApiKeyAuth {
