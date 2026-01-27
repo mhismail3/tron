@@ -113,7 +113,9 @@ final class DependencyContainerTests: XCTestCase {
 
         let originalClient = container.rpcClient
 
-        container.updateServerSettings(host: "example.com", port: "9000", useTLS: true)
+        // Use a unique port to guarantee settings change (avoids UserDefaults collision)
+        let uniquePort = String(Int.random(in: 10000...60000))
+        container.updateServerSettings(host: "test-server-\(uniquePort).example.com", port: uniquePort, useTLS: true)
 
         let newClient = container.rpcClient
 
