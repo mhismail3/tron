@@ -1370,8 +1370,7 @@
 				1F9AC8429220D0DB6C9BA815 /* SessionTree */,
 				D99EEB5F64258B6A2B00596D /* State */,
 				9CBD5C4D6563B0B6A9C117F6 /* Utilities */,
-			
-				DE07C51EE8EA70C268581A3A /* PaginationCoordinatorTests.swift */,);
+			);
 			path = ViewModels;
 			sourceTree = "<group>";
 		};
@@ -1413,6 +1412,7 @@
 				26F524E553392BAE6663A6DC /* UICanvasCoordinatorTests.swift */,
 				A90AD6A218D7FA80A6C33984 /* RenderAppUIChipTrackerTests.swift */,
 				43CC881AEB166E9887B35E22 /* ChatViewModelEventRoutingTests.swift */,
+				DE07C51EE8EA70C268581A3A /* PaginationCoordinatorTests.swift */,
 			);
 			path = ViewModels;
 			sourceTree = "<group>";
@@ -1502,8 +1502,6 @@
 		AC6166611A5239356657919C /* Handlers */ = {
 			isa = PBXGroup;
 			children = (
-				64AD762E06EF2B014ACAC880 /* PaginationContext.swift */,
-				9AB8F08DF035F9C322B205D1 /* PaginationCoordinator.swift */,
 				DD6AFA332997143C504C733B /* ConfigHandlers.swift */,
 				A78B5797B885EDB71E2BF6B4 /* ErrorHandlers.swift */,
 				35BDCD7F29207A366C356FF4 /* MessageHandlers.swift */,
@@ -1522,6 +1520,8 @@
 				68541E3ECA83D4DAC8EFADDB /* ChatEventHandler.swift */,
 				1E1E2A2B22732B153F35C836 /* ConnectionCoordinator.swift */,
 				DE255AADDFC9B06277562F78 /* MessagingCoordinator.swift */,
+				64AD762E06EF2B014ACAC880 /* PaginationContext.swift */,
+				9AB8F08DF035F9C322B205D1 /* PaginationCoordinator.swift */,
 				0EA53C381BBE642C4DC0F897 /* ToolEventContext.swift */,
 				0B459558B2DDAE5B155700AB /* ToolEventCoordinator.swift */,
 				5EBDBFBEB74723CC4FA0590B /* TranscriptionCoordinator.swift */,
