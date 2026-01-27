@@ -87,7 +87,12 @@ final class MockAgentClientForRepository {
 
     private func createMockAgentState() -> AgentStateResult {
         let json = """
-        {"isProcessing": false}
+        {
+            "isRunning": false,
+            "currentTurn": 0,
+            "messageCount": 0,
+            "model": "claude-sonnet-4-20250514"
+        }
         """
         return try! JSONDecoder().decode(AgentStateResult.self, from: json.data(using: .utf8)!)
     }
