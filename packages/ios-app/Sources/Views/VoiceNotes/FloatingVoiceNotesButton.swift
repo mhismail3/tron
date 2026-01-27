@@ -5,7 +5,7 @@ import SwiftUI
 @available(iOS 26.0, *)
 struct FloatingVoiceNotesButton: View {
     let action: () -> Void
-    @ObservedObject private var audioMonitor = AudioAvailabilityMonitor.shared
+    private let audioMonitor = AudioAvailabilityMonitor.shared
 
     var body: some View {
         Button(action: action) {

@@ -227,9 +227,28 @@ class ChatViewModel: ObservableObject, ChatEventContext {
         // Using withObservationTracking to react to @Observable changes
         observeSelectedImagesChanges()
 
-        audioRecorder.$isRecording
-            .receive(on: DispatchQueue.main)
-            .assign(to: &$isRecording)
+        // Observe audio recorder state changes
+        observeAudioRecorderChanges()
+    }
+
+    /// Observe changes to audioRecorder.isRecording using Swift Observation
+    private func observeAudioRecorderChanges() {
+        startAudioRecorderObservation()
+    }
+
+    /// Recursive observation helper for audioRecorder.isRecording changes
+    private func startAudioRecorderObservation() {
+        withObservationTracking {
+            // Access the property to register for tracking
+            _ = audioRecorder.isRecording
+        } onChange: { [weak self] in
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                self.isRecording = self.audioRecorder.isRecording
+                // Re-register for the next change
+                self.startAudioRecorderObservation()
+            }
+        }
     }
 
     private func setupAudioRecorder() {

@@ -118,13 +118,8 @@ class RPCClient: ObservableObject, RPCTransport {
         let ws = WebSocketService(serverURL: serverURL)
         self.webSocket = ws
 
-        // Observe connection state via @Published property
-        ws.$connectionState
-            .receive(on: DispatchQueue.main)
-            .sink { [weak self] state in
-                self?.connectionState = state
-            }
-            .store(in: &cancellables)
+        // Observe connection state via @Observable property
+        startConnectionStateObservation()
 
         // Set event handler callback
         ws.onEvent = { [weak self] data in
@@ -140,9 +135,22 @@ class RPCClient: ObservableObject, RPCTransport {
         webSocket?.disconnect()
         webSocket = nil
         // Explicitly reset state to allow future connections.
-        // The Combine subscription may not have delivered the .disconnected state yet
-        // when webSocket is set to nil, leaving connectionState stale.
         connectionState = .disconnected
+    }
+
+    /// Observe WebSocketService.connectionState using Swift Observation
+    private func startConnectionStateObservation() {
+        withObservationTracking {
+            // Access the property to register for tracking
+            _ = webSocket?.connectionState
+        } onChange: { [weak self] in
+            Task { @MainActor [weak self] in
+                guard let self, let ws = self.webSocket else { return }
+                self.connectionState = ws.connectionState
+                // Re-register for the next change
+                self.startConnectionStateObservation()
+            }
+        }
     }
 
     func reconnect() async {

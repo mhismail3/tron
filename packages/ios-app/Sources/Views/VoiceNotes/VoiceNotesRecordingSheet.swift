@@ -4,7 +4,7 @@ import SwiftUI
 /// Styled to match NewSessionFlow sheet.
 @available(iOS 26.0, *)
 struct VoiceNotesRecordingSheet: View {
-    @StateObject private var recorder = VoiceNotesRecorder()
+    @State private var recorder = VoiceNotesRecorder()
     @State private var isSaving = false
     @State private var errorMessage: String?
 

@@ -7,6 +7,10 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		076A4FD4936149A1BAABF8E3 /* DependencyProviding.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9087F526B4ED442C805CA6A7 /* DependencyProviding.swift */; };
+		8A9664F24FE24C0AA1D8527B /* DependencyContainer.swift in Sources */ = {isa = PBXBuildFile; fileRef = D42FC11128C14C70AE473D90 /* DependencyContainer.swift */; };
+		EC348871648D47519A4FB8E7 /* DependencyEnvironment.swift in Sources */ = {isa = PBXBuildFile; fileRef = F02BE4172FD6418698A1874D /* DependencyEnvironment.swift */; };
+		A6900A1EEF204AD8838303A9 /* DependencyContainerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 75EB3240A2924AA6B2CA6EA1 /* DependencyContainerTests.swift */; };
 		029590450DF8FB55EBB86C23 /* ModelNameFormatter.swift in Sources */ = {isa = PBXBuildFile; fileRef = D03A2E1D488FAFF8C0088D61 /* ModelNameFormatter.swift */; };
 		02FE389EB93928871C55206C /* LogViewer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6BCC3CF17E11CB993CBEF33D /* LogViewer.swift */; };
 		03E2F7FD601D8D2E072426AA /* RulesSectionViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 43EDE6ABD6C1946F755D2BF2 /* RulesSectionViews.swift */; };
@@ -246,7 +250,6 @@
 		A6FF0CA8C277543C8A7D0E2F /* ErrorPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1CF5274343CE2A3872EBFBC6 /* ErrorPlugin.swift */; };
 		A750BA1822BD51F7E2A92F32 /* TodoDetailSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = ED28F680CB52CD4C984DB9D4 /* TodoDetailSheet.swift */; };
 		A7EA05EDD776901D3C826A33 /* TronError.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0FCFF5A711A36D7C7C4561A7 /* TronError.swift */; };
-		A7F43CE8B687131A3F3D7011 /* AppState.swift in Sources */ = {isa = PBXBuildFile; fileRef = DB2DE70827D1CEDC99DA04E4 /* AppState.swift */; };
 		A8BB863D2AE3097293DEE450 /* ContentComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = E753AE65FE87C59B71FC0FDD /* ContentComponents.swift */; };
 		A922BB32EE90C7F249AB8F4D /* SubagentSpawnedPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE88DEE3F08070A2E1884468 /* SubagentSpawnedPlugin.swift */; };
 		A97D1C6501E6FBBE8851CC66 /* EventRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 776593C3803A2A9DD9D3FA76 /* EventRow.swift */; };
@@ -379,6 +382,10 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+		9087F526B4ED442C805CA6A7 /* DependencyProviding.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DependencyProviding.swift; sourceTree = "<group>"; };
+		D42FC11128C14C70AE473D90 /* DependencyContainer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DependencyContainer.swift; sourceTree = "<group>"; };
+		F02BE4172FD6418698A1874D /* DependencyEnvironment.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DependencyEnvironment.swift; sourceTree = "<group>"; };
+		75EB3240A2924AA6B2CA6EA1 /* DependencyContainerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DependencyContainerTests.swift; sourceTree = "<group>"; };
 		00621F6FD9BF0B51E5370E4B /* EventDatabase.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EventDatabase.swift; sourceTree = "<group>"; };
 		00739C1F26626C7791649198 /* TronIcons.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TronIcons.swift; sourceTree = "<group>"; };
 		00973EA1C4C50D6659116E12 /* SheetState.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = Sources/ViewModels/State/SheetState.swift; sourceTree = SOURCE_ROOT; };
@@ -681,7 +688,6 @@
 		D9A286D33EDDA7E4023E4CC6 /* ChatMessage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatMessage.swift; sourceTree = "<group>"; };
 		DAB63A06F10DECB64865B025 /* SineWaveView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SineWaveView.swift; sourceTree = "<group>"; };
 		DAD87CBC58F65286C1220FEE /* TurnEndPluginTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurnEndPluginTests.swift; sourceTree = "<group>"; };
-		DB2DE70827D1CEDC99DA04E4 /* AppState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppState.swift; sourceTree = "<group>"; };
 		DB5B1021E648395FEC832679 /* ImagesContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImagesContentView.swift; sourceTree = "<group>"; };
 		DB735E18A93415051F9F8047 /* EventDeduplicator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EventDeduplicator.swift; sourceTree = "<group>"; };
 		DB79369A9A4CBDD1306073E0 /* ChatViewModel+EventDispatchContext.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "ChatViewModel+EventDispatchContext.swift"; sourceTree = "<group>"; };
@@ -766,6 +772,7 @@
 		04D51232A89E7FE4E4702D16 /* Core */ = {
 			isa = PBXGroup;
 			children = (
+				E85033382A50409BB1BD3E1B /* DI */,
 				8E5BDBD810203C70BC4DC72C /* Errors */,
 				755D00F42AA8BC643C87506C /* Events */,
 			);
@@ -819,6 +826,7 @@
 				0123F7482F532CD8FBA61F0E /* UnifiedEventTransformerTests.swift */,
 				5BFC6030C4D57E9B31EB452D /* WorkspaceValidationTests.swift */,
 				C0883CAFDE697DC5DE1E0A91 /* Core */,
+				C5B6FA1B0AC64677851C0D13 /* Infrastructure */,
 				1946B05F96F17EAF65905AFA /* Mocks */,
 				F9E92A00D886754F461BBBE6 /* Models */,
 				713E6B3100E566A6E272FD1B /* Navigation */,
@@ -826,6 +834,14 @@
 				9863F329DAD37E8E14C091D4 /* ViewModels */,
 			);
 			path = Tests;
+			sourceTree = "<group>";
+		};
+		C5B6FA1B0AC64677851C0D13 /* Infrastructure */ = {
+			isa = PBXGroup;
+			children = (
+				75EB3240A2924AA6B2CA6EA1 /* DependencyContainerTests.swift */,
+			);
+			path = Infrastructure;
 			sourceTree = "<group>";
 		};
 		17D2D493213C68D1AB6E2B84 /* Utilities */ = {
@@ -1531,7 +1547,6 @@
 			isa = PBXGroup;
 			children = (
 				0CB9A87106B0113F8C0B7E25 /* AppDelegate.swift */,
-				DB2DE70827D1CEDC99DA04E4 /* AppState.swift */,
 				B018ED18CE376F88F9C442F4 /* TronMobileApp.swift */,
 			);
 			path = App;
@@ -1621,6 +1636,16 @@
 				0CE30634605946C2D90DAEC5 /* Events */,
 			);
 			path = Core;
+			sourceTree = "<group>";
+		};
+		E85033382A50409BB1BD3E1B /* DI */ = {
+			isa = PBXGroup;
+			children = (
+				9087F526B4ED442C805CA6A7 /* DependencyProviding.swift */,
+				D42FC11128C14C70AE473D90 /* DependencyContainer.swift */,
+				F02BE4172FD6418698A1874D /* DependencyEnvironment.swift */,
+			);
+			path = DI;
 			sourceTree = "<group>";
 		};
 		C14716D67E7B2B11827F5E09 /* Extensions */ = {
@@ -2012,7 +2037,6 @@
 				669DB4593CE2A289495B3C04 /* AnyCodable.swift in Sources */,
 				5611492C7C4ABE1A4055A901 /* AppDelegate.swift in Sources */,
 				5CBD814CB55BEB03EB78FEE1 /* AppError.swift in Sources */,
-				A7F43CE8B687131A3F3D7011 /* AppState.swift in Sources */,
 				27A6BCA7B9DE61434596A909 /* AskUserQuestionCoordinator.swift in Sources */,
 				82CE340859E9E8607280A836 /* AskUserQuestionDetector.swift in Sources */,
 				B80C830CFC5883B7A622AAFB /* AskUserQuestionSheet.swift in Sources */,
@@ -2079,6 +2103,9 @@
 				C8D276EE7F2AA301B173EED0 /* DatabaseTransport.swift in Sources */,
 				901A2D24F559EC522BF3D175 /* Date+Extensions.swift in Sources */,
 				C727C48CD26E2D92D55D93D4 /* DeepLinkRouter.swift in Sources */,
+				8A9664F24FE24C0AA1D8527B /* DependencyContainer.swift in Sources */,
+				EC348871648D47519A4FB8E7 /* DependencyEnvironment.swift in Sources */,
+				076A4FD4936149A1BAABF8E3 /* DependencyProviding.swift in Sources */,
 				09F9A7B4A25538D0AC14131A /* DocumentPicker.swift in Sources */,
 				EE6AF3EC6356EEF2D20145E9 /* ErrorHandler.swift in Sources */,
 				983DA3A441F4993DA362EB04 /* ErrorHandlers.swift in Sources */,
@@ -2308,6 +2335,7 @@
 				09155186F39445CC719E31FE /* ConnectionCoordinatorTests.swift in Sources */,
 				11AFA5645D976D4D73E39CB1 /* ContextStateTests.swift in Sources */,
 				9A135A4BD652CAB1AD485B58 /* DeepLinkRouterTests.swift in Sources */,
+				A6900A1EEF204AD8838303A9 /* DependencyContainerTests.swift in Sources */,
 				FACF3272EAAA614047FA83C8 /* EventDatabaseTests.swift in Sources */,
 				241A171ECEB32491DE28990D /* EventPluginTests.swift in Sources */,
 				D87AE30BAC6E6924B0C7C507 /* EventStoreManagerTests.swift in Sources */,

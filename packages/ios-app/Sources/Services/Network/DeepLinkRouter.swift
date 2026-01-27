@@ -37,10 +37,11 @@ enum NavigationIntent: Equatable {
 /// 2. Call `handle(url:)` when URL scheme is opened
 /// 3. Observe `pendingIntent` for navigation changes
 /// 4. Call `consumeIntent()` to get and clear the pending intent
+@Observable
 @MainActor
-class DeepLinkRouter: ObservableObject {
+final class DeepLinkRouter {
     /// The pending navigation intent to be handled
-    @Published var pendingIntent: NavigationIntent?
+    var pendingIntent: NavigationIntent?
 
     // MARK: - Notification Handling
 

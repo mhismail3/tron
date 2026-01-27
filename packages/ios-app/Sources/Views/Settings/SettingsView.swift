@@ -10,10 +10,19 @@ struct SettingsView: View {
     #endif
 
     @Environment(\.dismiss) private var dismiss
-    @EnvironmentObject var appState: AppState
-    @EnvironmentObject var eventStoreManager: EventStoreManager
-    let rpcClient: RPCClient
+    @Environment(\.dependencies) var dependencies
     @AppStorage("serverHost") private var serverHost = "localhost"
+
+    // Convenience accessors
+    private var rpcClient: RPCClient { dependencies!.rpcClient }
+    private var eventStoreManager: EventStoreManager { dependencies!.eventStoreManager }
+    private var defaultModelValue: String { dependencies!.defaultModel }
+    private var defaultModelBinding: Binding<String> {
+        Binding(
+            get: { dependencies?.defaultModel ?? "" },
+            set: { dependencies?.defaultModel = $0 }
+        )
+    }
     @AppStorage("serverPort") private var serverPort = ""
     @AppStorage("confirmArchive") private var confirmArchive = true
 
@@ -62,10 +71,10 @@ struct SettingsView: View {
 
     /// Selected model display name
     private var selectedModelDisplayName: String {
-        if let model = availableModels.first(where: { $0.id == appState.defaultModel }) {
+        if let model = availableModels.first(where: { $0.id == defaultModelValue }) {
             return model.formattedModelName
         }
-        return appState.defaultModel.shortModelName
+        return defaultModelValue.shortModelName
     }
 
     var body: some View {
@@ -83,7 +92,7 @@ struct SettingsView: View {
                             default: return
                             }
                             serverPort = ""  // Clear custom port
-                            appState.updateServerSettings(host: serverHost, port: newPort, useTLS: false)
+                            dependencies?.updateServerSettings(host: serverHost, port: newPort, useTLS: false)
                         }
                     )) {
                         Text("Beta")
@@ -106,7 +115,7 @@ struct SettingsView: View {
                         .autocapitalization(.none)
                         .autocorrectionDisabled()
                         .onSubmit {
-                            appState.updateServerSettings(host: serverHost, port: effectivePort, useTLS: false)
+                            dependencies?.updateServerSettings(host: serverHost, port: effectivePort, useTLS: false)
                         }
 
                     TextField("Custom Port (optional)", text: $serverPort)
@@ -115,7 +124,7 @@ struct SettingsView: View {
                         .onChange(of: serverPort) { _, newValue in
                             // Only trigger update if port actually changed to something meaningful
                             if !newValue.isEmpty {
-                                appState.updateServerSettings(host: serverHost, port: newValue, useTLS: false)
+                                dependencies?.updateServerSettings(host: serverHost, port: newValue, useTLS: false)
                             }
                         }
                 } header: {
@@ -179,7 +188,7 @@ struct SettingsView: View {
                         // Default Model Picker
                         ModelPickerMenuContent(
                             models: availableModels,
-                            selectedModelId: $appState.defaultModel,
+                            selectedModelId: defaultModelBinding,
                             isLoading: isLoadingModels
                         ) {
                             HStack {
@@ -314,7 +323,7 @@ struct SettingsView: View {
         serverPort = ""  // Empty = use Beta (8082) as default
         confirmArchive = true
         // Trigger server reconnection with Beta port
-        appState.updateServerSettings(host: "localhost", port: "8082", useTLS: false)
+        dependencies?.updateServerSettings(host: "localhost", port: "8082", useTLS: false)
     }
 
     private func archiveAllSessions() {
@@ -431,5 +440,6 @@ struct FontStyleSection: View {
 // MARK: - Preview
 
 #Preview {
-    SettingsView(rpcClient: RPCClient(serverURL: URL(string: "ws://localhost:8080/ws")!))
+    SettingsView()
+        .environment(\.dependencies, DependencyContainer())
 }

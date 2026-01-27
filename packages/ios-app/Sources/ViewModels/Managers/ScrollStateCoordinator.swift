@@ -2,9 +2,10 @@ import SwiftUI
 
 /// Simplified scroll state coordinator for ChatView
 /// Tracks whether user is "following" (auto-scroll on new content) or "reviewing" (scrolled up)
+@Observable
 @available(iOS 17.0, *)
 @MainActor
-final class ScrollStateCoordinator: ObservableObject {
+final class ScrollStateCoordinator {
 
     // MARK: - State
 
@@ -14,8 +15,8 @@ final class ScrollStateCoordinator: ObservableObject {
         case reviewing    // User scrolled up, preserve position
     }
 
-    @Published private(set) var mode: Mode = .following
-    @Published private(set) var hasUnreadContent = false
+    private(set) var mode: Mode = .following
+    private(set) var hasUnreadContent = false
 
     // MARK: - Internal
 

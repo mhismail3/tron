@@ -10,9 +10,11 @@ enum NavigationMode: String, CaseIterable {
 
 @available(iOS 26.0, *)
 struct SessionSidebar: View {
-    @EnvironmentObject var eventStoreManager: EventStoreManager
-    @EnvironmentObject var appState: AppState
+    @Environment(\.dependencies) var dependencies
     @Binding var selectedSessionId: String?
+
+    // Convenience accessor
+    private var eventStoreManager: EventStoreManager { dependencies!.eventStoreManager }
     let onNewSession: () -> Void
     var onNewSessionLongPress: (() -> Void)? = nil
     let onDeleteSession: (String) -> Void
@@ -370,7 +372,7 @@ struct EmptySessionsView: View {
 
 // MARK: - Preview
 
-// Note: Preview requires EventStoreManager which needs RPCClient and EventDatabase
+// Note: Preview requires DependencyContainer
 // Previews can be enabled by creating mock instances
 /*
 #Preview {
@@ -379,10 +381,10 @@ struct EmptySessionsView: View {
             selectedSessionId: .constant(nil),
             onNewSession: {},
             onDeleteSession: { _ in },
-            onSettings: {}
+            onSettings: {},
+            onVoiceNote: {}
         )
-        .environmentObject(EventStoreManager(...))
-        .environmentObject(AppState())
+        .environment(\.dependencies, DependencyContainer())
     }
     .preferredColorScheme(.dark)
 }

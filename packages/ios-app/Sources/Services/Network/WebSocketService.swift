@@ -1,5 +1,4 @@
 import Foundation
-import Combine
 import os
 
 // MARK: - Connection State
@@ -63,8 +62,9 @@ enum WebSocketError: Error, LocalizedError, Sendable {
 
 // MARK: - WebSocket Service
 
+@Observable
 @MainActor
-final class WebSocketService: ObservableObject {
+final class WebSocketService {
 
     private var webSocketTask: URLSessionWebSocketTask?
     private var pingTask: Task<Void, Never>?
@@ -86,7 +86,7 @@ final class WebSocketService: ObservableObject {
     /// Prevents concurrent connection attempts (race condition guard)
     private var isConnectionInProgress = false
 
-    @Published private(set) var connectionState: ConnectionState = .disconnected
+    private(set) var connectionState: ConnectionState = .disconnected
 
     var onEvent: ((Data) -> Void)?
 

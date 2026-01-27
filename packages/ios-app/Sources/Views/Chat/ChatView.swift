@@ -16,10 +16,13 @@ private struct ScrollState: Equatable {
 struct ChatView: View {
     // MARK: - Environment & State Objects (internal for extension access)
     @Environment(\.dismiss) var dismiss
-    @EnvironmentObject var eventStoreManager: EventStoreManager
+    @Environment(\.dependencies) var dependencies
     @StateObject var viewModel: ChatViewModel
-    @StateObject private var inputHistory = InputHistoryStore()
-    @StateObject var scrollCoordinator = ScrollStateCoordinator()
+
+    // Convenience accessor
+    var eventStoreManager: EventStoreManager { dependencies!.eventStoreManager }
+    @State private var inputHistory = InputHistoryStore()
+    @State var scrollCoordinator = ScrollStateCoordinator()
 
     // MARK: - Sheet Coordinator (single sheet pattern)
     // Uses enum-based single .sheet(item:) modifier to avoid Swift compiler type-checking timeout

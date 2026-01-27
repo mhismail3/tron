@@ -8,20 +8,26 @@ import SQLite3
 
 /// SQLite-based local event store for iOS
 /// Provides offline support and fast state reconstruction
+@Observable
 @MainActor
-class EventDatabase: ObservableObject, DatabaseTransport {
+final class EventDatabase: DatabaseTransport {
 
     private(set) var db: OpaquePointer?
     let dbPath: String
 
-    @Published private(set) var isInitialized = false
+    private(set) var isInitialized = false
 
     // MARK: - Domain Repositories
 
+    @ObservationIgnored
     lazy var events: EventRepository = EventRepository(transport: self)
+    @ObservationIgnored
     lazy var sessions: SessionRepository = SessionRepository(transport: self)
+    @ObservationIgnored
     lazy var sync: SyncRepository = SyncRepository(transport: self)
+    @ObservationIgnored
     lazy var thinking: ThinkingRepository = ThinkingRepository(transport: self, eventRepository: events)
+    @ObservationIgnored
     lazy var tree: TreeRepository = TreeRepository(eventRepository: events, sessionRepository: sessions)
 
     // MARK: - Initialization

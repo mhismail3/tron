@@ -11,14 +11,14 @@ struct SessionHistorySheet: View {
     let rpcClient: RPCClient
     let eventStoreManager: EventStoreManager
 
-    @StateObject private var viewModel: SessionHistoryViewModel
+    @State private var viewModel: SessionHistoryViewModel
     @State private var forkEventId: String?
 
     init(sessionId: String, rpcClient: RPCClient, eventStoreManager: EventStoreManager) {
         self.sessionId = sessionId
         self.rpcClient = rpcClient
         self.eventStoreManager = eventStoreManager
-        _viewModel = StateObject(wrappedValue: SessionHistoryViewModel(
+        self._viewModel = State(initialValue: SessionHistoryViewModel(
             sessionId: sessionId,
             eventStoreManager: eventStoreManager,
             rpcClient: rpcClient

@@ -4,20 +4,21 @@ import Foundation
 
 // NOTE: Uses global `logger` from TronLogger.swift (TronLogger.shared)
 
+@Observable
 @MainActor
-class SkillStore: ObservableObject {
+final class SkillStore {
     // MARK: - Constants
 
     /// Minimum interval between automatic refreshes (in seconds)
     /// Skills are rescanned from disk when this interval has passed
     private static let refreshInterval: TimeInterval = 30
 
-    // MARK: - Published Properties
+    // MARK: - Properties
 
-    @Published private(set) var skills: [Skill] = []
-    @Published private(set) var isLoading = false
-    @Published private(set) var error: String?
-    @Published private(set) var lastRefresh: Date?
+    private(set) var skills: [Skill] = []
+    private(set) var isLoading = false
+    private(set) var error: String?
+    private(set) var lastRefresh: Date?
 
     // MARK: - Computed Properties
 

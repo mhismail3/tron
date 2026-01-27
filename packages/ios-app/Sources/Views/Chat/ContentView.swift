@@ -4,10 +4,15 @@ import SwiftUI
 
 @available(iOS 26.0, *)
 struct ContentView: View {
-    @EnvironmentObject var appState: AppState
-    @EnvironmentObject var eventStoreManager: EventStoreManager
-    @EnvironmentObject var eventDatabase: EventDatabase
+    @Environment(\.dependencies) var dependencies
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+
+    // Convenience accessors
+    private var rpcClient: RPCClient { dependencies!.rpcClient }
+    private var eventStoreManager: EventStoreManager { dependencies!.eventStoreManager }
+    private var skillStore: SkillStore { dependencies!.skillStore }
+    private var defaultModel: String { dependencies!.defaultModel }
+    private var quickSessionWorkspace: String { dependencies!.quickSessionWorkspace }
 
     // Deep link navigation from TronMobileApp
     @Binding var deepLinkSessionId: String?
@@ -43,7 +48,8 @@ struct ContentView: View {
                 newSessionFlowSheet
             }
             .sheet(isPresented: $showSettings) {
-                SettingsView(rpcClient: appState.rpcClient)
+                SettingsView()
+                    .environment(\.dependencies, dependencies)
             }
             .sheet(isPresented: $showVoiceNotesRecording) {
                 voiceNotesRecordingSheet
@@ -81,7 +87,7 @@ struct ContentView: View {
                 // Stop polling when leaving the dashboard
                 eventStoreManager.stopDashboardPolling()
             }
-            .onReceive(appState.rpcClient.$connectionState.receive(on: DispatchQueue.main)) { state in
+            .onReceive(rpcClient.$connectionState.receive(on: DispatchQueue.main)) { state in
                 // When connection is established, trigger dashboard refresh
                 if state.isConnected {
                     eventStoreManager.startDashboardPolling()
@@ -130,7 +136,7 @@ struct ContentView: View {
     private var compactVoiceNotesList: some View {
         NavigationStack {
             VoiceNotesListView(
-                rpcClient: appState.rpcClient,
+                rpcClient: rpcClient,
                 onVoiceNote: { showVoiceNotesRecording = true },
                 onSettings: { showSettings = true },
                 onNavigationModeChange: { mode in
@@ -197,7 +203,7 @@ struct ContentView: View {
                 )
             } else {
                 VoiceNotesListView(
-                    rpcClient: appState.rpcClient,
+                    rpcClient: rpcClient,
                     onVoiceNote: { showVoiceNotesRecording = true },
                     onSettings: { showSettings = true },
                     onNavigationModeChange: { mode in
@@ -233,8 +239,8 @@ struct ContentView: View {
 
     private var newSessionFlowSheet: some View {
         NewSessionFlow(
-            rpcClient: appState.rpcClient,
-            defaultModel: appState.defaultModel,
+            rpcClient: rpcClient,
+            defaultModel: defaultModel,
             eventStoreManager: eventStoreManager,
             onSessionCreated: { sessionId, workspaceId, model, workingDirectory in
                 do {
@@ -259,7 +265,7 @@ struct ContentView: View {
 
     private var voiceNotesRecordingSheet: some View {
         VoiceNotesRecordingSheet(
-            rpcClient: appState.rpcClient,
+            rpcClient: rpcClient,
             onComplete: { _ in
                 showVoiceNotesRecording = false
             },
@@ -392,18 +398,18 @@ struct ContentView: View {
     private func chatViewForSession(_ sessionId: String) -> some View {
         if horizontalSizeClass == .regular {
             ChatView(
-                rpcClient: appState.rpcClient,
+                rpcClient: rpcClient,
                 sessionId: sessionId,
-                skillStore: appState.skillStore,
+                skillStore: skillStore,
                 workspaceDeleted: workspaceDeletedForSession[sessionId] ?? false,
                 scrollTarget: $currentScrollTarget,
                 onToggleSidebar: toggleSidebar
             )
         } else {
             ChatView(
-                rpcClient: appState.rpcClient,
+                rpcClient: rpcClient,
                 sessionId: sessionId,
-                skillStore: appState.skillStore,
+                skillStore: skillStore,
                 workspaceDeleted: workspaceDeletedForSession[sessionId] ?? false,
                 scrollTarget: $currentScrollTarget
             )
@@ -438,7 +444,7 @@ struct ContentView: View {
 
             // Try to delete from server (optional)
             do {
-                _ = try await appState.rpcClient.session.delete(sessionId)
+                _ = try await rpcClient.session.delete(sessionId)
             } catch {
                 logger.warning("Server delete failed (continuing): \(error)", category: .session)
             }
@@ -455,16 +461,16 @@ struct ContentView: View {
     private func createQuickSession() {
         Task {
             do {
-                let result = try await appState.rpcClient.session.create(
-                    workingDirectory: appState.quickSessionWorkspace,
-                    model: appState.defaultModel
+                let result = try await rpcClient.session.create(
+                    workingDirectory: quickSessionWorkspace,
+                    model: defaultModel
                 )
 
                 try eventStoreManager.cacheNewSession(
                     sessionId: result.sessionId,
-                    workspaceId: appState.quickSessionWorkspace,
+                    workspaceId: quickSessionWorkspace,
                     model: result.model,
-                    workingDirectory: appState.quickSessionWorkspace
+                    workingDirectory: quickSessionWorkspace
                 )
 
                 await MainActor.run {

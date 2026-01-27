@@ -92,9 +92,6 @@ class EventStoreManager: ObservableObject {
         }
     }
 
-    /// Cancellable for server settings subscription
-    private var serverSettingsSubscription: AnyCancellable?
-
     /// Cancellables for event stream subscription
     private var eventCancellables = Set<AnyCancellable>()
 
@@ -111,31 +108,6 @@ class EventStoreManager: ObservableObject {
         rpcClient = client
         setupGlobalEventHandlers()
         logger.info("RPC client updated to \(client.serverOrigin)", category: .session)
-    }
-
-    /// Subscribe to server settings changes to reload sessions with new filter
-    func subscribeToServerChanges(_ publisher: PassthroughSubject<ServerSettingsChanged, Never>, appState: AppState) {
-        serverSettingsSubscription = publisher.sink { [weak self, weak appState] change in
-            Task { @MainActor in
-                guard let self = self, let appState = appState else { return }
-                logger.info("Server settings changed to \(change.serverOrigin), reloading sessions", category: .session)
-
-                // Update the RPC client reference with the new one from AppState
-                self.updateRPCClient(appState.rpcClient)
-
-                // Reload sessions with new origin filter (only shows existing local sessions)
-                self.loadSessions()
-
-                // Connect to the new server (but DON'T auto-sync)
-                // We intentionally don't call fullSync() here because:
-                // 1. User only wants to see sessions already on this device
-                // 2. Auto-populating sessions from server on environment switch is confusing
-                // 3. User can manually sync if they want to pull sessions from server
-                Task {
-                    await appState.rpcClient.connect()
-                }
-            }
-        }
     }
 
     /// Set up handlers for global events (events from all sessions)

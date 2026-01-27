@@ -3,8 +3,9 @@ import AVFoundation
 
 /// Recorder for voice notes with audio level metering for visualization.
 /// Supports 5-minute max duration with auto-stop.
+@Observable
 @MainActor
-final class VoiceNotesRecorder: NSObject, ObservableObject, AVAudioRecorderDelegate {
+final class VoiceNotesRecorder: NSObject, AVAudioRecorderDelegate {
     enum RecorderError: LocalizedError {
         case permissionDenied
         case startFailed(String)
@@ -24,9 +25,9 @@ final class VoiceNotesRecorder: NSObject, ObservableObject, AVAudioRecorderDeleg
         case saving
     }
 
-    @Published private(set) var state: State = .idle
-    @Published private(set) var audioLevel: Float = 0  // Normalized 0-1 for visualization
-    @Published private(set) var recordingDuration: TimeInterval = 0
+    private(set) var state: State = .idle
+    private(set) var audioLevel: Float = 0  // Normalized 0-1 for visualization
+    private(set) var recordingDuration: TimeInterval = 0
 
     static let maxDuration: TimeInterval = 300  // 5 minutes
 

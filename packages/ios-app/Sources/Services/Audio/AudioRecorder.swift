@@ -3,8 +3,9 @@ import AVFoundation
 
 // MARK: - Audio Recorder
 
+@Observable
 @MainActor
-final class AudioRecorder: NSObject, ObservableObject, AVAudioRecorderDelegate {
+final class AudioRecorder: NSObject, AVAudioRecorderDelegate {
     enum RecorderError: LocalizedError {
         case permissionDenied
         case startFailed(String)
@@ -19,7 +20,7 @@ final class AudioRecorder: NSObject, ObservableObject, AVAudioRecorderDelegate {
         }
     }
 
-    @Published private(set) var isRecording = false
+    private(set) var isRecording = false
 
     var onFinish: ((URL?, Bool) -> Void)?
 

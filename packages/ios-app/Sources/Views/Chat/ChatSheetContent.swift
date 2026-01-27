@@ -11,7 +11,10 @@ struct ChatSheetContent: View {
     let sessionId: String
     let skillStore: SkillStore?
     let workspaceDeleted: Bool
-    @EnvironmentObject var eventStoreManager: EventStoreManager
+    @Environment(\.dependencies) var dependencies
+
+    // Convenience accessor
+    private var eventStoreManager: EventStoreManager { dependencies!.eventStoreManager }
 
     var body: some View {
         sheetContent
@@ -27,7 +30,8 @@ struct ChatSheetContent: View {
             browserSheet
 
         case .settings:
-            SettingsView(rpcClient: rpcClient)
+            SettingsView()
+                .environment(\.dependencies, dependencies)
 
         case .contextAudit:
             ContextAuditView(

@@ -70,7 +70,7 @@ struct GlassMicButton: View {
     let isProcessing: Bool
     let onMicTap: () -> Void
     let buttonSize: CGFloat
-    @ObservedObject var audioMonitor: AudioAvailabilityMonitor
+    let audioMonitor: AudioAvailabilityMonitor
 
     @State private var isMicPulsing = false
 
@@ -207,7 +207,7 @@ struct GlassAttachmentButton: View {
     @Binding var spellMentionQuery: String
 
     // Keyboard observer to prevent Menu opening during keyboard animation
-    @ObservedObject private var keyboardObserver = KeyboardObserver.shared
+    private let keyboardObserver = KeyboardObserver.shared
 
     /// Disable Menu during keyboard animation to prevent mispositioned popups
     private var isMenuDisabled: Bool {

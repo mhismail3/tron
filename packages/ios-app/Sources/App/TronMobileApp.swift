@@ -6,14 +6,13 @@ struct TronMobileApp: App {
     // App delegate for push notification handling
     @UIApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
 
-    @StateObject private var appState = AppState()
-    @StateObject private var eventDatabase = EventDatabase()
-    @StateObject private var pushNotificationService = PushNotificationService()
-    @StateObject private var deepLinkRouter = DeepLinkRouter()
-    @Environment(\.scenePhase) private var scenePhase
+    // Central dependency container - manages all services
+    @State private var container = DependencyContainer()
 
-    // EventStoreManager is created lazily since it needs appState.rpcClient
-    @State private var eventStoreManager: EventStoreManager?
+    // Whether container is ready (database initialized, etc.)
+    @State private var isReady = false
+
+    @Environment(\.scenePhase) private var scenePhase
 
     // Deep link navigation state
     @State private var deepLinkSessionId: String?
@@ -30,15 +29,12 @@ struct TronMobileApp: App {
         WindowGroup {
             Group {
                 if #available(iOS 26.0, *) {
-                    if let manager = eventStoreManager {
+                    if isReady {
                         ContentView(
                             deepLinkSessionId: $deepLinkSessionId,
                             deepLinkScrollTarget: $deepLinkScrollTarget
                         )
-                            .environmentObject(appState)
-                            .environmentObject(manager)
-                            .environmentObject(eventDatabase)
-                            .environmentObject(pushNotificationService)
+                        .environment(\.dependencies, container)
                     } else {
                         // Loading state while initializing
                         ProgressView()
@@ -54,34 +50,15 @@ struct TronMobileApp: App {
             }
             .preferredColorScheme(.dark)
             .task {
-                // Initialize event database and store manager on app launch
+                // Initialize container on app launch
                 do {
-                    try await eventDatabase.initialize()
-
-                    // Create EventStoreManager with dependencies
-                    let manager = EventStoreManager(
-                        eventDB: eventDatabase,
-                        rpcClient: appState.rpcClient
-                    )
-                    manager.initialize()
-
-                    // Subscribe to server settings changes for live reconnection
-                    manager.subscribeToServerChanges(appState.serverSettingsChanged, appState: appState)
-
-                    // Repair any duplicate events from previous sessions
-                    // This fixes the race condition between local caching and server sync
-                    manager.repairDuplicates()
-
-                    await MainActor.run {
-                        eventStoreManager = manager
-                    }
-
-                    TronLogger.shared.info("Event store initialized with \(manager.sessions.count) sessions", category: .session)
+                    try await container.initialize()
+                    isReady = true
 
                     // Request push notification authorization
                     await setupPushNotifications()
                 } catch {
-                    TronLogger.shared.error("Failed to initialize event store: \(error)", category: .session)
+                    TronLogger.shared.error("Failed to initialize container: \(error)", category: .session)
                 }
             }
             .onReceive(NotificationCenter.default.publisher(for: .deviceTokenDidUpdate)) { notification in
@@ -91,10 +68,10 @@ struct TronMobileApp: App {
                     await registerDeviceToken(token)
                 }
             }
-            .onReceive(appState.rpcClient.$connectionState) { state in
+            .onReceive(container.rpcClient.$connectionState) { state in
                 // When connection is established, register pending device token
                 guard state.isConnected else { return }
-                guard let token = pushNotificationService.deviceToken else { return }
+                guard let token = container.pushNotificationService.deviceToken else { return }
                 Task {
                     await registerDeviceToken(token)
                 }
@@ -102,15 +79,15 @@ struct TronMobileApp: App {
             .onReceive(NotificationCenter.default.publisher(for: .navigateToSession)) { notification in
                 // Handle deep link from push notification via DeepLinkRouter
                 guard let userInfo = notification.userInfo else { return }
-                deepLinkRouter.handle(notificationPayload: userInfo)
+                container.deepLinkRouter.handle(notificationPayload: userInfo)
             }
             .onOpenURL { url in
                 // Handle URL scheme deep links
-                _ = deepLinkRouter.handle(url: url)
+                _ = container.deepLinkRouter.handle(url: url)
             }
-            .onChange(of: deepLinkRouter.pendingIntent) { _, _ in
+            .onChange(of: container.deepLinkRouter.pendingIntent) { _, _ in
                 // Process pending deep link intent
-                guard let intent = deepLinkRouter.consumeIntent() else { return }
+                guard let intent = container.deepLinkRouter.consumeIntent() else { return }
                 switch intent {
                 case .session(let sessionId, let scrollTo):
                     deepLinkSessionId = sessionId
@@ -126,8 +103,7 @@ struct TronMobileApp: App {
             }
             .onChange(of: scenePhase) { oldPhase, newPhase in
                 let isBackground = newPhase != .active
-                appState.rpcClient.setBackgroundState(isBackground)
-                eventStoreManager?.setBackgroundState(isBackground)
+                container.setBackgroundState(isBackground)
                 TronLogger.shared.info("Scene phase changed: \(oldPhase) -> \(newPhase), background=\(isBackground)", category: .session)
 
                 // When returning to foreground, handle reconnection based on current state
@@ -141,18 +117,18 @@ struct TronMobileApp: App {
                         }
 
                         // Handle reconnection based on current connection state
-                        switch appState.rpcClient.connectionState {
+                        switch container.rpcClient.connectionState {
                         case .connected:
                             // Verify connection is still alive
-                            let isAlive = await appState.rpcClient.verifyConnection()
+                            let isAlive = await container.verifyConnection()
                             if !isAlive {
                                 TronLogger.shared.info("Connection dead on foreground return - reconnecting", category: .rpc)
-                                await appState.rpcClient.forceReconnect()
+                                await container.forceReconnect()
                             }
                         case .disconnected, .failed:
                             // Trigger reconnection for disconnected/failed states
-                            TronLogger.shared.info("Triggering reconnection on foreground return (state: \(appState.rpcClient.connectionState))", category: .rpc)
-                            await appState.rpcClient.manualRetry()
+                            TronLogger.shared.info("Triggering reconnection on foreground return (state: \(container.rpcClient.connectionState))", category: .rpc)
+                            await container.manualRetry()
                         case .connecting, .reconnecting:
                             // Already in progress, let it continue
                             TronLogger.shared.debug("Reconnection already in progress on foreground return", category: .rpc)
@@ -168,13 +144,13 @@ struct TronMobileApp: App {
     /// Request push notification authorization and register if authorized
     private func setupPushNotifications() async {
         // Request authorization
-        let authorized = await pushNotificationService.requestAuthorization()
+        let authorized = await container.pushNotificationService.requestAuthorization()
 
         if authorized {
             TronLogger.shared.info("Push notifications authorized", category: .notification)
 
             // If we already have a token and are connected, register it
-            if let token = pushNotificationService.deviceToken {
+            if let token = container.pushNotificationService.deviceToken {
                 await registerDeviceToken(token)
             }
         } else {
@@ -184,14 +160,14 @@ struct TronMobileApp: App {
 
     /// Register device token with the server (global registration, no session required)
     private func registerDeviceToken(_ token: String) async {
-        guard appState.rpcClient.isConnected else {
+        guard container.rpcClient.isConnected else {
             TronLogger.shared.debug("Not connected, will register token when connected", category: .notification)
             return
         }
 
         do {
             // Register globally - any agent/session can send notifications
-            try await appState.rpcClient.misc.registerDeviceToken(token)
+            try await container.rpcClient.misc.registerDeviceToken(token)
             TronLogger.shared.info("Device token registered with server", category: .notification)
         } catch {
             TronLogger.shared.error("Failed to register device token: \(error.localizedDescription)", category: .notification)

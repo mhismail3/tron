@@ -30,13 +30,14 @@ struct SiblingBranchInfo: Identifiable {
 // MARK: - Session History ViewModel
 
 /// ViewModel for managing session history tree state including sibling branches
+@Observable
 @MainActor
-class SessionHistoryViewModel: ObservableObject {
-    @Published var events: [SessionEvent] = []
-    @Published var siblingBranches: [String: [SiblingBranchInfo]] = [:]  // keyed by fork point event ID
-    @Published var expandedBranchPoints: Set<String> = []
-    @Published var isLoading = true
-    @Published var forkContext: SessionForkContext?
+final class SessionHistoryViewModel {
+    var events: [SessionEvent] = []
+    var siblingBranches: [String: [SiblingBranchInfo]] = [:]  // keyed by fork point event ID
+    var expandedBranchPoints: Set<String> = []
+    var isLoading = true
+    var forkContext: SessionForkContext?
 
     private let eventStoreManager: EventStoreManager
     private let rpcClient: RPCClient

@@ -4,13 +4,14 @@ import Foundation
 
 // NOTE: Uses global `logger` from TronLogger.swift (TronLogger.shared)
 
+@Observable
 @MainActor
-class InputHistoryStore: ObservableObject {
+final class InputHistoryStore {
     private let storageKey = "tron.inputHistory"
     private let maxHistorySize = 100
 
-    @Published private(set) var history: [String] = []
-    @Published private(set) var currentIndex: Int = -1
+    private(set) var history: [String] = []
+    private(set) var currentIndex: Int = -1
 
     private var tempInput: String = ""
 

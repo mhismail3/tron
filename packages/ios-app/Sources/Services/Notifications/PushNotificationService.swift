@@ -3,19 +3,20 @@ import UserNotifications
 import UIKit
 
 /// Service for managing push notification authorization and device tokens.
+@Observable
 @MainActor
-class PushNotificationService: ObservableObject {
+final class PushNotificationService {
     /// Whether push notifications are authorized
-    @Published private(set) var isAuthorized: Bool = false
+    private(set) var isAuthorized: Bool = false
 
     /// Current authorization status
-    @Published private(set) var authorizationStatus: UNAuthorizationStatus = .notDetermined
+    private(set) var authorizationStatus: UNAuthorizationStatus = .notDetermined
 
     /// Current device token (hex string, 64 chars)
-    @Published private(set) var deviceToken: String?
+    private(set) var deviceToken: String?
 
     /// Last error message during registration
-    @Published private(set) var lastErrorMessage: String?
+    private(set) var lastErrorMessage: String?
 
     init() {
         setupObservers()

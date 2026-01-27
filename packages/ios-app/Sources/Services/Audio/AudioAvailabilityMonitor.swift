@@ -1,20 +1,20 @@
 import AVFoundation
-import Combine
 import UIKit
 
 /// Monitors audio recording availability and publishes changes.
 /// Detects when recording is unavailable (e.g., during phone calls).
+@Observable
 @MainActor
-class AudioAvailabilityMonitor: ObservableObject {
+final class AudioAvailabilityMonitor {
     static let shared = AudioAvailabilityMonitor()
 
-    @Published private(set) var isRecordingAvailable: Bool = true
-    @Published private(set) var unavailabilityReason: String?
+    private(set) var isRecordingAvailable: Bool = true
+    private(set) var unavailabilityReason: String?
 
     /// Set to true when actively recording to prevent polling from interfering
     var isRecordingInProgress: Bool = false
 
-    private var cancellables = Set<AnyCancellable>()
+    private var notificationTasks: [Task<Void, Never>] = []
     private var pollingTask: Task<Void, Never>?
     private var isInForeground = true
 
@@ -30,46 +30,42 @@ class AudioAvailabilityMonitor: ObservableObject {
 
     private func setupNotifications() {
         // Listen for audio session interruptions (phone calls, alarms, etc.)
-        NotificationCenter.default.publisher(for: AVAudioSession.interruptionNotification)
-            .receive(on: DispatchQueue.main)
-            .sink { [weak self] notification in
-                self?.handleInterruption(notification)
+        notificationTasks.append(Task { [weak self] in
+            for await notification in NotificationCenter.default.notifications(named: AVAudioSession.interruptionNotification) {
+                await self?.handleInterruption(notification)
             }
-            .store(in: &cancellables)
+        })
 
         // Listen for route changes (headphones connected/disconnected, etc.)
-        NotificationCenter.default.publisher(for: AVAudioSession.routeChangeNotification)
-            .receive(on: DispatchQueue.main)
-            .debounce(for: .milliseconds(300), scheduler: DispatchQueue.main)
-            .sink { [weak self] _ in
-                Task { await self?.checkAvailabilityAsync() }
+        notificationTasks.append(Task { [weak self] in
+            for await _ in NotificationCenter.default.notifications(named: AVAudioSession.routeChangeNotification) {
+                // Simple debounce: wait before checking
+                try? await Task.sleep(for: .milliseconds(300))
+                await self?.checkAvailabilityAsync()
             }
-            .store(in: &cancellables)
+        })
 
         // Listen for media services reset
-        NotificationCenter.default.publisher(for: AVAudioSession.mediaServicesWereResetNotification)
-            .receive(on: DispatchQueue.main)
-            .sink { [weak self] _ in
-                Task { await self?.checkAvailabilityAsync() }
+        notificationTasks.append(Task { [weak self] in
+            for await _ in NotificationCenter.default.notifications(named: AVAudioSession.mediaServicesWereResetNotification) {
+                await self?.checkAvailabilityAsync()
             }
-            .store(in: &cancellables)
+        })
 
         // Listen for app becoming active (user might have ended call)
-        NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)
-            .receive(on: DispatchQueue.main)
-            .sink { [weak self] _ in
+        notificationTasks.append(Task { [weak self] in
+            for await _ in NotificationCenter.default.notifications(named: UIApplication.didBecomeActiveNotification) {
                 self?.isInForeground = true
-                Task { await self?.checkAvailabilityAsync() }
+                await self?.checkAvailabilityAsync()
             }
-            .store(in: &cancellables)
+        })
 
         // Stop polling when app goes to background
-        NotificationCenter.default.publisher(for: UIApplication.didEnterBackgroundNotification)
-            .receive(on: DispatchQueue.main)
-            .sink { [weak self] _ in
+        notificationTasks.append(Task { [weak self] in
+            for await _ in NotificationCenter.default.notifications(named: UIApplication.didEnterBackgroundNotification) {
                 self?.isInForeground = false
             }
-            .store(in: &cancellables)
+        })
     }
 
     /// Poll periodically to detect phone calls and other interruptions

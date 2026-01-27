@@ -3,8 +3,9 @@ import SwiftUI
 // MARK: - Animation Coordinator
 // Manages pill morph animations, message cascade timing, and tool call staggering
 
+@Observable
 @MainActor
-final class AnimationCoordinator: ObservableObject {
+final class AnimationCoordinator {
 
     // MARK: - Animation Timing Constants
 
@@ -40,17 +41,17 @@ final class AnimationCoordinator: ObservableObject {
 
     // MARK: - Published State
 
-    @Published private(set) var currentPhase: PillMorphPhase = .dormant
-    @Published private(set) var supportsReasoning: Bool = false
+    private(set) var currentPhase: PillMorphPhase = .dormant
+    private(set) var supportsReasoning: Bool = false
 
     // Tool stagger state
-    @Published private(set) var visibleToolCallIds: Set<String> = []
+    private(set) var visibleToolCallIds: Set<String> = []
     private var pendingToolCalls: [PendingToolCall] = []
     private var toolProcessingTask: Task<Void, Never>?
 
     // Message cascade state
-    @Published private(set) var cascadeProgress: Int = 0
-    @Published private(set) var totalCascadeMessages: Int = 0
+    private(set) var cascadeProgress: Int = 0
+    private(set) var totalCascadeMessages: Int = 0
     private var cascadeTask: Task<Void, Never>?
 
     // MARK: - Computed Visibility Properties

@@ -1,57 +1,53 @@
-import Combine
 import UIKit
 
 /// Observes keyboard show/hide events and provides keyboard height.
 /// Used to ensure UI elements (like Menus) have correct positioning after keyboard dismissal.
+@Observable
 @MainActor
-final class KeyboardObserver: ObservableObject {
+final class KeyboardObserver {
     static let shared = KeyboardObserver()
 
     /// Current keyboard height (0 when hidden)
-    @Published private(set) var keyboardHeight: CGFloat = 0
+    private(set) var keyboardHeight: CGFloat = 0
 
     /// Whether the keyboard is currently visible
-    @Published private(set) var isKeyboardVisible: Bool = false
+    private(set) var isKeyboardVisible: Bool = false
 
     /// Whether the keyboard is currently animating (showing or hiding)
-    @Published private(set) var isAnimating: Bool = false
+    private(set) var isAnimating: Bool = false
 
-    private var cancellables = Set<AnyCancellable>()
+    private var notificationTasks: [Task<Void, Never>] = []
 
     private init() {
         setupNotifications()
     }
 
     private func setupNotifications() {
-        NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)
-            .receive(on: DispatchQueue.main)
-            .sink { [weak self] notification in
+        notificationTasks.append(Task { [weak self] in
+            for await notification in NotificationCenter.default.notifications(named: UIResponder.keyboardWillShowNotification) {
                 self?.handleKeyboardWillShow(notification)
             }
-            .store(in: &cancellables)
+        })
 
-        NotificationCenter.default.publisher(for: UIResponder.keyboardDidShowNotification)
-            .receive(on: DispatchQueue.main)
-            .sink { [weak self] _ in
+        notificationTasks.append(Task { [weak self] in
+            for await _ in NotificationCenter.default.notifications(named: UIResponder.keyboardDidShowNotification) {
                 self?.isAnimating = false
             }
-            .store(in: &cancellables)
+        })
 
-        NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)
-            .receive(on: DispatchQueue.main)
-            .sink { [weak self] _ in
+        notificationTasks.append(Task { [weak self] in
+            for await _ in NotificationCenter.default.notifications(named: UIResponder.keyboardWillHideNotification) {
                 self?.isAnimating = true
             }
-            .store(in: &cancellables)
+        })
 
-        NotificationCenter.default.publisher(for: UIResponder.keyboardDidHideNotification)
-            .receive(on: DispatchQueue.main)
-            .sink { [weak self] _ in
+        notificationTasks.append(Task { [weak self] in
+            for await _ in NotificationCenter.default.notifications(named: UIResponder.keyboardDidHideNotification) {
                 self?.keyboardHeight = 0
                 self?.isKeyboardVisible = false
                 self?.isAnimating = false
             }
-            .store(in: &cancellables)
+        })
     }
 
     private func handleKeyboardWillShow(_ notification: Notification) {

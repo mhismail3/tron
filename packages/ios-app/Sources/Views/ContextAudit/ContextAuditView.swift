@@ -10,8 +10,11 @@ struct ContextAuditView: View {
     var readOnly: Bool = false
 
     @Environment(\.dismiss) private var dismiss
-    @EnvironmentObject var eventStoreManager: EventStoreManager
+    @Environment(\.dependencies) var dependencies
     @State private var isLoading = true
+
+    // Convenience accessor
+    private var eventStoreManager: EventStoreManager { dependencies!.eventStoreManager }
     @State private var errorMessage: String?
     @State private var detailedSnapshot: DetailedContextSnapshotResult?
     @State private var sessionEvents: [SessionEvent] = []

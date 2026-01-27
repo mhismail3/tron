@@ -4,8 +4,9 @@ import SwiftUI
 // MARK: - Message Window Manager
 // Manages virtual scrolling with lazy loading and memory-bounded message window
 
+@Observable
 @MainActor
-final class MessageWindowManager: ObservableObject {
+final class MessageWindowManager {
 
     // MARK: - Configuration
 
@@ -45,10 +46,10 @@ final class MessageWindowManager: ObservableObject {
 
     // MARK: - Published State
 
-    @Published private(set) var hasMoreOlder: Bool = false
-    @Published private(set) var hasMoreNewer: Bool = false
-    @Published private(set) var isLoadingOlder: Bool = false
-    @Published private(set) var isLoadingNewer: Bool = false
+    private(set) var hasMoreOlder: Bool = false
+    private(set) var hasMoreNewer: Bool = false
+    private(set) var isLoadingOlder: Bool = false
+    private(set) var isLoadingNewer: Bool = false
 
     // MARK: - Computed Properties
 

@@ -20,7 +20,7 @@ struct InputBar: View {
 
     @FocusState private var isFocused: Bool
     @State private var blockFocusUntil: Date = .distantPast
-    @ObservedObject private var audioMonitor = AudioAvailabilityMonitor.shared
+    private let audioMonitor = AudioAvailabilityMonitor.shared
     @State private var showingImagePicker = false
     @State private var showCamera = false
     @State private var showFilePicker = false
