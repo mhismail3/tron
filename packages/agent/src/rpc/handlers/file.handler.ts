@@ -9,7 +9,7 @@ import * as fs from 'fs/promises';
 import * as path from 'path';
 import * as os from 'os';
 import type { RpcRequest, RpcResponse } from '../types.js';
-import type { RpcContext } from '../handler.js';
+import type { RpcContext } from '../context-types.js';
 import { MethodRegistry, type MethodRegistration, type MethodHandler } from '../registry.js';
 
 // =============================================================================

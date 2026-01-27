@@ -17,7 +17,7 @@
  * await orchestrator.runAgent({ sessionId: 'session-123', prompt: 'Help me' });
  * ```
  */
-import type { RunResult } from '../../index.js';
+import type { RunResult } from '../../agent/types.js';
 import type { AgentRunOptions } from '../../orchestrator/types.js';
 
 // =============================================================================
@@ -60,4 +60,4 @@ export interface OrchestrationService {
 // =============================================================================
 
 export type { AgentRunOptions, AgentEvent } from '../../orchestrator/types.js';
-export type { RunResult } from '../../index.js';
+export type { RunResult } from '../../agent/types.js';

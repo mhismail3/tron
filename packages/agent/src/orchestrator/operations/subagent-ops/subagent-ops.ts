@@ -18,9 +18,9 @@
  * - Maintains backward compatibility with existing API
  * - Handlers are independently testable
  */
-import type { SpawnSubagentParams } from '../../../tools/subagent/spawn-subagent.js';
-import type { SpawnTmuxAgentParams } from '../../../tools/subagent/spawn-tmux-agent.js';
-import type { SubagentQueryType } from '../../../tools/subagent/query-subagent.js';
+import type { SpawnSubagentParams } from '../../../tools/subagent/index.js';
+import type { SpawnTmuxAgentParams } from '../../../tools/subagent/index.js';
+import type { SubagentQueryType } from '../../../tools/subagent/index.js';
 import type { ActiveSession } from '../../types.js';
 import type {
   SubagentOperationsConfig,

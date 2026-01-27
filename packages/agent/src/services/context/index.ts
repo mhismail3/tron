@@ -30,7 +30,7 @@ import type {
   PreTurnValidation,
   CompactionPreview,
   CompactionResult,
-} from '../../index.js';
+} from '../../context/types.js';
 
 // =============================================================================
 // Service Interface
@@ -204,4 +204,4 @@ export type {
   PreTurnValidation,
   CompactionPreview,
   CompactionResult,
-} from '../../index.js';
+} from '../../context/types.js';

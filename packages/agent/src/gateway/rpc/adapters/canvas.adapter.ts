@@ -5,7 +5,8 @@
  * Loads canvas artifacts from disk storage.
  */
 
-import { loadCanvasArtifact, type CanvasRpcManager } from '../../../index.js';
+import { loadCanvasArtifact } from '../../../productivity/index.js';
+import type { CanvasRpcManager } from '../../../rpc/index.js';
 
 /**
  * Creates a CanvasManager adapter that loads canvas artifacts from disk.

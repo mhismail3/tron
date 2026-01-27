@@ -7,8 +7,8 @@
 import { createLogger, categorizeError, LogErrorCategory, LogErrorCodes } from '../../../logging/index.js';
 import type { EventStore } from '../../../events/index.js';
 import type { SessionId, EventType } from '../../../events/index.js';
-import type { SpawnSubagentParams } from '../../../tools/subagent/spawn-subagent.js';
-import type { SpawnTmuxAgentParams } from '../../../tools/subagent/spawn-tmux-agent.js';
+import type { SpawnSubagentParams } from '../../../tools/subagent/index.js';
+import type { SpawnTmuxAgentParams } from '../../../tools/subagent/index.js';
 import type {
   ActiveSession,
   AgentRunOptions,

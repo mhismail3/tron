@@ -11,7 +11,7 @@
  */
 
 import { createLogger } from '../../../logging/index.js';
-import type { TronEvent } from '../../../types/events.js';
+import type { TronEvent } from '../../../types/index.js';
 import type { SessionId, EventType } from '../../../events/index.js';
 
 const logger = createLogger('compaction-event-handler');

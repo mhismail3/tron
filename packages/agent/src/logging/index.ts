@@ -56,3 +56,12 @@ export {
   type StructuredError,
   type LogErrorCode,
 } from './error-codes.js';
+
+// Export interfaces for dependency injection
+export type {
+  ITronLogger,
+  ILoggerRegistry,
+  ITransport,
+} from './types.js';
+
+export { LOG_LEVEL_NUM } from './types.js';

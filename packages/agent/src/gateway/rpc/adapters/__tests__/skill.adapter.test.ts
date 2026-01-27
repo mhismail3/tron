@@ -10,8 +10,8 @@ import { createSkillAdapter } from '../skill.adapter.js';
 import type { EventStoreOrchestrator } from '../../../../orchestrator/event-store-orchestrator.js';
 
 // Mock the SkillRegistry
-vi.mock('../../../../index.js', async () => {
-  const actual = await vi.importActual('../../../../index.js');
+vi.mock('../../../../skills/index.js', async () => {
+  const actual = await vi.importActual('../../../../skills/index.js');
   return {
     ...actual,
     SkillRegistry: vi.fn().mockImplementation(() => ({

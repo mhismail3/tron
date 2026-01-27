@@ -13,7 +13,7 @@
  */
 
 import type { RpcRequest, RpcResponse } from './types.js';
-import type { RpcContext } from './handler.js';
+import type { RpcContext } from './context-types.js';
 import { buildMiddlewareChain, type Middleware, type MiddlewareNext } from './middleware/index.js';
 
 // =============================================================================

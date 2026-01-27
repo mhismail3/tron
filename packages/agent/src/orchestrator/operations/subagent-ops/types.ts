@@ -8,8 +8,8 @@ import type {
   SubagentStatusInfo,
   SubagentEventInfo,
   SubagentLogInfo,
-} from '../../../tools/subagent/query-subagent.js';
-import type { SubagentResult } from '../../../tools/subagent/subagent-tracker.js';
+} from '../../../tools/subagent/index.js';
+import type { SubagentResult } from '../../../tools/subagent/index.js';
 import type {
   ActiveSession,
   AgentRunOptions,

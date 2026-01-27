@@ -21,7 +21,7 @@ import type {
   VoiceNotesDeleteResult,
   VoiceNoteMetadata,
 } from '../types.js';
-import type { RpcContext } from '../handler.js';
+import type { RpcContext } from '../context-types.js';
 import { MethodRegistry, type MethodRegistration, type MethodHandler } from '../registry.js';
 import { getNotesDir } from '../../settings/loader.js';
 

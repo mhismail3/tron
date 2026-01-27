@@ -22,7 +22,7 @@ import type {
   FilesystemCreateDirParams,
   FilesystemCreateDirResult,
 } from '../types.js';
-import type { RpcContext } from '../handler.js';
+import type { RpcContext } from '../context-types.js';
 import { MethodRegistry, type MethodRegistration, type MethodHandler } from '../registry.js';
 
 const logger = createLogger('rpc:filesystem');

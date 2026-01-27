@@ -8,7 +8,7 @@
  */
 
 import type { RpcRequest, RpcResponse } from '../types.js';
-import type { RpcContext } from '../handler.js';
+import type { RpcContext } from '../context-types.js';
 import { MethodRegistry, type MethodRegistration, type MethodHandler } from '../registry.js';
 
 // =============================================================================

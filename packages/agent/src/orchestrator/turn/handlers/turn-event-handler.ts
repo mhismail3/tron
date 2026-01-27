@@ -11,9 +11,9 @@
 
 import { createLogger } from '../../../logging/index.js';
 import { calculateCost } from '../../../usage/index.js';
-import type { TronEvent } from '../../../types/events.js';
+import type { TronEvent } from '../../../types/index.js';
 import type { SessionId, EventType, TronSessionEvent } from '../../../events/index.js';
-import { normalizeContentBlocks } from '../../../utils/content-normalizer.js';
+import { normalizeContentBlocks } from '../../../utils/index.js';
 import type { ActiveSession } from '../../types.js';
 import type { NormalizedTokenUsage } from '../turn-content-tracker.js';
 

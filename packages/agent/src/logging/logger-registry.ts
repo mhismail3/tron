@@ -10,24 +10,18 @@
  */
 
 import type Database from 'better-sqlite3';
-import { TronLogger, type LogLevel, type LogContext, type LoggerOptions } from './logger.js';
-import { SQLiteTransport, type SQLiteTransportOptions } from './sqlite-transport.js';
+import { TronLogger } from './logger.js';
+import { SQLiteTransport } from './sqlite-transport.js';
+import type {
+  LogContext,
+  LoggerOptions,
+  LoggerRegistryOptions,
+  TransportOptions,
+  ILoggerRegistry,
+} from './types.js';
 
-// =============================================================================
-// Types
-// =============================================================================
-
-export interface LoggerRegistryOptions {
-  /** Default log level for all loggers */
-  level?: LogLevel;
-  /** Enable pretty printing */
-  pretty?: boolean;
-}
-
-export interface TransportOptions extends SQLiteTransportOptions {
-  /** Minimum level to persist (default: 30/info) */
-  minLevel?: number;
-}
+// Re-export types for backward compatibility
+export type { LoggerRegistryOptions, TransportOptions } from './types.js';
 
 // =============================================================================
 // LoggerRegistry Class
@@ -39,7 +33,7 @@ export interface TransportOptions extends SQLiteTransportOptions {
  * Encapsulates all mutable state for logging infrastructure,
  * enabling multiple independent registries for testing.
  */
-export class LoggerRegistry {
+export class LoggerRegistry implements ILoggerRegistry {
   private transport: SQLiteTransport | null = null;
   private rootLogger: TronLogger | null = null;
   private options: LoggerRegistryOptions;

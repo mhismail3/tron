@@ -13,7 +13,7 @@
  * Extracted from AgentEventHandler to improve modularity and testability.
  */
 
-import type { TronEvent } from '../../../types/events.js';
+import type { TronEvent } from '../../../types/index.js';
 import type { SessionId } from '../../../events/index.js';
 
 // =============================================================================

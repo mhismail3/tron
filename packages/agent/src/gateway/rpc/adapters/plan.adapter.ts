@@ -6,7 +6,7 @@
  * and querying plan mode state.
  */
 
-import { DEFAULT_PLAN_MODE_BLOCKED_TOOLS } from '../../../index.js';
+import { DEFAULT_PLAN_MODE_BLOCKED_TOOLS } from '../../../rpc/types/index.js';
 import type { AdapterDependencies, PlanManagerAdapter } from '../types.js';
 
 /**

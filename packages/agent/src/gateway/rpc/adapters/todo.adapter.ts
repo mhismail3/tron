@@ -5,7 +5,7 @@
  * Provides access to session task lists, todo summaries, and backlog operations.
  */
 
-import type { TodoRpcManager, RpcTodoItem, RpcBackloggedTask } from '../../../index.js';
+import type { TodoRpcManager, RpcTodoItem, RpcBackloggedTask } from '../../../rpc/index.js';
 import type { AdapterDependencies } from '../types.js';
 
 // =============================================================================

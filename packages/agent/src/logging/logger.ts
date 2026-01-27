@@ -14,37 +14,16 @@ import pino from 'pino';
 import type Database from 'better-sqlite3';
 import { SQLiteTransport } from './sqlite-transport.js';
 import { getLoggingContext } from './log-context.js';
-import type { LoggerRegistry } from './logger-registry.js';
+import {
+  LOG_LEVEL_NUM,
+  type LogLevel,
+  type LoggerOptions,
+  type LogContext,
+  type ILoggerRegistry,
+} from './types.js';
 
-// =============================================================================
-// Types
-// =============================================================================
-
-export type LogLevel = 'trace' | 'debug' | 'info' | 'warn' | 'error' | 'fatal';
-
-export interface LoggerOptions {
-  level?: LogLevel;
-  name?: string;
-  pretty?: boolean;
-  destination?: string;
-}
-
-export interface LogContext {
-  sessionId?: string;
-  component?: string;
-  toolName?: string;
-  [key: string]: unknown;
-}
-
-// Log level to numeric value mapping
-const LOG_LEVEL_NUM: Record<LogLevel, number> = {
-  trace: 10,
-  debug: 20,
-  info: 30,
-  warn: 40,
-  error: 50,
-  fatal: 60,
-};
+// Re-export types for backward compatibility
+export type { LogLevel, LoggerOptions, LogContext } from './types.js';
 
 // =============================================================================
 // Global SQLite Transport
@@ -150,9 +129,9 @@ function createPinoLogger(options: LoggerOptions = {}): pino.Logger {
 export class TronLogger {
   private pino: pino.Logger;
   private context: LogContext;
-  private registry: LoggerRegistry | null;
+  private registry: ILoggerRegistry | null;
 
-  constructor(options: LoggerOptions = {}, context: LogContext = {}, registry?: LoggerRegistry) {
+  constructor(options: LoggerOptions = {}, context: LogContext = {}, registry?: ILoggerRegistry) {
     this.pino = createPinoLogger(options);
     this.context = context;
     this.registry = registry ?? null;
@@ -161,7 +140,7 @@ export class TronLogger {
   /**
    * Private constructor for child loggers - avoids creating new pino transport
    */
-  private static fromPino(pinoLogger: pino.Logger, context: LogContext, registry: LoggerRegistry | null): TronLogger {
+  private static fromPino(pinoLogger: pino.Logger, context: LogContext, registry: ILoggerRegistry | null): TronLogger {
     const logger = Object.create(TronLogger.prototype) as TronLogger;
     logger.pino = pinoLogger;
     logger.context = context;

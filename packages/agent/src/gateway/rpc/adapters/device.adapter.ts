@@ -6,7 +6,7 @@
  */
 
 import { createLogger } from '../../../logging/index.js';
-import type { DeviceTokenRpcManager, RpcDeviceToken } from '../../../rpc/handler.js';
+import type { DeviceTokenRpcManager, RpcDeviceToken } from '../../../rpc/index.js';
 import type { AdapterDependencies } from '../types.js';
 import { randomUUID } from 'crypto';
 

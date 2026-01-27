@@ -10,3 +10,4 @@ export * from './file-completion.js';
 export * from './media.js';
 export * from './errors.js';
 export * from './retry.js';
+export * from './content-normalizer.js';

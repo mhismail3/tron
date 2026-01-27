@@ -4,15 +4,9 @@
  * Main entry point for the Tron WebSocket server.
  * Uses event-sourced session management via EventStoreOrchestrator.
  */
-import {
-  createLogger,
-  resolveTronPath,
-  getTronDataDir,
-  initializeLogTransport,
-  closeLogTransport,
-  flushLogs,
-  type RpcContext,
-} from './index.js';
+import { createLogger, initializeLogTransport, closeLogTransport, flushLogs } from './logging/index.js';
+import { resolveTronPath, getTronDataDir } from './settings/index.js';
+import type { RpcContext } from './rpc/context-types.js';
 import { TronWebSocketServer, type WebSocketServerConfig } from './gateway/websocket.js';
 import { EventStoreOrchestrator, type EventStoreOrchestratorConfig } from './orchestrator/persistence/event-store-orchestrator.js';
 import { HealthServer, type HealthServerConfig } from './gateway/health.js';

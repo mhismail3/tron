@@ -7,7 +7,7 @@
  */
 
 import { createLogger } from '../../../logging/index.js';
-import { SkillRegistry } from '../../../skills/skill-registry.js';
+import { SkillRegistry } from '../../../skills/index.js';
 import type { AdapterDependencies, AgentManagerAdapter } from '../types.js';
 
 const logger = createLogger('agent-adapter');

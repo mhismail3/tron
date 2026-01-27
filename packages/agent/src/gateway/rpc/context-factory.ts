@@ -38,7 +38,7 @@
  * ```
  */
 
-import type { RpcContext } from '../../index.js';
+import type { RpcContext } from '../../rpc/context-types.js';
 import type { AdapterDependencies } from './types.js';
 
 // Orchestrator-dependent adapters

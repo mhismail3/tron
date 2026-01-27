@@ -12,7 +12,7 @@ import type {
   ModelSwitchParams,
   ModelListResult,
 } from '../types.js';
-import type { RpcContext } from '../handler.js';
+import type { RpcContext } from '../context-types.js';
 import { MethodRegistry, type MethodRegistration, type MethodHandler } from '../registry.js';
 import { ANTHROPIC_MODELS, OPENAI_CODEX_MODELS } from '../../providers/models.js';
 import { GEMINI_MODELS } from '../../providers/google.js';

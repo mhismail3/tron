@@ -7,17 +7,9 @@ import { WebSocketServer, WebSocket } from 'ws';
 import { EventEmitter } from 'events';
 import { randomUUID } from 'crypto';
 import type { IncomingMessage } from 'http';
-import {
-  createLogger,
-  categorizeError,
-  LogErrorCategory,
-  RpcHandler,
-  isRpcRequest,
-  type RpcRequest,
-  type RpcResponse,
-  type RpcEvent,
-  type RpcContext,
-} from '../index.js';
+import { createLogger, categorizeError, LogErrorCategory } from '../logging/index.js';
+import { RpcHandler, isRpcRequest, type RpcRequest, type RpcResponse, type RpcEvent } from '../rpc/index.js';
+import type { RpcContext } from '../rpc/context-types.js';
 
 const logger = createLogger('websocket');
 

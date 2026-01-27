@@ -19,7 +19,7 @@ import type {
   SkillRpcManager,
   PlanRpcManager,
   TodoRpcManager,
-} from '../../index.js';
+} from '../../rpc/context-types.js';
 
 // =============================================================================
 // Adapter Factory Types

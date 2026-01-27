@@ -7,8 +7,7 @@
 
 import { z, type ZodSchema, type ZodError } from 'zod';
 import type { RpcRequest, RpcResponse } from '../types.js';
-import type { Middleware, MiddlewareNext } from './index.js';
-import { MethodRegistry } from '../registry.js';
+import type { Middleware, MiddlewareNext } from './types.js';
 
 // =============================================================================
 // Types
@@ -74,10 +73,30 @@ export function formatValidationMessage(errors: ValidationError[]): string {
 }
 
 /**
+ * Create an error response (local helper to avoid circular dependency with registry)
+ */
+function createErrorResponse(
+  id: string | number,
+  code: string,
+  message: string,
+  details?: unknown
+): RpcResponse {
+  return {
+    id: String(id),
+    success: false,
+    error: {
+      code,
+      message,
+      ...(details !== undefined ? { details } : {}),
+    },
+  };
+}
+
+/**
  * Default error formatter
  */
 function defaultFormatError(errors: ValidationError[], requestId: string | number): RpcResponse {
-  return MethodRegistry.errorResponse(
+  return createErrorResponse(
     requestId,
     'INVALID_PARAMS',
     formatValidationMessage(errors),
@@ -140,7 +159,7 @@ export function createValidationMiddleware(
       return next(validatedRequest);
     } catch (error) {
       // Handle unexpected errors
-      return MethodRegistry.errorResponse(
+      return createErrorResponse(
         request.id,
         'VALIDATION_ERROR',
         error instanceof Error ? error.message : 'Validation failed'

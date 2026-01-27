@@ -7,48 +7,17 @@
  * and error handling.
  */
 
-import type { RpcRequest, RpcResponse } from '../types.js';
+import type { RpcResponse } from '../types.js';
 
-// =============================================================================
-// Types
-// =============================================================================
+// Re-export types from dedicated types file
+export type {
+  Middleware,
+  MiddlewareNext,
+  MiddlewareFactory,
+  MiddlewareChainOptions,
+} from './types.js';
 
-/**
- * Middleware function signature
- *
- * Middleware receives the request and a next function to call the rest of
- * the chain. It can:
- * - Modify the request before calling next
- * - Modify the response after next completes
- * - Short-circuit and return a response without calling next
- * - Handle errors from next
- */
-export type Middleware = (
-  request: RpcRequest,
-  next: MiddlewareNext
-) => Promise<RpcResponse>;
-
-/**
- * Next function in the middleware chain
- */
-export type MiddlewareNext = (request: RpcRequest) => Promise<RpcResponse>;
-
-/**
- * Middleware factory that receives configuration
- */
-export type MiddlewareFactory<TConfig = unknown> = (config: TConfig) => Middleware;
-
-// =============================================================================
-// Middleware Builder
-// =============================================================================
-
-/**
- * Options for middleware chain
- */
-export interface MiddlewareChainOptions {
-  /** Error handler for unhandled middleware errors */
-  onError?: (error: Error, request: RpcRequest) => RpcResponse;
-}
+import type { Middleware, MiddlewareNext, MiddlewareChainOptions } from './types.js';
 
 /**
  * Build a middleware chain from an array of middleware

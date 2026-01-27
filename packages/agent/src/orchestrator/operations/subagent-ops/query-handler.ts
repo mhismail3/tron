@@ -5,7 +5,7 @@
  */
 import { createLogger } from '../../../logging/index.js';
 import type { EventStore, SessionId, TronSessionEvent } from '../../../events/index.js';
-import type { SubagentQueryType } from '../../../tools/subagent/query-subagent.js';
+import type { SubagentQueryType } from '../../../tools/subagent/index.js';
 import type { ActiveSession } from '../../types.js';
 import type { QuerySubagentResult } from './types.js';
 

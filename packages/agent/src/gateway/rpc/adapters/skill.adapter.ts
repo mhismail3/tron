@@ -6,9 +6,9 @@
  * handles skill listing, loading, refreshing, and removal.
  */
 
-import { SkillRegistry } from '../../../index.js';
+import { SkillRegistry } from '../../../skills/index.js';
+import type { SkillRpcManager } from '../../../rpc/index.js';
 import type {
-  SkillRpcManager,
   SkillListParams,
   SkillListResult,
   SkillGetParams,
@@ -19,10 +19,9 @@ import type {
   SkillRemoveResult,
   RpcSkillInfo,
   RpcSkillMetadata,
-  SessionId,
-  SkillInfo,
-  SkillMetadata,
-} from '../../../index.js';
+} from '../../../rpc/types/index.js';
+import type { SessionId } from '../../../events/types/index.js';
+import type { SkillInfo, SkillMetadata } from '../../../skills/index.js';
 import type { AdapterDependencies } from '../types.js';
 
 // =============================================================================
