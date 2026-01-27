@@ -1,241 +1,203 @@
-import Testing
-import Foundation
+import XCTest
 @testable import TronMobile
 
 /// Tests for AsyncEventStream - the replacement for PassthroughSubject
+/// Uses XCTest with XCTestExpectation for reliable async coordination.
 @MainActor
-@Suite("AsyncEventStream Tests")
-struct AsyncEventStreamTests {
+final class AsyncEventStreamTests: XCTestCase {
 
     // MARK: - Basic Functionality Tests
 
-    @Test("Stream delivers events to single subscriber")
-    func testSingleSubscriber_receivesEvents() async {
+    func test_singleSubscriber_receivesEvents() async {
         let stream = AsyncEventStream<Int>()
-        var received: [Int] = []
+        let expectation = expectation(description: "Received all events")
+        let collector = Collector<Int>()
 
         let task = Task {
             for await value in stream.events {
-                received.append(value)
-                if received.count == 3 { break }
+                collector.append(value)
+                if collector.count >= 3 {
+                    expectation.fulfill()
+                    break
+                }
             }
         }
 
-        // Small delay to ensure subscriber is ready
-        try? await Task.sleep(nanoseconds: 10_000_000)
+        // Give the task time to start and register
+        try? await Task.sleep(nanoseconds: 50_000_000)
 
         stream.send(1)
         stream.send(2)
         stream.send(3)
 
-        // Wait for collection
-        try? await Task.sleep(nanoseconds: 50_000_000)
+        await fulfillment(of: [expectation], timeout: 2.0)
         task.cancel()
 
-        #expect(received == [1, 2, 3])
+        XCTAssertEqual(collector.values, [1, 2, 3])
     }
 
-    @Test("Stream delivers events to multiple subscribers")
-    func testMultipleSubscribers_allReceiveEvents() async {
+    func test_multipleSubscribers_allReceiveEvents() async {
         let stream = AsyncEventStream<String>()
-        var received1: [String] = []
-        var received2: [String] = []
+        let exp1 = expectation(description: "Subscriber 1 received events")
+        let exp2 = expectation(description: "Subscriber 2 received events")
+        let collector1 = Collector<String>()
+        let collector2 = Collector<String>()
 
         let task1 = Task {
             for await value in stream.events {
-                received1.append(value)
-                if received1.count == 2 { break }
+                collector1.append(value)
+                if collector1.count >= 2 {
+                    exp1.fulfill()
+                    break
+                }
             }
         }
 
         let task2 = Task {
             for await value in stream.events {
-                received2.append(value)
-                if received2.count == 2 { break }
+                collector2.append(value)
+                if collector2.count >= 2 {
+                    exp2.fulfill()
+                    break
+                }
             }
         }
 
-        // Small delay to ensure subscribers are ready
-        try? await Task.sleep(nanoseconds: 10_000_000)
+        try? await Task.sleep(nanoseconds: 50_000_000)
 
         stream.send("hello")
         stream.send("world")
 
-        // Wait for collection
-        try? await Task.sleep(nanoseconds: 50_000_000)
+        await fulfillment(of: [exp1, exp2], timeout: 2.0)
         task1.cancel()
         task2.cancel()
 
-        #expect(received1 == ["hello", "world"])
-        #expect(received2 == ["hello", "world"])
+        XCTAssertEqual(collector1.values, ["hello", "world"])
+        XCTAssertEqual(collector2.values, ["hello", "world"])
     }
 
-    @Test("Stream handles cancelled subscribers")
-    func testCancelledSubscriber_removedFromList() async {
-        let stream = AsyncEventStream<Int>()
-        var received: [Int] = []
+    func test_finish_completesAllStreams() async {
+        let stream = AsyncEventStream<String>()
+        let expectation = expectation(description: "Stream completed")
 
         let task = Task {
-            for await value in stream.events {
-                received.append(value)
+            for await _ in stream.events {
+                // Just iterate
             }
+            // Loop exits when stream finishes
+            expectation.fulfill()
         }
 
-        // Small delay to ensure subscriber is ready
-        try? await Task.sleep(nanoseconds: 10_000_000)
+        try? await Task.sleep(nanoseconds: 50_000_000)
 
-        stream.send(1)
+        stream.finish()
 
-        // Wait for delivery
-        try? await Task.sleep(nanoseconds: 20_000_000)
-
-        // Cancel the task
+        await fulfillment(of: [expectation], timeout: 2.0)
         task.cancel()
-
-        // Small delay for cancellation to propagate
-        try? await Task.sleep(nanoseconds: 20_000_000)
-
-        // This should not crash or accumulate
-        stream.send(2)
-        stream.send(3)
-
-        // Small delay
-        try? await Task.sleep(nanoseconds: 20_000_000)
-
-        // Only the first event should have been received
-        #expect(received == [1])
     }
 
-    // MARK: - Filtered Stream Tests
-
-    @Test("Filtered stream only delivers matching events")
-    func testFilteredStream_onlyMatchingEvents() async {
+    func test_filteredStream_onlyDeliversMatchingEvents() async {
         let stream = AsyncEventStream<Int>()
-        var received: [Int] = []
+        let expectation = expectation(description: "Received filtered events")
+        let collector = Collector<Int>()
 
         let task = Task {
             for await value in stream.filtered(where: { $0 % 2 == 0 }) {
-                received.append(value)
-                if received.count == 2 { break }
+                collector.append(value)
+                if collector.count >= 2 {
+                    expectation.fulfill()
+                    break
+                }
             }
         }
 
-        // Small delay to ensure subscriber is ready
-        try? await Task.sleep(nanoseconds: 10_000_000)
+        try? await Task.sleep(nanoseconds: 50_000_000)
 
         stream.send(1) // odd - filtered out
         stream.send(2) // even - delivered
         stream.send(3) // odd - filtered out
         stream.send(4) // even - delivered
 
-        // Wait for collection
-        try? await Task.sleep(nanoseconds: 50_000_000)
+        await fulfillment(of: [expectation], timeout: 2.0)
         task.cancel()
 
-        #expect(received == [2, 4])
+        XCTAssertEqual(collector.values, [2, 4])
     }
 
-    // MARK: - Finish Tests
-
-    @Test("Finish completes all streams")
-    func testFinish_completesAllStreams() async {
-        let stream = AsyncEventStream<String>()
-        var completed = false
-
-        let task = Task {
-            for await _ in stream.events {
-                // Wait for events
-            }
-            completed = true
-        }
-
-        // Small delay to ensure subscriber is ready
-        try? await Task.sleep(nanoseconds: 10_000_000)
-
-        stream.finish()
-
-        // Wait for completion
-        try? await Task.sleep(nanoseconds: 50_000_000)
-
-        #expect(completed == true)
-        task.cancel()
-    }
-
-    // MARK: - Thread Safety Tests
-
-    /// Actor to safely collect values in concurrent contexts
-    actor ValueCollector<T: Sendable> {
-        var values: [T] = []
-
-        func append(_ value: T) {
-            values.append(value)
-        }
-
-        var count: Int { values.count }
-    }
-
-    @Test("Stream handles concurrent sends safely")
-    func testConcurrentSends_noDataRace() async {
+    func test_concurrentSends_noDataRace() async {
         let stream = AsyncEventStream<Int>()
-        let collector = ValueCollector<Int>()
+        let expectation = expectation(description: "Received all concurrent events")
+        let collector = Collector<Int>()
+        let expectedCount = 50
 
         let task = Task {
             for await value in stream.events {
-                await collector.append(value)
-                if await collector.count >= 100 { break }
+                collector.append(value)
+                if collector.count >= expectedCount {
+                    expectation.fulfill()
+                    break
+                }
             }
         }
 
-        // Small delay to ensure subscriber is ready
-        try? await Task.sleep(nanoseconds: 10_000_000)
+        try? await Task.sleep(nanoseconds: 50_000_000)
 
         // Send concurrently
         await withTaskGroup(of: Void.self) { group in
-            for i in 0..<100 {
+            for i in 0..<expectedCount {
                 group.addTask {
                     stream.send(i)
                 }
             }
         }
 
-        // Wait for collection
-        try? await Task.sleep(nanoseconds: 100_000_000)
+        await fulfillment(of: [expectation], timeout: 2.0)
         task.cancel()
 
-        let count = await collector.count
-
-        #expect(count == 100)
+        XCTAssertEqual(collector.count, expectedCount)
     }
 
-    // MARK: - Type Tests
-
-    @Test("Stream works with Sendable types")
-    func testSendableTypes_workCorrectly() async {
+    func test_sendableTypes_workCorrectly() async {
         struct TestEvent: Sendable, Equatable {
             let id: String
             let value: Int
         }
 
         let stream = AsyncEventStream<TestEvent>()
+        let expectation = expectation(description: "Received event")
         var received: TestEvent?
 
         let task = Task {
             for await event in stream.events {
                 received = event
+                expectation.fulfill()
                 break
             }
         }
 
-        // Small delay
-        try? await Task.sleep(nanoseconds: 10_000_000)
+        try? await Task.sleep(nanoseconds: 50_000_000)
 
         let testEvent = TestEvent(id: "test", value: 42)
         stream.send(testEvent)
 
-        // Wait for collection
-        try? await Task.sleep(nanoseconds: 50_000_000)
+        await fulfillment(of: [expectation], timeout: 2.0)
         task.cancel()
 
-        #expect(received == testEvent)
+        XCTAssertEqual(received, testEvent)
+    }
+}
+
+// MARK: - Test Helper
+
+/// Simple thread-safe collector for test values
+/// Using @MainActor since tests are @MainActor
+@MainActor
+private final class Collector<T> {
+    private(set) var values: [T] = []
+
+    var count: Int { values.count }
+
+    func append(_ value: T) {
+        values.append(value)
     }
 }

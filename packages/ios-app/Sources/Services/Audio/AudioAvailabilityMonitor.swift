@@ -32,7 +32,7 @@ final class AudioAvailabilityMonitor {
         // Listen for audio session interruptions (phone calls, alarms, etc.)
         notificationTasks.append(Task { [weak self] in
             for await notification in NotificationCenter.default.notifications(named: AVAudioSession.interruptionNotification) {
-                await self?.handleInterruption(notification)
+                self?.handleInterruption(notification)
             }
         })
 
@@ -139,23 +139,27 @@ final class AudioAvailabilityMonitor {
 
         // Check if we can configure the audio session category (without activating it)
         // This verifies recording capability without interrupting other audio playback
-        let isAvailable = await Task.detached {
-            let session = AVAudioSession.sharedInstance()
-            do {
-                // Only set the category - do NOT activate the session
-                // Activating would interrupt other apps' audio playback
-                // Use .allowBluetoothHFP instead of deprecated .allowBluetooth
-                try session.setCategory(.playAndRecord, mode: .default, options: [.defaultToSpeaker, .allowBluetoothHFP])
-                return true
-            } catch {
-                return false
-            }
-        }.value
+        // Using nonisolated helper to avoid "no async operations" warning
+        let isAvailable = await checkAudioSessionAvailability()
 
         if isAvailable {
             updateAvailability(available: true, reason: nil)
         } else {
             updateAvailability(available: false, reason: "Audio unavailable")
+        }
+    }
+
+    /// Check if audio session can be configured (runs off main actor)
+    private nonisolated func checkAudioSessionAvailability() async -> Bool {
+        let session = AVAudioSession.sharedInstance()
+        do {
+            // Only set the category - do NOT activate the session
+            // Activating would interrupt other apps' audio playback
+            // Use .allowBluetoothHFP instead of deprecated .allowBluetooth
+            try session.setCategory(.playAndRecord, mode: .default, options: [.defaultToSpeaker, .allowBluetoothHFP])
+            return true
+        } catch {
+            return false
         }
     }
 

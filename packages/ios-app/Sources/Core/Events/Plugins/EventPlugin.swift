@@ -104,14 +104,14 @@ struct EventPluginBoxImpl<P: EventPlugin>: EventPluginBox, Sendable {
             // The actual event is Sendable (per EventPlugin protocol), but we need
             // type erasure so we wrap it.
             let wrappedEvent = ParsedEventData(value: event)
-            // Note: The closure captures P.Type which is technically non-Sendable,
-            // but metatypes are inherently thread-safe. This is a known Swift
-            // limitation that will be addressed in future Swift versions.
+            // Capture the transform result immediately to avoid capturing P.Type in closure.
+            // This sidesteps the non-Sendable metatype warning while maintaining the same behavior.
+            let transformResult = P.transform(event)
             return .plugin(
                 type: P.eventType,
                 event: wrappedEvent,
                 sessionId: sessionId,
-                transform: { P.transform(event) }
+                transform: { transformResult }
             )
         } catch {
             logger.warning("Failed to decode \(P.eventType): \(error.localizedDescription)", category: .events)
