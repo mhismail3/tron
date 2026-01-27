@@ -300,38 +300,3 @@ struct AttachmentButtonDock: View {
             .accessibilityHidden(true)
     }
 }
-
-// MARK: - Legacy Action Button (Non-Glass)
-
-struct LegacyActionButton: View {
-    let isProcessing: Bool
-    let canSend: Bool
-    let onSend: () -> Void
-    let onAbort: () -> Void
-
-    var body: some View {
-        Button {
-            if isProcessing {
-                onAbort()
-            } else {
-                onSend()
-            }
-        } label: {
-            Group {
-                if isProcessing {
-                    TronIconView(icon: .abort, size: 32, color: .tronError)
-                } else {
-                    TronIconView(
-                        icon: .send,
-                        size: 32,
-                        color: canSend ? .tronEmerald : .tronTextDisabled
-                    )
-                }
-            }
-            .frame(width: 36, height: 36)
-        }
-        .disabled(!isProcessing && !canSend)
-        .animation(.tronFast, value: isProcessing)
-        .animation(.tronFast, value: canSend)
-    }
-}

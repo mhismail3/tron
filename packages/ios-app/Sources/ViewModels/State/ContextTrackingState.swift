@@ -40,10 +40,7 @@ final class ContextTrackingState {
     /// Accumulated cost across all turns
     var accumulatedCost: Double = 0
 
-    // MARK: - Legacy Compatibility (for backward compatibility with existing code)
-
-    /// Last turn's input tokens (represents actual current context size)
-    /// This is now a proxy to contextWindowTokens
+    /// Last turn's input tokens (alias for contextWindowTokens for API compatibility)
     var lastTurnInputTokens: Int {
         get { contextWindowTokens }
         set { contextWindowTokens = newValue }

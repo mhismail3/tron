@@ -672,6 +672,7 @@ final class MockToolEventContext: ToolEventContext {
     func logInfo(_ message: String) {}
     func logWarning(_ message: String) {}
     func logError(_ message: String) {}
+    func showError(_ message: String) {}
 }
 
 // MARK: - Test Helper Extensions

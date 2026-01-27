@@ -23,45 +23,26 @@ struct ModelPickerMenuContent<Label: View>: View {
         self.label = label
     }
 
-    // MARK: - Model Categorization
+    // MARK: - Model Categorization (via ModelFilteringService)
 
-    /// Anthropic 4.5 models (latest) - sorted: Opus (top) → Sonnet → Haiku (bottom)
+    private var modelGroups: [ModelGroup] {
+        ModelFilteringService.categorize(models)
+    }
+
     private var latestAnthropicModels: [ModelInfo] {
-        models.filter { $0.isAnthropic && $0.is45Model }
-            .uniqueByFormattedName()
-            .sortedByTier()
+        modelGroups.first { $0.tier == "Anthropic (Latest)" }?.models ?? []
     }
 
-    /// Latest OpenAI Codex models (5.2 only) - sorted by tier
     private var latestCodexModels: [ModelInfo] {
-        models.filter { $0.isCodex && $0.id.lowercased().contains("5.2") }
+        modelGroups.first { $0.tier == "OpenAI Codex (Latest)" }?.models ?? []
     }
 
-    /// Gemini 3 models (latest Google models) - sorted: Pro → Flash → Flash Lite
     private var gemini3Models: [ModelInfo] {
-        models.filter { $0.isGemini && $0.isGemini3 }
-            .sorted { geminiTierPriority($0) < geminiTierPriority($1) }
+        modelGroups.first { $0.tier == "Gemini 3" }?.models ?? []
     }
 
-    /// Legacy models: legacy Anthropic (non-4.5) + Codex 5.1 + Gemini 2.5
     private var legacyModels: [ModelInfo] {
-        let legacyAnthropic = models.filter { $0.isAnthropic && !$0.is45Model }
-            .uniqueByFormattedName()
-            .sortedByTier()
-        let legacyCodex = models.filter { $0.isCodex && !$0.id.lowercased().contains("5.2") }
-        let legacyGemini = models.filter { $0.isGemini && !$0.isGemini3 }
-            .sorted { geminiTierPriority($0) < geminiTierPriority($1) }
-        return legacyAnthropic + legacyCodex + legacyGemini
-    }
-
-    /// Sort Gemini models: Pro first, then Flash, then Flash Lite
-    private func geminiTierPriority(_ model: ModelInfo) -> Int {
-        switch model.geminiTier {
-        case "pro": return 0
-        case "flash": return 1
-        case "flash-lite": return 2
-        default: return 3
-        }
+        modelGroups.first { $0.tier == "Legacy" }?.models ?? []
     }
 
     // MARK: - Body

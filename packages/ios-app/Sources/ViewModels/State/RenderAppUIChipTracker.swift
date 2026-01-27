@@ -4,15 +4,20 @@ import Foundation
 
 /// Tracks the state of RenderAppUI chip messages in the chat.
 ///
-/// This consolidates three previously separate dictionaries into one atomic state:
-/// - `renderAppUIChipMessageIds` - Which message shows each canvas chip
-/// - `pendingUIRenderStarts` - Events that arrived before tool_start
-/// - `canvasIdToPlaceholderToolCallId` - Placeholder IDs for early chips
+/// State Management:
+/// - `chips[canvasId]` - Primary index: all chip state keyed by canvasId
+/// - `toolCallIdToCanvasId[toolCallId]` - Secondary index: reverse lookup for toolCallId
 ///
 /// The race condition this solves:
 /// Events can arrive in any order: `ui_render_chunk` before `tool_start`, or vice versa.
 /// Each path creates/updates chips differently. This tracker ensures all state changes
 /// are atomic and the chip message can be found/updated regardless of event order.
+///
+/// ## State Transitions
+/// 1. **chunk first**: Creates placeholder chip (messageId set, toolCallId = "pending_X")
+/// 2. **tool_start first**: Creates real chip (messageId set, real toolCallId)
+/// 3. **render_start first**: Creates pre-chip (messageId nil, stores pendingRenderStart)
+/// 4. **render_start after chip**: Stores in chip.pendingRenderStart
 @MainActor
 final class RenderAppUIChipTracker {
 
@@ -20,8 +25,8 @@ final class RenderAppUIChipTracker {
 
     /// State for a single RenderAppUI chip
     struct ChipState {
-        /// The message ID in the chat messages array
-        var messageId: UUID
+        /// The message ID in the chat messages array (nil for pre-chip state)
+        var messageId: UUID?
 
         /// Current toolCallId (may be placeholder like "pending_canvasId" initially)
         var toolCallId: String
@@ -41,8 +46,11 @@ final class RenderAppUIChipTracker {
 
     // MARK: - State
 
-    /// All tracked chips by canvasId (single source of truth)
+    /// Primary index: all chips keyed by canvasId (single source of truth)
     private(set) var chips: [String: ChipState] = [:]
+
+    /// Secondary index: toolCallId → canvasId for reverse lookup
+    private var toolCallIdToCanvasId: [String: String] = [:]
 
     // MARK: - Chip Lifecycle
 
@@ -59,43 +67,66 @@ final class RenderAppUIChipTracker {
             title: title,
             pendingRenderStart: nil
         )
+        toolCallIdToCanvasId[placeholderToolCallId] = canvasId
 
         return placeholderToolCallId
     }
 
     /// Create a chip from tool_start (no prior chunk).
     func createChipFromToolStart(canvasId: String, messageId: UUID, toolCallId: String, title: String?) {
+        // Check if there's a pre-chip (from render_start that arrived first)
+        let existingPending = chips[canvasId]?.pendingRenderStart
+
         chips[canvasId] = ChipState(
             messageId: messageId,
             toolCallId: toolCallId,
             isPlaceholder: false,
             canvasId: canvasId,
             title: title,
-            pendingRenderStart: nil
+            pendingRenderStart: existingPending
         )
+        toolCallIdToCanvasId[toolCallId] = canvasId
     }
 
     /// Store a pending ui_render_start result (arrived before tool_start).
     func storePendingRenderStart(_ result: UIRenderStartPlugin.Result) {
-        // Check if we have a chip for this canvas already
         if var chip = chips[result.canvasId] {
+            // Chip already exists - store pending in chip
             chip.pendingRenderStart = result
             chips[result.canvasId] = chip
         } else {
-            // No chip yet - create a temporary entry with the result
-            // This will be completed when createChipFromToolStart is called
-            // Actually, we need to track by toolCallId for the legacy path
-            // Store in a separate lookup
-            pendingRenderStartsByToolCallId[result.toolCallId] = result
+            // No chip yet - create a "pre-chip" state (messageId nil)
+            chips[result.canvasId] = ChipState(
+                messageId: nil,
+                toolCallId: result.toolCallId,
+                isPlaceholder: true,
+                canvasId: result.canvasId,
+                title: result.title,
+                pendingRenderStart: result
+            )
+            toolCallIdToCanvasId[result.toolCallId] = result.canvasId
         }
     }
 
-    /// Pending render starts stored by toolCallId (for legacy path)
-    private var pendingRenderStartsByToolCallId: [String: UIRenderStartPlugin.Result] = [:]
-
-    /// Get and remove pending render start for a toolCallId
+    /// Get and remove pending render start for a toolCallId.
+    /// Uses secondary index to find canvasId, then looks up in chip.
     func consumePendingRenderStart(toolCallId: String) -> UIRenderStartPlugin.Result? {
-        pendingRenderStartsByToolCallId.removeValue(forKey: toolCallId)
+        guard let canvasId = toolCallIdToCanvasId[toolCallId],
+              var chip = chips[canvasId] else {
+            return nil
+        }
+
+        let result = chip.pendingRenderStart
+        chip.pendingRenderStart = nil
+        chips[canvasId] = chip
+
+        // Only remove from secondary index if this was a pre-chip (no real message yet)
+        if chip.messageId == nil {
+            toolCallIdToCanvasId.removeValue(forKey: toolCallId)
+            chips.removeValue(forKey: canvasId)
+        }
+
+        return result
     }
 
     /// Update a chip's toolCallId from placeholder to real (when tool_start arrives after chunk).
@@ -107,6 +138,12 @@ final class RenderAppUIChipTracker {
         }
 
         let oldToolCallId = chip.toolCallId
+
+        // Update secondary index
+        toolCallIdToCanvasId.removeValue(forKey: oldToolCallId)
+        toolCallIdToCanvasId[realToolCallId] = canvasId
+
+        // Update chip
         chip.toolCallId = realToolCallId
         chip.isPlaceholder = false
         chips[canvasId] = chip
@@ -145,19 +182,25 @@ final class RenderAppUIChipTracker {
 
     /// Remove a chip (e.g., when turn ends or context cleared)
     func removeChip(canvasId: String) {
+        if let chip = chips[canvasId] {
+            toolCallIdToCanvasId.removeValue(forKey: chip.toolCallId)
+        }
         chips.removeValue(forKey: canvasId)
     }
 
     /// Clear all chip tracking state
     func clearAll() {
         chips.removeAll()
-        pendingRenderStartsByToolCallId.removeAll()
+        toolCallIdToCanvasId.removeAll()
     }
 
     /// Clear chips that were created in the current turn (have placeholder IDs)
     func clearPlaceholders() {
         let placeholderCanvasIds = chips.filter { $0.value.isPlaceholder }.map { $0.key }
         for canvasId in placeholderCanvasIds {
+            if let chip = chips[canvasId] {
+                toolCallIdToCanvasId.removeValue(forKey: chip.toolCallId)
+            }
             chips.removeValue(forKey: canvasId)
         }
     }

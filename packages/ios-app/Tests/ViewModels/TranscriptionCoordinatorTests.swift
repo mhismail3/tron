@@ -357,4 +357,5 @@ final class MockTranscriptionContext: TranscriptionContext {
     func logInfo(_ message: String) {}
     func logWarning(_ message: String) {}
     func logError(_ message: String) {}
+    func showError(_ message: String) {}
 }

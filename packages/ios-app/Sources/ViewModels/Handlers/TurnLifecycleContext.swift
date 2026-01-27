@@ -5,13 +5,16 @@ import Foundation
 ///
 /// Inherits from:
 /// - LoggingContext: Logging and error display
-/// - SessionIdentifiable: Session ID access
 /// - ProcessingTrackable: Processing state and setSessionProcessing
 /// - StreamingManaging: Streaming state management
 /// - ToolStateTracking: Tool call state (currentToolMessages, currentTurnToolCalls, etc.)
 /// - BrowserManaging: Browser session management
+///
+/// Note: SessionIdentifiable was removed as sessionId is not used by TurnLifecycleCoordinator.
+/// Note: streamingText removed - passed as parameter to handleComplete instead.
+/// Note: updateTotalTokenUsage removed - not called by coordinator.
 @MainActor
-protocol TurnLifecycleContext: LoggingContext, SessionIdentifiable, ProcessingTrackable, StreamingManaging, ToolStateTracking, BrowserManaging {
+protocol TurnLifecycleContext: LoggingContext, ProcessingTrackable, StreamingManaging, ToolStateTracking, BrowserManaging {
 
     // MARK: - Messages State
 
@@ -31,9 +34,6 @@ protocol TurnLifecycleContext: LoggingContext, SessionIdentifiable, ProcessingTr
 
     /// ID of the currently streaming message (from StreamingManager)
     var streamingMessageId: UUID? { get }
-
-    /// Current streaming text content (from StreamingManager)
-    var streamingText: String { get }
 
     /// Whether there is active streaming (streamingMessageId != nil && !streamingText.isEmpty)
     var hasActiveStreaming: Bool { get }
@@ -81,9 +81,6 @@ protocol TurnLifecycleContext: LoggingContext, SessionIdentifiable, ProcessingTr
 
     /// Accumulate token usage for billing
     func accumulateTokens(input: Int, output: Int, cacheRead: Int, cacheCreation: Int, cost: Double)
-
-    /// Update total token usage display
-    func updateTotalTokenUsage(contextSize: Int, outputTokens: Int, cacheRead: Int?, cacheCreation: Int?)
 
     /// Refresh context from server
     func refreshContextFromServer() async

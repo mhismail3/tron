@@ -460,6 +460,10 @@ final class MockMessagingContext: MessagingContext {
         markPendingQuestionsAsSupersededCalled = true
     }
 
+    func flushPendingTextUpdates() {
+        // No-op for tests
+    }
+
     func resetStreamingManager() {
         streamingManagerResetCalled = true
     }
@@ -488,6 +492,10 @@ final class MockMessagingContext: MessagingContext {
     }
 
     func showErrorAlert(_ message: String) {
+        showErrorAlertCalled = true
+    }
+
+    func showError(_ message: String) {
         showErrorAlertCalled = true
     }
 

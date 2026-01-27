@@ -542,4 +542,8 @@ final class MockChatEventContext: ChatEventContext {
     func logError(_ message: String) {
         // No-op for tests
     }
+
+    func showError(_ message: String) {
+        // No-op for tests
+    }
 }

@@ -153,7 +153,8 @@ final class UICanvasCoordinator {
 
         // Update chip status to complete (use tracker as single source of truth)
         if let chipState = context.renderAppUIChipTracker.getChip(canvasId: result.canvasId),
-           let index = MessageFinder.indexById(chipState.messageId, in: context.messages),
+           let messageId = chipState.messageId,
+           let index = MessageFinder.indexById(messageId, in: context.messages),
            case .renderAppUI(var chipData) = context.messages[index].content {
             chipData.status = .complete
             chipData.errorMessage = nil
@@ -195,7 +196,8 @@ final class UICanvasCoordinator {
 
         // Update chip status to error (use tracker as single source of truth)
         if let chipState = context.renderAppUIChipTracker.getChip(canvasId: result.canvasId),
-           let index = MessageFinder.indexById(chipState.messageId, in: context.messages),
+           let messageId = chipState.messageId,
+           let index = MessageFinder.indexById(messageId, in: context.messages),
            case .renderAppUI(var chipData) = context.messages[index].content {
             chipData.status = .error
             chipData.errorMessage = result.error
@@ -222,7 +224,8 @@ final class UICanvasCoordinator {
         // The agent will create a NEW chip with the retry, so this one stays as error
         // Use tracker as single source of truth
         if let chipState = context.renderAppUIChipTracker.getChip(canvasId: result.canvasId),
-           let index = MessageFinder.indexById(chipState.messageId, in: context.messages),
+           let messageId = chipState.messageId,
+           let index = MessageFinder.indexById(messageId, in: context.messages),
            case .renderAppUI(var chipData) = context.messages[index].content {
             chipData.status = .error
             chipData.errorMessage = "Error generating"
@@ -260,7 +263,8 @@ final class UICanvasCoordinator {
     private func getToolCallIdForCanvas(_ canvasId: String, context: UICanvasContext) -> String? {
         // Use tracker as single source of truth
         guard let chipState = context.renderAppUIChipTracker.getChip(canvasId: canvasId),
-              let message = context.messages.first(where: { $0.id == chipState.messageId }),
+              let messageId = chipState.messageId,
+              let message = context.messages.first(where: { $0.id == messageId }),
               case .renderAppUI(let data) = message.content else {
             return nil
         }

@@ -254,7 +254,8 @@ final class ToolEventCoordinator {
 
         // Check if chip already exists from ui_render_chunk (via tracker)
         if let chipState = context.renderAppUIChipTracker.getChip(canvasId: canvasId),
-           let index = MessageFinder.indexById(chipState.messageId, in: context.messages),
+           let messageId = chipState.messageId,
+           let index = MessageFinder.indexById(messageId, in: context.messages),
            case .renderAppUI(var chipData) = context.messages[index].content {
             // Chip already exists - update toolCallId to real one
             let oldToolCallId = chipData.toolCallId

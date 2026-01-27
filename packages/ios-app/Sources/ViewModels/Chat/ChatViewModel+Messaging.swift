@@ -14,7 +14,7 @@ extension ChatViewModel: MessagingContext {
     ) async throws {
         try await rpcClient.agent.sendPrompt(
             text,
-            images: nil,  // Legacy - no longer used
+            images: nil,  // Images sent via attachments instead
             attachments: attachments,
             reasoningLevel: reasoningLevel,
             skills: skills,

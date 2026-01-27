@@ -520,7 +520,7 @@ final class MockConnectionContext: ConnectionContext {
         lastCatchUpToolCalls = toolCalls
     }
 
-    func showErrorAlert(_ message: String) {
+    func showError(_ message: String) {
         showErrorAlertCalled = true
     }
 

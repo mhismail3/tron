@@ -277,8 +277,8 @@ enum MessageContent: Equatable {
     case subagent(SubagentToolData)
     case renderAppUI(RenderAppUIChipData)
 
-    // MARK: - Legacy Convenience Cases (forward to systemEvent)
-    // These allow gradual migration - existing code using .modelChange etc. still works
+    // MARK: - Convenience Factories (forward to systemEvent)
+    // These provide cleaner API for common system event patterns
 
     /// In-chat notification for model change
     static func modelChange(from: String, to: String) -> MessageContent {

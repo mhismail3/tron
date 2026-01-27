@@ -481,6 +481,7 @@ final class MockTurnLifecycleContext: TurnLifecycleContext {
     var catchingUpMessageId: UUID?
     var userDismissedBrowserThisTurn: Bool = false
     var sessionId: String = "test-session"
+    var browserStatus: BrowserGetStatusResult?
 
     // Context state tracking
     var contextStateCurrentContextWindow: Int = 0
@@ -581,6 +582,7 @@ final class MockTurnLifecycleContext: TurnLifecycleContext {
     func logInfo(_ message: String) {}
     func logWarning(_ message: String) {}
     func logError(_ message: String) {}
+    func showError(_ message: String) {}
 }
 
 // MARK: - Test Helper Extensions

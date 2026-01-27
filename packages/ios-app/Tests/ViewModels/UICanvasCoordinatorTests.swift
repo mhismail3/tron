@@ -489,4 +489,5 @@ final class MockUICanvasContext: UICanvasContext {
     func logError(_ message: String) {
         logErrorCalled = true
     }
+    func showError(_ message: String) {}
 }

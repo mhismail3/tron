@@ -138,51 +138,17 @@ struct ModelPickerMenu: View {
 extension Array where Element == ModelInfo {
     /// Remove duplicate models by formatted name (keeps first occurrence)
     func uniqueByFormattedName() -> [ModelInfo] {
-        var seen = Set<String>()
-        return filter { model in
-            let name = model.formattedModelName
-            if seen.contains(name) {
-                return false
-            }
-            seen.insert(name)
-            return true
-        }
+        ModelFilteringService.uniqueByFormattedName(self)
     }
 
     /// Sort by tier priority: Opus at top, then Sonnet, then Haiku
     /// Within same tier, sort by version descending (newer versions first)
     func sortedByTier() -> [ModelInfo] {
-        sorted { m1, m2 in
-            let tier1 = tierPriority(m1)
-            let tier2 = tierPriority(m2)
-            if tier1 != tier2 {
-                return tier1 < tier2  // Opus (0) before Sonnet (1) before Haiku (2)
-            }
-            // Same tier: sort by version descending (newer first)
-            return versionPriority(m1) > versionPriority(m2)
-        }
-    }
-
-    private func tierPriority(_ model: ModelInfo) -> Int {
-        let id = model.id.lowercased()
-        if id.contains("opus") { return 0 }
-        if id.contains("sonnet") { return 1 }
-        if id.contains("haiku") { return 2 }
-        return 3
-    }
-
-    private func versionPriority(_ model: ModelInfo) -> Int {
-        let id = model.id.lowercased()
-        if id.contains("4-5") || id.contains("4.5") { return 45 }
-        if id.contains("4-1") || id.contains("4.1") { return 41 }
-        if id.contains("-4-") || id.contains("opus-4") || id.contains("sonnet-4") || id.contains("haiku-4") { return 40 }
-        if id.contains("3-5") || id.contains("3.5") { return 35 }
-        if id.contains("-3-") { return 30 }
-        return 0
+        ModelFilteringService.sortByTier(self)
     }
 }
 
-// MARK: - Legacy Model Switcher (Sheet-based, kept for reference)
+// MARK: - Model Switcher (Sheet-based)
 
 struct ModelSwitcher: View {
     let rpcClient: RPCClient
@@ -293,89 +259,7 @@ struct ModelSwitcher: View {
     }
 
     private var groupedModels: [ModelGroup] {
-        // Separate models by provider
-        let anthropicModels = models.filter { $0.isAnthropic }
-        let codexModels = models.filter { $0.isCodex }
-        let geminiModels = models.filter { $0.isGemini }
-
-        // Further separate Anthropic: 4.5 models (latest) from legacy models
-        let latestAnthropicModels = anthropicModels.filter { is45Model($0) }
-        let legacyAnthropicModels = anthropicModels.filter { !is45Model($0) }
-
-        // Separate Codex: 5.2 (latest) from 5.1 (legacy)
-        let latestCodexModels = codexModels.filter { $0.id.lowercased().contains("5.2") }
-        let legacyCodexModels = codexModels.filter { !$0.id.lowercased().contains("5.2") }
-
-        // Separate Gemini: 3.x (latest) from 2.x (legacy)
-        let gemini3Models = geminiModels.filter { $0.isGemini3 }
-            .sorted { geminiTierPriority($0) < geminiTierPriority($1) }
-        let geminiLegacyModels = geminiModels.filter { !$0.isGemini3 }
-            .sorted { geminiTierPriority($0) < geminiTierPriority($1) }
-
-        var groups: [ModelGroup] = []
-
-        // Latest 4.5 Anthropic models first - ordered by tier: Opus, Sonnet, Haiku
-        let orderedLatest = latestAnthropicModels.sorted { m1, m2 in
-            tierPriority(m1) < tierPriority(m2)
-        }
-
-        if !orderedLatest.isEmpty {
-            groups.append(ModelGroup(tier: "Anthropic (Latest)", models: orderedLatest))
-        }
-
-        // Latest OpenAI Codex models (5.2)
-        if !latestCodexModels.isEmpty {
-            groups.append(ModelGroup(tier: "OpenAI Codex (Latest)", models: latestCodexModels))
-        }
-
-        // Gemini 3 models (latest Google models)
-        if !gemini3Models.isEmpty {
-            groups.append(ModelGroup(tier: "Gemini 3", models: gemini3Models))
-        }
-
-        // Combined Legacy section
-        var allLegacyModels: [ModelInfo] = []
-
-        // Legacy Anthropic models - sorted by tier
-        let sortedLegacyAnthropic = legacyAnthropicModels.sorted { m1, m2 in
-            tierPriority(m1) < tierPriority(m2)
-        }
-        allLegacyModels.append(contentsOf: sortedLegacyAnthropic)
-
-        // Legacy Codex models (5.1)
-        allLegacyModels.append(contentsOf: legacyCodexModels)
-
-        // Legacy Gemini models (2.5)
-        allLegacyModels.append(contentsOf: geminiLegacyModels)
-
-        if !allLegacyModels.isEmpty {
-            groups.append(ModelGroup(tier: "Legacy", models: allLegacyModels))
-        }
-
-        return groups
-    }
-
-    /// Sort Gemini models: Pro first, then Flash, then Flash Lite
-    private func geminiTierPriority(_ model: ModelInfo) -> Int {
-        switch model.geminiTier {
-        case "pro": return 0
-        case "flash": return 1
-        case "flash-lite": return 2
-        default: return 3
-        }
-    }
-
-    private func is45Model(_ model: ModelInfo) -> Bool {
-        let id = model.id.lowercased()
-        return id.contains("4-5") || id.contains("4.5") || id.contains("opus-4-5") || id.contains("sonnet-4-5") || id.contains("haiku-4-5")
-    }
-
-    private func tierPriority(_ model: ModelInfo) -> Int {
-        let id = model.id.lowercased()
-        if id.contains("opus") { return 0 }
-        if id.contains("sonnet") { return 1 }
-        if id.contains("haiku") { return 2 }
-        return 3
+        ModelFilteringService.categorize(models)
     }
 
     private func loadModels() async {
