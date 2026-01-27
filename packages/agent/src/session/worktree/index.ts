@@ -29,6 +29,23 @@ export {
   type MergeHandlerDeps,
 } from './merge-handler.js';
 
+// Isolation policy
+export {
+  IsolationPolicy,
+  createIsolationPolicy,
+  type IsolationMode,
+  type IsolationOptions,
+  type IsolationPolicyDeps,
+} from './isolation-policy.js';
+
+// Recovery
+export {
+  WorktreeRecovery,
+  createWorktreeRecovery,
+  type WorktreeRecoveryDeps,
+  type RecoveryResult,
+} from './recovery.js';
+
 // Event emission
 export {
   WorktreeEvents,
