@@ -13,7 +13,7 @@ final class MockPaginationContext: PaginationContext {
     var hasInitiallyLoaded: Bool = false
     var isProcessing: Bool = false
 
-    var reconstructedState: ReconstructedChatState?
+    var reconstructedState: ReconstructedState?
     var reconstructedStateError: Error?
 
     var logMessages: [String] = []
@@ -34,7 +34,7 @@ final class MockPaginationContext: PaginationContext {
         logMessages.append("[ERROR] \(message)")
     }
 
-    func getReconstructedState() throws -> ReconstructedChatState {
+    func getReconstructedState() throws -> ReconstructedState {
         if let error = reconstructedStateError {
             throw error
         }

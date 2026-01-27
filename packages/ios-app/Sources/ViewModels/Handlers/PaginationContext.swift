@@ -37,5 +37,5 @@ protocol PaginationContext: AnyObject {
     // MARK: - State Reconstruction
 
     /// Get reconstructed state from event store
-    func getReconstructedState() throws -> ReconstructedChatState
+    func getReconstructedState() throws -> ReconstructedState
 }
