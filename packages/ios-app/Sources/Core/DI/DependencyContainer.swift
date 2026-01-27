@@ -64,6 +64,17 @@ final class DependencyContainer: DependencyProviding, ServerSettingsProvider, Ap
     /// Event store manager - updated when RPC client changes
     private(set) var eventStoreManager: EventStoreManager
 
+    // MARK: - Repositories
+
+    /// Model repository for model operations with caching
+    private(set) var modelRepository: ModelRepository
+
+    /// Session repository for network session management
+    private(set) var sessionRepository: NetworkSessionRepository
+
+    /// Agent repository for agent operations
+    private(set) var agentRepository: AgentRepository
+
     // MARK: - Observable Server Settings Version
 
     /// Incremented when server settings change. Views can observe this to react to changes.
@@ -126,6 +137,11 @@ final class DependencyContainer: DependencyProviding, ServerSettingsProvider, Ap
         // Initialize event store manager
         eventStoreManager = EventStoreManager(eventDB: db, rpcClient: client)
 
+        // Initialize repositories
+        modelRepository = DefaultModelRepository(modelClient: client.model)
+        sessionRepository = DefaultSessionRepository(sessionClient: client.session)
+        agentRepository = DefaultAgentRepository(agentClient: client.agent)
+
         // Configure skill store with RPC client (after all properties initialized)
         store.configure(rpcClient: client)
     }
@@ -182,6 +198,11 @@ final class DependencyContainer: DependencyProviding, ServerSettingsProvider, Ap
 
         // Update event store manager with new client
         eventStoreManager.updateRPCClient(newClient)
+
+        // Recreate repositories with new client
+        modelRepository = DefaultModelRepository(modelClient: newClient.model)
+        sessionRepository = DefaultSessionRepository(sessionClient: newClient.session)
+        agentRepository = DefaultAgentRepository(agentClient: newClient.agent)
 
         // Reload sessions with new origin filter
         eventStoreManager.loadSessions()

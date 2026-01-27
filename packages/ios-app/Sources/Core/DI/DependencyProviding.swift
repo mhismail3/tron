@@ -23,6 +23,17 @@ protocol DependencyProviding: AnyObject {
 
     /// Deep link router for navigation
     var deepLinkRouter: DeepLinkRouter { get }
+
+    // MARK: - Repositories
+
+    /// Model repository for model operations with caching
+    var modelRepository: ModelRepository { get }
+
+    /// Session repository for network session management
+    var sessionRepository: NetworkSessionRepository { get }
+
+    /// Agent repository for agent operations
+    var agentRepository: AgentRepository { get }
 }
 
 // MARK: - Server Settings Provider Protocol

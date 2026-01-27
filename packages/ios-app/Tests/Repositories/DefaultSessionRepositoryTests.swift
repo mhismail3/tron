@@ -1,0 +1,394 @@
+import XCTest
+@testable import TronMobile
+
+// MARK: - Mock Session Client for Repository Testing
+
+@MainActor
+final class MockSessionClientForRepository {
+    // Create
+    var createCallCount = 0
+    var lastCreateWorkingDirectory: String?
+    var lastCreateModel: String?
+    var createResultToReturn: SessionCreateResult?
+    var createError: Error?
+
+    // List
+    var listCallCount = 0
+    var lastListWorkingDirectory: String?
+    var lastListLimit: Int?
+    var lastListIncludeEnded: Bool?
+    var listResultToReturn: [SessionInfo] = []
+    var listError: Error?
+
+    // Resume
+    var resumeCallCount = 0
+    var lastResumeSessionId: String?
+    var resumeError: Error?
+
+    // End
+    var endCallCount = 0
+    var endError: Error?
+
+    // Delete
+    var deleteCallCount = 0
+    var lastDeleteSessionId: String?
+    var deleteResult: Bool = true
+    var deleteError: Error?
+
+    // Fork
+    var forkCallCount = 0
+    var lastForkSessionId: String?
+    var lastForkFromEventId: String?
+    var forkResultToReturn: SessionForkResult?
+    var forkError: Error?
+
+    // History
+    var historyCallCount = 0
+    var lastHistoryLimit: Int?
+    var historyResultToReturn: [HistoryMessage] = []
+    var historyError: Error?
+
+    func create(workingDirectory: String, model: String? = nil) async throws -> SessionCreateResult {
+        createCallCount += 1
+        lastCreateWorkingDirectory = workingDirectory
+        lastCreateModel = model
+        if let error = createError {
+            throw error
+        }
+        return createResultToReturn ?? createMockCreateResult()
+    }
+
+    func list(workingDirectory: String? = nil, limit: Int = 50, includeEnded: Bool = false) async throws -> [SessionInfo] {
+        listCallCount += 1
+        lastListWorkingDirectory = workingDirectory
+        lastListLimit = limit
+        lastListIncludeEnded = includeEnded
+        if let error = listError {
+            throw error
+        }
+        return listResultToReturn
+    }
+
+    func resume(sessionId: String) async throws {
+        resumeCallCount += 1
+        lastResumeSessionId = sessionId
+        if let error = resumeError {
+            throw error
+        }
+    }
+
+    func end() async throws {
+        endCallCount += 1
+        if let error = endError {
+            throw error
+        }
+    }
+
+    func delete(_ sessionId: String) async throws -> Bool {
+        deleteCallCount += 1
+        lastDeleteSessionId = sessionId
+        if let error = deleteError {
+            throw error
+        }
+        return deleteResult
+    }
+
+    func fork(_ sessionId: String, fromEventId: String? = nil) async throws -> SessionForkResult {
+        forkCallCount += 1
+        lastForkSessionId = sessionId
+        lastForkFromEventId = fromEventId
+        if let error = forkError {
+            throw error
+        }
+        return forkResultToReturn ?? createMockForkResult()
+    }
+
+    func getHistory(limit: Int = 100) async throws -> [HistoryMessage] {
+        historyCallCount += 1
+        lastHistoryLimit = limit
+        if let error = historyError {
+            throw error
+        }
+        return historyResultToReturn
+    }
+
+    // MARK: - Mock Helpers
+
+    private func createMockCreateResult() -> SessionCreateResult {
+        let json = """
+        {
+            "sessionId": "new-session-123",
+            "model": "claude-4-opus",
+            "createdAt": "2024-01-27T00:00:00Z"
+        }
+        """
+        return try! JSONDecoder().decode(SessionCreateResult.self, from: json.data(using: .utf8)!)
+    }
+
+    private func createMockForkResult() -> SessionForkResult {
+        let json = """
+        {
+            "newSessionId": "forked-session-456",
+            "forkedFromEventId": "event-123",
+            "forkedFromSessionId": "original-session-123",
+            "rootEventId": "new-root-789"
+        }
+        """
+        return try! JSONDecoder().decode(SessionForkResult.self, from: json.data(using: .utf8)!)
+    }
+}
+
+// MARK: - DefaultSessionRepository Tests
+
+@MainActor
+final class DefaultSessionRepositoryTests: XCTestCase {
+
+    var mockClient: MockSessionClientForRepository!
+
+    override func setUp() async throws {
+        mockClient = MockSessionClientForRepository()
+    }
+
+    override func tearDown() async throws {
+        mockClient = nil
+    }
+
+    // MARK: - Create Tests
+
+    func test_create_callsClientWithParameters() async throws {
+        // When
+        let result = try await mockClient.create(workingDirectory: "/path/to/project", model: "claude-4-opus")
+
+        // Then
+        XCTAssertEqual(mockClient.createCallCount, 1)
+        XCTAssertEqual(mockClient.lastCreateWorkingDirectory, "/path/to/project")
+        XCTAssertEqual(mockClient.lastCreateModel, "claude-4-opus")
+        XCTAssertNotNil(result)
+    }
+
+    func test_create_handlesNilModel() async throws {
+        // When
+        _ = try await mockClient.create(workingDirectory: "/path")
+
+        // Then
+        XCTAssertNil(mockClient.lastCreateModel)
+    }
+
+    func test_create_throwsError() async throws {
+        // Given
+        mockClient.createError = NSError(domain: "Test", code: 1, userInfo: nil)
+
+        // When/Then
+        do {
+            _ = try await mockClient.create(workingDirectory: "/path")
+            XCTFail("Expected error to be thrown")
+        } catch {
+            XCTAssertEqual(mockClient.createCallCount, 1)
+        }
+    }
+
+    // MARK: - List Tests
+
+    func test_list_callsClientWithParameters() async throws {
+        // Given
+        mockClient.listResultToReturn = [createMockSession(sessionId: "session-1")]
+
+        // When
+        let sessions = try await mockClient.list(workingDirectory: "/path", limit: 25, includeEnded: true)
+
+        // Then
+        XCTAssertEqual(mockClient.listCallCount, 1)
+        XCTAssertEqual(mockClient.lastListWorkingDirectory, "/path")
+        XCTAssertEqual(mockClient.lastListLimit, 25)
+        XCTAssertEqual(mockClient.lastListIncludeEnded, true)
+        XCTAssertEqual(sessions.count, 1)
+    }
+
+    func test_list_usesDefaultParameters() async throws {
+        // When
+        _ = try await mockClient.list()
+
+        // Then
+        XCTAssertNil(mockClient.lastListWorkingDirectory)
+        XCTAssertEqual(mockClient.lastListLimit, 50)
+        XCTAssertEqual(mockClient.lastListIncludeEnded, false)
+    }
+
+    func test_list_throwsError() async throws {
+        // Given
+        mockClient.listError = NSError(domain: "Test", code: 1, userInfo: nil)
+
+        // When/Then
+        do {
+            _ = try await mockClient.list()
+            XCTFail("Expected error to be thrown")
+        } catch {
+            XCTAssertEqual(mockClient.listCallCount, 1)
+        }
+    }
+
+    // MARK: - Resume Tests
+
+    func test_resume_callsClientWithSessionId() async throws {
+        // When
+        try await mockClient.resume(sessionId: "session-123")
+
+        // Then
+        XCTAssertEqual(mockClient.resumeCallCount, 1)
+        XCTAssertEqual(mockClient.lastResumeSessionId, "session-123")
+    }
+
+    func test_resume_throwsError() async throws {
+        // Given
+        mockClient.resumeError = NSError(domain: "Test", code: 1, userInfo: nil)
+
+        // When/Then
+        do {
+            try await mockClient.resume(sessionId: "session-123")
+            XCTFail("Expected error to be thrown")
+        } catch {
+            XCTAssertEqual(mockClient.resumeCallCount, 1)
+        }
+    }
+
+    // MARK: - End Tests
+
+    func test_end_callsClient() async throws {
+        // When
+        try await mockClient.end()
+
+        // Then
+        XCTAssertEqual(mockClient.endCallCount, 1)
+    }
+
+    func test_end_throwsError() async throws {
+        // Given
+        mockClient.endError = NSError(domain: "Test", code: 1, userInfo: nil)
+
+        // When/Then
+        do {
+            try await mockClient.end()
+            XCTFail("Expected error to be thrown")
+        } catch {
+            XCTAssertEqual(mockClient.endCallCount, 1)
+        }
+    }
+
+    // MARK: - Delete Tests
+
+    func test_delete_callsClientWithSessionId() async throws {
+        // When
+        let result = try await mockClient.delete("session-123")
+
+        // Then
+        XCTAssertEqual(mockClient.deleteCallCount, 1)
+        XCTAssertEqual(mockClient.lastDeleteSessionId, "session-123")
+        XCTAssertTrue(result)
+    }
+
+    func test_delete_returnsFalse() async throws {
+        // Given
+        mockClient.deleteResult = false
+
+        // When
+        let result = try await mockClient.delete("session-123")
+
+        // Then
+        XCTAssertFalse(result)
+    }
+
+    func test_delete_throwsError() async throws {
+        // Given
+        mockClient.deleteError = NSError(domain: "Test", code: 1, userInfo: nil)
+
+        // When/Then
+        do {
+            _ = try await mockClient.delete("session-123")
+            XCTFail("Expected error to be thrown")
+        } catch {
+            XCTAssertEqual(mockClient.deleteCallCount, 1)
+        }
+    }
+
+    // MARK: - Fork Tests
+
+    func test_fork_callsClientWithParameters() async throws {
+        // When
+        let result = try await mockClient.fork("session-123", fromEventId: "event-456")
+
+        // Then
+        XCTAssertEqual(mockClient.forkCallCount, 1)
+        XCTAssertEqual(mockClient.lastForkSessionId, "session-123")
+        XCTAssertEqual(mockClient.lastForkFromEventId, "event-456")
+        XCTAssertNotNil(result)
+    }
+
+    func test_fork_handlesNilEventId() async throws {
+        // When
+        _ = try await mockClient.fork("session-123")
+
+        // Then
+        XCTAssertNil(mockClient.lastForkFromEventId)
+    }
+
+    func test_fork_throwsError() async throws {
+        // Given
+        mockClient.forkError = NSError(domain: "Test", code: 1, userInfo: nil)
+
+        // When/Then
+        do {
+            _ = try await mockClient.fork("session-123")
+            XCTFail("Expected error to be thrown")
+        } catch {
+            XCTAssertEqual(mockClient.forkCallCount, 1)
+        }
+    }
+
+    // MARK: - History Tests
+
+    func test_getHistory_callsClientWithLimit() async throws {
+        // When
+        let messages = try await mockClient.getHistory(limit: 50)
+
+        // Then
+        XCTAssertEqual(mockClient.historyCallCount, 1)
+        XCTAssertEqual(mockClient.lastHistoryLimit, 50)
+        XCTAssertNotNil(messages)
+    }
+
+    func test_getHistory_usesDefaultLimit() async throws {
+        // When
+        _ = try await mockClient.getHistory()
+
+        // Then
+        XCTAssertEqual(mockClient.lastHistoryLimit, 100)
+    }
+
+    func test_getHistory_throwsError() async throws {
+        // Given
+        mockClient.historyError = NSError(domain: "Test", code: 1, userInfo: nil)
+
+        // When/Then
+        do {
+            _ = try await mockClient.getHistory()
+            XCTFail("Expected error to be thrown")
+        } catch {
+            XCTAssertEqual(mockClient.historyCallCount, 1)
+        }
+    }
+
+    // MARK: - Helpers
+
+    private func createMockSession(sessionId: String) -> SessionInfo {
+        let json = """
+        {
+            "sessionId": "\(sessionId)",
+            "model": "claude-4-opus",
+            "createdAt": "2024-01-27T00:00:00Z",
+            "messageCount": 10,
+            "isActive": true
+        }
+        """
+        return try! JSONDecoder().decode(SessionInfo.self, from: json.data(using: .utf8)!)
+    }
+}
