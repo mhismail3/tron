@@ -21,16 +21,10 @@ struct ChatView: View {
     @StateObject private var inputHistory = InputHistoryStore()
     @StateObject var scrollCoordinator = ScrollStateCoordinator()
 
-    // MARK: - Sheet State (internal for ChatView+Sheets)
-    @State var showContextAudit = false
-    @State var showSessionHistory = false
-    @State var skillForDetailSheet: Skill?
-    @State var skillDetailMode: ChipMode = .skill
-    @State var showSkillDetailSheet = false
-    @State var showCompactionDetail = false
-    @State var compactionDetailData: (tokensBefore: Int, tokensAfter: Int, reason: String, summary: String?)?
-    @State var notifyAppSheetData: NotifyAppChipData?
-    @State var thinkingSheetContent: String?
+    // MARK: - Sheet Coordinator (single sheet pattern)
+    // Uses enum-based single .sheet(item:) modifier to avoid Swift compiler type-checking timeout
+    // See: https://www.hackingwithswift.com/quick-start/swiftui/how-to-present-multiple-sheets
+    @State var sheetCoordinator = SheetCoordinator()
 
     // Note: Model state (cachedModels, isLoadingModels, optimisticModelName)
     // has been moved to viewModel.modelPickerState - see ChatView+Helpers.swift for accessors
@@ -135,25 +129,21 @@ struct ChatView: View {
                             onReasoningLevelChange: { newLevel in
                                 viewModel.inputBarState.reasoningLevel = newLevel
                             },
-                            onContextTap: {
-                                showContextAudit = true
+                            onContextTap: { [sheetCoordinator] in
+                                sheetCoordinator.showContextAudit()
                             },
                             onSkillSelect: nil,
                             onSkillRemove: { _ in
                                 // Skill removed from selection - no additional action needed
                             },
-                            onSkillDetailTap: { skill in
-                                skillForDetailSheet = skill
-                                skillDetailMode = .skill
-                                showSkillDetailSheet = true
+                            onSkillDetailTap: { [sheetCoordinator] skill in
+                                sheetCoordinator.showSkillDetail(skill, mode: .skill)
                             },
                             onSpellRemove: { _ in
                                 // Spell removed from selection - no additional action needed
                             },
-                            onSpellDetailTap: { spell in
-                                skillForDetailSheet = spell
-                                skillDetailMode = .spell
-                                showSkillDetailSheet = true
+                            onSpellDetailTap: { [sheetCoordinator] spell in
+                                sheetCoordinator.showSkillDetail(spell, mode: .spell)
                             }
                         )
                     )
@@ -171,137 +161,16 @@ struct ChatView: View {
             principalToolbarItem
             trailingToolbarItem
         }
-        // Safari sheet (OpenBrowser tool)
-        .sheet(isPresented: safariURLPresented) {
-            if let url = viewModel.browserState.safariURL {
-                SafariView(url: url)
-            }
-        }
-        // Browser sheet (replaces floating window)
-        .sheet(isPresented: browserWindowPresented) {
-            if #available(iOS 26.0, *) {
-                BrowserSheetView(
-                    frameImage: viewModel.browserState.browserFrame,
-                    currentUrl: viewModel.browserState.browserStatus?.currentUrl,
-                    isStreaming: viewModel.browserState.browserStatus?.isStreaming ?? false,
-                    onCloseBrowser: {
-                        viewModel.userDismissedBrowser()
-                    }
-                )
-            }
-        }
-        .sheet(isPresented: $viewModel.showSettings) {
-            SettingsView(rpcClient: rpcClient)
-        }
-        .sheet(isPresented: $showContextAudit) {
-            ContextAuditView(
-                rpcClient: rpcClient,
-                sessionId: sessionId,
-                skillStore: skillStore,
-                readOnly: workspaceDeleted
-            )
-        }
-        .sheet(isPresented: $showSessionHistory) {
-            SessionHistorySheet(
-                sessionId: sessionId,
-                rpcClient: rpcClient,
-                eventStoreManager: eventStoreManager
-            )
-        }
-        .sheet(isPresented: $showSkillDetailSheet) {
-            if let skill = skillForDetailSheet, let store = skillStore {
-                SkillDetailSheet(skill: skill, skillStore: store, mode: skillDetailMode)
-            }
-        }
-        .sheet(isPresented: $showCompactionDetail) {
-            if let data = compactionDetailData {
-                CompactionDetailSheet(
-                    tokensBefore: data.tokensBefore,
-                    tokensAfter: data.tokensAfter,
-                    reason: data.reason,
-                    summary: data.summary
-                )
-                .adaptivePresentationDetents([.medium, .large])
-            }
-        }
-        .sheet(isPresented: askUserQuestionPresented) {
-            if #available(iOS 26.0, *), let data = viewModel.askUserQuestionState.currentData {
-                AskUserQuestionSheet(
-                    toolData: data,
-                    onSubmit: { answers in
-                        Task {
-                            await viewModel.submitAskUserQuestionAnswers(answers)
-                        }
-                    },
-                    onDismiss: {
-                        viewModel.dismissAskUserQuestionSheet()
-                    },
-                    readOnly: data.status == .answered
-                )
-            }
-        }
-        .sheet(isPresented: Binding(
-            get: { viewModel.subagentState.showDetailSheet },
-            set: { viewModel.subagentState.showDetailSheet = $0 }
-        )) {
-            if let data = viewModel.subagentState.selectedSubagent {
-                SubagentDetailSheet(
-                    data: data,
-                    subagentState: viewModel.subagentState,
-                    eventStoreManager: eventStoreManager
-                )
-                .adaptivePresentationDetents([.medium, .large])
-            }
-        }
-        .sheet(isPresented: Binding(
-            get: { viewModel.uiCanvasState.showSheet },
-            set: { viewModel.uiCanvasState.showSheet = $0 }
-        )) {
-            if #available(iOS 26.0, *) {
-                UICanvasSheet(state: viewModel.uiCanvasState)
-            } else {
-                UICanvasSheetFallback(state: viewModel.uiCanvasState)
-            }
-        }
-        .sheet(isPresented: Binding(
-            get: { viewModel.todoState.showSheet },
-            set: { viewModel.todoState.showSheet = $0 }
-        )) {
-            if #available(iOS 26.0, *) {
-                TodoDetailSheet(
-                    rpcClient: rpcClient,
-                    sessionId: sessionId,
-                    workspaceId: viewModel.workspaceId,
-                    todoState: viewModel.todoState
-                )
-            } else {
-                TodoDetailSheetLegacy(
-                    rpcClient: rpcClient,
-                    sessionId: sessionId,
-                    workspaceId: viewModel.workspaceId,
-                    todoState: viewModel.todoState
-                )
-            }
-        }
-        .sheet(item: $notifyAppSheetData) { data in
-            if #available(iOS 26.0, *) {
-                NotifyAppDetailSheet(data: data)
-            } else {
-                NotifyAppDetailSheetFallback(data: data)
-            }
-        }
-        .sheet(isPresented: Binding(
-            get: { thinkingSheetContent != nil },
-            set: { if !$0 { thinkingSheetContent = nil } }
-        )) {
-            if let content = thinkingSheetContent {
-                if #available(iOS 26.0, *) {
-                    ThinkingDetailSheet(content: content)
-                } else {
-                    ThinkingDetailSheetFallback(content: content)
-                }
-            }
-        }
+        // MARK: - Sheet Modifier (extracted to help type-checker)
+        .chatSheets(
+            coordinator: sheetCoordinator,
+            viewModel: viewModel,
+            rpcClient: rpcClient,
+            sessionId: sessionId,
+            skillStore: skillStore,
+            workspaceDeleted: workspaceDeleted,
+            eventStoreManager: eventStoreManager
+        )
         .alert("Error", isPresented: $viewModel.showError) {
             Button("OK") { viewModel.clearError() }
         } message: {
@@ -311,10 +180,10 @@ struct ChatView: View {
         .onReceive(NotificationCenter.default.publisher(for: .chatMenuAction)) { notification in
             guard let action = notification.object as? String else { return }
             switch action {
-            case "history": showSessionHistory = true
-            case "context": showContextAudit = true
-            case "tasks": viewModel.todoState.showSheet = true
-            case "settings": viewModel.showSettings = true
+            case "history": sheetCoordinator.showSessionHistory()
+            case "context": sheetCoordinator.showContextAudit()
+            case "tasks": sheetCoordinator.showTodoList()
+            case "settings": sheetCoordinator.showSettings()
             default: break
             }
         }
@@ -494,25 +363,25 @@ struct ChatView: View {
                         ForEach(viewModel.messages) { message in
                             MessageBubble(
                                 message: message,
-                                onSkillTap: { skill in
-                                    skillForDetailSheet = skill
-                                    skillDetailMode = .skill
-                                    showSkillDetailSheet = true
+                                onSkillTap: { [sheetCoordinator] skill in
+                                    sheetCoordinator.showSkillDetail(skill, mode: .skill)
                                 },
-                                onSpellTap: { spell in
-                                    skillForDetailSheet = spell
-                                    skillDetailMode = .spell
-                                    showSkillDetailSheet = true
+                                onSpellTap: { [sheetCoordinator] spell in
+                                    sheetCoordinator.showSkillDetail(spell, mode: .spell)
                                 },
                                 onAskUserQuestionTap: { data in
                                     viewModel.openAskUserQuestionSheet(for: data)
                                 },
-                                onThinkingTap: { content in
-                                    thinkingSheetContent = content
+                                onThinkingTap: { [sheetCoordinator] content in
+                                    sheetCoordinator.showThinkingDetail(content)
                                 },
-                                onCompactionTap: { tokensBefore, tokensAfter, reason, summary in
-                                    compactionDetailData = (tokensBefore, tokensAfter, reason, summary)
-                                    showCompactionDetail = true
+                                onCompactionTap: { [sheetCoordinator] tokensBefore, tokensAfter, reason, summary in
+                                    sheetCoordinator.showCompactionDetail(
+                                        tokensBefore: tokensBefore,
+                                        tokensAfter: tokensAfter,
+                                        reason: reason,
+                                        summary: summary
+                                    )
                                 },
                                 onSubagentTap: { data in
                                     viewModel.subagentState.showDetails(with: data)
@@ -538,8 +407,8 @@ struct ChatView: View {
                                 onTodoWriteTap: {
                                     viewModel.todoState.showSheet = true
                                 },
-                                onNotifyAppTap: { data in
-                                    notifyAppSheetData = data
+                                onNotifyAppTap: { [sheetCoordinator] data in
+                                    sheetCoordinator.showNotifyApp(data)
                                 }
                             )
                             .id(message.id)

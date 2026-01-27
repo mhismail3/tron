@@ -86,19 +86,4 @@ extension ChatView {
             }
         }
     }
-
-    /// Commands menu (alternative simple version)
-    var commandsMenu: some View {
-        // NOTE: iOS 26 Menu requires simple Button("text") { } syntax
-        // Label views and Divider break gesture handling
-        Menu {
-            Button("Session History") { showSessionHistory = true }
-            Button("Context Manager") { showContextAudit = true }
-            Button("Settings") { viewModel.showSettings = true }
-        } label: {
-            Image(systemName: "gearshape")
-                .font(TronTypography.sans(size: TronTypography.sizeTitle, weight: .medium))
-                .foregroundStyle(.tronEmerald)
-        }
-    }
 }

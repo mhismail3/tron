@@ -27,29 +27,6 @@ extension ChatView {
     /// UserDefaults key for storing reasoning level per session
     var reasoningLevelKey: String { "tron.reasoningLevel.\(sessionId)" }
 
-    // MARK: - State Object Bindings
-
-    var safariURLPresented: Binding<Bool> {
-        Binding(
-            get: { viewModel.browserState.safariURL != nil },
-            set: { if !$0 { viewModel.browserState.safariURL = nil } }
-        )
-    }
-
-    var browserWindowPresented: Binding<Bool> {
-        Binding(
-            get: { viewModel.browserState.showBrowserWindow },
-            set: { viewModel.browserState.showBrowserWindow = $0 }
-        )
-    }
-
-    var askUserQuestionPresented: Binding<Bool> {
-        Binding(
-            get: { viewModel.askUserQuestionState.showSheet },
-            set: { viewModel.askUserQuestionState.showSheet = $0 }
-        )
-    }
-
     // MARK: - Model Operations
 
     /// Pre-fetch models for model picker menu
