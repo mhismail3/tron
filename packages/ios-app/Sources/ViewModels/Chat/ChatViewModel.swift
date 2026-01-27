@@ -68,6 +68,9 @@ class ChatViewModel: ObservableObject, ChatEventContext {
     let thinkingState = ThinkingState()
     /// Input bar state (text, attachments, skills, reasoning level)
     let inputBarState = InputBarState()
+    /// Model picker state (cached models, optimistic updates, switching)
+    /// Note: Initialized lazily in init since it depends on rpcClient.model
+    private(set) var modelPickerState: ModelPickerState!
 
     // MARK: - Protocol Conformance (ChatEventContext)
     // These are thin wrappers for protocol conformance only
@@ -155,6 +158,8 @@ class ChatViewModel: ObservableObject, ChatEventContext {
     let messagingCoordinator = MessagingCoordinator()
     /// Coordinates session connection, reconnection, and catch-up
     let connectionCoordinator = ConnectionCoordinator()
+    /// Coordinates event dispatch - routes plugin events to handlers
+    let eventDispatchCoordinator = EventDispatchCoordinator()
     var currentToolMessages: [UUID: ChatMessage] = [:]
 
     /// Track tool calls for the current turn (for display purposes)
@@ -207,6 +212,7 @@ class ChatViewModel: ObservableObject, ChatEventContext {
         self.rpcClient = rpcClient
         self.sessionId = sessionId
         self.eventStoreManager = eventStoreManager
+        self.modelPickerState = ModelPickerState(modelClient: rpcClient.model)
         setupBindings()
         setupEventHandlers()
         setupAudioRecorder()
@@ -378,161 +384,9 @@ class ChatViewModel: ObservableObject, ChatEventContext {
         }
     }
 
-    /// Handle a plugin-based event by extracting its Result and dispatching to the appropriate handler
+    /// Handle a plugin-based event by dispatching to the EventDispatchCoordinator
     private func handlePluginEvent(type: String, transform: @Sendable () -> (any EventResult)?) {
-        guard let result = transform() else {
-            logger.warning("Failed to transform event: \(type)", category: .events)
-            return
-        }
-
-        switch type {
-        case TextDeltaPlugin.eventType:
-            if let r = result as? TextDeltaPlugin.Result {
-                handleTextDelta(r.delta)
-            }
-
-        case ThinkingDeltaPlugin.eventType:
-            if let r = result as? ThinkingDeltaPlugin.Result {
-                handleThinkingDelta(r.delta)
-            }
-
-        case ToolStartPlugin.eventType:
-            if let r = result as? ToolStartPlugin.Result {
-                handleToolStart(r)
-            }
-
-        case ToolEndPlugin.eventType:
-            if let r = result as? ToolEndPlugin.Result {
-                handleToolEnd(r)
-            }
-
-        case TurnStartPlugin.eventType:
-            if let r = result as? TurnStartPlugin.Result {
-                handleTurnStart(r)
-            }
-
-        case TurnEndPlugin.eventType:
-            if let r = result as? TurnEndPlugin.Result {
-                handleTurnEnd(r)
-            }
-
-        case AgentTurnPlugin.eventType:
-            if let r = result as? AgentTurnPlugin.Result {
-                handleAgentTurn(r)
-            }
-
-        case CompletePlugin.eventType:
-            handleComplete()
-
-        case ErrorPlugin.eventType:
-            if let r = result as? ErrorPlugin.Result {
-                handleAgentError(r.message)
-            }
-
-        case CompactionPlugin.eventType:
-            if let r = result as? CompactionPlugin.Result {
-                handleCompaction(r)
-            }
-
-        case ContextClearedPlugin.eventType:
-            if let r = result as? ContextClearedPlugin.Result {
-                handleContextCleared(r)
-            }
-
-        case MessageDeletedPlugin.eventType:
-            if let r = result as? MessageDeletedPlugin.Result {
-                handleMessageDeleted(r)
-            }
-
-        case SkillRemovedPlugin.eventType:
-            if let r = result as? SkillRemovedPlugin.Result {
-                handleSkillRemoved(r)
-            }
-
-        case PlanModeEnteredPlugin.eventType:
-            if let r = result as? PlanModeEnteredPlugin.Result {
-                handlePlanModeEntered(r)
-            }
-
-        case PlanModeExitedPlugin.eventType:
-            if let r = result as? PlanModeExitedPlugin.Result {
-                handlePlanModeExited(r)
-            }
-
-        case BrowserFramePlugin.eventType:
-            if let r = result as? BrowserFramePlugin.Result {
-                handleBrowserFrameResult(r)
-            }
-
-        case BrowserClosedPlugin.eventType:
-            if let r = result as? BrowserClosedPlugin.Result {
-                if let sessionId = r.closedSessionId {
-                    handleBrowserClosed(sessionId)
-                }
-            }
-
-        case SubagentSpawnedPlugin.eventType:
-            if let r = result as? SubagentSpawnedPlugin.Result {
-                handleSubagentSpawnedResult(r)
-            }
-
-        case SubagentStatusPlugin.eventType:
-            if let r = result as? SubagentStatusPlugin.Result {
-                handleSubagentStatusResult(r)
-            }
-
-        case SubagentCompletedPlugin.eventType:
-            if let r = result as? SubagentCompletedPlugin.Result {
-                handleSubagentCompletedResult(r)
-            }
-
-        case SubagentFailedPlugin.eventType:
-            if let r = result as? SubagentFailedPlugin.Result {
-                handleSubagentFailedResult(r)
-            }
-
-        case SubagentEventPlugin.eventType:
-            if let r = result as? SubagentEventPlugin.Result {
-                handleSubagentForwardedEventResult(r)
-            }
-
-        case UIRenderStartPlugin.eventType:
-            if let r = result as? UIRenderStartPlugin.Result {
-                handleUIRenderStart(r)
-            }
-
-        case UIRenderChunkPlugin.eventType:
-            if let r = result as? UIRenderChunkPlugin.Result {
-                handleUIRenderChunk(r)
-            }
-
-        case UIRenderCompletePlugin.eventType:
-            if let r = result as? UIRenderCompletePlugin.Result {
-                handleUIRenderComplete(r)
-            }
-
-        case UIRenderErrorPlugin.eventType:
-            if let r = result as? UIRenderErrorPlugin.Result {
-                handleUIRenderError(r)
-            }
-
-        case UIRenderRetryPlugin.eventType:
-            if let r = result as? UIRenderRetryPlugin.Result {
-                handleUIRenderRetry(r)
-            }
-
-        case TodosUpdatedPlugin.eventType:
-            if let r = result as? TodosUpdatedPlugin.Result {
-                handleTodosUpdated(r)
-            }
-
-        case ConnectedPlugin.eventType:
-            // Connection events are handled elsewhere
-            break
-
-        default:
-            logger.debug("Unhandled plugin event type: \(type)", category: .events)
-        }
+        eventDispatchCoordinator.dispatch(type: type, transform: transform, context: self)
     }
 
     // MARK: - Windowed Messages (for virtual scrolling)

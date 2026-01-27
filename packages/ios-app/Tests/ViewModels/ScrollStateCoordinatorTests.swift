@@ -1,200 +1,305 @@
-import XCTest
+import Testing
+import Foundation
+import SwiftUI
 @testable import TronMobile
 
 /// Tests for ScrollStateCoordinator scroll functionality
-@available(iOS 17.0, *)
+/// Verifies scroll mode transitions, unread content tracking, and history loading
+@Suite("ScrollStateCoordinator Tests")
 @MainActor
-final class ScrollStateCoordinatorTests: XCTestCase {
+struct ScrollStateCoordinatorTests {
 
-    var coordinator: ScrollStateCoordinator!
+    // MARK: - Initial State Tests
 
-    override func setUp() async throws {
-        coordinator = ScrollStateCoordinator()
-    }
-
-    override func tearDown() async throws {
-        coordinator = nil
-    }
-
-    // MARK: - Mode Tests
-
+    @Test("Initial mode is following")
     func testInitialModeIsFollowing() {
-        XCTAssertEqual(coordinator.mode, .following)
+        let coordinator = ScrollStateCoordinator()
+
+        #expect(coordinator.mode == .following)
     }
 
+    @Test("Initial hasUnreadContent is false")
+    func testInitialHasUnreadContentIsFalse() {
+        let coordinator = ScrollStateCoordinator()
+
+        #expect(!coordinator.hasUnreadContent)
+    }
+
+    @Test("Initial shouldAutoScroll is true")
+    func testInitialShouldAutoScrollIsTrue() {
+        let coordinator = ScrollStateCoordinator()
+
+        #expect(coordinator.shouldAutoScroll)
+    }
+
+    @Test("Initial shouldShowScrollToBottomButton is false")
+    func testInitialShouldShowScrollToBottomButtonIsFalse() {
+        let coordinator = ScrollStateCoordinator()
+
+        #expect(!coordinator.shouldShowScrollToBottomButton)
+    }
+
+    // MARK: - Mode Transition Tests
+
+    @Test("Scroll to target sets reviewing mode")
     func testScrollToTargetSetsReviewingMode() {
-        // Given: Coordinator in following mode
-        XCTAssertEqual(coordinator.mode, .following)
+        let coordinator = ScrollStateCoordinator()
+        #expect(coordinator.mode == .following)
 
-        // When: Scrolling to target
         coordinator.scrollToTarget(messageId: UUID(), using: nil)
 
-        // Then: Mode should be reviewing (user initiated navigation)
-        XCTAssertEqual(coordinator.mode, .reviewing)
+        #expect(coordinator.mode == .reviewing)
     }
 
+    @Test("Scroll to target clears unread content")
     func testScrollToTargetClearsUnreadContent() {
-        // Given: Coordinator has unread content
-        // First put it in reviewing mode with unread content
-        coordinator.userDidScroll(isNearBottom: false)
-        XCTAssertEqual(coordinator.mode, .reviewing)
-        coordinator.contentAdded()
-        XCTAssertTrue(coordinator.hasUnreadContent)
+        let coordinator = ScrollStateCoordinator()
 
-        // When: Scrolling to target
+        // Put it in reviewing mode with unread content
+        coordinator.userDidScroll(isNearBottom: false)
+        coordinator.contentAdded()
+        #expect(coordinator.hasUnreadContent)
+
+        // Scroll to target
         coordinator.scrollToTarget(messageId: UUID(), using: nil)
 
-        // Then: Unread content should be cleared
-        XCTAssertFalse(coordinator.hasUnreadContent)
+        #expect(!coordinator.hasUnreadContent)
     }
 
+    @Test("Scroll to target sets grace period")
     func testScrollToTargetSetsGracePeriod() {
-        // When: Scrolling to target
-        coordinator.scrollToTarget(messageId: UUID(), using: nil)
+        let coordinator = ScrollStateCoordinator()
 
-        // Then: Grace period should prevent immediate mode switches
-        // User scroll detection should be suppressed during grace period
+        coordinator.scrollToTarget(messageId: UUID(), using: nil)
+        // Grace period should prevent immediate mode switches
         coordinator.userDidScroll(isNearBottom: true)
 
         // Mode should still be reviewing because we're in grace period
-        XCTAssertEqual(coordinator.mode, .reviewing)
+        #expect(coordinator.mode == .reviewing)
     }
 
-    // MARK: - Integration with Existing State
-
+    @Test("User sent message resets to following")
     func testUserSentMessageResetsToFollowing() {
-        // Given: Coordinator in reviewing mode
-        coordinator.scrollToTarget(messageId: UUID(), using: nil)
-        XCTAssertEqual(coordinator.mode, .reviewing)
+        let coordinator = ScrollStateCoordinator()
 
-        // When: User sends a message
+        // Put in reviewing mode
+        coordinator.scrollToTarget(messageId: UUID(), using: nil)
+        #expect(coordinator.mode == .reviewing)
+
         coordinator.userSentMessage()
 
-        // Then: Mode should reset to following
-        XCTAssertEqual(coordinator.mode, .following)
+        #expect(coordinator.mode == .following)
     }
 
+    @Test("User tapped scroll to bottom resets to following")
     func testUserTappedScrollToBottomResetsToFollowing() {
-        // Given: Coordinator in reviewing mode
-        coordinator.scrollToTarget(messageId: UUID(), using: nil)
-        XCTAssertEqual(coordinator.mode, .reviewing)
+        let coordinator = ScrollStateCoordinator()
 
-        // When: User taps scroll to bottom
+        // Put in reviewing mode
+        coordinator.scrollToTarget(messageId: UUID(), using: nil)
+        #expect(coordinator.mode == .reviewing)
+
         coordinator.userTappedScrollToBottom()
 
-        // Then: Mode should reset to following
-        XCTAssertEqual(coordinator.mode, .following)
+        #expect(coordinator.mode == .following)
     }
 
+    @Test("User did scroll away from bottom switches to reviewing")
     func testUserDidScrollSwitchesToReviewing() {
-        // Given: Coordinator in following mode
-        XCTAssertEqual(coordinator.mode, .following)
+        let coordinator = ScrollStateCoordinator()
+        #expect(coordinator.mode == .following)
 
-        // When: User scrolls away from bottom
         coordinator.userDidScroll(isNearBottom: false)
 
-        // Then: Mode should switch to reviewing
-        XCTAssertEqual(coordinator.mode, .reviewing)
+        #expect(coordinator.mode == .reviewing)
     }
 
+    @Test("User did scroll near bottom stays following")
     func testUserDidScrollNearBottomStaysFollowing() {
-        // Given: Coordinator in following mode
-        XCTAssertEqual(coordinator.mode, .following)
+        let coordinator = ScrollStateCoordinator()
+        #expect(coordinator.mode == .following)
 
-        // When: User scrolls but stays near bottom
         coordinator.userDidScroll(isNearBottom: true)
 
-        // Then: Mode should stay following
-        XCTAssertEqual(coordinator.mode, .following)
+        #expect(coordinator.mode == .following)
     }
 
+    @Test("User did scroll near bottom switches back to following from reviewing")
     func testUserDidScrollNearBottomSwitchesBackToFollowing() {
-        // Given: Coordinator in reviewing mode
-        coordinator.userDidScroll(isNearBottom: false)
-        XCTAssertEqual(coordinator.mode, .reviewing)
+        let coordinator = ScrollStateCoordinator()
 
-        // When: User scrolls back to near bottom
+        // Put in reviewing mode
+        coordinator.userDidScroll(isNearBottom: false)
+        #expect(coordinator.mode == .reviewing)
+
         coordinator.userDidScroll(isNearBottom: true)
 
-        // Then: Mode should switch back to following
-        XCTAssertEqual(coordinator.mode, .following)
+        #expect(coordinator.mode == .following)
     }
 
-    // MARK: - Content Changes
+    @Test("Switch from reviewing to following clears unread")
+    func testSwitchFromReviewingToFollowingClearsUnread() {
+        let coordinator = ScrollStateCoordinator()
 
+        // In reviewing mode with unread content
+        coordinator.userDidScroll(isNearBottom: false)
+        coordinator.contentAdded()
+        #expect(coordinator.hasUnreadContent)
+
+        // Scroll back to bottom
+        coordinator.userDidScroll(isNearBottom: true)
+
+        #expect(!coordinator.hasUnreadContent)
+        #expect(coordinator.mode == .following)
+    }
+
+    // MARK: - Content Changes Tests
+
+    @Test("Content added sets unread when reviewing")
     func testContentAddedSetsUnreadWhenReviewing() {
-        // Given: Coordinator in reviewing mode
-        coordinator.userDidScroll(isNearBottom: false)
-        XCTAssertEqual(coordinator.mode, .reviewing)
-        XCTAssertFalse(coordinator.hasUnreadContent)
+        let coordinator = ScrollStateCoordinator()
 
-        // When: New content is added
+        // Put in reviewing mode
+        coordinator.userDidScroll(isNearBottom: false)
+        #expect(!coordinator.hasUnreadContent)
+
         coordinator.contentAdded()
 
-        // Then: Should have unread content
-        XCTAssertTrue(coordinator.hasUnreadContent)
+        #expect(coordinator.hasUnreadContent)
     }
 
+    @Test("Content added does not set unread when following")
     func testContentAddedDoesNotSetUnreadWhenFollowing() {
-        // Given: Coordinator in following mode
-        XCTAssertEqual(coordinator.mode, .following)
+        let coordinator = ScrollStateCoordinator()
+        #expect(coordinator.mode == .following)
 
-        // When: New content is added
         coordinator.contentAdded()
 
-        // Then: Should not have unread content
-        XCTAssertFalse(coordinator.hasUnreadContent)
+        #expect(!coordinator.hasUnreadContent)
     }
 
+    @Test("Processing ended clears unread content")
     func testProcessingEndedClearsUnreadContent() {
-        // Given: Coordinator with unread content
+        let coordinator = ScrollStateCoordinator()
+
+        // Set up unread content
         coordinator.userDidScroll(isNearBottom: false)
         coordinator.contentAdded()
-        XCTAssertTrue(coordinator.hasUnreadContent)
+        #expect(coordinator.hasUnreadContent)
 
-        // When: Processing ends
         coordinator.processingEnded()
 
-        // Then: Unread content should be cleared
-        XCTAssertFalse(coordinator.hasUnreadContent)
+        #expect(!coordinator.hasUnreadContent)
     }
 
-    // MARK: - Should Show Scroll To Bottom Button
+    @Test("Multiple content adds stay true")
+    func testMultipleContentAddsAccumulate() {
+        let coordinator = ScrollStateCoordinator()
 
-    func testShouldNotShowButtonAfterTargetScrollWithNoUnread() {
-        // Given: Navigation completed, no new content
-        coordinator.scrollToTarget(messageId: UUID(), using: nil)
+        // In reviewing mode
+        coordinator.userDidScroll(isNearBottom: false)
 
-        // Then: Should not show scroll to bottom button
-        XCTAssertFalse(coordinator.shouldShowScrollToBottomButton)
-    }
-
-    func testShouldShowButtonAfterTargetScrollWithNewContent() {
-        // Given: Navigation completed
-        coordinator.scrollToTarget(messageId: UUID(), using: nil)
-        XCTAssertEqual(coordinator.mode, .reviewing)
-
-        // When: New content arrives while in reviewing mode
+        coordinator.contentAdded()
+        coordinator.contentAdded()
         coordinator.contentAdded()
 
-        // Then: Should show scroll to bottom button (mode is reviewing + unread content)
-        XCTAssertTrue(coordinator.shouldShowScrollToBottomButton)
+        #expect(coordinator.hasUnreadContent)
     }
 
+    // MARK: - Scroll Button Visibility Tests
+
+    @Test("Should not show button after target scroll with no unread")
+    func testShouldNotShowButtonAfterTargetScrollWithNoUnread() {
+        let coordinator = ScrollStateCoordinator()
+
+        coordinator.scrollToTarget(messageId: UUID(), using: nil)
+
+        #expect(!coordinator.shouldShowScrollToBottomButton)
+    }
+
+    @Test("Should show button after target scroll with new content")
+    func testShouldShowButtonAfterTargetScrollWithNewContent() {
+        let coordinator = ScrollStateCoordinator()
+
+        coordinator.scrollToTarget(messageId: UUID(), using: nil)
+        coordinator.contentAdded()
+
+        #expect(coordinator.shouldShowScrollToBottomButton)
+    }
+
+    @Test("Should auto scroll when following")
     func testShouldAutoScrollWhenFollowing() {
-        // Given: Coordinator in following mode
-        XCTAssertEqual(coordinator.mode, .following)
+        let coordinator = ScrollStateCoordinator()
+        #expect(coordinator.mode == .following)
 
-        // Then: Should auto scroll
-        XCTAssertTrue(coordinator.shouldAutoScroll)
+        #expect(coordinator.shouldAutoScroll)
     }
 
+    @Test("Should not auto scroll when reviewing")
     func testShouldNotAutoScrollWhenReviewing() {
-        // Given: Coordinator in reviewing mode
-        coordinator.userDidScroll(isNearBottom: false)
-        XCTAssertEqual(coordinator.mode, .reviewing)
+        let coordinator = ScrollStateCoordinator()
 
-        // Then: Should not auto scroll
-        XCTAssertFalse(coordinator.shouldAutoScroll)
+        coordinator.userDidScroll(isNearBottom: false)
+
+        #expect(!coordinator.shouldAutoScroll)
+    }
+
+    // MARK: - History Loading Tests
+
+    @Test("Will prepend history saves anchor ID")
+    func testWillPrependHistorySavesAnchorId() {
+        let coordinator = ScrollStateCoordinator()
+        let anchorId = UUID()
+
+        coordinator.willPrependHistory(firstVisibleId: anchorId)
+
+        // Mode should be unchanged
+        #expect(coordinator.mode == .following)
+    }
+
+    @Test("Will prepend history with nil ID handles gracefully")
+    func testWillPrependHistoryWithNilIdHandlesGracefully() {
+        let coordinator = ScrollStateCoordinator()
+
+        coordinator.willPrependHistory(firstVisibleId: nil)
+
+        #expect(coordinator.mode == .following)
+    }
+
+    @Test("Did prepend history clears anchor")
+    func testDidPrependHistoryClearsAnchor() {
+        let coordinator = ScrollStateCoordinator()
+        let anchorId = UUID()
+
+        coordinator.willPrependHistory(firstVisibleId: anchorId)
+        coordinator.didPrependHistory(using: nil)
+
+        // Subsequent calls should be no-op (no crash)
+        coordinator.didPrependHistory(using: nil)
+        #expect(coordinator.mode == .following)
+    }
+
+    // MARK: - Grace Period Edge Cases
+
+    @Test("Grace period from send prevents reviewing switch")
+    func testGracePeriodPreventsReviewingToFollowingSwitch() {
+        let coordinator = ScrollStateCoordinator()
+
+        coordinator.userSentMessage()
+        // Scroll event during grace period (simulating layout changes)
+        coordinator.userDidScroll(isNearBottom: false)
+
+        // Should stay following
+        #expect(coordinator.mode == .following)
+    }
+
+    @Test("Grace period from tap prevents switch")
+    func testGracePeriodFromTapPreventsSwitch() {
+        let coordinator = ScrollStateCoordinator()
+
+        coordinator.userTappedScrollToBottom()
+        coordinator.userDidScroll(isNearBottom: false)
+
+        #expect(coordinator.mode == .following)
     }
 }

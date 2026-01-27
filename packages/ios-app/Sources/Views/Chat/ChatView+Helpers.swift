@@ -6,12 +6,22 @@ import SwiftUI
 extension ChatView {
     /// Current model name (optimistic if pending, else actual)
     var displayModelName: String {
-        optimisticModelName ?? viewModel.currentModel
+        viewModel.modelPickerState.displayModelName(current: viewModel.currentModel)
     }
 
     /// Current model info (for reasoning level support detection)
     var currentModelInfo: ModelInfo? {
-        cachedModels.first { $0.id == displayModelName }
+        viewModel.modelPickerState.currentModelInfo(current: viewModel.currentModel)
+    }
+
+    /// Cached models from model picker state
+    var cachedModels: [ModelInfo] {
+        viewModel.modelPickerState.cachedModels
+    }
+
+    /// Whether models are being loaded
+    var isLoadingModels: Bool {
+        viewModel.modelPickerState.isLoadingModels
     }
 
     /// UserDefaults key for storing reasoning level per session
@@ -44,53 +54,38 @@ extension ChatView {
 
     /// Pre-fetch models for model picker menu
     func prefetchModels() async {
-        isLoadingModels = true
-        if let models = try? await rpcClient.model.list() {
-            cachedModels = models
-            // Update context window from server-provided model info
-            viewModel.updateContextWindow(from: models)
+        await viewModel.modelPickerState.prefetchModels { [weak viewModel] models in
+            viewModel?.updateContextWindow(from: models)
         }
-        isLoadingModels = false
     }
 
     /// Switch model with optimistic UI update for instant feedback
     func switchModel(to model: ModelInfo) {
-        let previousModel = viewModel.currentModel
-
-        // Optimistic update - UI updates instantly
-        optimisticModelName = model.id
-        // Update context window immediately with new model's value
-        viewModel.contextState.currentContextWindow = model.contextWindow
-
-        // Fire the actual switch in background
         Task {
-            do {
-                let result = try await rpcClient.model.switchModel(sessionId, model: model.id)
-                await MainActor.run {
-                    // Clear optimistic update - real value now in viewModel.currentModel
-                    optimisticModelName = nil
-
+            await viewModel.modelPickerState.switchModel(
+                to: model,
+                sessionId: sessionId,
+                currentModel: viewModel.currentModel,
+                onOptimisticSet: { [weak viewModel] _ in
+                    // Update context window immediately with new model's value
+                    viewModel?.contextState.currentContextWindow = model.contextWindow
+                },
+                onSuccess: { [weak viewModel] previousModel, newModel in
                     // Add in-chat notification for model change
-                    viewModel.addModelChangeNotification(
-                        from: previousModel,
-                        to: result.newModel
-                    )
-                    // Note: Model switch event is created by server and syncs automatically
-                }
-                // Refresh context from server to ensure accuracy after model switch
-                // This validates context limit and current token count
-                await viewModel.refreshContextFromServer()
-            } catch {
-                await MainActor.run {
-                    // Revert optimistic update on failure
-                    optimisticModelName = nil
+                    viewModel?.addModelChangeNotification(from: previousModel, to: newModel)
+                },
+                onError: { [weak viewModel] errorMessage, revertModel in
                     // Revert context window on failure
-                    if let originalModel = cachedModels.first(where: { $0.id == previousModel }) {
-                        viewModel.contextState.currentContextWindow = originalModel.contextWindow
+                    if let revertModel {
+                        viewModel?.contextState.currentContextWindow = revertModel.contextWindow
                     }
-                    viewModel.showErrorAlert("Failed to switch model: \(error.localizedDescription)")
+                    viewModel?.showErrorAlert("Failed to switch model: \(errorMessage)")
+                },
+                onContextRefresh: { [weak viewModel] in
+                    // Refresh context from server to ensure accuracy after model switch
+                    await viewModel?.refreshContextFromServer()
                 }
-            }
+            )
         }
     }
 

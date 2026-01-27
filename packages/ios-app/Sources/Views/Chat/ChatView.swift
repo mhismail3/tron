@@ -32,10 +32,8 @@ struct ChatView: View {
     @State var notifyAppSheetData: NotifyAppChipData?
     @State var thinkingSheetContent: String?
 
-    // MARK: - Model State (internal for ChatView+Helpers)
-    @State var cachedModels: [ModelInfo] = []
-    @State var isLoadingModels = false
-    @State var optimisticModelName: String?
+    // Note: Model state (cachedModels, isLoadingModels, optimisticModelName)
+    // has been moved to viewModel.modelPickerState - see ChatView+Helpers.swift for accessors
 
     // MARK: - Connection Interaction State (private - body only)
     @State private var isInteractionEnabled = true

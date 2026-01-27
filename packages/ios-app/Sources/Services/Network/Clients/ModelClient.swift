@@ -1,9 +1,17 @@
 import Foundation
 
+/// Protocol for model client operations.
+/// Allows dependency injection for testing ModelPickerState.
+@MainActor
+protocol ModelClientProtocol {
+    func list(forceRefresh: Bool) async throws -> [ModelInfo]
+    func switchModel(_ sessionId: String, model: String) async throws -> ModelSwitchResult
+}
+
 /// Client for model-related RPC methods.
 /// Handles model switching and listing with caching.
 @MainActor
-final class ModelClient {
+final class ModelClient: ModelClientProtocol {
     private weak var transport: RPCTransport?
 
     // Model list cache (5-minute TTL to reduce redundant server calls)
