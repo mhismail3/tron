@@ -9,17 +9,16 @@
  * 4. Worktree info is included in session responses
  * 5. Events are emitted for worktree operations
  */
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import * as os from 'os';
 import { execSync } from 'child_process';
 import {
-  EventStore,
   WorktreeCoordinator,
   createWorktreeCoordinator,
-  type SessionId,
 } from '../index.js';
+import { createMockEventStore, type MockEventStoreWithTracking } from '../__fixtures__/mocks/index.js';
 
 // =============================================================================
 // Test Helpers
@@ -51,32 +50,6 @@ async function cleanupTempDir(dir: string): Promise<void> {
   }
 }
 
-function createMockEventStore() {
-  const events: Array<{ sessionId: string; type: string; payload: unknown }> = [];
-
-  return {
-    events,
-    append: vi.fn().mockImplementation(async (opts) => {
-      events.push({
-        sessionId: opts.sessionId,
-        type: opts.type,
-        payload: opts.payload,
-      });
-      return { id: `evt_${Date.now()}` };
-    }),
-    getSession: vi.fn().mockResolvedValue(null),
-    initialize: vi.fn().mockResolvedValue(undefined),
-    createSession: vi.fn().mockImplementation(async (opts) => ({
-      session: {
-        id: `sess_${Date.now()}` as SessionId,
-        workingDirectory: opts.workingDirectory,
-        model: opts.model,
-      },
-      rootEvent: { id: `evt_${Date.now()}` },
-    })),
-    close: vi.fn().mockResolvedValue(undefined),
-  };
-}
 
 // =============================================================================
 // WorktreeCoordinator Unit Tests
@@ -84,13 +57,13 @@ function createMockEventStore() {
 
 describe('WorktreeCoordinator', () => {
   let tempDir: string;
-  let mockEventStore: ReturnType<typeof createMockEventStore>;
+  let mockEventStore: MockEventStoreWithTracking;
   let coordinator: WorktreeCoordinator;
 
   beforeEach(async () => {
     tempDir = await createTempGitRepo();
-    mockEventStore = createMockEventStore();
-    coordinator = createWorktreeCoordinator(mockEventStore as any, {
+    mockEventStore = createMockEventStore({ trackEvents: true });
+    coordinator = createWorktreeCoordinator(mockEventStore, {
       isolationMode: 'lazy',
       branchPrefix: 'test/',
       autoCommitOnRelease: false,
@@ -229,7 +202,7 @@ describe('WorktreeCoordinator', () => {
 
   describe('acquire - isolation modes', () => {
     it('should always use main directory in never mode', async () => {
-      const neverCoordinator = createWorktreeCoordinator(mockEventStore as any, {
+      const neverCoordinator = createWorktreeCoordinator(mockEventStore, {
         isolationMode: 'never',
       });
 
@@ -245,7 +218,7 @@ describe('WorktreeCoordinator', () => {
     });
 
     it('should always isolate in always mode', async () => {
-      const alwaysCoordinator = createWorktreeCoordinator(mockEventStore as any, {
+      const alwaysCoordinator = createWorktreeCoordinator(mockEventStore, {
         isolationMode: 'always',
       });
 
@@ -310,7 +283,7 @@ describe('WorktreeCoordinator', () => {
     });
 
     it('should auto-commit changes if configured', async () => {
-      const autoCommitCoordinator = createWorktreeCoordinator(mockEventStore as any, {
+      const autoCommitCoordinator = createWorktreeCoordinator(mockEventStore, {
         isolationMode: 'always',
         autoCommitOnRelease: true,
         deleteWorktreeOnRelease: true,
@@ -392,13 +365,13 @@ describe('WorktreeCoordinator', () => {
 
 describe('WorkingDirectory', () => {
   let tempDir: string;
-  let mockEventStore: ReturnType<typeof createMockEventStore>;
+  let mockEventStore: MockEventStoreWithTracking;
   let coordinator: WorktreeCoordinator;
 
   beforeEach(async () => {
     tempDir = await createTempGitRepo();
-    mockEventStore = createMockEventStore();
-    coordinator = createWorktreeCoordinator(mockEventStore as any, {
+    mockEventStore = createMockEventStore({ trackEvents: true });
+    coordinator = createWorktreeCoordinator(mockEventStore, {
       isolationMode: 'lazy',
     });
   });
@@ -499,13 +472,13 @@ describe('WorkingDirectory', () => {
 
 describe('Worktree Event Recording', () => {
   let tempDir: string;
-  let mockEventStore: ReturnType<typeof createMockEventStore>;
+  let mockEventStore: MockEventStoreWithTracking;
   let coordinator: WorktreeCoordinator;
 
   beforeEach(async () => {
     tempDir = await createTempGitRepo();
-    mockEventStore = createMockEventStore();
-    coordinator = createWorktreeCoordinator(mockEventStore as any, {
+    mockEventStore = createMockEventStore({ trackEvents: true });
+    coordinator = createWorktreeCoordinator(mockEventStore, {
       isolationMode: 'lazy',
       autoCommitOnRelease: true,
     });

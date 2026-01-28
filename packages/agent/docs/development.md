@@ -59,7 +59,70 @@ src/
 ├── events/__tests__/           # Event store tests
 ├── providers/__tests__/        # Provider tests
 ├── orchestrator/__tests__/     # Orchestrator tests
-└── __integration__/            # Integration tests
+├── __integration__/            # Integration tests
+│   ├── provider-switching/     # Provider switch scenarios
+│   ├── forking/                # Fork operation tests
+│   └── edge-cases/             # Combined edge cases
+└── __fixtures__/               # Shared test utilities
+    ├── mocks/                  # Type-safe mock factories
+    └── events/                 # Event fixture factories
+```
+
+### Using Test Fixtures
+
+The `__fixtures__/` directory provides type-safe mock factories to eliminate `as any` casts:
+
+```typescript
+import { describe, it, expect } from 'vitest';
+import {
+  // Mock factories
+  createMockEventStore,
+  createMockStats,
+  createMockDirent,
+  createFsError,
+
+  // Event fixtures
+  createSessionStartEvent,
+  createUserMessageEvent,
+  createToolUseChain,
+} from '../__fixtures__/index.js';
+
+describe('MyFeature', () => {
+  it('uses typed mocks', async () => {
+    // EventStore mock with event tracking
+    const mockStore = createMockEventStore({ trackEvents: true });
+
+    // Access tracked events for assertions
+    await someOperation(mockStore);
+    const event = mockStore.events.find(e => e.type === 'worktree.acquired');
+    expect(event).toBeDefined();
+  });
+
+  it('uses fs mocks', () => {
+    // Typed fs.Stats mock
+    vi.mocked(fs.stat).mockResolvedValue(createMockStats({ size: 1024 }));
+
+    // Typed fs.Dirent mock
+    vi.mocked(fs.readdir).mockResolvedValue([
+      createMockDirent('file.ts'),
+      createMockDirent('src', { isDirectory: true }),
+    ]);
+
+    // Typed error mock
+    vi.mocked(fs.access).mockRejectedValue(createFsError('ENOENT'));
+  });
+
+  it('uses event fixtures', () => {
+    // Create a complete tool use conversation chain
+    const events = createToolUseChain({
+      userContent: 'Read a file',
+      toolName: 'ReadFile',
+      toolResult: 'File contents',
+    });
+
+    expect(events).toHaveLength(5);
+  });
+});
 ```
 
 ### Writing Tests
@@ -147,7 +210,20 @@ See `adding-tools.md` for the complete checklist.
 
 ### Adding a Provider
 
-1. Create `src/providers/<name>.ts` implementing Provider interface
-2. Add to `src/providers/factory.ts` switch
-3. Add model IDs to `src/providers/models.ts`
-4. Add token normalization in `src/providers/token-normalizer.ts`
+For complex providers, use the modular directory structure:
+
+1. Create `src/providers/<name>/` directory:
+   ```
+   providers/<name>/
+   ├── index.ts           # Public exports
+   ├── <name>-provider.ts # Core provider class
+   ├── message-converter.ts # Message format conversion
+   └── types.ts           # Provider-specific types
+   ```
+2. Implement the `Provider` interface in `<name>-provider.ts`
+3. Export via `index.ts` with factory function
+4. Add to `src/providers/factory.ts` switch
+5. Add model IDs to `src/providers/models.ts`
+6. Add token normalization in `src/providers/token-normalizer.ts`
+
+For simpler providers, a single file may suffice (see `openai.ts`).

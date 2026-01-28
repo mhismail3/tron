@@ -42,7 +42,11 @@ The agent package (`@tron/agent`) is the core backend for Tron. It handles:
 ```
 src/
 ├── agent/           # TronAgent, turn execution
-├── providers/       # Anthropic, OpenAI, Google LLM adapters
+├── providers/       # LLM adapters (modular directories)
+│   ├── anthropic/   # Anthropic Claude provider
+│   ├── google/      # Google Gemini provider
+│   ├── base/        # Shared provider infrastructure
+│   └── *.ts         # OpenAI, factory, models, etc.
 ├── tools/           # read, write, edit, bash, grep, find, subagent
 │   ├── fs/          # Filesystem tools
 │   ├── browser/     # Browser automation
@@ -55,7 +59,11 @@ src/
 ├── gateway/         # WebSocket server, RPC handlers
 ├── hooks/           # PreToolUse, PostToolUse hooks
 ├── skills/          # Skill loader, registry
-└── rpc/             # RPC protocol, handlers, schemas
+├── session/         # Session management, worktree isolation
+│   └── worktree/    # Worktree module (isolation, lifecycle, merge)
+├── di/              # Dependency injection infrastructure
+├── rpc/             # RPC protocol, handlers, schemas
+└── __fixtures__/    # Test utilities (mock factories, event fixtures)
 ```
 
 ## Event Sourcing
@@ -174,13 +182,35 @@ Hierarchical loading with multi-directory support:
 
 ## Providers
 
-| Provider | Models | File |
-|----------|--------|------|
-| Anthropic | Claude 3.5/4 variants | `providers/anthropic.ts` |
+Providers are organized into modular directories for maintainability:
+
+| Provider | Models | Directory |
+|----------|--------|-----------|
+| Anthropic | Claude 3.5/4 variants | `providers/anthropic/` |
+| Google | Gemini 2.x | `providers/google/` |
 | OpenAI | GPT-4o, o1, o3 | `providers/openai.ts` |
-| Google | Gemini 2.x | `providers/google.ts` |
+
+Each modular provider directory contains:
+- `index.ts` - Public exports
+- `*-provider.ts` - Core provider class
+- `message-converter.ts` - Message format conversion
+- `types.ts` - Provider-specific types
 
 Token usage is normalized across providers via `token-normalizer.ts`.
+
+## Dependency Injection
+
+Settings are injected via the `SettingsProvider` interface rather than global access:
+
+```typescript
+import { getSettingsProvider } from '../di/index.js';
+
+// In factory functions
+const settings = getSettingsProvider();
+const apiConfig = settings.get('api');
+```
+
+This enables testing with mock settings and avoids global state issues.
 
 ## Design Decisions
 
