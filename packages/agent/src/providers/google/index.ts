@@ -37,3 +37,19 @@ export {
   convertTools,
   sanitizeSchemaForGemini,
 } from './message-converter.js';
+
+// Re-export auth utilities
+export {
+  shouldRefreshTokens,
+  ensureValidTokens,
+  ensureProjectId,
+  loadAuthMetadata,
+} from './auth.js';
+export type { TokenRefreshResult } from './auth.js';
+
+// Re-export stream handler utilities
+export {
+  parseSSEStream,
+  createStreamState,
+} from './stream-handler.js';
+export type { StreamState } from './stream-handler.js';

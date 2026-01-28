@@ -8,37 +8,32 @@
  * - Streaming responses
  * - Thinking mode support (thinkingLevel for Gemini 3, thinkingBudget for Gemini 2.5)
  * - Safety settings for agentic use
+ *
+ * Delegates to:
+ * - auth.ts: OAuth token management
+ * - stream-handler.ts: SSE parsing
+ * - message-converter.ts: Message format conversion
  */
 
 import type {
   AssistantMessage,
   Context,
   StreamEvent,
-  TextContent,
-  ThinkingContent,
-  ToolCall,
 } from '../../types/index.js';
-import { createLogger, categorizeError, LogErrorCategory } from '../../logging/index.js';
+import { createLogger } from '../../logging/index.js';
 import {
   withProviderRetry,
   type StreamRetryConfig,
-  mapGoogleStopReason,
 } from '../base/index.js';
 import {
-  refreshGoogleOAuthToken,
-  shouldRefreshGoogleTokens,
-  discoverGoogleProject,
   CLOUD_CODE_ASSIST_CONFIG,
   ANTIGRAVITY_CONFIG,
 } from '../../auth/google-oauth.js';
-import { saveProviderOAuthTokens, saveProviderAuth, getProviderAuthSync } from '../../auth/unified.js';
 import type {
   GoogleConfig,
   GoogleStreamOptions,
   GoogleProviderAuth,
   GoogleOAuthAuth,
-  GeminiStreamChunk,
-  SafetyRating,
 } from './types.js';
 import {
   GEMINI_MODELS,
@@ -46,6 +41,13 @@ import {
   isGemini3Model,
 } from './types.js';
 import { convertMessages, convertTools } from './message-converter.js';
+import {
+  loadAuthMetadata,
+  ensureValidTokens,
+  ensureProjectId,
+  shouldRefreshTokens,
+} from './auth.js';
+import { parseSSEStream, createStreamState } from './stream-handler.js';
 
 const logger = createLogger('google');
 
@@ -66,49 +68,18 @@ export class GoogleProvider {
     this.auth = config.auth;
 
     // For OAuth, ensure we have the correct endpoint and projectId from stored auth
-    // This handles the case where these values aren't passed through the config chain
     if (config.auth.type === 'oauth') {
-      let endpoint = config.auth.endpoint;
-      let projectId = config.auth.projectId;
+      this.auth = loadAuthMetadata(config.auth);
+      const oauthAuth = this.auth as GoogleOAuthAuth;
 
-      // If endpoint or projectId not in config, try to load from stored auth
-      if (!endpoint || !projectId) {
-        try {
-          const storedAuth = getProviderAuthSync('google');
-          if (!endpoint) {
-            endpoint = (storedAuth as GoogleOAuthAuth | null)?.endpoint;
-          }
-          if (!projectId) {
-            projectId = (storedAuth as GoogleOAuthAuth | null)?.projectId;
-          }
-          logger.debug('Loaded auth metadata from stored auth', { endpoint, projectId });
-        } catch (e) {
-          const structured = categorizeError(e, { operation: 'loadAuthMetadata' });
-          logger.debug('Could not load auth metadata from stored auth', {
-            code: structured.code,
-            category: LogErrorCategory.PROVIDER_AUTH,
-          });
-        }
-      }
-
-      // Default to cloud-code-assist if still not set
-      endpoint = endpoint ?? 'cloud-code-assist';
-
-      // Update the auth with the resolved values
-      this.auth = {
-        ...config.auth,
-        endpoint,
-        projectId,
-      };
-
-      this.baseURL = endpoint === 'antigravity'
+      this.baseURL = oauthAuth.endpoint === 'antigravity'
         ? ANTIGRAVITY_CONFIG.apiEndpoint
         : CLOUD_CODE_ASSIST_CONFIG.apiEndpoint;
 
       logger.info('Google provider initialized with OAuth', {
         model: config.model,
-        endpoint,
-        projectId: projectId ? `${projectId.slice(0, 10)}...` : 'none',
+        endpoint: oauthAuth.endpoint,
+        projectId: oauthAuth.projectId ? `${oauthAuth.projectId.slice(0, 10)}...` : 'none',
         baseURL: this.baseURL,
       });
     } else {
@@ -130,108 +101,9 @@ export class GoogleProvider {
     return this.config.model;
   }
 
-  /**
-   * Check if OAuth tokens need refresh
-   */
-  private shouldRefreshTokens(): boolean {
-    if (this.auth.type !== 'oauth') return false;
-    return shouldRefreshGoogleTokens({
-      accessToken: this.auth.accessToken,
-      refreshToken: this.auth.refreshToken,
-      expiresAt: this.auth.expiresAt,
-    });
-  }
-
-  /**
-   * Ensure we have a valid project ID for OAuth requests
-   *
-   * This calls the loadCodeAssist API to discover the user's project ID,
-   * which is REQUIRED for the x-goog-user-project header.
-   */
-  private async ensureProjectId(): Promise<void> {
-    if (this.auth.type !== 'oauth') return;
-    if (this.auth.projectId) return; // Already have projectId
-
-    const endpoint = this.auth.endpoint ?? 'cloud-code-assist';
-    logger.info('Discovering Google project ID for OAuth', { endpoint });
-
-    try {
-      const projectId = await discoverGoogleProject(this.auth.accessToken, endpoint);
-
-      if (projectId) {
-        // Update local state
-        this.auth = {
-          ...this.auth,
-          projectId,
-        };
-
-        // Persist the discovered projectId
-        const storedAuth = getProviderAuthSync('google');
-        if (storedAuth) {
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          await saveProviderAuth('google', {
-            ...storedAuth,
-            projectId,
-          } as any);
-        }
-
-        logger.info('Google project ID discovered and saved', {
-          projectId: projectId.slice(0, 15) + '...',
-        });
-      } else {
-        logger.warn('Could not discover Google project ID - requests may fail');
-      }
-    } catch (error) {
-      const structured = categorizeError(error, { endpoint, operation: 'discoverGoogleProject' });
-      logger.error('Failed to discover Google project ID', {
-        code: structured.code,
-        category: LogErrorCategory.PROVIDER_API,
-        error: structured.message,
-        retryable: structured.retryable,
-      });
-      // Don't throw - let the request proceed and potentially fail with a clearer error
-    }
-  }
-
-  /**
-   * Refresh OAuth tokens if needed
-   */
-  private async ensureValidTokens(): Promise<void> {
-    if (this.auth.type !== 'oauth') return;
-    if (!this.shouldRefreshTokens()) return;
-
-    logger.info('Refreshing Google OAuth tokens');
-
-    const endpoint = this.auth.endpoint ?? 'cloud-code-assist';
-    try {
-      const projectId = this.auth.projectId; // Preserve existing projectId
-      const newTokens = await refreshGoogleOAuthToken(this.auth.refreshToken, endpoint);
-
-      // Update local state - PRESERVE projectId
-      this.auth = {
-        type: 'oauth',
-        accessToken: newTokens.accessToken,
-        refreshToken: newTokens.refreshToken,
-        expiresAt: newTokens.expiresAt,
-        endpoint,
-        projectId, // Keep the existing projectId
-      };
-
-      // Persist refreshed tokens
-      await saveProviderOAuthTokens('google', newTokens);
-
-      logger.info('Google OAuth tokens refreshed successfully');
-    } catch (error) {
-      const structured = categorizeError(error, { endpoint, operation: 'refreshGoogleOAuthToken' });
-      logger.error('Failed to refresh Google OAuth tokens', {
-        code: structured.code,
-        category: LogErrorCategory.PROVIDER_AUTH,
-        error: structured.message,
-        retryable: structured.retryable,
-      });
-      throw new Error(`Failed to refresh Google OAuth tokens: ${structured.message}`);
-    }
-  }
+  // ===========================================================================
+  // URL and Header Helpers
+  // ===========================================================================
 
   /**
    * Get the API URL for a request
@@ -246,7 +118,8 @@ export class GoogleProvider {
     const model = this.config.model;
 
     if (this.auth.type === 'oauth') {
-      const endpoint = this.auth.endpoint ?? 'cloud-code-assist';
+      const oauthAuth = this.auth as GoogleOAuthAuth;
+      const endpoint = oauthAuth.endpoint ?? 'cloud-code-assist';
       const apiEndpoint = endpoint === 'antigravity'
         ? ANTIGRAVITY_CONFIG.apiEndpoint
         : CLOUD_CODE_ASSIST_CONFIG.apiEndpoint;
@@ -276,8 +149,9 @@ export class GoogleProvider {
     };
 
     if (this.auth.type === 'oauth') {
-      headers['Authorization'] = `Bearer ${this.auth.accessToken}`;
-      const endpoint = this.auth.endpoint ?? 'cloud-code-assist';
+      const oauthAuth = this.auth as GoogleOAuthAuth;
+      headers['Authorization'] = `Bearer ${oauthAuth.accessToken}`;
+      const endpoint = oauthAuth.endpoint ?? 'cloud-code-assist';
 
       if (endpoint === 'antigravity') {
         // Antigravity-specific headers - do NOT include x-goog-user-project
@@ -294,8 +168,8 @@ export class GoogleProvider {
         headers['User-Agent'] = 'tron-ai-agent/1.0.0';
         headers['X-Goog-Api-Client'] = 'gl-node/22.0.0';
         // x-goog-user-project is REQUIRED for Cloud Code Assist OAuth
-        if (this.auth.projectId) {
-          headers['x-goog-user-project'] = this.auth.projectId;
+        if (oauthAuth.projectId) {
+          headers['x-goog-user-project'] = oauthAuth.projectId;
         }
       }
     } else {
@@ -309,25 +183,20 @@ export class GoogleProvider {
 
   /**
    * Map standard Gemini model names to Antigravity model names
-   *
-   * Antigravity uses different model identifiers:
-   * - gemini-3-pro-high (high thinking)
-   * - gemini-3-pro-low (low thinking)
-   * - claude-sonnet-4-5
-   * - claude-sonnet-4-5-thinking
-   * - claude-opus-4-5-thinking
    */
   private mapToAntigravityModel(model: string): string {
-    // Map standard Gemini model names to Antigravity equivalents
     const modelMap: Record<string, string> = {
       'gemini-3-pro-preview': 'gemini-3-pro-high',
       'gemini-3-flash-preview': 'gemini-3-pro-low',
       'gemini-2.5-pro': 'gemini-2.5-pro',
       'gemini-2.5-flash': 'gemini-2.5-flash',
     };
-
     return modelMap[model] || model;
   }
+
+  // ===========================================================================
+  // Public API
+  // ===========================================================================
 
   /**
    * Non-streaming completion
@@ -358,11 +227,21 @@ export class GoogleProvider {
     context: Context,
     options: GoogleStreamOptions = {}
   ): AsyncGenerator<StreamEvent> {
-    // Ensure OAuth tokens are valid before starting
-    await this.ensureValidTokens();
+    // Ensure OAuth tokens are valid before starting (delegated to auth.ts)
+    if (this.auth.type === 'oauth') {
+      if (shouldRefreshTokens(this.auth)) {
+        const result = await ensureValidTokens(this.auth as GoogleOAuthAuth);
+        if (result.refreshed) {
+          this.auth = result.auth;
+        }
+      }
 
-    // Ensure we have a valid project ID for OAuth (discovered via loadCodeAssist API)
-    await this.ensureProjectId();
+      // Ensure we have a valid project ID (delegated to auth.ts)
+      const oauthAuth = this.auth as GoogleOAuthAuth;
+      if (!oauthAuth.projectId) {
+        this.auth = await ensureProjectId(oauthAuth);
+      }
+    }
 
     // If retry is disabled, stream directly
     if (this.retryConfig === false) {
@@ -376,6 +255,10 @@ export class GoogleProvider {
       this.retryConfig
     );
   }
+
+  // ===========================================================================
+  // Internal Streaming
+  // ===========================================================================
 
   /**
    * Internal stream implementation (called by retry wrapper)
@@ -409,105 +292,8 @@ export class GoogleProvider {
     yield { type: 'start' };
 
     try {
-      // Convert messages to Gemini format
-      const contents = convertMessages(context);
-      const tools = context.tools ? convertTools(context.tools) : undefined;
-
-      // Build generation config
-      const generationConfig: Record<string, unknown> = {
-        maxOutputTokens: maxTokens,
-        ...(temperature !== undefined && { temperature }),
-        ...(options.topP !== undefined && { topP: options.topP }),
-        ...(options.topK !== undefined && { topK: options.topK }),
-        ...(options.stopSequences?.length && { stopSequences: options.stopSequences }),
-      };
-
-      // Add thinking config based on model version
-      const modelInfo = GEMINI_MODELS[model];
-      const thinkingLevel = options.thinkingLevel ?? this.config.thinkingLevel ?? modelInfo?.defaultThinkingLevel;
-      const thinkingBudget = options.thinkingBudget ?? this.config.thinkingBudget;
-
-      if (isGemini3 && thinkingLevel) {
-        // Gemini 3 uses thinkingLevel (discrete levels)
-        // includeThoughts: true enables thought summaries in the response
-        (generationConfig as Record<string, unknown>).thinkingConfig = {
-          thinkingLevel: thinkingLevel.toUpperCase(), // API expects MINIMAL, LOW, MEDIUM, HIGH
-          includeThoughts: true,
-        };
-      } else if (!isGemini3 && thinkingBudget !== undefined) {
-        // Gemini 2.5 uses thinkingBudget (token count 0-32768)
-        (generationConfig as Record<string, unknown>).thinkingConfig = {
-          thinkingBudget,
-          includeThoughts: true,
-        };
-      }
-
-      // Build request body - format differs between OAuth endpoints and API key
-      let body: Record<string, unknown>;
-
-      if (this.auth.type === 'oauth') {
-        const endpoint = this.auth.endpoint ?? 'cloud-code-assist';
-
-        // Build the inner request object (common Gemini format)
-        const innerRequest: Record<string, unknown> = {
-          contents,
-          generationConfig,
-          // Safety settings - default to OFF for agentic use
-          safetySettings: this.config.safetySettings ?? DEFAULT_SAFETY_SETTINGS,
-        };
-
-        // Add system instruction if provided
-        if (context.systemPrompt) {
-          innerRequest.systemInstruction = {
-            parts: [{ text: context.systemPrompt }],
-          };
-        }
-
-        if (tools && tools.length > 0) {
-          innerRequest.tools = tools;
-        }
-
-        if (endpoint === 'antigravity') {
-          // Antigravity uses wrapped request format with project/model at top level
-          // Model names differ from standard Gemini API:
-          //   gemini-3-pro-preview -> gemini-3-pro-high
-          //   gemini-3-flash-preview -> gemini-3-pro-low
-          const antigravityModel = this.mapToAntigravityModel(model);
-
-          body = {
-            project: this.auth.projectId || '',
-            model: antigravityModel,
-            request: innerRequest,
-            requestType: 'agent',
-            userAgent: 'antigravity',
-            requestId: `agent-${crypto.randomUUID()}`,
-          };
-        } else {
-          // Cloud Code Assist uses standard format with model in body
-          body = {
-            ...innerRequest,
-            model: `models/${model}`,
-          };
-        }
-      } else {
-        // API key - standard Gemini API format
-        body = {
-          contents,
-          generationConfig,
-          safetySettings: this.config.safetySettings ?? DEFAULT_SAFETY_SETTINGS,
-        };
-
-        // Add system instruction if provided
-        if (context.systemPrompt) {
-          body.systemInstruction = {
-            parts: [{ text: context.systemPrompt }],
-          };
-        }
-
-        if (tools && tools.length > 0) {
-          body.tools = tools;
-        }
-      }
+      // Build request body
+      const body = this.buildRequestBody(context, options, maxTokens, temperature, isGemini3);
 
       // Make streaming request
       const url = this.getApiUrl('streamGenerateContent');
@@ -516,7 +302,7 @@ export class GoogleProvider {
       logger.debug('Making Gemini API request', {
         url,
         authType: this.auth.type,
-        endpoint: this.auth.type === 'oauth' ? this.auth.endpoint : 'api-key',
+        endpoint: this.auth.type === 'oauth' ? (this.auth as GoogleOAuthAuth).endpoint : 'api-key',
       });
 
       const response = await fetch(url, {
@@ -526,253 +312,19 @@ export class GoogleProvider {
       });
 
       if (!response.ok) {
-        const errorText = await response.text();
-        // Trace log full error response for debugging
-        logger.trace('Gemini API error response - full details', {
-          statusCode: response.status,
-          statusText: response.statusText,
-          errorBody: errorText,
-          requestUrl: url,
-          authType: this.auth.type,
-          endpoint: this.auth.type === 'oauth' ? this.auth.endpoint : 'api-key',
-          requestContext: {
-            model: this.config.model,
-            messageCount: context.messages.length,
-            hasTools: !!context.tools?.length,
-          },
-        });
-
-        // Parse error message for better user feedback
-        let errorMessage = `Gemini API error: ${response.status}`;
-        if (response.status === 404) {
-          errorMessage += ` - Model "${model}" not found at endpoint. `;
-          if (this.auth.type === 'oauth') {
-            errorMessage += `Try a different model or re-authenticate with 'antigravity' endpoint for broader model access.`;
-          }
-        } else if (response.status === 401 || response.status === 403) {
-          errorMessage += ' - Authentication failed. Please re-authenticate with Google OAuth.';
-        } else {
-          // Try to parse JSON error
-          try {
-            const errorJson = JSON.parse(errorText);
-            if (errorJson.error?.message) {
-              errorMessage += ` - ${errorJson.error.message}`;
-            } else {
-              errorMessage += ` - ${errorText.slice(0, 200)}`;
-            }
-          } catch {
-            // Not JSON, use raw text (truncated)
-            errorMessage += ` - ${errorText.slice(0, 200)}`;
-          }
-        }
-        throw new Error(errorMessage);
+        yield* this.handleErrorResponse(response, context);
+        return;
       }
 
-      // Process SSE stream
+      // Process SSE stream (delegated to stream-handler.ts)
       const reader = response.body?.getReader();
       if (!reader) {
         throw new Error('No response body');
       }
 
-      const decoder = new TextDecoder();
-      let buffer = '';
-      let accumulatedText = '';
-      let accumulatedThinking = '';
-      const toolCalls: Array<{ id: string; name: string; args: Record<string, unknown>; thoughtSignature?: string }> = [];
-      let inputTokens = 0;
-      let outputTokens = 0;
-      let textStarted = false;
-      let thinkingStarted = false;
-      let toolCallIndex = 0;
-      // Generate a unique prefix for this streaming response to avoid ID collisions across turns
-      // Other providers (Anthropic, OpenAI) return globally unique IDs from the API
-      // But Gemini doesn't provide IDs, so we must generate them ourselves
-      const uniquePrefix = Math.random().toString(36).substring(2, 10);
+      const state = createStreamState();
+      yield* parseSSEStream(reader, state);
 
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-
-        buffer += decoder.decode(value, { stream: true });
-
-        // Process complete lines
-        const lines = buffer.split('\n');
-        buffer = lines.pop() || '';
-
-        for (const line of lines) {
-          if (!line.startsWith('data: ')) continue;
-
-          const data = line.slice(6);
-          if (!data.trim()) continue;
-
-          try {
-            const chunk = JSON.parse(data) as GeminiStreamChunk;
-
-            // Check for errors
-            if (chunk.error) {
-              throw new Error(`Gemini error: ${chunk.error.message}`);
-            }
-
-            // Process usage
-            if (chunk.usageMetadata) {
-              inputTokens = chunk.usageMetadata.promptTokenCount;
-              outputTokens = chunk.usageMetadata.candidatesTokenCount;
-            }
-
-            const candidate = chunk.candidates?.[0];
-            if (!candidate?.content?.parts) {
-              // Handle finish reason without content (e.g., SAFETY block)
-              if (candidate?.finishReason === 'SAFETY') {
-                const safetyRatings = candidate.safetyRatings ?? [];
-                const blockedCategories = safetyRatings
-                  .filter((r: SafetyRating) => r.probability === 'HIGH' || r.probability === 'MEDIUM')
-                  .map((r: SafetyRating) => r.category);
-
-                yield {
-                  type: 'safety_block',
-                  blockedCategories,
-                  error: new Error('Response blocked by safety filters'),
-                } as StreamEvent;
-                continue;
-              }
-              continue;
-            }
-
-            for (const part of candidate.content.parts) {
-              // Handle thinking content (thought: true)
-              if ('text' in part && part.thought === true) {
-                if (!thinkingStarted) {
-                  thinkingStarted = true;
-                  yield { type: 'thinking_start' };
-                }
-                accumulatedThinking += part.text;
-                yield { type: 'thinking_delta', delta: part.text };
-                continue;
-              }
-
-              // Handle regular text content
-              if ('text' in part && !part.thought) {
-                // End thinking if we were in thinking mode
-                if (thinkingStarted) {
-                  yield { type: 'thinking_end', thinking: accumulatedThinking };
-                  thinkingStarted = false;
-                }
-
-                if (!textStarted) {
-                  textStarted = true;
-                  yield { type: 'text_start' };
-                }
-                accumulatedText += part.text;
-                yield { type: 'text_delta', delta: part.text };
-              }
-
-              // Handle function calls
-              if ('functionCall' in part) {
-                const fc = part.functionCall;
-                const id = `call_${uniquePrefix}_${toolCallIndex++}`;
-                // thoughtSignature is at the part level, not inside functionCall
-                const thoughtSig = (part as { thoughtSignature?: string }).thoughtSignature;
-
-                yield {
-                  type: 'toolcall_start',
-                  toolCallId: id,
-                  name: fc.name,
-                };
-
-                yield {
-                  type: 'toolcall_delta',
-                  toolCallId: id,
-                  argumentsDelta: JSON.stringify(fc.args),
-                };
-
-                toolCalls.push({
-                  id,
-                  name: fc.name,
-                  args: fc.args,
-                  // Capture thoughtSignature for Gemini 3 multi-turn function calling
-                  thoughtSignature: thoughtSig,
-                });
-
-                const toolCall: ToolCall = {
-                  type: 'tool_use',
-                  id,
-                  name: fc.name,
-                  arguments: fc.args,
-                  // Include thoughtSignature so it's preserved in events
-                  thoughtSignature: thoughtSig,
-                };
-                yield { type: 'toolcall_end', toolCall };
-              }
-            }
-
-            // Handle finish
-            if (candidate.finishReason) {
-              // End thinking if still active
-              if (thinkingStarted) {
-                yield { type: 'thinking_end', thinking: accumulatedThinking };
-                thinkingStarted = false;
-              }
-
-              // Handle SAFETY finish reason
-              if (candidate.finishReason === 'SAFETY') {
-                const safetyRatings = candidate.safetyRatings ?? [];
-                const blockedCategories = safetyRatings
-                  .filter((r: SafetyRating) => r.probability === 'HIGH' || r.probability === 'MEDIUM')
-                  .map((r: SafetyRating) => r.category);
-
-                yield {
-                  type: 'safety_block',
-                  blockedCategories,
-                  error: new Error('Response blocked by safety filters'),
-                } as StreamEvent;
-                continue;
-              }
-
-              // Emit text_end if we had text
-              if (textStarted) {
-                yield { type: 'text_end', text: accumulatedText };
-              }
-
-              // Build final message - include thinking content if accumulated
-              const content: (TextContent | ThinkingContent | ToolCall)[] = [];
-              if (accumulatedThinking) {
-                content.push({ type: 'thinking', thinking: accumulatedThinking });
-              }
-              if (accumulatedText) {
-                content.push({ type: 'text', text: accumulatedText });
-              }
-              for (const tc of toolCalls) {
-                content.push({
-                  type: 'tool_use',
-                  id: tc.id,
-                  name: tc.name,
-                  arguments: tc.args,
-                  // Preserve thought_signature for Gemini 3 multi-turn conversations
-                  ...(tc.thoughtSignature && { thoughtSignature: tc.thoughtSignature }),
-                });
-              }
-
-              const message: AssistantMessage = {
-                role: 'assistant',
-                content,
-                usage: { inputTokens, outputTokens, providerType: 'google' as const },
-                stopReason: mapGoogleStopReason(candidate.finishReason),
-              };
-
-              yield {
-                type: 'done',
-                message,
-                stopReason: candidate.finishReason,
-              };
-            }
-          } catch (e) {
-            if (e instanceof Error && e.message.startsWith('Gemini')) {
-              throw e;
-            }
-            logger.warn('Failed to parse chunk', { data, error: e });
-          }
-        }
-      }
     } catch (error) {
       // Trace log full error details for debugging
       logger.trace('Gemini stream error - full details', {
@@ -791,5 +343,189 @@ export class GoogleProvider {
       logger.error('Stream error', error instanceof Error ? error : new Error(String(error)));
       yield { type: 'error', error: error instanceof Error ? error : new Error(String(error)) };
     }
+  }
+
+  // ===========================================================================
+  // Request Building
+  // ===========================================================================
+
+  /**
+   * Build the request body for Gemini API
+   */
+  private buildRequestBody(
+    context: Context,
+    options: GoogleStreamOptions,
+    maxTokens: number,
+    temperature: number | undefined,
+    isGemini3: boolean
+  ): Record<string, unknown> {
+    const model = this.config.model;
+
+    // Convert messages to Gemini format (delegated to message-converter.ts)
+    const contents = convertMessages(context);
+    const tools = context.tools ? convertTools(context.tools) : undefined;
+
+    // Build generation config
+    const generationConfig: Record<string, unknown> = {
+      maxOutputTokens: maxTokens,
+      ...(temperature !== undefined && { temperature }),
+      ...(options.topP !== undefined && { topP: options.topP }),
+      ...(options.topK !== undefined && { topK: options.topK }),
+      ...(options.stopSequences?.length && { stopSequences: options.stopSequences }),
+    };
+
+    // Add thinking config based on model version
+    const modelInfo = GEMINI_MODELS[model];
+    const thinkingLevel = options.thinkingLevel ?? this.config.thinkingLevel ?? modelInfo?.defaultThinkingLevel;
+    const thinkingBudget = options.thinkingBudget ?? this.config.thinkingBudget;
+
+    if (isGemini3 && thinkingLevel) {
+      generationConfig.thinkingConfig = {
+        thinkingLevel: thinkingLevel.toUpperCase(),
+        includeThoughts: true,
+      };
+    } else if (!isGemini3 && thinkingBudget !== undefined) {
+      generationConfig.thinkingConfig = {
+        thinkingBudget,
+        includeThoughts: true,
+      };
+    }
+
+    // Build request body - format differs between OAuth endpoints and API key
+    if (this.auth.type === 'oauth') {
+      return this.buildOAuthRequestBody(context, contents, generationConfig, tools, model);
+    } else {
+      return this.buildApiKeyRequestBody(context, contents, generationConfig, tools);
+    }
+  }
+
+  /**
+   * Build request body for OAuth endpoints
+   */
+  private buildOAuthRequestBody(
+    context: Context,
+    contents: ReturnType<typeof convertMessages>,
+    generationConfig: Record<string, unknown>,
+    tools: ReturnType<typeof convertTools> | undefined,
+    model: string
+  ): Record<string, unknown> {
+    const oauthAuth = this.auth as GoogleOAuthAuth;
+    const endpoint = oauthAuth.endpoint ?? 'cloud-code-assist';
+
+    // Build the inner request object (common Gemini format)
+    const innerRequest: Record<string, unknown> = {
+      contents,
+      generationConfig,
+      safetySettings: this.config.safetySettings ?? DEFAULT_SAFETY_SETTINGS,
+    };
+
+    if (context.systemPrompt) {
+      innerRequest.systemInstruction = {
+        parts: [{ text: context.systemPrompt }],
+      };
+    }
+
+    if (tools && tools.length > 0) {
+      innerRequest.tools = tools;
+    }
+
+    if (endpoint === 'antigravity') {
+      const antigravityModel = this.mapToAntigravityModel(model);
+      return {
+        project: oauthAuth.projectId || '',
+        model: antigravityModel,
+        request: innerRequest,
+        requestType: 'agent',
+        userAgent: 'antigravity',
+        requestId: `agent-${crypto.randomUUID()}`,
+      };
+    } else {
+      return {
+        ...innerRequest,
+        model: `models/${model}`,
+      };
+    }
+  }
+
+  /**
+   * Build request body for API key endpoint
+   */
+  private buildApiKeyRequestBody(
+    context: Context,
+    contents: ReturnType<typeof convertMessages>,
+    generationConfig: Record<string, unknown>,
+    tools: ReturnType<typeof convertTools> | undefined
+  ): Record<string, unknown> {
+    const body: Record<string, unknown> = {
+      contents,
+      generationConfig,
+      safetySettings: this.config.safetySettings ?? DEFAULT_SAFETY_SETTINGS,
+    };
+
+    if (context.systemPrompt) {
+      body.systemInstruction = {
+        parts: [{ text: context.systemPrompt }],
+      };
+    }
+
+    if (tools && tools.length > 0) {
+      body.tools = tools;
+    }
+
+    return body;
+  }
+
+  // ===========================================================================
+  // Error Handling
+  // ===========================================================================
+
+  /**
+   * Handle error response from API
+   */
+  private async *handleErrorResponse(
+    response: Response,
+    context: Context
+  ): AsyncGenerator<StreamEvent> {
+    const model = this.config.model;
+    const errorText = await response.text();
+
+    // Trace log full error response for debugging
+    logger.trace('Gemini API error response - full details', {
+      statusCode: response.status,
+      statusText: response.statusText,
+      errorBody: errorText,
+      requestUrl: response.url,
+      authType: this.auth.type,
+      endpoint: this.auth.type === 'oauth' ? (this.auth as GoogleOAuthAuth).endpoint : 'api-key',
+      requestContext: {
+        model,
+        messageCount: context.messages.length,
+        hasTools: !!context.tools?.length,
+      },
+    });
+
+    // Parse error message for better user feedback
+    let errorMessage = `Gemini API error: ${response.status}`;
+    if (response.status === 404) {
+      errorMessage += ` - Model "${model}" not found at endpoint. `;
+      if (this.auth.type === 'oauth') {
+        errorMessage += `Try a different model or re-authenticate with 'antigravity' endpoint for broader model access.`;
+      }
+    } else if (response.status === 401 || response.status === 403) {
+      errorMessage += ' - Authentication failed. Please re-authenticate with Google OAuth.';
+    } else {
+      try {
+        const errorJson = JSON.parse(errorText);
+        if (errorJson.error?.message) {
+          errorMessage += ` - ${errorJson.error.message}`;
+        } else {
+          errorMessage += ` - ${errorText.slice(0, 200)}`;
+        }
+      } catch {
+        errorMessage += ` - ${errorText.slice(0, 200)}`;
+      }
+    }
+
+    throw new Error(errorMessage);
   }
 }
