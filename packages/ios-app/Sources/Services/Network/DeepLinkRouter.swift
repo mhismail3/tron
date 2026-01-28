@@ -53,17 +53,11 @@ final class DeepLinkRouter {
             return
         }
 
-        let scrollTarget: ScrollTarget?
-        if let toolCallId = notificationPayload["toolCallId"] as? String {
-            scrollTarget = .toolCall(id: toolCallId)
-        } else if let eventId = notificationPayload["eventId"] as? String {
-            scrollTarget = .event(id: eventId)
-        } else {
-            scrollTarget = nil
-        }
-
-        pendingIntent = .session(id: sessionId, scrollTo: scrollTarget)
-        TronLogger.shared.info("Deep link intent set: session=\(sessionId), scrollTo=\(String(describing: scrollTarget))", category: .notification)
+        // NOTE: Scroll-to-tool functionality is disabled for now due to complexity.
+        // When a notification is tapped, we just open the session normally.
+        // The toolCallId and eventId are ignored.
+        pendingIntent = .session(id: sessionId, scrollTo: nil)
+        TronLogger.shared.info("Deep link intent set: session=\(sessionId)", category: .notification)
     }
 
     // MARK: - URL Scheme Handling
@@ -110,8 +104,9 @@ final class DeepLinkRouter {
         }
     }
 
-    /// Handle session URL (tron://session/{sessionId}?tool=...&event=...)
+    /// Handle session URL (tron://session/{sessionId})
     /// The session ID is the first path component after the host.
+    /// NOTE: Scroll-to-tool functionality (via ?tool= or ?event= query params) is disabled for now.
     private func handleSessionURL(url: URL) -> Bool {
         // Path components include "/" as first element, then the actual path segments
         // e.g., tron://session/sess_123 has path="/sess_123", pathComponents=["/", "sess_123"]
@@ -122,17 +117,10 @@ final class DeepLinkRouter {
             return false
         }
 
-        let components = URLComponents(url: url, resolvingAgainstBaseURL: false)
-
-        var scrollTarget: ScrollTarget?
-        if let toolId = components?.queryItems?.first(where: { $0.name == "tool" })?.value {
-            scrollTarget = .toolCall(id: toolId)
-        } else if let eventId = components?.queryItems?.first(where: { $0.name == "event" })?.value {
-            scrollTarget = .event(id: eventId)
-        }
-
-        pendingIntent = .session(id: sessionId, scrollTo: scrollTarget)
-        TronLogger.shared.info("Deep link intent set: session=\(sessionId), scrollTo=\(String(describing: scrollTarget))", category: .notification)
+        // NOTE: Scroll-to-tool functionality is disabled for now due to complexity.
+        // Query params like ?tool= and ?event= are ignored.
+        pendingIntent = .session(id: sessionId, scrollTo: nil)
+        TronLogger.shared.info("Deep link intent set: session=\(sessionId)", category: .notification)
         return true
     }
 

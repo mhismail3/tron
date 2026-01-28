@@ -520,6 +520,12 @@ final class MockConnectionContext: ConnectionContext {
         lastCatchUpToolCalls = toolCalls
     }
 
+    var removeCatchingUpMessageCalled = false
+
+    func removeCatchingUpMessage() {
+        removeCatchingUpMessageCalled = true
+    }
+
     func showError(_ message: String) {
         showErrorAlertCalled = true
     }
