@@ -14,19 +14,15 @@ extension ChatView {
                     Image(systemName: "sidebar.leading")
                         .font(TronTypography.sans(size: TronTypography.sizeTitle, weight: .medium))
                         .foregroundStyle(.tronEmerald)
-                        .frame(width: 44, height: 44)
-                        .contentShape(Circle())
                 }
             } else {
-                // iPhone - show back button with expanded tap target
+                // iPhone - show back button
                 Button {
                     dismiss()
                 } label: {
                     Image(systemName: "chevron.left")
                         .font(TronTypography.button)
                         .foregroundStyle(.tronEmerald)
-                        .frame(width: 44, height: 44)
-                        .contentShape(Circle())
                 }
             }
         }
@@ -72,7 +68,7 @@ extension ChatView {
     @ToolbarContentBuilder
     var trailingToolbarItem: some ToolbarContent {
         ToolbarItem(placement: .topBarTrailing) {
-            HStack(spacing: 8) {
+            HStack(spacing: 16) {
                 // Browser button - only visible when browser session is active
                 if viewModel.hasBrowserSession {
                     Button {
@@ -81,8 +77,6 @@ extension ChatView {
                         Image(systemName: "globe")
                             .font(TronTypography.sans(size: TronTypography.sizeTitle, weight: .medium))
                             .foregroundStyle(.tronEmerald)
-                            .frame(width: 44, height: 44)
-                            .contentShape(Circle())
                     }
                 }
 
@@ -107,8 +101,6 @@ extension ChatView {
                     Image(systemName: "gearshape")
                         .font(TronTypography.sans(size: TronTypography.sizeTitle, weight: .medium))
                         .foregroundStyle(.tronEmerald)
-                        .frame(width: 44, height: 44)
-                        .contentShape(Circle())
                 }
             }
         }

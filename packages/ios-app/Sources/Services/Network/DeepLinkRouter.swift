@@ -71,25 +71,21 @@ final class DeepLinkRouter {
     /// Handle URL scheme (tron:// or tron-mobile://)
     /// - Parameter url: The URL to handle
     /// - Returns: true if the URL was handled, false otherwise
-    ///
-    /// URL Structure for custom schemes:
-    /// - `tron://settings` → host="settings", path=""
-    /// - `tron://session/sess_123` → host="session", path="/sess_123"
-    /// - `tron://session/sess_123?tool=abc` → host="session", path="/sess_123", query="tool=abc"
     @discardableResult
     func handle(url: URL) -> Bool {
         guard url.scheme == "tron" || url.scheme == "tron-mobile" else {
             return false
         }
 
-        // For custom URL schemes, the first segment is the host (not in pathComponents)
-        guard let host = url.host else {
+        let pathComponents = url.pathComponents.filter { $0 != "/" }
+
+        guard let firstPath = pathComponents.first else {
             return false
         }
 
-        switch host {
+        switch firstPath {
         case "session":
-            return handleSessionURL(url: url)
+            return handleSessionURL(url: url, pathComponents: pathComponents)
 
         case "settings":
             pendingIntent = .settings
@@ -102,21 +98,20 @@ final class DeepLinkRouter {
             return true
 
         default:
-            TronLogger.shared.warning("Unknown deep link path: \(host)", category: .notification)
+            TronLogger.shared.warning("Unknown deep link path: \(firstPath)", category: .notification)
             return false
         }
     }
 
     /// Handle session URL (tron://session/{sessionId}?tool=...&event=...)
-    private func handleSessionURL(url: URL) -> Bool {
-        // Session ID is the first path component after the host
-        let pathComponents = url.pathComponents.filter { $0 != "/" }
-        guard let sessionId = pathComponents.first else {
+    private func handleSessionURL(url: URL, pathComponents: [String]) -> Bool {
+        // Need at least "session" and the session ID
+        guard pathComponents.count >= 2 else {
             TronLogger.shared.warning("Session deep link missing sessionId", category: .notification)
             return false
         }
 
-        // Parse query parameters for scroll target
+        let sessionId = pathComponents[1]
         let components = URLComponents(url: url, resolvingAgainstBaseURL: false)
 
         var scrollTarget: ScrollTarget?

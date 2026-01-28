@@ -298,19 +298,9 @@ struct ContentView: View {
         let workingDir = session.workingDirectory
         Task {
             isValidatingWorkspace = true
-            let result = await manager.validateWorkspacePath(workingDir)
+            let pathExists = await manager.validateWorkspacePath(workingDir)
             isValidatingWorkspace = false
-            // Only mark as deleted if we confirmed the path doesn't exist
-            // Don't mark as deleted if we couldn't check (disconnected, etc.)
-            switch result {
-            case .exists:
-                workspaceDeletedForSession[id] = false
-            case .notFound:
-                workspaceDeletedForSession[id] = true
-            case .unknown:
-                // Can't determine - don't change the state, will retry when connected
-                break
-            }
+            workspaceDeletedForSession[id] = !pathExists
         }
     }
 
