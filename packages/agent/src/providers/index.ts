@@ -18,7 +18,9 @@ export {
   type OpenAIConfig,
   type OpenAIStreamOptions,
   type OpenAIModelId,
-} from './openai.js';
+  type ReasoningEffort,
+  type OpenAIOAuth,
+} from './openai/index.js';
 
 export {
   GoogleProvider,

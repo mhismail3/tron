@@ -4,8 +4,8 @@
  * Comprehensive tests for the OpenAI provider implementation including:
  * - Configuration and initialization
  * - Model registry
- * - Streaming interface
- * - Tool support
+ * - Streaming interface (text, tool calls, reasoning)
+ * - Reasoning/thinking event handling
  * - Error handling
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
@@ -13,10 +13,48 @@ import {
   OpenAIProvider,
   OPENAI_MODELS,
   type OpenAIConfig,
-} from '../openai.js';
+  type OpenAIOAuth,
+} from '../openai/index.js';
+import type { StreamEvent } from '../../types/index.js';
+
+// Create a valid mock OAuth config
+function createMockAuth(): OpenAIOAuth {
+  // Create a mock JWT token with required claims
+  const mockPayload = {
+    'https://api.openai.com/auth': {
+      chatgpt_account_id: 'test-account-123',
+    },
+    exp: Math.floor(Date.now() / 1000) + 3600, // 1 hour from now
+  };
+  const encodedPayload = Buffer.from(JSON.stringify(mockPayload)).toString('base64');
+  const mockToken = `header.${encodedPayload}.signature`;
+
+  return {
+    type: 'oauth',
+    accessToken: mockToken,
+    refreshToken: 'mock-refresh-token',
+    expiresAt: Date.now() + 3600000, // 1 hour from now
+  };
+}
+
+// Helper to create mock SSE stream
+function createMockStream(mockData: string[]) {
+  const encoder = new TextEncoder();
+  let dataIndex = 0;
+
+  return new ReadableStream({
+    pull(controller) {
+      if (dataIndex < mockData.length) {
+        controller.enqueue(encoder.encode(mockData[dataIndex]));
+        dataIndex++;
+      } else {
+        controller.close();
+      }
+    },
+  });
+}
 
 describe('OpenAI Provider', () => {
-  // Save original fetch
   const originalFetch = global.fetch;
 
   beforeEach(() => {
@@ -30,220 +68,533 @@ describe('OpenAI Provider', () => {
   describe('Configuration', () => {
     it('should accept valid configuration', () => {
       const config: OpenAIConfig = {
-        apiKey: 'sk-test-key',
-        model: 'gpt-4o',
+        model: 'gpt-5.2-codex',
+        auth: createMockAuth(),
       };
 
       const provider = new OpenAIProvider(config);
       expect(provider.id).toBe('openai');
-    });
-
-    it('should support custom base URL', () => {
-      const config: OpenAIConfig = {
-        apiKey: 'sk-test',
-        model: 'gpt-4o',
-        baseURL: 'https://custom.openai.azure.com',
-      };
-
-      const provider = new OpenAIProvider(config);
-      expect(provider).toBeDefined();
-    });
-
-    it('should support organization ID', () => {
-      const config: OpenAIConfig = {
-        apiKey: 'sk-test',
-        model: 'gpt-4o',
-        organization: 'org-123',
-      };
-
-      const provider = new OpenAIProvider(config);
-      expect(provider).toBeDefined();
     });
 
     it('should expose model property', () => {
       const provider = new OpenAIProvider({
-        apiKey: 'sk-test',
-        model: 'gpt-4o',
+        model: 'gpt-5.2-codex',
+        auth: createMockAuth(),
       });
 
-      expect(provider.model).toBe('gpt-4o');
+      expect(provider.model).toBe('gpt-5.2-codex');
     });
 
-    it('should support temperature setting', () => {
+    it('should support reasoning effort setting', () => {
       const provider = new OpenAIProvider({
-        apiKey: 'sk-test',
-        model: 'gpt-4o',
-        temperature: 0.7,
+        model: 'gpt-5.2-codex',
+        auth: createMockAuth(),
+        reasoningEffort: 'high',
       });
 
       expect(provider).toBeDefined();
     });
 
-    it('should support max tokens setting', () => {
+    it('should include summary parameter in reasoning config', async () => {
       const provider = new OpenAIProvider({
-        apiKey: 'sk-test',
-        model: 'gpt-4o',
-        maxTokens: 4096,
+        model: 'gpt-5.2-codex',
+        auth: createMockAuth(),
+        reasoningEffort: 'xhigh',
+        retry: false,
       });
 
-      expect(provider).toBeDefined();
+      const mockStreamData = [
+        'data: {"type":"response.completed","response":{"id":"resp-123","output":[],"usage":{"input_tokens":10,"output_tokens":5}}}\n\n',
+      ];
+
+      global.fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        body: createMockStream(mockStreamData),
+      });
+
+      const context = {
+        messages: [{ role: 'user' as const, content: 'Test' }],
+      };
+
+      for await (const _ of provider.stream(context)) {
+        // consume stream
+      }
+
+      // Verify the fetch call included reasoning with summary parameter
+      expect(global.fetch).toHaveBeenCalled();
+      const fetchCall = (global.fetch as any).mock.calls[0];
+      const requestBody = JSON.parse(fetchCall[1].body);
+
+      // The reasoning config MUST include summary: 'detailed' to get reasoning summaries
+      // Note: gpt-5.2-codex only supports 'detailed', not 'concise'
+      expect(requestBody.reasoning).toBeDefined();
+      expect(requestBody.reasoning.effort).toBe('xhigh');
+      expect(requestBody.reasoning.summary).toBe('detailed');
     });
   });
 
   describe('Model Registry', () => {
-    it('should define GPT-4o model', () => {
-      expect(OPENAI_MODELS['gpt-4o']).toBeDefined();
-      expect(OPENAI_MODELS['gpt-4o'].contextWindow).toBe(128000);
+    it('should define GPT-5.2 Codex model', () => {
+      expect(OPENAI_MODELS['gpt-5.2-codex']).toBeDefined();
+      expect(OPENAI_MODELS['gpt-5.2-codex'].contextWindow).toBe(192000);
     });
 
-    it('should define GPT-4 Turbo model', () => {
-      expect(OPENAI_MODELS['gpt-4-turbo']).toBeDefined();
-      expect(OPENAI_MODELS['gpt-4-turbo'].contextWindow).toBe(128000);
+    it('should define GPT-5.1 Codex Max model', () => {
+      expect(OPENAI_MODELS['gpt-5.1-codex-max']).toBeDefined();
+      expect(OPENAI_MODELS['gpt-5.1-codex-max'].supportsReasoning).toBe(true);
     });
 
-    it('should define GPT-4o Mini model', () => {
-      expect(OPENAI_MODELS['gpt-4o-mini']).toBeDefined();
-      expect(OPENAI_MODELS['gpt-4o-mini'].contextWindow).toBe(128000);
+    it('should define GPT-5.1 Codex Mini model', () => {
+      expect(OPENAI_MODELS['gpt-5.1-codex-mini']).toBeDefined();
     });
 
-    it('should define o1 reasoning models', () => {
-      expect(OPENAI_MODELS['o1']).toBeDefined();
-      expect(OPENAI_MODELS['o1-mini']).toBeDefined();
-    });
-
-    it('should include cost information', () => {
-      const gpt4o = OPENAI_MODELS['gpt-4o'];
-      expect(gpt4o.inputCostPer1k).toBeDefined();
-      expect(gpt4o.outputCostPer1k).toBeDefined();
-    });
-
-    it('should have name for all models', () => {
+    it('should indicate reasoning support for all models', () => {
       for (const [modelId, model] of Object.entries(OPENAI_MODELS)) {
-        expect(model.name).toBeDefined();
-        expect(model.name.length).toBeGreaterThan(0);
+        expect(model.supportsReasoning).toBe(true);
       }
     });
 
-    it('should have context window for all models', () => {
+    it('should indicate thinking support for all models', () => {
       for (const [modelId, model] of Object.entries(OPENAI_MODELS)) {
-        expect(model.contextWindow).toBeGreaterThan(0);
-      }
-    });
-
-    it('should have max output for all models', () => {
-      for (const [modelId, model] of Object.entries(OPENAI_MODELS)) {
-        expect(model.maxOutput).toBeGreaterThan(0);
+        expect(model.supportsThinking).toBe(true);
       }
     });
   });
 
-  describe('Interface', () => {
-    it('should define stream method', () => {
+  describe('Reasoning Events', () => {
+    it('should emit thinking_start when reasoning_summary_part.added received', async () => {
       const provider = new OpenAIProvider({
-        apiKey: 'sk-test',
-        model: 'gpt-4o',
+        model: 'gpt-5.2-codex',
+        auth: createMockAuth(),
+        retry: false,
       });
 
-      expect(typeof provider.stream).toBe('function');
-    });
-
-    it('should define complete method', () => {
-      const provider = new OpenAIProvider({
-        apiKey: 'sk-test',
-        model: 'gpt-4o',
-      });
-
-      expect(typeof provider.complete).toBe('function');
-    });
-
-    it('should have id property', () => {
-      const provider = new OpenAIProvider({
-        apiKey: 'sk-test',
-        model: 'gpt-4o',
-      });
-
-      expect(provider.id).toBe('openai');
-    });
-  });
-
-  describe('Streaming', () => {
-    it('should stream text deltas', async () => {
-      const provider = new OpenAIProvider({
-        apiKey: 'sk-test',
-        model: 'gpt-4o',
-      });
-
-      // Mock streaming response
       const mockStreamData = [
-        'data: {"id":"chatcmpl-123","object":"chat.completion.chunk","created":1234567890,"model":"gpt-4o","choices":[{"index":0,"delta":{"role":"assistant","content":""},"finish_reason":null}]}\n\n',
-        'data: {"id":"chatcmpl-123","object":"chat.completion.chunk","created":1234567890,"model":"gpt-4o","choices":[{"index":0,"delta":{"content":"Hello"},"finish_reason":null}]}\n\n',
-        'data: {"id":"chatcmpl-123","object":"chat.completion.chunk","created":1234567890,"model":"gpt-4o","choices":[{"index":0,"delta":{"content":" there!"},"finish_reason":null}]}\n\n',
-        'data: {"id":"chatcmpl-123","object":"chat.completion.chunk","created":1234567890,"model":"gpt-4o","choices":[{"index":0,"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":10,"completion_tokens":5,"total_tokens":15}}\n\n',
-        'data: [DONE]\n\n',
+        'data: {"type":"response.reasoning_summary_part.added","summary_index":0}\n\n',
+        'data: {"type":"response.completed","response":{"id":"resp-123","output":[],"usage":{"input_tokens":10,"output_tokens":5}}}\n\n',
       ];
-
-      const encoder = new TextEncoder();
-      let dataIndex = 0;
-
-      const mockReadableStream = new ReadableStream({
-        pull(controller) {
-          if (dataIndex < mockStreamData.length) {
-            controller.enqueue(encoder.encode(mockStreamData[dataIndex]));
-            dataIndex++;
-          } else {
-            controller.close();
-          }
-        },
-      });
 
       global.fetch = vi.fn().mockResolvedValue({
         ok: true,
-        body: mockReadableStream,
+        body: createMockStream(mockStreamData),
+      });
+
+      const context = {
+        messages: [{ role: 'user' as const, content: 'Test' }],
+      };
+
+      const events: StreamEvent[] = [];
+      for await (const event of provider.stream(context)) {
+        events.push(event);
+      }
+
+      expect(events.map(e => e.type)).toContain('thinking_start');
+    });
+
+    it('should emit thinking_delta for reasoning_summary_text.delta', async () => {
+      const provider = new OpenAIProvider({
+        model: 'gpt-5.2-codex',
+        auth: createMockAuth(),
+        retry: false,
+      });
+
+      const mockStreamData = [
+        'data: {"type":"response.reasoning_summary_part.added","summary_index":0}\n\n',
+        'data: {"type":"response.reasoning_summary_text.delta","delta":"**Analyzing the code...**","summary_index":0}\n\n',
+        'data: {"type":"response.completed","response":{"id":"resp-123","output":[],"usage":{"input_tokens":10,"output_tokens":5}}}\n\n',
+      ];
+
+      global.fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        body: createMockStream(mockStreamData),
+      });
+
+      const context = {
+        messages: [{ role: 'user' as const, content: 'Test' }],
+      };
+
+      const events: StreamEvent[] = [];
+      for await (const event of provider.stream(context)) {
+        events.push(event);
+      }
+
+      const thinkingDelta = events.find(e => e.type === 'thinking_delta');
+      expect(thinkingDelta).toBeDefined();
+      expect((thinkingDelta as any).delta).toBe('**Analyzing the code...**');
+    });
+
+    it('should emit thinking_end with accumulated text on response.completed', async () => {
+      const provider = new OpenAIProvider({
+        model: 'gpt-5.2-codex',
+        auth: createMockAuth(),
+        retry: false,
+      });
+
+      const mockStreamData = [
+        'data: {"type":"response.reasoning_summary_part.added","summary_index":0}\n\n',
+        'data: {"type":"response.reasoning_summary_text.delta","delta":"Step 1: ","summary_index":0}\n\n',
+        'data: {"type":"response.reasoning_summary_text.delta","delta":"Analyze input","summary_index":0}\n\n',
+        'data: {"type":"response.completed","response":{"id":"resp-123","output":[{"type":"reasoning","summary":[{"type":"summary_text","text":"Step 1: Analyze input"}]}],"usage":{"input_tokens":10,"output_tokens":5}}}\n\n',
+      ];
+
+      global.fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        body: createMockStream(mockStreamData),
+      });
+
+      const context = {
+        messages: [{ role: 'user' as const, content: 'Test' }],
+      };
+
+      const events: StreamEvent[] = [];
+      for await (const event of provider.stream(context)) {
+        events.push(event);
+      }
+
+      const thinkingEnd = events.find(e => e.type === 'thinking_end');
+      expect(thinkingEnd).toBeDefined();
+      expect((thinkingEnd as any).thinking).toBe('Step 1: Analyze input');
+    });
+
+    it('should handle reasoning item in response.output_item.added', async () => {
+      const provider = new OpenAIProvider({
+        model: 'gpt-5.2-codex',
+        auth: createMockAuth(),
+        retry: false,
+      });
+
+      const mockStreamData = [
+        'data: {"type":"response.output_item.added","item":{"type":"reasoning","summary":[]}}\n\n',
+        'data: {"type":"response.completed","response":{"id":"resp-123","output":[],"usage":{"input_tokens":10,"output_tokens":5}}}\n\n',
+      ];
+
+      global.fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        body: createMockStream(mockStreamData),
+      });
+
+      const context = {
+        messages: [{ role: 'user' as const, content: 'Test' }],
+      };
+
+      const events: StreamEvent[] = [];
+      for await (const event of provider.stream(context)) {
+        events.push(event);
+      }
+
+      expect(events.map(e => e.type)).toContain('thinking_start');
+    });
+  });
+
+  describe('Mixed Content Streaming', () => {
+    it('should emit reasoning before text in correct order', async () => {
+      const provider = new OpenAIProvider({
+        model: 'gpt-5.2-codex',
+        auth: createMockAuth(),
+        retry: false,
+      });
+
+      const mockStreamData = [
+        // Reasoning first
+        'data: {"type":"response.reasoning_summary_part.added","summary_index":0}\n\n',
+        'data: {"type":"response.reasoning_summary_text.delta","delta":"Thinking...","summary_index":0}\n\n',
+        // Then text
+        'data: {"type":"response.output_text.delta","delta":"Here is my answer"}\n\n',
+        'data: {"type":"response.completed","response":{"id":"resp-123","output":[{"type":"reasoning","summary":[{"type":"summary_text","text":"Thinking..."}]},{"type":"message","content":[{"type":"output_text","text":"Here is my answer"}]}],"usage":{"input_tokens":10,"output_tokens":15}}}\n\n',
+      ];
+
+      global.fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        body: createMockStream(mockStreamData),
+      });
+
+      const context = {
+        messages: [{ role: 'user' as const, content: 'Test' }],
+      };
+
+      const events: StreamEvent[] = [];
+      for await (const event of provider.stream(context)) {
+        events.push(event);
+      }
+
+      const eventTypes = events.map(e => e.type);
+
+      // Should have: start, thinking_start, thinking_delta, text_start, text_delta, thinking_end, text_end, done
+      expect(eventTypes).toContain('start');
+      expect(eventTypes).toContain('thinking_start');
+      expect(eventTypes).toContain('thinking_delta');
+      expect(eventTypes).toContain('text_start');
+      expect(eventTypes).toContain('text_delta');
+      expect(eventTypes).toContain('thinking_end');
+      expect(eventTypes).toContain('text_end');
+      expect(eventTypes).toContain('done');
+
+      // Verify order: thinking_start should come before text_start
+      const thinkingStartIdx = eventTypes.indexOf('thinking_start');
+      const textStartIdx = eventTypes.indexOf('text_start');
+      expect(thinkingStartIdx).toBeLessThan(textStartIdx);
+    });
+
+    it('should include ThinkingContent in final message', async () => {
+      const provider = new OpenAIProvider({
+        model: 'gpt-5.2-codex',
+        auth: createMockAuth(),
+        retry: false,
+      });
+
+      const mockStreamData = [
+        'data: {"type":"response.reasoning_summary_part.added","summary_index":0}\n\n',
+        'data: {"type":"response.reasoning_summary_text.delta","delta":"My reasoning","summary_index":0}\n\n',
+        'data: {"type":"response.output_text.delta","delta":"My answer"}\n\n',
+        'data: {"type":"response.completed","response":{"id":"resp-123","output":[{"type":"reasoning","summary":[{"type":"summary_text","text":"My reasoning"}]},{"type":"message","content":[{"type":"output_text","text":"My answer"}]}],"usage":{"input_tokens":10,"output_tokens":15}}}\n\n',
+      ];
+
+      global.fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        body: createMockStream(mockStreamData),
+      });
+
+      const context = {
+        messages: [{ role: 'user' as const, content: 'Test' }],
+      };
+
+      let doneEvent: any = null;
+      for await (const event of provider.stream(context)) {
+        if (event.type === 'done') {
+          doneEvent = event;
+        }
+      }
+
+      expect(doneEvent).not.toBeNull();
+      expect(doneEvent.message.content).toBeDefined();
+
+      // Should have thinking content
+      const thinkingContent = doneEvent.message.content.find((c: any) => c.type === 'thinking');
+      expect(thinkingContent).toBeDefined();
+      expect(thinkingContent.thinking).toBe('My reasoning');
+
+      // Should have text content
+      const textContent = doneEvent.message.content.find((c: any) => c.type === 'text');
+      expect(textContent).toBeDefined();
+      expect(textContent.text).toBe('My answer');
+    });
+  });
+
+  describe('Edge Cases', () => {
+    it('should handle empty reasoning summary gracefully', async () => {
+      const provider = new OpenAIProvider({
+        model: 'gpt-5.2-codex',
+        auth: createMockAuth(),
+        retry: false,
+      });
+
+      const mockStreamData = [
+        'data: {"type":"response.reasoning_summary_part.added","summary_index":0}\n\n',
+        // No delta events
+        'data: {"type":"response.completed","response":{"id":"resp-123","output":[{"type":"reasoning","summary":[]}],"usage":{"input_tokens":10,"output_tokens":5}}}\n\n',
+      ];
+
+      global.fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        body: createMockStream(mockStreamData),
+      });
+
+      const context = {
+        messages: [{ role: 'user' as const, content: 'Test' }],
+      };
+
+      const events: StreamEvent[] = [];
+      for await (const event of provider.stream(context)) {
+        events.push(event);
+      }
+
+      // Should still work without erroring
+      expect(events.map(e => e.type)).toContain('done');
+    });
+
+    it('should handle reasoning without text response', async () => {
+      const provider = new OpenAIProvider({
+        model: 'gpt-5.2-codex',
+        auth: createMockAuth(),
+        retry: false,
+      });
+
+      const mockStreamData = [
+        'data: {"type":"response.reasoning_summary_part.added","summary_index":0}\n\n',
+        'data: {"type":"response.reasoning_summary_text.delta","delta":"Just thinking","summary_index":0}\n\n',
+        'data: {"type":"response.completed","response":{"id":"resp-123","output":[{"type":"reasoning","summary":[{"type":"summary_text","text":"Just thinking"}]}],"usage":{"input_tokens":10,"output_tokens":5}}}\n\n',
+      ];
+
+      global.fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        body: createMockStream(mockStreamData),
+      });
+
+      const context = {
+        messages: [{ role: 'user' as const, content: 'Test' }],
+      };
+
+      let doneEvent: any = null;
+      for await (const event of provider.stream(context)) {
+        if (event.type === 'done') {
+          doneEvent = event;
+        }
+      }
+
+      expect(doneEvent).not.toBeNull();
+      // Should have thinking but no text
+      const thinkingContent = doneEvent.message.content.find((c: any) => c.type === 'thinking');
+      expect(thinkingContent).toBeDefined();
+    });
+
+    it('should handle text without reasoning (no regression)', async () => {
+      const provider = new OpenAIProvider({
+        model: 'gpt-5.2-codex',
+        auth: createMockAuth(),
+        retry: false,
+      });
+
+      const mockStreamData = [
+        'data: {"type":"response.output_text.delta","delta":"Hello "}\n\n',
+        'data: {"type":"response.output_text.delta","delta":"world!"}\n\n',
+        'data: {"type":"response.completed","response":{"id":"resp-123","output":[{"type":"message","content":[{"type":"output_text","text":"Hello world!"}]}],"usage":{"input_tokens":10,"output_tokens":5}}}\n\n',
+      ];
+
+      global.fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        body: createMockStream(mockStreamData),
       });
 
       const context = {
         messages: [{ role: 'user' as const, content: 'Say hello' }],
       };
 
-      const events: string[] = [];
+      const events: StreamEvent[] = [];
       for await (const event of provider.stream(context)) {
-        events.push(event.type);
+        events.push(event);
       }
 
-      expect(events).toContain('start');
-      expect(events).toContain('text_delta');
-      expect(events).toContain('done');
+      const eventTypes = events.map(e => e.type);
+
+      // Should NOT have thinking events
+      expect(eventTypes).not.toContain('thinking_start');
+      expect(eventTypes).not.toContain('thinking_delta');
+      expect(eventTypes).not.toContain('thinking_end');
+
+      // Should have text events
+      expect(eventTypes).toContain('text_start');
+      expect(eventTypes).toContain('text_delta');
+      expect(eventTypes).toContain('text_end');
     });
 
-    it('should include message in done event', async () => {
+    it('should handle tool calls with reasoning', async () => {
       const provider = new OpenAIProvider({
-        apiKey: 'sk-test',
-        model: 'gpt-4o',
+        model: 'gpt-5.2-codex',
+        auth: createMockAuth(),
+        retry: false,
       });
 
       const mockStreamData = [
-        'data: {"id":"chatcmpl-123","object":"chat.completion.chunk","created":1234567890,"model":"gpt-4o","choices":[{"index":0,"delta":{"role":"assistant","content":"Hi"},"finish_reason":null}]}\n\n',
-        'data: {"id":"chatcmpl-123","object":"chat.completion.chunk","created":1234567890,"model":"gpt-4o","choices":[{"index":0,"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":10,"completion_tokens":1,"total_tokens":11}}\n\n',
-        'data: [DONE]\n\n',
+        'data: {"type":"response.reasoning_summary_part.added","summary_index":0}\n\n',
+        'data: {"type":"response.reasoning_summary_text.delta","delta":"I need to read the file","summary_index":0}\n\n',
+        'data: {"type":"response.output_item.added","item":{"type":"function_call","call_id":"call_123","name":"read","arguments":""}}\n\n',
+        'data: {"type":"response.function_call_arguments.delta","call_id":"call_123","delta":"{\\"path\\":\\"/test.txt\\"}"}\n\n',
+        'data: {"type":"response.completed","response":{"id":"resp-123","output":[{"type":"reasoning","summary":[{"type":"summary_text","text":"I need to read the file"}]},{"type":"function_call","call_id":"call_123","name":"read","arguments":"{\\"path\\":\\"/test.txt\\"}"}],"usage":{"input_tokens":10,"output_tokens":20}}}\n\n',
       ];
-
-      const encoder = new TextEncoder();
-      let dataIndex = 0;
-
-      const mockReadableStream = new ReadableStream({
-        pull(controller) {
-          if (dataIndex < mockStreamData.length) {
-            controller.enqueue(encoder.encode(mockStreamData[dataIndex]));
-            dataIndex++;
-          } else {
-            controller.close();
-          }
-        },
-      });
 
       global.fetch = vi.fn().mockResolvedValue({
         ok: true,
-        body: mockReadableStream,
+        body: createMockStream(mockStreamData),
+      });
+
+      const context = {
+        messages: [{ role: 'user' as const, content: 'Read the file' }],
+        tools: [{
+          name: 'read',
+          description: 'Read a file',
+          parameters: { type: 'object', properties: { path: { type: 'string' } }, required: ['path'] },
+        }],
+      };
+
+      let doneEvent: any = null;
+      for await (const event of provider.stream(context)) {
+        if (event.type === 'done') {
+          doneEvent = event;
+        }
+      }
+
+      expect(doneEvent).not.toBeNull();
+      expect(doneEvent.message.stopReason).toBe('tool_use');
+
+      // Should have both thinking and tool call
+      const thinkingContent = doneEvent.message.content.find((c: any) => c.type === 'thinking');
+      expect(thinkingContent).toBeDefined();
+
+      const toolCall = doneEvent.message.content.find((c: any) => c.type === 'tool_use');
+      expect(toolCall).toBeDefined();
+      expect(toolCall.name).toBe('read');
+    });
+
+    it('should deduplicate thinking content across different event types', async () => {
+      const provider = new OpenAIProvider({
+        model: 'gpt-5.2-codex',
+        auth: createMockAuth(),
+        retry: false,
+      });
+
+      // Simulate scenario where same thinking content appears in multiple event types
+      const mockStreamData = [
+        // First via output_item.done with summary
+        'data: {"type":"response.output_item.added","item":{"type":"reasoning"}}\n\n',
+        'data: {"type":"response.output_item.done","item":{"type":"reasoning","summary":[{"type":"summary_text","text":"Thinking about this"}]}}\n\n',
+        // Then the same text via delta event (should be skipped)
+        'data: {"type":"response.reasoning_summary_text.delta","delta":"Thinking about this"}\n\n',
+        'data: {"type":"response.output_text.delta","delta":"Hello!"}\n\n',
+        'data: {"type":"response.completed","response":{"id":"resp-123","output":[{"type":"reasoning","summary":[{"type":"summary_text","text":"Thinking about this"}]},{"type":"message","content":[{"type":"output_text","text":"Hello!"}]}],"usage":{"input_tokens":10,"output_tokens":5}}}\n\n',
+      ];
+
+      global.fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        body: createMockStream(mockStreamData),
+      });
+
+      const context = {
+        messages: [{ role: 'user' as const, content: 'Test' }],
+      };
+
+      const events: StreamEvent[] = [];
+      for await (const event of provider.stream(context)) {
+        events.push(event);
+      }
+
+      // Count thinking_delta events - should only have one
+      const thinkingDeltas = events.filter(e => e.type === 'thinking_delta');
+      expect(thinkingDeltas).toHaveLength(1);
+
+      // Verify the done message has thinking only once
+      const doneEvent = events.find(e => e.type === 'done') as any;
+      expect(doneEvent).toBeDefined();
+      const thinkingContent = doneEvent.message.content.find((c: any) => c.type === 'thinking');
+      expect(thinkingContent?.thinking).toBe('Thinking about this');
+    });
+  });
+
+  describe('Regression Tests', () => {
+    it('should still stream text correctly (no reasoning)', async () => {
+      const provider = new OpenAIProvider({
+        model: 'gpt-5.2-codex',
+        auth: createMockAuth(),
+        retry: false,
+      });
+
+      const mockStreamData = [
+        'data: {"type":"response.output_text.delta","delta":"Hello!"}\n\n',
+        'data: {"type":"response.completed","response":{"id":"resp-123","output":[{"type":"message","content":[{"type":"output_text","text":"Hello!"}]}],"usage":{"input_tokens":10,"output_tokens":5}}}\n\n',
+      ];
+
+      global.fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        body: createMockStream(mockStreamData),
       });
 
       const context = {
@@ -258,41 +609,70 @@ describe('OpenAI Provider', () => {
       }
 
       expect(doneEvent).not.toBeNull();
-      expect(doneEvent.message).toBeDefined();
       expect(doneEvent.message.role).toBe('assistant');
+      const textContent = doneEvent.message.content.find((c: any) => c.type === 'text');
+      expect(textContent?.text).toBe('Hello!');
+    });
+
+    it('should still stream tool calls correctly', async () => {
+      const provider = new OpenAIProvider({
+        model: 'gpt-5.2-codex',
+        auth: createMockAuth(),
+        retry: false,
+      });
+
+      const mockStreamData = [
+        'data: {"type":"response.output_item.added","item":{"type":"function_call","call_id":"call_abc","name":"read","arguments":""}}\n\n',
+        'data: {"type":"response.function_call_arguments.delta","call_id":"call_abc","delta":"{\\"path\\":\\"/file.txt\\"}"}\n\n',
+        'data: {"type":"response.completed","response":{"id":"resp-123","output":[{"type":"function_call","call_id":"call_abc","name":"read","arguments":"{\\"path\\":\\"/file.txt\\"}"}],"usage":{"input_tokens":10,"output_tokens":20}}}\n\n',
+      ];
+
+      global.fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        body: createMockStream(mockStreamData),
+      });
+
+      const context = {
+        messages: [{ role: 'user' as const, content: 'Read the file' }],
+        tools: [{
+          name: 'read',
+          description: 'Read a file',
+          parameters: { type: 'object', properties: { path: { type: 'string' } }, required: ['path'] },
+        }],
+      };
+
+      const toolCallEvents: any[] = [];
+      let doneEvent: any = null;
+      for await (const event of provider.stream(context)) {
+        if (event.type === 'toolcall_start' || event.type === 'toolcall_delta' || event.type === 'toolcall_end') {
+          toolCallEvents.push(event);
+        }
+        if (event.type === 'done') {
+          doneEvent = event;
+        }
+      }
+
+      expect(toolCallEvents.length).toBeGreaterThan(0);
+      expect(doneEvent.message.stopReason).toBe('tool_use');
     });
   });
 
   describe('Complete Method', () => {
     it('should return AssistantMessage', async () => {
       const provider = new OpenAIProvider({
-        apiKey: 'sk-test',
-        model: 'gpt-4o',
+        model: 'gpt-5.2-codex',
+        auth: createMockAuth(),
+        retry: false,
       });
 
       const mockStreamData = [
-        'data: {"id":"chatcmpl-123","object":"chat.completion.chunk","created":1234567890,"model":"gpt-4o","choices":[{"index":0,"delta":{"role":"assistant","content":"Hello!"},"finish_reason":null}]}\n\n',
-        'data: {"id":"chatcmpl-123","object":"chat.completion.chunk","created":1234567890,"model":"gpt-4o","choices":[{"index":0,"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":10,"completion_tokens":5,"total_tokens":15}}\n\n',
-        'data: [DONE]\n\n',
+        'data: {"type":"response.output_text.delta","delta":"Hello!"}\n\n',
+        'data: {"type":"response.completed","response":{"id":"resp-123","output":[{"type":"message","content":[{"type":"output_text","text":"Hello!"}]}],"usage":{"input_tokens":10,"output_tokens":5}}}\n\n',
       ];
-
-      const encoder = new TextEncoder();
-      let dataIndex = 0;
-
-      const mockReadableStream = new ReadableStream({
-        pull(controller) {
-          if (dataIndex < mockStreamData.length) {
-            controller.enqueue(encoder.encode(mockStreamData[dataIndex]));
-            dataIndex++;
-          } else {
-            controller.close();
-          }
-        },
-      });
 
       global.fetch = vi.fn().mockResolvedValue({
         ok: true,
-        body: mockReadableStream,
+        body: createMockStream(mockStreamData),
       });
 
       const context = {
@@ -303,470 +683,6 @@ describe('OpenAI Provider', () => {
 
       expect(result.role).toBe('assistant');
       expect(result.content).toBeDefined();
-    });
-  });
-
-  describe('Tool Support', () => {
-    it('should accept tools in context', () => {
-      const provider = new OpenAIProvider({
-        apiKey: 'sk-test',
-        model: 'gpt-4o',
-      });
-
-      const tools = [
-        {
-          name: 'read',
-          description: 'Read a file',
-          parameters: {
-            type: 'object',
-            properties: {
-              path: { type: 'string' },
-            },
-            required: ['path'],
-          },
-        },
-      ];
-
-      const context = {
-        messages: [{ role: 'user' as const, content: 'Test' }],
-        tools,
-      };
-
-      // Should not throw when creating context with tools
-      expect(() => {
-        provider.stream(context);
-      }).not.toThrow();
-    });
-  });
-
-  describe('Model Properties', () => {
-    it('should indicate tool support for applicable models', () => {
-      expect(OPENAI_MODELS['gpt-4o'].supportsTools).toBe(true);
-      expect(OPENAI_MODELS['gpt-4-turbo'].supportsTools).toBe(true);
-      expect(OPENAI_MODELS['gpt-4o-mini'].supportsTools).toBe(true);
-    });
-
-    it('should indicate no tool support for o1 models', () => {
-      expect(OPENAI_MODELS['o1'].supportsTools).toBe(false);
-      expect(OPENAI_MODELS['o1-mini'].supportsTools).toBe(false);
-    });
-  });
-
-  describe('Tool Calling', () => {
-    it('should stream tool call with correct stop reason', async () => {
-      const provider = new OpenAIProvider({
-        apiKey: 'sk-test',
-        model: 'gpt-4o',
-      });
-
-      const mockStreamData = [
-        'data: {"id":"chatcmpl-123","object":"chat.completion.chunk","created":1234567890,"model":"gpt-4o","choices":[{"index":0,"delta":{"role":"assistant","content":null,"tool_calls":[{"index":0,"id":"call_abc123","type":"function","function":{"name":"read","arguments":""}}]},"finish_reason":null}]}\n\n',
-        'data: {"id":"chatcmpl-123","object":"chat.completion.chunk","created":1234567890,"model":"gpt-4o","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"{\\"path\\":"}}]},"finish_reason":null}]}\n\n',
-        'data: {"id":"chatcmpl-123","object":"chat.completion.chunk","created":1234567890,"model":"gpt-4o","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"\\"/test.txt\\"}"}}]},"finish_reason":null}]}\n\n',
-        'data: {"id":"chatcmpl-123","object":"chat.completion.chunk","created":1234567890,"model":"gpt-4o","choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":50,"completion_tokens":30,"total_tokens":80}}\n\n',
-        'data: [DONE]\n\n',
-      ];
-
-      const encoder = new TextEncoder();
-      let dataIndex = 0;
-
-      const mockReadableStream = new ReadableStream({
-        pull(controller) {
-          if (dataIndex < mockStreamData.length) {
-            controller.enqueue(encoder.encode(mockStreamData[dataIndex]));
-            dataIndex++;
-          } else {
-            controller.close();
-          }
-        },
-      });
-
-      global.fetch = vi.fn().mockResolvedValue({
-        ok: true,
-        body: mockReadableStream,
-      });
-
-      const context = {
-        messages: [{ role: 'user' as const, content: 'Read the test file' }],
-        tools: [{
-          name: 'read',
-          description: 'Read a file',
-          parameters: { type: 'object', properties: { path: { type: 'string' } }, required: ['path'] },
-        }],
-      };
-
-      let doneEvent: any = null;
-      const toolCallEndEvents: any[] = [];
-      for await (const event of provider.stream(context)) {
-        if (event.type === 'done') {
-          doneEvent = event;
-        }
-        if (event.type === 'toolcall_end') {
-          toolCallEndEvents.push(event);
-        }
-      }
-
-      expect(doneEvent).not.toBeNull();
-      expect(doneEvent.message.stopReason).toBe('tool_use');
-      expect(toolCallEndEvents).toHaveLength(1);
-      expect(toolCallEndEvents[0].toolCall.name).toBe('read');
-      expect(toolCallEndEvents[0].toolCall.arguments).toEqual({ path: '/test.txt' });
-    });
-
-    it('should handle malformed tool call arguments gracefully', async () => {
-      const provider = new OpenAIProvider({
-        apiKey: 'sk-test',
-        model: 'gpt-4o',
-      });
-
-      // Simulate malformed JSON in tool call arguments
-      const mockStreamData = [
-        'data: {"id":"chatcmpl-123","object":"chat.completion.chunk","created":1234567890,"model":"gpt-4o","choices":[{"index":0,"delta":{"role":"assistant","content":null,"tool_calls":[{"index":0,"id":"call_bad","type":"function","function":{"name":"read","arguments":""}}]},"finish_reason":null}]}\n\n',
-        'data: {"id":"chatcmpl-123","object":"chat.completion.chunk","created":1234567890,"model":"gpt-4o","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"{ malformed json"}}]},"finish_reason":null}]}\n\n',
-        'data: {"id":"chatcmpl-123","object":"chat.completion.chunk","created":1234567890,"model":"gpt-4o","choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":50,"completion_tokens":30,"total_tokens":80}}\n\n',
-        'data: [DONE]\n\n',
-      ];
-
-      const encoder = new TextEncoder();
-      let dataIndex = 0;
-
-      const mockReadableStream = new ReadableStream({
-        pull(controller) {
-          if (dataIndex < mockStreamData.length) {
-            controller.enqueue(encoder.encode(mockStreamData[dataIndex]));
-            dataIndex++;
-          } else {
-            controller.close();
-          }
-        },
-      });
-
-      global.fetch = vi.fn().mockResolvedValue({
-        ok: true,
-        body: mockReadableStream,
-      });
-
-      const context = {
-        messages: [{ role: 'user' as const, content: 'Read something' }],
-        tools: [{
-          name: 'read',
-          description: 'Read a file',
-          parameters: { type: 'object', properties: { path: { type: 'string' } }, required: ['path'] },
-        }],
-      };
-
-      let doneEvent: any = null;
-      let errorEvent: any = null;
-      const toolCallEndEvents: any[] = [];
-
-      for await (const event of provider.stream(context)) {
-        if (event.type === 'done') doneEvent = event;
-        if (event.type === 'error') errorEvent = event;
-        if (event.type === 'toolcall_end') toolCallEndEvents.push(event);
-      }
-
-      // Should not error out - should handle gracefully with empty args
-      expect(errorEvent).toBeNull();
-      expect(doneEvent).not.toBeNull();
-      expect(toolCallEndEvents).toHaveLength(1);
-      // Malformed JSON should result in empty object
-      expect(toolCallEndEvents[0].toolCall.arguments).toEqual({});
-    });
-  });
-
-  describe('Cache Token Extraction', () => {
-    it('should extract cached_tokens from prompt_tokens_details', async () => {
-      const provider = new OpenAIProvider({
-        apiKey: 'sk-test',
-        model: 'gpt-4o',
-      });
-
-      // Mock response with prompt_tokens_details.cached_tokens
-      const mockStreamData = [
-        'data: {"id":"chatcmpl-123","object":"chat.completion.chunk","created":1234567890,"model":"gpt-4o","choices":[{"index":0,"delta":{"role":"assistant","content":"Hello!"},"finish_reason":null}]}\n\n',
-        'data: {"id":"chatcmpl-123","object":"chat.completion.chunk","created":1234567890,"model":"gpt-4o","choices":[{"index":0,"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":1000,"completion_tokens":5,"total_tokens":1005,"prompt_tokens_details":{"cached_tokens":800}}}\n\n',
-        'data: [DONE]\n\n',
-      ];
-
-      const encoder = new TextEncoder();
-      let dataIndex = 0;
-
-      const mockReadableStream = new ReadableStream({
-        pull(controller) {
-          if (dataIndex < mockStreamData.length) {
-            controller.enqueue(encoder.encode(mockStreamData[dataIndex]));
-            dataIndex++;
-          } else {
-            controller.close();
-          }
-        },
-      });
-
-      global.fetch = vi.fn().mockResolvedValue({
-        ok: true,
-        body: mockReadableStream,
-      });
-
-      const context = {
-        messages: [{ role: 'user' as const, content: 'Hello' }],
-      };
-
-      let doneEvent: any = null;
-      for await (const event of provider.stream(context)) {
-        if (event.type === 'done') {
-          doneEvent = event;
-        }
-      }
-
-      expect(doneEvent).not.toBeNull();
-      expect(doneEvent.message.usage).toBeDefined();
-      expect(doneEvent.message.usage.inputTokens).toBe(1000);
-      expect(doneEvent.message.usage.outputTokens).toBe(5);
-      expect(doneEvent.message.usage.cacheReadTokens).toBe(800);
-    });
-
-    it('should handle missing prompt_tokens_details gracefully', async () => {
-      const provider = new OpenAIProvider({
-        apiKey: 'sk-test',
-        model: 'gpt-4o',
-      });
-
-      // Mock response without prompt_tokens_details
-      const mockStreamData = [
-        'data: {"id":"chatcmpl-123","object":"chat.completion.chunk","created":1234567890,"model":"gpt-4o","choices":[{"index":0,"delta":{"role":"assistant","content":"Hello!"},"finish_reason":null}]}\n\n',
-        'data: {"id":"chatcmpl-123","object":"chat.completion.chunk","created":1234567890,"model":"gpt-4o","choices":[{"index":0,"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":500,"completion_tokens":5,"total_tokens":505}}\n\n',
-        'data: [DONE]\n\n',
-      ];
-
-      const encoder = new TextEncoder();
-      let dataIndex = 0;
-
-      const mockReadableStream = new ReadableStream({
-        pull(controller) {
-          if (dataIndex < mockStreamData.length) {
-            controller.enqueue(encoder.encode(mockStreamData[dataIndex]));
-            dataIndex++;
-          } else {
-            controller.close();
-          }
-        },
-      });
-
-      global.fetch = vi.fn().mockResolvedValue({
-        ok: true,
-        body: mockReadableStream,
-      });
-
-      const context = {
-        messages: [{ role: 'user' as const, content: 'Hello' }],
-      };
-
-      let doneEvent: any = null;
-      for await (const event of provider.stream(context)) {
-        if (event.type === 'done') {
-          doneEvent = event;
-        }
-      }
-
-      expect(doneEvent).not.toBeNull();
-      expect(doneEvent.message.usage.inputTokens).toBe(500);
-      expect(doneEvent.message.usage.outputTokens).toBe(5);
-      expect(doneEvent.message.usage.cacheReadTokens).toBe(0);
-    });
-
-    it('should handle prompt_tokens_details without cached_tokens', async () => {
-      const provider = new OpenAIProvider({
-        apiKey: 'sk-test',
-        model: 'gpt-4o',
-      });
-
-      // Mock response with prompt_tokens_details but no cached_tokens
-      const mockStreamData = [
-        'data: {"id":"chatcmpl-123","object":"chat.completion.chunk","created":1234567890,"model":"gpt-4o","choices":[{"index":0,"delta":{"role":"assistant","content":"Hello!"},"finish_reason":null}]}\n\n',
-        'data: {"id":"chatcmpl-123","object":"chat.completion.chunk","created":1234567890,"model":"gpt-4o","choices":[{"index":0,"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":500,"completion_tokens":5,"total_tokens":505,"prompt_tokens_details":{}}}\n\n',
-        'data: [DONE]\n\n',
-      ];
-
-      const encoder = new TextEncoder();
-      let dataIndex = 0;
-
-      const mockReadableStream = new ReadableStream({
-        pull(controller) {
-          if (dataIndex < mockStreamData.length) {
-            controller.enqueue(encoder.encode(mockStreamData[dataIndex]));
-            dataIndex++;
-          } else {
-            controller.close();
-          }
-        },
-      });
-
-      global.fetch = vi.fn().mockResolvedValue({
-        ok: true,
-        body: mockReadableStream,
-      });
-
-      const context = {
-        messages: [{ role: 'user' as const, content: 'Hello' }],
-      };
-
-      let doneEvent: any = null;
-      for await (const event of provider.stream(context)) {
-        if (event.type === 'done') {
-          doneEvent = event;
-        }
-      }
-
-      expect(doneEvent).not.toBeNull();
-      expect(doneEvent.message.usage.inputTokens).toBe(500);
-      expect(doneEvent.message.usage.cacheReadTokens).toBe(0);
-    });
-  });
-
-  describe('Multi-Turn Conversation', () => {
-    it('should properly convert tool result messages', async () => {
-      const provider = new OpenAIProvider({
-        apiKey: 'sk-test',
-        model: 'gpt-4o',
-      });
-
-      const mockStreamData = [
-        'data: {"id":"chatcmpl-123","object":"chat.completion.chunk","created":1234567890,"model":"gpt-4o","choices":[{"index":0,"delta":{"role":"assistant","content":"The file contains: test content"},"finish_reason":null}]}\n\n',
-        'data: {"id":"chatcmpl-123","object":"chat.completion.chunk","created":1234567890,"model":"gpt-4o","choices":[{"index":0,"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":100,"completion_tokens":10,"total_tokens":110}}\n\n',
-        'data: [DONE]\n\n',
-      ];
-
-      const encoder = new TextEncoder();
-      let dataIndex = 0;
-
-      const mockReadableStream = new ReadableStream({
-        pull(controller) {
-          if (dataIndex < mockStreamData.length) {
-            controller.enqueue(encoder.encode(mockStreamData[dataIndex]));
-            dataIndex++;
-          } else {
-            controller.close();
-          }
-        },
-      });
-
-      global.fetch = vi.fn().mockResolvedValue({
-        ok: true,
-        body: mockReadableStream,
-      });
-
-      // Simulate a multi-turn conversation with tool results
-      const context = {
-        messages: [
-          { role: 'user' as const, content: 'Read the test file' },
-          {
-            role: 'assistant' as const,
-            content: [{
-              type: 'tool_use' as const,
-              id: 'call_abc123',
-              name: 'read',
-              arguments: { path: '/test.txt' },
-            }],
-          },
-          {
-            role: 'toolResult' as const,
-            toolCallId: 'call_abc123',
-            content: 'test content',
-          },
-        ],
-        tools: [{
-          name: 'read',
-          description: 'Read a file',
-          parameters: { type: 'object', properties: { path: { type: 'string' } }, required: ['path'] },
-        }],
-      };
-
-      let doneEvent: any = null;
-      for await (const event of provider.stream(context)) {
-        if (event.type === 'done') {
-          doneEvent = event;
-        }
-      }
-
-      expect(doneEvent).not.toBeNull();
-      expect(doneEvent.message.stopReason).toBe('end_turn');
-
-      // Verify the fetch was called with properly formatted messages
-      expect(global.fetch).toHaveBeenCalled();
-      const fetchCall = (global.fetch as any).mock.calls[0];
-      const body = JSON.parse(fetchCall[1].body);
-
-      // Check that messages were properly converted (user + assistant + tool)
-      expect(body.messages).toHaveLength(3);
-      expect(body.messages[0].role).toBe('user');
-      expect(body.messages[1].role).toBe('assistant');
-      expect(body.messages[1].tool_calls).toBeDefined();
-      expect(body.messages[1].tool_calls[0].id).toBe('call_abc123');
-      expect(body.messages[2].role).toBe('tool');
-      expect(body.messages[2].tool_call_id).toBe('call_abc123');
-      expect(body.messages[2].content).toBe('test content');
-    });
-
-    it('should handle multiple tool calls in one turn', async () => {
-      const provider = new OpenAIProvider({
-        apiKey: 'sk-test',
-        model: 'gpt-4o',
-      });
-
-      const mockStreamData = [
-        'data: {"id":"chatcmpl-123","object":"chat.completion.chunk","created":1234567890,"model":"gpt-4o","choices":[{"index":0,"delta":{"role":"assistant","content":"I\'ll read both files.","tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"read","arguments":""}},{"index":1,"id":"call_2","type":"function","function":{"name":"read","arguments":""}}]},"finish_reason":null}]}\n\n',
-        'data: {"id":"chatcmpl-123","object":"chat.completion.chunk","created":1234567890,"model":"gpt-4o","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"{\\"path\\":\\"/file1.txt\\"}"}},{"index":1,"function":{"arguments":"{\\"path\\":\\"/file2.txt\\"}"}}]},"finish_reason":null}]}\n\n',
-        'data: {"id":"chatcmpl-123","object":"chat.completion.chunk","created":1234567890,"model":"gpt-4o","choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":50,"completion_tokens":50,"total_tokens":100}}\n\n',
-        'data: [DONE]\n\n',
-      ];
-
-      const encoder = new TextEncoder();
-      let dataIndex = 0;
-
-      const mockReadableStream = new ReadableStream({
-        pull(controller) {
-          if (dataIndex < mockStreamData.length) {
-            controller.enqueue(encoder.encode(mockStreamData[dataIndex]));
-            dataIndex++;
-          } else {
-            controller.close();
-          }
-        },
-      });
-
-      global.fetch = vi.fn().mockResolvedValue({
-        ok: true,
-        body: mockReadableStream,
-      });
-
-      const context = {
-        messages: [{ role: 'user' as const, content: 'Read both files' }],
-        tools: [{
-          name: 'read',
-          description: 'Read a file',
-          parameters: { type: 'object', properties: { path: { type: 'string' } }, required: ['path'] },
-        }],
-      };
-
-      const toolCallEndEvents: any[] = [];
-      let doneEvent: any = null;
-      for await (const event of provider.stream(context)) {
-        if (event.type === 'toolcall_end') {
-          toolCallEndEvents.push(event);
-        }
-        if (event.type === 'done') {
-          doneEvent = event;
-        }
-      }
-
-      expect(toolCallEndEvents).toHaveLength(2);
-      expect(toolCallEndEvents[0].toolCall.id).toBe('call_1');
-      expect(toolCallEndEvents[0].toolCall.arguments.path).toBe('/file1.txt');
-      expect(toolCallEndEvents[1].toolCall.id).toBe('call_2');
-      expect(toolCallEndEvents[1].toolCall.arguments.path).toBe('/file2.txt');
-
-      // Verify final message contains both tool calls
-      expect(doneEvent.message.content).toHaveLength(3); // text + 2 tool calls
     });
   });
 });

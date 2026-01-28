@@ -12,8 +12,7 @@
 import { describe, it, expect } from 'vitest';
 
 import type { Message, ToolCall } from '../../types/index.js';
-import { OpenAICodexProvider } from '../openai-codex.js';
-import { OpenAIProvider } from '../openai.js';
+import { OpenAIProvider, convertToResponsesInput } from '../openai/index.js';
 import { GoogleProvider, convertMessages as convertGoogleMessages } from '../google/index.js';
 
 /**
@@ -61,7 +60,7 @@ const baseMessages: Message[] = [
 ];
 
 describe('Message Format Robustness', () => {
-  describe('OpenAI Codex Provider', () => {
+  describe('OpenAI Provider', () => {
     it('should handle toolResult role messages (internal format)', () => {
       const messages: Message[] = [
         ...baseMessages,
@@ -73,13 +72,8 @@ describe('Message Format Robustness', () => {
         },
       ];
 
-      const provider = new OpenAICodexProvider({
-        model: 'gpt-5.2-codex',
-        auth: { type: 'oauth', accessToken: 'test', refreshToken: 'test', expiresAt: Date.now() + 3600000 },
-      });
-
-      // Access private method for testing
-      const input = (provider as any).convertToResponsesInput(createContext(messages));
+      // Use the exported function directly for testing
+      const input = convertToResponsesInput(createContext(messages));
 
       // Should include function_call_output
       const functionOutput = input.find((i: any) => i.type === 'function_call_output');
@@ -115,12 +109,7 @@ describe('Message Format Robustness', () => {
         },
       ];
 
-      const provider = new OpenAICodexProvider({
-        model: 'gpt-5.2-codex',
-        auth: { type: 'oauth', accessToken: 'test', refreshToken: 'test', expiresAt: Date.now() + 3600000 },
-      });
-
-      const input = (provider as any).convertToResponsesInput(createContext(messages));
+      const input = convertToResponsesInput(createContext(messages));
 
       // Should remap toolu_01ABC123 to call_remap_0
       const functionCall = input.find((i: any) => i.type === 'function_call');
@@ -160,12 +149,7 @@ describe('Message Format Robustness', () => {
         },
       ];
 
-      const provider = new OpenAICodexProvider({
-        model: 'gpt-5.2-codex',
-        auth: { type: 'oauth', accessToken: 'test', refreshToken: 'test', expiresAt: Date.now() + 3600000 },
-      });
-
-      const input = (provider as any).convertToResponsesInput(createContext(messages));
+      const input = convertToResponsesInput(createContext(messages));
 
       const functionOutputs = input.filter((i: any) => i.type === 'function_call_output');
       expect(functionOutputs.length).toBe(2);
@@ -174,34 +158,6 @@ describe('Message Format Robustness', () => {
       expect(functionOutputs[1].call_id).toBe('call_2');
       expect(functionOutputs[1].output).toBe('Result 2');
     });
-  });
-
-  describe('OpenAI Provider', () => {
-    it('should handle toolResult role messages (internal format)', () => {
-      const messages: Message[] = [
-        ...baseMessages,
-        {
-          role: 'toolResult',
-          toolCallId: 'call_123',
-          content: 'Tool result content',
-          isError: false,
-        },
-      ];
-
-      const provider = new OpenAIProvider({
-        model: 'gpt-4o',
-        apiKey: 'test-key',
-      });
-
-      const converted = (provider as any).convertMessages(createContext(messages));
-
-      // Should include tool message
-      const toolMessage = converted.find((m: any) => m.role === 'tool');
-      expect(toolMessage).toBeDefined();
-      expect(toolMessage.tool_call_id).toBe('call_123');
-      expect(toolMessage.content).toBe('Tool result content');
-    });
-
   });
 
   describe('Google Provider', () => {

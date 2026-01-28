@@ -2,12 +2,18 @@
  * @fileoverview Provider Factory
  *
  * Creates and manages providers with a unified interface.
- * Supports Anthropic (with OAuth), OpenAI, and Google providers.
+ * Supports Anthropic (with OAuth), OpenAI (with OAuth), and Google providers.
  */
 
 import type { Context, StreamEvent } from '../types/index.js';
 import { AnthropicProvider, type AnthropicConfig, type StreamOptions } from './anthropic/index.js';
-import { OpenAIProvider, type OpenAIConfig, type OpenAIStreamOptions } from './openai.js';
+import {
+  OpenAIProvider,
+  type OpenAIConfig,
+  type OpenAIStreamOptions,
+  type ReasoningEffort,
+  OPENAI_MODELS,
+} from './openai/index.js';
 import {
   GoogleProvider,
   type GoogleConfig,
@@ -19,15 +25,7 @@ import {
   type GoogleApiKeyAuth,
 } from './google/index.js';
 import type { GoogleOAuthEndpoint } from '../auth/google-oauth.js';
-import {
-  OpenAICodexProvider,
-  type OpenAICodexConfig,
-  type OpenAICodexStreamOptions,
-  type ReasoningEffort,
-  OPENAI_CODEX_MODELS,
-} from './openai-codex.js';
 import { CLAUDE_MODELS, DEFAULT_MODEL } from './anthropic/index.js';
-import { OPENAI_MODELS } from './openai.js';
 import { GEMINI_MODELS } from './google/index.js';
 import { createLogger } from '../logging/index.js';
 
@@ -37,7 +35,7 @@ const logger = createLogger('provider-factory');
 // Types
 // =============================================================================
 
-export type ProviderType = 'anthropic' | 'openai' | 'google' | 'openai-codex';
+export type ProviderType = 'anthropic' | 'openai' | 'openai-codex' | 'google';
 
 /**
  * Unified auth configuration
@@ -59,8 +57,6 @@ export interface ProviderConfig {
   // Anthropic-specific
   thinkingBudget?: number;
   // OpenAI-specific
-  organization?: string;
-  // OpenAI Codex-specific
   reasoningEffort?: ReasoningEffort;
   // Google/Gemini-specific
   /** Thinking level for Gemini 3 models (minimal/low/medium/high) */
@@ -93,17 +89,14 @@ export interface ProviderStreamOptions {
   enableThinking?: boolean;
   thinkingBudget?: number;
   // OpenAI-specific
-  topP?: number;
-  frequencyPenalty?: number;
-  presencePenalty?: number;
+  reasoningEffort?: ReasoningEffort;
   // Google/Gemini-specific
+  topP?: number;
   topK?: number;
   /** Thinking level for Gemini 3 models */
   thinkingLevel?: GeminiThinkingLevel;
   /** Thinking budget for Gemini 2.5 models */
   geminiThinkingBudget?: number;
-  // OpenAI Codex-specific
-  reasoningEffort?: ReasoningEffort;
 }
 
 // =============================================================================
@@ -116,8 +109,8 @@ export interface ProviderStreamOptions {
 export const PROVIDER_MODELS = {
   anthropic: CLAUDE_MODELS,
   openai: OPENAI_MODELS,
+  'openai-codex': OPENAI_MODELS,
   google: GEMINI_MODELS,
-  'openai-codex': OPENAI_CODEX_MODELS,
 } as const;
 
 /**
@@ -142,10 +135,11 @@ export function detectProviderFromModel(modelId: string): ProviderType {
   if (modelId.startsWith('claude') || modelId.includes('claude')) {
     return 'anthropic';
   }
-  // OpenAI Codex models (via ChatGPT subscription)
+  // OpenAI Codex models (use Responses API with fixed instructions)
   if (modelId.includes('codex')) {
     return 'openai-codex';
   }
+  // Other OpenAI models (GPT, o-series)
   if (modelId.startsWith('gpt') || modelId.startsWith('o1') || modelId.startsWith('o3') || modelId.startsWith('o4')) {
     return 'openai';
   }
@@ -164,11 +158,10 @@ export function getDefaultModel(provider: ProviderType): string {
     case 'anthropic':
       return DEFAULT_MODEL;
     case 'openai':
-      return 'gpt-4o';
-    case 'google':
-      return 'gemini-2.5-flash';
     case 'openai-codex':
       return 'gpt-5.2-codex';
+    case 'google':
+      return 'gemini-2.5-flash';
     default:
       return DEFAULT_MODEL;
   }
@@ -188,11 +181,10 @@ export function createProvider(config: ProviderConfig): Provider {
     case 'anthropic':
       return createAnthropicProvider(config);
     case 'openai':
+    case 'openai-codex':
       return createOpenAIProvider(config);
     case 'google':
       return createGoogleProvider(config);
-    case 'openai-codex':
-      return createOpenAICodexProvider(config);
     default:
       throw new Error(`Unknown provider type: ${config.type}`);
   }
@@ -231,20 +223,20 @@ function createAnthropicProvider(config: ProviderConfig): Provider {
 }
 
 /**
- * Create OpenAI provider
+ * Create OpenAI provider (OAuth-based, for ChatGPT subscription)
  */
 function createOpenAIProvider(config: ProviderConfig): Provider {
-  if (config.auth.type !== 'api_key') {
-    throw new Error('OpenAI only supports API key authentication');
+  if (config.auth.type !== 'oauth') {
+    throw new Error('OpenAI requires OAuth authentication');
   }
 
   const openaiConfig: OpenAIConfig = {
     model: config.model,
-    apiKey: config.auth.apiKey,
+    auth: config.auth,
     maxTokens: config.maxTokens,
     temperature: config.temperature,
     baseURL: config.baseURL,
-    organization: config.organization,
+    reasoningEffort: config.reasoningEffort,
   };
 
   const provider = new OpenAIProvider(openaiConfig);
@@ -256,9 +248,7 @@ function createOpenAIProvider(config: ProviderConfig): Provider {
       const opts: OpenAIStreamOptions = {
         maxTokens: options?.maxTokens,
         temperature: options?.temperature,
-        topP: options?.topP,
-        frequencyPenalty: options?.frequencyPenalty,
-        presencePenalty: options?.presencePenalty,
+        reasoningEffort: options?.reasoningEffort,
         stopSequences: options?.stopSequences,
       };
       yield* provider.stream(context, opts);
@@ -318,40 +308,6 @@ function createGoogleProvider(config: ProviderConfig): Provider {
         stopSequences: options?.stopSequences,
         thinkingLevel: options?.thinkingLevel,
         thinkingBudget: options?.geminiThinkingBudget,
-      };
-      yield* provider.stream(context, opts);
-    },
-  };
-}
-
-/**
- * Create OpenAI Codex provider (for ChatGPT subscription OAuth)
- */
-function createOpenAICodexProvider(config: ProviderConfig): Provider {
-  if (config.auth.type !== 'oauth') {
-    throw new Error('OpenAI Codex requires OAuth authentication');
-  }
-
-  const codexConfig: OpenAICodexConfig = {
-    model: config.model,
-    auth: config.auth,
-    maxTokens: config.maxTokens,
-    temperature: config.temperature,
-    baseURL: config.baseURL,
-    reasoningEffort: config.reasoningEffort,
-  };
-
-  const provider = new OpenAICodexProvider(codexConfig);
-
-  return {
-    id: 'openai-codex',
-    get model() { return provider.model; },
-    async *stream(context: Context, options?: ProviderStreamOptions): AsyncGenerator<StreamEvent> {
-      const opts: OpenAICodexStreamOptions = {
-        maxTokens: options?.maxTokens,
-        temperature: options?.temperature,
-        reasoningEffort: options?.reasoningEffort,
-        stopSequences: options?.stopSequences,
       };
       yield* provider.stream(context, opts);
     },

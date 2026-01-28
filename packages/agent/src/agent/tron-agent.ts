@@ -96,7 +96,6 @@ export class TronAgent {
       temperature: config.temperature,
       baseURL: config.provider.baseURL,
       thinkingBudget: config.provider.thinkingBudget ?? config.thinkingBudget,
-      organization: config.provider.organization,
       googleEndpoint: config.provider.googleEndpoint,
     });
 
@@ -242,7 +241,6 @@ export class TronAgent {
       temperature: this.config.temperature,
       baseURL: this.config.provider.baseURL,
       thinkingBudget: this.config.provider.thinkingBudget ?? this.config.thinkingBudget,
-      organization: this.config.provider.organization,
       googleEndpoint,
     });
 
