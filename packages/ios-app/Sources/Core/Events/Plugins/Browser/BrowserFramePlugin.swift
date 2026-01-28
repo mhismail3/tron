@@ -14,10 +14,21 @@ enum BrowserFramePlugin: EventPlugin {
         let data: DataPayload
 
         struct DataPayload: Decodable, Sendable {
-            let frame: String  // Base64-encoded image data
-            let format: String?
-            let width: Int?
-            let height: Int?
+            let sessionId: String
+            /// Base64-encoded frame data (named "data" in server response)
+            let data: String
+            let frameId: Int
+            let timestamp: Double
+            let metadata: Metadata?
+
+            struct Metadata: Decodable, Sendable {
+                let offsetTop: Double?
+                let pageScaleFactor: Double?
+                let deviceWidth: Double?
+                let deviceHeight: Double?
+                let scrollOffsetX: Double?
+                let scrollOffsetY: Double?
+            }
         }
     }
 
@@ -34,10 +45,10 @@ enum BrowserFramePlugin: EventPlugin {
 
     static func transform(_ event: EventData) -> (any EventResult)? {
         Result(
-            frameData: event.data.frame,
-            format: event.data.format,
-            width: event.data.width,
-            height: event.data.height
+            frameData: event.data.data,
+            format: nil,
+            width: event.data.metadata?.deviceWidth.map { Int($0) },
+            height: event.data.metadata?.deviceHeight.map { Int($0) }
         )
     }
 }
