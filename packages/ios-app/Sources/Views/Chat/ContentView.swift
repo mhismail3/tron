@@ -362,11 +362,28 @@ struct ContentView: View {
             .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
-                    // iPad - show emerald sidebar toggle
+                    // Sidebar toggle
                     Button(action: toggleSidebar) {
                         Image(systemName: "sidebar.leading")
                             .font(TronTypography.sans(size: TronTypography.sizeTitle, weight: .medium))
                             .foregroundStyle(.tronEmerald)
+                    }
+                }
+                ToolbarItem(placement: .topBarLeading) {
+                    // Tron logo menu for navigation mode switching
+                    Menu {
+                        ForEach(NavigationMode.allCases, id: \.self) { mode in
+                            Button {
+                                navigationMode = mode
+                            } label: {
+                                Label(mode.rawValue, systemImage: mode == .agents ? "cpu" : "waveform")
+                            }
+                        }
+                    } label: {
+                        Image("TronLogo")
+                            .resizable()
+                            .aspectRatio(contentMode: .fit)
+                            .frame(height: 24)
                     }
                 }
                 ToolbarItem(placement: .principal) {

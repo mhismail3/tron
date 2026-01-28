@@ -214,9 +214,11 @@ struct VoiceNoteRow: View {
         .padding(.vertical, 10)
         .padding(.horizontal, 14)
         .glassEffect(
-            .regular.tint(Color.tronPhthaloGreen.opacity(0.15)),
+            .regular.tint(Color.tronPhthaloGreen.opacity(0.15)).interactive(),
             in: RoundedRectangle(cornerRadius: 12, style: .continuous)
         )
+        .contentShape([.interaction, .hoverEffect], RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .hoverEffect(.highlight)
     }
 }
 
