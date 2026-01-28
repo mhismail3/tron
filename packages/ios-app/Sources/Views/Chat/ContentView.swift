@@ -394,6 +394,9 @@ struct ContentView: View {
 
     /// Creates a ChatView for the given session
     /// iPad (regular) gets sidebar toggle, iPhone (compact) uses back button
+    /// Note: .id(sessionId) forces SwiftUI to treat each session as a unique view,
+    /// destroying the old view and creating a fresh one when switching sessions.
+    /// This ensures ChatViewModel is recreated with the correct sessionId.
     @ViewBuilder
     private func chatViewForSession(_ sessionId: String) -> some View {
         if horizontalSizeClass == .regular {
@@ -405,6 +408,7 @@ struct ContentView: View {
                 scrollTarget: $currentScrollTarget,
                 onToggleSidebar: toggleSidebar
             )
+            .id(sessionId)
         } else {
             ChatView(
                 rpcClient: rpcClient,
@@ -413,6 +417,7 @@ struct ContentView: View {
                 workspaceDeleted: workspaceDeletedForSession[sessionId] ?? false,
                 scrollTarget: $currentScrollTarget
             )
+            .id(sessionId)
         }
     }
 
