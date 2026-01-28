@@ -39,9 +39,16 @@ struct ChatView: View {
     // MARK: - Legacy Scroll State (internal for extension access)
     @State var scrollProxy: ScrollViewProxy?
 
-    // MARK: - Entry Morph Animation (private - body only)
-    @State private var showEntryContent = false
-    private let entryMorphDelay: UInt64 = 180_000_000
+    // MARK: - Per-Message Visibility Animation (internal for extension access)
+    // Each message tracks its own visibility state for staggered entry animation.
+    // This replaces the global showEntryContent boolean which caused all messages
+    // to animate simultaneously, leading to frame drops with many messages.
+    @State var enteredMessageIds: Set<UUID> = []
+
+    /// Number of messages to animate on load (bottom N messages get staggered animation)
+    let animatedBatchSize = 10
+    /// Stagger delay between each message animation
+    let staggerDelayNs: UInt64 = 25_000_000  // 25ms
 
     // MARK: - Message Loading State (private - body only)
     @State private var initialLoadComplete = false
@@ -221,18 +228,11 @@ struct ChatView: View {
             if let savedLevel = UserDefaults.standard.string(forKey: reasoningLevelKey) {
                 viewModel.inputBarState.reasoningLevel = savedLevel
             }
-
-            // Entry morph animation from left with 180ms delay (90% of mic button's 200ms)
-            Task { @MainActor in
-                try? await Task.sleep(nanoseconds: entryMorphDelay)
-                withAnimation(.spring(response: 0.32, dampingFraction: 0.86)) {
-                    showEntryContent = true
-                }
-            }
+            // Note: Message entry animations are handled in .task after messages load
         }
         .onDisappear {
             // Reset for next entry
-            showEntryContent = false
+            enteredMessageIds.removeAll()
             initialLoadComplete = false
             // Full reset of animation state when leaving session
             viewModel.animationCoordinator.fullReset()
@@ -283,11 +283,8 @@ struct ChatView: View {
             // Mark initial load complete - enables auto-scroll for subsequent updates
             initialLoadComplete = true
 
-            // Scroll to bottom after messages are loaded
-            // (We don't use defaultScrollAnchor because it causes keyboard issues)
-            await MainActor.run {
-                scrollProxy?.scrollTo("bottom", anchor: .bottom)
-            }
+            // Handle message visibility based on whether we have a deep link target
+            await handleInitialMessageVisibility()
         }
         .onChange(of: viewModel.connectionState) { oldState, newState in
             // React when connection transitions to connected
@@ -329,23 +326,12 @@ struct ChatView: View {
 
             // Wait for initial load to complete before scrolling
             guard initialLoadComplete else {
-                // If not loaded yet, the target will be handled by the task below
+                // If not loaded yet, the target will be handled by handleInitialMessageVisibility
                 return
             }
 
             // Find and scroll to the target message
             performDeepLinkScroll(to: target)
-        }
-        .task(id: scrollTarget) {
-            // Handle scroll target that was set before initial load completed
-            guard let target = scrollTarget, initialLoadComplete else { return }
-
-            // Brief delay for layout to settle
-            try? await Task.sleep(nanoseconds: 150_000_000)
-
-            await MainActor.run {
-                performDeepLinkScroll(to: target)
-            }
         }
     }
 
@@ -417,12 +403,12 @@ struct ChatView: View {
                                 }
                             )
                             .id(message.id)
-                            // Entrance animation - fade in with slight upward movement
-                            .opacity(showEntryContent ? 1 : 0)
-                            .offset(y: showEntryContent ? 0 : 6)
+                            // Per-message entrance animation - fade in with slight upward movement
+                            // Each message tracks its own visibility state via enteredMessageIds
+                            .opacity(enteredMessageIds.contains(message.id) ? 1 : 0)
+                            .offset(y: enteredMessageIds.contains(message.id) ? 0 : 6)
                             .transition(.opacity.combined(with: .scale(scale: 0.98, anchor: .bottom)))
                         }
-                        .animation(.easeOut(duration: 0.3), value: showEntryContent)
                         .animation(.easeOut(duration: 0.25), value: viewModel.messages.count)
 
                         // Show processing indicator only when:
@@ -505,10 +491,18 @@ struct ChatView: View {
                 .onAppear {
                     scrollProxy = proxy
                 }
-                // Auto-scroll on new messages
+                // Auto-scroll on new messages and handle visibility
                 .onChange(of: viewModel.messages.count) { oldCount, newCount in
                     guard initialLoadComplete else { return }
                     guard newCount > oldCount else { return }  // Only for new messages, not history
+
+                    // Make new messages visible with animation
+                    let newMessages = viewModel.messages.suffix(newCount - oldCount)
+                    for message in newMessages {
+                        withAnimation(.easeOut(duration: 0.2)) {
+                            enteredMessageIds.insert(message.id)
+                        }
+                    }
 
                     scrollCoordinator.contentAdded()
                     if scrollCoordinator.shouldAutoScroll {
@@ -549,6 +543,11 @@ struct ChatView: View {
                 // Restore scroll position after loading older messages
                 .onChange(of: viewModel.isLoadingMoreMessages) { wasLoading, isLoading in
                     if wasLoading && !isLoading {
+                        // Make all newly loaded older messages visible immediately
+                        // These were prepended to the beginning of the array
+                        for message in viewModel.messages {
+                            enteredMessageIds.insert(message.id)
+                        }
                         scrollCoordinator.didPrependHistory(using: proxy)
                     }
                 }

@@ -33,6 +33,16 @@ final class ToolEventCoordinator {
     ) {
         context.logDebug("Tool args: \(pluginResult.formattedArguments.prefix(200))")
 
+        // CRITICAL: Check if this tool already exists from catch-up processing.
+        // When resuming an in-progress session, catch-up creates tool messages for running/completed tools.
+        // The server then continues streaming those same tools, which would cause duplicates.
+        if MessageFinder.hasToolMessage(toolCallId: pluginResult.toolCallId, in: context.messages) {
+            context.logInfo("Skipping duplicate tool.start for \(pluginResult.toolName) (toolCallId: \(pluginResult.toolCallId)) - already exists from catch-up")
+            // Still make the tool visible (in case it wasn't) and track it
+            context.makeToolVisible(pluginResult.toolCallId)
+            return
+        }
+
         // Finalize any current streaming text before tool starts
         context.flushPendingTextUpdates()
         context.finalizeStreamingMessage()

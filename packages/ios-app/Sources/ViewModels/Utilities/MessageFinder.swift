@@ -30,6 +30,31 @@ enum MessageFinder {
         })
     }
 
+    /// Find LAST message index with matching toolCallId in toolResult content.
+    static func lastIndexOfToolResult(toolCallId: String, in messages: [ChatMessage]) -> Int? {
+        messages.lastIndex(where: { message in
+            if case .toolResult(let result) = message.content {
+                return result.toolCallId == toolCallId
+            }
+            return false
+        })
+    }
+
+    /// Check if a message with this toolCallId already exists (toolUse OR toolResult).
+    /// Used to prevent duplicate tool messages during catch-up + streaming.
+    static func hasToolMessage(toolCallId: String, in messages: [ChatMessage]) -> Bool {
+        messages.contains(where: { message in
+            switch message.content {
+            case .toolUse(let tool):
+                return tool.toolCallId == toolCallId
+            case .toolResult(let result):
+                return result.toolCallId == toolCallId
+            default:
+                return false
+            }
+        })
+    }
+
     // MARK: - By AskUserQuestion
 
     /// Find LAST message index with matching toolCallId in askUserQuestion content.

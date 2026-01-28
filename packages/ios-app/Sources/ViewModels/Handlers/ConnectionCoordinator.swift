@@ -40,6 +40,9 @@ protocol ConnectionContext: LoggingContext, SessionIdentifiable, ProcessingTrack
 
     /// Process catch-up content from resumed session
     func processCatchUpContent(accumulatedText: String, toolCalls: [CurrentTurnToolCall]) async
+
+    /// Remove the catching-up notification message after processing is complete
+    func removeCatchingUpMessage()
 }
 
 /// Coordinates session connection, reconnection, and catch-up for ChatViewModel.
@@ -196,6 +199,11 @@ final class ConnectionCoordinator {
 
                 // Process catch-up content
                 await context.processCatchUpContent(accumulatedText: accumulatedText, toolCalls: toolCalls)
+
+                // Remove the catching-up notification now that content has been processed.
+                // This provides immediate feedback that catch-up is complete, rather than
+                // waiting for the next turn_end which may not come for a while.
+                context.removeCatchingUpMessage()
 
                 context.logInfo("Processed catch-up content for in-progress turn")
             } else {

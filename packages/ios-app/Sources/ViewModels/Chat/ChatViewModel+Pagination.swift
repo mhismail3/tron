@@ -55,22 +55,27 @@ extension ChatViewModel {
         // Load thinking history for display in sheet
         await thinkingState.loadHistory(sessionId: sessionId)
 
-        let initialMessageCount = messages.count
-        logger.info("Loaded \(initialMessageCount) cached messages - now syncing from server", category: .session)
+        // Track HISTORY message count (from DB), not total count which includes catch-up
+        // This is important for determining if sync brought new events
+        let initialHistoryCount = allReconstructedMessages.count
+        logger.info("Loaded \(initialHistoryCount) history messages (total including catch-up: \(messages.count)) - now syncing from server", category: .session)
 
         // Then sync from server in background to get any events that happened while away
         do {
             try await manager.syncSessionEvents(sessionId: sessionId)
             logger.info("Synced events from server after initial load", category: .session)
 
-            // If sync brought new events, reload to show them
-            // But only if we're not in the middle of processing (avoid disrupting streaming)
-            if !isProcessing {
-                let state = try manager.getReconstructedState(sessionId: sessionId)
-                if state.messages.count > initialMessageCount {
-                    logger.info("Server sync found \(state.messages.count - initialMessageCount) new messages, updating UI", category: .session)
-                    await loadPersistedMessagesAsync()
-                }
+            // If sync brought new events, reload to show them.
+            // NOTE: We reload even when isProcessing=true because loadPersistedMessagesAsync()
+            // preserves catch-up state (streaming messages, tool chips) while loading history.
+            // This ensures the user's prompt appears even when resuming an in-progress session.
+            //
+            // We compare against HISTORY count (allReconstructedMessages), not total messages,
+            // because catch-up messages shouldn't prevent us from reloading when history grows.
+            let state = try manager.getReconstructedState(sessionId: sessionId)
+            if state.messages.count > initialHistoryCount {
+                logger.info("Server sync found \(state.messages.count - initialHistoryCount) new history messages, updating UI (isProcessing=\(isProcessing))", category: .session)
+                await loadPersistedMessagesAsync()
             }
         } catch {
             logger.warning("Failed to sync events from server: \(error.localizedDescription)", category: .session)
@@ -82,13 +87,53 @@ extension ChatViewModel {
     func loadPersistedMessagesAsync() async {
         guard let manager = eventStoreManager else { return }
 
-        // Preserve streaming state if in progress
+        // =============================================================================
+        // CATCH-UP STATE PRESERVATION
+        // =============================================================================
+        //
+        // When resuming an in-progress session, we have TWO sources of messages:
+        // 1. PERSISTED EVENTS (from DB) - all completed turns and events synced from server
+        // 2. CATCH-UP CONTENT - current turn's in-progress state from getAgentState()
+        //
+        // Key insight: message.assistant events are only created at TURN END.
+        // So during an in-progress turn, history won't have the current turn's text.
+        // Catch-up supplements history with in-progress content.
+        //
+        // We must be careful to only preserve ACTUAL catch-up content, not history:
+        // - Streaming text (isStreaming = true)
+        // - Running tools (toolUse with status = .running)
+        // - System notifications (catching-up, etc.)
+        //
+        // We do NOT preserve:
+        // - History messages (text from completed turns) - these come from DB
+        // - Completed tools - these will be in DB after sync
+        // =============================================================================
+
         let preserveStreamingState = isProcessing || streamingManager.streamingMessageId != nil
         var catchUpMessagesToRestore: [ChatMessage] = []
 
         if preserveStreamingState {
-            catchUpMessagesToRestore = messages
-            logger.info("Preserving \(catchUpMessagesToRestore.count) catch-up messages before loading history (isProcessing=\(isProcessing))", category: .session)
+            // Only preserve ACTUAL catch-up content, not history that was already loaded
+            catchUpMessagesToRestore = messages.filter { msg in
+                // Keep streaming messages (in-progress text)
+                if msg.isStreaming {
+                    return true
+                }
+
+                // Keep running tools (not yet completed)
+                if case .toolUse(let data) = msg.content, data.status == .running {
+                    return true
+                }
+
+                // Keep system notifications (catching-up, etc.)
+                if case .systemEvent = msg.content {
+                    return true
+                }
+
+                // Discard everything else (history, completed tools)
+                return false
+            }
+            logger.info("Preserving \(catchUpMessagesToRestore.count) catch-up messages (filtered from \(messages.count) total)", category: .session)
         }
 
         await Task.yield()
@@ -112,10 +157,23 @@ extension ChatViewModel {
                 messages = []
             }
 
-            // Restore catch-up messages at the end
+            // Restore catch-up messages at the end, with final deduplication.
+            // Even after filtering above, a tool might have completed between catch-up
+            // and sync, so we still check for duplicates by toolCallId.
             if !catchUpMessagesToRestore.isEmpty {
-                messages.append(contentsOf: catchUpMessagesToRestore)
-                logger.info("Restored \(catchUpMessagesToRestore.count) catch-up messages after loading \(loadedMessages.count) historical messages", category: .session)
+                let filteredCatchUp = catchUpMessagesToRestore.filter { catchUpMsg in
+                    // Check if this is a tool message that now exists in history
+                    if let toolCallId = catchUpMsg.toolCallId {
+                        return !MessageFinder.hasToolMessage(toolCallId: toolCallId, in: messages)
+                    }
+                    // Non-tool messages (streaming text, system events) are always kept
+                    return true
+                }
+
+                if !filteredCatchUp.isEmpty {
+                    messages.append(contentsOf: filteredCatchUp)
+                }
+                logger.info("Restored \(filteredCatchUp.count)/\(catchUpMessagesToRestore.count) catch-up messages after loading \(loadedMessages.count) historical messages", category: .session)
             }
 
             // Update turn counter from unified state

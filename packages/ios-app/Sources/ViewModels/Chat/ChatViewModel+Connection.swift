@@ -1,4 +1,5 @@
 import Foundation
+import SwiftUI
 
 // MARK: - ConnectionContext Conformance
 
@@ -41,6 +42,15 @@ extension ChatViewModel: ConnectionContext {
 
     func processCatchUpContent(accumulatedText: String, toolCalls: [CurrentTurnToolCall]) async {
         await processCatchUpContentInternal(accumulatedText: accumulatedText, toolCalls: toolCalls)
+    }
+
+    func removeCatchingUpMessage() {
+        guard let catchUpId = catchingUpMessageId else { return }
+        withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+            messages.removeAll { $0.id == catchUpId }
+        }
+        catchingUpMessageId = nil
+        logger.info("Removed catching-up notification after processing", category: .session)
     }
 
     // Note: The following methods are already defined in other extensions:

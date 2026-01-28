@@ -3,6 +3,19 @@ import Foundation
 // MARK: - Message Extensions
 
 extension ChatMessage {
+    /// Extract the toolCallId from this message if it contains a tool (toolUse or toolResult).
+    /// Returns nil for non-tool messages.
+    var toolCallId: String? {
+        switch content {
+        case .toolUse(let data):
+            return data.toolCallId
+        case .toolResult(let data):
+            return data.toolCallId
+        default:
+            return nil
+        }
+    }
+
     /// Create a user message with optional attachments, skills, and spells
     static func user(_ text: String, attachments: [Attachment]? = nil, skills: [Skill]? = nil, spells: [Skill]? = nil) -> ChatMessage {
         ChatMessage(role: .user, content: .text(text), attachments: attachments, skills: skills, spells: spells)

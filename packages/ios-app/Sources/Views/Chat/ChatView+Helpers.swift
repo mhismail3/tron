@@ -71,6 +71,8 @@ extension ChatView {
     /// Perform scroll to deep link target
     func performDeepLinkScroll(to target: ScrollTarget) {
         if let messageId = viewModel.findMessageId(for: target) {
+            // Ensure the target message is visible before scrolling
+            enteredMessageIds.insert(messageId)
             scrollCoordinator.scrollToTarget(messageId: messageId, using: scrollProxy)
             logger.info("Deep link scroll to message: \(messageId)", category: .notification)
         } else {
@@ -78,5 +80,83 @@ extension ChatView {
         }
         // Clear the scroll target after processing
         scrollTarget = nil
+    }
+
+    // MARK: - Message Visibility Animation
+
+    /// Handle initial message visibility after load.
+    /// For deep links: makes all messages immediately visible then scrolls.
+    /// For normal loads: stagger animates the bottom N messages.
+    func handleInitialMessageVisibility() async {
+        let messageCount = viewModel.messages.count
+        guard messageCount > 0 else { return }
+
+        if let target = scrollTarget {
+            // Deep link: make all messages visible immediately, then scroll
+            await makeAllMessagesVisible()
+
+            // Brief delay for layout to settle before scrolling
+            try? await Task.sleep(nanoseconds: 100_000_000)  // 100ms
+
+            await MainActor.run {
+                performDeepLinkScroll(to: target)
+            }
+        } else {
+            // Normal load: stagger animate the visible batch, older messages appear instantly
+            await staggerMessageEntries()
+
+            // Scroll to bottom after animation
+            await MainActor.run {
+                scrollProxy?.scrollTo("bottom", anchor: .bottom)
+            }
+        }
+    }
+
+    /// Make all messages visible immediately (for deep link scenarios)
+    private func makeAllMessagesVisible() async {
+        await MainActor.run {
+            enteredMessageIds = Set(viewModel.messages.map { $0.id })
+        }
+        logger.debug("Made all \(viewModel.messages.count) messages visible for deep link", category: .notification)
+    }
+
+    /// Stagger message entry animations for smooth loading experience.
+    /// Only animates the bottom N messages; older messages appear instantly.
+    private func staggerMessageEntries() async {
+        let messages = viewModel.messages
+        let messageCount = messages.count
+        guard messageCount > 0 else { return }
+
+        // Messages beyond the animated batch appear instantly (no animation)
+        let messagesToAnimate = min(animatedBatchSize, messageCount)
+        let instantMessages = messages.dropLast(messagesToAnimate)
+
+        // Make older messages visible immediately (no animation)
+        await MainActor.run {
+            for message in instantMessages {
+                enteredMessageIds.insert(message.id)
+            }
+        }
+
+        // Stagger animate the visible batch (bottom N messages)
+        let visibleBatch = messages.suffix(messagesToAnimate)
+
+        // Small initial delay for smooth entry
+        try? await Task.sleep(nanoseconds: 100_000_000)  // 100ms
+
+        for (index, message) in visibleBatch.enumerated() {
+            // Stagger delay between messages
+            if index > 0 {
+                try? await Task.sleep(nanoseconds: staggerDelayNs)
+            }
+
+            await MainActor.run {
+                withAnimation(.easeOut(duration: 0.2)) {
+                    enteredMessageIds.insert(message.id)
+                }
+            }
+        }
+
+        logger.debug("Staggered \(messagesToAnimate) messages, \(instantMessages.count) instant", category: .session)
     }
 }

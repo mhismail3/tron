@@ -262,4 +262,156 @@ final class ChatViewModelFindMessageTests: XCTestCase {
         XCTAssertNil(foundEvent)
         XCTAssertNil(foundBottom)
     }
+
+    // MARK: - Full History Search Tests (for deep links to out-of-window messages)
+
+    func testFindMessageIdSearchesAllReconstructedMessages() {
+        // Given: A message in allReconstructedMessages but NOT in displayed messages
+        let targetId = UUID()
+        let targetMessage = ChatMessage(
+            id: targetId,
+            role: .assistant,
+            content: .toolUse(ToolUseData(
+                toolName: "NotifyApp",
+                toolCallId: "toolu_old",
+                arguments: "{}",
+                status: .success
+            ))
+        )
+
+        // Simulate pagination: old message is in full history but not displayed
+        viewModel.allReconstructedMessages = [
+            targetMessage,  // Older message (not displayed)
+            ChatMessage(id: UUID(), role: .user, content: .text("Hello")),
+            ChatMessage(id: UUID(), role: .assistant, content: .text("Hi")),
+        ]
+        viewModel.messages = [
+            ChatMessage(id: UUID(), role: .user, content: .text("Hello")),
+            ChatMessage(id: UUID(), role: .assistant, content: .text("Hi")),
+        ]
+
+        // When: Finding message for tool call that's in full history
+        let found = viewModel.findMessageId(for: .toolCall(id: "toolu_old"))
+
+        // Then: Should find it in allReconstructedMessages
+        XCTAssertEqual(found, targetId)
+    }
+
+    func testFindMessageIdSearchesDisplayedMessagesFirst() {
+        // Given: A message in both displayed messages AND full history
+        let targetId = UUID()
+        let targetMessage = ChatMessage(
+            id: targetId,
+            role: .assistant,
+            content: .toolUse(ToolUseData(
+                toolName: "NotifyApp",
+                toolCallId: "toolu_recent",
+                arguments: "{}",
+                status: .success
+            ))
+        )
+
+        // Message is in both arrays (as would happen normally)
+        viewModel.messages = [targetMessage]
+        viewModel.allReconstructedMessages = [
+            ChatMessage(id: UUID(), role: .user, content: .text("Old message")),
+            targetMessage,
+        ]
+
+        // When: Finding message for tool call
+        let found = viewModel.findMessageId(for: .toolCall(id: "toolu_recent"))
+
+        // Then: Should find it (displayed messages searched first)
+        XCTAssertEqual(found, targetId)
+    }
+
+    func testFindMessageIdForEventSearchesFullHistory() {
+        // Given: An event in full history but not displayed
+        let targetId = UUID()
+        let targetMessage = ChatMessage(
+            id: targetId,
+            role: .assistant,
+            content: .text("Old notification"),
+            eventId: "evt_old"
+        )
+
+        viewModel.allReconstructedMessages = [targetMessage]
+        viewModel.messages = []
+
+        // When: Finding message for event
+        let found = viewModel.findMessageId(for: .event(id: "evt_old"))
+
+        // Then: Should find it in full history
+        XCTAssertEqual(found, targetId)
+    }
+
+    func testFindMessageIdExpandsWindowForOldMessage() {
+        // Given: A deep link target that's beyond the displayed window
+        let targetId = UUID()
+        let targetMessage = ChatMessage(
+            id: targetId,
+            role: .assistant,
+            content: .toolUse(ToolUseData(
+                toolName: "NotifyApp",
+                toolCallId: "toolu_old",
+                arguments: "{}",
+                status: .success
+            ))
+        )
+
+        // Build a realistic scenario: 60 messages total, only latest 50 displayed
+        var allMessages: [ChatMessage] = []
+        allMessages.append(targetMessage)  // Index 0 (oldest)
+        for i in 1..<60 {
+            allMessages.append(ChatMessage(
+                id: UUID(),
+                role: i.isMultiple(of: 2) ? .user : .assistant,
+                content: .text("Message \(i)")
+            ))
+        }
+
+        viewModel.allReconstructedMessages = allMessages
+        viewModel.messages = Array(allMessages.suffix(50))  // Only latest 50
+        viewModel.displayedMessageCount = 50
+
+        // When: Finding the old message
+        let found = viewModel.findMessageId(for: .toolCall(id: "toolu_old"))
+
+        // Then: Should find it
+        XCTAssertEqual(found, targetId)
+
+        // And: Window should be expanded to include it
+        XCTAssertTrue(viewModel.messages.contains(where: { $0.id == targetId }))
+    }
+
+    func testFindMessageIdReturnsIndexInFullHistory() {
+        // Given: A message that needs window expansion
+        let targetId = UUID()
+        let targetMessage = ChatMessage(
+            id: targetId,
+            role: .assistant,
+            content: .toolUse(ToolUseData(
+                toolName: "NotifyApp",
+                toolCallId: "toolu_target",
+                arguments: "{}",
+                status: .success
+            ))
+        )
+
+        viewModel.allReconstructedMessages = [
+            targetMessage,
+            ChatMessage(id: UUID(), role: .user, content: .text("Middle")),
+            ChatMessage(id: UUID(), role: .assistant, content: .text("End")),
+        ]
+        viewModel.messages = [
+            ChatMessage(id: UUID(), role: .assistant, content: .text("End")),
+        ]
+        viewModel.displayedMessageCount = 1
+
+        // When: Finding the message
+        let found = viewModel.findMessageId(for: .toolCall(id: "toolu_target"))
+
+        // Then: Should return the message ID
+        XCTAssertEqual(found, targetId)
+    }
 }

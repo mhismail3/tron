@@ -69,6 +69,13 @@ final class DeepLinkRouter {
     // MARK: - URL Scheme Handling
 
     /// Handle URL scheme (tron:// or tron-mobile://)
+    ///
+    /// URLs are parsed as: `scheme://host/path?query`
+    /// For custom URL schemes, the "host" is typically used as the route type.
+    /// Examples:
+    /// - `tron://session/sess_123` → host="session", path="/sess_123"
+    /// - `tron://settings` → host="settings", path=""
+    ///
     /// - Parameter url: The URL to handle
     /// - Returns: true if the URL was handled, false otherwise
     @discardableResult
@@ -77,15 +84,15 @@ final class DeepLinkRouter {
             return false
         }
 
-        let pathComponents = url.pathComponents.filter { $0 != "/" }
-
-        guard let firstPath = pathComponents.first else {
+        // In custom URL schemes, the host acts as the route type
+        // e.g., tron://session/sess_123 has host="session"
+        guard let routeType = url.host else {
             return false
         }
 
-        switch firstPath {
+        switch routeType {
         case "session":
-            return handleSessionURL(url: url, pathComponents: pathComponents)
+            return handleSessionURL(url: url)
 
         case "settings":
             pendingIntent = .settings
@@ -98,20 +105,23 @@ final class DeepLinkRouter {
             return true
 
         default:
-            TronLogger.shared.warning("Unknown deep link path: \(firstPath)", category: .notification)
+            TronLogger.shared.warning("Unknown deep link route: \(routeType)", category: .notification)
             return false
         }
     }
 
     /// Handle session URL (tron://session/{sessionId}?tool=...&event=...)
-    private func handleSessionURL(url: URL, pathComponents: [String]) -> Bool {
-        // Need at least "session" and the session ID
-        guard pathComponents.count >= 2 else {
+    /// The session ID is the first path component after the host.
+    private func handleSessionURL(url: URL) -> Bool {
+        // Path components include "/" as first element, then the actual path segments
+        // e.g., tron://session/sess_123 has path="/sess_123", pathComponents=["/", "sess_123"]
+        let pathComponents = url.pathComponents.filter { $0 != "/" }
+
+        guard let sessionId = pathComponents.first, !sessionId.isEmpty else {
             TronLogger.shared.warning("Session deep link missing sessionId", category: .notification)
             return false
         }
 
-        let sessionId = pathComponents[1]
         let components = URLComponents(url: url, resolvingAgainstBaseURL: false)
 
         var scrollTarget: ScrollTarget?
