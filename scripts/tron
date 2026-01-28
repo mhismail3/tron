@@ -1278,6 +1278,23 @@ EOF
         run_tests || print_warning "Some tests failed (continuing anyway)"
     fi
 
+    # Create symlink for global 'tron' command
+    print_status "Setting up tron command..."
+    mkdir -p "$HOME/.local/bin"
+    if [ -L "$HOME/.local/bin/tron" ]; then
+        rm "$HOME/.local/bin/tron"
+    fi
+    ln -s "$PROJECT_DIR/scripts/tron" "$HOME/.local/bin/tron"
+    print_success "Created symlink: ~/.local/bin/tron"
+
+    # Check if ~/.local/bin is in PATH
+    if [[ ":$PATH:" != *":$HOME/.local/bin:"* ]]; then
+        print_warning "~/.local/bin is not in your PATH"
+        echo "  Add this to your shell config (~/.zshrc or ~/.bashrc):"
+        echo "    export PATH=\"\$HOME/.local/bin:\$PATH\""
+        echo ""
+    fi
+
     echo ""
     echo -e "${GREEN}═══════════════════════════════════════════════════════════════${NC}"
     echo -e "${GREEN}                    Tron Setup Complete!${NC}"
@@ -1302,10 +1319,10 @@ EOF
     echo "     export ANTHROPIC_API_KEY=\"your-key-here\""
     echo ""
     echo "  5. Start development server:"
-    echo "     ./scripts/tron dev"
+    echo "     tron dev"
     echo ""
     echo "  6. (Optional) Install as production service:"
-    echo "     ./scripts/tron install"
+    echo "     tron install"
     echo ""
 }
 
