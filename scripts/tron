@@ -1210,9 +1210,8 @@ cmd_setup() {
 
     # Create directory structure
     print_status "Creating directory structure..."
-    mkdir -p "$TRON_HOME"/{logs,sessions,memory,tasks,notes,inbox,skills,hooks,db}
-    mkdir -p "$TRON_HOME"/memory/{handoffs,learnings}
-    mkdir -p "$TRON_HOME"/inbox/processed
+    mkdir -p "$TRON_HOME"/{db,mods,notes,plans,rules,skills}
+    mkdir -p "$TRON_HOME"/mods/apns
     print_success "Created $TRON_HOME directory structure"
 
     # Create default config files
@@ -1234,28 +1233,35 @@ EOF
         print_warning "settings.json already exists, skipping"
     fi
 
-    if [ ! -f "$TRON_HOME/AGENTS.md" ]; then
-        cat > "$TRON_HOME/AGENTS.md" << 'EOF'
-# Global Agent Context
+    if [ ! -f "$TRON_HOME/rules/system.md" ]; then
+        cat > "$TRON_HOME/rules/system.md" << 'EOF'
+You are Tron, an AI coding assistant with full access to the user's file system.
 
-This file provides global instructions that apply to all Tron sessions.
+When the user asks you to work with files or code, you can directly read, write, and edit files using the available tools. You are operating on the server machine with full file system access.
 
-## General Guidelines
-
-- Be concise and direct in responses
-- Follow the project's coding conventions
-- Write tests for new functionality
-- Document significant changes
-
-## Memory Usage
-
-- Keep the ledger updated with current focus
-- Generate handoffs before context compaction
-- Record key decisions with reasoning
+Be helpful, accurate, and efficient. When working with code:
+1. Read existing files to understand context before making changes
+2. Make targeted, minimal edits rather than rewriting entire files
+3. Test changes by running appropriate commands when asked
+4. Explain what you're doing and why
 EOF
-        print_success "Created AGENTS.md"
+        print_success "Created rules/system.md"
     else
-        print_warning "AGENTS.md already exists, skipping"
+        print_warning "rules/system.md already exists, skipping"
+    fi
+
+    if [ ! -f "$TRON_HOME/auth.json" ]; then
+        cat > "$TRON_HOME/auth.json" << 'EOF'
+{
+  "version": 1,
+  "providers": {},
+  "lastUpdated": ""
+}
+EOF
+        chmod 600 "$TRON_HOME/auth.json"
+        print_success "Created auth.json"
+    else
+        print_warning "auth.json already exists, skipping"
     fi
 
     # Install dependencies
@@ -1272,51 +1278,6 @@ EOF
         run_tests || print_warning "Some tests failed (continuing anyway)"
     fi
 
-    # Create default skills
-    print_status "Creating default skills..."
-
-    mkdir -p "$TRON_HOME/skills/commit"
-    if [ ! -f "$TRON_HOME/skills/commit/SKILL.md" ]; then
-        cat > "$TRON_HOME/skills/commit/SKILL.md" << 'EOF'
----
-name: commit
-description: Create a git commit with a well-formatted message
-arguments:
-  - name: message
-    description: Optional commit message (will be generated if not provided)
-    required: false
----
-
-# Commit Skill
-
-Create a git commit following conventional commit format.
-1. Run `git status` to see changes
-2. Run `git diff --staged` to understand what's being committed
-3. Generate a commit message: type(scope): description
-4. Run `git commit -m "..."` with the message
-EOF
-        print_success "Created commit skill"
-    fi
-
-    mkdir -p "$TRON_HOME/skills/handoff"
-    if [ ! -f "$TRON_HOME/skills/handoff/SKILL.md" ]; then
-        cat > "$TRON_HOME/skills/handoff/SKILL.md" << 'EOF'
----
-name: handoff
-description: Generate a handoff document for session continuity
-arguments: []
----
-
-# Handoff Skill
-
-Generate a handoff document summarizing the current session.
-1. Review the session's conversation history
-2. Identify: what was accomplished, current state, blockers, next steps
-3. Save to the handoffs directory
-EOF
-        print_success "Created handoff skill"
-    fi
-
     echo ""
     echo -e "${GREEN}═══════════════════════════════════════════════════════════════${NC}"
     echo -e "${GREEN}                    Tron Setup Complete!${NC}"
@@ -1325,15 +1286,26 @@ EOF
     echo "  Data directory: $TRON_HOME"
     echo "  Project path:   $PROJECT_DIR"
     echo ""
-    echo "  Next steps:"
-    echo "    1. Configure authentication:"
-    echo "       - Set ANTHROPIC_API_KEY for API access"
+    echo -e "${YELLOW}Manual Setup Required${NC}"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     echo ""
-    echo "    2. Start development server:"
-    echo "       tron dev"
+    echo "  1. Copy auth.json from existing machine:"
+    echo "     scp user@other-machine:~/.tron/auth.json ~/.tron/"
     echo ""
-    echo "    3. (Optional) Install as a service:"
-    echo "       tron install"
+    echo "  2. Copy APNS credentials (for iOS push notifications):"
+    echo "     scp -r user@other-machine:~/.tron/mods/apns/* ~/.tron/mods/apns/"
+    echo ""
+    echo "  3. Create Obsidian vault symlink (optional):"
+    echo "     ln -s /path/to/your/obsidian/vault ~/.tron/obsidian"
+    echo ""
+    echo "  4. Configure API keys (if not using auth.json):"
+    echo "     export ANTHROPIC_API_KEY=\"your-key-here\""
+    echo ""
+    echo "  5. Start development server:"
+    echo "     ./scripts/tron dev"
+    echo ""
+    echo "  6. (Optional) Install as production service:"
+    echo "     ./scripts/tron install"
     echo ""
 }
 
