@@ -37,6 +37,12 @@ import {
   createGitExecutor,
   WorktreeEvents,
   createWorktreeEvents,
+  IsolationPolicy,
+  createIsolationPolicy,
+  WorktreeLifecycle,
+  createWorktreeLifecycle,
+  WorktreeRecovery,
+  createWorktreeRecovery,
 } from './worktree/index.js';
 
 const logger = createLogger('worktree-coordinator');
@@ -111,6 +117,9 @@ export class WorktreeCoordinator {
   // Handlers for delegated operations
   private gitExecutor: GitExecutor;
   private worktreeEvents: WorktreeEvents;
+  private isolationPolicy: IsolationPolicy | null = null;
+  private worktreeLifecycle: WorktreeLifecycle | null = null;
+  private worktreeRecovery: WorktreeRecovery | null = null;
 
   constructor(
     private eventStore: EventStore,
@@ -139,6 +148,38 @@ export class WorktreeCoordinator {
           return 'event-id';
         },
       },
+    });
+  }
+
+  /**
+   * Initialize handlers that need repoRoot (called lazily when repoRoot is set)
+   */
+  private initializeHandlers(): void {
+    if (!this.repoRoot) return;
+
+    const worktreeBaseDir = this.config.worktreeBaseDir || path.join(this.repoRoot, '.worktrees');
+
+    // IsolationPolicy
+    this.isolationPolicy = createIsolationPolicy({
+      isolationMode: this.config.isolationMode,
+      getMainDirectoryOwner: () => this.mainDirectoryOwner,
+    });
+
+    // WorktreeLifecycle
+    this.worktreeLifecycle = createWorktreeLifecycle({
+      gitExecutor: this.gitExecutor,
+      repoRoot: this.repoRoot,
+      worktreeBaseDir,
+      branchPrefix: this.config.branchPrefix,
+    });
+
+    // WorktreeRecovery
+    this.worktreeRecovery = createWorktreeRecovery({
+      gitExecutor: this.gitExecutor,
+      repoRoot: this.repoRoot,
+      worktreeBaseDir,
+      isSessionActive: (sessionId: string) => this.activeSessions.has(sessionId),
+      deleteOnRecovery: this.config.deleteWorktreeOnRelease,
     });
   }
 
@@ -211,6 +252,9 @@ export class WorktreeCoordinator {
       logger.warn('Not a git repository, using directory without isolation', { workingDir });
       return this.acquireNonGitDirectory(sessionId, workingDir);
     }
+
+    // Initialize handlers that need repoRoot
+    this.initializeHandlers();
 
     // Determine if we need isolation
     const needsIsolation = this.shouldIsolate(sessionId, options);
@@ -377,40 +421,23 @@ export class WorktreeCoordinator {
   }
 
   // ===========================================================================
-  // Isolation Decision
+  // Isolation Decision (delegated to IsolationPolicy)
   // ===========================================================================
 
   /**
    * Determine if a session needs an isolated worktree
    */
   private shouldIsolate(sessionId: SessionId, options: AcquireOptions): boolean {
-    // Never mode - always use main directory
-    if (this.config.isolationMode === 'never') {
-      return false;
+    // Use the IsolationPolicy if available, otherwise inline logic for non-git case
+    if (this.isolationPolicy) {
+      return this.isolationPolicy.shouldIsolate(sessionId, {
+        forceIsolation: options.forceIsolation,
+        parentSessionId: options.parentSessionId,
+      });
     }
 
-    // Always mode - always isolate
-    if (this.config.isolationMode === 'always') {
-      return true;
-    }
-
-    // Force isolation requested
-    if (options.forceIsolation) {
-      return true;
-    }
-
-    // Forked session - must isolate
-    if (options.parentSessionId) {
-      return true;
-    }
-
-    // Another session already owns the main directory
-    if (this.mainDirectoryOwner && this.mainDirectoryOwner !== (sessionId as string)) {
-      return true;
-    }
-
-    // First session - no isolation needed
-    return false;
+    // Fallback for when handlers aren't initialized (shouldn't happen)
+    return options.forceIsolation || !!options.parentSessionId;
   }
 
   // ===========================================================================
@@ -573,86 +600,42 @@ export class WorktreeCoordinator {
   }
 
   /**
-   * Create a git worktree
+   * Create a git worktree (delegated to WorktreeLifecycle)
    */
   private async createWorktree(
     worktreePath: string,
     branchName: string,
     baseCommit: string
   ): Promise<void> {
-    // Check if branch exists
-    const branchCheck = await this.gitExecutor.execGit(
-      ['rev-parse', '--verify', branchName],
-      this.repoRoot!
-    );
-
-    if (branchCheck.exitCode !== 0) {
-      // Create branch from base commit
-      await this.gitExecutor.execGit(
-        ['branch', branchName, baseCommit],
-        this.repoRoot!
-      );
+    if (!this.worktreeLifecycle) {
+      throw new Error('WorktreeLifecycle not initialized');
     }
 
-    // Create worktree
-    const result = await this.gitExecutor.execGit(
-      ['worktree', 'add', worktreePath, branchName],
-      this.repoRoot!
-    );
-
-    if (result.exitCode !== 0) {
-      throw new Error(`Failed to create worktree: ${result.stderr}`);
-    }
-
+    await this.worktreeLifecycle.createWorktree(worktreePath, branchName, baseCommit);
     logger.info('Worktree created', { path: worktreePath, branch: branchName });
   }
 
   /**
-   * Remove a worktree
+   * Remove a worktree (delegated to WorktreeLifecycle)
    */
   private async removeWorktree(worktreePath: string): Promise<void> {
-    // Check if directory exists before trying git operations
-    const dirExists = await this.gitExecutor.pathExists(worktreePath);
-
-    if (!dirExists) {
-      // Directory already gone - just prune stale worktree references
-      logger.debug('Worktree directory already deleted, pruning references', {
-        path: worktreePath,
-      });
-      try {
-        await this.gitExecutor.execGit(['worktree', 'prune'], this.repoRoot!);
-      } catch {
-        // Ignore prune errors
-      }
+    if (!this.worktreeLifecycle) {
+      // Fallback if lifecycle not initialized
+      logger.warn('WorktreeLifecycle not initialized, skipping worktree removal');
       return;
     }
 
-    const result = await this.gitExecutor.execGit(
-      ['worktree', 'remove', worktreePath, '--force'],
-      this.repoRoot!
-    );
-
-    if (result.exitCode !== 0) {
-      logger.warn('Failed to remove worktree via git', {
+    try {
+      await this.worktreeLifecycle.removeWorktree(worktreePath, { force: true });
+    } catch (error) {
+      const structured = categorizeError(error, { path: worktreePath, operation: 'remove-worktree' });
+      logger.error('Failed to remove worktree', {
         path: worktreePath,
-        error: result.stderr,
+        code: structured.code,
+        category: LogErrorCategory.FILESYSTEM,
+        error: structured.message,
+        retryable: structured.retryable,
       });
-
-      // Try to remove directory directly
-      try {
-        await fs.rm(worktreePath, { recursive: true, force: true });
-        // Prune worktree references
-        await this.gitExecutor.execGit(['worktree', 'prune'], this.repoRoot!);
-      } catch (error) {
-        const structured = categorizeError(error, { path: worktreePath, operation: 'remove-worktree' });
-        logger.error('Failed to remove worktree directory', {
-          path: worktreePath,
-          code: structured.code,
-          category: LogErrorCategory.FILESYSTEM,
-          error: structured.message,
-          retryable: structured.retryable,
-        });
-      }
     }
   }
 
@@ -861,128 +844,51 @@ export class WorktreeCoordinator {
   }
 
   // ===========================================================================
-  // Recovery
+  // Recovery (delegated to WorktreeRecovery)
   // ===========================================================================
 
   /**
    * Recover orphaned worktrees from crashed sessions
    */
   async recoverOrphanedWorktrees(): Promise<void> {
-    if (!this.repoRoot) {
-      return;
+    if (!this.worktreeRecovery) {
+      // Initialize handlers if we have repoRoot but handlers aren't set up yet
+      if (this.repoRoot) {
+        this.initializeHandlers();
+      }
+      if (!this.worktreeRecovery) {
+        return;
+      }
     }
 
-    const worktreeBase = this.config.worktreeBaseDir || path.join(this.repoRoot, '.worktrees');
+    const results = await this.worktreeRecovery.recoverOrphaned();
 
-    // Check if worktree base directory exists
-    if (!await this.gitExecutor.pathExists(worktreeBase)) {
-      return;
-    }
-
-    try {
-      const entries = await fs.readdir(worktreeBase, { withFileTypes: true });
-
-      for (const entry of entries) {
-        if (!entry.isDirectory()) continue;
-
-        const sessionId = entry.name;
-        const worktreePath = path.join(worktreeBase, sessionId);
-
-        // Check if session is active
-        if (this.activeSessions.has(sessionId)) {
-          continue;
-        }
-
-        // Verify directory still exists (might have been deleted externally)
-        if (!await this.gitExecutor.pathExists(worktreePath)) {
-          logger.debug('Orphaned worktree directory no longer exists', { sessionId, path: worktreePath });
-          continue;
-        }
-
-        logger.info('Found orphaned worktree', { sessionId, path: worktreePath });
-
-        try {
-          // Check for uncommitted changes
-          const statusResult = await this.gitExecutor.execGit(['status', '--porcelain'], worktreePath);
-          if (statusResult.stdout) {
-            // Has uncommitted changes - commit them
-            await this.gitExecutor.execGit(['add', '-A'], worktreePath);
-            await this.gitExecutor.execGit(
-              ['commit', '-m', `[RECOVERED] Session ${sessionId}`],
-              worktreePath
-            );
-            logger.info('Committed orphaned changes', { sessionId });
-          }
-
-          // Optionally clean up
-          if (this.config.deleteWorktreeOnRelease) {
-            await this.removeWorktree(worktreePath);
-            logger.info('Removed orphaned worktree', { sessionId });
-          }
-        } catch (error) {
-          // Log but continue processing other worktrees
-          const structured = categorizeError(error, { sessionId, path: worktreePath, operation: 'recover' });
-          logger.warn('Failed to recover orphaned worktree', {
-            sessionId,
-            path: worktreePath,
-            code: structured.code,
-            category: LogErrorCategory.SESSION_STATE,
-            error: structured.message,
-          });
-        }
-      }
-
-      // Prune any stale worktree references
-      try {
-        await this.gitExecutor.execGit(['worktree', 'prune'], this.repoRoot);
-      } catch {
-        // Ignore prune errors
-      }
-    } catch (error) {
-      const structured = categorizeError(error, { operation: 'scan-orphaned' });
-      logger.warn('Failed to scan for orphaned worktrees', {
-        code: structured.code,
-        category: LogErrorCategory.SESSION_STATE,
-        error: structured.message,
+    // Log summary
+    const recovered = results.filter(r => r.committed);
+    const deleted = results.filter(r => r.deleted);
+    if (recovered.length > 0 || deleted.length > 0) {
+      logger.info('Orphaned worktree recovery complete', {
+        recoveredCount: recovered.length,
+        deletedCount: deleted.length,
       });
     }
   }
 
   /**
    * List all worktrees (including orphaned ones)
+   * Delegated to WorktreeLifecycle
    */
   async listWorktrees(): Promise<Array<{ path: string; branch: string; sessionId?: string }>> {
-    if (!this.repoRoot) {
+    if (!this.worktreeLifecycle) {
       return [];
     }
 
-    const result = await this.gitExecutor.execGit(['worktree', 'list', '--porcelain'], this.repoRoot);
-    if (result.exitCode !== 0) {
-      return [];
-    }
-
-    const worktrees: Array<{ path: string; branch: string; sessionId?: string }> = [];
-    const blocks = result.stdout.split('\n\n');
-
-    for (const block of blocks) {
-      const lines = block.split('\n');
-      const worktreePath = lines.find(l => l.startsWith('worktree '))?.slice(9);
-      const branch = lines.find(l => l.startsWith('branch '))?.slice(7);
-
-      if (worktreePath && branch) {
-        const sessionId = branch.startsWith(`refs/heads/${this.config.branchPrefix}`)
-          ? branch.replace(`refs/heads/${this.config.branchPrefix}`, '')
-          : undefined;
-
-        worktrees.push({
-          path: worktreePath,
-          branch: branch.replace('refs/heads/', ''),
-          sessionId,
-        });
-      }
-    }
-
-    return worktrees;
+    const worktrees = await this.worktreeLifecycle.listWorktrees();
+    return worktrees.map(wt => ({
+      path: wt.path,
+      branch: wt.branch,
+      sessionId: wt.sessionId,
+    }));
   }
 }
 
