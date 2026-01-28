@@ -328,68 +328,62 @@ struct ContentView: View {
     }
 
     private var selectSessionPrompt: some View {
-        // Use Color.clear with overlay for true centering that animates smoothly
-        // (Spacer-based centering doesn't animate - it recalculates immediately)
-        Color.clear
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .overlay {
-                VStack(spacing: 24) {
-                    // Logo and branding
-                    VStack(spacing: 16) {
-                        Image("TronLogo")
-                            .resizable()
-                            .aspectRatio(contentMode: .fit)
-                            .frame(height: 64)
+        // Match WelcomePage structure for consistent UI when sessions exist but none selected
+        NavigationStack {
+            ZStack(alignment: .bottomTrailing) {
+                // Centered content - positioned higher to match WelcomePage
+                VStack(spacing: 16) {
+                    // Circuit moose logo
+                    Image("TronLogo")
+                        .resizable()
+                        .aspectRatio(contentMode: .fit)
+                        .frame(height: 80)
 
-                        Text("TRON")
-                            .font(TronTypography.mono(size: TronTypography.sizeHero, weight: .bold))
-                            .foregroundStyle(.tronEmerald)
-                            .tracking(3)
-                    }
-
-                    // Prompt
-                    VStack(spacing: 8) {
-                        Text("Select a Session")
-                            .font(TronTypography.sans(size: TronTypography.sizeXL, weight: .medium))
-                            .foregroundStyle(.white.opacity(0.9))
-
-                        Text("Choose a session from the sidebar or create a new one")
-                            .font(TronTypography.subheadline)
-                            .foregroundStyle(.white.opacity(0.5))
-                            .multilineTextAlignment(.center)
-                    }
-
-                    // Show sidebar button on compact
-                    if horizontalSizeClass == .compact {
-                        Button {
-                            columnVisibility = .all
-                        } label: {
-                            Label("Show Sessions", systemImage: "sidebar.left")
-                                .font(TronTypography.headline)
-                                .foregroundStyle(.white)
-                                .padding(.horizontal, 24)
-                                .padding(.vertical, 12)
-                                .contentShape(Capsule())
-                        }
-                        .glassEffect(.regular.tint(Color.tronEmerald).interactive(), in: .capsule)
-                        .padding(.top, 8)
-                    }
+                    // Subtle tagline
+                    Text("Choose a session")
+                        .font(TronTypography.messageBody)
+                        .foregroundStyle(.white.opacity(0.4))
                 }
-                .padding(40)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .offset(y: -60)
+
+                // Floating buttons - mic and plus (hide when sidebar is visible to avoid duplicates)
+                if !isSidebarVisible {
+                    HStack(spacing: 12) {
+                        FloatingVoiceNotesButton(action: { showVoiceNotesRecording = true })
+                        FloatingNewSessionButton(action: { showNewSessionSheet = true }, onLongPress: { createQuickSession() })
+                    }
+                    .padding(.trailing, 20)
+                    .padding(.bottom, 24)
+                }
             }
             .geometryGroup()
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
             .toolbar {
-                // Custom emerald sidebar toggle for iPad
-                if horizontalSizeClass == .regular {
-                    ToolbarItem(placement: .topBarLeading) {
-                        Button(action: toggleSidebar) {
-                            Image(systemName: "sidebar.leading")
-                                .font(TronTypography.sans(size: TronTypography.sizeTitle, weight: .medium))
-                                .foregroundStyle(.tronEmerald)
-                        }
+                ToolbarItem(placement: .topBarLeading) {
+                    // iPad - show emerald sidebar toggle
+                    Button(action: toggleSidebar) {
+                        Image(systemName: "sidebar.leading")
+                            .font(TronTypography.sans(size: TronTypography.sizeTitle, weight: .medium))
+                            .foregroundStyle(.tronEmerald)
+                    }
+                }
+                ToolbarItem(placement: .principal) {
+                    Text("TRON")
+                        .font(TronTypography.mono(size: TronTypography.sizeTitle, weight: .bold))
+                        .foregroundStyle(.tronEmerald)
+                        .tracking(2)
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button(action: { showSettings = true }) {
+                        Image(systemName: "gearshape")
+                            .font(TronTypography.sans(size: TronTypography.sizeTitle, weight: .medium))
+                            .foregroundStyle(.tronEmerald)
                     }
                 }
             }
+        }
     }
 
     /// Creates a ChatView for the given session
