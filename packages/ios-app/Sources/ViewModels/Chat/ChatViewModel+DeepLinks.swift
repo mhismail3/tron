@@ -11,6 +11,11 @@ extension ChatViewModel {
     func findMessageId(for target: ScrollTarget) -> UUID? {
         switch target {
         case .toolCall(let toolCallId):
+            TronLogger.shared.debug(
+                "Searching for toolCallId: \(toolCallId) in \(messages.count) messages",
+                category: .notification
+            )
+
             // Search for messages that contain this tool call ID
             for message in messages {
                 switch message.content {
@@ -28,10 +33,26 @@ extension ChatViewModel {
                     continue
                 }
             }
+
+            TronLogger.shared.debug(
+                "toolCallId \(toolCallId) not found in any messages",
+                category: .notification
+            )
             return nil
 
         case .event(let eventId):
-            return messages.first(where: { $0.eventId == eventId })?.id
+            TronLogger.shared.debug(
+                "Searching for eventId: \(eventId) in \(messages.count) messages",
+                category: .notification
+            )
+            let result = messages.first(where: { $0.eventId == eventId })?.id
+            if result == nil {
+                TronLogger.shared.debug(
+                    "eventId \(eventId) not found in any messages",
+                    category: .notification
+                )
+            }
+            return result
 
         case .bottom:
             // Caller should use "bottom" anchor directly instead

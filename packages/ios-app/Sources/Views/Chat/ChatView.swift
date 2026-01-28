@@ -275,7 +275,23 @@ struct ChatView: View {
             }
 
             // Connect and resume - this is required before loading messages
+            // For deep link scenarios, we need more robust connection handling
+            let hasDeepLinkTarget = scrollTarget != nil
             await viewModel.connectAndResume()
+
+            // If connection failed and we have a deep link target, retry with backoff
+            // This handles the case where app comes from background via notification tap
+            if hasDeepLinkTarget && !viewModel.connectionState.isConnected {
+                logger.info("Deep link: connection failed, retrying...", category: .notification)
+                for attempt in 1...3 {
+                    try? await Task.sleep(nanoseconds: UInt64(attempt) * 200_000_000) // 200ms, 400ms, 600ms
+                    await viewModel.connectAndResume()
+                    if viewModel.connectionState.isConnected {
+                        logger.info("Deep link: connection succeeded on attempt \(attempt + 1)", category: .notification)
+                        break
+                    }
+                }
+            }
 
             // Load messages after connection is established
             await viewModel.syncAndLoadMessagesForResume()
@@ -283,10 +299,23 @@ struct ChatView: View {
             // Mark initial load complete - enables auto-scroll for subsequent updates
             initialLoadComplete = true
 
-            // Scroll to bottom after messages are loaded
+            // Wait for entry animation to complete before scrolling
+            // The entry animation sets showEntryContent=true after entryMorphDelay (180ms)
+            // Without this wait, scroll happens while messages have opacity 0 (invisible)
+            while !showEntryContent {
+                try? await Task.sleep(nanoseconds: 50_000_000) // Check every 50ms
+            }
+
+            // Handle pending deep link scroll target, or scroll to bottom
             // (We don't use defaultScrollAnchor because it causes keyboard issues)
             await MainActor.run {
-                scrollProxy?.scrollTo("bottom", anchor: .bottom)
+                if let target = scrollTarget {
+                    // Deep link scroll target was set before load completed - scroll to it now
+                    performDeepLinkScroll(to: target)
+                } else {
+                    // No deep link target - scroll to bottom as normal
+                    scrollProxy?.scrollTo("bottom", anchor: .bottom)
+                }
             }
         }
         .onChange(of: viewModel.connectionState) { oldState, newState in

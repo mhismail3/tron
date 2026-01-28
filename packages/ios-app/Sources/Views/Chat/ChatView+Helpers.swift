@@ -68,15 +68,51 @@ extension ChatView {
 
     // MARK: - Deep Link Scroll
 
-    /// Perform scroll to deep link target
+    /// Perform scroll to deep link target with robust retry for streaming sessions
     func performDeepLinkScroll(to target: ScrollTarget) {
+        // Try to find and scroll immediately
         if let messageId = viewModel.findMessageId(for: target) {
             scrollCoordinator.scrollToTarget(messageId: messageId, using: scrollProxy)
             logger.info("Deep link scroll to message: \(messageId)", category: .notification)
-        } else {
-            logger.warning("Deep link target not found: \(target)", category: .notification)
+            scrollTarget = nil
+            return
         }
-        // Clear the scroll target after processing
-        scrollTarget = nil
+
+        // Message not found yet - retry with increasing delays
+        // This handles:
+        // 1. Deep link fires before messages sync completes
+        // 2. Agent is streaming and catch-up content is being processed
+        // 3. Messages are being reconstructed from events
+        logger.debug("Deep link target not found immediately, will retry: \(target) (messages=\(viewModel.messages.count), isProcessing=\(viewModel.isProcessing))", category: .notification)
+
+        Task {
+            // Retry up to 5 times with increasing delays: 300ms, 500ms, 800ms, 1000ms, 1500ms
+            let delays: [UInt64] = [300_000_000, 500_000_000, 800_000_000, 1_000_000_000, 1_500_000_000]
+
+            for (attempt, delay) in delays.enumerated() {
+                try? await Task.sleep(nanoseconds: delay)
+
+                // Check if target is now available
+                if let messageId = viewModel.findMessageId(for: target) {
+                    scrollCoordinator.scrollToTarget(messageId: messageId, using: scrollProxy)
+                    logger.info("Deep link scroll to message after \(attempt + 1) retries: \(messageId)", category: .notification)
+                    scrollTarget = nil
+                    return
+                }
+
+                // Log progress for debugging
+                logger.debug("Deep link retry \(attempt + 1)/\(delays.count): target not found (messages=\(viewModel.messages.count), isProcessing=\(viewModel.isProcessing))", category: .notification)
+
+                // If we're still processing (streaming catch-up), keep retrying
+                // If not processing and messages loaded, the target probably doesn't exist
+                if !viewModel.isProcessing && viewModel.messages.count > 0 && attempt >= 2 {
+                    logger.warning("Deep link target not found and not processing - may not exist: \(target)", category: .notification)
+                    break
+                }
+            }
+
+            logger.warning("Deep link target not found after all retries: \(target)", category: .notification)
+            scrollTarget = nil
+        }
     }
 }

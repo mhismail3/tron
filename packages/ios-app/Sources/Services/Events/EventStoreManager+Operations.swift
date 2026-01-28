@@ -157,16 +157,42 @@ extension EventStoreManager {
 
     // MARK: - Workspace Validation
 
+    /// Result of workspace path validation
+    enum WorkspaceValidationResult {
+        /// Path exists and is accessible
+        case exists
+        /// Path does not exist (confirmed via server)
+        case notFound
+        /// Unable to check (not connected, network error, etc.)
+        case unknown
+    }
+
     /// Check if a workspace path exists on the filesystem.
-    /// Returns false for empty paths or if the path doesn't exist.
-    func validateWorkspacePath(_ path: String) async -> Bool {
-        guard !path.isEmpty else { return false }
+    /// Returns `.exists`, `.notFound`, or `.unknown` if unable to check (e.g., disconnected).
+    func validateWorkspacePath(_ path: String) async -> WorkspaceValidationResult {
+        guard !path.isEmpty else { return .notFound }
+
+        // Don't attempt validation if not connected - return unknown
+        guard rpcClient.isConnected else {
+            logger.debug("Workspace path validation skipped for '\(path)': not connected", category: .session)
+            return .unknown
+        }
+
         do {
             _ = try await rpcClient.filesystem.listDirectory(path: path, showHidden: false)
-            return true
+            return .exists
         } catch {
-            logger.debug("Workspace path validation failed for '\(path)': \(error.localizedDescription)", category: .session)
-            return false
+            let errorString = error.localizedDescription.lowercased()
+            // Check for path-not-found errors vs connection errors
+            if errorString.contains("not found") || errorString.contains("no such file") ||
+               errorString.contains("does not exist") || errorString.contains("enoent") {
+                logger.debug("Workspace path '\(path)' does not exist", category: .session)
+                return .notFound
+            } else {
+                // Connection error, timeout, or other transient issue
+                logger.debug("Workspace path validation failed for '\(path)': \(error.localizedDescription)", category: .session)
+                return .unknown
+            }
         }
     }
 
