@@ -4,21 +4,17 @@ import SwiftUI
 /// Strips server-side line prefixes and displays clean formatted output
 struct LineNumberedContentView: View {
     let content: String
-    let maxCollapsedLines: Int
-    @Binding var isExpanded: Bool
+    let maxCollapsedLines: Int  // Kept for API compatibility, but unused
+    @Binding var isExpanded: Bool  // Kept for API compatibility, but unused
 
     var fontSize: CGFloat = 11
     var lineNumFontSize: CGFloat = 9
-    var maxCollapsedHeight: CGFloat = 200
+    var maxCollapsedHeight: CGFloat = 200  // Unused
     var lineHeight: CGFloat = 16
-    var showExpandButton: Bool = true
+    var showExpandButton: Bool = true  // Unused
 
     private var parsedLines: [ContentLineParser.ParsedLine] {
         ContentLineParser.parse(content)
-    }
-
-    private var displayLines: [ContentLineParser.ParsedLine] {
-        isExpanded ? parsedLines : Array(parsedLines.prefix(maxCollapsedLines))
     }
 
     /// Calculate optimal width for line numbers based on max line number
@@ -32,7 +28,7 @@ struct LineNumberedContentView: View {
         VStack(alignment: .leading, spacing: 0) {
             ScrollView(.horizontal, showsIndicators: false) {
                 VStack(alignment: .leading, spacing: 0) {
-                    ForEach(displayLines) { line in
+                    ForEach(parsedLines) { line in
                         HStack(spacing: 0) {
                             // Line number gutter
                             Text("\(line.lineNum)")
@@ -51,27 +47,6 @@ struct LineNumberedContentView: View {
                     }
                 }
                 .padding(.vertical, 4)
-            }
-            .frame(maxHeight: isExpanded ? .infinity : maxCollapsedHeight)
-
-            // Expand/collapse button
-            if showExpandButton && parsedLines.count > maxCollapsedLines {
-                Button {
-                    withAnimation(.tronFast) {
-                        isExpanded.toggle()
-                    }
-                } label: {
-                    HStack {
-                        Text(isExpanded ? "Show less" : "Show more (\(parsedLines.count) lines)")
-                            .font(TronTypography.mono(size: TronTypography.sizeCaption))
-                        Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
-                            .font(TronTypography.sans(size: TronTypography.sizeSM))
-                    }
-                    .foregroundStyle(.tronTextMuted)
-                    .padding(.vertical, 6)
-                    .frame(maxWidth: .infinity)
-                    .background(Color.tronSurface)
-                }
             }
         }
     }

@@ -13,6 +13,7 @@ struct MessageBubble: View {
     var onRenderAppUITap: ((RenderAppUIChipData) -> Void)?
     var onTodoWriteTap: (() -> Void)?
     var onNotifyAppTap: ((NotifyAppChipData) -> Void)?
+    var onCommandToolTap: ((CommandToolChipData) -> Void)?
 
     private var isUserMessage: Bool {
         message.role == .user
@@ -187,8 +188,25 @@ struct MessageBubble: View {
                     // Fallback to regular tool view if parsing fails
                     ToolResultRouter(tool: tool)
                 }
-            default:
+            case "askuserquestion":
+                // AskUserQuestion is handled in its own case
                 ToolResultRouter(tool: tool)
+            default:
+                // Route all other tools to CommandToolChip
+                if let chipData = CommandToolChipData(from: tool) {
+                    if #available(iOS 26.0, *) {
+                        CommandToolChip(data: chipData) {
+                            onCommandToolTap?(chipData)
+                        }
+                    } else {
+                        CommandToolChipFallback(data: chipData) {
+                            onCommandToolTap?(chipData)
+                        }
+                    }
+                } else {
+                    // Fallback to ToolResultRouter for unknown tools
+                    ToolResultRouter(tool: tool)
+                }
             }
 
         case .toolResult(let result):

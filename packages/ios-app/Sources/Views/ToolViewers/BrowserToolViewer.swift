@@ -5,42 +5,16 @@ import SwiftUI
 struct BrowserResultViewer: View {
     let action: String
     let result: String
-    @Binding var isExpanded: Bool
-
-    private var displayText: String {
-        if isExpanded || result.count <= 500 {
-            return result
-        }
-        return String(result.prefix(500)) + "..."
-    }
+    @Binding var isExpanded: Bool  // Kept for API compatibility, but unused
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text(displayText)
+            Text(result)
                 .font(TronTypography.codeCaption)
                 .foregroundStyle(.tronTextSecondary)
                 .padding(.horizontal, 12)
                 .padding(.vertical, 8)
                 .frame(maxWidth: .infinity, alignment: .leading)
-
-            if result.count > 500 {
-                Button {
-                    withAnimation(.tronFast) {
-                        isExpanded.toggle()
-                    }
-                } label: {
-                    HStack {
-                        Text(isExpanded ? "Show less" : "Show more")
-                            .font(TronTypography.codeCaption)
-                        Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
-                            .font(TronTypography.codeSM)
-                    }
-                    .foregroundStyle(.tronTextMuted)
-                    .padding(.vertical, 5)
-                    .frame(maxWidth: .infinity)
-                    .background(Color.tronSurface)
-                }
-            }
         }
     }
 }
@@ -51,7 +25,7 @@ struct BrowserResultViewer: View {
 struct OpenBrowserResultViewer: View {
     let url: String
     let result: String
-    @Binding var isExpanded: Bool
+    @Binding var isExpanded: Bool  // Kept for API compatibility, but unused
 
     /// Unescape JSON escape sequences in strings
     private func unescape(_ str: String) -> String {
@@ -111,7 +85,6 @@ struct OpenBrowserResultViewer: View {
                         Text(detail)
                             .font(TronTypography.codeSM)
                             .foregroundStyle(.blue)
-                            .lineLimit(isExpanded ? nil : 1)
                     }
                 }
 
@@ -126,30 +99,11 @@ struct OpenBrowserResultViewer: View {
                     .fill(Color.tronBorder.opacity(0.3))
                     .frame(height: 0.5)
 
-                Text(isExpanded ? displayResult : String(displayResult.prefix(200)) + (displayResult.count > 200 ? "..." : ""))
+                Text(displayResult)
                     .font(TronTypography.codeSM)
                     .foregroundStyle(.tronTextMuted)
                     .padding(.horizontal, 12)
                     .padding(.vertical, 8)
-
-                if displayResult.count > 200 {
-                    Button {
-                        withAnimation(.tronFast) {
-                            isExpanded.toggle()
-                        }
-                    } label: {
-                        HStack {
-                            Text(isExpanded ? "Show less" : "Show more")
-                                .font(TronTypography.codeSM)
-                            Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
-                                .font(TronTypography.pill)
-                        }
-                        .foregroundStyle(.tronTextMuted)
-                        .padding(.vertical, 5)
-                        .frame(maxWidth: .infinity)
-                        .background(Color.tronSurface)
-                    }
-                }
             }
         }
     }

@@ -112,4 +112,9 @@ final class SheetCoordinator {
     func showThinkingDetail(_ content: String) {
         present(.thinkingDetail(content))
     }
+
+    /// Show command tool detail sheet
+    func showCommandToolDetail(_ data: CommandToolChipData) {
+        present(.commandToolDetail(data))
+    }
 }

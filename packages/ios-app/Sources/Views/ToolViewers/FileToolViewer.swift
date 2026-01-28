@@ -5,14 +5,10 @@ import SwiftUI
 struct ReadResultViewer: View {
     let filePath: String
     let content: String
-    @Binding var isExpanded: Bool
+    @Binding var isExpanded: Bool  // Kept for API compatibility, but unused
 
     private var parsedLines: [ContentLineParser.ParsedLine] {
         ContentLineParser.parse(content)
-    }
-
-    private var displayLines: [ContentLineParser.ParsedLine] {
-        isExpanded ? parsedLines : Array(parsedLines.prefix(12))
     }
 
     private var fileExtension: String {
@@ -85,10 +81,10 @@ struct ReadResultViewer: View {
                 alignment: .leading
             )
 
-            // Content lines
+            // Content lines - show all
             ScrollView(.horizontal, showsIndicators: false) {
                 VStack(alignment: .leading, spacing: 0) {
-                    ForEach(displayLines) { line in
+                    ForEach(parsedLines) { line in
                         HStack(spacing: 0) {
                             // Line number
                             Text("\(line.lineNum)")
@@ -108,27 +104,6 @@ struct ReadResultViewer: View {
                 }
                 .padding(.vertical, 3)
             }
-            .frame(maxHeight: isExpanded ? .infinity : 200)
-
-            // Expand/collapse button
-            if parsedLines.count > 12 {
-                Button {
-                    withAnimation(.tronFast) {
-                        isExpanded.toggle()
-                    }
-                } label: {
-                    HStack {
-                        Text(isExpanded ? "Show less" : "Show more")
-                            .font(TronTypography.codeCaption)
-                        Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
-                            .font(TronTypography.codeSM)
-                    }
-                    .foregroundStyle(.tronTextMuted)
-                    .padding(.vertical, 6)
-                    .frame(maxWidth: .infinity)
-                    .background(Color.tronSurface)
-                }
-            }
         }
     }
 }
@@ -139,14 +114,9 @@ struct WriteResultViewer: View {
     let filePath: String
     let content: String
     let result: String
-    @State private var isExpanded = false
 
     private var contentLines: [String] {
         content.components(separatedBy: "\n")
-    }
-
-    private var displayLines: [String] {
-        isExpanded ? contentLines : Array(contentLines.prefix(6))
     }
 
     private var hasContent: Bool {
@@ -169,7 +139,7 @@ struct WriteResultViewer: View {
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
 
-            // Content preview (expandable)
+            // Content preview - show all
             if hasContent {
                 VStack(alignment: .leading, spacing: 0) {
                     // Divider
@@ -177,10 +147,10 @@ struct WriteResultViewer: View {
                         .fill(Color.tronBorder.opacity(0.3))
                         .frame(height: 0.5)
 
-                    // Content preview
+                    // Content
                     ScrollView(.horizontal, showsIndicators: false) {
                         VStack(alignment: .leading, spacing: 0) {
-                            ForEach(Array(displayLines.enumerated()), id: \.offset) { index, line in
+                            ForEach(Array(contentLines.enumerated()), id: \.offset) { index, line in
                                 HStack(spacing: 0) {
                                     Text("\(index + 1)")
                                         .font(TronTypography.pill)
@@ -198,27 +168,6 @@ struct WriteResultViewer: View {
                         }
                         .padding(.vertical, 4)
                     }
-                    .frame(maxHeight: isExpanded ? .infinity : 100)
-
-                    // Expand/collapse button
-                    if contentLines.count > 6 {
-                        Button {
-                            withAnimation(.tronFast) {
-                                isExpanded.toggle()
-                            }
-                        } label: {
-                            HStack {
-                                Text(isExpanded ? "Hide content" : "Show all \(contentLines.count) lines")
-                                    .font(TronTypography.codeSM)
-                                Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
-                                    .font(TronTypography.pill)
-                            }
-                            .foregroundStyle(.tronTextMuted)
-                            .padding(.vertical, 5)
-                            .frame(maxWidth: .infinity)
-                            .background(Color.tronSurface)
-                        }
-                    }
                 }
             }
         }
@@ -230,21 +179,11 @@ struct WriteResultViewer: View {
 struct EditResultViewer: View {
     let filePath: String
     let result: String
-    @Binding var isExpanded: Bool
+    @Binding var isExpanded: Bool  // Kept for API compatibility, but unused
 
     /// Check if result contains a proper diff format
     private var hasDiffFormat: Bool {
         result.contains("@@") && (result.contains("-") || result.contains("+"))
-    }
-
-    /// Extract the success message if present (e.g., "Successfully replaced 1 occurrence...")
-    private var successMessage: String? {
-        let lines = result.components(separatedBy: "\n")
-        if let firstLine = lines.first,
-           firstLine.contains("Successfully") || firstLine.contains("successfully") {
-            return firstLine
-        }
-        return nil
     }
 
     private var diffStats: (added: Int, removed: Int) {
@@ -296,10 +235,6 @@ struct EditResultViewer: View {
         return lines
     }
 
-    private var displayLines: [(type: DiffLineType, content: String, oldNum: Int?, newNum: Int?)] {
-        isExpanded ? diffLines : Array(diffLines.prefix(15))
-    }
-
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             // File info header with stats
@@ -338,10 +273,10 @@ struct EditResultViewer: View {
 
             // Show diff if available, otherwise show the raw result
             if hasDiffFormat && !diffLines.isEmpty {
-                // Diff lines
+                // Diff lines - show all
                 ScrollView(.horizontal, showsIndicators: false) {
                     VStack(alignment: .leading, spacing: 0) {
-                        ForEach(Array(displayLines.enumerated()), id: \.offset) { _, line in
+                        ForEach(Array(diffLines.enumerated()), id: \.offset) { _, line in
                             DiffLineView(
                                 type: line.type,
                                 content: line.content,
@@ -349,27 +284,6 @@ struct EditResultViewer: View {
                                 newLineNum: line.newNum
                             )
                         }
-                    }
-                }
-                .frame(maxHeight: isExpanded ? .infinity : 280)
-
-                // Expand/collapse button
-                if diffLines.count > 15 {
-                    Button {
-                        withAnimation(.tronFast) {
-                            isExpanded.toggle()
-                        }
-                    } label: {
-                        HStack {
-                            Text(isExpanded ? "Show less" : "Show more")
-                                .font(TronTypography.codeCaption)
-                            Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
-                                .font(TronTypography.codeSM)
-                        }
-                        .foregroundStyle(.tronTextMuted)
-                        .padding(.vertical, 6)
-                        .frame(maxWidth: .infinity)
-                        .background(Color.tronSurface)
                     }
                 }
             } else if !result.isEmpty {

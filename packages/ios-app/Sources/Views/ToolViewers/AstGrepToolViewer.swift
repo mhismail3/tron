@@ -6,15 +6,11 @@ import SwiftUI
 struct AstGrepResultViewer: View {
     let pattern: String
     let result: String
-    @Binding var isExpanded: Bool
+    @Binding var isExpanded: Bool  // Kept for API compatibility, but unused
 
     /// Parse AST grep result into structured matches
     private var matches: [AstGrepMatch] {
         parseAstGrepResult(result)
-    }
-
-    private var displayMatches: [AstGrepMatch] {
-        isExpanded ? matches : Array(matches.prefix(5))
     }
 
     /// Check if result indicates no matches found
@@ -134,30 +130,10 @@ struct AstGrepResultViewer: View {
                     .padding(.horizontal, 12)
                     .padding(.vertical, 8)
             } else {
-                // Match list
+                // Match list - show all
                 VStack(alignment: .leading, spacing: 0) {
-                    ForEach(displayMatches) { match in
+                    ForEach(matches) { match in
                         AstGrepMatchRow(match: match)
-                    }
-                }
-
-                // Expand/collapse button
-                if matches.count > 5 {
-                    Button {
-                        withAnimation(.tronFast) {
-                            isExpanded.toggle()
-                        }
-                    } label: {
-                        HStack {
-                            Text(isExpanded ? "Show less" : "Show all \(matches.count) matches")
-                                .font(TronTypography.codeCaption)
-                            Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
-                                .font(TronTypography.codeSM)
-                        }
-                        .foregroundStyle(.tronTextMuted)
-                        .padding(.vertical, 6)
-                        .frame(maxWidth: .infinity)
-                        .background(Color.tronSurface)
                     }
                 }
             }

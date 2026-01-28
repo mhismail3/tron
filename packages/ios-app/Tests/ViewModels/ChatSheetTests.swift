@@ -194,6 +194,20 @@ struct ChatSheetTests {
             sheetContent: nil,
             status: .sending
         )
+        let commandToolData = CommandToolChipData(
+            id: "cmd_tool",
+            toolName: "Read",
+            normalizedName: "read",
+            icon: "doc.text",
+            iconColor: .green,
+            displayName: "Read",
+            summary: "file.swift",
+            status: .success,
+            durationMs: 10,
+            arguments: "{}",
+            result: nil,
+            isResultTruncated: false
+        )
 
         let sheets: [ChatSheet] = [
             .safari(URL(string: "https://example.com")!),
@@ -208,7 +222,8 @@ struct ChatSheetTests {
             .uiCanvas,
             .todoList,
             .notifyApp(notifyData),
-            .thinkingDetail("content")
+            .thinkingDetail("content"),
+            .commandToolDetail(commandToolData)
         ]
 
         // Extract base ids (before any dynamic suffix)

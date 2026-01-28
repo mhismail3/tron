@@ -35,6 +35,9 @@ enum ChatSheet: Identifiable, Equatable {
     case notifyApp(NotifyAppChipData)
     case thinkingDetail(String)
 
+    // Command tool detail
+    case commandToolDetail(CommandToolChipData)
+
     var id: String {
         switch self {
         case .safari(let url):
@@ -63,6 +66,8 @@ enum ChatSheet: Identifiable, Equatable {
             return "notifyApp-\(data.toolCallId)"
         case .thinkingDetail:
             return "thinking"
+        case .commandToolDetail(let data):
+            return "commandTool-\(data.id)"
         }
     }
 
@@ -96,6 +101,8 @@ enum ChatSheet: Identifiable, Equatable {
             return data1.toolCallId == data2.toolCallId
         case (.thinkingDetail(let content1), .thinkingDetail(let content2)):
             return content1 == content2
+        case (.commandToolDetail(let data1), .commandToolDetail(let data2)):
+            return data1.id == data2.id
         default:
             return false
         }

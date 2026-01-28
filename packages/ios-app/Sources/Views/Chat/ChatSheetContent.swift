@@ -82,6 +82,9 @@ struct ChatSheetContent: View {
 
         case .thinkingDetail(let content):
             ThinkingDetailSheet(content: content)
+
+        case .commandToolDetail(let data):
+            CommandToolDetailSheet(data: data)
         }
     }
 

@@ -6,14 +6,10 @@ import SwiftUI
 struct FindResultViewer: View {
     let pattern: String
     let result: String
-    @Binding var isExpanded: Bool
+    @Binding var isExpanded: Bool  // Kept for API compatibility, but unused
 
     private var files: [String] {
         result.components(separatedBy: "\n").filter { !$0.isEmpty }
-    }
-
-    private var displayFiles: [String] {
-        isExpanded ? files : Array(files.prefix(10))
     }
 
     var body: some View {
@@ -34,9 +30,9 @@ struct FindResultViewer: View {
             .padding(.vertical, 6)
             .background(Color.tronSurface)
 
-            // File list
+            // File list - show all
             VStack(alignment: .leading, spacing: 0) {
-                ForEach(displayFiles, id: \.self) { file in
+                ForEach(files, id: \.self) { file in
                     HStack(spacing: 8) {
                         Image(systemName: fileIcon(for: file))
                             .font(TronTypography.codeSM)
@@ -50,26 +46,6 @@ struct FindResultViewer: View {
                     }
                     .padding(.horizontal, 12)
                     .padding(.vertical, 4)
-                }
-            }
-
-            // Expand/collapse button
-            if files.count > 10 {
-                Button {
-                    withAnimation(.tronFast) {
-                        isExpanded.toggle()
-                    }
-                } label: {
-                    HStack {
-                        Text(isExpanded ? "Show less" : "Show all \(files.count) files")
-                            .font(TronTypography.codeCaption)
-                        Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
-                            .font(TronTypography.codeSM)
-                    }
-                    .foregroundStyle(.tronTextMuted)
-                    .padding(.vertical, 6)
-                    .frame(maxWidth: .infinity)
-                    .background(Color.tronSurface)
                 }
             }
         }
@@ -111,14 +87,10 @@ struct FindResultViewer: View {
 struct GrepResultViewer: View {
     let pattern: String
     let result: String
-    @Binding var isExpanded: Bool
+    @Binding var isExpanded: Bool  // Kept for API compatibility, but unused
 
     private var lines: [String] {
         result.components(separatedBy: "\n").filter { !$0.isEmpty }
-    }
-
-    private var displayLines: [String] {
-        isExpanded ? lines : Array(lines.prefix(10))
     }
 
     var body: some View {
@@ -146,10 +118,10 @@ struct GrepResultViewer: View {
             .padding(.vertical, 6)
             .background(Color.tronSurface)
 
-            // Results - simple raw display
+            // Results - show all
             ScrollView(.horizontal, showsIndicators: false) {
                 VStack(alignment: .leading, spacing: 0) {
-                    ForEach(Array(displayLines.enumerated()), id: \.offset) { _, line in
+                    ForEach(Array(lines.enumerated()), id: \.offset) { _, line in
                         Text(line)
                             .font(TronTypography.codeCaption)
                             .foregroundStyle(.tronTextSecondary)
@@ -158,27 +130,6 @@ struct GrepResultViewer: View {
                     }
                 }
                 .padding(.vertical, 4)
-            }
-            .frame(maxHeight: isExpanded ? .infinity : 180)
-
-            // Expand/collapse button
-            if lines.count > 10 {
-                Button {
-                    withAnimation(.tronFast) {
-                        isExpanded.toggle()
-                    }
-                } label: {
-                    HStack {
-                        Text(isExpanded ? "Show less" : "Show all \(lines.count) matches")
-                            .font(TronTypography.codeCaption)
-                        Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
-                            .font(TronTypography.codeSM)
-                    }
-                    .foregroundStyle(.tronTextMuted)
-                    .padding(.vertical, 6)
-                    .frame(maxWidth: .infinity)
-                    .background(Color.tronSurface)
-                }
             }
         }
     }
@@ -191,16 +142,12 @@ struct GrepResultViewer: View {
 struct LsResultViewer: View {
     let path: String
     let result: String
-    @Binding var isExpanded: Bool
+    @Binding var isExpanded: Bool  // Kept for API compatibility, but unused
 
     private var entries: [LsEntry] {
         result.components(separatedBy: "\n")
             .filter { !$0.isEmpty }
             .compactMap { parseLsEntry($0) }
-    }
-
-    private var displayEntries: [LsEntry] {
-        isExpanded ? entries : Array(entries.prefix(12))
     }
 
     /// Parse ls output line - handles both custom [D]/[F] format and standard ls -la
@@ -269,9 +216,9 @@ struct LsResultViewer: View {
             .padding(.vertical, 6)
             .background(Color.tronSurface)
 
-            // Directory listing - filename first
+            // Directory listing - show all
             VStack(alignment: .leading, spacing: 0) {
-                ForEach(displayEntries, id: \.name) { entry in
+                ForEach(entries, id: \.name) { entry in
                     HStack(spacing: 6) {
                         // Icon
                         Image(systemName: entry.isDirectory ? "folder.fill" : entryIcon(for: entry.name))
@@ -303,26 +250,6 @@ struct LsResultViewer: View {
                     }
                     .padding(.horizontal, 12)
                     .padding(.vertical, 3)
-                }
-            }
-
-            // Expand/collapse button
-            if entries.count > 12 {
-                Button {
-                    withAnimation(.tronFast) {
-                        isExpanded.toggle()
-                    }
-                } label: {
-                    HStack {
-                        Text(isExpanded ? "Show less" : "Show all \(entries.count) items")
-                            .font(TronTypography.codeCaption)
-                        Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
-                            .font(TronTypography.codeSM)
-                    }
-                    .foregroundStyle(.tronTextMuted)
-                    .padding(.vertical, 6)
-                    .frame(maxWidth: .infinity)
-                    .background(Color.tronSurface)
                 }
             }
         }

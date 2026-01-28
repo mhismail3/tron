@@ -411,6 +411,9 @@ struct ChatView: View {
                                 },
                                 onNotifyAppTap: { [sheetCoordinator] data in
                                     sheetCoordinator.showNotifyApp(data)
+                                },
+                                onCommandToolTap: { [sheetCoordinator] data in
+                                    sheetCoordinator.showCommandToolDetail(data)
                                 }
                             )
                             .id(message.id)
