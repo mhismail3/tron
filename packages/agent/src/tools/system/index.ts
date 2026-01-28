@@ -4,9 +4,10 @@
  * Tools for executing system commands and code analysis.
  */
 
-export { BashTool, type BashToolConfig } from './bash.js';
+export { BashTool, getDefaultBashSettings, type BashToolConfig } from './bash.js';
 export {
   AstGrepTool,
+  getDefaultAstGrepSettings,
   type AstGrepToolConfig,
   type AstGrepMatch,
   type AstGrepDetails,

@@ -5,6 +5,7 @@
  */
 import { createLogger, categorizeError, LogErrorCategory } from '../logging/index.js';
 import { getSettings } from '../settings/index.js';
+import type { TranscriptionSettings } from '../settings/types.js';
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import os from 'node:os';
@@ -12,6 +13,14 @@ import path from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 
 const logger = createLogger('transcription-sidecar');
+
+/**
+ * Get default transcription settings from the global settings.
+ * Used for backwards compatibility when settings not explicitly provided.
+ */
+export function getDefaultTranscriptionSettings(): TranscriptionSettings {
+  return getSettings().server.transcription;
+}
 
 const HEALTH_TIMEOUT_MS = 2000;
 const STARTUP_TIMEOUT_MS = 20000;
@@ -22,7 +31,7 @@ let sidecarOwned = false;
 let sidecarStarting = false;
 
 export async function ensureTranscriptionSidecar(): Promise<void> {
-  const settings = getSettings().server.transcription;
+  const settings = getDefaultTranscriptionSettings();
   if (!settings.enabled || !settings.manageSidecar) {
     return;
   }

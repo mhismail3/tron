@@ -26,7 +26,7 @@
  */
 
 export * from './types.js';
-export { HookEngine } from './engine.js';
+export { HookEngine, getDefaultHookSettings } from './engine.js';
 
 // Discovery module
 export {

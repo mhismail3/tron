@@ -13,12 +13,21 @@ import type {
 } from './types.js';
 import { createLogger, categorizeError, LogErrorCategory, LogErrorCodes } from '../logging/index.js';
 import { getSettings } from '../settings/index.js';
+import type { HookSettings } from '../settings/types.js';
 
 const logger = createLogger('hooks:engine');
 
-// Get hook settings (loaded lazily on first access)
-function getHookSettings() {
+/**
+ * Get default hook settings from global settings.
+ * Exported for dependency injection - consumers can pass custom settings.
+ */
+export function getDefaultHookSettings(): HookSettings {
   return getSettings().hooks;
+}
+
+// Internal helper - uses the exported getter
+function getHookSettings() {
+  return getDefaultHookSettings();
 }
 
 export class HookEngine {

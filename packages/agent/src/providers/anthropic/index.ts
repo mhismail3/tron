@@ -13,6 +13,7 @@ export type {
   ClaudeModelId,
   ClaudeModelInfo,
   SystemPromptBlock,
+  AnthropicProviderSettings,
 } from './types.js';
 
 export {
@@ -26,6 +27,7 @@ export {
   AnthropicProvider,
   getDefaultModel,
   getOAuthSystemPromptPrefix,
+  getDefaultAnthropicProviderSettings,
 } from './anthropic-provider.js';
 
 // Re-export message conversion utilities (for testing)

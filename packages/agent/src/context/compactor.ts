@@ -30,9 +30,13 @@
  */
 import type { Message } from '../types/index.js';
 import { getSettings } from '../settings/index.js';
+import type { CompactorSettings } from '../settings/types.js';
 
-// Get compactor settings (loaded lazily on first access)
-function getCompactorSettings() {
+/**
+ * Get default compactor settings from the global settings.
+ * Used for backwards compatibility when settings not explicitly provided.
+ */
+export function getDefaultCompactorSettings(): CompactorSettings {
   return getSettings().context.compactor;
 }
 
@@ -88,7 +92,7 @@ export interface CompactResult {
 
 /** Get default compactor config from settings */
 function getDefaultConfig(): CompactorConfig {
-  const settings = getCompactorSettings();
+  const settings = getDefaultCompactorSettings();
   return {
     maxTokens: settings.maxTokens,
     compactionThreshold: settings.compactionThreshold,

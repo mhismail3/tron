@@ -21,16 +21,20 @@ import { shouldRefreshTokens, refreshOAuthToken, type OAuthTokens } from '../../
 import { parseError, formatError } from '../../utils/errors.js';
 import { calculateBackoffDelay, type RetryConfig } from '../../utils/retry.js';
 import { getSettings } from '../../settings/index.js';
-import type { AnthropicConfig, StreamOptions, SystemPromptBlock } from './types.js';
+import type { AnthropicConfig, StreamOptions, SystemPromptBlock, AnthropicProviderSettings } from './types.js';
 import { convertMessages, convertTools, convertResponse } from './message-converter.js';
 
 const logger = createLogger('anthropic');
 
 // =============================================================================
-// Settings Helper
+// Settings Helpers
 // =============================================================================
 
-function getAnthropicSettings() {
+/**
+ * Get default Anthropic provider settings from global settings.
+ * Exported for dependency injection - consumers can pass custom settings.
+ */
+export function getDefaultAnthropicProviderSettings(): AnthropicProviderSettings {
   const settings = getSettings();
   return {
     api: settings.api.anthropic,
@@ -39,32 +43,21 @@ function getAnthropicSettings() {
   };
 }
 
-function getDefaultRetryConfig(): Required<Omit<RetryConfig, 'onRetry' | 'signal'>> {
-  const { retry } = getAnthropicSettings();
-  return {
-    maxRetries: retry.maxRetries,
-    baseDelayMs: retry.baseDelayMs,
-    maxDelayMs: retry.maxDelayMs,
-    jitterFactor: retry.jitterFactor,
-  };
-}
-
-function getOAuthHeaders() {
-  const { api } = getAnthropicSettings();
-  return {
-    'accept': 'application/json',
-    'anthropic-dangerous-direct-browser-access': 'true',
-    'anthropic-beta': api.oauthBetaHeaders,
-  };
-}
-
+/**
+ * Get the OAuth system prompt prefix from default settings.
+ * This is a convenience function for callers who don't have a provider instance.
+ */
 export function getOAuthSystemPromptPrefix(): string {
-  const { api } = getAnthropicSettings();
+  const { api } = getDefaultAnthropicProviderSettings();
   return api.systemPromptPrefix;
 }
 
+/**
+ * Get the default model from settings.
+ * This is a convenience function for callers who don't have a provider instance.
+ */
 export function getDefaultModel(): string {
-  const { models } = getAnthropicSettings();
+  const { models } = getDefaultAnthropicProviderSettings();
   return models.default;
 }
 
@@ -78,12 +71,17 @@ export class AnthropicProvider {
   private tokens?: OAuthTokens;
   private isOAuth: boolean;
   private retryConfig: Required<Omit<RetryConfig, 'onRetry' | 'signal'>>;
+  private providerSettings: AnthropicProviderSettings;
 
   constructor(config: AnthropicConfig) {
     this.config = config;
+    this.providerSettings = config.providerSettings ?? getDefaultAnthropicProviderSettings();
     this.isOAuth = config.auth.type === 'oauth';
     this.retryConfig = {
-      ...getDefaultRetryConfig(),
+      maxRetries: this.providerSettings.retry.maxRetries,
+      baseDelayMs: this.providerSettings.retry.baseDelayMs,
+      maxDelayMs: this.providerSettings.retry.maxDelayMs,
+      jitterFactor: this.providerSettings.retry.jitterFactor,
       ...config.retry,
     };
 
@@ -108,7 +106,7 @@ export class AnthropicProvider {
         authToken: config.auth.accessToken,
         baseURL: config.baseURL,
         dangerouslyAllowBrowser: true,
-        defaultHeaders: getOAuthHeaders(),
+        defaultHeaders: this.getOAuthHeaders(),
         maxRetries: sdkMaxRetries,
       });
     }
@@ -118,6 +116,14 @@ export class AnthropicProvider {
       isOAuth: this.isOAuth,
       retryConfig: this.retryConfig,
     });
+  }
+
+  private getOAuthHeaders(): Record<string, string> {
+    return {
+      'accept': 'application/json',
+      'anthropic-dangerous-direct-browser-access': 'true',
+      'anthropic-beta': this.providerSettings.api.oauthBetaHeaders,
+    };
   }
 
   get usingOAuth(): boolean {
@@ -140,7 +146,7 @@ export class AnthropicProvider {
         authToken: this.tokens.accessToken,
         baseURL: this.config.baseURL,
         dangerouslyAllowBrowser: true,
-        defaultHeaders: getOAuthHeaders(),
+        defaultHeaders: this.getOAuthHeaders(),
       });
     }
   }
@@ -151,9 +157,8 @@ export class AnthropicProvider {
   ): AsyncGenerator<StreamEvent> {
     await this.ensureValidTokens();
 
-    const { models } = getAnthropicSettings();
     const model = this.config.model;
-    const maxTokens = options.maxTokens ?? this.config.maxTokens ?? models.defaultMaxTokens;
+    const maxTokens = options.maxTokens ?? this.config.maxTokens ?? this.providerSettings.models.defaultMaxTokens;
 
     logger.debug('Starting stream', {
       model,
@@ -183,7 +188,7 @@ export class AnthropicProvider {
     if (options.enableThinking) {
       (params as unknown as { thinking: { type: string; budget_tokens: number } }).thinking = {
         type: 'enabled',
-        budget_tokens: options.thinkingBudget ?? models.defaultThinkingBudget,
+        budget_tokens: options.thinkingBudget ?? this.providerSettings.models.defaultThinkingBudget,
       };
     }
 
@@ -449,7 +454,7 @@ export class AnthropicProvider {
 
       systemBlocks.push({
         type: 'text',
-        text: getOAuthSystemPromptPrefix(),
+        text: this.providerSettings.api.systemPromptPrefix,
       });
 
       if (context.systemPrompt) {

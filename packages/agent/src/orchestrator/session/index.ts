@@ -30,6 +30,13 @@ export {
   type ReconstructedState,
 } from './session-reconstructor.js';
 
+// Tracker reconstruction (for session resume)
+export {
+  TrackerReconstructor,
+  createTrackerReconstructor,
+  type ReconstructedTrackers,
+} from './tracker-reconstructor.js';
+
 // Auth provider
 export {
   AuthProvider,

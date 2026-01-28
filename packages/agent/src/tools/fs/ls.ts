@@ -10,6 +10,7 @@ import * as path from 'path';
 import type { TronTool, TronToolResult } from '../../types/index.js';
 import { createLogger, categorizeError } from '../../logging/index.js';
 import { getSettings } from '../../settings/index.js';
+import type { LsToolSettings } from '../../settings/types.js';
 import {
   truncateOutput,
   resolvePath,
@@ -18,13 +19,18 @@ import {
 
 const logger = createLogger('tool:ls');
 
-// Get ls tool settings (loaded lazily on first access)
-function getLsSettings() {
-  return getSettings().tools.ls ?? { maxEntries: 1000, maxOutputTokens: 10000 };
+/**
+ * Get default ls settings from the global settings.
+ * Used for backwards compatibility when settings not explicitly provided.
+ */
+export function getDefaultLsSettings(): LsToolSettings {
+  return getSettings().tools.ls;
 }
 
 export interface LsToolConfig {
   workingDirectory: string;
+  /** Ls tool settings. If not provided, uses global settings. */
+  lsSettings?: LsToolSettings;
 }
 
 interface LsEntry {
@@ -69,9 +75,11 @@ export class LsTool implements TronTool {
   };
 
   private config: LsToolConfig;
+  private lsSettings: LsToolSettings;
 
   constructor(config: LsToolConfig) {
     this.config = config;
+    this.lsSettings = config.lsSettings ?? getDefaultLsSettings();
   }
 
   async execute(args: Record<string, unknown>): Promise<TronToolResult> {
@@ -123,9 +131,8 @@ export class LsTool implements TronTool {
         };
       }
 
-      const settings = getLsSettings();
-      const maxEntries = settings.maxEntries ?? 1000;
-      const maxOutputTokens = settings.maxOutputTokens ?? 10000;
+      const maxEntries = this.lsSettings.maxEntries ?? 1000;
+      const maxOutputTokens = this.lsSettings.maxOutputTokens ?? 10000;
 
       const dirEntries = await fs.readdir(listPath, { withFileTypes: true });
       const entries: LsEntry[] = [];

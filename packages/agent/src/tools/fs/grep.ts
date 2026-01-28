@@ -10,6 +10,7 @@ import * as path from 'path';
 import type { TronTool, TronToolResult } from '../../types/index.js';
 import { createLogger, categorizeError } from '../../logging/index.js';
 import { getSettings } from '../../settings/index.js';
+import type { GrepToolSettings } from '../../settings/types.js';
 import {
   truncateOutput,
   resolvePath,
@@ -20,31 +21,18 @@ import {
 
 const logger = createLogger('tool:grep');
 
-// Get grep tool settings (loaded lazily on first access)
-function getGrepSettings() {
+/**
+ * Get default grep settings from the global settings.
+ * Used for backwards compatibility when settings not explicitly provided.
+ */
+export function getDefaultGrepSettings(): GrepToolSettings {
   return getSettings().tools.grep;
-}
-
-// Cache binary extensions set (built from settings on first access)
-let binaryExtensionsSet: Set<string> | null = null;
-function getBinaryExtensions(): Set<string> {
-  if (!binaryExtensionsSet) {
-    binaryExtensionsSet = new Set(getGrepSettings().binaryExtensions);
-  }
-  return binaryExtensionsSet;
-}
-
-// Cache skip directories set (built from settings on first access)
-let skipDirectoriesSet: Set<string> | null = null;
-function getSkipDirectories(): Set<string> {
-  if (!skipDirectoriesSet) {
-    skipDirectoriesSet = new Set(getGrepSettings().skipDirectories);
-  }
-  return skipDirectoriesSet;
 }
 
 export interface GrepToolConfig {
   workingDirectory: string;
+  /** Grep tool settings. If not provided, uses global settings. */
+  grepSettings?: GrepToolSettings;
 }
 
 interface GrepMatch {
@@ -89,9 +77,33 @@ export class GrepTool implements TronTool {
   };
 
   private config: GrepToolConfig;
+  private grepSettings: GrepToolSettings;
+  private binaryExtensionsSet: Set<string> | null = null;
+  private skipDirectoriesSet: Set<string> | null = null;
 
   constructor(config: GrepToolConfig) {
     this.config = config;
+    this.grepSettings = config.grepSettings ?? getDefaultGrepSettings();
+  }
+
+  /**
+   * Get binary extensions set (cached per instance).
+   */
+  private getBinaryExtensions(): Set<string> {
+    if (!this.binaryExtensionsSet) {
+      this.binaryExtensionsSet = new Set(this.grepSettings.binaryExtensions);
+    }
+    return this.binaryExtensionsSet;
+  }
+
+  /**
+   * Get skip directories set (cached per instance).
+   */
+  private getSkipDirectories(): Set<string> {
+    if (!this.skipDirectoriesSet) {
+      this.skipDirectoriesSet = new Set(this.grepSettings.skipDirectories);
+    }
+    return this.skipDirectoriesSet;
   }
 
   async execute(args: Record<string, unknown>): Promise<TronToolResult> {
@@ -106,12 +118,11 @@ export class GrepTool implements TronTool {
     const emptyValidation = validateNonEmptyString(patternStr, 'pattern', '"function.*" or "TODO"');
     if (!emptyValidation.valid) return emptyValidation.error!;
 
-    const settings = getGrepSettings();
     const searchPath = resolvePath((args.path as string) || '.', this.config.workingDirectory);
     const globPattern = args.glob as string | undefined;
     const ignoreCase = (args.ignoreCase as boolean) ?? false;
     const contextLines = (args.context as number) ?? 0;
-    const maxResults = (args.maxResults as number) ?? settings.defaultMaxResults;
+    const maxResults = (args.maxResults as number) ?? this.grepSettings.defaultMaxResults;
 
     const startTime = Date.now();
     logger.debug('Grep search', { pattern: patternStr, searchPath, globPattern, ignoreCase });
@@ -142,7 +153,7 @@ export class GrepTool implements TronTool {
       const output = this.formatMatches(matches, contextLines > 0);
 
       // Apply token-based truncation
-      const maxOutputTokens = settings.maxOutputTokens ?? 15000;
+      const maxOutputTokens = this.grepSettings.maxOutputTokens ?? 15000;
       const truncateResult = truncateOutput(output, maxOutputTokens, {
         preserveStartLines: 5,
         truncationMessage: `\n\n... [Results truncated: ${matches.length} matches found. Output exceeded ${maxOutputTokens.toLocaleString()} token limit. Use maxResults parameter or narrow your search.]`,
@@ -200,9 +211,8 @@ export class GrepTool implements TronTool {
     }
 
     try {
-      const settings = getGrepSettings();
       const stat = await fs.stat(filePath);
-      if (stat.size > settings.maxFileSizeBytes) {
+      if (stat.size > this.grepSettings.maxFileSizeBytes) {
         logger.debug('Skipping large file', { filePath, size: stat.size });
         return;
       }
@@ -260,7 +270,7 @@ export class GrepTool implements TronTool {
 
       // Skip hidden directories and common non-code directories
       if (entry.isDirectory()) {
-        const skipDirs = getSkipDirectories();
+        const skipDirs = this.getSkipDirectories();
         if (entry.name.startsWith('.') || skipDirs.has(entry.name)) {
           continue;
         }
@@ -285,7 +295,7 @@ export class GrepTool implements TronTool {
 
   private isBinaryFile(filePath: string): boolean {
     const ext = path.extname(filePath).toLowerCase();
-    return getBinaryExtensions().has(ext);
+    return this.getBinaryExtensions().has(ext);
   }
 
   private formatMatches(matches: GrepMatch[], hasContext: boolean): string {

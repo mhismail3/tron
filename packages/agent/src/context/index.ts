@@ -29,6 +29,7 @@ export {
   ContextCompactor,
   /** @deprecated Use createContextManager instead */
   createContextCompactor,
+  getDefaultCompactorSettings,
   type CompactorConfig,
   type CompactResult,
   type BeforeCompactInfo,

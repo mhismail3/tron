@@ -37,6 +37,19 @@ export type AnthropicAuth = ApiKeyAuth | OAuthAuth;
 // Configuration Types
 // =============================================================================
 
+// Forward declaration to avoid circular imports
+import type { AnthropicApiSettings, ModelSettings, RetrySettings } from '../../settings/types.js';
+
+/**
+ * Combined settings needed by AnthropicProvider.
+ * This combines multiple settings sections for DI.
+ */
+export interface AnthropicProviderSettings {
+  api: AnthropicApiSettings;
+  models: ModelSettings;
+  retry: RetrySettings;
+}
+
 /**
  * Configuration for Anthropic provider
  */
@@ -49,6 +62,8 @@ export interface AnthropicConfig {
   baseURL?: string;
   /** Retry configuration for rate limits and transient errors */
   retry?: RetryConfig;
+  /** Optional provider settings for dependency injection (falls back to global settings) */
+  providerSettings?: AnthropicProviderSettings;
 }
 
 /**

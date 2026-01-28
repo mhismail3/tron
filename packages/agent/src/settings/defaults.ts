@@ -165,6 +165,7 @@ export const DEFAULT_SETTINGS: TronSettings = {
       binaryPath: 'sg',          // Primary binary name, falls back to 'ast-grep'
       skipDirectories: DEFAULT_SKIP_DIRECTORIES,
       requireConfirmationForReplace: false,  // Auto-apply by default
+      defaultTimeoutMs: 60000,   // 60 second timeout
     },
   },
 

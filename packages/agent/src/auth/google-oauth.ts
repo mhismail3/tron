@@ -12,6 +12,7 @@
 import crypto from 'crypto';
 import { createLogger } from '../logging/index.js';
 import { getSettings } from '../settings/index.js';
+import type { GoogleApiSettings } from '../settings/types.js';
 import { loadAuthStorage, saveProviderOAuthTokens, getProviderAuth, saveProviderAuth } from './unified.js';
 import type { OAuthTokens, GoogleProviderAuth } from './types.js';
 
@@ -188,12 +189,19 @@ export async function saveGoogleOAuthCredentials(
 // =============================================================================
 
 /**
+ * Get default Google API settings from the global settings.
+ * Used for backwards compatibility when settings not explicitly provided.
+ */
+export function getDefaultGoogleApiSettings(): GoogleApiSettings | undefined {
+  return getSettings().api.google;
+}
+
+/**
  * Get Google OAuth settings from Tron settings (synchronous, for URL/scope config only)
  * NOTE: clientId and clientSecret are NOT populated here - use getGoogleOAuthConfig() instead.
  */
 function getGoogleOAuthSettings(): GoogleOAuthConfig {
-  const settings = getSettings();
-  const googleSettings = settings.api.google;
+  const googleSettings = getDefaultGoogleApiSettings();
 
   if (!googleSettings) {
     return CLOUD_CODE_ASSIST_CONFIG;

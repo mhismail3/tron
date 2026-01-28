@@ -5,6 +5,7 @@
  */
 import { createLogger } from '../logging/index.js';
 import { getSettings } from '../settings/index.js';
+import type { TranscriptionSettings } from '../settings/types.js';
 import type {
   TranscribeAudioParams,
   TranscribeAudioResult,
@@ -13,6 +14,14 @@ import type {
 } from '../rpc/types.js';
 
 const logger = createLogger('transcription');
+
+/**
+ * Get default transcription settings from the global settings.
+ * Exported for use by code that needs to check settings without transcribing.
+ */
+export function getDefaultTranscriptionSettings(): TranscriptionSettings {
+  return getSettings().server.transcription;
+}
 
 type TranscriptionModelProfile = TranscriptionModelInfo & {
   backend: string;
@@ -57,7 +66,7 @@ function normalizeCleanupMode(mode: TranscribeAudioParams['cleanupMode'], fallba
 }
 
 export async function transcribeAudio(params: TranscribeAudioParams): Promise<TranscribeAudioResult> {
-  const settings = getSettings().server.transcription;
+  const settings = getDefaultTranscriptionSettings();
 
   if (!settings.enabled) {
     throw new Error('Transcription is disabled');

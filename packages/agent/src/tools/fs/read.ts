@@ -8,6 +8,7 @@ import * as fs from 'fs/promises';
 import type { TronTool, TronToolResult } from '../../types/index.js';
 import { createLogger, categorizeError } from '../../logging/index.js';
 import { getSettings } from '../../settings/index.js';
+import type { ReadToolSettings } from '../../settings/types.js';
 import {
   truncateOutput,
   resolvePath,
@@ -18,13 +19,18 @@ import {
 
 const logger = createLogger('tool:read');
 
-// Get read tool settings (loaded lazily on first access)
-function getReadSettings() {
+/**
+ * Get default read settings from the global settings.
+ * Used for backwards compatibility when settings not explicitly provided.
+ */
+export function getDefaultReadSettings(): ReadToolSettings {
   return getSettings().tools.read;
 }
 
 export interface ReadToolConfig {
   workingDirectory: string;
+  /** Read tool settings. If not provided, uses global settings. */
+  readSettings?: ReadToolSettings;
 }
 
 export class ReadTool implements TronTool {
@@ -50,9 +56,11 @@ export class ReadTool implements TronTool {
   };
 
   private config: ReadToolConfig;
+  private readSettings: ReadToolSettings;
 
   constructor(config: ReadToolConfig) {
     this.config = config;
+    this.readSettings = config.readSettings ?? getDefaultReadSettings();
   }
 
   async execute(args: Record<string, unknown>): Promise<TronToolResult> {
@@ -67,10 +75,9 @@ export class ReadTool implements TronTool {
     const pathValidation = validatePathNotRoot(rawPath, 'file_path');
     if (!pathValidation.valid) return pathValidation.error!;
 
-    const settings = getReadSettings();
     const filePath = resolvePath(rawPath, this.config.workingDirectory);
     const offset = (args.offset as number | undefined) ?? 0;
-    const limit = (args.limit as number | undefined) ?? settings.defaultLimitLines;
+    const limit = (args.limit as number | undefined) ?? this.readSettings.defaultLimitLines;
 
     const startTime = Date.now();
     logger.debug('Reading file', { filePath, offset, limit });
@@ -86,7 +93,7 @@ export class ReadTool implements TronTool {
       const selectedLines = lines.slice(startLine, endLine);
 
       // Format with line numbers and truncate long lines
-      const maxLineLength = settings.maxLineLength;
+      const maxLineLength = this.readSettings.maxLineLength;
       const formatted = selectedLines.map((line, idx) => {
         const lineNum = startLine + idx + 1;
         const truncatedLine = line.length > maxLineLength
@@ -96,7 +103,7 @@ export class ReadTool implements TronTool {
       }).join('\n');
 
       // Apply token-based truncation
-      const maxOutputTokens = settings.maxOutputTokens ?? 20000;
+      const maxOutputTokens = this.readSettings.maxOutputTokens ?? 20000;
       const truncateResult = truncateOutput(formatted, maxOutputTokens, {
         preserveStartLines: 10,
         truncationMessage: `\n\n... [Output truncated: ${totalLines} total lines, showing ${selectedLines.length} lines. Output exceeded ${maxOutputTokens.toLocaleString()} token limit. Use offset/limit parameters to read specific sections.]`,

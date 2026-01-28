@@ -8,11 +8,15 @@
 import crypto from 'crypto';
 import { createLogger } from '../logging/index.js';
 import { getSettings } from '../settings/index.js';
+import type { AnthropicApiSettings } from '../settings/types.js';
 
 const logger = createLogger('oauth');
 
-// Get OAuth settings (loaded lazily on first access)
-function getOAuthSettings() {
+/**
+ * Get default Anthropic OAuth settings from the global settings.
+ * Used for backwards compatibility when settings not explicitly provided.
+ */
+export function getDefaultAnthropicOAuthSettings(): AnthropicApiSettings {
   return getSettings().api.anthropic;
 }
 
@@ -57,32 +61,32 @@ export class OAuthError extends Error {
 
 /** Get Anthropic auth URL from settings */
 function getAuthUrl(): string {
-  return getOAuthSettings().authUrl;
+  return getDefaultAnthropicOAuthSettings().authUrl;
 }
 
 /** Get Anthropic token URL from settings */
 function getTokenUrl(): string {
-  return getOAuthSettings().tokenUrl;
+  return getDefaultAnthropicOAuthSettings().tokenUrl;
 }
 
 /** Get OAuth client ID from settings (env var takes precedence) */
 function getClientId(): string {
-  return process.env.ANTHROPIC_CLIENT_ID ?? getOAuthSettings().clientId;
+  return process.env.ANTHROPIC_CLIENT_ID ?? getDefaultAnthropicOAuthSettings().clientId;
 }
 
 /** Get OAuth scopes from settings */
 function getScopes(): string[] {
-  return getOAuthSettings().scopes;
+  return getDefaultAnthropicOAuthSettings().scopes;
 }
 
 /** Get token expiry buffer from settings */
 function getExpiryBuffer(): number {
-  return getOAuthSettings().tokenExpiryBufferSeconds;
+  return getDefaultAnthropicOAuthSettings().tokenExpiryBufferSeconds;
 }
 
 /** Get OAuth redirect URI from settings */
 function getRedirectUri(): string {
-  return getOAuthSettings().redirectUri;
+  return getDefaultAnthropicOAuthSettings().redirectUri;
 }
 
 // =============================================================================

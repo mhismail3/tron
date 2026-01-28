@@ -14,11 +14,11 @@ import * as os from 'os';
 import { createLogger, categorizeError, LogErrorCategory } from '../../logging/index.js';
 import { EventStore } from '../../events/event-store.js';
 import { WorktreeCoordinator } from '../../session/worktree-coordinator.js';
-import { SkillTracker, createSkillTracker, type SkillTrackingEvent } from '../../skills/skill-tracker.js';
-import { SubAgentTracker, createSubAgentTracker, type SubagentTrackingEvent } from '../../tools/subagent/subagent-tracker.js';
-import { RulesTracker, createRulesTracker, type RulesTrackingEvent } from '../../context/rules-tracker.js';
-import { TodoTracker, createTodoTracker } from '../../todos/todo-tracker.js';
-import type { TodoTrackingEvent } from '../../todos/types.js';
+import { createSkillTracker } from '../../skills/skill-tracker.js';
+import { createSubAgentTracker } from '../../tools/subagent/subagent-tracker.js';
+import { createRulesTracker } from '../../context/rules-tracker.js';
+import { createTodoTracker } from '../../todos/todo-tracker.js';
+import { createTrackerReconstructor } from './tracker-reconstructor.js';
 import { ContextLoader } from '../../context/loader.js';
 import { TronAgent } from '../../agent/tron-agent.js';
 import {
@@ -316,47 +316,28 @@ export class SessionManager {
       ? await this.eventStore.getAncestors(session.headEventId)
       : [];
 
+    // Reconstruct all trackers using the TrackerReconstructor
+    const trackerReconstructor = createTrackerReconstructor();
+    const trackers = trackerReconstructor.reconstruct(events);
+
     // Restore API token count from last turn_end event
     // This ensures Context Manager sheet matches progress bar on session resume
-    const lastTurnEnd = [...events]
-      .reverse()
-      .find((e) => e.type === 'stream.turn_end');
-    if (lastTurnEnd && lastTurnEnd.payload?.normalizedUsage?.contextWindowTokens) {
-      agent.getContextManager().setApiContextTokens(
-        lastTurnEnd.payload.normalizedUsage.contextWindowTokens
-      );
+    if (trackers.apiTokenCount !== undefined) {
+      agent.getContextManager().setApiContextTokens(trackers.apiTokenCount);
       logger.info('API token count restored from last turn', {
         sessionId,
-        contextWindowTokens: lastTurnEnd.payload.normalizedUsage.contextWindowTokens,
+        contextWindowTokens: trackers.apiTokenCount,
       });
     }
 
-    const skillTracker = SkillTracker.fromEvents(events as SkillTrackingEvent[]);
+    const { skillTracker, rulesTracker, subagentTracker, todoTracker } = trackers;
 
-    logger.info('Skill tracker reconstructed from events', {
+    logger.info('Trackers reconstructed from events', {
       sessionId,
-      addedSkillsCount: skillTracker.count,
-    });
-
-    const rulesTracker = RulesTracker.fromEvents(events as RulesTrackingEvent[]);
-
-    logger.info('Rules tracker reconstructed from events', {
-      sessionId,
+      skillCount: skillTracker.count,
       rulesFileCount: rulesTracker.getTotalFiles(),
-    });
-
-    const subagentTracker = SubAgentTracker.fromEvents(events as SubagentTrackingEvent[]);
-
-    logger.info('Subagent tracker reconstructed from events', {
-      sessionId,
-      totalSubagents: subagentTracker.count,
+      subagentCount: subagentTracker.count,
       activeSubagents: subagentTracker.activeCount,
-    });
-
-    const todoTracker = TodoTracker.fromEvents(events as TodoTrackingEvent[]);
-
-    logger.info('Todo tracker reconstructed from events', {
-      sessionId,
       todoCount: todoTracker.count,
       incompleteTasks: todoTracker.hasIncompleteTasks,
     });

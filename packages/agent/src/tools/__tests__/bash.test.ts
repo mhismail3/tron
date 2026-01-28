@@ -200,4 +200,61 @@ describe('BashTool', () => {
       expect(result.isError).toBe(true);
     });
   });
+
+  describe('settings injection', () => {
+    it('should use injected settings when provided', async () => {
+      mockSpawn.mockReturnValue(createMockProcess('output\n') as any);
+
+      const customSettings = {
+        defaultTimeoutMs: 5000,
+        maxTimeoutMs: 10000,
+        maxOutputLength: 100,
+        dangerousPatterns: ['custom-danger'],
+      };
+
+      const toolWithCustomSettings = new BashTool({
+        workingDirectory: '/test/project',
+        bashSettings: customSettings,
+      });
+
+      // Test dangerous pattern from custom settings
+      const dangerResult = await toolWithCustomSettings.execute({ command: 'custom-danger command' });
+      expect(dangerResult.isError).toBe(true);
+      expect(dangerResult.content).toContain('blocked');
+
+      // Safe command should work
+      const safeResult = await toolWithCustomSettings.execute({ command: 'ls' });
+      expect(safeResult.isError).toBeFalsy();
+    });
+
+    it('should use custom max output length from injected settings', async () => {
+      const longOutput = 'a'.repeat(200);
+      mockSpawn.mockReturnValue(createMockProcess(longOutput) as any);
+
+      const customSettings = {
+        defaultTimeoutMs: 5000,
+        maxTimeoutMs: 10000,
+        maxOutputLength: 50, // Very short for testing
+        dangerousPatterns: [],
+      };
+
+      const toolWithShortOutput = new BashTool({
+        workingDirectory: '/test/project',
+        bashSettings: customSettings,
+      });
+
+      const result = await toolWithShortOutput.execute({ command: 'cat file' });
+      expect(result.content.length).toBeLessThan(200);
+      expect(result.content).toContain('truncated');
+    });
+
+    it('should fall back to global settings when not provided', async () => {
+      // This is implicitly tested by all existing tests which don't provide bashSettings
+      // Just verify the tool can be created without bashSettings
+      const toolWithDefaults = new BashTool({
+        workingDirectory: '/test/project',
+      });
+      expect(toolWithDefaults.name).toBe('Bash');
+    });
+  });
 });

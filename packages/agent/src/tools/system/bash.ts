@@ -8,27 +8,23 @@ import { spawn } from 'child_process';
 import type { TronTool, TronToolResult } from '../../types/index.js';
 import { createLogger } from '../../logging/index.js';
 import { getSettings } from '../../settings/index.js';
+import type { BashToolSettings } from '../../settings/types.js';
 
 const logger = createLogger('tool:bash');
 
-// Get settings (loaded lazily on first access)
-function getBashSettings() {
+/**
+ * Get default bash settings from the global settings.
+ * Used for backwards compatibility when settings not explicitly provided.
+ */
+export function getDefaultBashSettings(): BashToolSettings {
   return getSettings().tools.bash;
-}
-
-// Compile dangerous patterns from settings (cached after first call)
-let compiledPatterns: RegExp[] | null = null;
-function getDangerousPatterns(): RegExp[] {
-  if (!compiledPatterns) {
-    const settings = getBashSettings();
-    compiledPatterns = settings.dangerousPatterns.map(p => new RegExp(p, 'i'));
-  }
-  return compiledPatterns;
 }
 
 export interface BashToolConfig {
   workingDirectory: string;
   defaultTimeout?: number;
+  /** Bash tool settings. If not provided, uses global settings. */
+  bashSettings?: BashToolSettings;
 }
 
 export class BashTool implements TronTool {
@@ -54,9 +50,23 @@ export class BashTool implements TronTool {
   };
 
   private config: BashToolConfig;
+  private bashSettings: BashToolSettings;
+  private compiledPatterns: RegExp[] | null = null;
 
   constructor(config: BashToolConfig) {
     this.config = config;
+    // Use provided settings or fall back to global settings
+    this.bashSettings = config.bashSettings ?? getDefaultBashSettings();
+  }
+
+  /**
+   * Get compiled dangerous patterns (cached per instance).
+   */
+  private getDangerousPatterns(): RegExp[] {
+    if (!this.compiledPatterns) {
+      this.compiledPatterns = this.bashSettings.dangerousPatterns.map(p => new RegExp(p, 'i'));
+    }
+    return this.compiledPatterns;
   }
 
   async execute(
@@ -89,10 +99,9 @@ export class BashTool implements TronTool {
       };
     }
 
-    const settings = getBashSettings();
     const timeout = Math.min(
-      (args.timeout as number) ?? this.config.defaultTimeout ?? settings.defaultTimeoutMs,
-      settings.maxTimeoutMs
+      (args.timeout as number) ?? this.config.defaultTimeout ?? this.bashSettings.defaultTimeoutMs,
+      this.bashSettings.maxTimeoutMs
     );
     const description = args.description as string | undefined;
 
@@ -137,7 +146,7 @@ export class BashTool implements TronTool {
         }
 
         // Truncate if needed
-        const maxOutput = settings.maxOutputLength;
+        const maxOutput = this.bashSettings.maxOutputLength;
         if (output.length > maxOutput) {
           output = output.substring(0, maxOutput) + '\n... [output truncated]';
         }
@@ -175,7 +184,7 @@ export class BashTool implements TronTool {
       // Truncate if too long
       let truncated = false;
       let originalLength: number | undefined;
-      const maxOutput = settings.maxOutputLength;
+      const maxOutput = this.bashSettings.maxOutputLength;
       if (output.length > maxOutput) {
         originalLength = output.length;
         const estimatedTokens = Math.ceil(originalLength / 4);
@@ -222,7 +231,7 @@ export class BashTool implements TronTool {
   }
 
   private checkDangerous(command: string): string | null {
-    const patterns = getDangerousPatterns();
+    const patterns = this.getDangerousPatterns();
     for (const pattern of patterns) {
       if (pattern.test(command)) {
         return `Potentially destructive command pattern detected`;

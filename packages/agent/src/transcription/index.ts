@@ -5,7 +5,7 @@
  */
 
 // Client API
-export { transcribeAudio, listTranscriptionModels } from './client.js';
+export { transcribeAudio, listTranscriptionModels, getDefaultTranscriptionSettings } from './client.js';
 
 // Sidecar management
 export { ensureTranscriptionSidecar, stopTranscriptionSidecar } from './sidecar.js';

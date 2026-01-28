@@ -11,6 +11,7 @@ export {
   shouldRefreshTokens,
   isOAuthToken,
   loadServerAuth,
+  getDefaultAnthropicOAuthSettings,
   OAuthError,
   type PKCEPair,
   /** @deprecated Use UnifiedAuth from types.ts */
@@ -33,6 +34,7 @@ export {
   getGoogleOAuthCredentials,
   saveGoogleOAuthCredentials,
   getGoogleOAuthConfig,
+  getDefaultGoogleApiSettings,
   GoogleOAuthError,
   CLOUD_CODE_ASSIST_CONFIG,
   ANTIGRAVITY_CONFIG,

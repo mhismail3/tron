@@ -207,6 +207,8 @@ export interface AstGrepToolSettings {
   skipDirectories: string[];
   /** Require user confirmation before applying replacements */
   requireConfirmationForReplace: boolean;
+  /** Default timeout in milliseconds (default: 60,000) */
+  defaultTimeoutMs: number;
 }
 
 /**

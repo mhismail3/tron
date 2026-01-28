@@ -322,9 +322,19 @@ export class TronServer {
 // =============================================================================
 
 import { getSettings } from './settings/loader.js';
+import type { ServerSettings } from './settings/types.js';
 
-function getServerSettings() {
+/**
+ * Get default server settings from global settings.
+ * Exported for dependency injection - consumers can pass custom settings.
+ */
+export function getDefaultServerSettings(): ServerSettings {
   return getSettings().server;
+}
+
+// Internal helper - uses the exported getter
+function getServerSettings() {
+  return getDefaultServerSettings();
 }
 
 async function main(): Promise<void> {

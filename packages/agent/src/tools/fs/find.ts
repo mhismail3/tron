@@ -10,6 +10,7 @@ import * as path from 'path';
 import type { TronTool, TronToolResult } from '../../types/index.js';
 import { createLogger, categorizeError } from '../../logging/index.js';
 import { getSettings } from '../../settings/index.js';
+import type { FindToolSettings } from '../../settings/types.js';
 import {
   resolvePath,
   validateRequiredString,
@@ -19,13 +20,18 @@ import {
 
 const logger = createLogger('tool:find');
 
-// Get find tool settings (loaded lazily on first access)
-function getFindSettings() {
+/**
+ * Get default find settings from the global settings.
+ * Used for backwards compatibility when settings not explicitly provided.
+ */
+export function getDefaultFindSettings(): FindToolSettings {
   return getSettings().tools.find;
 }
 
 export interface FindToolConfig {
   workingDirectory: string;
+  /** Find tool settings. If not provided, uses global settings. */
+  findSettings?: FindToolSettings;
 }
 
 interface FileEntry {
@@ -82,9 +88,11 @@ export class FindTool implements TronTool {
   };
 
   private config: FindToolConfig;
+  private findSettings: FindToolSettings;
 
   constructor(config: FindToolConfig) {
     this.config = config;
+    this.findSettings = config.findSettings ?? getDefaultFindSettings();
   }
 
   async execute(args: Record<string, unknown>): Promise<TronToolResult> {
@@ -99,14 +107,13 @@ export class FindTool implements TronTool {
     const emptyValidation = validateNonEmptyString(patternStr, 'pattern', '"*.ts" or "**/*.js"');
     if (!emptyValidation.valid) return emptyValidation.error!;
 
-    const settings = getFindSettings();
     const searchPath = resolvePath((args.path as string) || '.', this.config.workingDirectory);
     const typeFilter = (args.type as 'file' | 'directory' | 'all') ?? 'all';
-    const maxDepth = (args.maxDepth as number) ?? settings.defaultMaxDepth;
+    const maxDepth = (args.maxDepth as number) ?? this.findSettings.defaultMaxDepth;
     const excludePatterns = (args.exclude as string[]) ?? [];
     const showSize = (args.showSize as boolean) ?? false;
     const sortByTime = (args.sortByTime as boolean) ?? false;
-    const maxResults = (args.maxResults as number) ?? settings.defaultMaxResults;
+    const maxResults = (args.maxResults as number) ?? this.findSettings.defaultMaxResults;
 
     const startTime = Date.now();
     logger.debug('Find search', { pattern: patternStr, searchPath, typeFilter, maxDepth });

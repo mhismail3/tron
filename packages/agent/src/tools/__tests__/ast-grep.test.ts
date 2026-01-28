@@ -545,6 +545,75 @@ describe('AstGrepTool', () => {
     });
   });
 
+  describe('settings injection', () => {
+    it('should use injected settings when provided', async () => {
+      const customSettings = {
+        defaultLimit: 5,
+        maxLimit: 10,
+        defaultContext: 0,
+        maxOutputTokens: 1000,
+        binaryPath: 'sg',
+        defaultTimeoutMs: 30000,
+        skipDirectories: [],
+        requireConfirmationForReplace: false,
+      };
+
+      const toolWithCustomSettings = new AstGrepTool({
+        workingDirectory: FIXTURES_PATH,
+        astGrepSettings: customSettings,
+      });
+
+      // Custom maxLimit should cap results
+      const result = await toolWithCustomSettings.execute({
+        pattern: 'console.log($MSG)',
+        lang: 'js',
+        limit: 100, // Request more than maxLimit
+      });
+
+      // Should be capped to maxLimit of 10
+      if (result.details?.matches && result.details.matches.length > 0) {
+        expect(result.details.matches.length).toBeLessThanOrEqual(10);
+      }
+    });
+
+    it('should use custom default limit from injected settings', async () => {
+      const customSettings = {
+        defaultLimit: 2,
+        maxLimit: 200,
+        defaultContext: 0,
+        maxOutputTokens: 15000,
+        binaryPath: 'sg',
+        defaultTimeoutMs: 60000,
+        skipDirectories: [],
+        requireConfirmationForReplace: false,
+      };
+
+      const toolWithCustomDefaults = new AstGrepTool({
+        workingDirectory: FIXTURES_PATH,
+        astGrepSettings: customSettings,
+      });
+
+      const result = await toolWithCustomDefaults.execute({
+        pattern: 'console.log($MSG)',
+        lang: 'js',
+        // No limit specified - should use defaultLimit of 2
+      });
+
+      // If there are matches, should be limited to 2
+      if (result.details?.matches && result.details.matches.length > 0) {
+        expect(result.details.matches.length).toBeLessThanOrEqual(2);
+      }
+    });
+
+    it('should fall back to global settings when not provided', () => {
+      // Verify tool can be created without astGrepSettings
+      const toolWithDefaults = new AstGrepTool({
+        workingDirectory: FIXTURES_PATH,
+      });
+      expect(toolWithDefaults.name).toBe('AstGrep');
+    });
+  });
+
   describe('Abort Signal Support', () => {
     it.skip('respects abort signal', async () => {
       const controller = new AbortController();

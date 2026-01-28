@@ -64,6 +64,8 @@ export interface OpenAICodexConfig {
   reasoningEffort?: ReasoningEffort;
   /** Retry configuration for transient failures (default: enabled with 3 retries) */
   retry?: StreamRetryConfig | false;
+  /** Optional Codex settings for dependency injection (falls back to global settings) */
+  codexSettings?: OpenAICodexApiSettings;
 }
 
 /**
@@ -265,7 +267,13 @@ When asked to visit a website or fetch data from the internet, USE the Bash tool
 // Settings Helper
 // =============================================================================
 
-function getCodexSettings() {
+import type { OpenAICodexApiSettings } from '../settings/types.js';
+
+/**
+ * Get default OpenAI Codex settings from global settings.
+ * Exported for dependency injection - consumers can pass custom settings.
+ */
+export function getDefaultCodexSettings(): OpenAICodexApiSettings | undefined {
   const settings = getSettings();
   return settings.api.openaiCodex;
 }
@@ -279,11 +287,12 @@ export class OpenAICodexProvider {
   private config: OpenAICodexConfig;
   private baseURL: string;
   private retryConfig: StreamRetryConfig | false;
+  private codexSettings: OpenAICodexApiSettings | undefined;
 
   constructor(config: OpenAICodexConfig) {
     this.config = config;
-    const codexSettings = getCodexSettings();
-    this.baseURL = config.baseURL || codexSettings?.baseUrl || 'https://chatgpt.com/backend-api';
+    this.codexSettings = config.codexSettings ?? getDefaultCodexSettings();
+    this.baseURL = config.baseURL || this.codexSettings?.baseUrl || 'https://chatgpt.com/backend-api';
     // Default to enabled retry with standard config
     this.retryConfig = config.retry === false ? false : (config.retry ?? {});
 
@@ -319,8 +328,7 @@ export class OpenAICodexProvider {
    * Check if tokens need refresh
    */
   private shouldRefreshTokens(): boolean {
-    const codexSettings = getCodexSettings();
-    const bufferSeconds = codexSettings?.tokenExpiryBufferSeconds ?? 300;
+    const bufferSeconds = this.codexSettings?.tokenExpiryBufferSeconds ?? 300;
     // expiresAt is in milliseconds from our auth flow
     return Date.now() > this.config.auth.expiresAt - (bufferSeconds * 1000);
   }
@@ -329,9 +337,8 @@ export class OpenAICodexProvider {
    * Refresh OAuth tokens
    */
   private async refreshTokens(): Promise<OAuthTokens> {
-    const codexSettings = getCodexSettings();
-    const tokenUrl = codexSettings?.tokenUrl ?? 'https://auth.openai.com/oauth/token';
-    const clientId = codexSettings?.clientId ?? 'app_EMoamEEZ73f0CkXaXp7hrann';
+    const tokenUrl = this.codexSettings?.tokenUrl ?? 'https://auth.openai.com/oauth/token';
+    const clientId = this.codexSettings?.clientId ?? 'app_EMoamEEZ73f0CkXaXp7hrann';
 
     logger.info('Refreshing Codex OAuth tokens');
 
@@ -438,7 +445,7 @@ export class OpenAICodexProvider {
     const maxTokens = options.maxTokens ?? this.config.maxTokens ?? 16384;
     const reasoningEffort = options.reasoningEffort
       ?? this.config.reasoningEffort
-      ?? getCodexSettings()?.defaultReasoningEffort
+      ?? this.codexSettings?.defaultReasoningEffort
       ?? 'medium';
 
     logger.debug('Starting Codex stream', {

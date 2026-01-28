@@ -11,21 +11,17 @@ import * as fs from 'fs/promises';
 import type { TronTool, TronToolResult } from '../../types/index.js';
 import { createLogger } from '../../logging/index.js';
 import { getSettings } from '../../settings/index.js';
+import type { AstGrepToolSettings } from '../../settings/types.js';
 import { truncateOutput } from '../utils.js';
 
 const logger = createLogger('tool:ast-grep');
 
-// Get ast-grep tool settings (loaded lazily on first access)
-function getAstGrepSettings() {
-  const settings = getSettings();
-  return (settings.tools as any).astGrep ?? {
-    defaultLimit: 50,
-    maxLimit: 200,
-    defaultContext: 0,
-    maxOutputTokens: 15000,
-    defaultTimeoutMs: 60000,
-    skipDirectories: ['node_modules', '.git', 'dist', 'build', 'vendor'],
-  };
+/**
+ * Get default ast-grep settings from the global settings.
+ * Used for backwards compatibility when settings not explicitly provided.
+ */
+export function getDefaultAstGrepSettings(): AstGrepToolSettings {
+  return getSettings().tools.astGrep;
 }
 
 // Install instructions for all platforms
@@ -59,6 +55,8 @@ const SUPPORTED_LANGUAGES = [
 
 export interface AstGrepToolConfig {
   workingDirectory: string;
+  /** AstGrep tool settings. If not provided, uses global settings. */
+  astGrepSettings?: AstGrepToolSettings;
 }
 
 export interface AstGrepMatch {
@@ -144,11 +142,14 @@ Examples:
   };
 
   private config: AstGrepToolConfig;
+  private astGrepSettings: AstGrepToolSettings;
   private binaryPath: string | null = null;
   private binaryChecked = false;
 
   constructor(config: AstGrepToolConfig) {
     this.config = config;
+    // Use provided settings or fall back to global settings
+    this.astGrepSettings = config.astGrepSettings ?? getDefaultAstGrepSettings();
   }
 
   /**
@@ -470,13 +471,12 @@ Examples:
 
     const pattern = (args.pattern as string).trim();
     const mode = (args.mode as Mode) ?? 'search';
-    const settings = getAstGrepSettings();
     const limit = Math.min(
-      (args.limit as number) ?? settings.defaultLimit,
-      settings.maxLimit
+      (args.limit as number) ?? this.astGrepSettings.defaultLimit,
+      this.astGrepSettings.maxLimit
     );
-    const context = (args.context as number) ?? settings.defaultContext;
-    const timeout = settings.defaultTimeoutMs ?? 60000;
+    const context = (args.context as number) ?? this.astGrepSettings.defaultContext;
+    const timeout = this.astGrepSettings.defaultTimeoutMs ?? 60000;
     const searchPath = args.path ? this.resolvePath(args.path as string) : this.config.workingDirectory;
 
     logger.debug('AstGrep execute', { pattern, mode, searchPath, limit });
@@ -563,7 +563,7 @@ Examples:
       const output = this.formatMatches(limitedMatches, context);
 
       // Apply token-based truncation
-      const maxOutputTokens = settings.maxOutputTokens ?? 15000;
+      const maxOutputTokens = this.astGrepSettings.maxOutputTokens ?? 15000;
       const truncateResult = truncateOutput(output, maxOutputTokens, {
         preserveStartLines: 5,
         truncationMessage: `\n\n... [Results truncated: ${totalMatches} matches found. Output exceeded ${maxOutputTokens.toLocaleString()} token limit. Use limit parameter or narrow your search.]`,
