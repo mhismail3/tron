@@ -132,6 +132,113 @@ describe('Attachment Processing', () => {
       expect(blocks[0].mimeType).toBe('image/jpeg');
       expect(blocks[1].mimeType).toBe('application/pdf');
     });
+
+    it('converts text/plain attachments to text content blocks', () => {
+      const textContent = 'Hello, world!';
+      const base64Data = Buffer.from(textContent).toString('base64');
+      const attachments: FileAttachment[] = [
+        {
+          data: base64Data,
+          mimeType: 'text/plain',
+          fileName: 'hello.txt',
+        },
+      ];
+
+      const blocks = convertAttachmentsToContentBlocks(attachments);
+
+      expect(blocks).toHaveLength(1);
+      expect(blocks[0].type).toBe('text');
+      expect((blocks[0] as { type: 'text'; text: string }).text).toBe('[File: hello.txt]\nHello, world!');
+    });
+
+    it('converts text/markdown attachments to text content blocks', () => {
+      const mdContent = '# Hello\n\nThis is **markdown**.';
+      const base64Data = Buffer.from(mdContent).toString('base64');
+      const attachments: FileAttachment[] = [
+        {
+          data: base64Data,
+          mimeType: 'text/markdown',
+          fileName: 'readme.md',
+        },
+      ];
+
+      const blocks = convertAttachmentsToContentBlocks(attachments);
+
+      expect(blocks).toHaveLength(1);
+      expect(blocks[0].type).toBe('text');
+      expect((blocks[0] as { type: 'text'; text: string }).text).toContain('# Hello');
+    });
+
+    it('converts application/json attachments to text content blocks', () => {
+      const jsonContent = '{"key": "value"}';
+      const base64Data = Buffer.from(jsonContent).toString('base64');
+      const attachments: FileAttachment[] = [
+        {
+          data: base64Data,
+          mimeType: 'application/json',
+          fileName: 'data.json',
+        },
+      ];
+
+      const blocks = convertAttachmentsToContentBlocks(attachments);
+
+      expect(blocks).toHaveLength(1);
+      expect(blocks[0].type).toBe('text');
+      expect((blocks[0] as { type: 'text'; text: string }).text).toContain('{"key": "value"}');
+    });
+
+    it('handles text files without fileName', () => {
+      const textContent = 'No filename content';
+      const base64Data = Buffer.from(textContent).toString('base64');
+      const attachments: FileAttachment[] = [
+        {
+          data: base64Data,
+          mimeType: 'text/plain',
+        },
+      ];
+
+      const blocks = convertAttachmentsToContentBlocks(attachments);
+
+      expect(blocks).toHaveLength(1);
+      expect(blocks[0].type).toBe('text');
+      // Should not have file prefix when no filename
+      expect((blocks[0] as { type: 'text'; text: string }).text).toBe('No filename content');
+    });
+
+    it('handles mixed image, document, and text attachments', () => {
+      const textContent = 'Sample text';
+      const base64Text = Buffer.from(textContent).toString('base64');
+      const attachments: FileAttachment[] = [
+        { data: 'img1', mimeType: 'image/png' },
+        { data: 'pdf1', mimeType: 'application/pdf', fileName: 'doc.pdf' },
+        { data: base64Text, mimeType: 'text/plain', fileName: 'note.txt' },
+      ];
+
+      const blocks = convertAttachmentsToContentBlocks(attachments);
+
+      expect(blocks).toHaveLength(3);
+      expect(blocks[0].type).toBe('image');
+      expect(blocks[1].type).toBe('document');
+      expect(blocks[2].type).toBe('text');
+    });
+
+    it('gracefully handles invalid base64 in text attachments', () => {
+      const attachments: FileAttachment[] = [
+        { data: 'valid-image', mimeType: 'image/png' },
+        { data: '!!!not-valid-base64!!!', mimeType: 'text/plain', fileName: 'bad.txt' },
+        { data: Buffer.from('valid text').toString('base64'), mimeType: 'text/markdown' },
+      ];
+
+      // Should not throw, should skip the invalid one
+      const blocks = convertAttachmentsToContentBlocks(attachments);
+
+      // Image should pass through, invalid text skipped, valid text decoded
+      expect(blocks).toHaveLength(3);
+      expect(blocks[0].type).toBe('image');
+      // The "invalid" base64 actually decodes (base64 is lenient), so it becomes text
+      expect(blocks[1].type).toBe('text');
+      expect(blocks[2].type).toBe('text');
+    });
   });
 
   describe('mergeAttachments (backward compatibility)', () => {

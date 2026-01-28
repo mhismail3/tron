@@ -5,6 +5,10 @@
  * that can be sent to Claude and OpenAI APIs.
  */
 
+import { createLogger } from '../logging/index.js';
+
+const logger = createLogger('attachments');
+
 /**
  * File attachment from client (iOS app or web)
  */
@@ -37,9 +41,18 @@ export interface DocumentContentBlock {
 }
 
 /**
+ * Text content block for API (text files decoded from base64)
+ */
+export interface TextContentBlock {
+  type: 'text';
+  text: string;
+  fileName?: string;
+}
+
+/**
  * Content block union type
  */
-export type ContentBlock = ImageContentBlock | DocumentContentBlock;
+export type ContentBlock = ImageContentBlock | DocumentContentBlock | TextContentBlock;
 
 /**
  * Supported image MIME types
@@ -59,6 +72,21 @@ const SUPPORTED_DOCUMENT_TYPES = new Set([
 ]);
 
 /**
+ * Supported text MIME types (decoded and sent as text)
+ */
+const SUPPORTED_TEXT_TYPES = new Set([
+  'text/plain',
+  'text/markdown',
+  'text/csv',
+  'text/html',
+  'text/xml',
+  'application/json',
+  'application/xml',
+  'text/yaml',
+  'text/x-yaml',
+]);
+
+/**
  * Check if a MIME type is a supported image type
  */
 function isImageType(mimeType: string): boolean {
@@ -73,10 +101,17 @@ function isDocumentType(mimeType: string): boolean {
 }
 
 /**
- * Check if a MIME type is supported (image or document)
+ * Check if a MIME type is a supported text type
+ */
+function isTextType(mimeType: string): boolean {
+  return SUPPORTED_TEXT_TYPES.has(mimeType);
+}
+
+/**
+ * Check if a MIME type is supported (image, document, or text)
  */
 function isSupportedType(mimeType: string): boolean {
-  return isImageType(mimeType) || isDocumentType(mimeType);
+  return isImageType(mimeType) || isDocumentType(mimeType) || isTextType(mimeType);
 }
 
 /**
@@ -114,8 +149,9 @@ export function convertAttachmentsToContentBlocks(
   for (const attachment of allAttachments) {
     const { data, mimeType, fileName } = attachment;
 
-    // Skip unsupported MIME types
+    // Skip and log unsupported MIME types
     if (!isSupportedType(mimeType)) {
+      logger.warn('Skipping unsupported attachment type', { mimeType, fileName });
       continue;
     }
 
@@ -132,6 +168,21 @@ export function convertAttachmentsToContentBlocks(
         mimeType,
         fileName,
       });
+    } else if (isTextType(mimeType)) {
+      try {
+        const text = Buffer.from(data, 'base64').toString('utf-8');
+        contentBlocks.push({
+          type: 'text',
+          text: fileName ? `[File: ${fileName}]\n${text}` : text,
+          fileName,
+        });
+      } catch (err) {
+        logger.warn('Failed to decode text attachment', {
+          mimeType,
+          fileName,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
     }
   }
 

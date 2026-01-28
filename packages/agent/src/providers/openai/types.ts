@@ -78,9 +78,20 @@ export type ResponsesInputItem =
   | { type: 'function_call'; id?: string; call_id: string; name: string; arguments: string }
   | { type: 'function_call_output'; call_id: string; output: string };
 
+/**
+ * Input image content for multimodal messages (Responses API format)
+ * Note: image_url is a string (URL or data URL), not an object
+ */
+export interface OpenAIInputImage {
+  type: 'input_image';
+  image_url: string;  // URL or data:mime;base64,... format
+  detail?: 'auto' | 'low' | 'high';
+}
+
 export type MessageContent =
   | { type: 'output_text'; text: string }
-  | { type: 'input_text'; text: string };
+  | { type: 'input_text'; text: string }
+  | OpenAIInputImage;
 
 /**
  * Tool definition for Responses API

@@ -5,9 +5,23 @@
  * Handles tool call ID remapping for cross-provider compatibility.
  */
 
-import type { Context, TextContent, ToolCall } from '../../types/index.js';
+import type { Context, TextContent, ToolCall, ImageContent } from '../../types/index.js';
 import { buildToolCallIdMapping, remapToolCallId } from '../base/index.js';
-import type { ResponsesInputItem, ResponsesTool } from './types.js';
+import type { ResponsesInputItem, ResponsesTool, MessageContent, OpenAIInputImage } from './types.js';
+import { createLogger } from '../../logging/index.js';
+
+const logger = createLogger('openai:converter');
+
+/**
+ * Convert an image content block to OpenAI input_image format
+ */
+function convertImageToOpenAI(image: ImageContent): OpenAIInputImage {
+  return {
+    type: 'input_image',
+    image_url: `data:${image.mimeType};base64,${image.data}`,
+    detail: 'auto',
+  };
+}
 
 /**
  * Generate a tool clarification message to prepend to conversation.
@@ -82,20 +96,39 @@ export function convertToResponsesInput(context: Context): ResponsesInputItem[] 
   // Convert messages with remapped IDs
   for (const msg of context.messages) {
     if (msg.role === 'user') {
-      const text = typeof msg.content === 'string'
-        ? msg.content
-        : msg.content
-            .filter(c => c.type === 'text')
-            .map(c => (c as TextContent).text)
-            .join('\n');
-
-      if (text) {
-        // ChatGPT backend API requires 'message' type, not 'input_text'
+      if (typeof msg.content === 'string') {
         input.push({
           type: 'message',
           role: 'user',
-          content: [{ type: 'input_text', text }],
+          content: [{ type: 'input_text', text: msg.content }],
         });
+      } else {
+        const contentParts: MessageContent[] = [];
+
+        for (const c of msg.content) {
+          if (c.type === 'text') {
+            contentParts.push({ type: 'input_text', text: c.text });
+          } else if (c.type === 'image') {
+            contentParts.push(convertImageToOpenAI(c));
+          } else if (c.type === 'document') {
+            logger.warn('Document content not fully supported by OpenAI, adding as reference', {
+              mimeType: c.mimeType,
+              fileName: c.fileName,
+            });
+            contentParts.push({
+              type: 'input_text',
+              text: `[Document: ${c.fileName || 'unnamed'} (${c.mimeType})]`,
+            });
+          }
+        }
+
+        if (contentParts.length > 0) {
+          input.push({
+            type: 'message',
+            role: 'user',
+            content: contentParts,
+          });
+        }
       }
     } else if (msg.role === 'assistant') {
       // Handle assistant messages with text

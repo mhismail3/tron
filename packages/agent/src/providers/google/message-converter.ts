@@ -19,6 +19,9 @@ import type {
 } from '../../types/index.js';
 import { buildToolCallIdMapping, remapToolCallId } from '../base/index.js';
 import type { GeminiContent, GeminiPart, GeminiTool } from './types.js';
+import { createLogger } from '../../logging/index.js';
+
+const logger = createLogger('google:converter');
 
 // =============================================================================
 // Message Conversion
@@ -56,8 +59,28 @@ export function convertMessages(context: Context): GeminiContent[] {
         for (const c of userMsg.content) {
           if (c.type === 'text') {
             parts.push({ text: c.text });
+          } else if (c.type === 'image') {
+            parts.push({
+              inlineData: {
+                mimeType: c.mimeType,
+                data: c.data,
+              },
+            });
+          } else if (c.type === 'document') {
+            if (c.mimeType === 'application/pdf') {
+              parts.push({
+                inlineData: {
+                  mimeType: c.mimeType,
+                  data: c.data,
+                },
+              });
+            } else {
+              logger.warn('Unsupported document type for Gemini, skipping', {
+                mimeType: c.mimeType,
+                fileName: c.fileName,
+              });
+            }
           }
-          // Note: Image handling would go here for multimodal
         }
       }
 

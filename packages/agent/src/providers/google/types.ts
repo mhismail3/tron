@@ -157,7 +157,8 @@ export interface GeminiContent {
 export type GeminiPart =
   | { text: string; thought?: boolean; thoughtSignature?: string }
   | { functionCall: { name: string; args: Record<string, unknown> }; thoughtSignature?: string }
-  | { functionResponse: { name: string; response: Record<string, unknown> } };
+  | { functionResponse: { name: string; response: Record<string, unknown> } }
+  | { inlineData: { mimeType: string; data: string } };
 
 export interface GeminiTool {
   functionDeclarations: Array<{
