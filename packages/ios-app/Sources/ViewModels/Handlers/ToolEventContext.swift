@@ -56,4 +56,10 @@ protocol ToolEventContext: LoggingContext, ToolStateTracking {
 
     /// Update browser status if needed (for browser tools)
     func updateBrowserStatusIfNeeded()
+
+    // MARK: - Thinking State
+
+    /// Reset thinking state for a new thinking block
+    /// Called after tool completion so subsequent thinking starts fresh
+    func resetThinkingForNewBlock()
 }

@@ -282,6 +282,35 @@ final class ChatEventHandlerTests: XCTestCase {
         XCTAssertEqual(result.turnNumber, 1)
     }
 
+    // MARK: - Thinking Reset Tests
+
+    func testResetThinkingStateClearsOnlyThinkingText() async throws {
+        // Given: handler with accumulated thinking and streaming text
+        mockContext.askUserQuestionCalledInTurn = false
+        _ = handler.handleTextDelta("streaming text", context: mockContext)
+        _ = handler.handleThinkingDelta("thinking content")
+
+        // When: resetting thinking state only
+        handler.resetThinkingState()
+
+        // Then: thinking text should be cleared but streaming text preserved
+        XCTAssertEqual(handler.thinkingText, "")
+        XCTAssertEqual(handler.streamingText, "streaming text")
+    }
+
+    func testResetThinkingStateAllowsNewBlockAccumulation() async throws {
+        // Given: handler with accumulated thinking text
+        _ = handler.handleThinkingDelta("first block content")
+        XCTAssertEqual(handler.thinkingText, "first block content")
+
+        // When: resetting and adding new thinking
+        handler.resetThinkingState()
+        let result = handler.handleThinkingDelta("second block content")
+
+        // Then: new block starts fresh
+        XCTAssertEqual(result.thinkingText, "second block content")
+    }
+
     // MARK: - Reset Tests
 
     func testResetClearsAllState() async throws {

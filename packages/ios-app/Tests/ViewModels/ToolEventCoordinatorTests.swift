@@ -551,6 +551,83 @@ final class ToolEventCoordinatorTests: XCTestCase {
         XCTAssertTrue(mockContext.askUserQuestionSheetOpened)
     }
 
+    // MARK: - Thinking Block Boundary Tests
+
+    func testToolEndResetsThinkingStateForNewBlock() async throws {
+        // Given: A tool end event
+        let event = ToolEndPlugin.Result(
+            toolCallId: "tool_thinking_reset",
+            success: true,
+            displayResult: "Done",
+            durationMs: 100,
+            details: nil
+        )
+        let result = ToolEndResult(
+            toolCallId: "tool_thinking_reset",
+            status: .success,
+            result: "Done",
+            durationMs: 100,
+            isAskUserQuestion: false
+        )
+
+        // When: Handling tool end
+        coordinator.handleToolEnd(event, result: result, context: mockContext)
+
+        // Then: Thinking state should be reset for new block
+        XCTAssertTrue(mockContext.resetThinkingForNewBlockCalled)
+    }
+
+    func testAskUserQuestionToolEndAlsoResetsThinkingState() async throws {
+        // Given: An AskUserQuestion message exists
+        let askData = AskUserQuestionToolData(
+            toolCallId: "ask_thinking_reset",
+            params: AskUserQuestionParams(
+                questions: [
+                    AskUserQuestion(
+                        id: "q1",
+                        question: "Pick?",
+                        options: [
+                            AskUserQuestionOption(label: "A", value: nil, description: nil)
+                        ],
+                        mode: .single,
+                        allowOther: false,
+                        otherPlaceholder: nil
+                    )
+                ],
+                context: nil
+            ),
+            answers: [:],
+            status: .pending,
+            result: nil
+        )
+        mockContext.messages.append(ChatMessage(
+            role: .assistant,
+            content: .askUserQuestion(askData)
+        ))
+
+        // Given: Tool end arrives
+        let event = ToolEndPlugin.Result(
+            toolCallId: "ask_thinking_reset",
+            success: true,
+            displayResult: "",
+            durationMs: 100,
+            details: nil
+        )
+        let result = ToolEndResult(
+            toolCallId: "ask_thinking_reset",
+            status: .success,
+            result: "",
+            durationMs: 100,
+            isAskUserQuestion: false
+        )
+
+        // When: Handling tool end (AskUserQuestion returns early, but should still reset)
+        coordinator.handleToolEnd(event, result: result, context: mockContext)
+
+        // Then: Thinking state should still be reset (called at start of handleToolEnd)
+        XCTAssertTrue(mockContext.resetThinkingForNewBlockCalled)
+    }
+
     func testToolEndDoesNotEnqueueForAskUserQuestion() async throws {
         // Given: An AskUserQuestion message exists
         let askData = AskUserQuestionToolData(
@@ -628,6 +705,7 @@ final class MockToolEventContext: ToolEventContext {
     var enqueuedToolEnds: [UIUpdateQueue.ToolEndData] = []
     var askUserQuestionSheetOpened = false
     var openedAskUserQuestionData: AskUserQuestionToolData?
+    var resetThinkingForNewBlockCalled = false
 
     // MARK: - Protocol Methods
 
@@ -664,6 +742,10 @@ final class MockToolEventContext: ToolEventContext {
         if browserStatus == nil {
             browserStatus = BrowserGetStatusResult(hasBrowser: true, isStreaming: false, currentUrl: nil)
         }
+    }
+
+    func resetThinkingForNewBlock() {
+        resetThinkingForNewBlockCalled = true
     }
 
     // MARK: - Logging (no-op for tests)

@@ -130,6 +130,10 @@ final class ToolEventCoordinator {
         context.logInfo("Tool ended: \(result.toolCallId) status=\(result.status) duration=\(result.durationMs ?? 0)ms")
         context.logDebug("Tool result: \(result.result.prefix(300))")
 
+        // Reset thinking state after tool completion
+        // Any subsequent thinking deltas should start a new thinking block
+        context.resetThinkingForNewBlock()
+
         // Check if this is an AskUserQuestion tool end
         if let index = MessageFinder.lastIndexOfAskUserQuestion(toolCallId: result.toolCallId, in: context.messages) {
             if case .askUserQuestion(let data) = context.messages[index].content {

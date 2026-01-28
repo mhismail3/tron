@@ -44,4 +44,11 @@ extension ChatViewModel: ToolEventContext {
             browserState.browserStatus = BrowserGetStatusResult(hasBrowser: true, isStreaming: false, currentUrl: nil)
         }
     }
+
+    /// Reset thinking state for a new thinking block (ToolEventContext)
+    /// Called after tool completion so subsequent thinking starts fresh
+    func resetThinkingForNewBlock() {
+        eventHandler.resetThinkingState()
+        thinkingMessageId = nil
+    }
 }

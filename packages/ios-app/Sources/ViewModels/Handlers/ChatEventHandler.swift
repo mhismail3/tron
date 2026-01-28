@@ -321,6 +321,12 @@ final class ChatEventHandler {
         streamingMessageId = nil
     }
 
+    /// Reset thinking state for new block (called after tool completion)
+    /// Any subsequent thinking deltas should start a new thinking block
+    func resetThinkingState() {
+        thinkingText = ""
+    }
+
     /// Finalize current streaming message
     /// - Returns: The final text and message ID, or nil if no streaming message
     func finalizeStreamingMessage() -> (text: String, messageId: UUID)? {
