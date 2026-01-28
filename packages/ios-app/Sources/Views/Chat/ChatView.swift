@@ -628,5 +628,6 @@ struct ChatView: View {
 
 extension Notification.Name {
     static let chatMenuAction = Notification.Name("chatMenuAction")
+    static let navigationModeAction = Notification.Name("navigationModeAction")
     // modelPickerAction is defined in InputBar.swift
 }

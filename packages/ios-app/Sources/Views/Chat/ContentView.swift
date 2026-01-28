@@ -97,6 +97,12 @@ struct ContentView: View {
                 // Server changed - clear workspace deleted states since they may be invalid
                 workspaceDeletedForSession = [:]
             }
+            .onReceive(NotificationCenter.default.publisher(for: .navigationModeAction)) { notification in
+                // Handle navigation mode change from ChatView toolbar (iPad)
+                if let mode = notification.object as? NavigationMode {
+                    navigationMode = mode
+                }
+            }
             .onChange(of: selectedSessionId) { oldValue, newValue in
                 handleSessionSelection(newValue)
             }
