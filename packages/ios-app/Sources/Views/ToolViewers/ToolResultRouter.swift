@@ -1,7 +1,7 @@
 import SwiftUI
 
 // MARK: - Tool Result Router
-// Handles core Tron tools: Read, Write, Edit, Bash, Grep, Find, Ls, Browser, AST Grep, Open Browser
+// Handles core Tron tools: Read, Write, Edit, Bash, Search, Find, BrowseTheWeb, OpenURL
 
 struct ToolResultRouter: View {
     let tool: ToolUseData
@@ -75,17 +75,13 @@ struct ToolResultRouter: View {
             return ("pencil.line", .orange)
         case "bash":
             return ("terminal", .tronEmerald)
-        case "grep":
+        case "search":
             return ("magnifyingglass", .purple)
         case "find", "glob":
             return ("doc.text.magnifyingglass", .cyan)
-        case "ls":
-            return ("folder", .yellow)
-        case "browser":
+        case "browsetheweb":
             return ("globe", .blue)
-        case "astgrep":
-            return ("wand.and.stars", .mint)
-        case "openbrowser":
+        case "openurl":
             return ("safari", .blue)
         case "askuserquestion":
             return ("questionmark.circle.fill", .tronAmber)
@@ -121,13 +117,11 @@ struct ToolResultRouter: View {
         case "write": return "Write"
         case "edit": return "Edit"
         case "bash": return "Bash"
-        case "grep": return "Grep"
+        case "search": return "Search"
         case "find": return "Find"
         case "glob": return "Glob"
-        case "ls": return "Ls"
-        case "browser": return "Browser"
-        case "astgrep": return "AST Grep"
-        case "openbrowser": return "Open Browser"
+        case "browsetheweb": return "Browse Web"
+        case "openurl": return "Open URL"
         default: return tool.toolName.capitalized
         }
     }
@@ -150,7 +144,7 @@ struct ToolResultRouter: View {
             return shortenPath(extractFilePath(from: args))
         case "bash":
             return truncateCommand(extractCommand(from: args))
-        case "grep":
+        case "search":
             let pattern = extractPattern(from: args)
             let path = extractPath(from: args)
             if !path.isEmpty && path != "." {
@@ -159,18 +153,9 @@ struct ToolResultRouter: View {
             return "\"\(pattern)\""
         case "find", "glob":
             return extractPattern(from: args)
-        case "ls":
-            return extractPath(from: args)
-        case "browser":
+        case "browsetheweb":
             return extractBrowserAction(from: args)
-        case "astgrep":
-            let pattern = extractAstGrepPattern(from: args)
-            let path = extractPath(from: args)
-            if !path.isEmpty && path != "." {
-                return "\"\(pattern)\" in \(shortenPath(path))"
-            }
-            return "\"\(pattern)\""
-        case "openbrowser":
+        case "openurl":
             return extractOpenBrowserUrl(from: args)
         default:
             return ""
@@ -206,8 +191,8 @@ struct ToolResultRouter: View {
                 output: result,
                 isExpanded: $isExpanded
             )
-        case "grep":
-            GrepResultViewer(
+        case "search":
+            SearchToolViewer(
                 pattern: extractPattern(from: tool.arguments),
                 result: result,
                 isExpanded: $isExpanded
@@ -218,26 +203,14 @@ struct ToolResultRouter: View {
                 result: result,
                 isExpanded: $isExpanded
             )
-        case "ls":
-            LsResultViewer(
-                path: extractPath(from: tool.arguments),
-                result: result,
-                isExpanded: $isExpanded
-            )
-        case "browser":
-            BrowserResultViewer(
+        case "browsetheweb":
+            BrowserToolViewer(
                 action: extractBrowserAction(from: tool.arguments),
                 result: result,
                 isExpanded: $isExpanded
             )
-        case "astgrep":
-            AstGrepResultViewer(
-                pattern: extractAstGrepPattern(from: tool.arguments),
-                result: result,
-                isExpanded: $isExpanded
-            )
-        case "openbrowser":
-            OpenBrowserResultViewer(
+        case "openurl":
+            OpenURLResultViewer(
                 url: extractOpenBrowserUrl(from: tool.arguments),
                 result: result,
                 isExpanded: $isExpanded

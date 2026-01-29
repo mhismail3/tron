@@ -101,8 +101,8 @@ enum CommandToolRegistry {
     static let allCommandTools: Set<String> = [
         "read", "write", "edit",
         "bash",
-        "grep", "glob", "find", "ls",
-        "browser", "astgrep", "openbrowser",
+        "search", "glob", "find",
+        "browsetheweb", "openurl",
         "webfetch", "websearch",
         "task"
     ]
@@ -134,18 +134,14 @@ enum CommandToolRegistry {
             return ("pencil.line", .orange, "Edit")
         case "bash":
             return ("terminal", .tronEmerald, "Bash")
-        case "grep":
-            return ("magnifyingglass", .purple, "Grep")
+        case "search":
+            return ("magnifyingglass", .purple, "Search")
         case "glob", "find":
             return ("doc.text.magnifyingglass", .cyan, toolName.lowercased() == "glob" ? "Glob" : "Find")
-        case "ls":
-            return ("folder", .yellow, "Ls")
-        case "browser":
-            return ("globe", .blue, "Browser")
-        case "astgrep":
-            return ("wand.and.stars", .mint, "AST Grep")
-        case "openbrowser":
-            return ("safari", .blue, "Open Browser")
+        case "browsetheweb":
+            return ("globe", .blue, "Browse Web")
+        case "openurl":
+            return ("safari", .blue, "Open URL")
         case "webfetch":
             return ("arrow.down.doc", .tronInfo, "WebFetch")
         case "websearch":
@@ -207,7 +203,7 @@ extension CommandToolChipData {
             return shortenPath(extractFilePath(from: args))
         case "bash":
             return truncateCommand(extractCommand(from: args))
-        case "grep":
+        case "search":
             let pattern = extractPattern(from: args)
             let path = extractPath(from: args)
             if !path.isEmpty && path != "." {
@@ -216,18 +212,9 @@ extension CommandToolChipData {
             return "\"\(pattern)\""
         case "find", "glob":
             return extractPattern(from: args)
-        case "ls":
-            return extractPath(from: args)
-        case "browser":
+        case "browsetheweb":
             return extractBrowserAction(from: args)
-        case "astgrep":
-            let pattern = extractAstGrepPattern(from: args)
-            let path = extractPath(from: args)
-            if !path.isEmpty && path != "." {
-                return "\"\(pattern)\" in \(shortenPath(path))"
-            }
-            return "\"\(pattern)\""
-        case "openbrowser":
+        case "openurl":
             return extractOpenBrowserUrl(from: args)
         case "webfetch":
             return extractUrl(from: args)

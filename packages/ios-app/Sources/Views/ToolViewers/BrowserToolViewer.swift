@@ -1,8 +1,9 @@
 import SwiftUI
 
-// MARK: - Browser Result Viewer
+// MARK: - Browse The Web Tool Viewer
+// Updated name: BrowseTheWebTool (was AgentWebBrowser)
 
-struct BrowserResultViewer: View {
+struct BrowserToolViewer: View {
     let action: String
     let result: String
     @Binding var isExpanded: Bool  // Kept for API compatibility, but unused
@@ -19,10 +20,10 @@ struct BrowserResultViewer: View {
     }
 }
 
-// MARK: - Open Browser Result Viewer
-// Shows browser open action results
+// MARK: - Open URL Result Viewer
+// Updated name: OpenURLTool (was OpenBrowser)
 
-struct OpenBrowserResultViewer: View {
+struct OpenURLResultViewer: View {
     let url: String
     let result: String
     @Binding var isExpanded: Bool  // Kept for API compatibility, but unused
@@ -108,3 +109,8 @@ struct OpenBrowserResultViewer: View {
         }
     }
 }
+
+// MARK: - Backward Compatibility Aliases
+// Keep old names for any remaining references
+typealias BrowserResultViewer = BrowserToolViewer
+typealias OpenBrowserResultViewer = OpenURLResultViewer
