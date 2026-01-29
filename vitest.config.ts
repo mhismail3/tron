@@ -12,6 +12,7 @@ export default defineConfig({
     coverage: {
       provider: 'v8',
       reporter: ['text', 'json', 'html'],
+      reportsDirectory: '.coverage', // Renamed to avoid conflict with Python imports
       include: ['packages/*/src/**/*.ts'],
       exclude: [
         'packages/*/src/**/*.d.ts',

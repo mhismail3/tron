@@ -19,7 +19,7 @@ dist/
 !**/vite-env.d.ts
 
 # Test coverage
-coverage/
+.coverage/
 
 # Logs
 logs/

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import threading
 import time
 from dataclasses import asdict
 from pathlib import Path
@@ -15,6 +16,7 @@ from .config import TranscribeConfig, ensure_dirs, load_config
 
 _CONFIG = load_config()
 _MODEL_CACHE: dict[tuple[str, str, str, str], object] = {}
+_MODEL_CACHE_LOCK = threading.Lock()
 
 _DEFAULT_BACKEND_MODELS = {
     "parakeet-mlx": "mlx-community/parakeet-tdt-0.6b-v3",
@@ -46,49 +48,62 @@ def _load_model(
     compute_type: str,
     config: TranscribeConfig,
 ) -> Optional[object]:
+    """Load a transcription model, with thread-safe caching.
+
+    Uses double-checked locking to avoid loading the same model twice
+    when multiple threads request it simultaneously.
+    """
     key = (backend, model_name, device, compute_type)
+
+    # Fast path: check cache without lock
     if key in _MODEL_CACHE:
         return _MODEL_CACHE[key]
 
-    ensure_dirs(config)
+    # Slow path: acquire lock and check again before loading
+    with _MODEL_CACHE_LOCK:
+        # Double-check after acquiring lock (another thread may have loaded it)
+        if key in _MODEL_CACHE:
+            return _MODEL_CACHE[key]
 
-    if backend == "parakeet-mlx":
-        try:
-            from parakeet_mlx import from_pretrained
-        except ImportError as error:
-            raise RuntimeError(
-                "parakeet-mlx is not installed. Run `pip install parakeet-mlx` in services/transcribe/.venv."
-            ) from error
-        model = from_pretrained(model_name)
-        _MODEL_CACHE[key] = model
-        return model
+        ensure_dirs(config)
 
-    if backend == "mlx-whisper":
-        module = _import_mlx_whisper()
-        load_model = getattr(module, "load_model", None)
-        model = load_model(model_name) if callable(load_model) else None
-        _MODEL_CACHE[key] = model
-        return model
+        if backend == "parakeet-mlx":
+            try:
+                from parakeet_mlx import from_pretrained
+            except ImportError as error:
+                raise RuntimeError(
+                    "parakeet-mlx is not installed. Run `pip install parakeet-mlx` in services/transcribe/.venv."
+                ) from error
+            model = from_pretrained(model_name)
+            _MODEL_CACHE[key] = model
+            return model
 
-    if backend == "faster-whisper":
-        try:
-            from faster_whisper import WhisperModel
-        except ImportError as error:
-            raise RuntimeError(
-                "faster-whisper is not installed. Run `pip install faster-whisper` in services/transcribe/.venv."
-            ) from error
-        model = WhisperModel(
-            model_name,
-            device=device,
-            compute_type=compute_type,
-            download_root=str(config.models_dir),
-            cpu_threads=config.cpu_threads,
-            num_workers=config.num_workers,
-        )
-        _MODEL_CACHE[key] = model
-        return model
+        if backend == "mlx-whisper":
+            module = _import_mlx_whisper()
+            load_model = getattr(module, "load_model", None)
+            model = load_model(model_name) if callable(load_model) else None
+            _MODEL_CACHE[key] = model
+            return model
 
-    raise RuntimeError(f"Unsupported transcription backend: {backend}")
+        if backend == "faster-whisper":
+            try:
+                from faster_whisper import WhisperModel
+            except ImportError as error:
+                raise RuntimeError(
+                    "faster-whisper is not installed. Run `pip install faster-whisper` in services/transcribe/.venv."
+                ) from error
+            model = WhisperModel(
+                model_name,
+                device=device,
+                compute_type=compute_type,
+                download_root=str(config.models_dir),
+                cpu_threads=config.cpu_threads,
+                num_workers=config.num_workers,
+            )
+            _MODEL_CACHE[key] = model
+            return model
+
+        raise RuntimeError(f"Unsupported transcription backend: {backend}")
 
 
 def transcribe_file(
