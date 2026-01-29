@@ -217,20 +217,20 @@ struct CommandToolTypesTests {
         #expect(config.displayName == "Browser")
     }
 
-    @Test("Registry returns correct config for AstGrep tool")
-    func testRegistryAstGrepConfig() {
-        let config = CommandToolRegistry.config(for: "astgrep")
+    @Test("Registry returns correct config for Search tool")
+    func testRegistrySearchConfig() {
+        let config = CommandToolRegistry.config(for: "search")
 
-        #expect(config.icon == "wand.and.stars")
-        #expect(config.displayName == "AST Grep")
+        #expect(config.icon == "magnifyingglass")
+        #expect(config.displayName == "Search")
     }
 
-    @Test("Registry returns correct config for OpenBrowser tool")
-    func testRegistryOpenBrowserConfig() {
-        let config = CommandToolRegistry.config(for: "openbrowser")
+    @Test("Registry returns correct config for OpenURL tool")
+    func testRegistryOpenURLConfig() {
+        let config = CommandToolRegistry.config(for: "openurl")
 
         #expect(config.icon == "safari")
-        #expect(config.displayName == "Open Browser")
+        #expect(config.displayName == "Open URL")
     }
 
     @Test("Registry returns correct config for WebFetch tool")
@@ -284,13 +284,11 @@ struct CommandToolTypesTests {
         #expect(commandTools.contains("write"))
         #expect(commandTools.contains("edit"))
         #expect(commandTools.contains("bash"))
-        #expect(commandTools.contains("grep"))
+        #expect(commandTools.contains("search"))
         #expect(commandTools.contains("glob"))
         #expect(commandTools.contains("find"))
-        #expect(commandTools.contains("ls"))
-        #expect(commandTools.contains("browser"))
-        #expect(commandTools.contains("astgrep"))
-        #expect(commandTools.contains("openbrowser"))
+        #expect(commandTools.contains("browsetheweb"))
+        #expect(commandTools.contains("openurl"))
         #expect(commandTools.contains("webfetch"))
         #expect(commandTools.contains("websearch"))
         #expect(commandTools.contains("task"))
@@ -300,7 +298,7 @@ struct CommandToolTypesTests {
     func testRegistryIsCommandToolTrue() {
         #expect(CommandToolRegistry.isCommandTool("read"))
         #expect(CommandToolRegistry.isCommandTool("bash"))
-        #expect(CommandToolRegistry.isCommandTool("grep"))
+        #expect(CommandToolRegistry.isCommandTool("search"))
         #expect(CommandToolRegistry.isCommandTool("edit"))
     }
 

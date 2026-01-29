@@ -71,7 +71,7 @@ extension ChatViewModel {
         // (Extract screenshot before coordinator - needs access to BrowserScreenshotService)
         if let index = MessageFinder.lastIndexOfToolUse(toolCallId: result.toolCallId, in: messages) {
             if case .toolUse(let tool) = messages[index].content {
-                if tool.toolName.lowercased().contains("browser") {
+                if tool.toolName.lowercased() == "browsetheweb" {
                     // Pass plugin result for screenshot extraction (needs result.details)
                     extractAndDisplayBrowserScreenshot(from: pluginResult)
                 }

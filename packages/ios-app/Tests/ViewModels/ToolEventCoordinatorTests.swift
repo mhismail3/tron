@@ -38,9 +38,9 @@ final class ToolEventCoordinatorTests: XCTestCase {
             ),
             isAskUserQuestion: false,
             isBrowserTool: false,
-            isOpenBrowser: false,
+            isOpenURL: false,
             askUserQuestionParams: nil,
-            openBrowserURL: nil
+            openURL: nil
         )
 
         // When: Handling tool start
@@ -75,9 +75,9 @@ final class ToolEventCoordinatorTests: XCTestCase {
             ),
             isAskUserQuestion: false,
             isBrowserTool: false,
-            isOpenBrowser: false,
+            isOpenURL: false,
             askUserQuestionParams: nil,
-            openBrowserURL: nil
+            openURL: nil
         )
 
         // When: Handling tool start
@@ -105,9 +105,9 @@ final class ToolEventCoordinatorTests: XCTestCase {
             ),
             isAskUserQuestion: false,
             isBrowserTool: false,
-            isOpenBrowser: false,
+            isOpenURL: false,
             askUserQuestionParams: nil,
-            openBrowserURL: nil
+            openURL: nil
         )
 
         // When: Handling tool start
@@ -136,9 +136,9 @@ final class ToolEventCoordinatorTests: XCTestCase {
             ),
             isAskUserQuestion: false,
             isBrowserTool: false,
-            isOpenBrowser: false,
+            isOpenURL: false,
             askUserQuestionParams: nil,
-            openBrowserURL: nil
+            openURL: nil
         )
 
         // When: Handling tool start
@@ -165,9 +165,9 @@ final class ToolEventCoordinatorTests: XCTestCase {
             ),
             isAskUserQuestion: false,
             isBrowserTool: false,
-            isOpenBrowser: false,
+            isOpenURL: false,
             askUserQuestionParams: nil,
-            openBrowserURL: nil
+            openURL: nil
         )
 
         // When: Handling tool start
@@ -213,9 +213,9 @@ final class ToolEventCoordinatorTests: XCTestCase {
             ),
             isAskUserQuestion: true,
             isBrowserTool: false,
-            isOpenBrowser: false,
+            isOpenURL: false,
             askUserQuestionParams: params,
-            openBrowserURL: nil
+            openURL: nil
         )
 
         // When: Handling tool start
@@ -252,9 +252,9 @@ final class ToolEventCoordinatorTests: XCTestCase {
             ),
             isAskUserQuestion: true,
             isBrowserTool: false,
-            isOpenBrowser: false,
+            isOpenURL: false,
             askUserQuestionParams: nil, // Parse failed
-            openBrowserURL: nil
+            openURL: nil
         )
 
         // When: Handling tool start
@@ -269,29 +269,29 @@ final class ToolEventCoordinatorTests: XCTestCase {
         }
     }
 
-    // MARK: - OpenBrowser Tool Tests
+    // MARK: - OpenURL Tool Tests
 
-    func testOpenBrowserToolStart() async throws {
-        // Given: An OpenBrowser tool start
+    func testOpenURLToolStart() async throws {
+        // Given: An OpenURL tool start
         let url = URL(string: "https://example.com")!
         let event = ToolStartPlugin.Result(
-            toolName: "OpenBrowser",
+            toolName: "OpenURL",
             toolCallId: "browser_123",
             arguments: ["url": AnyCodable("https://example.com")],
             formattedArguments: "{\"url\": \"https://example.com\"}"
         )
         let result = ToolStartResult(
             tool: ToolUseData(
-                toolName: "OpenBrowser",
+                toolName: "OpenURL",
                 toolCallId: "browser_123",
                 arguments: "{\"url\": \"https://example.com\"}",
                 status: .running
             ),
             isAskUserQuestion: false,
             isBrowserTool: false,
-            isOpenBrowser: true,
+            isOpenURL: true,
             askUserQuestionParams: nil,
-            openBrowserURL: url
+            openURL: url
         )
 
         // When: Handling tool start
@@ -303,7 +303,7 @@ final class ToolEventCoordinatorTests: XCTestCase {
         // Then: Should ALSO create regular tool message (don't return early)
         XCTAssertEqual(mockContext.messages.count, 1)
         if case .toolUse(let tool) = mockContext.messages[0].content {
-            XCTAssertEqual(tool.toolName, "OpenBrowser")
+            XCTAssertEqual(tool.toolName, "OpenURL")
         } else {
             XCTFail("Expected toolUse content")
         }
@@ -328,9 +328,9 @@ final class ToolEventCoordinatorTests: XCTestCase {
             ),
             isAskUserQuestion: false,
             isBrowserTool: true,
-            isOpenBrowser: false,
+            isOpenURL: false,
             askUserQuestionParams: nil,
-            openBrowserURL: nil
+            openURL: nil
         )
 
         // When: Handling tool start (browserStatus is initially nil)
@@ -361,9 +361,9 @@ final class ToolEventCoordinatorTests: XCTestCase {
             ),
             isAskUserQuestion: false,
             isBrowserTool: false,
-            isOpenBrowser: false,
+            isOpenURL: false,
             askUserQuestionParams: nil,
-            openBrowserURL: nil
+            openURL: nil
         )
 
         // When: Handling tool start (no prior chunk)
@@ -421,9 +421,9 @@ final class ToolEventCoordinatorTests: XCTestCase {
             ),
             isAskUserQuestion: false,
             isBrowserTool: false,
-            isOpenBrowser: false,
+            isOpenURL: false,
             askUserQuestionParams: nil,
-            openBrowserURL: nil
+            openURL: nil
         )
 
         // When: Handling tool start

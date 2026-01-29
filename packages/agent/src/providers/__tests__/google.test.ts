@@ -696,6 +696,213 @@ describe('Google Gemini Provider', () => {
   });
 
   // ===========================================================================
+  // Stream Edge Cases Tests
+  // ===========================================================================
+
+  describe('Stream Edge Cases', () => {
+    it('should handle stream ending without finishReason', async () => {
+      const provider = new GoogleProvider({
+        auth: createApiKeyAuth(),
+        model: 'gemini-3-flash-preview',
+      });
+
+      // Mock stream that sends text but no finishReason
+      const mockStreamData = [
+        'data: {"candidates":[{"content":{"parts":[{"text":"Hello"}],"role":"model"}}],"usageMetadata":{"promptTokenCount":10,"candidatesTokenCount":1,"totalTokenCount":11}}\n\n',
+        // No finishReason chunk
+      ];
+
+      const encoder = new TextEncoder();
+      let dataIndex = 0;
+
+      const mockReadableStream = new ReadableStream({
+        pull(controller) {
+          if (dataIndex < mockStreamData.length) {
+            controller.enqueue(encoder.encode(mockStreamData[dataIndex]));
+            dataIndex++;
+          } else {
+            controller.close();
+          }
+        },
+      });
+
+      global.fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        body: mockReadableStream,
+      });
+
+      const context = {
+        messages: [{ role: 'user' as const, content: 'Hello' }],
+      };
+
+      const events: any[] = [];
+      for await (const event of provider.stream(context)) {
+        events.push(event);
+      }
+
+      // Should still get a done event with the accumulated content
+      const doneEvent = events.find(e => e.type === 'done');
+      expect(doneEvent).toBeDefined();
+      expect(doneEvent.message.content).toHaveLength(1);
+      expect(doneEvent.message.content[0].text).toBe('Hello');
+      // Synthesized stop reason defaults to 'end_turn' for text content
+      expect(doneEvent.message.stopReason).toBe('end_turn');
+    });
+
+    it('should handle data in buffer when stream ends', async () => {
+      const provider = new GoogleProvider({
+        auth: createApiKeyAuth(),
+        model: 'gemini-3-flash-preview',
+      });
+
+      // Mock stream where final chunk doesn't end with newline
+      const mockStreamData = [
+        'data: {"candidates":[{"content":{"parts":[{"text":"Hello"}],"role":"model"},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":10,"candidatesTokenCount":1,"totalTokenCount":11}}',
+        // No trailing newline!
+      ];
+
+      const encoder = new TextEncoder();
+      let dataIndex = 0;
+
+      const mockReadableStream = new ReadableStream({
+        pull(controller) {
+          if (dataIndex < mockStreamData.length) {
+            controller.enqueue(encoder.encode(mockStreamData[dataIndex]));
+            dataIndex++;
+          } else {
+            controller.close();
+          }
+        },
+      });
+
+      global.fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        body: mockReadableStream,
+      });
+
+      const context = {
+        messages: [{ role: 'user' as const, content: 'Hello' }],
+      };
+
+      const events: any[] = [];
+      for await (const event of provider.stream(context)) {
+        events.push(event);
+      }
+
+      // Should process the buffered data and emit done
+      const doneEvent = events.find(e => e.type === 'done');
+      expect(doneEvent).toBeDefined();
+      expect(doneEvent.message.content[0].text).toBe('Hello');
+    });
+
+    it('should synthesize done event with accumulated tool calls when stream ends without finishReason', async () => {
+      const provider = new GoogleProvider({
+        auth: createApiKeyAuth(),
+        model: 'gemini-3-flash-preview',
+      });
+
+      // Mock stream with tool call but no finishReason
+      const mockStreamData = [
+        'data: {"candidates":[{"content":{"parts":[{"functionCall":{"name":"read_file","args":{"path":"/test.txt"}}}],"role":"model"}}],"usageMetadata":{"promptTokenCount":10,"candidatesTokenCount":5,"totalTokenCount":15}}\n\n',
+        // Stream ends without finishReason
+      ];
+
+      const encoder = new TextEncoder();
+      let dataIndex = 0;
+
+      const mockReadableStream = new ReadableStream({
+        pull(controller) {
+          if (dataIndex < mockStreamData.length) {
+            controller.enqueue(encoder.encode(mockStreamData[dataIndex]));
+            dataIndex++;
+          } else {
+            controller.close();
+          }
+        },
+      });
+
+      global.fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        body: mockReadableStream,
+      });
+
+      const context = {
+        messages: [{ role: 'user' as const, content: 'Read the file' }],
+      };
+
+      const events: any[] = [];
+      for await (const event of provider.stream(context)) {
+        events.push(event);
+      }
+
+      // Should have tool call events
+      const toolCallStart = events.find(e => e.type === 'toolcall_start');
+      expect(toolCallStart).toBeDefined();
+      expect(toolCallStart.name).toBe('read_file');
+
+      // Should still get a done event with the tool call
+      const doneEvent = events.find(e => e.type === 'done');
+      expect(doneEvent).toBeDefined();
+      expect(doneEvent.message.content).toHaveLength(1);
+      expect(doneEvent.message.content[0].type).toBe('tool_use');
+      expect(doneEvent.message.content[0].name).toBe('read_file');
+    });
+
+    it('should properly close thinking state when synthesizing done event', async () => {
+      const provider = new GoogleProvider({
+        auth: createApiKeyAuth(),
+        model: 'gemini-3-flash-preview',
+      });
+
+      // Mock stream with thinking content but no finishReason
+      const mockStreamData = [
+        'data: {"candidates":[{"content":{"parts":[{"thought":true,"text":"Let me think..."}],"role":"model"}}]}\n\n',
+        'data: {"candidates":[{"content":{"parts":[{"text":"The answer is 42."}],"role":"model"}}],"usageMetadata":{"promptTokenCount":10,"candidatesTokenCount":10,"totalTokenCount":20}}\n\n',
+        // No finishReason
+      ];
+
+      const encoder = new TextEncoder();
+      let dataIndex = 0;
+
+      const mockReadableStream = new ReadableStream({
+        pull(controller) {
+          if (dataIndex < mockStreamData.length) {
+            controller.enqueue(encoder.encode(mockStreamData[dataIndex]));
+            dataIndex++;
+          } else {
+            controller.close();
+          }
+        },
+      });
+
+      global.fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        body: mockReadableStream,
+      });
+
+      const context = {
+        messages: [{ role: 'user' as const, content: 'Think about this' }],
+      };
+
+      const events: any[] = [];
+      for await (const event of provider.stream(context)) {
+        events.push(event);
+      }
+
+      // Should have thinking events
+      expect(events.some(e => e.type === 'thinking_start')).toBe(true);
+      expect(events.some(e => e.type === 'thinking_delta')).toBe(true);
+
+      // Should get done event with both thinking and text content
+      const doneEvent = events.find(e => e.type === 'done');
+      expect(doneEvent).toBeDefined();
+      expect(doneEvent.message.content).toHaveLength(2);
+      expect(doneEvent.message.content[0].type).toBe('thinking');
+      expect(doneEvent.message.content[1].type).toBe('text');
+    });
+  });
+
+  // ===========================================================================
   // Safety Handling Tests
   // ===========================================================================
 

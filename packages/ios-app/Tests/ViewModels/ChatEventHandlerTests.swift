@@ -122,9 +122,9 @@ final class ChatEventHandlerTests: XCTestCase {
     }
 
     func testToolStartDetectsBrowserTool() async throws {
-        // Given: a browser tool start plugin result
+        // Given: a BrowseTheWeb tool start plugin result
         let pluginResult = ToolStartPlugin.Result(
-            toolName: "browser_snapshot",
+            toolName: "BrowseTheWeb",
             toolCallId: "tool_789",
             arguments: nil
         )

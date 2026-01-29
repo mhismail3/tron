@@ -4,7 +4,7 @@ import Foundation
 ///
 /// Responsibilities:
 /// - Creating tool messages on tool.start
-/// - Handling special tools: AskUserQuestion, OpenBrowser, RenderAppUI
+/// - Handling special tools: AskUserQuestion, OpenURL, RenderAppUI
 /// - Managing RenderAppUI chip race conditions (chunk vs tool_start order)
 /// - Tracking tool calls for the current turn
 /// - Enqueuing tool events for ordered UI processing
@@ -53,9 +53,9 @@ final class ToolEventCoordinator {
             return
         }
 
-        // Handle OpenBrowser - opens Safari but also displays as regular tool
-        if result.isOpenBrowser {
-            handleOpenBrowserToolStart(url: result.openBrowserURL, context: context)
+        // Handle OpenURL - opens Safari but also displays as regular tool
+        if result.isOpenURL {
+            handleOpenURLToolStart(url: result.openURL, context: context)
             // Don't return - still display as regular tool use
         }
 
@@ -158,7 +158,7 @@ final class ToolEventCoordinator {
         // Check if this is a browser tool result with screenshot data
         if let index = MessageFinder.lastIndexOfToolUse(toolCallId: result.toolCallId, in: context.messages) {
             if case .toolUse(let tool) = context.messages[index].content {
-                if tool.toolName.lowercased().contains("browser") {
+                if tool.toolName.lowercased() == "browsetheweb" {
                     // Browser screenshot extraction is handled by ChatViewModel
                     // (requires access to BrowserScreenshotService and browserState.browserFrame)
                     // We just log here that it would be extracted
@@ -237,12 +237,12 @@ final class ToolEventCoordinator {
         // Note: Sheet auto-opens on tool.end, not tool.start (async mode)
     }
 
-    /// Handle OpenBrowser tool start - opens Safari in-app browser
-    private func handleOpenBrowserToolStart(url: URL?, context: ToolEventContext) {
-        context.logInfo("OpenBrowser tool detected")
+    /// Handle OpenURL tool start - opens Safari in-app browser
+    private func handleOpenURLToolStart(url: URL?, context: ToolEventContext) {
+        context.logInfo("OpenURL tool detected")
 
         guard let url = url else {
-            context.logError("Failed to parse OpenBrowser URL from arguments")
+            context.logError("Failed to parse OpenURL URL from arguments")
             return
         }
 

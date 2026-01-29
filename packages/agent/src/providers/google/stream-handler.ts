@@ -75,6 +75,7 @@ export async function* parseSSEStream(
 ): AsyncGenerator<StreamEvent> {
   const decoder = new TextDecoder();
   let buffer = '';
+  let receivedDone = false;
 
   while (true) {
     const { done, value } = await reader.read();
@@ -92,8 +93,36 @@ export async function* parseSSEStream(
       const data = line.slice(6);
       if (!data.trim()) continue;
 
-      yield* processChunk(data, state);
+      for (const event of processChunk(data, state)) {
+        if (event.type === 'done') receivedDone = true;
+        yield event;
+      }
     }
+  }
+
+  // Process any remaining buffer content after stream ends
+  if (buffer.trim()) {
+    const remainingLines = buffer.split('\n');
+    for (const line of remainingLines) {
+      if (!line.startsWith('data: ')) continue;
+      const data = line.slice(6);
+      if (!data.trim()) continue;
+
+      for (const event of processChunk(data, state)) {
+        if (event.type === 'done') receivedDone = true;
+        yield event;
+      }
+    }
+  }
+
+  // Emit fallback done event if stream ended without finishReason
+  if (!receivedDone) {
+    logger.warn('Stream ended without finishReason, synthesizing done event', {
+      hasText: state.accumulatedText.length > 0,
+      hasThinking: state.accumulatedThinking.length > 0,
+      toolCallCount: state.toolCalls.length,
+    });
+    yield* synthesizeDoneEvent(state);
   }
 }
 
@@ -273,6 +302,56 @@ function* handleFinish(
     type: 'done',
     message,
     stopReason: finishReason,
+  };
+}
+
+/**
+ * Synthesize a done event when stream ends without finishReason
+ * This handles cases where the API response is truncated or malformed
+ */
+function* synthesizeDoneEvent(state: StreamState): Generator<StreamEvent> {
+  // End thinking if still active
+  if (state.thinkingStarted) {
+    yield { type: 'thinking_end', thinking: state.accumulatedThinking };
+  }
+
+  // Emit text_end if we had text
+  if (state.textStarted) {
+    yield { type: 'text_end', text: state.accumulatedText };
+  }
+
+  // Build final message with whatever we accumulated
+  const content: (TextContent | ThinkingContent | ToolCall)[] = [];
+  if (state.accumulatedThinking) {
+    content.push({ type: 'thinking', thinking: state.accumulatedThinking });
+  }
+  if (state.accumulatedText) {
+    content.push({ type: 'text', text: state.accumulatedText });
+  }
+  for (const tc of state.toolCalls) {
+    content.push({
+      type: 'tool_use',
+      id: tc.id,
+      name: tc.name,
+      arguments: tc.args,
+      ...(tc.thoughtSignature && { thoughtSignature: tc.thoughtSignature }),
+    });
+  }
+
+  // Determine stop reason based on content - if we have tool calls, it's tool_use
+  const stopReason = state.toolCalls.length > 0 ? 'tool_use' : 'end_turn';
+
+  const message: AssistantMessage = {
+    role: 'assistant',
+    content,
+    usage: { inputTokens: state.inputTokens, outputTokens: state.outputTokens, providerType: 'google' as const },
+    stopReason,
+  };
+
+  yield {
+    type: 'done',
+    message,
+    stopReason: state.toolCalls.length > 0 ? 'TOOL_USE' : 'STOP',
   };
 }
 

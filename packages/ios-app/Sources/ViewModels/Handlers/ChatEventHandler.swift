@@ -20,9 +20,9 @@ struct ToolStartResult {
     let tool: ToolUseData
     let isAskUserQuestion: Bool
     let isBrowserTool: Bool
-    let isOpenBrowser: Bool
+    let isOpenURL: Bool
     let askUserQuestionParams: AskUserQuestionParams?
-    let openBrowserURL: URL?
+    let openURL: URL?
 }
 
 /// Result of handling a tool end
@@ -220,8 +220,8 @@ final class ChatEventHandler {
 
         // Detect tool types
         let isAskUserQuestion = toolNameLower == "askuserquestion"
-        let isBrowserTool = toolNameLower.contains("browser")
-        let isOpenBrowser = toolNameLower == "openbrowser"
+        let isBrowserTool = toolNameLower == "browsetheweb"
+        let isOpenURL = toolNameLower == "openurl"
 
         // Parse AskUserQuestion params if applicable
         var askUserQuestionParams: AskUserQuestionParams?
@@ -231,13 +231,13 @@ final class ChatEventHandler {
             }
         }
 
-        // Parse OpenBrowser URL if applicable
-        var openBrowserURL: URL?
-        if isOpenBrowser {
+        // Parse OpenURL URL if applicable
+        var openURL: URL?
+        if isOpenURL {
             if let args = pluginResult.arguments,
                let urlValue = args["url"],
                let urlString = urlValue.value as? String {
-                openBrowserURL = URL(string: urlString)
+                openURL = URL(string: urlString)
             }
         }
 
@@ -255,9 +255,9 @@ final class ChatEventHandler {
             tool: tool,
             isAskUserQuestion: isAskUserQuestion,
             isBrowserTool: isBrowserTool,
-            isOpenBrowser: isOpenBrowser,
+            isOpenURL: isOpenURL,
             askUserQuestionParams: askUserQuestionParams,
-            openBrowserURL: openBrowserURL
+            openURL: openURL
         )
     }
 
