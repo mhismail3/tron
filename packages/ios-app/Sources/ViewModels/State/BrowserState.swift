@@ -18,6 +18,10 @@ final class BrowserState {
     /// Whether user manually dismissed browser sheet this turn (prevents auto-reopen)
     var userDismissedBrowserThisTurn = false
 
+    /// Whether the browser sheet was auto-dismissed (e.g., agent complete)
+    /// Used to avoid treating programmatic dismiss as a user dismissal.
+    var autoDismissedBrowserThisTurn = false
+
     /// URL to open in native Safari (set by OpenBrowser tool)
     var safariURL: URL?
 
@@ -32,6 +36,7 @@ final class BrowserState {
     /// Reset turn-specific state (called at turn start)
     func resetForNewTurn() {
         userDismissedBrowserThisTurn = false
+        autoDismissedBrowserThisTurn = false
     }
 
     /// Clear all browser state (called when browser session closes)
@@ -41,5 +46,6 @@ final class BrowserState {
         showBrowserWindow = false
         safariURL = nil
         userDismissedBrowserThisTurn = false
+        autoDismissedBrowserThisTurn = false
     }
 }

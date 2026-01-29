@@ -31,6 +31,9 @@ protocol MessagingContext: LoggingContext, SessionIdentifiable, ProcessingTracka
     /// Whether the user dismissed the browser this turn
     var userDismissedBrowserThisTurn: Bool { get set }
 
+    /// Whether the browser sheet was auto-dismissed this turn
+    var autoDismissedBrowserThisTurn: Bool { get set }
+
     /// Send prompt to the server
     func sendPromptToServer(
         text: String,
@@ -106,8 +109,9 @@ final class MessagingCoordinator {
             context.markPendingQuestionsAsSuperseded()
         }
 
-        // Reset browser dismiss flag for new prompt - browser can auto-open again
+        // Reset browser dismissal flags for new prompt - browser can auto-open again
         context.userDismissedBrowserThisTurn = false
+        context.autoDismissedBrowserThisTurn = false
 
         // Create user message with attachments, skills, and spells displayed above text
         let attachmentsToShow = context.attachments.isEmpty ? nil : context.attachments

@@ -126,6 +126,7 @@ extension ChatViewModel {
 
         // Auto-dismiss browser sheet when agent completes
         if browserState.showBrowserWindow {
+            browserState.autoDismissedBrowserThisTurn = true
             browserState.showBrowserWindow = false
         }
 

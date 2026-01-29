@@ -8,7 +8,16 @@ import Observation
 @MainActor
 final class SheetCoordinator {
     /// Currently active sheet (nil = no sheet presented)
-    var activeSheet: ChatSheet?
+    var activeSheet: ChatSheet? {
+        didSet {
+            if oldValue != activeSheet {
+                lastActiveSheet = oldValue
+            }
+        }
+    }
+
+    /// Last active sheet before dismissal/change (used to infer what was dismissed)
+    var lastActiveSheet: ChatSheet?
 
     /// Dismissal callback (called by SwiftUI when sheet dismisses)
     var onDismiss: (() -> Void)?
