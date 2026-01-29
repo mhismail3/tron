@@ -1,5 +1,5 @@
 /**
- * @fileoverview OpenBrowser tool for opening URLs in native Safari
+ * @fileoverview OpenURL tool for opening URLs in native Safari
  *
  * This tool triggers the iOS app to open a URL in SFSafariViewController.
  * It's a fire-and-forget operation - returns immediately after validating the URL.
@@ -10,12 +10,12 @@ import { createLogger } from '../../logging/index.js';
 
 const logger = createLogger('tool:open-browser');
 
-export interface OpenBrowserConfig {
+export interface OpenURLConfig {
   workingDirectory?: string;
 }
 
-export class OpenBrowserTool implements TronTool {
-  readonly name = 'OpenBrowser';
+export class OpenURLTool implements TronTool {
+  readonly name = 'OpenURL';
   readonly description = `Open a URL in the native iOS Safari browser for the user to view.
 
 Use this tool when you want to:
@@ -45,7 +45,7 @@ Examples:
   readonly label = 'Open Browser';
   readonly category = 'custom' as const;
 
-  constructor(_config: OpenBrowserConfig = {}) {
+  constructor(_config: OpenURLConfig = {}) {
     // Config accepted for API compatibility
   }
 

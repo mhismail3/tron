@@ -1,13 +1,13 @@
 /**
- * @fileoverview AgentWebBrowserTool unit tests (mocked, fast)
+ * @fileoverview BrowseTheWebTool unit tests (mocked, fast)
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { AgentWebBrowserTool, type BrowserDelegate } from '../browser/agent-web-browser.js';
+import { BrowseTheWebTool, type BrowserDelegate } from '../browser/browse-the-web.js';
 
-describe('AgentWebBrowserTool', () => {
+describe('BrowseTheWebTool', () => {
   let mockDelegate: BrowserDelegate;
-  let tool: AgentWebBrowserTool;
+  let tool: BrowseTheWebTool;
 
   beforeEach(() => {
     mockDelegate = {
@@ -15,12 +15,12 @@ describe('AgentWebBrowserTool', () => {
       ensureSession: vi.fn(),
       hasSession: vi.fn(),
     };
-    tool = new AgentWebBrowserTool({ delegate: mockDelegate });
+    tool = new BrowseTheWebTool({ delegate: mockDelegate });
   });
 
   describe('tool definition', () => {
     it('should have correct name and description', () => {
-      expect(tool.name).toBe('AgentWebBrowser');
+      expect(tool.name).toBe('BrowseTheWeb');
       expect(tool.description).toContain('Control a web browser');
     });
 
@@ -39,7 +39,7 @@ describe('AgentWebBrowserTool', () => {
 
   describe('execute - no delegate', () => {
     it('should return error when delegate not configured', async () => {
-      const toolWithoutDelegate = new AgentWebBrowserTool({});
+      const toolWithoutDelegate = new BrowseTheWebTool({});
       const result = await toolWithoutDelegate.execute({ action: 'navigate', url: 'https://example.com' });
 
       expect(result.content).toBeDefined();

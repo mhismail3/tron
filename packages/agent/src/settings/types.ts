@@ -180,16 +180,6 @@ export interface GrepToolSettings {
 }
 
 /**
- * Ls tool configuration
- */
-export interface LsToolSettings {
-  /** Maximum directory entries to return (default: 1,000) */
-  maxEntries: number;
-  /** Maximum output size in tokens (default: 10,000) */
-  maxOutputTokens: number;
-}
-
-/**
  * AstGrep tool configuration
  */
 export interface AstGrepToolSettings {
@@ -219,7 +209,6 @@ export interface ToolSettings {
   read: ReadToolSettings;
   find: FindToolSettings;
   grep: GrepToolSettings;
-  ls: LsToolSettings;
   astGrep: AstGrepToolSettings;
 }
 

@@ -1,10 +1,10 @@
 /**
- * @fileoverview AgentWebBrowser tool using agent-browser library
+ * @fileoverview BrowseTheWeb tool using agent-browser library
  */
 
 import type { TronTool, TronToolResult, ToolResultContentType } from '../../types/index.js';
 
-export interface AgentWebBrowserToolConfig {
+export interface BrowseTheWebToolConfig {
   workingDirectory?: string;
   delegate?: BrowserDelegate;
   /** Tron session ID - used to key browser sessions so iOS can control them */
@@ -12,7 +12,7 @@ export interface AgentWebBrowserToolConfig {
 }
 
 /**
- * Delegate interface for AgentWebBrowserTool to interact with BrowserService
+ * Delegate interface for BrowseTheWebTool to interact with BrowserService
  */
 export interface BrowserDelegate {
   execute(
@@ -50,8 +50,8 @@ interface BrowserSession {
  * minimum threshold. Shortening descriptions may break caching.
  * See anthropic.ts for caching implementation details.
  */
-export class AgentWebBrowserTool implements TronTool {
-  readonly name = 'AgentWebBrowser';
+export class BrowseTheWebTool implements TronTool {
+  readonly name = 'BrowseTheWeb';
   readonly description = `Control a web browser with automation capabilities using agent-browser.
 
 IMPORTANT: Execute browser actions ONE AT A TIME sequentially - wait for each action to complete before starting the next. Do NOT call multiple browser tools in parallel as this causes race conditions.
@@ -194,7 +194,7 @@ The browser runs headless by default and streams frames to the iOS app.`;
   private session?: BrowserSession;
   private configuredSessionId?: string;
 
-  constructor(config: AgentWebBrowserToolConfig = {}) {
+  constructor(config: BrowseTheWebToolConfig = {}) {
     this.delegate = config.delegate;
     this.configuredSessionId = config.sessionId;
   }

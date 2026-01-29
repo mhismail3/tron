@@ -4,9 +4,9 @@
  * Tools for browser automation and web interaction.
  */
 
-export { OpenBrowserTool, type OpenBrowserConfig } from './open-browser.js';
+export { OpenURLTool, type OpenURLConfig } from './open-url.js';
 export {
-  AgentWebBrowserTool,
-  type AgentWebBrowserToolConfig,
+  BrowseTheWebTool,
+  type BrowseTheWebToolConfig,
   type BrowserDelegate,
-} from './agent-web-browser.js';
+} from './browse-the-web.js';

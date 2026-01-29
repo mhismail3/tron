@@ -59,10 +59,10 @@ function getOriginalSizeFromTruncationNotice(content: string): number | null {
 // 1. Browser Tool Tests - Should return FULL data
 // =============================================================================
 
-describe('AgentWebBrowserTool - Full Screenshot Data', () => {
+describe('BrowseTheWebTool - Full Screenshot Data', () => {
   it('should return concise text content but include full screenshot in details', async () => {
     // Import dynamically to allow mocking
-    const { AgentWebBrowserTool } = await import('../tools/browser/agent-web-browser.js');
+    const { BrowseTheWebTool } = await import('../tools/browser/browse-the-web.js');
 
     const fullScreenshot = generateLargeScreenshot();
 
@@ -75,7 +75,7 @@ describe('AgentWebBrowserTool - Full Screenshot Data', () => {
       hasSession: vi.fn().mockReturnValue(false),
     };
 
-    const tool = new AgentWebBrowserTool({ delegate: mockDelegate });
+    const tool = new BrowseTheWebTool({ delegate: mockDelegate });
     const result = await tool.execute({ action: 'screenshot' });
 
     // Extract the content
@@ -97,7 +97,7 @@ describe('AgentWebBrowserTool - Full Screenshot Data', () => {
   });
 
   it('should include full screenshot in result.details for separate access', async () => {
-    const { AgentWebBrowserTool } = await import('../tools/browser/agent-web-browser.js');
+    const { BrowseTheWebTool } = await import('../tools/browser/browse-the-web.js');
 
     const fullScreenshot = generateLargeScreenshot();
 
@@ -110,7 +110,7 @@ describe('AgentWebBrowserTool - Full Screenshot Data', () => {
       hasSession: vi.fn().mockReturnValue(false),
     };
 
-    const tool = new AgentWebBrowserTool({ delegate: mockDelegate });
+    const tool = new BrowseTheWebTool({ delegate: mockDelegate });
     const result = await tool.execute({ action: 'screenshot' });
 
     // The full screenshot should be available in details for clients
@@ -120,7 +120,7 @@ describe('AgentWebBrowserTool - Full Screenshot Data', () => {
   });
 
   it('should NOT include details for non-screenshot actions', async () => {
-    const { AgentWebBrowserTool } = await import('../tools/browser/agent-web-browser.js');
+    const { BrowseTheWebTool } = await import('../tools/browser/browse-the-web.js');
 
     const mockDelegate = {
       execute: vi.fn().mockResolvedValue({
@@ -131,7 +131,7 @@ describe('AgentWebBrowserTool - Full Screenshot Data', () => {
       hasSession: vi.fn().mockReturnValue(false),
     };
 
-    const tool = new AgentWebBrowserTool({ delegate: mockDelegate });
+    const tool = new BrowseTheWebTool({ delegate: mockDelegate });
     const result = await tool.execute({ action: 'navigate', url: 'https://example.com' });
 
     // Non-screenshot actions should not have details
@@ -273,7 +273,7 @@ describe('WebSocket Tool End Emission - Full Data', () => {
     const toolExecutionEndEvent = {
       type: 'tool_execution_end',
       toolCallId: 'test-tool-123',
-      toolName: 'AgentWebBrowser',
+      toolName: 'BrowseTheWeb',
       result: { content: largeResult },
       isError: false,
       duration: 100,
@@ -454,7 +454,7 @@ describe('Deferred Truncation - Integration Flow', () => {
       type: 'agent.tool_end',
       data: {
         toolCallId: 'browser-screenshot-123',
-        toolName: 'AgentWebBrowser',
+        toolName: 'BrowseTheWeb',
         success: true,
         output: 'Screenshot captured (base64): ...truncated for display...', // Text can be truncated
         details: {

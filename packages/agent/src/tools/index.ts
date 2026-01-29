@@ -2,9 +2,9 @@
  * @fileoverview Tools module exports
  *
  * Tools are organized by domain:
- * - fs/       - Filesystem operations (read, write, edit, find, grep, ls)
+ * - fs/       - Filesystem operations (read, write, edit, find, grep)
  * - subagent/ - Subagent management (spawn, query, wait, tracker)
- * - browser/  - Browser automation (open-browser, agent-web-browser)
+ * - browser/  - Browser automation (open-url, browse-the-web)
  * - system/   - System commands (bash, ast-grep)
  * - ui/       - User interaction (ask-user-question, todo-write, notify-app, render-app-ui)
  */
@@ -21,8 +21,6 @@ export {
   type FindToolConfig,
   GrepTool,
   type GrepToolConfig,
-  LsTool,
-  type LsToolConfig,
 } from './fs/index.js';
 
 // Subagent tools
@@ -62,10 +60,10 @@ export {
 
 // Browser tools
 export {
-  OpenBrowserTool,
-  type OpenBrowserConfig,
-  AgentWebBrowserTool,
-  type AgentWebBrowserToolConfig,
+  OpenURLTool,
+  type OpenURLConfig,
+  BrowseTheWebTool,
+  type BrowseTheWebToolConfig,
   type BrowserDelegate,
 } from './browser/index.js';
 

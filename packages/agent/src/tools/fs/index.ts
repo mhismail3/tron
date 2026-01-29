@@ -9,4 +9,3 @@ export { WriteTool, type WriteToolConfig } from './write.js';
 export { EditTool, type EditToolConfig } from './edit.js';
 export { FindTool, getDefaultFindSettings, type FindToolConfig } from './find.js';
 export { GrepTool, getDefaultGrepSettings, type GrepToolConfig } from './grep.js';
-export { LsTool, getDefaultLsSettings, type LsToolConfig } from './ls.js';

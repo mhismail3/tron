@@ -153,10 +153,6 @@ export const DEFAULT_SETTINGS: TronSettings = {
       skipDirectories: DEFAULT_SKIP_DIRECTORIES,
       maxOutputTokens: 15000,    // 15k tokens (~60k chars)
     },
-    ls: {
-      maxEntries: 1000,          // Max 1k directory entries
-      maxOutputTokens: 10000,    // 10k tokens (~40k chars)
-    },
     astGrep: {
       defaultLimit: 50,
       maxLimit: 200,

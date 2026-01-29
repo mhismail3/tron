@@ -1,22 +1,22 @@
 /**
- * @fileoverview Tests for OpenBrowser tool
+ * @fileoverview Tests for OpenURL tool
  *
  * Tests for native Safari browser opening functionality
  */
 
 import { describe, it, expect, beforeEach } from 'vitest';
-import { OpenBrowserTool } from '../browser/open-browser.js';
+import { OpenURLTool } from '../browser/open-url.js';
 
-describe('OpenBrowserTool', () => {
-  let openBrowserTool: OpenBrowserTool;
+describe('OpenURLTool', () => {
+  let openBrowserTool: OpenURLTool;
 
   beforeEach(() => {
-    openBrowserTool = new OpenBrowserTool({ workingDirectory: '/test/project' });
+    openBrowserTool = new OpenURLTool({ workingDirectory: '/test/project' });
   });
 
   describe('tool definition', () => {
     it('should have correct name', () => {
-      expect(openBrowserTool.name).toBe('OpenBrowser');
+      expect(openBrowserTool.name).toBe('OpenURL');
     });
 
     it('should have description mentioning Safari', () => {
