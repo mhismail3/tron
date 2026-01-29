@@ -139,3 +139,26 @@ struct ProviderErrorPayload {
         self.retryAfter = payload.int("retryAfter")
     }
 }
+
+/// Payload for turn.failed event
+/// Server: TurnFailedEvent.payload
+struct TurnFailedPayload {
+    let turn: Int
+    let error: String
+    let code: String?
+    let category: String?
+    let recoverable: Bool
+
+    init?(from payload: [String: AnyCodable]) {
+        guard let error = payload.string("error")
+                ?? payload.string("message") else {
+            return nil
+        }
+
+        self.turn = payload.int("turn") ?? 0
+        self.error = error
+        self.code = payload.string("code")
+        self.category = payload.string("category")
+        self.recoverable = payload.bool("recoverable") ?? false
+    }
+}

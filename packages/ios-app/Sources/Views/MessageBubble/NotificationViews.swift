@@ -438,3 +438,40 @@ struct WorkspaceDeletedNotificationView: View {
         .frame(maxWidth: .infinity, alignment: .center)
     }
 }
+
+// MARK: - Turn Failed Notification View (Red pill-style in-chat notification)
+
+/// Notification shown when a turn fails due to errors
+struct TurnFailedNotificationView: View {
+    let error: String
+    let code: String?
+    let recoverable: Bool
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .font(TronTypography.codeSM)
+                .foregroundStyle(.red)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Request failed")
+                    .font(TronTypography.filePath)
+                    .foregroundStyle(.red.opacity(0.9))
+
+                Text(error)
+                    .font(TronTypography.codeCaption)
+                    .foregroundStyle(.tronTextSecondary)
+                    .lineLimit(2)
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(Color.red.opacity(0.1))
+        .clipShape(Capsule())
+        .overlay(
+            Capsule()
+                .stroke(Color.red.opacity(0.3), lineWidth: 0.5)
+        )
+        .frame(maxWidth: .infinity, alignment: .center)
+    }
+}

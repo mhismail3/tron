@@ -61,6 +61,9 @@ struct SystemEventView: View {
 
         case .catchingUp:
             CatchingUpNotificationView()
+
+        case .turnFailed(let error, let code, let recoverable):
+            TurnFailedNotificationView(error: error, code: code, recoverable: recoverable)
         }
     }
 }

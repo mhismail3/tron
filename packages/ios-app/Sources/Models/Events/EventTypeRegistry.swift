@@ -77,6 +77,9 @@ enum PersistedEventType: String, CaseIterable {
     case errorTool = "error.tool"
     case errorProvider = "error.provider"
 
+    // Turn events
+    case turnFailed = "turn.failed"
+
     // MARK: - Display Classification
 
     /// Whether this event type should render as a ChatMessage in the chat UI
@@ -87,7 +90,7 @@ enum PersistedEventType: String, CaseIterable {
              .notificationInterrupted, .configModelSwitch, .configReasoningLevel,
              .contextCleared, .compactBoundary, .skillRemoved, .rulesLoaded,
              .errorAgent, .errorTool, .errorProvider,
-             .streamThinkingComplete:
+             .streamThinkingComplete, .turnFailed:
             return true
         default:
             return false
@@ -178,6 +181,7 @@ enum PersistedEventType: String, CaseIterable {
         case .errorAgent: return "Agent error"
         case .errorTool: return "Tool error"
         case .errorProvider: return "Provider error"
+        case .turnFailed: return "Turn failed"
         }
     }
 }

@@ -31,6 +31,8 @@ enum SystemEvent: Equatable {
     case planModeExited(reason: String, planPath: String?)
     /// Catching up to in-progress session
     case catchingUp
+    /// Turn failed with error
+    case turnFailed(error: String, code: String?, recoverable: Bool)
 
     /// Human-readable description for the event
     var textContent: String {
@@ -66,6 +68,8 @@ enum SystemEvent: Equatable {
             return "Plan mode \(reason)"
         case .catchingUp:
             return "Loading latest messages..."
+        case .turnFailed(let error, _, _):
+            return "Request failed: \(error)"
         }
     }
 }

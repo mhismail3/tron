@@ -83,7 +83,7 @@ export class AgentTurnRunner implements ITurnRunner {
 
       // Emit turn_failed event for context limit exceeded
       this.eventEmitter.emit({
-        type: 'turn_failed',
+        type: 'agent.turn_failed',
         sessionId: this.sessionId,
         timestamp: new Date().toISOString(),
         turn,
@@ -275,7 +275,7 @@ export class AgentTurnRunner implements ITurnRunner {
 
       // Emit turn_failed event for iOS visibility
       this.eventEmitter.emit({
-        type: 'turn_failed',
+        type: 'agent.turn_failed',
         sessionId: this.sessionId,
         timestamp: new Date().toISOString(),
         turn,

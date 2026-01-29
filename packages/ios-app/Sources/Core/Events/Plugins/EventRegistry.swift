@@ -64,6 +64,7 @@ final class EventRegistry: @unchecked Sendable {
         register(ContextClearedPlugin.self)
         register(MessageDeletedPlugin.self)
         register(SkillRemovedPlugin.self)
+        register(TurnFailedPlugin.self)
 
         // Session events
         register(ConnectedPlugin.self)

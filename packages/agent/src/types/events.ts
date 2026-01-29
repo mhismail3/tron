@@ -238,7 +238,7 @@ export interface TurnEndEvent extends BaseTronEvent {
  * otherwise cause the agent to stop silently.
  */
 export interface TurnFailedEvent extends BaseTronEvent {
-  type: 'turn_failed';
+  type: 'agent.turn_failed';
   /** Turn number that failed */
   turn: number;
   /** Human-readable error message */

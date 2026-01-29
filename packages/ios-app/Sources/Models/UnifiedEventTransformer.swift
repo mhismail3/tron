@@ -151,6 +151,8 @@ struct UnifiedEventTransformer {
             return ErrorHandlers.transformToolError(payload, timestamp: ts)
         case .errorProvider:
             return ErrorHandlers.transformProviderError(payload, timestamp: ts)
+        case .turnFailed:
+            return ErrorHandlers.transformTurnFailed(payload, timestamp: ts)
         case .contextCleared:
             return SystemEventHandlers.transformContextCleared(payload, timestamp: ts)
         case .compactBoundary:

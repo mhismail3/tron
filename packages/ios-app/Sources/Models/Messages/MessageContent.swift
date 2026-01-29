@@ -77,6 +77,10 @@ enum MessageContent: Equatable {
     static var catchingUp: MessageContent {
         .systemEvent(.catchingUp)
     }
+    /// In-chat notification for turn failure
+    static func turnFailed(error: String, code: String?, recoverable: Bool) -> MessageContent {
+        .systemEvent(.turnFailed(error: error, code: code, recoverable: recoverable))
+    }
 
     var textContent: String {
         switch self {
