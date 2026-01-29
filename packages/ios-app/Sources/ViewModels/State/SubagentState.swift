@@ -315,9 +315,8 @@ final class SubagentState {
         case "read": return "📄 Read"
         case "write": return "✏️ Write"
         case "edit": return "📝 Edit"
-        case "grep": return "🔍 Grep"
+        case "search": return "🔍 Search"
         case "glob", "find": return "📂 Find"
-        case "ls": return "📁 List"
         default: return name
         }
     }
@@ -335,8 +334,8 @@ final class SubagentState {
             return formatBashResult(cleaned)
         case "read":
             return formatReadResult(cleaned)
-        case "grep":
-            return formatGrepResult(cleaned)
+        case "search":
+            return formatSearchResult(cleaned)
         case "write", "edit":
             return formatWriteResult(cleaned)
         default:
@@ -384,7 +383,7 @@ final class SubagentState {
         return "\(lines.count) lines read"
     }
 
-    private func formatGrepResult(_ result: String) -> String {
+    private func formatSearchResult(_ result: String) -> String {
         let lines = result.components(separatedBy: "\n").filter { !$0.isEmpty }
         if lines.isEmpty {
             return "No matches"

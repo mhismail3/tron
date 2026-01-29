@@ -256,7 +256,7 @@ struct SessionEvent: Identifiable, Codable, EventTransformable {
             if let cmd = args["command"] as? String {
                 return String(cmd.prefix(25))
             }
-        case "grep":
+        case "search":
             if let pattern = args["pattern"] as? String {
                 return "\"\(String(pattern.prefix(20)))\""
             }

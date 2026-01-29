@@ -166,21 +166,15 @@ struct CommandToolDetailSheet: View {
             return extractFilePath(from: data.arguments)
         case "bash":
             return extractCommand(from: data.arguments)
-        case "grep":
+        case "search":
             let pattern = extractPattern(from: data.arguments)
             let path = extractPath(from: data.arguments)
             return "Pattern: \"\(pattern)\"\nPath: \(path)"
         case "glob", "find":
             return extractPattern(from: data.arguments)
-        case "ls":
-            return extractPath(from: data.arguments)
-        case "browser":
+        case "browsetheweb":
             return extractBrowserDetails(from: data.arguments)
-        case "astgrep":
-            let pattern = extractAstPattern(from: data.arguments)
-            let path = extractPath(from: data.arguments)
-            return "Pattern: \(pattern)\nPath: \(path)"
-        case "openbrowser", "webfetch":
+        case "openurl", "webfetch":
             return extractUrl(from: data.arguments)
         case "websearch":
             return extractQuery(from: data.arguments)
@@ -286,8 +280,8 @@ struct CommandToolDetailSheet: View {
                 output: result,
                 isExpanded: $isResultExpanded
             )
-        case "grep":
-            GrepResultViewer(
+        case "search":
+            SearchToolViewer(
                 pattern: extractPattern(from: data.arguments),
                 result: result,
                 isExpanded: $isResultExpanded
@@ -298,26 +292,14 @@ struct CommandToolDetailSheet: View {
                 result: result,
                 isExpanded: $isResultExpanded
             )
-        case "ls":
-            LsResultViewer(
-                path: extractPath(from: data.arguments),
-                result: result,
-                isExpanded: $isResultExpanded
-            )
-        case "browser":
-            BrowserResultViewer(
+        case "browsetheweb":
+            BrowserToolViewer(
                 action: extractBrowserAction(from: data.arguments),
                 result: result,
                 isExpanded: $isResultExpanded
             )
-        case "astgrep":
-            AstGrepResultViewer(
-                pattern: extractAstPattern(from: data.arguments),
-                result: result,
-                isExpanded: $isResultExpanded
-            )
-        case "openbrowser":
-            OpenBrowserResultViewer(
+        case "openurl":
+            OpenURLResultViewer(
                 url: extractUrl(from: data.arguments),
                 result: result,
                 isExpanded: $isResultExpanded
@@ -393,16 +375,6 @@ struct CommandToolDetailSheet: View {
             return "Action: \(action)\nSelector: \(unescapeJSON(String(selectorMatch.1)))"
         }
         return "Action: \(action)"
-    }
-
-    private func extractAstPattern(from args: String) -> String {
-        if let match = args.firstMatch(of: /"pattern"\s*:\s*"([^"]+)"/) {
-            return unescapeJSON(String(match.1))
-        }
-        if let match = args.firstMatch(of: /"rule"\s*:\s*"([^"]+)"/) {
-            return unescapeJSON(String(match.1))
-        }
-        return ""
     }
 
     private func extractUrl(from args: String) -> String {

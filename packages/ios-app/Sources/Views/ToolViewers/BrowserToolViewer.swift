@@ -110,7 +110,3 @@ struct OpenURLResultViewer: View {
     }
 }
 
-// MARK: - Backward Compatibility Aliases
-// Keep old names for any remaining references
-typealias BrowserResultViewer = BrowserToolViewer
-typealias OpenBrowserResultViewer = OpenURLResultViewer

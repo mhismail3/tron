@@ -136,6 +136,3 @@ struct SearchToolViewer: View {
     }
 }
 
-// MARK: - Backward Compatibility Alias
-// GrepResultViewer is now SearchToolViewer, but keep alias for any remaining references
-typealias GrepResultViewer = SearchToolViewer

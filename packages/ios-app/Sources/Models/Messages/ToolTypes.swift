@@ -17,7 +17,7 @@ struct ToolUseData: Equatable {
         case "edit": return "Editing file"
         case "bash": return "Running command"
         case "glob": return "Searching files"
-        case "grep": return "Searching content"
+        case "search": return "Searching content"
         case "task": return "Spawning agent"
         case "webfetch": return "Fetching URL"
         case "websearch": return "Searching web"
