@@ -110,8 +110,8 @@ extension ChatView {
         // STEP 1: Scroll to bottom FIRST (messages at opacity 0 via !initialLoadComplete)
         scrollProxy?.scrollTo("bottom", anchor: .bottom)
 
-        // Brief delay for scroll position to settle
-        try? await Task.sleep(nanoseconds: 50_000_000)  // 50ms
+        // Minimal delay for scroll position to settle (one frame)
+        try? await Task.sleep(nanoseconds: 16_000_000)  // ~16ms (1 frame at 60fps)
 
         // STEP 2: Start cascade with CURRENT message count (may have changed during scroll/sleep)
         // startBottomUpCascade() synchronously sets isCascading=true, so after this call
