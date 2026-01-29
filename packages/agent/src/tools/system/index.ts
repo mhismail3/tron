@@ -5,10 +5,3 @@
  */
 
 export { BashTool, getDefaultBashSettings, type BashToolConfig } from './bash.js';
-export {
-  AstGrepTool,
-  getDefaultAstGrepSettings,
-  type AstGrepToolConfig,
-  type AstGrepMatch,
-  type AstGrepDetails,
-} from './ast-grep.js';

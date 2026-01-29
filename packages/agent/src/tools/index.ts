@@ -2,10 +2,11 @@
  * @fileoverview Tools module exports
  *
  * Tools are organized by domain:
- * - fs/       - Filesystem operations (read, write, edit, find, grep)
+ * - fs/       - Filesystem operations (read, write, edit, find)
  * - subagent/ - Subagent management (spawn, query, wait, tracker)
  * - browser/  - Browser automation (open-url, browse-the-web)
- * - system/   - System commands (bash, ast-grep)
+ * - system/   - System commands (bash)
+ * - search/   - Code search (unified text + AST search)
  * - ui/       - User interaction (ask-user-question, todo-write, notify-app, render-app-ui)
  */
 
@@ -19,8 +20,6 @@ export {
   type EditToolConfig,
   FindTool,
   type FindToolConfig,
-  GrepTool,
-  type GrepToolConfig,
 } from './fs/index.js';
 
 // Subagent tools
@@ -71,11 +70,13 @@ export {
 export {
   BashTool,
   type BashToolConfig,
-  AstGrepTool,
-  type AstGrepToolConfig,
-  type AstGrepMatch,
-  type AstGrepDetails,
 } from './system/index.js';
+
+// Search tools
+export {
+  SearchTool,
+  type SearchToolConfig,
+} from './search/index.js';
 
 // UI tools
 export {

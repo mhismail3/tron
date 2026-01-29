@@ -36,7 +36,7 @@ import {
   WriteTool,
   EditTool,
   BashTool,
-  AstGrepTool,
+  SearchTool,
   DEFAULT_MODEL,
   ANTHROPIC_MODELS,
   formatError,
@@ -607,7 +607,7 @@ export function App({ config, auth }: AppProps): React.ReactElement {
         new WriteTool({ workingDirectory: config.workingDirectory }),
         new EditTool({ workingDirectory: config.workingDirectory }),
         new BashTool({ workingDirectory: config.workingDirectory }),
-        new AstGrepTool({ workingDirectory: config.workingDirectory }),
+        new SearchTool({ workingDirectory: config.workingDirectory }),
       ];
 
       const agentOptions: AgentOptions = {
