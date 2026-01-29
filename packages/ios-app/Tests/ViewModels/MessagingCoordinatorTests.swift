@@ -393,6 +393,7 @@ final class MockMessagingContext: MessagingContext {
     var currentTurn: Int = 0
     var sessionId: String = "test-session"
     var userDismissedBrowserThisTurn: Bool = false
+    var autoDismissedBrowserThisTurn: Bool = false
 
     // MARK: - Tracking for Assertions
     var sendPromptCalled = false
