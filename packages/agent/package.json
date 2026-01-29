@@ -33,7 +33,7 @@
   "dependencies": {
     "@anthropic-ai/sdk": "^0.71.2",
     "@sinclair/typebox": "^0.34.12",
-    "agent-browser": "^0.6.0",
+    "agent-browser": "^0.7.1",
     "ajv": "^8.17.1",
     "better-sqlite3": "^11.10.0",
     "pino": "^9.6.0",

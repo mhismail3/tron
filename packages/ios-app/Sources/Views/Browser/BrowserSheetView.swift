@@ -45,11 +45,6 @@ struct BrowserSheetView: View {
             .toolbar {
                 ToolbarItem(placement: .principal) {
                     HStack(spacing: 8) {
-                        if isStreaming {
-                            Circle()
-                                .fill(.tronError)
-                                .frame(width: 8, height: 8)
-                        }
                         Text(urlDisplayText)
                             .font(TronTypography.mono(size: TronTypography.sizeTitle, weight: .semibold))
                             .foregroundStyle(.tronEmerald)

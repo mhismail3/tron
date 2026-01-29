@@ -113,13 +113,13 @@ final class MediaClient {
     ///   - quality: JPEG quality (0-100, default 60)
     ///   - maxWidth: Max frame width (default 1280)
     ///   - maxHeight: Max frame height (default 800)
-    ///   - everyNthFrame: Skip frames for battery savings (default 2 = ~5 FPS, still smooth)
+    ///   - everyNthFrame: Skip frames for battery savings (default 1 = ~10 FPS)
     func startBrowserStream(
         sessionId: String,
         quality: Int = 60,
         maxWidth: Int = 1280,
         maxHeight: Int = 800,
-        everyNthFrame: Int = 2
+        everyNthFrame: Int = 1
     ) async throws -> BrowserStartStreamResult {
         guard let transport else { throw RPCClientError.connectionNotEstablished }
         let ws = try transport.requireConnection()
