@@ -48,9 +48,9 @@ export interface SubagentOperationsConfig {
 // =============================================================================
 
 /**
- * Result of spawning an agent (unified for both inProcess and tmux modes)
+ * Result of spawning a subagent (unified for both inProcess and tmux modes)
  */
-export interface SpawnAgentResult {
+export interface SpawnSubagentResult {
   sessionId: string;
   success: boolean;
   error?: string;
@@ -58,9 +58,8 @@ export interface SpawnAgentResult {
   tmuxSessionName?: string;
 }
 
-// Legacy type aliases for backwards compatibility
-export type SpawnSubagentResult = SpawnAgentResult;
-export type SpawnTmuxAgentResult = SpawnAgentResult;
+// Legacy type alias for backwards compatibility with tmux-specific result
+export type SpawnTmuxAgentResult = SpawnSubagentResult;
 
 /**
  * Result of querying a sub-agent

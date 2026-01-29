@@ -34,7 +34,7 @@ export type {
   BashToolSettings,
   ReadToolSettings,
   FindToolSettings,
-  GrepToolSettings,
+  SearchToolSettings,
   ContextSettings,
   CompactorSettings,
   MemorySettings,

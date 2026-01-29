@@ -5,12 +5,12 @@
  */
 
 export {
-  SpawnAgentTool,
-  type SpawnAgentToolConfig,
-  type SpawnAgentParams,
-  type SpawnAgentResult,
-  type SpawnAgentCallback,
-} from './spawn-agent.js';
+  SpawnSubagentTool,
+  type SpawnSubagentToolConfig,
+  type SpawnSubagentParams,
+  type SpawnSubagentResult,
+  type SpawnSubagentCallback,
+} from './spawn-subagent.js';
 
 export {
   QueryAgentTool,

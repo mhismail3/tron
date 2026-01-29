@@ -110,7 +110,7 @@ enum CommandToolRegistry {
     /// Special tools that have their own dedicated UI (not command tool chips)
     private static let specialTools: Set<String> = [
         "askuserquestion",
-        "spawnagent", "queryagent", "waitforagents",
+        "spawnsubagent", "queryagent", "waitforagents",
         "renderappui",
         "todowrite",
         "notifyapp"

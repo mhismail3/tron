@@ -1,5 +1,5 @@
 /**
- * @fileoverview Unified Spawn Agent Tool
+ * @fileoverview Unified Spawn Subagent Tool
  *
  * Spawns a sub-agent in either in-process or tmux mode.
  * - inProcess: Runs in the same process, can block until complete
@@ -11,12 +11,12 @@ import type { SubAgentTracker } from './subagent-tracker.js';
 import type { SessionId } from '../../events/types.js';
 import { createLogger } from '../../logging/index.js';
 
-const logger = createLogger('tool:spawn-agent');
+const logger = createLogger('tool:spawn-subagent');
 
 /**
  * Parameters for spawning an agent
  */
-export interface SpawnAgentParams {
+export interface SpawnSubagentParams {
   /** The task/prompt for the agent to execute */
   task: string;
   /** Execution mode: 'inProcess' (default) or 'tmux' */
@@ -53,7 +53,7 @@ export interface SpawnAgentParams {
 /**
  * Result of spawning an agent
  */
-export interface SpawnAgentResult {
+export interface SpawnSubagentResult {
   /** Session ID of the spawned agent */
   sessionId: string;
   /** Whether the operation was successful */
@@ -81,17 +81,17 @@ export interface SpawnAgentResult {
 /**
  * Callback to spawn an agent (provided by orchestrator)
  */
-export type SpawnAgentCallback = (
+export type SpawnSubagentCallback = (
   parentSessionId: string,
-  params: SpawnAgentParams,
+  params: SpawnSubagentParams,
   /** Tool call ID for correlating events with the tool call message */
   toolCallId: string
-) => Promise<SpawnAgentResult>;
+) => Promise<SpawnSubagentResult>;
 
 /**
- * Configuration for SpawnAgentTool
+ * Configuration for SpawnSubagentTool
  */
-export interface SpawnAgentToolConfig {
+export interface SpawnSubagentToolConfig {
   /** Current session ID (parent session) */
   sessionId: string;
   /** Default working directory */
@@ -101,7 +101,7 @@ export interface SpawnAgentToolConfig {
   /** Path to shared SQLite database (for tmux mode) */
   dbPath: string;
   /** Callback to spawn the agent */
-  onSpawn: SpawnAgentCallback;
+  onSpawn: SpawnSubagentCallback;
   /**
    * Get the SubAgentTracker for blocking mode.
    * Required for waiting on agent completion in inProcess mode.
@@ -112,8 +112,8 @@ export interface SpawnAgentToolConfig {
 /**
  * Unified tool for spawning agents in either inProcess or tmux mode
  */
-export class SpawnAgentTool implements TronTool<SpawnAgentParams> {
-  readonly name = 'SpawnAgent';
+export class SpawnSubagentTool implements TronTool<SpawnSubagentParams> {
+  readonly name = 'SpawnSubagent';
   readonly description = `Spawn an agent to handle a specific task. Supports two execution modes:
 
 **1. In-Process Mode (default):**
@@ -193,11 +193,11 @@ Returns (when mode=inProcess and blocking=true):
   };
 
   readonly category = 'custom' as const;
-  readonly label = 'Spawn Agent';
+  readonly label = 'Spawn Sub-Agent';
 
-  private config: SpawnAgentToolConfig;
+  private config: SpawnSubagentToolConfig;
 
-  constructor(config: SpawnAgentToolConfig) {
+  constructor(config: SpawnSubagentToolConfig) {
     this.config = config;
   }
 
@@ -205,7 +205,7 @@ Returns (when mode=inProcess and blocking=true):
     toolCallIdOrArgs: string | Record<string, unknown>,
     argsOrSignal?: Record<string, unknown> | AbortSignal,
     _signal?: AbortSignal
-  ): Promise<TronToolResult<SpawnAgentResult>> {
+  ): Promise<TronToolResult<SpawnSubagentResult>> {
     // Handle both old and new signatures
     let args: Record<string, unknown>;
     let toolCallId: string;
@@ -253,7 +253,7 @@ Returns (when mode=inProcess and blocking=true):
 
     try {
       // Build spawn params
-      const spawnParams: SpawnAgentParams = {
+      const spawnParams: SpawnSubagentParams = {
         task,
         mode,
         model: model ?? this.config.model,
@@ -337,7 +337,7 @@ Example: QueryAgent({ sessionId: "${spawnResult.sessionId}", queryType: "status"
         );
 
         // Build the full result
-        const fullResult: SpawnAgentResult = {
+        const fullResult: SpawnSubagentResult = {
           sessionId: spawnResult.sessionId,
           success: completionResult.success,
           output: completionResult.output,

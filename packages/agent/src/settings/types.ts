@@ -164,9 +164,9 @@ export interface FindToolSettings {
 }
 
 /**
- * Grep tool configuration
+ * Search tool configuration (unified text + AST search)
  */
-export interface GrepToolSettings {
+export interface SearchToolSettings {
   /** Default maximum results */
   defaultMaxResults: number;
   /** Maximum file size to search in bytes */
@@ -177,24 +177,14 @@ export interface GrepToolSettings {
   skipDirectories: string[];
   /** Maximum output size in tokens (default: 15,000) */
   maxOutputTokens: number;
-}
-
-/**
- * AstGrep tool configuration
- */
-export interface AstGrepToolSettings {
-  /** Default result limit (default: 50) */
-  defaultLimit: number;
-  /** Maximum result limit (default: 200) */
-  maxLimit: number;
+  /** Default result limit for AST mode (default: 50) */
+  astDefaultLimit: number;
+  /** Maximum result limit for AST mode (default: 200) */
+  astMaxLimit: number;
   /** Default context lines (default: 0) */
   defaultContext: number;
-  /** Maximum output size in tokens (default: 15,000) */
-  maxOutputTokens: number;
-  /** Binary name to use (default: 'sg', falls back to 'ast-grep') */
-  binaryPath: string;
-  /** Directories to skip during search */
-  skipDirectories: string[];
+  /** Binary name for AST search (default: 'sg', falls back to 'ast-grep') */
+  astBinaryPath: string;
   /** Require user confirmation before applying replacements */
   requireConfirmationForReplace: boolean;
   /** Default timeout in milliseconds (default: 60,000) */
@@ -208,8 +198,7 @@ export interface ToolSettings {
   bash: BashToolSettings;
   read: ReadToolSettings;
   find: FindToolSettings;
-  grep: GrepToolSettings;
-  astGrep: AstGrepToolSettings;
+  search: SearchToolSettings;
 }
 
 // =============================================================================

@@ -146,20 +146,16 @@ export const DEFAULT_SETTINGS: TronSettings = {
       defaultMaxResults: 100,
       defaultMaxDepth: 10,
     },
-    grep: {
+    search: {
       defaultMaxResults: 100,
       maxFileSizeBytes: 10 * 1024 * 1024,  // 10MB
       binaryExtensions: DEFAULT_BINARY_EXTENSIONS,
       skipDirectories: DEFAULT_SKIP_DIRECTORIES,
       maxOutputTokens: 15000,    // 15k tokens (~60k chars)
-    },
-    astGrep: {
-      defaultLimit: 50,
-      maxLimit: 200,
+      astDefaultLimit: 50,
+      astMaxLimit: 200,
       defaultContext: 0,
-      maxOutputTokens: 15000,    // 15k tokens (~60k chars)
-      binaryPath: 'sg',          // Primary binary name, falls back to 'ast-grep'
-      skipDirectories: DEFAULT_SKIP_DIRECTORIES,
+      astBinaryPath: 'sg',       // Primary binary name, falls back to 'ast-grep'
       requireConfirmationForReplace: false,  // Auto-apply by default
       defaultTimeoutMs: 60000,   // 60 second timeout
     },

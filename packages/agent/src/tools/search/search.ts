@@ -165,7 +165,7 @@ Examples:
   ): Promise<TronToolResult> {
     const filePattern = args.filePattern as string | undefined;
     // const context = (args.context as number | undefined) || 0; // TODO: Implement context support
-    const maxResults = (args.maxResults as number | undefined) || this.settings.tools.grep.defaultMaxResults;
+    const maxResults = (args.maxResults as number | undefined) || this.settings.tools.search.defaultMaxResults;
 
     const stat = await fs.stat(searchPath);
     const files: string[] = [];
@@ -225,7 +225,7 @@ Examples:
     }
 
     // Truncate if needed
-    const truncateResult = truncateOutput(output, this.settings.tools.grep.maxOutputTokens);
+    const truncateResult = truncateOutput(output, this.settings.tools.search.maxOutputTokens);
 
     return {
       content: truncateResult.content,
@@ -248,7 +248,7 @@ Examples:
     args: Record<string, unknown>
   ): Promise<TronToolResult> {
     const filePattern = args.filePattern as string | undefined;
-    const maxResults = (args.maxResults as number | undefined) || this.settings.tools.astGrep.defaultLimit;
+    const maxResults = (args.maxResults as number | undefined) || this.settings.tools.search.astDefaultLimit;
 
     return new Promise((resolve) => {
       const astGrepArgs: string[] = ['--json', '--pattern', pattern];
@@ -259,8 +259,8 @@ Examples:
 
       astGrepArgs.push(searchPath);
 
-      const astGrepSettings = this.settings.tools.astGrep;
-      const binaryPath = astGrepSettings?.binaryPath || 'sg';
+      const astGrepSettings = this.settings.tools.search;
+      const binaryPath = astGrepSettings?.astBinaryPath || 'sg';
       const timeout = astGrepSettings?.defaultTimeoutMs || 60000;
       const maxOutputTokens = astGrepSettings?.maxOutputTokens || 15000;
       const proc = spawn(binaryPath, astGrepArgs, {

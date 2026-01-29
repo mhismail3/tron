@@ -24,11 +24,11 @@ export {
 
 // Subagent tools
 export {
-  SpawnAgentTool,
-  type SpawnAgentToolConfig,
-  type SpawnAgentParams,
-  type SpawnAgentResult,
-  type SpawnAgentCallback,
+  SpawnSubagentTool,
+  type SpawnSubagentToolConfig,
+  type SpawnSubagentParams,
+  type SpawnSubagentResult,
+  type SpawnSubagentCallback,
   QueryAgentTool,
   type QueryAgentToolConfig,
   type QueryAgentParams,

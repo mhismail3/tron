@@ -23,13 +23,13 @@ import {
   AskUserQuestionTool,
   OpenURLTool,
   RenderAppUITool,
-  SpawnAgentTool,
+  SpawnSubagentTool,
   QueryAgentTool,
   WaitForAgentsTool,
   TodoWriteTool,
   NotifyAppTool,
   type BrowserDelegate,
-  type SpawnAgentParams,
+  type SpawnSubagentParams,
   type SubagentQueryType,
   type SubAgentTracker,
   type NotifyAppResult,
@@ -80,7 +80,7 @@ export interface AgentFactoryConfig {
   /** Get authentication for a model (returns GoogleAuth for Google models) */
   getAuthForProvider: (model: string) => Promise<ServerAuth | GoogleAuth>;
   /** Spawn subsession callback - toolCallId included for event correlation */
-  spawnSubsession: (parentId: string, params: SpawnAgentParams, toolCallId?: string) => Promise<any>;
+  spawnSubsession: (parentId: string, params: SpawnSubagentParams, toolCallId?: string) => Promise<any>;
   /** Query subagent callback */
   querySubagent: (sessionId: string, queryType: SubagentQueryType, limit?: number) => any;
   /** Wait for subagents callback */
@@ -202,18 +202,18 @@ export class AgentFactory {
       );
     }
 
-    // Sub-agent tools: Only add SpawnAgent for top-level agents.
+    // Sub-agent tools: Only add SpawnSubagent for top-level agents.
     // Subagents cannot spawn their own subagents to prevent complexity and infinite recursion.
     // QueryAgent and WaitForAgents are also excluded since they only make sense
     // when spawning is allowed.
     if (!isSubagent) {
       tools.push(
-        new SpawnAgentTool({
+        new SpawnSubagentTool({
           sessionId,
           workingDirectory,
           model,
           dbPath: this.config.dbPath,
-          onSpawn: (parentId: string, params: SpawnAgentParams, toolCallId: string) =>
+          onSpawn: (parentId: string, params: SpawnSubagentParams, toolCallId: string) =>
             this.config.spawnSubsession(parentId, params, toolCallId),
           getSubagentTracker: () => {
             const tracker = this.config.getSubagentTrackerForSession(sessionId);
