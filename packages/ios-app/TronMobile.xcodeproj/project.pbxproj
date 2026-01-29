@@ -361,7 +361,6 @@
 		E35218873C7549883A5519A2 /* AnswerParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE7816ABBC956CE9E60ABA97 /* AnswerParser.swift */; };
 		E53BD145F52F65070990B5CB /* MessageContent.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4858DA8A897A42940D15629D /* MessageContent.swift */; };
 		E61181D73E4D021CDCD099B2 /* ConnectionCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1E1E2A2B22732B153F35C836 /* ConnectionCoordinator.swift */; };
-		E66C6220440A5DFDC032A6D3 /* AstGrepToolViewer.swift in Sources */ = {isa = PBXBuildFile; fileRef = DFF8D000C6F1C39AE82ECEA4 /* AstGrepToolViewer.swift */; };
 		E6CDD8634619BE68EB307E81 /* CloneRepoSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6C1612AACC366E0C97BAEB4B /* CloneRepoSheet.swift */; };
 		EA47A09187A810F4C4AB6835 /* UICanvasCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = BD60E3A77666AB1BB5EE68EC /* UICanvasCoordinator.swift */; };
 		EAE9FFCC465D011583D191E0 /* TronColors.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0BA5810A34C92084B89C6EA4 /* TronColors.swift */; };
@@ -771,7 +770,6 @@
 		DF913D046649A2757FEA1FD5 /* GenericToolViewer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GenericToolViewer.swift; sourceTree = "<group>"; };
 		DFA29BF65193E68C18A29255 /* ThinkingCaption.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThinkingCaption.swift; sourceTree = "<group>"; };
 		DFB67664868C5499732A7C72 /* StructuralComponents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StructuralComponents.swift; sourceTree = "<group>"; };
-		DFF8D000C6F1C39AE82ECEA4 /* AstGrepToolViewer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AstGrepToolViewer.swift; sourceTree = "<group>"; };
 		E09F2A8C19FFF23E7F221259 /* CommandToolChip.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = CommandToolChip.swift; sourceTree = "<group>"; };
 		E0B23C91EE877275B8030EE0 /* EventIconProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EventIconProvider.swift; sourceTree = "<group>"; };
 		E10F44727A46F0F661FB6C0E /* NotificationViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationViews.swift; sourceTree = "<group>"; };
@@ -1490,7 +1488,6 @@
 		772A03F976309F1FC074CC14 /* ToolViewers */ = {
 			isa = PBXGroup;
 			children = (
-				DFF8D000C6F1C39AE82ECEA4 /* AstGrepToolViewer.swift */,
 				F25EA9767ADB2C8628135491 /* BashToolViewer.swift */,
 				6AC377B44A707E319C9A4C25 /* BrowserToolViewer.swift */,
 				32EDE54E825DED7E7E2FD034 /* FileToolViewer.swift */,
@@ -2302,7 +2299,6 @@
 				B77FADD339F30EDF27379464 /* AskUserQuestionState.swift in Sources */,
 				A1826887DC32160F3468F20F /* AskUserQuestionTransformer.swift in Sources */,
 				0F322C0000641A49E7A95012 /* AskUserQuestionViewer.swift in Sources */,
-				E66C6220440A5DFDC032A6D3 /* AstGrepToolViewer.swift in Sources */,
 				B3162E23E3D3846044CF60D7 /* Attachment.swift in Sources */,
 				220EE905D1B68C9C82C9D21C /* AttachmentBubble.swift in Sources */,
 				5C5A4BA313424CB260AE9C65 /* AudioAvailabilityMonitor.swift in Sources */,

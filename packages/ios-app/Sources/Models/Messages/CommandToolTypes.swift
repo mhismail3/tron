@@ -127,9 +127,9 @@ enum CommandToolRegistry {
     static func config(for toolName: String) -> (icon: String, color: Color, displayName: String) {
         switch toolName.lowercased() {
         case "read":
-            return ("doc.text", .tronEmerald, "Read")
+            return ("doc.text", .tronSlate, "Read")
         case "write":
-            return ("doc.badge.plus", .tronSuccess, "Write")
+            return ("doc.badge.plus", .tronPink, "Write")
         case "edit":
             return ("pencil.line", .orange, "Edit")
         case "bash":

@@ -68,9 +68,9 @@ struct ToolResultRouter: View {
     private var toolIconConfig: (name: String, color: Color) {
         switch normalizedToolName {
         case "read":
-            return ("doc.text", .tronEmerald)
+            return ("doc.text", .tronSlate)
         case "write":
-            return ("doc.badge.plus", .tronSuccess)
+            return ("doc.badge.plus", .tronPink)
         case "edit":
             return ("pencil.line", .orange)
         case "bash":
