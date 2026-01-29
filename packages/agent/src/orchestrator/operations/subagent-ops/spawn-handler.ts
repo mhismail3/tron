@@ -7,8 +7,7 @@
 import { createLogger, categorizeError, LogErrorCategory, LogErrorCodes } from '../../../logging/index.js';
 import type { EventStore } from '../../../events/index.js';
 import type { SessionId, EventType } from '../../../events/index.js';
-import type { SpawnSubagentParams } from '../../../tools/subagent/index.js';
-import type { SpawnTmuxAgentParams } from '../../../tools/subagent/index.js';
+import type { SpawnAgentParams } from '../../../tools/subagent/index.js';
 import type {
   ActiveSession,
   AgentRunOptions,
@@ -65,7 +64,7 @@ export class SpawnHandler {
    */
   async spawnSubsession(
     parentSessionId: string,
-    params: SpawnSubagentParams,
+    params: SpawnAgentParams,
     toolCallId?: string
   ): Promise<SpawnSubagentResult> {
     const parent = this.deps.getActiveSession(parentSessionId);
@@ -181,7 +180,7 @@ export class SpawnHandler {
    */
   async spawnTmuxAgent(
     parentSessionId: string,
-    params: SpawnTmuxAgentParams
+    params: SpawnAgentParams
   ): Promise<SpawnTmuxAgentResult> {
     const parent = this.deps.getActiveSession(parentSessionId);
     if (!parent) {

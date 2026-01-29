@@ -5,40 +5,32 @@
  */
 
 export {
-  SpawnSubagentTool,
-  type SpawnSubagentToolConfig,
-  type SpawnSubagentParams,
-  type SpawnSubagentResult,
-  type SpawnSubagentCallback,
-} from './spawn-subagent.js';
+  SpawnAgentTool,
+  type SpawnAgentToolConfig,
+  type SpawnAgentParams,
+  type SpawnAgentResult,
+  type SpawnAgentCallback,
+} from './spawn-agent.js';
 
 export {
-  SpawnTmuxAgentTool,
-  type SpawnTmuxAgentToolConfig,
-  type SpawnTmuxAgentParams,
-  type SpawnTmuxAgentResult,
-  type SpawnTmuxAgentCallback,
-} from './spawn-tmux-agent.js';
-
-export {
-  QuerySubagentTool,
-  type QuerySubagentToolConfig,
-  type QuerySubagentParams,
-  type QuerySubagentResult,
-  type QuerySubagentCallback,
+  QueryAgentTool,
+  type QueryAgentToolConfig,
+  type QueryAgentParams,
+  type QueryAgentResult,
+  type QueryAgentCallback,
   type SubagentQueryType,
   type SubagentStatusInfo,
   type SubagentEventInfo,
   type SubagentLogInfo,
-} from './query-subagent.js';
+} from './query-agent.js';
 
 export {
-  WaitForSubagentTool,
-  type WaitForSubagentToolConfig,
-  type WaitForSubagentParams,
-  type WaitForSubagentResult,
-  type WaitForSubagentCallback,
-} from './wait-for-subagent.js';
+  WaitForAgentsTool,
+  type WaitForAgentsToolConfig,
+  type WaitForAgentsParams,
+  type WaitForAgentsResult,
+  type WaitForAgentsCallback,
+} from './wait-for-agents.js';
 
 export {
   SubAgentTracker,

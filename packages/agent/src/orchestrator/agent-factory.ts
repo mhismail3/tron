@@ -23,13 +23,13 @@ import {
   AskUserQuestionTool,
   OpenURLTool,
   RenderAppUITool,
-  SpawnSubagentTool,
-  QuerySubagentTool,
-  WaitForSubagentTool,
+  SpawnAgentTool,
+  QueryAgentTool,
+  WaitForAgentsTool,
   TodoWriteTool,
   NotifyAppTool,
   type BrowserDelegate,
-  type SpawnSubagentParams,
+  type SpawnAgentParams,
   type SubagentQueryType,
   type SubAgentTracker,
   type NotifyAppResult,
@@ -80,19 +80,21 @@ export interface AgentFactoryConfig {
   /** Get authentication for a model (returns GoogleAuth for Google models) */
   getAuthForProvider: (model: string) => Promise<ServerAuth | GoogleAuth>;
   /** Spawn subsession callback - toolCallId included for event correlation */
-  spawnSubsession: (parentId: string, params: SpawnSubagentParams, toolCallId?: string) => Promise<any>;
+  spawnSubsession: (parentId: string, params: SpawnAgentParams, toolCallId?: string) => Promise<any>;
   /** Query subagent callback */
   querySubagent: (sessionId: string, queryType: SubagentQueryType, limit?: number) => any;
   /** Wait for subagents callback */
   waitForSubagents: (sessionIds: string[], mode: 'all' | 'any', timeout: number) => Promise<any>;
   /** Forward agent event callback */
   forwardAgentEvent: (sessionId: SessionId, event: TronEvent) => void;
-  /** Get SubAgentTracker for a session (for blocking SpawnSubagent) */
+  /** Get SubAgentTracker for a session (for blocking SpawnAgent) */
   getSubagentTrackerForSession: (sessionId: string) => SubAgentTracker | undefined;
   /** Callback when todos are updated via TodoWrite tool */
   onTodosUpdated: (sessionId: string, todos: TodoItem[]) => Promise<void>;
   /** Generate unique ID for todos */
   generateTodoId: () => string;
+  /** Path to shared SQLite database (for tmux mode agent spawning) */
+  dbPath: string;
   /** Callback for sending push notifications (optional) */
   onNotify?: (
     sessionId: string,
@@ -200,17 +202,18 @@ export class AgentFactory {
       );
     }
 
-    // Sub-agent tools: Only add SpawnSubagent for top-level agents.
+    // Sub-agent tools: Only add SpawnAgent for top-level agents.
     // Subagents cannot spawn their own subagents to prevent complexity and infinite recursion.
-    // QuerySubagent and WaitForSubagent are also excluded since they only make sense
+    // QueryAgent and WaitForAgents are also excluded since they only make sense
     // when spawning is allowed.
     if (!isSubagent) {
       tools.push(
-        new SpawnSubagentTool({
+        new SpawnAgentTool({
           sessionId,
           workingDirectory,
           model,
-          onSpawn: (parentId: string, params: SpawnSubagentParams, toolCallId: string) =>
+          dbPath: this.config.dbPath,
+          onSpawn: (parentId: string, params: SpawnAgentParams, toolCallId: string) =>
             this.config.spawnSubsession(parentId, params, toolCallId),
           getSubagentTracker: () => {
             const tracker = this.config.getSubagentTrackerForSession(sessionId);
@@ -220,11 +223,11 @@ export class AgentFactory {
             return tracker;
           },
         }),
-        new QuerySubagentTool({
+        new QueryAgentTool({
           onQuery: (sid: string, queryType: SubagentQueryType, limit?: number) =>
             this.config.querySubagent(sid, queryType, limit),
         }),
-        new WaitForSubagentTool({
+        new WaitForAgentsTool({
           onWait: (sessionIds: string[], mode: 'all' | 'any', timeout: number) =>
             this.config.waitForSubagents(sessionIds, mode, timeout),
         }),

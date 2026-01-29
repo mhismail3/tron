@@ -85,7 +85,7 @@ export interface SearchOptions {
 export class EventStore {
   private backend: SQLiteEventStore;
   private initialized = false;
-  private dbPath: string;
+  public readonly dbPath: string;
 
   constructor(dbPath: string) {
     this.dbPath = dbPath;

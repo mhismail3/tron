@@ -18,8 +18,7 @@
  * - Maintains backward compatibility with existing API
  * - Handlers are independently testable
  */
-import type { SpawnSubagentParams } from '../../../tools/subagent/index.js';
-import type { SpawnTmuxAgentParams } from '../../../tools/subagent/index.js';
+import type { SpawnAgentParams } from '../../../tools/subagent/index.js';
 import type { SubagentQueryType } from '../../../tools/subagent/index.js';
 import type { ActiveSession } from '../../types.js';
 import type {
@@ -65,7 +64,7 @@ export class SubagentOperations {
    */
   async spawnSubsession(
     parentSessionId: string,
-    params: SpawnSubagentParams,
+    params: SpawnAgentParams,
     toolCallId?: string
   ): Promise<SpawnSubagentResult> {
     return this.spawnHandler.spawnSubsession(parentSessionId, params, toolCallId);
@@ -77,7 +76,7 @@ export class SubagentOperations {
    */
   async spawnTmuxAgent(
     parentSessionId: string,
-    params: SpawnTmuxAgentParams
+    params: SpawnAgentParams
   ): Promise<SpawnTmuxAgentResult> {
     return this.spawnHandler.spawnTmuxAgent(parentSessionId, params);
   }

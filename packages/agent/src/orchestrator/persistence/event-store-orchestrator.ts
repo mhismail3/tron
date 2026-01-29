@@ -325,6 +325,7 @@ export class EventStoreOrchestrator extends EventEmitter {
       getSubagentTrackerForSession: (sessionId) => this.activeSessions.get(sessionId)?.subagentTracker,
       onTodosUpdated: async (sessionId, todos) => this.todos.handleTodosUpdated(sessionId, todos),
       generateTodoId: () => `todo_${crypto.randomUUID().replace(/-/g, '').slice(0, 12)}`,
+      dbPath: this.eventStore.dbPath,
       onNotify: this.apnsService ? async (sessionId, notification, toolCallId) => {
         return this.notificationController.sendNotification(sessionId, notification, toolCallId);
       } : undefined,

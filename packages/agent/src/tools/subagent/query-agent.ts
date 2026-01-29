@@ -17,7 +17,7 @@ export type SubagentQueryType = 'status' | 'events' | 'logs' | 'output';
 /**
  * Parameters for querying a subagent
  */
-export interface QuerySubagentParams {
+export interface QueryAgentParams {
   /** Session ID of the sub-agent to query */
   sessionId: string;
   /** Type of query to perform */
@@ -82,7 +82,7 @@ export interface SubagentLogInfo {
 /**
  * Result of a subagent query
  */
-export interface QuerySubagentResult {
+export interface QueryAgentResult {
   /** Whether query was successful */
   success: boolean;
   /** Status info (for status query) */
@@ -100,25 +100,25 @@ export interface QuerySubagentResult {
 /**
  * Callback to query a subagent (provided by orchestrator)
  */
-export type QuerySubagentCallback = (
+export type QueryAgentCallback = (
   sessionId: string,
   queryType: SubagentQueryType,
   limit?: number
-) => Promise<QuerySubagentResult>;
+) => Promise<QueryAgentResult>;
 
 /**
- * Configuration for QuerySubagentTool
+ * Configuration for QueryAgentTool
  */
-export interface QuerySubagentToolConfig {
+export interface QueryAgentToolConfig {
   /** Callback to query the subagent */
-  onQuery: QuerySubagentCallback;
+  onQuery: QueryAgentCallback;
 }
 
 /**
  * Tool for querying sub-agent status, events, logs, or output
  */
-export class QuerySubagentTool implements TronTool<QuerySubagentParams> {
-  readonly name = 'QuerySubagent';
+export class QueryAgentTool implements TronTool<QueryAgentParams> {
+  readonly name = 'QueryAgent';
   readonly description = `Query the status, events, logs, or output of a spawned sub-agent.
 
 Query types:
@@ -152,9 +152,9 @@ Use this to monitor sub-agents you've spawned with SpawnSubagent or SpawnTmuxAge
   readonly category = 'custom' as const;
   readonly label = 'Query Sub-Agent';
 
-  private config: QuerySubagentToolConfig;
+  private config: QueryAgentToolConfig;
 
-  constructor(config: QuerySubagentToolConfig) {
+  constructor(config: QueryAgentToolConfig) {
     this.config = config;
   }
 
@@ -162,7 +162,7 @@ Use this to monitor sub-agents you've spawned with SpawnSubagent or SpawnTmuxAge
     toolCallIdOrArgs: string | Record<string, unknown>,
     argsOrSignal?: Record<string, unknown> | AbortSignal,
     _signal?: AbortSignal
-  ): Promise<TronToolResult<QuerySubagentResult>> {
+  ): Promise<TronToolResult<QueryAgentResult>> {
     // Handle both old and new signatures
     let args: Record<string, unknown>;
 

@@ -14,7 +14,7 @@ const logger = createLogger('tool:wait-for-subagent');
 /**
  * Parameters for waiting on sub-agent(s)
  */
-export interface WaitForSubagentParams {
+export interface WaitForAgentsParams {
   /** Session ID(s) of the sub-agent(s) to wait for */
   sessionIds: string[];
   /** How to wait when multiple IDs provided: 'all' or 'any' */
@@ -26,7 +26,7 @@ export interface WaitForSubagentParams {
 /**
  * Result of waiting for sub-agent(s)
  */
-export interface WaitForSubagentResult {
+export interface WaitForAgentsResult {
   /** Whether the wait was successful */
   success: boolean;
   /** Results from completed sub-agent(s) */
@@ -40,18 +40,18 @@ export interface WaitForSubagentResult {
 /**
  * Callback to wait for sub-agent(s) (provided by orchestrator)
  */
-export type WaitForSubagentCallback = (
+export type WaitForAgentsCallback = (
   sessionIds: string[],
   mode: 'all' | 'any',
   timeout: number
-) => Promise<WaitForSubagentResult>;
+) => Promise<WaitForAgentsResult>;
 
 /**
- * Configuration for WaitForSubagentTool
+ * Configuration for WaitForAgentsTool
  */
-export interface WaitForSubagentToolConfig {
+export interface WaitForAgentsToolConfig {
   /** Callback to perform the wait */
-  onWait: WaitForSubagentCallback;
+  onWait: WaitForAgentsCallback;
 }
 
 /**
@@ -61,8 +61,8 @@ export interface WaitForSubagentToolConfig {
  * For fire-and-forget tasks where you don't need immediate results,
  * use SpawnSubagent/SpawnTmuxAgent without waiting.
  */
-export class WaitForSubagentTool implements TronTool<WaitForSubagentParams> {
-  readonly name = 'WaitForSubagent';
+export class WaitForAgentsTool implements TronTool<WaitForAgentsParams> {
+  readonly name = 'WaitForAgents';
   readonly description = `Wait for spawned sub-agent(s) to complete and get their results.
 
 Use this when you need the output of a sub-agent before proceeding. The tool will block until:
@@ -81,13 +81,13 @@ Returns the full result including output, token usage, and duration.
 Example usage:
 \`\`\`
 // Wait for a single sub-agent
-WaitForSubagent({ sessionIds: ["sess_abc123"] })
+WaitForAgents({ sessionIds: ["sess_abc123"] })
 
 // Wait for multiple sub-agents to all complete
-WaitForSubagent({ sessionIds: ["sess_abc", "sess_xyz"], mode: "all" })
+WaitForAgents({ sessionIds: ["sess_abc", "sess_xyz"], mode: "all" })
 
 // Wait for the first of multiple sub-agents to complete
-WaitForSubagent({ sessionIds: ["sess_abc", "sess_xyz"], mode: "any" })
+WaitForAgents({ sessionIds: ["sess_abc", "sess_xyz"], mode: "any" })
 \`\`\``;
 
   readonly parameters = {
@@ -114,9 +114,9 @@ WaitForSubagent({ sessionIds: ["sess_abc", "sess_xyz"], mode: "any" })
   readonly category = 'custom' as const;
   readonly label = 'Wait For Sub-Agent';
 
-  private config: WaitForSubagentToolConfig;
+  private config: WaitForAgentsToolConfig;
 
-  constructor(config: WaitForSubagentToolConfig) {
+  constructor(config: WaitForAgentsToolConfig) {
     this.config = config;
   }
 
@@ -124,7 +124,7 @@ WaitForSubagent({ sessionIds: ["sess_abc", "sess_xyz"], mode: "any" })
     toolCallIdOrArgs: string | Record<string, unknown>,
     argsOrSignal?: Record<string, unknown> | AbortSignal,
     _signal?: AbortSignal
-  ): Promise<TronToolResult<WaitForSubagentResult>> {
+  ): Promise<TronToolResult<WaitForAgentsResult>> {
     // Handle both old and new signatures
     let args: Record<string, unknown>;
 
