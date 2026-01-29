@@ -75,6 +75,7 @@ thoughts/shared/plans/
 tmp/
 temp/
 *.tmp
+ast-grep-temp-*/
 
 # Crash reports
 *.dump
