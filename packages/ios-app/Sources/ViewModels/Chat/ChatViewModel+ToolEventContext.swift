@@ -39,9 +39,30 @@ extension ChatViewModel: ToolEventContext {
     }
 
     /// Update browser status if needed - for browser tools (ToolEventContext)
-    func updateBrowserStatusIfNeeded() {
+    /// Also auto-shows the browser window when a browser tool is detected.
+    @discardableResult
+    func updateBrowserStatusIfNeeded() -> Bool {
+        let shouldShow = !browserState.userDismissedBrowserThisTurn
         if browserState.browserStatus == nil {
             browserState.browserStatus = BrowserGetStatusResult(hasBrowser: true, isStreaming: false, currentUrl: nil)
+        }
+        // Auto-show browser window when browser tool is detected (unless user dismissed this turn)
+        // This follows the same pattern as BrowserCoordinator.handleBrowserFrame and
+        // ChatViewModel+Events.extractAndDisplayBrowserScreenshot
+        if shouldShow && !browserState.showBrowserWindow {
+            browserState.showBrowserWindow = true
+            logger.info("Browser window auto-shown on browser tool start", category: .events)
+        }
+        return shouldShow
+    }
+
+    /// Start browser stream if not already streaming (ToolEventContext)
+    func startBrowserStreamIfNeeded() {
+        if browserState.browserStatus?.isStreaming == true || browserState.userDismissedBrowserThisTurn {
+            return
+        }
+        Task {
+            await startBrowserStream()
         }
     }
 
@@ -50,5 +71,10 @@ extension ChatViewModel: ToolEventContext {
     func resetThinkingForNewBlock() {
         eventHandler.resetThinkingState()
         thinkingMessageId = nil
+    }
+
+    /// Mark the current thinking message as no longer streaming (ToolEventContext)
+    func finalizeThinkingMessageIfNeeded() {
+        markThinkingMessageCompleteIfNeeded()
     }
 }

@@ -55,11 +55,19 @@ protocol ToolEventContext: LoggingContext, ToolStateTracking {
     // MARK: - Browser
 
     /// Update browser status if needed (for browser tools)
-    func updateBrowserStatusIfNeeded()
+    /// - Returns: true if browser should be shown/streamed for this turn
+    @discardableResult
+    func updateBrowserStatusIfNeeded() -> Bool
+
+    /// Start browser streaming if needed (for browser tools)
+    func startBrowserStreamIfNeeded()
 
     // MARK: - Thinking State
 
     /// Reset thinking state for a new thinking block
     /// Called after tool completion so subsequent thinking starts fresh
     func resetThinkingForNewBlock()
+
+    /// Mark the current thinking message as no longer streaming (if present)
+    func finalizeThinkingMessageIfNeeded()
 }

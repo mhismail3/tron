@@ -88,6 +88,35 @@ final class ToolEventCoordinatorTests: XCTestCase {
         XCTAssertTrue(mockContext.finalizeStreamingMessageCalled)
     }
 
+    func testToolStartFinalizesThinkingMessage() async throws {
+        // Given: A tool start event
+        let event = ToolStartPlugin.Result(
+            toolName: "Read",
+            toolCallId: "tool_thinking_start",
+            arguments: nil,
+            formattedArguments: "{}"
+        )
+        let result = ToolStartResult(
+            tool: ToolUseData(
+                toolName: "Read",
+                toolCallId: "tool_thinking_start",
+                arguments: "{}",
+                status: .running
+            ),
+            isAskUserQuestion: false,
+            isBrowserTool: false,
+            isOpenURL: false,
+            askUserQuestionParams: nil,
+            openURL: nil
+        )
+
+        // When: Handling tool start
+        coordinator.handleToolStart(event, result: result, context: mockContext)
+
+        // Then: Thinking should be finalized
+        XCTAssertTrue(mockContext.finalizeThinkingMessageIfNeededCalled)
+    }
+
     func testToolStartTracksToolCall() async throws {
         // Given: A tool start event
         let event = ToolStartPlugin.Result(
@@ -314,14 +343,14 @@ final class ToolEventCoordinatorTests: XCTestCase {
     func testBrowserToolStartUpdatesBrowserStatus() async throws {
         // Given: A browser tool start
         let event = ToolStartPlugin.Result(
-            toolName: "browser_snapshot",
+            toolName: "BrowseTheWeb",
             toolCallId: "browser_snap",
             arguments: nil,
             formattedArguments: "{}"
         )
         let result = ToolStartResult(
             tool: ToolUseData(
-                toolName: "browser_snapshot",
+                toolName: "BrowseTheWeb",
                 toolCallId: "browser_snap",
                 arguments: "{}",
                 status: .running
@@ -335,11 +364,56 @@ final class ToolEventCoordinatorTests: XCTestCase {
 
         // When: Handling tool start (browserStatus is initially nil)
         XCTAssertNil(mockContext.browserStatus)
+        XCTAssertFalse(mockContext.showBrowserWindow)
         coordinator.handleToolStart(event, result: result, context: mockContext)
 
         // Then: Browser status should be set
         XCTAssertNotNil(mockContext.browserStatus)
         XCTAssertTrue(mockContext.browserStatus?.hasBrowser ?? false)
+
+        // Then: Browser window should be auto-shown
+        XCTAssertTrue(mockContext.showBrowserWindow)
+
+        // Then: Browser streaming should be requested
+        XCTAssertTrue(mockContext.startBrowserStreamIfNeededCalled)
+    }
+
+    func testBrowserToolStartRespectsUserDismissal() async throws {
+        // Given: User has dismissed browser this turn
+        mockContext.userDismissedBrowserThisTurn = true
+
+        // Given: A browser tool start
+        let event = ToolStartPlugin.Result(
+            toolName: "BrowseTheWeb",
+            toolCallId: "browser_dismissed",
+            arguments: nil,
+            formattedArguments: "{}"
+        )
+        let result = ToolStartResult(
+            tool: ToolUseData(
+                toolName: "BrowseTheWeb",
+                toolCallId: "browser_dismissed",
+                arguments: "{}",
+                status: .running
+            ),
+            isAskUserQuestion: false,
+            isBrowserTool: true,
+            isOpenURL: false,
+            askUserQuestionParams: nil,
+            openURL: nil
+        )
+
+        // When: Handling tool start
+        coordinator.handleToolStart(event, result: result, context: mockContext)
+
+        // Then: Browser status should still be set
+        XCTAssertNotNil(mockContext.browserStatus)
+
+        // Then: Browser window should NOT be auto-shown (user dismissed)
+        XCTAssertFalse(mockContext.showBrowserWindow)
+
+        // Then: Browser streaming should NOT be requested
+        XCTAssertFalse(mockContext.startBrowserStreamIfNeededCalled)
     }
 
     // MARK: - RenderAppUI Tool Tests
@@ -577,6 +651,31 @@ final class ToolEventCoordinatorTests: XCTestCase {
         XCTAssertTrue(mockContext.resetThinkingForNewBlockCalled)
     }
 
+    func testToolEndFinalizesThinkingBeforeReset() async throws {
+        // Given: A tool end event
+        let event = ToolEndPlugin.Result(
+            toolCallId: "tool_thinking_finalize",
+            success: true,
+            displayResult: "Done",
+            durationMs: 100,
+            details: nil
+        )
+        let result = ToolEndResult(
+            toolCallId: "tool_thinking_finalize",
+            status: .success,
+            result: "Done",
+            durationMs: 100,
+            isAskUserQuestion: false
+        )
+
+        // When: Handling tool end
+        coordinator.handleToolEnd(event, result: result, context: mockContext)
+
+        // Then: Thinking should be finalized and then reset
+        XCTAssertTrue(mockContext.finalizeThinkingMessageIfNeededCalled)
+        XCTAssertTrue(mockContext.resetThinkingForNewBlockCalled)
+    }
+
     func testAskUserQuestionToolEndAlsoResetsThinkingState() async throws {
         // Given: An AskUserQuestion message exists
         let askData = AskUserQuestionToolData(
@@ -695,6 +794,8 @@ final class MockToolEventContext: ToolEventContext {
     var browserStatus: BrowserGetStatusResult?
     var safariURL: URL?
     let renderAppUIChipTracker = RenderAppUIChipTracker()
+    var showBrowserWindow: Bool = false
+    var userDismissedBrowserThisTurn: Bool = false
 
     // MARK: - Tracking for Assertions
     var flushPendingTextUpdatesCalled = false
@@ -706,6 +807,8 @@ final class MockToolEventContext: ToolEventContext {
     var askUserQuestionSheetOpened = false
     var openedAskUserQuestionData: AskUserQuestionToolData?
     var resetThinkingForNewBlockCalled = false
+    var finalizeThinkingMessageIfNeededCalled = false
+    var startBrowserStreamIfNeededCalled = false
 
     // MARK: - Protocol Methods
 
@@ -738,14 +841,28 @@ final class MockToolEventContext: ToolEventContext {
         openedAskUserQuestionData = data
     }
 
-    func updateBrowserStatusIfNeeded() {
+    @discardableResult
+    func updateBrowserStatusIfNeeded() -> Bool {
+        let shouldShow = !userDismissedBrowserThisTurn
         if browserStatus == nil {
             browserStatus = BrowserGetStatusResult(hasBrowser: true, isStreaming: false, currentUrl: nil)
         }
+        if shouldShow && !showBrowserWindow {
+            showBrowserWindow = true
+        }
+        return shouldShow
+    }
+
+    func startBrowserStreamIfNeeded() {
+        startBrowserStreamIfNeededCalled = true
     }
 
     func resetThinkingForNewBlock() {
         resetThinkingForNewBlockCalled = true
+    }
+
+    func finalizeThinkingMessageIfNeeded() {
+        finalizeThinkingMessageIfNeededCalled = true
     }
 
     // MARK: - Logging (no-op for tests)

@@ -29,8 +29,12 @@ struct ChatSheetModifier: ViewModifier {
                 }
             }
             .onChange(of: viewModel.browserState.showBrowserWindow) { _, show in
-                if show, sheetCoordinator.activeSheet == nil {
-                    sheetCoordinator.showBrowser()
+                if show {
+                    if sheetCoordinator.activeSheet == nil {
+                        sheetCoordinator.showBrowser()
+                    }
+                } else if sheetCoordinator.activeSheet == .browser {
+                    sheetCoordinator.activeSheet = nil
                 }
             }
             .onChange(of: viewModel.showSettings) { _, show in

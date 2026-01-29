@@ -442,6 +442,30 @@ final class ChatViewModelEventRoutingTests: XCTestCase {
         XCTAssertFalse(viewModel.browserState.showBrowserWindow)
     }
 
+    func test_browserSheetAutoDismissesOnCompleteAndReopensNextToolStart() {
+        // Given - browser tool starts and auto-opens
+        let firstToolStart = makeToolStartResult(toolName: "BrowseTheWeb", toolCallId: "browser_1")
+        viewModel.handleToolStart(firstToolStart)
+        XCTAssertTrue(viewModel.browserState.showBrowserWindow)
+
+        // Given - user dismissed in this turn (should reset on complete)
+        viewModel.browserState.userDismissedBrowserThisTurn = true
+
+        // When - agent completes
+        viewModel.handleComplete()
+
+        // Then - browser sheet auto-dismissed and dismissal reset
+        XCTAssertFalse(viewModel.browserState.showBrowserWindow)
+        XCTAssertFalse(viewModel.browserState.userDismissedBrowserThisTurn)
+
+        // When - next tool start arrives
+        let secondToolStart = makeToolStartResult(toolName: "BrowseTheWeb", toolCallId: "browser_2")
+        viewModel.handleToolStart(secondToolStart)
+
+        // Then - browser sheet auto-opens again
+        XCTAssertTrue(viewModel.browserState.showBrowserWindow)
+    }
+
     // MARK: - UI Canvas Routing Tests
 
     func test_uiRenderChunk_createsChipIfNotExists() {

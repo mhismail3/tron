@@ -464,6 +464,19 @@ final class ChatViewModel: ChatEventContext {
         _ = streamingManager.finalizeStreamingMessage()
     }
 
+    /// Mark the current thinking message as no longer streaming (if present)
+    func markThinkingMessageCompleteIfNeeded() {
+        guard let id = thinkingMessageId,
+              let index = MessageFinder.indexById(id, in: messages),
+              case .thinking(let visible, let isExpanded, let isStreaming) = messages[index].content,
+              isStreaming else {
+            return
+        }
+
+        messages[index].content = .thinking(visible: visible, isExpanded: isExpanded, isStreaming: false)
+        messageWindowManager.updateMessage(messages[index])
+    }
+
     /// Force flush any pending text updates (called before completion)
     func flushPendingTextUpdates() {
         // Delegate to StreamingManager for flushing

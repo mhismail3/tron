@@ -33,6 +33,9 @@ final class ToolEventCoordinator {
     ) {
         context.logDebug("Tool args: \(pluginResult.formattedArguments.prefix(200))")
 
+        // Finalize any active thinking message before tools begin
+        context.finalizeThinkingMessageIfNeeded()
+
         // CRITICAL: Check if this tool already exists from catch-up processing.
         // When resuming an in-progress session, catch-up creates tool messages for running/completed tools.
         // The server then continues streaming those same tools, which would cause duplicates.
@@ -111,7 +114,10 @@ final class ToolEventCoordinator {
         // Update browser status for browser tools
         if result.isBrowserTool {
             context.logInfo("Browser tool detected")
-            context.updateBrowserStatusIfNeeded()
+            let shouldStartStreaming = context.updateBrowserStatusIfNeeded()
+            if shouldStartStreaming {
+                context.startBrowserStreamIfNeeded()
+            }
         }
 
         // Enqueue tool start for ordered processing and staggered animation
@@ -139,6 +145,9 @@ final class ToolEventCoordinator {
     ) {
         context.logInfo("Tool ended: \(result.toolCallId) status=\(result.status) duration=\(result.durationMs ?? 0)ms")
         context.logDebug("Tool result: \(result.result.prefix(300))")
+
+        // Finalize the current thinking message before starting a new block
+        context.finalizeThinkingMessageIfNeeded()
 
         // Reset thinking state after tool completion
         // Any subsequent thinking deltas should start a new thinking block

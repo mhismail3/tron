@@ -14,6 +14,9 @@ extension ChatViewModel {
             return
         }
 
+        // Once text starts streaming, thinking is no longer active
+        markThinkingMessageCompleteIfNeeded()
+
         // Delegate to StreamingManager for batched processing
         let accepted = streamingManager.handleTextDelta(delta)
 
@@ -120,6 +123,11 @@ extension ChatViewModel {
 
         // Process through handler (resets handler state)
         _ = eventHandler.handleComplete()
+
+        // Auto-dismiss browser sheet when agent completes
+        if browserState.showBrowserWindow {
+            browserState.showBrowserWindow = false
+        }
 
         // Delegate to coordinator for all completion handling
         turnLifecycleCoordinator.handleComplete(streamingText: finalStreamingText, context: self)

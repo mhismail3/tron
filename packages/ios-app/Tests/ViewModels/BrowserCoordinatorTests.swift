@@ -45,6 +45,32 @@ final class BrowserCoordinatorTests: XCTestCase {
         XCTAssertNil(mockContext.browserState.browserFrame)
     }
 
+    func testHandleBrowserFrameDecodesDataUriPayload() {
+        // Given: A valid base64 JPEG wrapped in data URI
+        let testImageData = createTestJPEGImage()
+        let base64 = testImageData.base64EncodedString()
+        let frameData = "data:image/jpeg;base64,\(base64)"
+
+        // When: Handling browser frame
+        coordinator.handleBrowserFrame(frameData: frameData, context: mockContext)
+
+        // Then: Frame should be stored in browserState
+        XCTAssertNotNil(mockContext.browserState.browserFrame)
+    }
+
+    func testHandleBrowserFrameDecodesWithWhitespace() {
+        // Given: A valid base64 JPEG with whitespace/newlines
+        let testImageData = createTestJPEGImage()
+        let base64 = testImageData.base64EncodedString()
+        let chunked = base64.prefix(40) + "\n" + base64.dropFirst(40).prefix(40) + " \n" + base64.dropFirst(80)
+
+        // When: Handling browser frame
+        coordinator.handleBrowserFrame(frameData: String(chunked), context: mockContext)
+
+        // Then: Frame should be stored in browserState
+        XCTAssertNotNil(mockContext.browserState.browserFrame)
+    }
+
     func testHandleBrowserFrameUpdatesBrowserStatusOnFirstFrame() {
         // Given: No browser status yet
         XCTAssertNil(mockContext.browserState.browserStatus)

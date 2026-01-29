@@ -52,9 +52,18 @@ final class BrowserCoordinator {
     ///   - frameData: Base64-encoded JPEG frame data
     ///   - context: The context providing access to state and dependencies
     func handleBrowserFrame(frameData: String, context: BrowserEventContext) {
+        // Support data URI prefixes and whitespace/newlines in base64 payloads.
+        let cleanedFrameData: String
+        if let commaIndex = frameData.firstIndex(of: ","),
+           frameData[..<commaIndex].contains("base64") {
+            cleanedFrameData = String(frameData[frameData.index(after: commaIndex)...])
+        } else {
+            cleanedFrameData = frameData
+        }
+
         // Decode base64 JPEG - this is fast enough to do on main thread
         // Streaming at ~10 FPS means ~100ms per frame budget, JPEG decode is <5ms
-        guard let data = Data(base64Encoded: frameData),
+        guard let data = Data(base64Encoded: cleanedFrameData, options: [.ignoreUnknownCharacters]),
               let image = UIImage(data: data) else {
             context.logDebug("Failed to decode browser frame data")
             return
