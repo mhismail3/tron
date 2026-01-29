@@ -10,10 +10,11 @@ describe('BrowseTheWebTool', () => {
   let tool: BrowseTheWebTool;
 
   beforeEach(() => {
+    // Create mock delegate with default implementations
     mockDelegate = {
-      execute: vi.fn(),
-      ensureSession: vi.fn(),
-      hasSession: vi.fn(),
+      execute: vi.fn().mockResolvedValue({ success: true, data: {} }),
+      ensureSession: vi.fn().mockResolvedValue(undefined),
+      hasSession: vi.fn().mockReturnValue(true),
     };
     tool = new BrowseTheWebTool({ delegate: mockDelegate });
   });
@@ -60,8 +61,8 @@ describe('BrowseTheWebTool', () => {
     });
 
     it('should call delegate.ensureSession', async () => {
-      vi.mocked(mockDelegate.hasSession).mockReturnValue(false);
-      vi.mocked(mockDelegate.execute).mockResolvedValue({ success: true, data: { url: 'https://example.com' } });
+      (mockDelegate.hasSession as ReturnType<typeof vi.fn>).mockReturnValue(false);
+      (mockDelegate.execute as ReturnType<typeof vi.fn>).mockResolvedValue({ success: true, data: { url: 'https://example.com' } });
 
       await tool.execute({ action: 'navigate', url: 'https://example.com' });
 
@@ -69,8 +70,8 @@ describe('BrowseTheWebTool', () => {
     });
 
     it('should execute navigate action', async () => {
-      vi.mocked(mockDelegate.hasSession).mockReturnValue(false);
-      vi.mocked(mockDelegate.execute).mockResolvedValue({ success: true, data: { url: 'https://example.com' } });
+      (mockDelegate.hasSession as ReturnType<typeof vi.fn>).mockReturnValue(false);
+      (mockDelegate.execute as ReturnType<typeof vi.fn>).mockResolvedValue({ success: true, data: { url: 'https://example.com' } });
 
       const result = await tool.execute({ action: 'navigate', url: 'https://example.com' });
 
@@ -85,8 +86,8 @@ describe('BrowseTheWebTool', () => {
     });
 
     it('should execute click action', async () => {
-      vi.mocked(mockDelegate.hasSession).mockReturnValue(false);
-      vi.mocked(mockDelegate.execute).mockResolvedValue({ success: true, data: { selector: 'button' } });
+      (mockDelegate.hasSession as ReturnType<typeof vi.fn>).mockReturnValue(false);
+      (mockDelegate.execute as ReturnType<typeof vi.fn>).mockResolvedValue({ success: true, data: { selector: 'button' } });
 
       const result = await tool.execute({ action: 'click', selector: 'button' });
 
@@ -101,8 +102,8 @@ describe('BrowseTheWebTool', () => {
     });
 
     it('should execute fill action', async () => {
-      vi.mocked(mockDelegate.hasSession).mockReturnValue(false);
-      vi.mocked(mockDelegate.execute).mockResolvedValue({ success: true, data: { selector: '#email', value: 'test@example.com' } });
+      (mockDelegate.hasSession as ReturnType<typeof vi.fn>).mockReturnValue(false);
+      (mockDelegate.execute as ReturnType<typeof vi.fn>).mockResolvedValue({ success: true, data: { selector: '#email', value: 'test@example.com' } });
 
       const result = await tool.execute({ action: 'fill', selector: '#email', value: 'test@example.com' });
 
@@ -117,8 +118,8 @@ describe('BrowseTheWebTool', () => {
     });
 
     it('should execute screenshot action', async () => {
-      vi.mocked(mockDelegate.hasSession).mockReturnValue(false);
-      vi.mocked(mockDelegate.execute).mockResolvedValue({
+      (mockDelegate.hasSession as ReturnType<typeof vi.fn>).mockReturnValue(false);
+      (mockDelegate.execute as ReturnType<typeof vi.fn>).mockResolvedValue({
         success: true,
         data: { screenshot: 'base64data', format: 'png' }
       });
@@ -136,8 +137,8 @@ describe('BrowseTheWebTool', () => {
     });
 
     it('should execute snapshot action', async () => {
-      vi.mocked(mockDelegate.hasSession).mockReturnValue(false);
-      vi.mocked(mockDelegate.execute).mockResolvedValue({
+      (mockDelegate.hasSession as ReturnType<typeof vi.fn>).mockReturnValue(false);
+      (mockDelegate.execute as ReturnType<typeof vi.fn>).mockResolvedValue({
         success: true,
         data: {
           snapshot: { role: 'document' },
@@ -158,8 +159,8 @@ describe('BrowseTheWebTool', () => {
     });
 
     it('should execute goBack action', async () => {
-      vi.mocked(mockDelegate.hasSession).mockReturnValue(false);
-      vi.mocked(mockDelegate.execute).mockResolvedValue({ success: true, data: {} });
+      (mockDelegate.hasSession as ReturnType<typeof vi.fn>).mockReturnValue(false);
+      (mockDelegate.execute as ReturnType<typeof vi.fn>).mockResolvedValue({ success: true, data: {} });
 
       const result = await tool.execute({ action: 'goBack' });
 
@@ -174,8 +175,8 @@ describe('BrowseTheWebTool', () => {
     });
 
     it('should execute goForward action', async () => {
-      vi.mocked(mockDelegate.hasSession).mockReturnValue(false);
-      vi.mocked(mockDelegate.execute).mockResolvedValue({ success: true, data: {} });
+      (mockDelegate.hasSession as ReturnType<typeof vi.fn>).mockReturnValue(false);
+      (mockDelegate.execute as ReturnType<typeof vi.fn>).mockResolvedValue({ success: true, data: {} });
 
       const result = await tool.execute({ action: 'goForward' });
 
@@ -190,8 +191,8 @@ describe('BrowseTheWebTool', () => {
     });
 
     it('should execute reload action', async () => {
-      vi.mocked(mockDelegate.hasSession).mockReturnValue(false);
-      vi.mocked(mockDelegate.execute).mockResolvedValue({ success: true, data: {} });
+      (mockDelegate.hasSession as ReturnType<typeof vi.fn>).mockReturnValue(false);
+      (mockDelegate.execute as ReturnType<typeof vi.fn>).mockResolvedValue({ success: true, data: {} });
 
       const result = await tool.execute({ action: 'reload' });
 
@@ -206,8 +207,8 @@ describe('BrowseTheWebTool', () => {
     });
 
     it('should execute hover action', async () => {
-      vi.mocked(mockDelegate.hasSession).mockReturnValue(false);
-      vi.mocked(mockDelegate.execute).mockResolvedValue({ success: true, data: { selector: 'button' } });
+      (mockDelegate.hasSession as ReturnType<typeof vi.fn>).mockReturnValue(false);
+      (mockDelegate.execute as ReturnType<typeof vi.fn>).mockResolvedValue({ success: true, data: { selector: 'button' } });
 
       const result = await tool.execute({ action: 'hover', selector: 'button' });
 
@@ -222,8 +223,8 @@ describe('BrowseTheWebTool', () => {
     });
 
     it('should execute pressKey action', async () => {
-      vi.mocked(mockDelegate.hasSession).mockReturnValue(false);
-      vi.mocked(mockDelegate.execute).mockResolvedValue({ success: true, data: { key: 'Enter' } });
+      (mockDelegate.hasSession as ReturnType<typeof vi.fn>).mockReturnValue(false);
+      (mockDelegate.execute as ReturnType<typeof vi.fn>).mockResolvedValue({ success: true, data: { key: 'Enter' } });
 
       const result = await tool.execute({ action: 'pressKey', key: 'Enter' });
 
@@ -238,8 +239,8 @@ describe('BrowseTheWebTool', () => {
     });
 
     it('should execute getText action', async () => {
-      vi.mocked(mockDelegate.hasSession).mockReturnValue(false);
-      vi.mocked(mockDelegate.execute).mockResolvedValue({ success: true, data: { selector: '.content', text: 'Hello World' } });
+      (mockDelegate.hasSession as ReturnType<typeof vi.fn>).mockReturnValue(false);
+      (mockDelegate.execute as ReturnType<typeof vi.fn>).mockResolvedValue({ success: true, data: { selector: '.content', text: 'Hello World' } });
 
       const result = await tool.execute({ action: 'getText', selector: '.content' });
 
@@ -254,8 +255,8 @@ describe('BrowseTheWebTool', () => {
     });
 
     it('should execute getAttribute action', async () => {
-      vi.mocked(mockDelegate.hasSession).mockReturnValue(false);
-      vi.mocked(mockDelegate.execute).mockResolvedValue({ success: true, data: { selector: 'a', attribute: 'href', value: 'https://example.com' } });
+      (mockDelegate.hasSession as ReturnType<typeof vi.fn>).mockReturnValue(false);
+      (mockDelegate.execute as ReturnType<typeof vi.fn>).mockResolvedValue({ success: true, data: { selector: 'a', attribute: 'href', value: 'https://example.com' } });
 
       const result = await tool.execute({ action: 'getAttribute', selector: 'a', attribute: 'href' });
 
@@ -270,8 +271,8 @@ describe('BrowseTheWebTool', () => {
     });
 
     it('should execute pdf action', async () => {
-      vi.mocked(mockDelegate.hasSession).mockReturnValue(false);
-      vi.mocked(mockDelegate.execute).mockResolvedValue({ success: true, data: { path: '/tmp/page.pdf' } });
+      (mockDelegate.hasSession as ReturnType<typeof vi.fn>).mockReturnValue(false);
+      (mockDelegate.execute as ReturnType<typeof vi.fn>).mockResolvedValue({ success: true, data: { path: '/tmp/page.pdf' } });
 
       const result = await tool.execute({ action: 'pdf', path: '/tmp/page.pdf' });
 
@@ -286,8 +287,8 @@ describe('BrowseTheWebTool', () => {
     });
 
     it('should return error when delegate execution fails', async () => {
-      vi.mocked(mockDelegate.hasSession).mockReturnValue(false);
-      vi.mocked(mockDelegate.execute).mockResolvedValue({ success: false, error: 'Navigation failed' });
+      (mockDelegate.hasSession as ReturnType<typeof vi.fn>).mockReturnValue(false);
+      (mockDelegate.execute as ReturnType<typeof vi.fn>).mockResolvedValue({ success: false, error: 'Navigation failed' });
 
       const result = await tool.execute({ action: 'navigate', url: 'https://example.com' });
 
@@ -298,8 +299,8 @@ describe('BrowseTheWebTool', () => {
     });
 
     it('should handle exceptions gracefully', async () => {
-      vi.mocked(mockDelegate.hasSession).mockReturnValue(false);
-      vi.mocked(mockDelegate.ensureSession).mockRejectedValue(new Error('Session creation failed'));
+      (mockDelegate.hasSession as ReturnType<typeof vi.fn>).mockReturnValue(false);
+      (mockDelegate.ensureSession as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('Session creation failed'));
 
       const result = await tool.execute({ action: 'navigate', url: 'https://example.com' });
 
@@ -311,8 +312,8 @@ describe('BrowseTheWebTool', () => {
 
   describe('selector conversion', () => {
     it('should convert :contains() with double quotes', async () => {
-      vi.mocked(mockDelegate.hasSession).mockReturnValue(false);
-      vi.mocked(mockDelegate.execute).mockResolvedValue({ success: true, data: { selector: 'converted' } });
+      (mockDelegate.hasSession as ReturnType<typeof vi.fn>).mockReturnValue(false);
+      (mockDelegate.execute as ReturnType<typeof vi.fn>).mockResolvedValue({ success: true, data: { selector: 'converted' } });
 
       await tool.execute({ action: 'click', selector: 'button:contains("Submit")' });
 
@@ -326,8 +327,8 @@ describe('BrowseTheWebTool', () => {
     });
 
     it('should convert :contains() with single quotes', async () => {
-      vi.mocked(mockDelegate.hasSession).mockReturnValue(false);
-      vi.mocked(mockDelegate.execute).mockResolvedValue({ success: true, data: { selector: 'converted' } });
+      (mockDelegate.hasSession as ReturnType<typeof vi.fn>).mockReturnValue(false);
+      (mockDelegate.execute as ReturnType<typeof vi.fn>).mockResolvedValue({ success: true, data: { selector: 'converted' } });
 
       await tool.execute({ action: 'click', selector: "button:contains('Submit')" });
 
@@ -341,8 +342,8 @@ describe('BrowseTheWebTool', () => {
     });
 
     it('should convert multiple :contains() in selector', async () => {
-      vi.mocked(mockDelegate.hasSession).mockReturnValue(false);
-      vi.mocked(mockDelegate.execute).mockResolvedValue({ success: true, data: { selector: 'converted' } });
+      (mockDelegate.hasSession as ReturnType<typeof vi.fn>).mockReturnValue(false);
+      (mockDelegate.execute as ReturnType<typeof vi.fn>).mockResolvedValue({ success: true, data: { selector: 'converted' } });
 
       await tool.execute({ action: 'click', selector: 'div:contains("Foo") button:contains("Bar")' });
 
@@ -356,8 +357,8 @@ describe('BrowseTheWebTool', () => {
     });
 
     it('should not modify selectors without :contains()', async () => {
-      vi.mocked(mockDelegate.hasSession).mockReturnValue(false);
-      vi.mocked(mockDelegate.execute).mockResolvedValue({ success: true, data: { selector: 'button' } });
+      (mockDelegate.hasSession as ReturnType<typeof vi.fn>).mockReturnValue(false);
+      (mockDelegate.execute as ReturnType<typeof vi.fn>).mockResolvedValue({ success: true, data: { selector: 'button' } });
 
       await tool.execute({ action: 'click', selector: 'button.primary' });
 
@@ -373,8 +374,8 @@ describe('BrowseTheWebTool', () => {
 
   describe('session management', () => {
     it('should reuse existing session', async () => {
-      vi.mocked(mockDelegate.hasSession).mockReturnValue(true);
-      vi.mocked(mockDelegate.execute).mockResolvedValue({ success: true, data: {} });
+      (mockDelegate.hasSession as ReturnType<typeof vi.fn>).mockReturnValue(true);
+      (mockDelegate.execute as ReturnType<typeof vi.fn>).mockResolvedValue({ success: true, data: {} });
 
       await tool.execute({ action: 'navigate', url: 'https://example.com' });
 
@@ -383,8 +384,8 @@ describe('BrowseTheWebTool', () => {
     });
 
     it('should create session if not exists', async () => {
-      vi.mocked(mockDelegate.hasSession).mockReturnValue(false);
-      vi.mocked(mockDelegate.execute).mockResolvedValue({ success: true, data: {} });
+      (mockDelegate.hasSession as ReturnType<typeof vi.fn>).mockReturnValue(false);
+      (mockDelegate.execute as ReturnType<typeof vi.fn>).mockResolvedValue({ success: true, data: {} });
 
       await tool.execute({ action: 'navigate', url: 'https://example.com' });
 
