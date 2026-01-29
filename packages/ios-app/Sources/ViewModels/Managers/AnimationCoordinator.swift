@@ -216,9 +216,23 @@ final class AnimationCoordinator {
 
     // MARK: - Message Cascade Animation
 
-    /// Start cascade animation for loading session messages
-    /// Messages animate in from bottom with staggered timing
-    func startMessageCascade(totalMessages: Int, completion: @escaping (Int) -> Void) {
+    /// Whether a cascade animation is currently running
+    var isCascading: Bool {
+        cascadeTask != nil
+    }
+
+    /// Start bottom-up cascade animation for loading session messages.
+    /// Messages animate from bottom (newest) to top (oldest), so the user
+    /// sees the most recent messages appear first at the scroll position.
+    /// - Parameters:
+    ///   - totalMessages: Total number of messages to cascade
+    ///   - onProgress: Called each time a message becomes visible
+    ///   - onComplete: Called when cascade finishes
+    func startBottomUpCascade(
+        totalMessages: Int,
+        onProgress: ((Int) -> Void)? = nil,
+        onComplete: (() -> Void)? = nil
+    ) {
         cascadeTask?.cancel()
         cascadeProgress = 0
         totalCascadeMessages = min(totalMessages, Timing.cascadeMaxMessages)
@@ -235,15 +249,15 @@ final class AnimationCoordinator {
                 )) {
                     cascadeProgress = i + 1
                 }
-                completion(i)
+                onProgress?(i)
             }
 
-            // Any messages beyond cap appear instantly
+            // Messages beyond cap appear instantly
             if totalMessages > Timing.cascadeMaxMessages {
                 cascadeProgress = totalMessages
-                completion(totalMessages - 1)
             }
 
+            onComplete?()
             cascadeTask = nil
         }
     }
@@ -254,9 +268,25 @@ final class AnimationCoordinator {
         cascadeTask = nil
     }
 
-    /// Check if a message at index should be visible in cascade
-    func isCascadeVisible(index: Int) -> Bool {
-        index < cascadeProgress
+    /// Check if a message at index should be visible in bottom-up cascade.
+    /// Bottom-up means newest messages (highest indices) become visible first.
+    /// - Parameters:
+    ///   - index: Message index (0 = oldest)
+    ///   - total: Total message count
+    /// - Returns: true if message should be visible
+    func isCascadeVisibleFromBottom(index: Int, total: Int) -> Bool {
+        // Bottom-up: newest messages visible first
+        // Message at index i is visible when i >= total - cascadeProgress
+        return index >= total - cascadeProgress
+    }
+
+    /// Make all messages immediately visible (skip cascade animation).
+    /// Used for deep link scenarios where we need instant visibility.
+    func makeAllMessagesVisible(count: Int) {
+        cascadeTask?.cancel()
+        cascadeTask = nil
+        cascadeProgress = count
+        totalCascadeMessages = count
     }
 
     // MARK: - Animation Helpers

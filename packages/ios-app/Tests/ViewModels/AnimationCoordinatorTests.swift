@@ -154,20 +154,58 @@ final class AnimationCoordinatorTests: XCTestCase {
         XCTAssertEqual(coordinator.totalCascadeMessages, 0)
     }
 
-    func test_isCascadeVisible_returnsFalseWhenNotStarted() {
-        XCTAssertFalse(coordinator.isCascadeVisible(index: 0))
-        XCTAssertFalse(coordinator.isCascadeVisible(index: 5))
+    func test_isCascadeVisibleFromBottom_returnsFalseWhenNotStarted() {
+        // With 10 total messages and 0 progress, no messages should be visible
+        XCTAssertFalse(coordinator.isCascadeVisibleFromBottom(index: 0, total: 10))
+        XCTAssertFalse(coordinator.isCascadeVisibleFromBottom(index: 5, total: 10))
+        XCTAssertFalse(coordinator.isCascadeVisibleFromBottom(index: 9, total: 10))
     }
 
     func test_cancelCascade_stopsAnimation() {
-        // Given
-        coordinator.startMessageCascade(totalMessages: 10) { _ in }
+        // Given - start a bottom-up cascade
+        coordinator.startBottomUpCascade(totalMessages: 10)
 
         // When
         coordinator.cancelCascade()
 
         // Then - should not crash and cascade should stop
         XCTAssertLessThanOrEqual(coordinator.cascadeProgress, 10)
+        XCTAssertFalse(coordinator.isCascading)
+    }
+
+    func test_isCascading_returnsTrueWhenCascadeRunning() {
+        // Given/When
+        coordinator.startBottomUpCascade(totalMessages: 10)
+
+        // Then
+        XCTAssertTrue(coordinator.isCascading)
+
+        // Cleanup
+        coordinator.cancelCascade()
+    }
+
+    func test_makeAllMessagesVisible_setsProgressToCount() {
+        // When
+        coordinator.makeAllMessagesVisible(count: 25)
+
+        // Then
+        XCTAssertEqual(coordinator.cascadeProgress, 25)
+        XCTAssertEqual(coordinator.totalCascadeMessages, 25)
+        XCTAssertFalse(coordinator.isCascading)
+    }
+
+    func test_isCascadeVisibleFromBottom_logic() {
+        // Given - simulate cascade progress of 3 out of 10 messages
+        coordinator.makeAllMessagesVisible(count: 0)  // Reset
+        // Manually set progress to test visibility logic
+        // With total=10 and progress=3, messages 7,8,9 should be visible (bottom-up)
+
+        // We can't easily set cascadeProgress directly, so test via makeAllMessagesVisible
+        coordinator.makeAllMessagesVisible(count: 10)
+
+        // Then - all messages should be visible when progress equals total
+        XCTAssertTrue(coordinator.isCascadeVisibleFromBottom(index: 0, total: 10))
+        XCTAssertTrue(coordinator.isCascadeVisibleFromBottom(index: 9, total: 10))
     }
 
     // MARK: - Animation Helpers

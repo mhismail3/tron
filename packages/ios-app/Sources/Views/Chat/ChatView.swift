@@ -36,22 +36,11 @@ struct ChatView: View {
     @State private var isInteractionEnabled = true
     @State private var interactionDebounceTask: Task<Void, Never>?
 
-    // MARK: - Legacy Scroll State (internal for extension access)
+    // MARK: - Scroll State (internal for extension access)
     @State var scrollProxy: ScrollViewProxy?
 
-    // MARK: - Per-Message Visibility Animation (internal for extension access)
-    // Each message tracks its own visibility state for staggered entry animation.
-    // This replaces the global showEntryContent boolean which caused all messages
-    // to animate simultaneously, leading to frame drops with many messages.
-    @State var enteredMessageIds: Set<UUID> = []
-
-    /// Number of messages to animate on load (bottom N messages get staggered animation)
-    let animatedBatchSize = 10
-    /// Stagger delay between each message animation
-    let staggerDelayNs: UInt64 = 25_000_000  // 25ms
-
-    // MARK: - Message Loading State (private - body only)
-    @State private var initialLoadComplete = false
+    // MARK: - Message Loading State (internal for extension access)
+    @State var initialLoadComplete = false
 
     // MARK: - Deep Link Scroll Target (internal for extension access)
     @Binding var scrollTarget: ScrollTarget?
@@ -232,7 +221,6 @@ struct ChatView: View {
         }
         .onDisappear {
             // Reset for next entry
-            enteredMessageIds.removeAll()
             initialLoadComplete = false
             // Full reset of animation state when leaving session
             viewModel.animationCoordinator.fullReset()
@@ -280,10 +268,9 @@ struct ChatView: View {
             // Load messages after connection is established
             await viewModel.syncAndLoadMessagesForResume()
 
-            // Mark initial load complete - enables auto-scroll for subsequent updates
-            initialLoadComplete = true
-
-            // Handle message visibility based on whether we have a deep link target
+            // Handle message visibility and set initialLoadComplete
+            // NOTE: initialLoadComplete is set INSIDE handleInitialMessageVisibility()
+            // AFTER the cascade starts, to prevent a flash where all messages are visible
             await handleInitialMessageVisibility()
         }
         .onChange(of: viewModel.connectionState) { oldState, newState in
@@ -348,7 +335,7 @@ struct ChatView: View {
                                 .id("loadMore")
                         }
 
-                        ForEach(viewModel.messages) { message in
+                        ForEach(Array(viewModel.messages.enumerated()), id: \.element.id) { index, message in
                             MessageBubble(
                                 message: message,
                                 onSkillTap: { [sheetCoordinator] skill in
@@ -404,9 +391,9 @@ struct ChatView: View {
                             )
                             .id(message.id)
                             // Per-message entrance animation - fade in with slight upward movement
-                            // Each message tracks its own visibility state via enteredMessageIds
-                            .opacity(enteredMessageIds.contains(message.id) ? 1 : 0)
-                            .offset(y: enteredMessageIds.contains(message.id) ? 0 : 6)
+                            // Visibility managed by AnimationCoordinator bottom-up cascade
+                            .opacity(messageIsVisible(at: index, total: viewModel.messages.count) ? 1 : 0)
+                            .offset(y: messageIsVisible(at: index, total: viewModel.messages.count) ? 0 : 6)
                             .transition(.opacity.combined(with: .scale(scale: 0.98, anchor: .bottom)))
                         }
                         .animation(.easeOut(duration: 0.25), value: viewModel.messages.count)
@@ -454,7 +441,8 @@ struct ChatView: View {
                     let isNearBottom = distanceFromBottom < 100
                     return ScrollState(isNearBottom: isNearBottom, offset: geometry.contentOffset.y)
                 } action: { oldState, newState in
-                    guard initialLoadComplete else { return }
+                    // Don't switch to reviewing mode during initial cascade
+                    guard initialLoadComplete && !viewModel.animationCoordinator.isCascading else { return }
 
                     // Detect user actively scrolling up: offset DECREASES when scrolling toward top
                     // Use threshold to avoid noise from minor layout adjustments
@@ -491,19 +479,19 @@ struct ChatView: View {
                 .onAppear {
                     scrollProxy = proxy
                 }
-                // Auto-scroll on new messages and handle visibility
+                // Auto-scroll on new messages
                 .onChange(of: viewModel.messages.count) { oldCount, newCount in
-                    guard initialLoadComplete else { return }
                     guard newCount > oldCount else { return }  // Only for new messages, not history
 
-                    // Make new messages visible with animation
-                    let newMessages = viewModel.messages.suffix(newCount - oldCount)
-                    for message in newMessages {
-                        withAnimation(.easeOut(duration: 0.2)) {
-                            enteredMessageIds.insert(message.id)
-                        }
+                    // If new messages arrive during initial cascade, complete cascade immediately
+                    // This prevents visibility calculation issues when total changes mid-cascade
+                    if viewModel.animationCoordinator.isCascading {
+                        viewModel.animationCoordinator.makeAllMessagesVisible(count: newCount)
                     }
 
+                    guard initialLoadComplete else { return }
+
+                    // After cascade, new messages are immediately visible via messageIsVisible()
                     scrollCoordinator.contentAdded()
                     if scrollCoordinator.shouldAutoScroll {
                         withAnimation(.easeOut(duration: 0.2)) {
@@ -543,11 +531,7 @@ struct ChatView: View {
                 // Restore scroll position after loading older messages
                 .onChange(of: viewModel.isLoadingMoreMessages) { wasLoading, isLoading in
                     if wasLoading && !isLoading {
-                        // Make all newly loaded older messages visible immediately
-                        // These were prepended to the beginning of the array
-                        for message in viewModel.messages {
-                            enteredMessageIds.insert(message.id)
-                        }
+                        // Older messages are now visible via messageIsVisible() (cascade complete = all visible)
                         scrollCoordinator.didPrependHistory(using: proxy)
                     }
                 }
@@ -589,6 +573,18 @@ struct ChatView: View {
             .clipShape(Capsule())
             .shadow(color: .black.opacity(0.3), radius: 8, y: 4)
         }
+    }
+
+    // MARK: - Message Visibility Helper
+
+    /// Check if message at index should be visible based on cascade state
+    private func messageIsVisible(at index: Int, total: Int) -> Bool {
+        // During initial cascade, use coordinator
+        if viewModel.animationCoordinator.isCascading || !initialLoadComplete {
+            return viewModel.animationCoordinator.isCascadeVisibleFromBottom(index: index, total: total)
+        }
+        // After cascade complete, all messages visible
+        return true
     }
 
     // MARK: - Load More Button
