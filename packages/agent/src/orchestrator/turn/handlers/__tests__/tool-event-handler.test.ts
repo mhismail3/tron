@@ -5,6 +5,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { ToolEventHandler, createToolEventHandler, type ToolEventHandlerDeps } from '../tool-event-handler.js';
 import type { SessionId } from '../../../../events/types.js';
+import type { TronEvent } from '../../../../types/events.js';
 import type { ActiveSession } from '../../../types.js';
 
 // =============================================================================
@@ -18,6 +19,17 @@ function createMockUIRenderHandler() {
     handleToolCallDelta: vi.fn(),
     cleanup: vi.fn(),
   };
+}
+
+function createTestEvent(
+  sessionId: SessionId,
+  overrides: Record<string, unknown> = {}
+): TronEvent {
+  return {
+    sessionId,
+    timestamp: new Date().toISOString(),
+    ...overrides,
+  } as unknown as TronEvent;
 }
 
 function createMockDeps(): ToolEventHandlerDeps {
@@ -69,13 +81,13 @@ describe('ToolEventHandler', () => {
   describe('handleToolUseBatch', () => {
     it('should register tool intents when active session exists', () => {
       const sessionId = 'test-session' as SessionId;
-      const event = {
+      const event = createTestEvent(sessionId, {
         type: 'tool_use_batch',
         toolCalls: [
           { id: 'call-1', name: 'Read', arguments: { file_path: '/test.txt' } },
           { id: 'call-2', name: 'Write', arguments: { file_path: '/out.txt', content: 'hello' } },
         ],
-      };
+      });
       const mockActive = createMockActiveSession();
 
       (deps.getActiveSession as ReturnType<typeof vi.fn>).mockReturnValue(mockActive);
@@ -90,12 +102,12 @@ describe('ToolEventHandler', () => {
 
     it('should handle input field as arguments', () => {
       const sessionId = 'test-session' as SessionId;
-      const event = {
+      const event = createTestEvent(sessionId, {
         type: 'tool_use_batch',
         toolCalls: [
           { id: 'call-1', name: 'Read', input: { file_path: '/test.txt' } },
         ],
-      };
+      });
       const mockActive = createMockActiveSession();
 
       (deps.getActiveSession as ReturnType<typeof vi.fn>).mockReturnValue(mockActive);
@@ -109,10 +121,10 @@ describe('ToolEventHandler', () => {
 
     it('should do nothing when no active session', () => {
       const sessionId = 'test-session' as SessionId;
-      const event = {
+      const event = createTestEvent(sessionId, {
         type: 'tool_use_batch',
         toolCalls: [{ id: 'call-1', name: 'Read', arguments: {} }],
-      };
+      });
 
       (deps.getActiveSession as ReturnType<typeof vi.fn>).mockReturnValue(undefined);
 
@@ -126,13 +138,13 @@ describe('ToolEventHandler', () => {
   describe('handleToolExecutionStart', () => {
     it('should emit agent.tool_start event', () => {
       const sessionId = 'test-session' as SessionId;
-      const event = {
+      const timestamp = new Date().toISOString();
+      const event = createTestEvent(sessionId, {
         type: 'tool_execution_start',
         toolCallId: 'call-1',
         toolName: 'Read',
         arguments: { file_path: '/test.txt' },
-      };
-      const timestamp = new Date().toISOString();
+      });
 
       handler.handleToolExecutionStart(sessionId, event, timestamp);
 
@@ -150,13 +162,13 @@ describe('ToolEventHandler', () => {
 
     it('should persist tool.call event', () => {
       const sessionId = 'test-session' as SessionId;
-      const event = {
+      const timestamp = new Date().toISOString();
+      const event = createTestEvent(sessionId, {
         type: 'tool_execution_start',
         toolCallId: 'call-1',
         toolName: 'Read',
         arguments: { file_path: '/test.txt' },
-      };
-      const timestamp = new Date().toISOString();
+      });
 
       handler.handleToolExecutionStart(sessionId, event, timestamp);
 
@@ -173,13 +185,13 @@ describe('ToolEventHandler', () => {
 
     it('should track tool call on session context', () => {
       const sessionId = 'test-session' as SessionId;
-      const event = {
+      const timestamp = new Date().toISOString();
+      const event = createTestEvent(sessionId, {
         type: 'tool_execution_start',
         toolCallId: 'call-1',
         toolName: 'Read',
         arguments: { file_path: '/test.txt' },
-      };
-      const timestamp = new Date().toISOString();
+      });
       const mockActive = createMockActiveSession();
 
       (deps.getActiveSession as ReturnType<typeof vi.fn>).mockReturnValue(mockActive);
@@ -195,13 +207,13 @@ describe('ToolEventHandler', () => {
 
     it('should flush pre-tool content when it exists', () => {
       const sessionId = 'test-session' as SessionId;
-      const event = {
+      const timestamp = new Date().toISOString();
+      const event = createTestEvent(sessionId, {
         type: 'tool_execution_start',
         toolCallId: 'call-1',
         toolName: 'Read',
         arguments: {},
-      };
-      const timestamp = new Date().toISOString();
+      });
       const mockActive = createMockActiveSession();
 
       // Return content to flush
@@ -222,13 +234,13 @@ describe('ToolEventHandler', () => {
 
     it('should delegate RenderAppUI to UIRenderHandler', () => {
       const sessionId = 'test-session' as SessionId;
-      const event = {
+      const timestamp = new Date().toISOString();
+      const event = createTestEvent(sessionId, {
         type: 'tool_execution_start',
         toolCallId: 'call-1',
         toolName: 'RenderAppUI',
         arguments: { component: 'test' },
-      };
-      const timestamp = new Date().toISOString();
+      });
 
       handler.handleToolExecutionStart(sessionId, event, timestamp);
 
@@ -244,15 +256,15 @@ describe('ToolEventHandler', () => {
   describe('handleToolExecutionEnd', () => {
     it('should emit agent.tool_end event on success', () => {
       const sessionId = 'test-session' as SessionId;
-      const event = {
+      const timestamp = new Date().toISOString();
+      const event = createTestEvent(sessionId, {
         type: 'tool_execution_end',
         toolCallId: 'call-1',
         toolName: 'Read',
         result: { content: 'file contents here' },
         isError: false,
         duration: 150,
-      };
-      const timestamp = new Date().toISOString();
+      });
 
       handler.handleToolExecutionEnd(sessionId, event, timestamp);
 
@@ -272,15 +284,15 @@ describe('ToolEventHandler', () => {
 
     it('should emit agent.tool_end event on error', () => {
       const sessionId = 'test-session' as SessionId;
-      const event = {
+      const timestamp = new Date().toISOString();
+      const event = createTestEvent(sessionId, {
         type: 'tool_execution_end',
         toolCallId: 'call-1',
         toolName: 'Read',
         result: { content: 'File not found' },
         isError: true,
         duration: 50,
-      };
-      const timestamp = new Date().toISOString();
+      });
 
       handler.handleToolExecutionEnd(sessionId, event, timestamp);
 
@@ -300,14 +312,15 @@ describe('ToolEventHandler', () => {
 
     it('should persist tool.result event', () => {
       const sessionId = 'test-session' as SessionId;
-      const event = {
+      const timestamp = new Date().toISOString();
+      const event = createTestEvent(sessionId, {
         type: 'tool_execution_end',
         toolCallId: 'call-1',
         toolName: 'Read',
         result: { content: 'file contents' },
         isError: false,
-      };
-      const timestamp = new Date().toISOString();
+        duration: 100,
+      });
 
       handler.handleToolExecutionEnd(sessionId, event, timestamp);
 
@@ -325,14 +338,15 @@ describe('ToolEventHandler', () => {
 
     it('should track tool result on session context', () => {
       const sessionId = 'test-session' as SessionId;
-      const event = {
+      const timestamp = new Date().toISOString();
+      const event = createTestEvent(sessionId, {
         type: 'tool_execution_end',
         toolCallId: 'call-1',
         toolName: 'Read',
         result: { content: 'file contents' },
         isError: false,
-      };
-      const timestamp = new Date().toISOString();
+        duration: 100,
+      });
       const mockActive = createMockActiveSession();
 
       (deps.getActiveSession as ReturnType<typeof vi.fn>).mockReturnValue(mockActive);
@@ -348,7 +362,8 @@ describe('ToolEventHandler', () => {
 
     it('should extract content from array blocks', () => {
       const sessionId = 'test-session' as SessionId;
-      const event = {
+      const timestamp = new Date().toISOString();
+      const event = createTestEvent(sessionId, {
         type: 'tool_execution_end',
         toolCallId: 'call-1',
         toolName: 'Read',
@@ -360,8 +375,8 @@ describe('ToolEventHandler', () => {
           ],
         },
         isError: false,
-      };
-      const timestamp = new Date().toISOString();
+        duration: 100,
+      });
       const mockActive = createMockActiveSession();
 
       (deps.getActiveSession as ReturnType<typeof vi.fn>).mockReturnValue(mockActive);
@@ -377,14 +392,15 @@ describe('ToolEventHandler', () => {
 
     it('should delegate RenderAppUI to UIRenderHandler', () => {
       const sessionId = 'test-session' as SessionId;
-      const event = {
+      const timestamp = new Date().toISOString();
+      const event = createTestEvent(sessionId, {
         type: 'tool_execution_end',
         toolCallId: 'call-1',
         toolName: 'RenderAppUI',
         result: { content: 'success', details: { html: '<div/>' } },
         isError: false,
-      };
-      const timestamp = new Date().toISOString();
+        duration: 100,
+      });
 
       handler.handleToolExecutionEnd(sessionId, event, timestamp);
 

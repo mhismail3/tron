@@ -27,15 +27,16 @@ function getMessages(result: ReconstructionResult): Message[] {
 function createEvent(
   overrides: Partial<SessionEvent> & { type: string; payload: unknown }
 ): SessionEvent {
+  const { type, payload, ...rest } = overrides;
   return {
     id: `evt_${Math.random().toString(36).slice(2)}` as any,
     sessionId: 'sess_test' as any,
-    type: overrides.type,
-    payload: overrides.payload,
+    type,
+    payload,
     timestamp: new Date().toISOString(),
     parentId: null,
     sequence: 0,
-    ...overrides,
+    ...rest,
   } as SessionEvent;
 }
 
@@ -43,7 +44,7 @@ describe('reconstructFromEvents', () => {
   describe('Tool Result Output Format', () => {
     it('should output tool results as ToolResultMessage objects', () => {
       const events: SessionEvent[] = [
-        createEvent({ type: 'session.start', payload: {} }),
+        createEvent({ type: 'session.start', payload: { workingDirectory: '/test', model: 'claude-3-5-sonnet' } }),
         createEvent({
           type: 'message.user',
           payload: { content: 'Use a tool', turn: 1 },
@@ -56,11 +57,14 @@ describe('reconstructFromEvents', () => {
               { type: 'tool_use', id: 'call_123', name: 'TestTool', input: { arg: 'value' } },
             ],
             turn: 1,
+            tokenUsage: { inputTokens: 50, outputTokens: 25 },
+            stopReason: 'tool_use',
+            model: 'claude-3-5-sonnet',
           },
         }),
         createEvent({
           type: 'tool.result',
-          payload: { toolCallId: 'call_123', content: 'Tool output', isError: false },
+          payload: { toolCallId: 'call_123', content: 'Tool output', isError: false, duration: 100 },
         }),
         // Assistant continues after processing tool result (normal agentic flow)
         createEvent({
@@ -68,6 +72,9 @@ describe('reconstructFromEvents', () => {
           payload: {
             content: [{ type: 'text', text: 'The tool returned: Tool output' }],
             turn: 2,
+            tokenUsage: { inputTokens: 75, outputTokens: 40 },
+            stopReason: 'end_turn',
+            model: 'claude-3-5-sonnet',
           },
         }),
       ];
@@ -91,7 +98,7 @@ describe('reconstructFromEvents', () => {
 
     it('should output multiple tool results as separate ToolResultMessage objects', () => {
       const events: SessionEvent[] = [
-        createEvent({ type: 'session.start', payload: {} }),
+        createEvent({ type: 'session.start', payload: { workingDirectory: '/test', model: 'claude-3-5-sonnet' } }),
         createEvent({
           type: 'message.user',
           payload: { content: 'Use multiple tools', turn: 1 },
@@ -104,21 +111,27 @@ describe('reconstructFromEvents', () => {
               { type: 'tool_use', id: 'call_2', name: 'Tool2', input: {} },
             ],
             turn: 1,
+            tokenUsage: { inputTokens: 60, outputTokens: 30 },
+            stopReason: 'tool_use',
+            model: 'claude-3-5-sonnet',
           },
         }),
         createEvent({
           type: 'tool.result',
-          payload: { toolCallId: 'call_1', content: 'Result 1' },
+          payload: { toolCallId: 'call_1', content: 'Result 1', isError: false, duration: 150 },
         }),
         createEvent({
           type: 'tool.result',
-          payload: { toolCallId: 'call_2', content: 'Result 2', isError: true },
+          payload: { toolCallId: 'call_2', content: 'Result 2', isError: true, duration: 200 },
         }),
         createEvent({
           type: 'message.assistant',
           payload: {
             content: [{ type: 'text', text: 'Done' }],
             turn: 2,
+            tokenUsage: { inputTokens: 80, outputTokens: 35 },
+            stopReason: 'end_turn',
+            model: 'claude-3-5-sonnet',
           },
         }),
       ];
@@ -147,7 +160,7 @@ describe('reconstructFromEvents', () => {
 
     it('should flush tool results before next assistant message in agentic loop', () => {
       const events: SessionEvent[] = [
-        createEvent({ type: 'session.start', payload: {} }),
+        createEvent({ type: 'session.start', payload: { workingDirectory: '/test', model: 'claude-3-5-sonnet' } }),
         createEvent({
           type: 'message.user',
           payload: { content: 'Start agentic loop', turn: 1 },
@@ -158,11 +171,14 @@ describe('reconstructFromEvents', () => {
           payload: {
             content: [{ type: 'tool_use', id: 'call_1', name: 'Tool1', input: {} }],
             turn: 1,
+            tokenUsage: { inputTokens: 45, outputTokens: 20 },
+            stopReason: 'tool_use',
+            model: 'claude-3-5-sonnet',
           },
         }),
         createEvent({
           type: 'tool.result',
-          payload: { toolCallId: 'call_1', content: 'Result 1' },
+          payload: { toolCallId: 'call_1', content: 'Result 1', isError: false, duration: 120 },
         }),
         // Second tool call (continuation)
         createEvent({
@@ -170,11 +186,14 @@ describe('reconstructFromEvents', () => {
           payload: {
             content: [{ type: 'tool_use', id: 'call_2', name: 'Tool2', input: {} }],
             turn: 2,
+            tokenUsage: { inputTokens: 65, outputTokens: 28 },
+            stopReason: 'tool_use',
+            model: 'claude-3-5-sonnet',
           },
         }),
         createEvent({
           type: 'tool.result',
-          payload: { toolCallId: 'call_2', content: 'Result 2' },
+          payload: { toolCallId: 'call_2', content: 'Result 2', isError: false, duration: 130 },
         }),
         // Final response
         createEvent({
@@ -182,6 +201,9 @@ describe('reconstructFromEvents', () => {
           payload: {
             content: [{ type: 'text', text: 'All done!' }],
             turn: 3,
+            tokenUsage: { inputTokens: 85, outputTokens: 42 },
+            stopReason: 'end_turn',
+            model: 'claude-3-5-sonnet',
           },
         }),
       ];
@@ -200,7 +222,7 @@ describe('reconstructFromEvents', () => {
 
     it('should handle tool results at end of conversation (for resume/fork)', () => {
       const events: SessionEvent[] = [
-        createEvent({ type: 'session.start', payload: {} }),
+        createEvent({ type: 'session.start', payload: { workingDirectory: '/test', model: 'claude-3-5-sonnet' } }),
         createEvent({
           type: 'message.user',
           payload: { content: 'Run a tool', turn: 1 },
@@ -210,11 +232,14 @@ describe('reconstructFromEvents', () => {
           payload: {
             content: [{ type: 'tool_use', id: 'call_1', name: 'Tool', input: {} }],
             turn: 1,
+            tokenUsage: { inputTokens: 40, outputTokens: 18 },
+            stopReason: 'tool_use',
+            model: 'claude-3-5-sonnet',
           },
         }),
         createEvent({
           type: 'tool.result',
-          payload: { toolCallId: 'call_1', content: 'Tool finished' },
+          payload: { toolCallId: 'call_1', content: 'Tool finished', isError: false, duration: 110 },
         }),
         // No more events - this simulates resuming mid-agentic-loop
       ];
@@ -236,7 +261,7 @@ describe('reconstructFromEvents', () => {
   describe('Message Merging', () => {
     it('should merge consecutive user messages', () => {
       const events: SessionEvent[] = [
-        createEvent({ type: 'session.start', payload: {} }),
+        createEvent({ type: 'session.start', payload: { workingDirectory: '/test', model: 'claude-3-5-sonnet' } }),
         createEvent({
           type: 'message.user',
           payload: { content: 'First message', turn: 1 },
@@ -260,7 +285,7 @@ describe('reconstructFromEvents', () => {
 
     it('should discard pending tool results when real user message arrives', () => {
       const events: SessionEvent[] = [
-        createEvent({ type: 'session.start', payload: {} }),
+        createEvent({ type: 'session.start', payload: { workingDirectory: '/test', model: 'claude-3-5-sonnet' } }),
         createEvent({
           type: 'message.user',
           payload: { content: 'Use tool', turn: 1 },
@@ -270,11 +295,14 @@ describe('reconstructFromEvents', () => {
           payload: {
             content: [{ type: 'tool_use', id: 'call_1', name: 'Tool', input: {} }],
             turn: 1,
+            tokenUsage: { inputTokens: 50, outputTokens: 25 },
+            stopReason: 'tool_use',
+            model: 'claude-3-5-sonnet',
           },
         }),
         createEvent({
           type: 'tool.result',
-          payload: { toolCallId: 'call_1', content: 'Result' },
+          payload: { toolCallId: 'call_1', content: 'Result', isError: false, duration: 140 },
         }),
         // User interrupts before assistant processes result
         createEvent({
@@ -297,18 +325,24 @@ describe('reconstructFromEvents', () => {
   describe('Compaction Handling', () => {
     it('should clear messages after compact.summary and inject synthetic pair', () => {
       const events: SessionEvent[] = [
-        createEvent({ type: 'session.start', payload: {} }),
+        createEvent({ type: 'session.start', payload: { workingDirectory: '/test', model: 'claude-3-5-sonnet' } }),
         createEvent({
           type: 'message.user',
           payload: { content: 'Old message', turn: 1 },
         }),
         createEvent({
           type: 'message.assistant',
-          payload: { content: [{ type: 'text', text: 'Old response' }], turn: 1 },
+          payload: {
+            content: [{ type: 'text', text: 'Old response' }],
+            turn: 1,
+            tokenUsage: { inputTokens: 30, outputTokens: 15 },
+            stopReason: 'end_turn',
+            model: 'claude-3-5-sonnet',
+          },
         }),
         createEvent({
           type: 'compact.summary',
-          payload: { summary: 'Previous conversation summary' },
+          payload: { summary: 'Previous conversation summary', boundaryEventId: 'evt_boundary' as any },
         }),
         createEvent({
           type: 'message.user',
@@ -332,7 +366,7 @@ describe('reconstructFromEvents', () => {
   describe('Token Usage Accumulation', () => {
     it('should accumulate token usage from all messages', () => {
       const events: SessionEvent[] = [
-        createEvent({ type: 'session.start', payload: {} }),
+        createEvent({ type: 'session.start', payload: { workingDirectory: '/test', model: 'claude-3-5-sonnet' } }),
         createEvent({
           type: 'message.user',
           payload: { content: 'Hello', turn: 1 },
@@ -343,6 +377,8 @@ describe('reconstructFromEvents', () => {
             content: [{ type: 'text', text: 'Hi' }],
             turn: 1,
             tokenUsage: { inputTokens: 100, outputTokens: 50, cacheReadTokens: 10 },
+            stopReason: 'end_turn',
+            model: 'claude-3-5-sonnet',
           },
         }),
         createEvent({
@@ -355,6 +391,8 @@ describe('reconstructFromEvents', () => {
             content: [{ type: 'text', text: 'More response' }],
             turn: 2,
             tokenUsage: { inputTokens: 150, outputTokens: 75, cacheCreationTokens: 20 },
+            stopReason: 'end_turn',
+            model: 'claude-3-5-sonnet',
           },
         }),
       ];
@@ -371,7 +409,7 @@ describe('reconstructFromEvents', () => {
   describe('Tool Argument Restoration', () => {
     it('should restore truncated tool arguments from tool.call events', () => {
       const events: SessionEvent[] = [
-        createEvent({ type: 'session.start', payload: {} }),
+        createEvent({ type: 'session.start', payload: { workingDirectory: '/test', model: 'claude-3-5-sonnet' } }),
         createEvent({
           type: 'message.user',
           payload: { content: 'Run tool', turn: 1 },
@@ -388,18 +426,23 @@ describe('reconstructFromEvents', () => {
               },
             ],
             turn: 1,
+            tokenUsage: { inputTokens: 55, outputTokens: 22 },
+            stopReason: 'tool_use',
+            model: 'claude-3-5-sonnet',
           },
         }),
         createEvent({
           type: 'tool.call',
           payload: {
             toolCallId: 'call_1',
+            name: 'BigTool',
             arguments: { largeArg: 'This is the full argument that was truncated' },
+            turn: 1,
           },
         }),
         createEvent({
           type: 'tool.result',
-          payload: { toolCallId: 'call_1', content: 'Done' },
+          payload: { toolCallId: 'call_1', content: 'Done', isError: false, duration: 160 },
         }),
       ];
 
@@ -415,7 +458,7 @@ describe('reconstructFromEvents', () => {
   describe('Reasoning Level', () => {
     it('should extract reasoning level from config events', () => {
       const events: SessionEvent[] = [
-        createEvent({ type: 'session.start', payload: {} }),
+        createEvent({ type: 'session.start', payload: { workingDirectory: '/test', model: 'claude-3-5-sonnet' } }),
         createEvent({
           type: 'config.reasoning_level',
           payload: { newLevel: 'high' },
@@ -433,7 +476,7 @@ describe('reconstructFromEvents', () => {
 
     it('should use most recent reasoning level', () => {
       const events: SessionEvent[] = [
-        createEvent({ type: 'session.start', payload: {} }),
+        createEvent({ type: 'session.start', payload: { workingDirectory: '/test', model: 'claude-3-5-sonnet' } }),
         createEvent({
           type: 'config.reasoning_level',
           payload: { newLevel: 'low' },

@@ -208,9 +208,10 @@ describe('Tool Parameter Validation', () => {
 
       expect(result.isError).toBe(true);
       // Error message should hint at possible cause
+      const content = typeof result.content === 'string' ? result.content : '';
       expect(
-        result.content.toLowerCase().includes('truncat') ||
-        result.content.toLowerCase().includes('missing')
+        content.toLowerCase().includes('truncat') ||
+        content.toLowerCase().includes('missing')
       ).toBe(true);
     });
   });

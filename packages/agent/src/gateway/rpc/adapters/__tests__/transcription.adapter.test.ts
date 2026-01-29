@@ -26,15 +26,22 @@ describe('TranscriptionAdapter', () => {
     it('should delegate to transcription client', async () => {
       const mockResult = {
         text: 'Hello world',
-        segments: [{ start: 0, end: 1, text: 'Hello world' }],
+        rawText: 'Hello world',
+        language: 'en',
+        durationSeconds: 1.5,
+        processingTimeMs: 200,
+        model: 'parakeet-tdt-0.6b-v3',
+        device: 'mlx',
+        computeType: 'mlx',
+        cleanupMode: 'basic',
       };
       vi.mocked(transcribeAudio).mockResolvedValue(mockResult);
 
       const adapter = createTranscriptionAdapter();
       const params = {
-        audioData: 'base64-audio-data',
+        audioBase64: 'base64-audio-data',
         mimeType: 'audio/wav',
-        model: 'parakeet-tdt-0.6b-v3',
+        transcriptionModelId: 'parakeet-tdt-0.6b-v3',
       };
 
       const result = await adapter.transcribeAudio(params);
@@ -50,7 +57,7 @@ describe('TranscriptionAdapter', () => {
       const adapter = createTranscriptionAdapter();
 
       await expect(adapter.transcribeAudio({
-        audioData: 'invalid',
+        audioBase64: 'invalid',
         mimeType: 'audio/wav',
       })).rejects.toThrow('Transcription failed');
     });
@@ -60,8 +67,9 @@ describe('TranscriptionAdapter', () => {
     it('should return available transcription models', async () => {
       const mockModels = {
         models: [
-          { id: 'parakeet-tdt-0.6b-v3', name: 'Parakeet TDT', provider: 'mlx' },
+          { id: 'parakeet-tdt-0.6b-v3', label: 'Parakeet TDT', description: 'Fast transcription on Apple Silicon' },
         ],
+        defaultModelId: 'parakeet-tdt-0.6b-v3',
       };
       vi.mocked(listTranscriptionModels).mockResolvedValue(mockModels);
 

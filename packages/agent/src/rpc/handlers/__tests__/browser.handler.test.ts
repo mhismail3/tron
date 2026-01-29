@@ -9,26 +9,35 @@ import {
   handleBrowserGetStatus,
   createBrowserHandlers,
 } from '../browser.handler.js';
-import type { RpcRequest, RpcResponse } from '../../types.js';
-import type { RpcContext } from '../handler.js';
+import type { RpcRequest } from '../../types.js';
+import type { RpcContext } from '../../handler.js';
 
 describe('browser.handler', () => {
   let mockContext: RpcContext;
+  let mockStartStream: ReturnType<typeof vi.fn>;
+  let mockStopStream: ReturnType<typeof vi.fn>;
+  let mockGetStatus: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
+    mockStartStream = vi.fn().mockResolvedValue({ success: true });
+    mockStopStream = vi.fn().mockResolvedValue({ success: true });
+    mockGetStatus = vi.fn().mockResolvedValue({ hasBrowser: true, isStreaming: false });
+
     mockContext = {
       browserManager: {
-        startStream: vi.fn(),
-        stopStream: vi.fn(),
-        getStatus: vi.fn(),
+        startStream: mockStartStream,
+        stopStream: mockStopStream,
+        getStatus: mockGetStatus,
       },
+      sessionManager: {} as any,
+      agentManager: {} as any,
+      memoryStore: {} as any,
     } as unknown as RpcContext;
   });
 
   describe('handleBrowserStartStream', () => {
     it('should return error when browserManager is not available', async () => {
       const request: RpcRequest = {
-        jsonrpc: '2.0',
         id: '1',
         method: 'browser.startStream',
         params: { sessionId: 'session-123' },
@@ -44,7 +53,6 @@ describe('browser.handler', () => {
 
     it('should return error when sessionId is missing', async () => {
       const request: RpcRequest = {
-        jsonrpc: '2.0',
         id: '1',
         method: 'browser.startStream',
         params: {},
@@ -59,31 +67,29 @@ describe('browser.handler', () => {
 
     it('should start stream successfully', async () => {
       const request: RpcRequest = {
-        jsonrpc: '2.0',
         id: '1',
         method: 'browser.startStream',
         params: { sessionId: 'session-123' },
       };
 
-      const mockResult = { streamId: 'stream-456', status: 'started' };
-      vi.mocked(mockContext.browserManager!.startStream).mockResolvedValue(mockResult);
+      const mockResult = { success: true };
+      mockStartStream.mockResolvedValue(mockResult);
 
       const response = await handleBrowserStartStream(request, mockContext);
 
       expect(response.success).toBe(true);
       expect(response.result).toEqual(mockResult);
-      expect(mockContext.browserManager!.startStream).toHaveBeenCalledWith({ sessionId: 'session-123' });
+      expect(mockStartStream).toHaveBeenCalledWith({ sessionId: 'session-123' });
     });
 
     it('should handle errors', async () => {
       const request: RpcRequest = {
-        jsonrpc: '2.0',
         id: '1',
         method: 'browser.startStream',
         params: { sessionId: 'session-123' },
       };
 
-      vi.mocked(mockContext.browserManager!.startStream).mockRejectedValue(new Error('Browser not connected'));
+      mockStartStream.mockRejectedValue(new Error('Browser not connected'));
 
       const response = await handleBrowserStartStream(request, mockContext);
 
@@ -96,7 +102,6 @@ describe('browser.handler', () => {
   describe('handleBrowserStopStream', () => {
     it('should return error when browserManager is not available', async () => {
       const request: RpcRequest = {
-        jsonrpc: '2.0',
         id: '1',
         method: 'browser.stopStream',
         params: { sessionId: 'session-123' },
@@ -111,7 +116,6 @@ describe('browser.handler', () => {
 
     it('should return error when sessionId is missing', async () => {
       const request: RpcRequest = {
-        jsonrpc: '2.0',
         id: '1',
         method: 'browser.stopStream',
         params: {},
@@ -125,14 +129,13 @@ describe('browser.handler', () => {
 
     it('should stop stream successfully', async () => {
       const request: RpcRequest = {
-        jsonrpc: '2.0',
         id: '1',
         method: 'browser.stopStream',
         params: { sessionId: 'session-123' },
       };
 
-      const mockResult = { status: 'stopped' };
-      vi.mocked(mockContext.browserManager!.stopStream).mockResolvedValue(mockResult);
+      const mockResult = { success: true };
+      mockStopStream.mockResolvedValue(mockResult);
 
       const response = await handleBrowserStopStream(request, mockContext);
 
@@ -142,13 +145,12 @@ describe('browser.handler', () => {
 
     it('should handle errors', async () => {
       const request: RpcRequest = {
-        jsonrpc: '2.0',
         id: '1',
         method: 'browser.stopStream',
         params: { sessionId: 'session-123' },
       };
 
-      vi.mocked(mockContext.browserManager!.stopStream).mockRejectedValue(new Error('Stream not found'));
+      mockStopStream.mockRejectedValue(new Error('Stream not found'));
 
       const response = await handleBrowserStopStream(request, mockContext);
 
@@ -160,7 +162,6 @@ describe('browser.handler', () => {
   describe('handleBrowserGetStatus', () => {
     it('should return error when browserManager is not available', async () => {
       const request: RpcRequest = {
-        jsonrpc: '2.0',
         id: '1',
         method: 'browser.getStatus',
         params: { sessionId: 'session-123' },
@@ -175,7 +176,6 @@ describe('browser.handler', () => {
 
     it('should return error when sessionId is missing', async () => {
       const request: RpcRequest = {
-        jsonrpc: '2.0',
         id: '1',
         method: 'browser.getStatus',
         params: {},
@@ -189,14 +189,13 @@ describe('browser.handler', () => {
 
     it('should get status successfully', async () => {
       const request: RpcRequest = {
-        jsonrpc: '2.0',
         id: '1',
         method: 'browser.getStatus',
         params: { sessionId: 'session-123' },
       };
 
-      const mockResult = { isStreaming: true, frameCount: 150 };
-      vi.mocked(mockContext.browserManager!.getStatus).mockResolvedValue(mockResult);
+      const mockResult = { hasBrowser: true, isStreaming: true };
+      mockGetStatus.mockResolvedValue(mockResult);
 
       const response = await handleBrowserGetStatus(request, mockContext);
 
@@ -206,13 +205,12 @@ describe('browser.handler', () => {
 
     it('should handle errors', async () => {
       const request: RpcRequest = {
-        jsonrpc: '2.0',
         id: '1',
         method: 'browser.getStatus',
         params: { sessionId: 'session-123' },
       };
 
-      vi.mocked(mockContext.browserManager!.getStatus).mockRejectedValue(new Error('Session not found'));
+      mockGetStatus.mockRejectedValue(new Error('Session not found'));
 
       const response = await handleBrowserGetStatus(request, mockContext);
 
@@ -242,11 +240,10 @@ describe('browser.handler', () => {
       const registrations = createBrowserHandlers();
       const startHandler = registrations.find(r => r.method === 'browser.startStream')!.handler;
 
-      const mockResult = { streamId: 'stream-789' };
-      vi.mocked(mockContext.browserManager!.startStream).mockResolvedValue(mockResult);
+      const mockResult = { success: true };
+      mockStartStream.mockResolvedValue(mockResult);
 
       const request: RpcRequest = {
-        jsonrpc: '2.0',
         id: '1',
         method: 'browser.startStream',
         params: { sessionId: 'session-123' },
@@ -262,7 +259,6 @@ describe('browser.handler', () => {
       const handler = registrations[0].handler;
 
       const request: RpcRequest = {
-        jsonrpc: '2.0',
         id: '1',
         method: 'browser.startStream',
         params: {},

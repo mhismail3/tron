@@ -15,7 +15,9 @@ import type { BrowserLocator } from '../types.js';
 // Test Helpers
 // =============================================================================
 
-function createMockLocator(): BrowserLocator & { [key: string]: ReturnType<typeof vi.fn> } {
+function createMockLocator(): Omit<BrowserLocator, keyof BrowserLocator> & {
+  [K in keyof BrowserLocator]: ReturnType<typeof vi.fn>;
+} {
   return {
     click: vi.fn(),
     fill: vi.fn(),

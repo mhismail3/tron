@@ -6,6 +6,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { TurnEventHandler, createTurnEventHandler, type TurnEventHandlerDeps } from '../turn-event-handler.js';
 import type { SessionId } from '../../../../events/types.js';
 import type { ActiveSession } from '../../../types.js';
+import type { TronEvent } from '../../../../types/index.js';
 
 // =============================================================================
 // Test Helpers
@@ -65,8 +66,8 @@ describe('TurnEventHandler', () => {
   describe('handleTurnStart', () => {
     it('should emit agent.turn_start event', () => {
       const sessionId = 'test-session' as SessionId;
-      const event = { type: 'turn_start', turn: 1 };
       const timestamp = new Date().toISOString();
+      const event = { type: 'turn_start', turn: 1, sessionId, timestamp } as unknown as TronEvent;
 
       handler.handleTurnStart(sessionId, event, timestamp);
 
@@ -80,8 +81,8 @@ describe('TurnEventHandler', () => {
 
     it('should persist stream.turn_start event', () => {
       const sessionId = 'test-session' as SessionId;
-      const event = { type: 'turn_start', turn: 1 };
       const timestamp = new Date().toISOString();
+      const event = { type: 'turn_start', turn: 1, sessionId, timestamp } as unknown as TronEvent;
 
       handler.handleTurnStart(sessionId, event, timestamp);
 
@@ -94,8 +95,8 @@ describe('TurnEventHandler', () => {
 
     it('should call startTurn on session context when active session exists', () => {
       const sessionId = 'test-session' as SessionId;
-      const event = { type: 'turn_start', turn: 2 };
       const timestamp = new Date().toISOString();
+      const event = { type: 'turn_start', turn: 2, sessionId, timestamp } as unknown as TronEvent;
       const mockActive = createMockActiveSession();
 
       (deps.getActiveSession as ReturnType<typeof vi.fn>).mockReturnValue(mockActive);
@@ -107,8 +108,8 @@ describe('TurnEventHandler', () => {
 
     it('should not call startTurn when turn is undefined', () => {
       const sessionId = 'test-session' as SessionId;
-      const event = { type: 'turn_start' };
       const timestamp = new Date().toISOString();
+      const event = { type: 'turn_start', sessionId, timestamp } as unknown as TronEvent;
       const mockActive = createMockActiveSession();
 
       (deps.getActiveSession as ReturnType<typeof vi.fn>).mockReturnValue(mockActive);
@@ -122,13 +123,15 @@ describe('TurnEventHandler', () => {
   describe('handleTurnEnd', () => {
     it('should emit agent.turn_end event', () => {
       const sessionId = 'test-session' as SessionId;
+      const timestamp = new Date().toISOString();
       const event = {
         type: 'turn_end',
         turn: 1,
         duration: 1000,
         tokenUsage: { inputTokens: 100, outputTokens: 50 },
-      };
-      const timestamp = new Date().toISOString();
+        sessionId,
+        timestamp,
+      } as unknown as TronEvent;
 
       handler.handleTurnEnd(sessionId, event, timestamp);
 
@@ -141,12 +144,14 @@ describe('TurnEventHandler', () => {
 
     it('should persist stream.turn_end event', () => {
       const sessionId = 'test-session' as SessionId;
+      const timestamp = new Date().toISOString();
       const event = {
         type: 'turn_end',
         turn: 1,
         tokenUsage: { inputTokens: 100, outputTokens: 50 },
-      };
-      const timestamp = new Date().toISOString();
+        sessionId,
+        timestamp,
+      } as unknown as TronEvent;
 
       handler.handleTurnEnd(sessionId, event, timestamp);
 
@@ -162,12 +167,14 @@ describe('TurnEventHandler', () => {
 
     it('should create message.assistant when content exists and not pre-flushed', () => {
       const sessionId = 'test-session' as SessionId;
+      const timestamp = new Date().toISOString();
       const event = {
         type: 'turn_end',
         turn: 1,
         tokenUsage: { inputTokens: 100, outputTokens: 50 },
-      };
-      const timestamp = new Date().toISOString();
+        sessionId,
+        timestamp,
+      } as unknown as TronEvent;
       const mockActive = createMockActiveSession();
 
       // Mock endTurn to return content
@@ -196,12 +203,14 @@ describe('TurnEventHandler', () => {
 
     it('should skip message.assistant when content was pre-flushed for tools', () => {
       const sessionId = 'test-session' as SessionId;
+      const timestamp = new Date().toISOString();
       const event = {
         type: 'turn_end',
         turn: 1,
         tokenUsage: { inputTokens: 100, outputTokens: 50 },
-      };
-      const timestamp = new Date().toISOString();
+        sessionId,
+        timestamp,
+      } as unknown as TronEvent;
       const mockActive = createMockActiveSession();
 
       // Mark as pre-flushed (tools were called)
@@ -227,12 +236,14 @@ describe('TurnEventHandler', () => {
 
     it('should sync context tokens to ContextManager', () => {
       const sessionId = 'test-session' as SessionId;
+      const timestamp = new Date().toISOString();
       const event = {
         type: 'turn_end',
         turn: 1,
         tokenUsage: { inputTokens: 100, outputTokens: 50 },
-      };
-      const timestamp = new Date().toISOString();
+        sessionId,
+        timestamp,
+      } as unknown as TronEvent;
       const mockActive = createMockActiveSession();
       const mockSetApiContextTokens = vi.fn();
 
@@ -256,16 +267,22 @@ describe('TurnEventHandler', () => {
   describe('handleResponseComplete', () => {
     it('should set response token usage on session context', () => {
       const sessionId = 'test-session' as SessionId;
+      const timestamp = new Date().toISOString();
       const event = {
         type: 'response_complete',
         turn: 1,
+        stopReason: 'end_turn',
+        hasToolCalls: false,
+        toolCallCount: 0,
         tokenUsage: {
           inputTokens: 100,
           outputTokens: 50,
           cacheReadTokens: 10,
           cacheCreationTokens: 5,
         },
-      };
+        sessionId,
+        timestamp,
+      } as unknown as TronEvent;
       const mockActive = createMockActiveSession();
 
       (deps.getActiveSession as ReturnType<typeof vi.fn>).mockReturnValue(mockActive);
@@ -282,11 +299,17 @@ describe('TurnEventHandler', () => {
 
     it('should do nothing when no active session', () => {
       const sessionId = 'test-session' as SessionId;
+      const timestamp = new Date().toISOString();
       const event = {
         type: 'response_complete',
         turn: 1,
+        stopReason: 'end_turn',
+        hasToolCalls: false,
+        toolCallCount: 0,
         tokenUsage: { inputTokens: 100, outputTokens: 50 },
-      };
+        sessionId,
+        timestamp,
+      } as unknown as TronEvent;
 
       (deps.getActiveSession as ReturnType<typeof vi.fn>).mockReturnValue(undefined);
 
@@ -298,7 +321,16 @@ describe('TurnEventHandler', () => {
 
     it('should do nothing when no token usage in event', () => {
       const sessionId = 'test-session' as SessionId;
-      const event = { type: 'response_complete', turn: 1 };
+      const timestamp = new Date().toISOString();
+      const event = {
+        type: 'response_complete',
+        turn: 1,
+        stopReason: 'end_turn',
+        hasToolCalls: false,
+        toolCallCount: 0,
+        sessionId,
+        timestamp,
+      } as unknown as TronEvent;
       const mockActive = createMockActiveSession();
 
       (deps.getActiveSession as ReturnType<typeof vi.fn>).mockReturnValue(mockActive);

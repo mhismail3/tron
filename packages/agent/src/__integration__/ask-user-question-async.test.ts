@@ -40,7 +40,7 @@ describe('AskUserQuestion Tool (Async Model)', () => {
       };
 
       const startTime = Date.now();
-      const result = await tool.execute(params as Record<string, unknown>, {
+      const result = await tool.execute(params as unknown as Record<string, unknown>, {
         toolCallId: 'call_123',
         sessionId: 'sess_456',
       });
@@ -71,7 +71,7 @@ describe('AskUserQuestion Tool (Async Model)', () => {
         ],
       };
 
-      const result = await noDelegateTool.execute(params as Record<string, unknown>, {
+      const result = await noDelegateTool.execute(params as unknown as Record<string, unknown>, {
         toolCallId: 'call_123',
         sessionId: 'sess_456',
       });
@@ -104,7 +104,7 @@ describe('AskUserQuestion Tool (Async Model)', () => {
         ],
       };
 
-      const result = await tool.execute(params as Record<string, unknown>, {
+      const result = await tool.execute(params as unknown as Record<string, unknown>, {
         toolCallId: 'call_123',
         sessionId: 'sess_456',
       });
@@ -127,7 +127,7 @@ describe('AskUserQuestion Tool (Async Model)', () => {
         ],
       };
 
-      const result = await tool.execute(params as Record<string, unknown>, {
+      const result = await tool.execute(params as unknown as Record<string, unknown>, {
         toolCallId: 'call_123',
         sessionId: 'sess_456',
       });
@@ -146,7 +146,7 @@ describe('AskUserQuestion Tool (Async Model)', () => {
         ],
       };
 
-      const result = await tool.execute(params as Record<string, unknown>, {
+      const result = await tool.execute(params as unknown as Record<string, unknown>, {
         toolCallId: 'call_123',
         sessionId: 'sess_456',
       });
@@ -168,7 +168,7 @@ describe('AskUserQuestion Tool (Async Model)', () => {
         ],
       };
 
-      const result = await tool.execute(params as Record<string, unknown>, {
+      const result = await tool.execute(params as unknown as Record<string, unknown>, {
         sessionId: 'sess_456',
         // No toolCallId
       });
@@ -189,7 +189,7 @@ describe('AskUserQuestion Tool (Async Model)', () => {
         ],
       };
 
-      const result = await tool.execute(params as Record<string, unknown>, {
+      const result = await tool.execute(params as unknown as Record<string, unknown>, {
         toolCallId: 'call_123',
         // No sessionId
       });
@@ -212,7 +212,7 @@ describe('AskUserQuestion Tool (Async Model)', () => {
         ],
       };
 
-      const result = await tool.execute(params as Record<string, unknown>, {
+      const result = await tool.execute(params as unknown as Record<string, unknown>, {
         toolCallId: 'call_123',
         sessionId: 'sess_456',
       });
@@ -228,7 +228,7 @@ describe('AskUserQuestion Tool (Async Model)', () => {
         ],
       };
 
-      const result = await tool.execute(params as Record<string, unknown>, {
+      const result = await tool.execute(params as unknown as Record<string, unknown>, {
         toolCallId: 'call_123',
         sessionId: 'sess_456',
       });
@@ -245,7 +245,7 @@ describe('AskUserQuestion Tool (Async Model)', () => {
         ],
       };
 
-      const result = await tool.execute(params as Record<string, unknown>, {
+      const result = await tool.execute(params as unknown as Record<string, unknown>, {
         toolCallId: 'call_123',
         sessionId: 'sess_456',
       });
@@ -270,7 +270,7 @@ describe('AskUserQuestion Tool (Async Model)', () => {
         context: 'Choosing implementation strategy for the new feature',
       };
 
-      const result = await tool.execute(params as Record<string, unknown>, {
+      const result = await tool.execute(params as unknown as Record<string, unknown>, {
         toolCallId: 'call_123',
         sessionId: 'sess_456',
       });
@@ -295,7 +295,7 @@ describe('AskUserQuestion Tool (Async Model)', () => {
         ],
       };
 
-      const result = await tool.execute(params as Record<string, unknown>, {
+      const result = await tool.execute(params as unknown as Record<string, unknown>, {
         toolCallId: 'call_123',
         sessionId: 'sess_456',
       });
@@ -323,7 +323,7 @@ describe('AskUserQuestion Tool (Async Model)', () => {
         ],
       };
 
-      const result = await tool.execute(params as Record<string, unknown>, {
+      const result = await tool.execute(params as unknown as Record<string, unknown>, {
         toolCallId: 'call_123',
         sessionId: 'sess_456',
       });
@@ -348,7 +348,7 @@ describe('AskUserQuestion Tool (Async Model)', () => {
         ],
       };
 
-      const result = await tool.execute(params as Record<string, unknown>, {
+      const result = await tool.execute(params as unknown as Record<string, unknown>, {
         toolCallId: 'call_123',
         sessionId: 'sess_456',
       });
@@ -373,7 +373,7 @@ describe('AskUserQuestion Tool (Async Model)', () => {
       };
 
       // Execute should return immediately
-      const result = await tool.execute(params as Record<string, unknown>, {
+      const result = await tool.execute(params as unknown as Record<string, unknown>, {
         toolCallId: 'call_123',
         sessionId: 'sess_456',
       });

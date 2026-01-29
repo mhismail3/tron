@@ -21,6 +21,7 @@ const createTestOrchestrator = async (testDir: string) => {
 
   const orchestrator = new EventStoreOrchestrator({
     defaultModel: 'claude-sonnet-4-20250514',
+    defaultProvider: 'anthropic',
     eventStoreDbPath: path.join(testDir, 'events.db'),
     eventStore, // Inject the test store
   });
@@ -190,8 +191,10 @@ describe('Orchestrator Compaction', () => {
       expect(preview).toBeDefined();
       expect(preview.tokensBefore).toBeGreaterThan(0);
       expect(preview.tokensAfter).toBeLessThan(preview.tokensBefore);
-      expect(preview.compressionRatio).toBeGreaterThan(0);
-      expect(preview.compressionRatio).toBeLessThan(1);
+      expect(preview.compressionRatio).toBeCloseTo(
+        preview.tokensAfter / preview.tokensBefore,
+        5
+      );
       expect(preview.summary).toBeDefined();
     });
 

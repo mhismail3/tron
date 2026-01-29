@@ -13,7 +13,7 @@ import {
   handleTreeGetAncestors,
 } from '../tree.handler.js';
 import type { RpcRequest } from '../../types.js';
-import type { RpcContext } from '../handler.js';
+import type { RpcContext } from '../../handler.js';
 import { MethodRegistry } from '../../registry.js';
 
 describe('Tree Handlers', () => {

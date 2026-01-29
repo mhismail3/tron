@@ -178,7 +178,8 @@ describe('Provider Switching - Tool ID Remapping', () => {
       const toolUse = assistantEvents[0].payload.content.find(
         (c: { type: string }) => c.type === 'tool_use'
       );
-      expect(toolUse.id).toBe(anthropicToolId);
+      expect(toolUse).toBeDefined();
+      expect(toolUse?.type === 'tool_use' && toolUse.id).toBe(anthropicToolId);
 
       // Find the tool result
       const resultEvents = ancestors.filter(e => e.type === 'tool.result');

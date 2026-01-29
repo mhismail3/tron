@@ -6,7 +6,7 @@
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { createAgentAdapter } from '../agent.adapter.js';
-import type { EventStoreOrchestrator } from '../../../../orchestrator/event-store-orchestrator.js';
+import type { EventStoreOrchestrator } from '../../../../orchestrator/persistence/event-store-orchestrator.js';
 
 // Use vi.hoisted to define mocks before they're hoisted
 const { mockLogger } = vi.hoisted(() => ({
@@ -118,7 +118,7 @@ describe('AgentAdapter', () => {
       await adapter.prompt({
         sessionId: 'sess-123',
         prompt: 'Test prompt',
-        skills: [{ name: 'test-skill' }],
+        skills: [{ name: 'test-skill', source: 'project' }],
         reasoningLevel: 'high',
       });
 
@@ -126,7 +126,7 @@ describe('AgentAdapter', () => {
         expect.objectContaining({
           sessionId: 'sess-123',
           prompt: 'Test prompt',
-          skills: [{ name: 'test-skill' }],
+          skills: [{ name: 'test-skill', source: 'project' }],
           reasoningLevel: 'high',
           skillLoader: expect.any(Function),
         }),
@@ -219,7 +219,7 @@ describe('AgentAdapter', () => {
     });
 
     it('should return idle state when no active session', async () => {
-      vi.mocked(mockOrchestrator.getActiveSession!).mockReturnValue(null);
+      vi.mocked(mockOrchestrator.getActiveSession!).mockReturnValue(undefined);
       vi.mocked((mockOrchestrator as any).sessions.getSession).mockResolvedValue({
         model: 'claude-sonnet-4-20250514',
         messageCount: 5,
@@ -261,7 +261,7 @@ describe('AgentAdapter', () => {
     });
 
     it('should detect interrupted session from persisted events', async () => {
-      vi.mocked(mockOrchestrator.getActiveSession!).mockReturnValue(null);
+      vi.mocked(mockOrchestrator.getActiveSession!).mockReturnValue(undefined);
       vi.mocked((mockOrchestrator as any).sessions.getSession).mockResolvedValue({
         model: 'claude-sonnet-4-20250514',
         messageCount: 5,
@@ -279,7 +279,7 @@ describe('AgentAdapter', () => {
     });
 
     it('should return unknown model when session not found', async () => {
-      vi.mocked(mockOrchestrator.getActiveSession!).mockReturnValue(null);
+      vi.mocked(mockOrchestrator.getActiveSession!).mockReturnValue(undefined);
       vi.mocked((mockOrchestrator as any).sessions.getSession).mockResolvedValue(null);
 
       const adapter = createAgentAdapter({

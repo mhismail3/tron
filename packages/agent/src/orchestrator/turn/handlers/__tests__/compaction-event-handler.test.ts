@@ -9,6 +9,7 @@ import {
   type CompactionEventHandlerDeps,
 } from '../compaction-event-handler.js';
 import type { SessionId } from '../../../../events/types.js';
+import type { CompactionCompleteEvent } from '../../../../types/events.js';
 
 // =============================================================================
 // Test Helpers
@@ -37,16 +38,18 @@ describe('CompactionEventHandler', () => {
   describe('handleCompactionComplete', () => {
     it('should emit agent.compaction event', () => {
       const sessionId = 'test-session' as SessionId;
-      const event = {
+      const timestamp = new Date().toISOString();
+      const event: CompactionCompleteEvent = {
         type: 'compaction_complete',
+        sessionId,
+        timestamp,
         tokensBefore: 100000,
         tokensAfter: 50000,
         compressionRatio: 0.5,
-        reason: 'auto',
+        reason: 'manual',
         success: true,
         summary: 'Compacted context',
       };
-      const timestamp = new Date().toISOString();
 
       handler.handleCompactionComplete(sessionId, event, timestamp);
 
@@ -58,7 +61,7 @@ describe('CompactionEventHandler', () => {
           tokensBefore: 100000,
           tokensAfter: 50000,
           compressionRatio: 0.5,
-          reason: 'auto',
+          reason: 'manual',
           summary: 'Compacted context',
         },
       });
@@ -66,8 +69,11 @@ describe('CompactionEventHandler', () => {
 
     it('should persist compact.boundary event on success', () => {
       const sessionId = 'test-session' as SessionId;
-      const event = {
+      const timestamp = new Date().toISOString();
+      const event: CompactionCompleteEvent = {
         type: 'compaction_complete',
+        sessionId,
+        timestamp,
         tokensBefore: 100000,
         tokensAfter: 50000,
         compressionRatio: 0.5,
@@ -75,7 +81,6 @@ describe('CompactionEventHandler', () => {
         success: true,
         summary: 'User-requested compaction',
       };
-      const timestamp = new Date().toISOString();
 
       handler.handleCompactionComplete(sessionId, event, timestamp);
 
@@ -94,13 +99,16 @@ describe('CompactionEventHandler', () => {
 
     it('should not persist event on failure', () => {
       const sessionId = 'test-session' as SessionId;
-      const event = {
+      const timestamp = new Date().toISOString();
+      const event: CompactionCompleteEvent = {
         type: 'compaction_complete',
+        sessionId,
+        timestamp,
         tokensBefore: 100000,
         tokensAfter: 100000,
+        compressionRatio: 1.0,
         success: false,
       };
-      const timestamp = new Date().toISOString();
 
       handler.handleCompactionComplete(sessionId, event, timestamp);
 
@@ -112,13 +120,16 @@ describe('CompactionEventHandler', () => {
 
     it('should default reason to auto', () => {
       const sessionId = 'test-session' as SessionId;
-      const event = {
+      const timestamp = new Date().toISOString();
+      const event: CompactionCompleteEvent = {
         type: 'compaction_complete',
+        sessionId,
+        timestamp,
         tokensBefore: 100000,
         tokensAfter: 50000,
+        compressionRatio: 0.5,
         success: true,
       };
-      const timestamp = new Date().toISOString();
 
       handler.handleCompactionComplete(sessionId, event, timestamp);
 
@@ -140,14 +151,18 @@ describe('CompactionEventHandler', () => {
       );
     });
 
-    it('should persist when success is undefined (default true)', () => {
+    it('should persist when success is true', () => {
       const sessionId = 'test-session' as SessionId;
-      const event = {
+      const timestamp = new Date().toISOString();
+      const event: CompactionCompleteEvent = {
         type: 'compaction_complete',
+        sessionId,
+        timestamp,
         tokensBefore: 100000,
         tokensAfter: 50000,
+        compressionRatio: 0.5,
+        success: true,
       };
-      const timestamp = new Date().toISOString();
 
       handler.handleCompactionComplete(sessionId, event, timestamp);
 

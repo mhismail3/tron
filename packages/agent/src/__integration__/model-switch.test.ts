@@ -58,8 +58,9 @@ describe('Model Switch', () => {
 
       expect(modelSwitchEvent.parentId).toBe(userMsgEvent.id);
       expect(modelSwitchEvent.type).toBe('config.model_switch');
-      expect(modelSwitchEvent.payload.previousModel).toBe('claude-haiku-4-5-20251001');
-      expect(modelSwitchEvent.payload.newModel).toBe('claude-sonnet-4-5-20250929');
+      const switchPayload = modelSwitchEvent.payload as { previousModel: string; newModel: string };
+      expect(switchPayload.previousModel).toBe('claude-haiku-4-5-20251001');
+      expect(switchPayload.newModel).toBe('claude-sonnet-4-5-20250929');
     });
 
     it('should not create branch when model is switched', async () => {

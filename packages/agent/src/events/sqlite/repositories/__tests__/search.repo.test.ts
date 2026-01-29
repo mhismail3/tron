@@ -53,7 +53,7 @@ describe('SearchRepository', () => {
         type: 'message.user' as const,
         sequence: 0,
         timestamp: new Date().toISOString(),
-        payload: { content: 'Hello world this is a test message' },
+        payload: { content: 'Hello world this is a test message', turn: 0 },
       };
 
       await eventRepo.insert(event);
@@ -74,9 +74,13 @@ describe('SearchRepository', () => {
         timestamp: new Date().toISOString(),
         payload: {
           content: [
-            { type: 'text', text: 'First block ' },
-            { type: 'text', text: 'Second block' },
+            { type: 'text' as const, text: 'First block ' },
+            { type: 'text' as const, text: 'Second block' },
           ],
+          turn: 1,
+          tokenUsage: { inputTokens: 10, outputTokens: 20 },
+          stopReason: 'end_turn' as const,
+          model: 'claude-3-5-sonnet-20241022',
         },
       };
 
@@ -96,7 +100,7 @@ describe('SearchRepository', () => {
         type: 'tool.call' as const,
         sequence: 2,
         timestamp: new Date().toISOString(),
-        payload: { toolName: 'bash', content: 'ls -la' },
+        payload: { toolCallId: 'tc_1', name: 'bash', arguments: { command: 'ls -la' }, turn: 1 },
       };
 
       await eventRepo.insert(event);
@@ -110,28 +114,27 @@ describe('SearchRepository', () => {
 
   describe('indexBatch', () => {
     it('should index multiple events', async () => {
-      const events = [
-        {
-          id: EventId('evt_batch_1'),
-          sessionId: testSessionId,
-          workspaceId: testWorkspaceId,
-          parentId: null,
-          type: 'message.user' as const,
-          sequence: 0,
-          timestamp: new Date().toISOString(),
-          payload: { content: 'First message' },
-        },
-        {
-          id: EventId('evt_batch_2'),
-          sessionId: testSessionId,
-          workspaceId: testWorkspaceId,
-          parentId: EventId('evt_batch_1'),
-          type: 'message.assistant' as const,
-          sequence: 1,
-          timestamp: new Date().toISOString(),
-          payload: { content: 'Second message' },
-        },
-      ];
+      const evt1 = {
+        id: EventId('evt_batch_1'),
+        sessionId: testSessionId,
+        workspaceId: testWorkspaceId,
+        parentId: null,
+        type: 'message.user' as const,
+        sequence: 0,
+        timestamp: new Date().toISOString(),
+        payload: { content: 'First message', turn: 0 },
+      };
+      const evt2 = {
+        id: EventId('evt_batch_2'),
+        sessionId: testSessionId,
+        workspaceId: testWorkspaceId,
+        parentId: EventId('evt_batch_1'),
+        type: 'message.assistant' as const,
+        sequence: 1,
+        timestamp: new Date().toISOString(),
+        payload: { content: [{ type: 'text' as const, text: 'Second message' }], turn: 1, tokenUsage: { inputTokens: 10, outputTokens: 20 }, stopReason: 'end_turn' as const, model: 'claude-3-5-sonnet-20241022' },
+      };
+      const events = [evt1, evt2];
 
       // FTS triggers auto-index on insert
       await eventRepo.insertBatch(events);
@@ -147,38 +150,37 @@ describe('SearchRepository', () => {
 
   describe('search', () => {
     beforeEach(async () => {
-      const events = [
-        {
-          id: EventId('evt_s1'),
-          sessionId: testSessionId,
-          workspaceId: testWorkspaceId,
-          parentId: null,
-          type: 'message.user' as const,
-          sequence: 0,
-          timestamp: new Date().toISOString(),
-          payload: { content: 'Hello world test query' },
-        },
-        {
-          id: EventId('evt_s2'),
-          sessionId: testSessionId,
-          workspaceId: testWorkspaceId,
-          parentId: EventId('evt_s1'),
-          type: 'message.assistant' as const,
-          sequence: 1,
-          timestamp: new Date().toISOString(),
-          payload: { content: 'Response with different content' },
-        },
-        {
-          id: EventId('evt_s3'),
-          sessionId: testSessionId,
-          workspaceId: testWorkspaceId,
-          parentId: EventId('evt_s2'),
-          type: 'tool.call' as const,
-          sequence: 2,
-          timestamp: new Date().toISOString(),
-          payload: { toolName: 'read', content: 'Reading file test' },
-        },
-      ];
+      const evt1 = {
+        id: EventId('evt_s1'),
+        sessionId: testSessionId,
+        workspaceId: testWorkspaceId,
+        parentId: null,
+        type: 'message.user' as const,
+        sequence: 0,
+        timestamp: new Date().toISOString(),
+        payload: { content: 'Hello world test query', turn: 0 },
+      };
+      const evt2 = {
+        id: EventId('evt_s2'),
+        sessionId: testSessionId,
+        workspaceId: testWorkspaceId,
+        parentId: EventId('evt_s1'),
+        type: 'message.assistant' as const,
+        sequence: 1,
+        timestamp: new Date().toISOString(),
+        payload: { content: [{ type: 'text' as const, text: 'Response with different content' }], turn: 1, tokenUsage: { inputTokens: 10, outputTokens: 20 }, stopReason: 'end_turn' as const, model: 'claude-3-5-sonnet-20241022' },
+      };
+      const evt3 = {
+        id: EventId('evt_s3'),
+        sessionId: testSessionId,
+        workspaceId: testWorkspaceId,
+        parentId: EventId('evt_s2'),
+        type: 'tool.call' as const,
+        sequence: 2,
+        timestamp: new Date().toISOString(),
+        payload: { toolCallId: 'tc_1', name: 'read', arguments: { path: 'test' }, turn: 1 },
+      };
+      const events = [evt1, evt2, evt3];
 
       await eventRepo.insertBatch(events);
       searchRepo.indexBatch(events);
@@ -242,7 +244,7 @@ describe('SearchRepository', () => {
         type: 'message.user' as const,
         sequence: 0,
         timestamp: new Date().toISOString(),
-        payload: { content: 'unique search term here' },
+        payload: { content: 'unique search term here', turn: 0 },
       };
 
       await eventRepo.insert(event);
@@ -264,7 +266,7 @@ describe('SearchRepository', () => {
         type: 'message.user' as const,
         sequence: 0,
         timestamp: new Date().toISOString(),
-        payload: { content: 'workspace specific term' },
+        payload: { content: 'workspace specific term', turn: 0 },
       };
 
       await eventRepo.insert(event);
@@ -285,7 +287,7 @@ describe('SearchRepository', () => {
         type: 'tool.call' as const,
         sequence: 0,
         timestamp: new Date().toISOString(),
-        payload: { toolName: 'grep', content: 'searching for pattern' },
+        payload: { toolCallId: 'tc_1', name: 'grep', arguments: { pattern: 'test' }, turn: 1 },
       };
 
       await eventRepo.insert(event);
@@ -308,7 +310,7 @@ describe('SearchRepository', () => {
         type: 'message.user' as const,
         sequence: 0,
         timestamp: new Date().toISOString(),
-        payload: { content: 'to be removed' },
+        payload: { content: 'to be removed', turn: 0 },
       };
 
       await eventRepo.insert(event);
@@ -328,28 +330,27 @@ describe('SearchRepository', () => {
 
   describe('removeBySession', () => {
     it('should remove all events for session', async () => {
-      const events = [
-        {
-          id: EventId('evt_rs1'),
-          sessionId: testSessionId,
-          workspaceId: testWorkspaceId,
-          parentId: null,
-          type: 'message.user' as const,
-          sequence: 0,
-          timestamp: new Date().toISOString(),
-          payload: { content: 'message 1' },
-        },
-        {
-          id: EventId('evt_rs2'),
-          sessionId: testSessionId,
-          workspaceId: testWorkspaceId,
-          parentId: EventId('evt_rs1'),
-          type: 'message.assistant' as const,
-          sequence: 1,
-          timestamp: new Date().toISOString(),
-          payload: { content: 'message 2' },
-        },
-      ];
+      const evt1 = {
+        id: EventId('evt_rs1'),
+        sessionId: testSessionId,
+        workspaceId: testWorkspaceId,
+        parentId: null,
+        type: 'message.user' as const,
+        sequence: 0,
+        timestamp: new Date().toISOString(),
+        payload: { content: 'message 1', turn: 0 },
+      };
+      const evt2 = {
+        id: EventId('evt_rs2'),
+        sessionId: testSessionId,
+        workspaceId: testWorkspaceId,
+        parentId: EventId('evt_rs1'),
+        type: 'message.assistant' as const,
+        sequence: 1,
+        timestamp: new Date().toISOString(),
+        payload: { content: [{ type: 'text' as const, text: 'message 2' }], turn: 1, tokenUsage: { inputTokens: 10, outputTokens: 20 }, stopReason: 'end_turn' as const, model: 'claude-3-5-sonnet-20241022' },
+      };
+      const events = [evt1, evt2];
 
       // FTS triggers auto-index on insert
       await eventRepo.insertBatch(events);
@@ -376,7 +377,7 @@ describe('SearchRepository', () => {
         type: 'message.user' as const,
         sequence: 0,
         timestamp: new Date().toISOString(),
-        payload: { content: 'indexed content' },
+        payload: { content: 'indexed content', turn: 0 },
       };
 
       // FTS triggers auto-index on insert
@@ -392,28 +393,27 @@ describe('SearchRepository', () => {
     });
 
     it('should return count of indexed events', async () => {
-      const events = [
-        {
-          id: EventId('evt_c1'),
-          sessionId: testSessionId,
-          workspaceId: testWorkspaceId,
-          parentId: null,
-          type: 'message.user' as const,
-          sequence: 0,
-          timestamp: new Date().toISOString(),
-          payload: { content: 'count 1' },
-        },
-        {
-          id: EventId('evt_c2'),
-          sessionId: testSessionId,
-          workspaceId: testWorkspaceId,
-          parentId: EventId('evt_c1'),
-          type: 'message.assistant' as const,
-          sequence: 1,
-          timestamp: new Date().toISOString(),
-          payload: { content: 'count 2' },
-        },
-      ];
+      const evt1 = {
+        id: EventId('evt_c1'),
+        sessionId: testSessionId,
+        workspaceId: testWorkspaceId,
+        parentId: null,
+        type: 'message.user' as const,
+        sequence: 0,
+        timestamp: new Date().toISOString(),
+        payload: { content: 'count 1', turn: 0 },
+      };
+      const evt2 = {
+        id: EventId('evt_c2'),
+        sessionId: testSessionId,
+        workspaceId: testWorkspaceId,
+        parentId: EventId('evt_c1'),
+        type: 'message.assistant' as const,
+        sequence: 1,
+        timestamp: new Date().toISOString(),
+        payload: { content: [{ type: 'text' as const, text: 'count 2' }], turn: 1, tokenUsage: { inputTokens: 10, outputTokens: 20 }, stopReason: 'end_turn' as const, model: 'claude-3-5-sonnet-20241022' },
+      };
+      const events = [evt1, evt2];
 
       // FTS triggers auto-index on insert
       await eventRepo.insertBatch(events);
@@ -424,28 +424,27 @@ describe('SearchRepository', () => {
 
   describe('rebuildSessionIndex', () => {
     it('should rebuild index from events table', async () => {
-      const events = [
-        {
-          id: EventId('evt_rb1'),
-          sessionId: testSessionId,
-          workspaceId: testWorkspaceId,
-          parentId: null,
-          type: 'message.user' as const,
-          sequence: 0,
-          timestamp: new Date().toISOString(),
-          payload: { content: 'rebuild test 1' },
-        },
-        {
-          id: EventId('evt_rb2'),
-          sessionId: testSessionId,
-          workspaceId: testWorkspaceId,
-          parentId: EventId('evt_rb1'),
-          type: 'message.assistant' as const,
-          sequence: 1,
-          timestamp: new Date().toISOString(),
-          payload: { content: 'rebuild test 2' },
-        },
-      ];
+      const evt1 = {
+        id: EventId('evt_rb1'),
+        sessionId: testSessionId,
+        workspaceId: testWorkspaceId,
+        parentId: null,
+        type: 'message.user' as const,
+        sequence: 0,
+        timestamp: new Date().toISOString(),
+        payload: { content: 'rebuild test 1', turn: 0 },
+      };
+      const evt2 = {
+        id: EventId('evt_rb2'),
+        sessionId: testSessionId,
+        workspaceId: testWorkspaceId,
+        parentId: EventId('evt_rb1'),
+        type: 'message.assistant' as const,
+        sequence: 1,
+        timestamp: new Date().toISOString(),
+        payload: { content: [{ type: 'text' as const, text: 'rebuild test 2' }], turn: 1, tokenUsage: { inputTokens: 10, outputTokens: 20 }, stopReason: 'end_turn' as const, model: 'claude-3-5-sonnet-20241022' },
+      };
+      const events = [evt1, evt2];
 
       // Insert events - they are now auto-indexed via FTS triggers
       await eventRepo.insertBatch(events);
@@ -471,7 +470,7 @@ describe('SearchRepository', () => {
         type: 'message.user' as const,
         sequence: 0,
         timestamp: new Date().toISOString(),
-        payload: { content: 'original content' },
+        payload: { content: 'original content', turn: 0 },
       };
 
       // Insert event - now auto-indexed via FTS trigger

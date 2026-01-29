@@ -297,10 +297,10 @@ describe('Fork Integration - Basic Operations', () => {
       const forkEvents = await eventStore.getEventsBySession(forkResult.session.id);
 
       const originalAssistant = originalEvents.find(
-        e => e.type === 'message.assistant' && e.payload.content[0].text === 'Original path'
+        e => e.type === 'message.assistant' && (e.payload as { content: Array<{ type: string; text?: string }> }).content[0]?.text === 'Original path'
       );
       const forkAssistant = forkEvents.find(
-        e => e.type === 'message.assistant' && e.payload.content[0].text === 'Forked path'
+        e => e.type === 'message.assistant' && (e.payload as { content: Array<{ type: string; text?: string }> }).content[0]?.text === 'Forked path'
       );
 
       expect(originalAssistant).toBeDefined();

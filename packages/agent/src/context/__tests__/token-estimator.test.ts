@@ -251,7 +251,7 @@ describe('estimateMessageTokens', () => {
         role: 'user',
         content: [
           { type: 'text', text: 'What is this?' },
-          { type: 'image', source: { type: 'url', url: 'https://example.com/img.png' } },
+          { type: 'image', data: 'a'.repeat(10000), mimeType: 'image/png' },
         ],
       };
       // role (4) + overhead (10) + text (13) + image (1500 * 4 = 6000 chars)
@@ -279,7 +279,7 @@ describe('estimateMessageTokens', () => {
             type: 'tool_use',
             id: 'tool_abc',
             name: 'Read',
-            input: { file_path: '/test.ts' },
+            arguments: { file_path: '/test.ts' },
           },
         ],
       };
@@ -381,7 +381,7 @@ describe('estimateSystemTokens', () => {
       {
         name: 'Read',
         description: 'Read a file',
-        inputSchema: { type: 'object', properties: { path: { type: 'string' } } },
+        parameters: { type: 'object', properties: { path: { type: 'string' } } },
       },
     ];
     const tokens = estimateSystemTokens(prompt, tools);
@@ -395,9 +395,9 @@ describe('estimateSystemTokens', () => {
   it('handles multiple tools', () => {
     const prompt = 'System prompt';
     const tools: Tool[] = [
-      { name: 'Read', description: 'Read file', inputSchema: {} },
-      { name: 'Write', description: 'Write file', inputSchema: {} },
-      { name: 'Edit', description: 'Edit file', inputSchema: {} },
+      { name: 'Read', description: 'Read file', parameters: { type: 'object' } },
+      { name: 'Write', description: 'Write file', parameters: { type: 'object' } },
+      { name: 'Edit', description: 'Edit file', parameters: { type: 'object' } },
     ];
     const tokens = estimateSystemTokens(prompt, tools);
     expect(tokens).toBeGreaterThan(Math.ceil(prompt.length / 4));

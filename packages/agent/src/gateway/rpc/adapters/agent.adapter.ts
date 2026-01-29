@@ -179,15 +179,12 @@ export function createAgentAdapter(deps: AdapterDependencies): AgentManagerAdapt
         },
         model: session?.model ?? 'unknown',
         tools: [],
-        // Include current turn content for resume support (only when agent is running)
-        // Note: if isRunning is true, active is guaranteed to exist (non-null assertion safe)
         currentTurnText: isRunning
           ? active!.sessionContext.getAccumulatedContent().text
           : undefined,
         currentTurnToolCalls: isRunning
           ? active!.sessionContext.getAccumulatedContent().toolCalls
           : undefined,
-        // Flag indicating session was interrupted
         wasInterrupted,
       };
     },

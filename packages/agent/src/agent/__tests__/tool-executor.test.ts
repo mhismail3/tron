@@ -6,8 +6,8 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { AgentToolExecutor, createToolExecutor } from '../tool-executor.js';
 import { createEventEmitter } from '../event-emitter.js';
 import { HookEngine } from '../../hooks/engine.js';
-import type { TronTool } from '../types/index.js';
-import type { ContextManager } from '../context/context-manager.js';
+import type { TronTool } from '../../types/tools.js';
+import type { ContextManager } from '../../context/context-manager.js';
 
 describe('AgentToolExecutor', () => {
   let executor: AgentToolExecutor;
@@ -54,7 +54,7 @@ describe('AgentToolExecutor', () => {
       const tool: TronTool = {
         name: 'TestTool',
         description: 'Test tool',
-        parameters: {},
+        parameters: { type: 'object' },
         execute: vi.fn().mockResolvedValue({ content: 'result' }),
       };
       mockTools.set('TestTool', tool);
@@ -78,7 +78,7 @@ describe('AgentToolExecutor', () => {
       const tool: TronTool = {
         name: 'TestTool',
         description: 'Test tool',
-        parameters: {},
+        parameters: { type: 'object' },
         execute: vi.fn().mockResolvedValue({ content: 'Tool result' }),
       };
       mockTools.set('TestTool', tool);
@@ -109,7 +109,7 @@ describe('AgentToolExecutor', () => {
       const tool: TronTool = {
         name: 'ErrorTool',
         description: 'Tool that throws',
-        parameters: {},
+        parameters: { type: 'object' },
         execute: vi.fn().mockRejectedValue(new Error('Tool failed')),
       };
       mockTools.set('ErrorTool', tool);
@@ -131,7 +131,7 @@ describe('AgentToolExecutor', () => {
       const tool: TronTool = {
         name: 'TestTool',
         description: 'Test tool',
-        parameters: {},
+        parameters: { type: 'object' },
         execute: vi.fn().mockResolvedValue({ content: 'result' }),
       };
       mockTools.set('TestTool', tool);
@@ -162,7 +162,7 @@ describe('AgentToolExecutor', () => {
       const tool: TronTool = {
         name: 'TestTool',
         description: 'Test tool',
-        parameters: {},
+        parameters: { type: 'object' },
         execute: executeFn,
       };
       mockTools.set('TestTool', tool);
@@ -187,7 +187,7 @@ describe('AgentToolExecutor', () => {
       const tool: TronTool = {
         name: 'NewTool',
         description: 'Tool with new signature',
-        parameters: {},
+        parameters: { type: 'object' },
         execute: executeFn,
       };
       mockTools.set('NewTool', tool);
@@ -206,7 +206,7 @@ describe('AgentToolExecutor', () => {
       const tool: TronTool = {
         name: 'StopTool',
         description: 'Tool that stops turn',
-        parameters: {},
+        parameters: { type: 'object' },
         execute: vi.fn().mockResolvedValue({
           content: 'Waiting for user input',
           stopTurn: true,
@@ -235,7 +235,7 @@ describe('AgentToolExecutor', () => {
       const tool: TronTool = {
         name: 'LargeTool',
         description: 'Tool with large output',
-        parameters: {},
+        parameters: { type: 'object' },
         execute: vi.fn().mockResolvedValue({ content: 'x'.repeat(10000) }),
       };
       mockTools.set('LargeTool', tool);
@@ -253,7 +253,7 @@ describe('AgentToolExecutor', () => {
       const tool: TronTool = {
         name: 'ImageTool',
         description: 'Tool with image output',
-        parameters: {},
+        parameters: { type: 'object' },
         execute: vi.fn().mockResolvedValue({
           content: [
             { type: 'text', text: 'Here is an image:' },
@@ -286,7 +286,7 @@ describe('AgentToolExecutor', () => {
       const tool: TronTool = {
         name: 'TestTool',
         description: 'Test tool',
-        parameters: {},
+        parameters: { type: 'object' },
         execute: vi.fn().mockResolvedValue({ content: 'result' }),
       };
       mockTools.set('TestTool', tool);
@@ -316,7 +316,7 @@ describe('AgentToolExecutor', () => {
       const tool: TronTool = {
         name: 'TestTool',
         description: 'Test tool',
-        parameters: {},
+        parameters: { type: 'object' },
         execute: vi.fn().mockResolvedValue({ content: 'result' }),
       };
       mockTools.set('TestTool', tool);
@@ -346,7 +346,7 @@ describe('AgentToolExecutor', () => {
       const tool: TronTool = {
         name: 'TestTool',
         description: 'Test tool',
-        parameters: {},
+        parameters: { type: 'object' },
         execute: executeFn,
       };
       mockTools.set('TestTool', tool);
@@ -375,7 +375,7 @@ describe('AgentToolExecutor', () => {
       const tool: TronTool = {
         name: 'TestTool',
         description: 'Test tool',
-        parameters: {},
+        parameters: { type: 'object' },
         execute: vi.fn().mockResolvedValue({ content: 'result' }),
       };
       mockTools.set('TestTool', tool);
@@ -414,7 +414,7 @@ describe('AgentToolExecutor', () => {
       const tool: TronTool = {
         name: 'TestTool',
         description: 'Test tool',
-        parameters: {},
+        parameters: { type: 'object' },
         execute: vi.fn().mockResolvedValue({ content: 'result' }),
       };
       mockTools.set('TestTool', tool);
@@ -445,7 +445,7 @@ describe('AgentToolExecutor', () => {
       const tool: TronTool = {
         name: 'TestTool',
         description: 'Test tool',
-        parameters: {},
+        parameters: { type: 'object' },
         execute: vi.fn().mockResolvedValue({ content: 'result' }),
       };
       mockTools.set('TestTool', tool);

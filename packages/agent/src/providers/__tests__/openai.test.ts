@@ -512,7 +512,7 @@ describe('OpenAI Provider', () => {
         tools: [{
           name: 'read',
           description: 'Read a file',
-          parameters: { type: 'object', properties: { path: { type: 'string' } }, required: ['path'] },
+          parameters: { type: 'object' as const, properties: { path: { type: 'string' as const } }, required: ['path'] },
         }],
       };
 
@@ -637,7 +637,7 @@ describe('OpenAI Provider', () => {
         tools: [{
           name: 'read',
           description: 'Read a file',
-          parameters: { type: 'object', properties: { path: { type: 'string' } }, required: ['path'] },
+          parameters: { type: 'object' as const, properties: { path: { type: 'string' as const } }, required: ['path'] },
         }],
       };
 

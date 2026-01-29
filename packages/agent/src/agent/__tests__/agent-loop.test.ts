@@ -76,13 +76,13 @@ describe('Agent Loop', () => {
         },
         toolCallsExecuted: 0,
         tokenUsage: {
-          input: 100,
-          output: 50,
+          inputTokens: 100,
+          outputTokens: 50,
         },
       };
 
       expect(result.success).toBe(true);
-      expect(result.message.role).toBe('assistant');
+      expect(result.message?.role).toBe('assistant');
     });
 
     it('should define a turn with tool calls', () => {
@@ -102,18 +102,18 @@ describe('Agent Loop', () => {
           stopReason: 'tool_use',
         },
         toolCallsExecuted: 1,
-        tokenUsage: { input: 100, output: 80 },
+        tokenUsage: { inputTokens: 100, outputTokens: 80 },
       };
 
       expect(result.toolCallsExecuted).toBe(1);
-      expect(result.message.stopReason).toBe('tool_use');
+      expect(result.message?.stopReason).toBe('tool_use');
     });
 
     it('should define a failed turn', () => {
       const result: TurnResult = {
         success: false,
         error: 'Rate limit exceeded',
-        tokenUsage: { input: 0, output: 0 },
+        tokenUsage: { inputTokens: 0, outputTokens: 0 },
       };
 
       expect(result.success).toBe(false);

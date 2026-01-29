@@ -7,7 +7,7 @@
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { createSkillAdapter } from '../skill.adapter.js';
-import type { EventStoreOrchestrator } from '../../../../orchestrator/event-store-orchestrator.js';
+import type { EventStoreOrchestrator } from '../../../../orchestrator/persistence/event-store-orchestrator.js';
 
 // Mock the SkillRegistry
 vi.mock('../../../../skills/index.js', async () => {
@@ -145,7 +145,7 @@ describe('SkillAdapter', () => {
 
   describe('removeSkill', () => {
     it('should return error when session not active', async () => {
-      vi.mocked(mockOrchestrator.getActiveSession!).mockReturnValue(null);
+      vi.mocked(mockOrchestrator.getActiveSession!).mockReturnValue(undefined);
 
       const adapter = createSkillAdapter({
         orchestrator: mockOrchestrator as EventStoreOrchestrator,

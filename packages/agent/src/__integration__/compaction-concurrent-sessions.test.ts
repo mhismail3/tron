@@ -22,6 +22,7 @@ const createTestOrchestrator = async (testDir: string) => {
 
   const orchestrator = new EventStoreOrchestrator({
     defaultModel: 'claude-sonnet-4-20250514',
+    defaultProvider: 'anthropic',
     eventStoreDbPath: path.join(testDir, 'events.db'),
     eventStore,
   });
@@ -262,7 +263,7 @@ describe('Concurrent Session Compaction', () => {
       // All should return same values
       expect(preview1.tokensBefore).toBe(preview2.tokensBefore);
       expect(preview2.tokensBefore).toBe(preview3.tokensBefore);
-      expect(preview1.compressionRatio).toBe(preview2.compressionRatio);
+      expect(preview1.tokensAfter).toBe(preview2.tokensAfter);
     });
 
     it('parallel compaction requests on same session serialize correctly', async () => {

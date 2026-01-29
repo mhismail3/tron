@@ -214,7 +214,7 @@ describe('FindTool', () => {
       });
 
       expect(result.isError).toBeFalsy();
-      expect(result.details?.truncated).toBe(true);
+      expect((result.details as { truncated?: boolean })?.truncated).toBe(true);
     });
 
     it('should resolve relative paths against working directory', async () => {

@@ -2,8 +2,15 @@
  * @fileoverview Tests for BashTool interrupt/abort functionality
  */
 
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach } from 'vitest';
 import { BashTool } from '../system/bash.js';
+
+interface BashToolDetails {
+  command?: string;
+  exitCode?: number;
+  durationMs?: number;
+  interrupted?: boolean;
+}
 
 describe('BashTool Interrupt', () => {
   let bashTool: BashTool;
@@ -28,7 +35,7 @@ describe('BashTool Interrupt', () => {
 
       expect(result.isError).toBe(true);
       expect(result.content).toContain('interrupted');
-      expect(result.details?.interrupted).toBe(true);
+      expect((result.details as BashToolDetails)?.interrupted).toBe(true);
     });
 
     it('should terminate running command when signal is aborted', async () => {
@@ -50,7 +57,7 @@ describe('BashTool Interrupt', () => {
       // Should be interrupted, not timed out
       expect(result.isError).toBe(true);
       expect(result.content).toContain('interrupted');
-      expect(result.details?.interrupted).toBe(true);
+      expect((result.details as BashToolDetails)?.interrupted).toBe(true);
     });
 
     it('should capture partial output when interrupted', async () => {
@@ -70,10 +77,11 @@ describe('BashTool Interrupt', () => {
       const result = await resultPromise;
 
       expect(result.isError).toBe(true);
-      expect(result.details?.interrupted).toBe(true);
+      expect((result.details as BashToolDetails)?.interrupted).toBe(true);
       // Should have captured at least some output
-      if (result.content.includes('Partial output')) {
-        expect(result.content).toContain('line');
+      const content = typeof result.content === 'string' ? result.content : '';
+      if (content.includes('Partial output')) {
+        expect(content).toContain('line');
       }
     });
 

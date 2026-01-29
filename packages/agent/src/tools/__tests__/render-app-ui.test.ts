@@ -38,12 +38,13 @@ describe('RenderAppUITool', () => {
         ui: { $tag: 'VStack', $children: [{ $tag: 'Text', $children: 'Hello' }] },
       });
 
+      const details = result.details as { canvasId?: string };
       expect(result.isError).toBe(false);
       expect(result.stopTurn).toBe(true);
-      expect(result.details?.canvasId).toBeDefined();
-      expect(typeof result.details?.canvasId).toBe('string');
+      expect(details.canvasId).toBeDefined();
+      expect(typeof details.canvasId).toBe('string');
       // Should have format: canvas-vstack-<8-char-random>
-      expect(result.details?.canvasId).toMatch(/^canvas-vstack-[a-f0-9]{8}$/);
+      expect(details.canvasId).toMatch(/^canvas-vstack-[a-f0-9]{8}$/);
     });
 
     it('should use title for canvasId generation', async () => {
@@ -52,9 +53,10 @@ describe('RenderAppUITool', () => {
         ui: { $tag: 'VStack', $children: [] },
       });
 
-      expect(result.details?.canvasId).toBeDefined();
+      const details = result.details as { canvasId?: string };
+      expect(details.canvasId).toBeDefined();
       // Should have format: settings-panel-<8-char-random>
-      expect(result.details?.canvasId).toMatch(/^settings-panel-[a-f0-9]{8}$/);
+      expect(details.canvasId).toMatch(/^settings-panel-[a-f0-9]{8}$/);
     });
 
     it('should handle multi-word titles', async () => {
@@ -63,8 +65,9 @@ describe('RenderAppUITool', () => {
         ui: { $tag: 'VStack', $children: [] },
       });
 
+      const details = result.details as { canvasId?: string };
       // Should only use first 3 words: user-registration-form-<8-char-random>
-      expect(result.details?.canvasId).toMatch(/^user-registration-form-[a-f0-9]{8}$/);
+      expect(details.canvasId).toMatch(/^user-registration-form-[a-f0-9]{8}$/);
     });
 
     it('should strip special characters from title', async () => {
@@ -73,7 +76,8 @@ describe('RenderAppUITool', () => {
         ui: { $tag: 'VStack', $children: [] },
       });
 
-      expect(result.details?.canvasId).toMatch(/^my-app-[a-f0-9]{8}$/);
+      const details = result.details as { canvasId?: string };
+      expect(details.canvasId).toMatch(/^my-app-[a-f0-9]{8}$/);
     });
 
     it('should preserve provided canvasId', async () => {
@@ -82,7 +86,8 @@ describe('RenderAppUITool', () => {
         ui: { $tag: 'VStack', $children: [] },
       });
 
-      expect(result.details?.canvasId).toBe('my-custom-id');
+      const details = result.details as { canvasId?: string };
+      expect(details.canvasId).toBe('my-custom-id');
     });
 
     it('should generate unique IDs for each call', async () => {
@@ -93,7 +98,9 @@ describe('RenderAppUITool', () => {
         ui: { $tag: 'Text', $children: 'World' },
       });
 
-      expect(result1.details?.canvasId).not.toBe(result2.details?.canvasId);
+      const details1 = result1.details as { canvasId?: string };
+      const details2 = result2.details as { canvasId?: string };
+      expect(details1.canvasId).not.toBe(details2.canvasId);
     });
   });
 
@@ -104,9 +111,10 @@ describe('RenderAppUITool', () => {
         ui: { $tag: 'VStack', $children: [{ $tag: 'Text', $children: 'Hello' }] },
       });
 
+      const details = result.details as { canvasId?: string };
       expect(result.isError).toBe(false);
       expect(result.stopTurn).toBe(true);
-      expect(result.details?.canvasId).toBe('test-canvas');
+      expect(details.canvasId).toBe('test-canvas');
     });
 
     it('should return success for valid Button with required props', async () => {
@@ -148,9 +156,10 @@ describe('RenderAppUITool', () => {
         ui: { $tag: 'Button', $props: { label: 'OK', actionId: 'ok' } },
       });
 
+      const details = result.details as { needsRetry?: boolean };
       expect(result.isError).toBe(false);
       expect(result.stopTurn).toBe(true);
-      expect(result.details?.needsRetry).toBeUndefined();
+      expect(details.needsRetry).toBeUndefined();
     });
 
     it('should include component counts in summary', async () => {
@@ -174,8 +183,9 @@ describe('RenderAppUITool', () => {
       const state = { key: 'value' };
       const result = await tool.execute({ canvasId: 'test', ui, state });
 
-      expect(result.details?.ui).toEqual(ui);
-      expect(result.details?.state).toEqual(state);
+      const details = result.details as { ui?: unknown; state?: unknown };
+      expect(details.ui).toEqual(ui);
+      expect(details.state).toEqual(state);
     });
   });
 
@@ -186,9 +196,10 @@ describe('RenderAppUITool', () => {
         ui: { $tag: 'Button' }, // Missing label and actionId
       });
 
+      const details = result.details as { needsRetry?: boolean };
       expect(result.isError).toBe(false); // NOT an error - allow retry
       expect(result.stopTurn).toBe(false); // Allow turn to continue
-      expect(result.details?.needsRetry).toBe(true);
+      expect(details.needsRetry).toBe(true);
       expect(result.content).toContain('validation failed');
     });
 
@@ -246,7 +257,8 @@ describe('RenderAppUITool', () => {
         ui: { $tag: 'Button' },
       });
 
-      expect(result.details?.canvasId).toBe('canvas-123');
+      const details = result.details as { canvasId?: string };
+      expect(details.canvasId).toBe('canvas-123');
     });
 
     it('should prompt to use same canvasId for retry', async () => {
@@ -274,8 +286,9 @@ describe('RenderAppUITool', () => {
         title: 'My UI',
         ui: { $tag: 'Text', $children: 'Hello' },
       });
+      const details = result.details as { title?: string };
       expect(result.content).toContain('My UI');
-      expect(result.details?.title).toBe('My UI');
+      expect(details.title).toBe('My UI');
     });
 
     it('should include async marker in details', async () => {
@@ -283,7 +296,8 @@ describe('RenderAppUITool', () => {
         canvasId: 'test',
         ui: { $tag: 'Text', $children: 'Hello' },
       });
-      expect(result.details?.async).toBe(true);
+      const details = result.details as { async?: boolean };
+      expect(details.async).toBe(true);
     });
 
     it('should log warnings without failing', async () => {

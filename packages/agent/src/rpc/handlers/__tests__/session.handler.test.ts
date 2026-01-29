@@ -14,7 +14,7 @@ import {
   handleSessionFork,
 } from '../session.handler.js';
 import type { RpcRequest } from '../../types.js';
-import type { RpcContext } from '../handler.js';
+import type { RpcContext } from '../../handler.js';
 import { MethodRegistry } from '../../registry.js';
 
 describe('Session Handlers', () => {

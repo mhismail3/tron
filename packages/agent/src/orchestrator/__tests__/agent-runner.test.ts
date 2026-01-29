@@ -841,7 +841,7 @@ describe('AgentRunner Edge Cases', () => {
     const appendCall = (active.sessionContext.appendEvent as Mock).mock.calls.find(
       ([type]) => type === 'message.user'
     );
-    const content = appendCall[1].content;
+    const content = appendCall![1].content;
     const imageBlocks = content.filter((c: any) => c.type === 'image');
     expect(imageBlocks).toHaveLength(1);
   });

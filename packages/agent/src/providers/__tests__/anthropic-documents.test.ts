@@ -5,7 +5,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import type { DocumentContent, ImageContent, TextContent } from '../types/messages.js';
+import type { DocumentContent, ImageContent, TextContent } from '../../types/messages.js';
 
 // Define the expected Anthropic API format for documents
 interface AnthropicDocumentBlock {

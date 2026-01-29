@@ -7,7 +7,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { TronAgent } from '../tron-agent.js';
 import type { AgentConfig, TurnResult } from '../types.js';
-import type { TronTool, TronToolResult, TronEvent } from '../types/index.js';
+import type { TronTool, TronToolResult, TronEvent } from '../../types/index.js';
 
 // Mock the provider factory - factory creates inline mock
 vi.mock('../../providers/index.js', async (importOriginal) => {

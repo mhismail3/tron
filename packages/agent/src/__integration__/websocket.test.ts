@@ -25,20 +25,25 @@ vi.mock('ws', () => {
 
 // Mock RpcContext
 const mockContext: RpcContext = {
-  getSessionManager: vi.fn().mockReturnValue({
-    createSession: vi.fn().mockResolvedValue({ id: 'sess_test', messages: [] }),
+  sessionManager: {
+    createSession: vi.fn().mockResolvedValue({ sessionId: 'sess_test', messages: [] }),
     getSession: vi.fn().mockResolvedValue(null),
+    resumeSession: vi.fn().mockResolvedValue({ sessionId: 'sess_test' }),
     listSessions: vi.fn().mockResolvedValue([]),
-    addMessage: vi.fn().mockResolvedValue(undefined),
-    endSession: vi.fn().mockResolvedValue(undefined),
+    deleteSession: vi.fn().mockResolvedValue(true),
     forkSession: vi.fn().mockResolvedValue({ newSessionId: 'sess_fork' }),
-  }),
-  getMemoryStore: vi.fn().mockReturnValue({
-    search: vi.fn().mockResolvedValue([]),
-    store: vi.fn().mockResolvedValue('mem_test'),
-    getById: vi.fn().mockResolvedValue(null),
-    delete: vi.fn().mockResolvedValue(true),
-  }),
+    switchModel: vi.fn().mockResolvedValue({ success: true }),
+  },
+  agentManager: {
+    prompt: vi.fn().mockResolvedValue({ success: true }),
+    abort: vi.fn().mockResolvedValue({ success: true }),
+    getState: vi.fn().mockResolvedValue({ messages: [] }),
+  },
+  memoryStore: {
+    searchEntries: vi.fn().mockResolvedValue({ entries: [], totalCount: 0 }),
+    addEntry: vi.fn().mockResolvedValue({ id: 'mem_test' }),
+    listHandoffs: vi.fn().mockResolvedValue([]),
+  },
 };
 
 describe('TronWebSocketServer', () => {

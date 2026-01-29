@@ -10,19 +10,28 @@ import {
   handleSkillRemove,
   createSkillHandlers,
 } from '../skill.handler.js';
-import type { RpcRequest, RpcResponse } from '../../types.js';
-import type { RpcContext } from '../handler.js';
+import type { RpcRequest } from '../../types.js';
+import type { RpcContext } from '../../handler.js';
 
 describe('skill.handler', () => {
   let mockContext: RpcContext;
+  let mockListSkills: ReturnType<typeof vi.fn>;
+  let mockGetSkill: ReturnType<typeof vi.fn>;
+  let mockRefreshSkills: ReturnType<typeof vi.fn>;
+  let mockRemoveSkill: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
+    mockListSkills = vi.fn();
+    mockGetSkill = vi.fn();
+    mockRefreshSkills = vi.fn();
+    mockRemoveSkill = vi.fn();
+
     mockContext = {
       skillManager: {
-        listSkills: vi.fn(),
-        getSkill: vi.fn(),
-        refreshSkills: vi.fn(),
-        removeSkill: vi.fn(),
+        listSkills: mockListSkills,
+        getSkill: mockGetSkill,
+        refreshSkills: mockRefreshSkills,
+        removeSkill: mockRemoveSkill,
       },
     } as unknown as RpcContext;
   });
@@ -30,7 +39,6 @@ describe('skill.handler', () => {
   describe('handleSkillList', () => {
     it('should return error when skillManager is not available', async () => {
       const request: RpcRequest = {
-        jsonrpc: '2.0',
         id: '1',
         method: 'skill.list',
         params: {},
@@ -46,7 +54,6 @@ describe('skill.handler', () => {
 
     it('should list skills successfully', async () => {
       const request: RpcRequest = {
-        jsonrpc: '2.0',
         id: '1',
         method: 'skill.list',
         params: { category: 'automation' },
@@ -54,28 +61,29 @@ describe('skill.handler', () => {
 
       const mockResult = {
         skills: [
-          { name: 'skill1', description: 'First skill' },
-          { name: 'skill2', description: 'Second skill' },
+          { name: 'skill1', displayName: 'Skill 1', description: 'First skill', source: 'global' as const, autoInject: false },
+          { name: 'skill2', displayName: 'Skill 2', description: 'Second skill', source: 'project' as const, autoInject: true },
         ],
+        totalCount: 2,
+        autoInjectCount: 1,
       };
-      vi.mocked(mockContext.skillManager!.listSkills).mockResolvedValue(mockResult);
+      mockListSkills.mockResolvedValue(mockResult);
 
       const response = await handleSkillList(request, mockContext);
 
       expect(response.success).toBe(true);
       expect(response.result).toEqual(mockResult);
-      expect(mockContext.skillManager!.listSkills).toHaveBeenCalledWith({ category: 'automation' });
+      expect(mockListSkills).toHaveBeenCalledWith({ category: 'automation' });
     });
 
     it('should handle errors', async () => {
       const request: RpcRequest = {
-        jsonrpc: '2.0',
         id: '1',
         method: 'skill.list',
         params: {},
       };
 
-      vi.mocked(mockContext.skillManager!.listSkills).mockRejectedValue(new Error('Database error'));
+      mockListSkills.mockRejectedValue(new Error('Database error'));
 
       const response = await handleSkillList(request, mockContext);
 
@@ -87,7 +95,6 @@ describe('skill.handler', () => {
   describe('handleSkillGet', () => {
     it('should return error when skillManager is not available', async () => {
       const request: RpcRequest = {
-        jsonrpc: '2.0',
         id: '1',
         method: 'skill.get',
         params: { name: 'test-skill' },
@@ -102,7 +109,6 @@ describe('skill.handler', () => {
 
     it('should return error when name is missing', async () => {
       const request: RpcRequest = {
-        jsonrpc: '2.0',
         id: '1',
         method: 'skill.get',
         params: {},
@@ -117,35 +123,41 @@ describe('skill.handler', () => {
 
     it('should get skill successfully', async () => {
       const request: RpcRequest = {
-        jsonrpc: '2.0',
         id: '1',
         method: 'skill.get',
         params: { name: 'test-skill' },
       };
 
       const mockResult = {
-        name: 'test-skill',
-        description: 'A test skill',
-        enabled: true,
+        skill: {
+          name: 'test-skill',
+          displayName: 'Test Skill',
+          description: 'A test skill',
+          source: 'global' as const,
+          autoInject: false,
+          content: '# Test Skill\n\nSome content',
+          path: '/path/to/skill',
+          additionalFiles: [],
+        },
+        found: true,
       };
-      vi.mocked(mockContext.skillManager!.getSkill).mockResolvedValue(mockResult);
+      mockGetSkill.mockResolvedValue(mockResult);
 
       const response = await handleSkillGet(request, mockContext);
 
       expect(response.success).toBe(true);
       expect(response.result).toEqual(mockResult);
-      expect(mockContext.skillManager!.getSkill).toHaveBeenCalledWith({ name: 'test-skill' });
+      expect(mockGetSkill).toHaveBeenCalledWith({ name: 'test-skill' });
     });
 
     it('should handle errors', async () => {
       const request: RpcRequest = {
-        jsonrpc: '2.0',
         id: '1',
         method: 'skill.get',
         params: { name: 'test-skill' },
       };
 
-      vi.mocked(mockContext.skillManager!.getSkill).mockRejectedValue(new Error('Skill not found'));
+      mockGetSkill.mockRejectedValue(new Error('Skill not found'));
 
       const response = await handleSkillGet(request, mockContext);
 
@@ -157,7 +169,6 @@ describe('skill.handler', () => {
   describe('handleSkillRefresh', () => {
     it('should return error when skillManager is not available', async () => {
       const request: RpcRequest = {
-        jsonrpc: '2.0',
         id: '1',
         method: 'skill.refresh',
         params: {},
@@ -172,31 +183,29 @@ describe('skill.handler', () => {
 
     it('should refresh skills successfully', async () => {
       const request: RpcRequest = {
-        jsonrpc: '2.0',
         id: '1',
         method: 'skill.refresh',
         params: { force: true },
       };
 
-      const mockResult = { refreshedCount: 5 };
-      vi.mocked(mockContext.skillManager!.refreshSkills).mockResolvedValue(mockResult);
+      const mockResult = { success: true, skillCount: 5 };
+      mockRefreshSkills.mockResolvedValue(mockResult);
 
       const response = await handleSkillRefresh(request, mockContext);
 
       expect(response.success).toBe(true);
       expect(response.result).toEqual(mockResult);
-      expect(mockContext.skillManager!.refreshSkills).toHaveBeenCalledWith({ force: true });
+      expect(mockRefreshSkills).toHaveBeenCalledWith({ force: true });
     });
 
     it('should handle errors', async () => {
       const request: RpcRequest = {
-        jsonrpc: '2.0',
         id: '1',
         method: 'skill.refresh',
         params: {},
       };
 
-      vi.mocked(mockContext.skillManager!.refreshSkills).mockRejectedValue(new Error('Refresh failed'));
+      mockRefreshSkills.mockRejectedValue(new Error('Refresh failed'));
 
       const response = await handleSkillRefresh(request, mockContext);
 
@@ -208,7 +217,6 @@ describe('skill.handler', () => {
   describe('handleSkillRemove', () => {
     it('should return error when skillManager is not available', async () => {
       const request: RpcRequest = {
-        jsonrpc: '2.0',
         id: '1',
         method: 'skill.remove',
         params: { sessionId: 'session-123', skillName: 'test-skill' },
@@ -223,7 +231,6 @@ describe('skill.handler', () => {
 
     it('should return error when sessionId is missing', async () => {
       const request: RpcRequest = {
-        jsonrpc: '2.0',
         id: '1',
         method: 'skill.remove',
         params: { skillName: 'test-skill' },
@@ -238,7 +245,6 @@ describe('skill.handler', () => {
 
     it('should return error when skillName is missing', async () => {
       const request: RpcRequest = {
-        jsonrpc: '2.0',
         id: '1',
         method: 'skill.remove',
         params: { sessionId: 'session-123' },
@@ -253,20 +259,19 @@ describe('skill.handler', () => {
 
     it('should remove skill successfully', async () => {
       const request: RpcRequest = {
-        jsonrpc: '2.0',
         id: '1',
         method: 'skill.remove',
         params: { sessionId: 'session-123', skillName: 'test-skill' },
       };
 
-      const mockResult = { removed: true };
-      vi.mocked(mockContext.skillManager!.removeSkill).mockResolvedValue(mockResult);
+      const mockResult = { success: true };
+      mockRemoveSkill.mockResolvedValue(mockResult);
 
       const response = await handleSkillRemove(request, mockContext);
 
       expect(response.success).toBe(true);
       expect(response.result).toEqual(mockResult);
-      expect(mockContext.skillManager!.removeSkill).toHaveBeenCalledWith({
+      expect(mockRemoveSkill).toHaveBeenCalledWith({
         sessionId: 'session-123',
         skillName: 'test-skill',
       });
@@ -274,13 +279,12 @@ describe('skill.handler', () => {
 
     it('should handle errors', async () => {
       const request: RpcRequest = {
-        jsonrpc: '2.0',
         id: '1',
         method: 'skill.remove',
         params: { sessionId: 'session-123', skillName: 'test-skill' },
       };
 
-      vi.mocked(mockContext.skillManager!.removeSkill).mockRejectedValue(new Error('Skill not found'));
+      mockRemoveSkill.mockRejectedValue(new Error('Skill not found'));
 
       const response = await handleSkillRemove(request, mockContext);
 
@@ -305,7 +309,6 @@ describe('skill.handler', () => {
         expect(reg.options?.requiredManagers).toContain('skillManager');
       }
 
-      // Check specific required params
       const getHandler = registrations.find(r => r.method === 'skill.get');
       expect(getHandler?.options?.requiredParams).toContain('name');
 
@@ -318,11 +321,10 @@ describe('skill.handler', () => {
       const registrations = createSkillHandlers();
       const listHandler = registrations.find(r => r.method === 'skill.list')!.handler;
 
-      const mockResult = { skills: [] };
-      vi.mocked(mockContext.skillManager!.listSkills).mockResolvedValue(mockResult);
+      const mockResult = { skills: [], totalCount: 0, autoInjectCount: 0 };
+      mockListSkills.mockResolvedValue(mockResult);
 
       const request: RpcRequest = {
-        jsonrpc: '2.0',
         id: '1',
         method: 'skill.list',
         params: {},
@@ -338,7 +340,6 @@ describe('skill.handler', () => {
       const getHandler = registrations.find(r => r.method === 'skill.get')!.handler;
 
       const request: RpcRequest = {
-        jsonrpc: '2.0',
         id: '1',
         method: 'skill.get',
         params: {},

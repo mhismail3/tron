@@ -9,7 +9,8 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { TodoWriteTool, type TodoWriteToolConfig, type TodoItem } from '../ui/todo-write.js';
+import { TodoWriteTool, type TodoWriteToolConfig } from '../ui/todo-write.js';
+import type { TodoItem } from '../../todos/types.js';
 
 // =============================================================================
 // Test Helpers

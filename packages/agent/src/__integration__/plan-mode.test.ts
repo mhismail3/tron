@@ -10,11 +10,14 @@ import type {
   PlanModeEnteredEvent,
   PlanModeExitedEvent,
   SessionEvent,
-} from '../index.js';
+} from '../events/types/index.js';
 import {
   isPlanModeEnteredEvent,
   isPlanModeExitedEvent,
-} from '../index.js';
+  EventId,
+  SessionId as SessionIdConstructor,
+  WorkspaceId,
+} from '../events/types/index.js';
 
 // Mock types for the plan mode manager we'll implement
 interface PlanModeState {
@@ -56,10 +59,10 @@ describe('Plan Mode Enforcement', () => {
 
     it('should emit plan.mode_entered event', () => {
       const event: PlanModeEnteredEvent = {
-        id: 'evt_test' as any,
+        id: EventId('evt_test'),
         parentId: null,
-        sessionId: 'sess_test' as any,
-        workspaceId: 'ws_test' as any,
+        sessionId: SessionIdConstructor('sess_test'),
+        workspaceId: WorkspaceId('ws_test'),
         timestamp: new Date().toISOString(),
         type: 'plan.mode_entered',
         sequence: 1,
@@ -76,10 +79,10 @@ describe('Plan Mode Enforcement', () => {
 
     it('should include blocked tools in event payload', () => {
       const event: PlanModeEnteredEvent = {
-        id: 'evt_test' as any,
+        id: EventId('evt_test'),
         parentId: null,
-        sessionId: 'sess_test' as any,
-        workspaceId: 'ws_test' as any,
+        sessionId: SessionIdConstructor('sess_test'),
+        workspaceId: WorkspaceId('ws_test'),
         timestamp: new Date().toISOString(),
         type: 'plan.mode_entered',
         sequence: 1,
@@ -98,7 +101,7 @@ describe('Plan Mode Enforcement', () => {
 
     it('should not activate for skills without planMode', () => {
       // Given a skill without planMode
-      const skillFrontmatter = {
+      const skillFrontmatter: { name: string; description: string; planMode?: boolean } = {
         name: 'regular-skill',
         description: 'A normal skill without plan mode',
         // planMode is NOT set
@@ -182,10 +185,10 @@ describe('Plan Mode Enforcement', () => {
   describe('deactivation', () => {
     it('should deactivate when user approves via AskUserQuestion', () => {
       const event: PlanModeExitedEvent = {
-        id: 'evt_test' as any,
+        id: EventId('evt_test'),
         parentId: null,
-        sessionId: 'sess_test' as any,
-        workspaceId: 'ws_test' as any,
+        sessionId: SessionIdConstructor('sess_test'),
+        workspaceId: WorkspaceId('ws_test'),
         timestamp: new Date().toISOString(),
         type: 'plan.mode_exited',
         sequence: 2,
@@ -202,10 +205,10 @@ describe('Plan Mode Enforcement', () => {
 
     it('should emit plan.mode_exited event with approved reason', () => {
       const event: PlanModeExitedEvent = {
-        id: 'evt_test' as any,
+        id: EventId('evt_test'),
         parentId: null,
-        sessionId: 'sess_test' as any,
-        workspaceId: 'ws_test' as any,
+        sessionId: SessionIdConstructor('sess_test'),
+        workspaceId: WorkspaceId('ws_test'),
         timestamp: new Date().toISOString(),
         type: 'plan.mode_exited',
         sequence: 2,
@@ -215,16 +218,16 @@ describe('Plan Mode Enforcement', () => {
         },
       };
 
-      expect(isPlanModeExitedEvent(event as SessionEvent)).toBe(true);
+      expect(isPlanModeExitedEvent(event)).toBe(true);
       expect(event.payload.reason).toBe('approved');
     });
 
     it('should deactivate when user cancels', () => {
       const event: PlanModeExitedEvent = {
-        id: 'evt_test' as any,
+        id: EventId('evt_test'),
         parentId: null,
-        sessionId: 'sess_test' as any,
-        workspaceId: 'ws_test' as any,
+        sessionId: SessionIdConstructor('sess_test'),
+        workspaceId: WorkspaceId('ws_test'),
         timestamp: new Date().toISOString(),
         type: 'plan.mode_exited',
         sequence: 2,
@@ -239,10 +242,10 @@ describe('Plan Mode Enforcement', () => {
 
     it('should emit plan.mode_exited event with cancelled reason', () => {
       const event: PlanModeExitedEvent = {
-        id: 'evt_test' as any,
+        id: EventId('evt_test'),
         parentId: null,
-        sessionId: 'sess_test' as any,
-        workspaceId: 'ws_test' as any,
+        sessionId: SessionIdConstructor('sess_test'),
+        workspaceId: WorkspaceId('ws_test'),
         timestamp: new Date().toISOString(),
         type: 'plan.mode_exited',
         sequence: 2,
@@ -282,10 +285,10 @@ describe('Plan Mode Enforcement', () => {
     it('should reconstruct plan mode state from events', () => {
       const events: SessionEvent[] = [
         {
-          id: 'evt_1' as any,
+          id: EventId('evt_1'),
           parentId: null,
-          sessionId: 'sess_test' as any,
-          workspaceId: 'ws_test' as any,
+          sessionId: SessionIdConstructor('sess_test'),
+          workspaceId: WorkspaceId('ws_test'),
           timestamp: '2026-01-14T10:00:00.000Z',
           type: 'plan.mode_entered',
           sequence: 1,
@@ -293,7 +296,7 @@ describe('Plan Mode Enforcement', () => {
             skillName: 'plan',
             blockedTools: ['Write', 'Edit', 'Bash'],
           },
-        } as PlanModeEnteredEvent,
+        },
       ];
 
       // Reconstruct state
@@ -317,10 +320,10 @@ describe('Plan Mode Enforcement', () => {
     it('should be in plan mode after mode_entered without mode_exited', () => {
       const events: SessionEvent[] = [
         {
-          id: 'evt_1' as any,
+          id: EventId('evt_1'),
           parentId: null,
-          sessionId: 'sess_test' as any,
-          workspaceId: 'ws_test' as any,
+          sessionId: SessionIdConstructor('sess_test'),
+          workspaceId: WorkspaceId('ws_test'),
           timestamp: '2026-01-14T10:00:00.000Z',
           type: 'plan.mode_entered',
           sequence: 1,
@@ -328,7 +331,7 @@ describe('Plan Mode Enforcement', () => {
             skillName: 'plan',
             blockedTools: ['Write', 'Edit', 'Bash'],
           },
-        } as PlanModeEnteredEvent,
+        },
         // No mode_exited event
       ];
 
@@ -349,10 +352,10 @@ describe('Plan Mode Enforcement', () => {
     it('should not be in plan mode after mode_exited', () => {
       const events: SessionEvent[] = [
         {
-          id: 'evt_1' as any,
+          id: EventId('evt_1'),
           parentId: null,
-          sessionId: 'sess_test' as any,
-          workspaceId: 'ws_test' as any,
+          sessionId: SessionIdConstructor('sess_test'),
+          workspaceId: WorkspaceId('ws_test'),
           timestamp: '2026-01-14T10:00:00.000Z',
           type: 'plan.mode_entered',
           sequence: 1,
@@ -360,12 +363,12 @@ describe('Plan Mode Enforcement', () => {
             skillName: 'plan',
             blockedTools: ['Write', 'Edit', 'Bash'],
           },
-        } as PlanModeEnteredEvent,
+        },
         {
-          id: 'evt_2' as any,
-          parentId: 'evt_1' as any,
-          sessionId: 'sess_test' as any,
-          workspaceId: 'ws_test' as any,
+          id: EventId('evt_2'),
+          parentId: EventId('evt_1'),
+          sessionId: SessionIdConstructor('sess_test'),
+          workspaceId: WorkspaceId('ws_test'),
           timestamp: '2026-01-14T10:05:00.000Z',
           type: 'plan.mode_exited',
           sequence: 2,
@@ -373,7 +376,7 @@ describe('Plan Mode Enforcement', () => {
             reason: 'approved',
             planPath: '/path/to/plan.md',
           },
-        } as PlanModeExitedEvent,
+        },
       ];
 
       // Reconstruct state
@@ -416,11 +419,11 @@ describe('Plan Mode Enforcement', () => {
 // Orchestrator Integration Tests
 // =============================================================================
 
-import { EventStore, SessionId } from '../index.js';
+import { EventStore } from '../events/event-store.js';
 import { EventStoreOrchestrator } from '../orchestrator/persistence/event-store-orchestrator.js';
-import path from 'path';
-import os from 'os';
-import fs from 'fs';
+import * as path from 'path';
+import * as os from 'os';
+import * as fs from 'fs';
 
 const createTestOrchestrator = async (testDir: string) => {
   const eventStore = new EventStore(path.join(testDir, 'events.db'));
@@ -531,7 +534,7 @@ describe('Plan Mode Orchestrator Integration', () => {
         blockedTools: ['Write', 'Edit', 'Bash'],
       });
 
-      const events = await eventStore.getEventsBySession(SessionId(sessionId));
+      const events = await eventStore.getEventsBySession(SessionIdConstructor(sessionId));
       const planEvent = events.find(e => e.type === 'plan.mode_entered');
 
       expect(planEvent).toBeDefined();
@@ -568,7 +571,7 @@ describe('Plan Mode Orchestrator Integration', () => {
         planPath: '/path/to/plan.md',
       });
 
-      const events = await eventStore.getEventsBySession(SessionId(sessionId));
+      const events = await eventStore.getEventsBySession(SessionIdConstructor(sessionId));
       const exitEvent = events.find(e => e.type === 'plan.mode_exited');
 
       expect(exitEvent).toBeDefined();
@@ -588,7 +591,7 @@ describe('Plan Mode Orchestrator Integration', () => {
         reason: 'cancelled',
       });
 
-      const events = await eventStore.getEventsBySession(SessionId(sessionId));
+      const events = await eventStore.getEventsBySession(SessionIdConstructor(sessionId));
       const exitEvent = events.find(e => e.type === 'plan.mode_exited');
 
       expect(exitEvent).toBeDefined();

@@ -19,6 +19,8 @@ import {
   createWorktreeCoordinator,
 } from '../index.js';
 import { createMockEventStore, type MockEventStoreWithTracking } from '../__fixtures__/mocks/index.js';
+import type { SessionId, EventId } from '../events/types.js';
+import type { EventStore } from '../events/event-store.js';
 
 // =============================================================================
 // Test Helpers
@@ -63,7 +65,7 @@ describe('WorktreeCoordinator', () => {
   beforeEach(async () => {
     tempDir = await createTempGitRepo();
     mockEventStore = createMockEventStore({ trackEvents: true });
-    coordinator = createWorktreeCoordinator(mockEventStore, {
+    coordinator = createWorktreeCoordinator(mockEventStore as unknown as EventStore, {
       isolationMode: 'lazy',
       branchPrefix: 'test/',
       autoCommitOnRelease: false,
@@ -202,7 +204,7 @@ describe('WorktreeCoordinator', () => {
 
   describe('acquire - isolation modes', () => {
     it('should always use main directory in never mode', async () => {
-      const neverCoordinator = createWorktreeCoordinator(mockEventStore, {
+      const neverCoordinator = createWorktreeCoordinator(mockEventStore as unknown as EventStore, {
         isolationMode: 'never',
       });
 
@@ -218,7 +220,7 @@ describe('WorktreeCoordinator', () => {
     });
 
     it('should always isolate in always mode', async () => {
-      const alwaysCoordinator = createWorktreeCoordinator(mockEventStore, {
+      const alwaysCoordinator = createWorktreeCoordinator(mockEventStore as unknown as EventStore, {
         isolationMode: 'always',
       });
 
@@ -283,7 +285,7 @@ describe('WorktreeCoordinator', () => {
     });
 
     it('should auto-commit changes if configured', async () => {
-      const autoCommitCoordinator = createWorktreeCoordinator(mockEventStore, {
+      const autoCommitCoordinator = createWorktreeCoordinator(mockEventStore as unknown as EventStore, {
         isolationMode: 'always',
         autoCommitOnRelease: true,
         deleteWorktreeOnRelease: true,
@@ -371,7 +373,7 @@ describe('WorkingDirectory', () => {
   beforeEach(async () => {
     tempDir = await createTempGitRepo();
     mockEventStore = createMockEventStore({ trackEvents: true });
-    coordinator = createWorktreeCoordinator(mockEventStore, {
+    coordinator = createWorktreeCoordinator(mockEventStore as unknown as EventStore, {
       isolationMode: 'lazy',
     });
   });
@@ -478,7 +480,7 @@ describe('Worktree Event Recording', () => {
   beforeEach(async () => {
     tempDir = await createTempGitRepo();
     mockEventStore = createMockEventStore({ trackEvents: true });
-    coordinator = createWorktreeCoordinator(mockEventStore, {
+    coordinator = createWorktreeCoordinator(mockEventStore as unknown as EventStore, {
       isolationMode: 'lazy',
       autoCommitOnRelease: true,
     });

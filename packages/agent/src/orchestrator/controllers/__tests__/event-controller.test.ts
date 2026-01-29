@@ -93,11 +93,13 @@ describe('EventController', () => {
     return {
       sessionId,
       agent: {} as any,
-      contextManager: {} as any,
       sessionContext,
-      skillTracker: new Map(),
+      skillTracker: {} as any,
+      rulesTracker: {} as any,
       subagentTracker: {} as any,
-      workingDir: undefined,
+      todoTracker: {} as any,
+      workingDirectory: '/tmp/test',
+      model: 'claude-sonnet-4-20250514',
       lastActivity: new Date(),
     };
   }

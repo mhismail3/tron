@@ -232,6 +232,28 @@ export interface TurnEndEvent extends BaseTronEvent {
 }
 
 /**
+ * Turn failed event - emitted when a turn fails due to errors
+ *
+ * This event ensures iOS receives visibility into failures that would
+ * otherwise cause the agent to stop silently.
+ */
+export interface TurnFailedEvent extends BaseTronEvent {
+  type: 'turn_failed';
+  /** Turn number that failed */
+  turn: number;
+  /** Human-readable error message */
+  error: string;
+  /** Error category code (e.g., 'PAUTH', 'PRATE', 'NET', 'CTX') */
+  code?: string;
+  /** Human-readable error category */
+  category?: string;
+  /** Whether the user can retry this operation */
+  recoverable: boolean;
+  /** Any content generated before the failure occurred */
+  partialContent?: string;
+}
+
+/**
  * Response complete event - emitted when LLM API response finishes streaming,
  * BEFORE tool execution begins. This provides token usage data at the earliest
  * possible moment, allowing normalization before message.assistant is created.
@@ -564,6 +586,7 @@ export type TronEvent =
   | AgentInterruptedEvent
   | TurnStartEvent
   | TurnEndEvent
+  | TurnFailedEvent
   | ResponseCompleteEvent
   | MessageUpdateEvent
   | ToolUseBatchEvent

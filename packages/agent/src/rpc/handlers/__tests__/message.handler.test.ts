@@ -8,7 +8,7 @@ import {
   createMessageHandlers,
 } from '../message.handler.js';
 import type { RpcRequest, RpcResponse } from '../../types.js';
-import type { RpcContext } from '../handler.js';
+import type { RpcContext } from '../../handler.js';
 
 describe('message.handler', () => {
   let mockContext: RpcContext;
@@ -24,7 +24,6 @@ describe('message.handler', () => {
   describe('handleMessageDelete', () => {
     it('should return error when sessionId is missing', async () => {
       const request: RpcRequest = {
-        jsonrpc: '2.0',
         id: '1',
         method: 'message.delete',
         params: { targetEventId: 'event-123' },
@@ -39,7 +38,6 @@ describe('message.handler', () => {
 
     it('should return error when targetEventId is missing', async () => {
       const request: RpcRequest = {
-        jsonrpc: '2.0',
         id: '1',
         method: 'message.delete',
         params: { sessionId: 'session-123' },
@@ -54,7 +52,6 @@ describe('message.handler', () => {
 
     it('should return error when eventStore is not available', async () => {
       const request: RpcRequest = {
-        jsonrpc: '2.0',
         id: '1',
         method: 'message.delete',
         params: { sessionId: 'session-123', targetEventId: 'event-123' },
@@ -70,7 +67,6 @@ describe('message.handler', () => {
 
     it('should delete message successfully', async () => {
       const request: RpcRequest = {
-        jsonrpc: '2.0',
         id: '1',
         method: 'message.delete',
         params: {
@@ -103,7 +99,6 @@ describe('message.handler', () => {
 
     it('should handle NOT_FOUND error', async () => {
       const request: RpcRequest = {
-        jsonrpc: '2.0',
         id: '1',
         method: 'message.delete',
         params: { sessionId: 'session-123', targetEventId: 'event-123' },
@@ -121,7 +116,6 @@ describe('message.handler', () => {
 
     it('should handle INVALID_OPERATION error', async () => {
       const request: RpcRequest = {
-        jsonrpc: '2.0',
         id: '1',
         method: 'message.delete',
         params: { sessionId: 'session-123', targetEventId: 'event-123' },
@@ -139,7 +133,6 @@ describe('message.handler', () => {
 
     it('should handle generic errors', async () => {
       const request: RpcRequest = {
-        jsonrpc: '2.0',
         id: '1',
         method: 'message.delete',
         params: { sessionId: 'session-123', targetEventId: 'event-123' },
@@ -178,7 +171,6 @@ describe('message.handler', () => {
       vi.mocked(mockContext.eventStore!.deleteMessage).mockResolvedValue(mockDeletionEvent);
 
       const request: RpcRequest = {
-        jsonrpc: '2.0',
         id: '1',
         method: 'message.delete',
         params: { sessionId: 'session-123', targetEventId: 'event-123' },
@@ -198,7 +190,6 @@ describe('message.handler', () => {
       const handler = registrations[0].handler;
 
       const request: RpcRequest = {
-        jsonrpc: '2.0',
         id: '1',
         method: 'message.delete',
         params: {},

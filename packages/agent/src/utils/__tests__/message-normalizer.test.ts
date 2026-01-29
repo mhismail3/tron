@@ -211,7 +211,8 @@ describe('Message Normalizer', () => {
       const result = normalizeMessage(message);
 
       // Should convert to toolResult role message
-      expect(result.role).toBe('toolResult');
+      const singleResult = Array.isArray(result) ? result[0] : result;
+      expect(singleResult.role).toBe('toolResult');
       expect((result as any).toolCallId).toBe('call_123');
       expect((result as any).content).toBe('Result');
       expect((result as any).isError).toBe(false);
@@ -273,7 +274,8 @@ describe('Message Normalizer', () => {
 
       const result = normalizeMessage(message);
 
-      expect(result.role).toBe('assistant');
+      const singleResult = Array.isArray(result) ? result[0] : result;
+      expect(singleResult.role).toBe('assistant');
       expect((result as any).content[0]).toEqual({ type: 'text', text: 'Using tool' });
       expect((result as any).content[1]).toEqual({
         type: 'tool_use',

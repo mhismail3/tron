@@ -16,7 +16,8 @@
  * creating tool.call events (at first tool_execution_start).
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { EventStore, SessionId, type TronSessionEvent } from '../../events/event-store.js';
+import { EventStore } from '../../events/event-store.js';
+import { SessionId, type SessionEvent } from '../../events/types.js';
 import path from 'path';
 import os from 'os';
 import fs from 'fs';
@@ -32,7 +33,7 @@ async function getEventsByTypes(
   eventStore: EventStore,
   sessionId: SessionId,
   types: string[]
-): Promise<TronSessionEvent[]> {
+): Promise<SessionEvent[]> {
   const events = await eventStore.getEventsBySession(sessionId);
   return events
     .filter(e => types.includes(e.type))
@@ -43,7 +44,7 @@ async function getEventsByTypes(
  * Verify that message.assistant events with tool_use come before their corresponding
  * tool.call and tool.result events.
  */
-function verifyToolCallOrdering(events: TronSessionEvent[]): {
+function verifyToolCallOrdering(events: SessionEvent[]): {
   isValid: boolean;
   violations: string[];
 } {
@@ -88,7 +89,7 @@ function verifyToolCallOrdering(events: TronSessionEvent[]): {
 /**
  * Get the order of event types (useful for debugging).
  */
-function getEventTypeOrder(events: TronSessionEvent[]): string[] {
+function getEventTypeOrder(events: SessionEvent[]): string[] {
   return events.map(e => e.type);
 }
 

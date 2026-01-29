@@ -92,16 +92,16 @@ describe('Event Types', () => {
 
   describe('TronEvent (Agent-level events)', () => {
     it('should define agent lifecycle events', () => {
-      const start: TronEvent = { type: 'agent_start', sessionId: 'sess_123', timestamp: Date.now() };
-      const end: TronEvent = { type: 'agent_end', sessionId: 'sess_123', timestamp: Date.now() };
+      const start: TronEvent = { type: 'agent_start', sessionId: 'sess_123', timestamp: new Date().toISOString() };
+      const end: TronEvent = { type: 'agent_end', sessionId: 'sess_123', timestamp: new Date().toISOString() };
 
       expect(start.type).toBe('agent_start');
       expect(end.type).toBe('agent_end');
     });
 
     it('should define turn events', () => {
-      const start: TronEvent = { type: 'turn_start', sessionId: 'sess_123', timestamp: Date.now() };
-      const end: TronEvent = { type: 'turn_end', sessionId: 'sess_123', timestamp: Date.now() };
+      const start: TronEvent = { type: 'turn_start', sessionId: 'sess_123', timestamp: new Date().toISOString(), turn: 1 };
+      const end: TronEvent = { type: 'turn_end', sessionId: 'sess_123', timestamp: new Date().toISOString(), turn: 1, duration: 500 };
 
       expect(start.type).toBe('turn_start');
       expect(end.type).toBe('turn_end');
@@ -144,8 +144,8 @@ describe('Event Types', () => {
       const event: TronEvent = {
         type: 'message_update',
         sessionId: 'sess_123',
-        timestamp: Date.now(),
-        event: { type: 'text_delta', delta: 'Hello' },
+        timestamp: new Date().toISOString(),
+        content: 'Hello',
       };
 
       expect(event.type).toBe('message_update');
@@ -155,16 +155,16 @@ describe('Event Types', () => {
       const start: TronEvent = {
         type: 'tool_execution_start',
         sessionId: 'sess_123',
-        timestamp: Date.now(),
+        timestamp: new Date().toISOString(),
         toolCallId: 'call_123',
-        name: 'read',
+        toolName: 'read',
         arguments: { path: '/test.txt' },
       };
 
       const update: TronEvent = {
         type: 'tool_execution_update',
         sessionId: 'sess_123',
-        timestamp: Date.now(),
+        timestamp: new Date().toISOString(),
         toolCallId: 'call_123',
         update: 'Reading line 50...',
       };
@@ -172,8 +172,10 @@ describe('Event Types', () => {
       const end: TronEvent = {
         type: 'tool_execution_end',
         sessionId: 'sess_123',
-        timestamp: Date.now(),
+        timestamp: new Date().toISOString(),
         toolCallId: 'call_123',
+        toolName: 'read',
+        duration: 1000,
         result: {
           content: [{ type: 'text', text: 'file contents' }],
         },
@@ -196,7 +198,7 @@ describe('Event Types', () => {
         const event: TronEvent = {
           type,
           sessionId: 'sess_123',
-          timestamp: Date.now(),
+          timestamp: new Date().toISOString(),
         } as TronEvent;
 
         expect(event.sessionId).toBe('sess_123');

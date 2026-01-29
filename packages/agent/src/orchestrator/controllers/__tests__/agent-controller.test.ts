@@ -31,7 +31,7 @@ describe('AgentController', () => {
     },
     subagentTracker: {},
     skillTracker: {},
-  } as unknown as ActiveSession;
+  } as any as ActiveSession;
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -57,7 +57,7 @@ describe('AgentController', () => {
   describe('run', () => {
     it('runs agent on active session', async () => {
       mockGetActiveSession.mockReturnValue(mockActiveSession);
-      mockActiveSession.sessionContext.isProcessing.mockReturnValue(false);
+      (mockActiveSession.sessionContext as any).isProcessing.mockReturnValue(false);
       mockAgentRunner.run.mockResolvedValue([{ content: 'Hello' }]);
 
       const result = await controller.run({
@@ -66,7 +66,7 @@ describe('AgentController', () => {
       });
 
       expect(mockGetActiveSession).toHaveBeenCalledWith('sess-123');
-      expect(mockActiveSession.sessionContext.setProcessing).toHaveBeenCalledWith(true);
+      expect((mockActiveSession.sessionContext as any).setProcessing).toHaveBeenCalledWith(true);
       expect(mockAgentRunner.run).toHaveBeenCalledWith(mockActiveSession, {
         sessionId: 'sess-123',
         prompt: 'Hello',
@@ -80,7 +80,7 @@ describe('AgentController', () => {
         .mockReturnValueOnce(undefined)
         .mockReturnValueOnce(mockActiveSession);
       mockResumeSession.mockResolvedValue({});
-      mockActiveSession.sessionContext.isProcessing.mockReturnValue(false);
+      (mockActiveSession.sessionContext as any).isProcessing.mockReturnValue(false);
       mockAgentRunner.run.mockResolvedValue([]);
 
       await controller.run({
@@ -114,7 +114,7 @@ describe('AgentController', () => {
 
     it('throws error if session already processing', async () => {
       mockGetActiveSession.mockReturnValue(mockActiveSession);
-      mockActiveSession.sessionContext.isProcessing.mockReturnValue(true);
+      (mockActiveSession.sessionContext as any).isProcessing.mockReturnValue(true);
 
       await expect(controller.run({
         sessionId: 'sess-123',
@@ -124,7 +124,7 @@ describe('AgentController', () => {
 
     it('clears processing state on success', async () => {
       mockGetActiveSession.mockReturnValue(mockActiveSession);
-      mockActiveSession.sessionContext.isProcessing.mockReturnValue(false);
+      (mockActiveSession.sessionContext as any).isProcessing.mockReturnValue(false);
       mockAgentRunner.run.mockResolvedValue([]);
 
       await controller.run({
@@ -133,13 +133,13 @@ describe('AgentController', () => {
       });
 
       // setProcessing should be called with true at start, then false at end
-      expect(mockActiveSession.sessionContext.setProcessing).toHaveBeenNthCalledWith(1, true);
-      expect(mockActiveSession.sessionContext.setProcessing).toHaveBeenNthCalledWith(2, false);
+      expect((mockActiveSession.sessionContext as any).setProcessing).toHaveBeenNthCalledWith(1, true);
+      expect((mockActiveSession.sessionContext as any).setProcessing).toHaveBeenNthCalledWith(2, false);
     });
 
     it('clears processing state on error', async () => {
       mockGetActiveSession.mockReturnValue(mockActiveSession);
-      mockActiveSession.sessionContext.isProcessing.mockReturnValue(false);
+      (mockActiveSession.sessionContext as any).isProcessing.mockReturnValue(false);
       mockAgentRunner.run.mockRejectedValue(new Error('Agent failed'));
 
       await expect(controller.run({
@@ -148,13 +148,13 @@ describe('AgentController', () => {
       })).rejects.toThrow('Agent failed');
 
       // Processing should be cleared even on error
-      expect(mockActiveSession.sessionContext.setProcessing).toHaveBeenLastCalledWith(false);
+      expect((mockActiveSession.sessionContext as any).setProcessing).toHaveBeenLastCalledWith(false);
     });
 
     it('updates lastActivity timestamp', async () => {
       const originalDate = mockActiveSession.lastActivity;
       mockGetActiveSession.mockReturnValue(mockActiveSession);
-      mockActiveSession.sessionContext.isProcessing.mockReturnValue(false);
+      (mockActiveSession.sessionContext as any).isProcessing.mockReturnValue(false);
       mockAgentRunner.run.mockResolvedValue([]);
 
       await controller.run({
@@ -181,7 +181,7 @@ describe('AgentController', () => {
 
     it('returns false when session not processing', async () => {
       mockGetActiveSession.mockReturnValue(mockActiveSession);
-      mockActiveSession.sessionContext.isProcessing.mockReturnValue(false);
+      (mockActiveSession.sessionContext as any).isProcessing.mockReturnValue(false);
 
       const result = await controller.cancel('sess-123');
 
@@ -191,19 +191,19 @@ describe('AgentController', () => {
 
     it('aborts agent and returns true when processing', async () => {
       mockGetActiveSession.mockReturnValue(mockActiveSession);
-      mockActiveSession.sessionContext.isProcessing.mockReturnValue(true);
+      (mockActiveSession.sessionContext as any).isProcessing.mockReturnValue(true);
 
       const result = await controller.cancel('sess-123');
 
       expect(result).toBe(true);
       expect(mockActiveSession.agent.abort).toHaveBeenCalled();
-      expect(mockActiveSession.sessionContext.setProcessing).toHaveBeenCalledWith(false);
+      expect((mockActiveSession.sessionContext as any).setProcessing).toHaveBeenCalledWith(false);
     });
 
     it('updates lastActivity timestamp on cancel', async () => {
       const originalDate = mockActiveSession.lastActivity;
       mockGetActiveSession.mockReturnValue(mockActiveSession);
-      mockActiveSession.sessionContext.isProcessing.mockReturnValue(true);
+      (mockActiveSession.sessionContext as any).isProcessing.mockReturnValue(true);
 
       await controller.cancel('sess-123');
 

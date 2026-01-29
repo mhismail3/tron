@@ -110,8 +110,10 @@ describe('Tool Types', () => {
         ],
       };
 
-      expect(result.content.length).toBe(2);
-      expect(result.content[1]?.type).toBe('image');
+      expect(Array.isArray(result.content)).toBe(true);
+      const contentArray = result.content as Array<{ type: string }>;
+      expect(contentArray.length).toBe(2);
+      expect(contentArray[1]?.type).toBe('image');
     });
 
     it('should support typed details', () => {

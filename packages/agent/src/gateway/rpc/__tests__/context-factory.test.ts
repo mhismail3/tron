@@ -10,7 +10,7 @@ import {
   createMinimalRpcContext,
   isFullRpcContext,
 } from '../context-factory.js';
-import type { EventStoreOrchestrator } from '../../../orchestrator/event-store-orchestrator.js';
+import type { EventStoreOrchestrator } from '../../../orchestrator/index.js';
 
 // Mock all adapter modules
 vi.mock('../adapters/session.adapter.js', () => ({
@@ -112,25 +112,20 @@ import { createBrowserAdapter } from '../adapters/browser.adapter.js';
 import { createSkillAdapter } from '../adapters/skill.adapter.js';
 
 describe('RpcContextFactory', () => {
-  let mockOrchestrator: Partial<EventStoreOrchestrator>;
+  let mockOrchestrator: EventStoreOrchestrator;
 
   beforeEach(() => {
     vi.clearAllMocks();
 
     mockOrchestrator = {
-      createSession: vi.fn(),
-      getSession: vi.fn(),
-      listSessions: vi.fn(),
-      runAgent: vi.fn(),
-      cancelAgent: vi.fn(),
       getActiveSession: vi.fn(),
-    };
+    } as unknown as EventStoreOrchestrator;
   });
 
   describe('createRpcContext', () => {
     it('should create context with all required managers', () => {
       const context = createRpcContext({
-        orchestrator: mockOrchestrator as EventStoreOrchestrator,
+        orchestrator: mockOrchestrator,
       });
 
       // Required managers must exist
@@ -141,7 +136,7 @@ describe('RpcContextFactory', () => {
 
     it('should create context with all optional managers by default', () => {
       const context = createRpcContext({
-        orchestrator: mockOrchestrator as EventStoreOrchestrator,
+        orchestrator: mockOrchestrator,
       });
 
       // Optional managers should exist
@@ -154,7 +149,7 @@ describe('RpcContextFactory', () => {
     });
 
     it('should call adapter factories with correct dependencies', () => {
-      const deps = { orchestrator: mockOrchestrator as EventStoreOrchestrator };
+      const deps = { orchestrator: mockOrchestrator };
 
       createRpcContext(deps);
 
@@ -174,7 +169,7 @@ describe('RpcContextFactory', () => {
 
     it('should skip optional managers in minimal mode', () => {
       const context = createRpcContext(
-        { orchestrator: mockOrchestrator as EventStoreOrchestrator },
+        { orchestrator: mockOrchestrator },
         { minimal: true },
       );
 
@@ -196,7 +191,7 @@ describe('RpcContextFactory', () => {
       vi.clearAllMocks();
 
       createRpcContext(
-        { orchestrator: mockOrchestrator as EventStoreOrchestrator },
+        { orchestrator: mockOrchestrator },
         { minimal: true },
       );
 
@@ -218,7 +213,7 @@ describe('RpcContextFactory', () => {
       vi.clearAllMocks();
 
       const context = createRpcContext(
-        { orchestrator: mockOrchestrator as EventStoreOrchestrator },
+        { orchestrator: mockOrchestrator },
         { skipTranscription: true },
       );
 
@@ -232,7 +227,7 @@ describe('RpcContextFactory', () => {
 
     it('should return context with proper types', () => {
       const context = createRpcContext({
-        orchestrator: mockOrchestrator as EventStoreOrchestrator,
+        orchestrator: mockOrchestrator,
       });
 
       // Verify required manager methods exist (type safety)
@@ -247,7 +242,7 @@ describe('RpcContextFactory', () => {
   describe('createMinimalRpcContext', () => {
     it('should create context with only required managers', () => {
       const context = createMinimalRpcContext({
-        orchestrator: mockOrchestrator as EventStoreOrchestrator,
+        orchestrator: mockOrchestrator,
       });
 
       // Required managers must exist
@@ -268,13 +263,13 @@ describe('RpcContextFactory', () => {
       vi.clearAllMocks();
 
       const minimalContext = createMinimalRpcContext({
-        orchestrator: mockOrchestrator as EventStoreOrchestrator,
+        orchestrator: mockOrchestrator,
       });
 
       vi.clearAllMocks();
 
       const explicitMinimalContext = createRpcContext(
-        { orchestrator: mockOrchestrator as EventStoreOrchestrator },
+        { orchestrator: mockOrchestrator },
         { minimal: true },
       );
 
@@ -288,7 +283,7 @@ describe('RpcContextFactory', () => {
   describe('isFullRpcContext', () => {
     it('should return true for full context', () => {
       const context = createRpcContext({
-        orchestrator: mockOrchestrator as EventStoreOrchestrator,
+        orchestrator: mockOrchestrator,
       });
 
       expect(isFullRpcContext(context)).toBe(true);
@@ -296,7 +291,7 @@ describe('RpcContextFactory', () => {
 
     it('should return false for minimal context', () => {
       const context = createMinimalRpcContext({
-        orchestrator: mockOrchestrator as EventStoreOrchestrator,
+        orchestrator: mockOrchestrator,
       });
 
       expect(isFullRpcContext(context)).toBe(false);
@@ -304,7 +299,7 @@ describe('RpcContextFactory', () => {
 
     it('should return false when any optional manager is missing', () => {
       const context = createRpcContext(
-        { orchestrator: mockOrchestrator as EventStoreOrchestrator },
+        { orchestrator: mockOrchestrator },
         { skipTranscription: true },
       );
 
@@ -315,7 +310,7 @@ describe('RpcContextFactory', () => {
   describe('adapter composition', () => {
     it('should compose session manager with correct interface', () => {
       const context = createRpcContext({
-        orchestrator: mockOrchestrator as EventStoreOrchestrator,
+        orchestrator: mockOrchestrator,
       });
 
       // Verify sessionManager has all expected methods
@@ -330,7 +325,7 @@ describe('RpcContextFactory', () => {
 
     it('should compose agent manager with correct interface', () => {
       const context = createRpcContext({
-        orchestrator: mockOrchestrator as EventStoreOrchestrator,
+        orchestrator: mockOrchestrator,
       });
 
       // Verify agentManager has all expected methods
@@ -341,7 +336,7 @@ describe('RpcContextFactory', () => {
 
     it('should compose event store manager with correct interface', () => {
       const context = createRpcContext({
-        orchestrator: mockOrchestrator as EventStoreOrchestrator,
+        orchestrator: mockOrchestrator,
       });
 
       // Verify eventStore has all expected methods
@@ -358,7 +353,7 @@ describe('RpcContextFactory', () => {
 
     it('should compose worktree manager with correct interface', () => {
       const context = createRpcContext({
-        orchestrator: mockOrchestrator as EventStoreOrchestrator,
+        orchestrator: mockOrchestrator,
       });
 
       // Verify worktreeManager has all expected methods
@@ -370,7 +365,7 @@ describe('RpcContextFactory', () => {
 
     it('should compose context manager with correct interface', () => {
       const context = createRpcContext({
-        orchestrator: mockOrchestrator as EventStoreOrchestrator,
+        orchestrator: mockOrchestrator,
       });
 
       // Verify contextManager has all expected methods
@@ -385,7 +380,7 @@ describe('RpcContextFactory', () => {
 
     it('should compose browser manager with correct interface', () => {
       const context = createRpcContext({
-        orchestrator: mockOrchestrator as EventStoreOrchestrator,
+        orchestrator: mockOrchestrator,
       });
 
       // Verify browserManager has all expected methods
@@ -396,7 +391,7 @@ describe('RpcContextFactory', () => {
 
     it('should compose skill manager with correct interface', () => {
       const context = createRpcContext({
-        orchestrator: mockOrchestrator as EventStoreOrchestrator,
+        orchestrator: mockOrchestrator,
       });
 
       // Verify skillManager has all expected methods
@@ -408,7 +403,7 @@ describe('RpcContextFactory', () => {
 
     it('should compose transcription manager with correct interface', () => {
       const context = createRpcContext({
-        orchestrator: mockOrchestrator as EventStoreOrchestrator,
+        orchestrator: mockOrchestrator,
       });
 
       // Verify transcriptionManager has all expected methods
@@ -418,7 +413,7 @@ describe('RpcContextFactory', () => {
 
     it('should compose memory store with correct interface', () => {
       const context = createRpcContext({
-        orchestrator: mockOrchestrator as EventStoreOrchestrator,
+        orchestrator: mockOrchestrator,
       });
 
       // Verify memoryStore has all expected methods (deprecated but present)

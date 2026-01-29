@@ -5,12 +5,14 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs/promises';
+import type { Stats, Dirent } from 'fs';
 import * as path from 'path';
 import {
   FileCompletion,
   fuzzyMatch,
   scoreMatch,
 } from '../file-completion.js';
+import { createMockStats, createMockDirent } from '../../__fixtures__/mocks/fs.js';
 
 // Mock fs module
 vi.mock('fs/promises');
@@ -84,22 +86,31 @@ describe('File Completion', () => {
       vi.mocked(fs.readdir).mockImplementation(async (dir) => {
         const dirStr = String(dir);
         if (dirStr === '/project') {
-          return ['src', 'tests', 'package.json', 'README.md'] as unknown as fs.Dirent[];
+          return [
+            createMockDirent('src', { isDirectory: true }),
+            createMockDirent('tests', { isDirectory: true }),
+            createMockDirent('package.json', { isFile: true }),
+            createMockDirent('README.md', { isFile: true }),
+          ] as any;
         }
         if (dirStr === '/project/src') {
-          return ['index.ts', 'utils', 'components'] as unknown as fs.Dirent[];
+          return [
+            createMockDirent('index.ts', { isFile: true }),
+            createMockDirent('utils', { isDirectory: true }),
+            createMockDirent('components', { isDirectory: true }),
+          ] as any;
         }
         if (dirStr === '/project/src/utils') {
-          return ['helpers.ts'] as unknown as fs.Dirent[];
+          return [createMockDirent('helpers.ts', { isFile: true })] as any;
         }
         if (dirStr === '/project/src/components') {
-          return ['Button.tsx'] as unknown as fs.Dirent[];
+          return [createMockDirent('Button.tsx', { isFile: true })] as any;
         }
         if (dirStr === '/project/tests') {
-          return ['unit'] as unknown as fs.Dirent[];
+          return [createMockDirent('unit', { isDirectory: true })] as any;
         }
         if (dirStr === '/project/tests/unit') {
-          return ['test.ts'] as unknown as fs.Dirent[];
+          return [createMockDirent('test.ts', { isFile: true })] as any;
         }
         return [];
       });
@@ -107,10 +118,10 @@ describe('File Completion', () => {
       vi.mocked(fs.stat).mockImplementation(async (filePath) => {
         const pathStr = String(filePath);
         const isDir = !pathStr.includes('.');
-        return {
-          isDirectory: () => isDir,
-          isFile: () => !isDir,
-        } as fs.Stats;
+        return createMockStats({
+          isDirectory: isDir,
+          isFile: !isDir,
+        });
       });
     });
 

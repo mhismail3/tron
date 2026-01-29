@@ -13,7 +13,7 @@ describe('MemoryAdapter (deprecated)', () => {
     it('should return empty results', async () => {
       const adapter = createMemoryAdapter();
       const result = await adapter.searchEntries({
-        query: 'test query',
+        searchText: 'test query',
         limit: 10,
       });
 
@@ -26,10 +26,10 @@ describe('MemoryAdapter (deprecated)', () => {
     it('should ignore all parameters and return empty', async () => {
       const adapter = createMemoryAdapter();
       const result = await adapter.searchEntries({
-        query: 'anything',
-        workingDirectory: '/some/path',
+        searchText: 'anything',
+        source: 'project',
         limit: 100,
-        types: ['handoff', 'note'],
+        type: 'pattern',
       });
 
       expect(result.entries).toHaveLength(0);
@@ -42,7 +42,7 @@ describe('MemoryAdapter (deprecated)', () => {
       const adapter = createMemoryAdapter();
       const result = await adapter.addEntry({
         content: 'Some content',
-        type: 'note',
+        type: 'lesson',
       });
 
       expect(result).toEqual({ id: '' });

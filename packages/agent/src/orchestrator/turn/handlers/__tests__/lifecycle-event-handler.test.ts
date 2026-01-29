@@ -133,8 +133,14 @@ describe('LifecycleEventHandler', () => {
   describe('handleAgentInterrupted', () => {
     it('should emit agent.complete with interrupted status', () => {
       const sessionId = 'test-session' as SessionId;
-      const event = { type: 'agent_interrupted', partialContent: 'partial text' };
       const timestamp = new Date().toISOString();
+      const event = {
+        type: 'agent_interrupted',
+        sessionId,
+        timestamp,
+        turn: 1,
+        partialContent: 'partial text',
+      } as const;
 
       handler.handleAgentInterrupted(sessionId, event, timestamp);
 
@@ -152,8 +158,13 @@ describe('LifecycleEventHandler', () => {
 
     it('should handle missing partialContent', () => {
       const sessionId = 'test-session' as SessionId;
-      const event = { type: 'agent_interrupted' };
       const timestamp = new Date().toISOString();
+      const event = {
+        type: 'agent_interrupted',
+        sessionId,
+        timestamp,
+        turn: 1,
+      } as const;
 
       handler.handleAgentInterrupted(sessionId, event, timestamp);
 
@@ -173,12 +184,17 @@ describe('LifecycleEventHandler', () => {
   describe('handleApiRetry', () => {
     it('should persist error.provider event', () => {
       const sessionId = 'test-session' as SessionId;
+      const timestamp = new Date().toISOString();
       const event = {
         type: 'api_retry',
+        sessionId,
+        timestamp,
+        attempt: 1,
+        maxRetries: 3,
         errorMessage: 'Rate limit exceeded',
         errorCategory: 'rate_limit',
         delayMs: 5000,
-      };
+      } as const;
 
       handler.handleApiRetry(sessionId, event);
 
@@ -197,7 +213,17 @@ describe('LifecycleEventHandler', () => {
 
     it('should handle missing error details', () => {
       const sessionId = 'test-session' as SessionId;
-      const event = { type: 'api_retry' };
+      const timestamp = new Date().toISOString();
+      const event = {
+        type: 'api_retry',
+        sessionId,
+        timestamp,
+        attempt: 1,
+        maxRetries: 3,
+        delayMs: 0,
+        errorCategory: '',
+        errorMessage: '',
+      } as const;
 
       handler.handleApiRetry(sessionId, event);
 
@@ -206,10 +232,10 @@ describe('LifecycleEventHandler', () => {
         'error.provider',
         {
           provider: 'anthropic',
-          error: undefined,
-          code: undefined,
+          error: '',
+          code: '',
           retryable: true,
-          retryAfter: undefined,
+          retryAfter: 0,
         }
       );
     });

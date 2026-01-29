@@ -7,7 +7,7 @@
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { createSessionAdapter } from '../session.adapter.js';
-import type { EventStoreOrchestrator } from '../../../../orchestrator/event-store-orchestrator.js';
+import type { EventStoreOrchestrator } from '../../../../orchestrator/persistence/event-store-orchestrator.js';
 
 describe('SessionAdapter', () => {
   let mockOrchestrator: Partial<EventStoreOrchestrator>;

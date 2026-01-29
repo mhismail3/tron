@@ -11,7 +11,8 @@
  * 5. getPendingHeadEventId() returns current head
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { EventStore, type SessionId, type EventId } from '../../../events/event-store.js';
+import { EventStore } from '../../../events/event-store.js';
+import type { SessionId, EventId } from '../../../events/types.js';
 import path from 'path';
 import os from 'os';
 import fs from 'fs';

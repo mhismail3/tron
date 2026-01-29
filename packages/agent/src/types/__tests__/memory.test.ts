@@ -8,7 +8,7 @@ import { describe, it, expect } from 'vitest';
 import type {
   SessionMemory,
   HandoffRecord,
-} from '../types.js';
+} from '../memory.js';
 
 describe('Memory Types', () => {
   describe('SessionMemory', () => {

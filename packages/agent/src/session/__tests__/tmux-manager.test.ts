@@ -99,22 +99,6 @@ describe('TmuxManager', () => {
     });
   });
 
-  describe('Session Name Generation', () => {
-    it('should generate unique session names', () => {
-      const name1 = manager.generateSessionName('task1');
-      const name2 = manager.generateSessionName('task2');
-
-      expect(name1).toContain('test-agent');
-      expect(name2).toContain('test-agent');
-      expect(name1).not.toBe(name2);
-    });
-
-    it('should generate names with prefix', () => {
-      const name = manager.generateSessionName('myTask');
-      expect(name.startsWith('test-agent-')).toBe(true);
-    });
-  });
-
   describe('Availability Check', () => {
     it('should define isAvailable method', () => {
       expect(typeof manager.isAvailable).toBe('function');

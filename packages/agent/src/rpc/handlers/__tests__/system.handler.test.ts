@@ -11,7 +11,7 @@ import {
   handleSystemGetInfo,
 } from '../system.handler.js';
 import type { RpcRequest } from '../../types.js';
-import type { RpcContext } from '../handler.js';
+import type { RpcContext } from '../../handler.js';
 import { MethodRegistry } from '../../registry.js';
 
 describe('System Handlers', () => {
@@ -28,7 +28,6 @@ describe('System Handlers', () => {
   describe('handleSystemPing', () => {
     it('should return pong with timestamp', async () => {
       const request: RpcRequest = {
-        jsonrpc: '2.0',
         id: '1',
         method: 'system.ping',
       };
@@ -44,7 +43,6 @@ describe('System Handlers', () => {
 
     it('should return valid ISO timestamp', async () => {
       const request: RpcRequest = {
-        jsonrpc: '2.0',
         id: '1',
         method: 'system.ping',
       };
@@ -59,7 +57,6 @@ describe('System Handlers', () => {
 
     it('should preserve request id', async () => {
       const request: RpcRequest = {
-        jsonrpc: '2.0',
         id: 'custom-id-123',
         method: 'system.ping',
       };
@@ -73,7 +70,6 @@ describe('System Handlers', () => {
   describe('handleSystemGetInfo', () => {
     it('should return system info', async () => {
       const request: RpcRequest = {
-        jsonrpc: '2.0',
         id: '1',
         method: 'system.getInfo',
       };
@@ -94,7 +90,6 @@ describe('System Handlers', () => {
 
     it('should return positive uptime', async () => {
       const request: RpcRequest = {
-        jsonrpc: '2.0',
         id: '1',
         method: 'system.getInfo',
       };
@@ -107,7 +102,6 @@ describe('System Handlers', () => {
 
     it('should return valid memory stats', async () => {
       const request: RpcRequest = {
-        jsonrpc: '2.0',
         id: '1',
         method: 'system.getInfo',
       };
@@ -135,7 +129,6 @@ describe('System Handlers', () => {
       const pingHandler = handlers.find((h) => h.method === 'system.ping');
 
       const request: RpcRequest = {
-        jsonrpc: '2.0',
         id: '1',
         method: 'system.ping',
       };
@@ -155,7 +148,6 @@ describe('System Handlers', () => {
       expect(registry.has('system.getInfo')).toBe(true);
 
       const request: RpcRequest = {
-        jsonrpc: '2.0',
         id: '1',
         method: 'system.ping',
       };

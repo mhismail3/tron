@@ -449,7 +449,7 @@ describe('Linearization Pattern', () => {
           const event = await eventStore.append({
             sessionId: session.session.id,
             type: 'stream.turn_start',
-            payload: { turn: i, order: i },
+            payload: { turn: i },
             parentId,
           });
           return event.id;
@@ -460,12 +460,12 @@ describe('Linearization Pattern', () => {
 
       const events = await eventStore.getEventsBySession(session.session.id);
 
-      // Sort by sequence and verify order matches payload
+      // Sort by sequence and verify order matches turn number (which tracks order)
       const sorted = [...events].filter(e => e.type === 'stream.turn_start')
         .sort((a, b) => a.sequence - b.sequence);
 
       for (let i = 0; i < sorted.length; i++) {
-        expect(sorted[i].payload.order).toBe(i);
+        expect((sorted[i].payload as { turn: number }).turn).toBe(i);
       }
 
       // Verify sequence numbers are monotonic

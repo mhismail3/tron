@@ -119,13 +119,16 @@ describe('EventRepository', () => {
       const event = createEvent({
         type: 'message.assistant',
         payload: {
-          content: 'Response',
+          content: [{ type: 'text', text: 'Response' }],
+          turn: 1,
           tokenUsage: {
             inputTokens: 100,
             outputTokens: 50,
             cacheReadTokens: 10,
             cacheCreationTokens: 5,
           },
+          model: 'test-model',
+          stopReason: 'end_turn',
         },
       });
       await repo.insert(event);
@@ -144,6 +147,7 @@ describe('EventRepository', () => {
           name: 'readFile',
           toolCallId: 'call_123',
           turn: 1,
+          arguments: { path: '/test/file.txt' },
         },
       });
       await repo.insert(event);
@@ -180,12 +184,13 @@ describe('EventRepository', () => {
 
     it('should return event with parsed payload', async () => {
       const event = createEvent({
-        payload: { content: 'Hello', nested: { key: 'value' } },
+        type: 'message.user',
+        payload: { content: 'Hello', turn: 1 },
       });
       await repo.insert(event);
 
       const found = repo.getById(event.id);
-      expect(found?.payload).toEqual({ content: 'Hello', nested: { key: 'value' } });
+      expect(found?.payload).toEqual({ content: 'Hello', turn: 1 });
     });
   });
 
@@ -534,8 +539,11 @@ describe('EventRepository', () => {
         type: 'message.assistant',
         sequence: 0,
         payload: {
-          content: 'Response 1',
+          content: [{ type: 'text', text: 'Response 1' }],
+          turn: 1,
           tokenUsage: { inputTokens: 100, outputTokens: 50 },
+          model: 'test-model',
+          stopReason: 'end_turn',
         },
       }));
       await repo.insert(createEvent({
@@ -543,8 +551,11 @@ describe('EventRepository', () => {
         type: 'message.assistant',
         sequence: 1,
         payload: {
-          content: 'Response 2',
+          content: [{ type: 'text', text: 'Response 2' }],
+          turn: 2,
           tokenUsage: { inputTokens: 200, outputTokens: 100 },
+          model: 'test-model',
+          stopReason: 'end_turn',
         },
       }));
 

@@ -15,7 +15,7 @@ import type { BrowserLocator } from '../types.js';
 // Test Helpers
 // =============================================================================
 
-function createMockLocator(): BrowserLocator & { [key: string]: ReturnType<typeof vi.fn> } {
+function createMockLocator() {
   return {
     click: vi.fn(),
     fill: vi.fn(),
@@ -39,15 +39,15 @@ function createMockSession(mockPage: ReturnType<typeof createMockPage>): Browser
   return {
     manager: {
       getPage: () => mockPage,
-    } as BrowserSession['manager'],
+    } as unknown as BrowserSession['manager'],
     isStreaming: false,
     elementRefs: new Map(),
   };
 }
 
-function createMockDeps(mockLocator: BrowserLocator): InputHandlerDeps {
+function createMockDeps(mockLocator: ReturnType<typeof createMockLocator>): InputHandlerDeps {
   return {
-    getLocator: vi.fn(() => mockLocator),
+    getLocator: vi.fn(() => mockLocator as BrowserLocator),
     resolveSelector: vi.fn((_, selector) => selector),
   };
 }

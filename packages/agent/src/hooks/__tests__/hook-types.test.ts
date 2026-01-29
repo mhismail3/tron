@@ -15,6 +15,7 @@ import type {
   PostToolHookContext,
   StopHookContext,
   NotificationHookContext,
+  AnyHookContext,
 } from '../types.js';
 
 describe('Hook Types', () => {
@@ -198,7 +199,7 @@ describe('Hook Types', () => {
       const hook: HookDefinition = {
         name: 'bash-only-hook',
         type: 'PreToolUse',
-        filter: (context) => context.toolName === 'Bash',
+        filter: (context) => (context as PreToolHookContext).toolName === 'Bash',
         handler: async () => ({ action: 'continue' }),
       };
 

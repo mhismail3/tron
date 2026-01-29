@@ -17,7 +17,8 @@ const execAsync = promisify(exec);
 // =============================================================================
 
 describe('WorktreeRecovery - Unit Tests', () => {
-  const createMockGitExecutor = (): GitExecutor => ({
+  const createMockGitExecutor = () => ({
+    defaultTimeout: 30000,
     execGit: vi.fn().mockResolvedValue({ stdout: '', stderr: '', exitCode: 0 }),
     isGitRepo: vi.fn().mockResolvedValue(true),
     getRepoRoot: vi.fn().mockResolvedValue('/repo'),
@@ -26,7 +27,7 @@ describe('WorktreeRecovery - Unit Tests', () => {
     branchExists: vi.fn().mockResolvedValue(false),
     hasUncommittedChanges: vi.fn().mockResolvedValue(false),
     pathExists: vi.fn().mockResolvedValue(true),
-  });
+  }) as unknown as GitExecutor;
 
   describe('recoverOrphaned', () => {
     it('should return empty array when worktree base does not exist', async () => {
@@ -133,8 +134,9 @@ describe('WorktreeRecovery - Integration Tests', () => {
     return resolved;
   }
 
-  function createRealGitExecutor(): GitExecutor {
+  function createRealGitExecutor() {
     return {
+      defaultTimeout: 30000,
       async execGit(args: string[], cwd: string) {
         try {
           // Properly escape arguments for shell
@@ -199,7 +201,7 @@ describe('WorktreeRecovery - Integration Tests', () => {
           return false;
         }
       },
-    };
+    } as unknown as GitExecutor;
   }
 
   beforeEach(async () => {

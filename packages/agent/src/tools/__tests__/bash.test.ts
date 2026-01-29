@@ -162,7 +162,7 @@ describe('BashTool', () => {
       const result = await bashTool.execute({ command: 'ls' });
 
       expect(result.details).toHaveProperty('durationMs');
-      expect(typeof result.details?.durationMs).toBe('number');
+      expect(typeof (result.details as { durationMs?: number })?.durationMs).toBe('number');
     });
 
     it('should truncate very long output', async () => {

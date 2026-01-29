@@ -7,7 +7,7 @@
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { createBrowserAdapter } from '../browser.adapter.js';
-import type { EventStoreOrchestrator } from '../../../../orchestrator/event-store-orchestrator.js';
+import type { EventStoreOrchestrator } from '../../../../orchestrator/persistence/event-store-orchestrator.js';
 
 describe('BrowserAdapter', () => {
   let mockOrchestrator: Partial<EventStoreOrchestrator>;
@@ -57,9 +57,9 @@ describe('BrowserAdapter', () => {
   describe('getStatus', () => {
     it('should delegate to orchestrator.browser.getStatus', async () => {
       const mockResult = {
+        hasBrowser: true,
         isStreaming: true,
-        streamId: 'stream-123',
-        frameCount: 42,
+        currentUrl: 'https://example.com',
       };
       vi.mocked(mockOrchestrator.browser!.getStatus).mockResolvedValue(mockResult);
 

@@ -80,4 +80,5 @@ function compareIds(a: number, b: number): boolean {
   return a === a && b === b && a === b;
 }
 
-export { User, ApiResponse, UserService, fetchUser, saveUser };
+export { UserService, fetchUser, saveUser };
+export type { User, ApiResponse };

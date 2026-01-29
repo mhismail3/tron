@@ -71,7 +71,7 @@ describe('ContextManager', () => {
 
     it('accepts initial tools', () => {
       const tools = [
-        { name: 'read_file', description: 'Read a file', inputSchema: { type: 'object' } },
+        { name: 'read_file', description: 'Read a file', parameters: { type: 'object' as const } },
       ];
       const cm = createContextManager({
         model: 'claude-sonnet-4-20250514',
@@ -134,7 +134,7 @@ describe('ContextManager', () => {
             type: 'tool_use',
             id: 'tool_123',
             name: 'read_file',
-            input: { path: '/src/index.ts' },
+            arguments: { path: '/src/index.ts' },
           },
         ],
       });
@@ -146,14 +146,9 @@ describe('ContextManager', () => {
 
     it('handles tool results', () => {
       cm.addMessage({
-        role: 'user',
-        content: [
-          {
-            type: 'tool_result',
-            tool_use_id: 'tool_123',
-            content: 'File contents here...',
-          },
-        ],
+        role: 'toolResult',
+        toolCallId: 'tool_123',
+        content: 'File contents here...',
       });
       expect(cm.getMessages()).toHaveLength(1);
     });
@@ -200,7 +195,7 @@ describe('ContextManager', () => {
       const cm = createContextManager({
         model: 'claude-sonnet-4-20250514',
         systemPrompt: 'You are a helpful assistant.',
-        tools: [{ name: 'test', description: 'A test tool', inputSchema: { type: 'object' } }],
+        tools: [{ name: 'test', description: 'A test tool', parameters: { type: 'object' as const } }],
       });
       cm.addMessage({ role: 'user', content: 'Hello' });
       cm.setApiContextTokens(5000); // Simulate API reporting tokens
@@ -221,7 +216,7 @@ describe('ContextManager', () => {
           {
             name: 'test_tool',
             description: 'A test tool for unit tests',
-            input_schema: { type: 'object', properties: {} },
+            parameters: { type: 'object' as const, properties: {} },
           },
         ],
       });

@@ -26,20 +26,23 @@ describe('Clipboard Utility', () => {
   describe('getClipboardCommand', () => {
     it('returns pbcopy/pbpaste for darwin', () => {
       const cmd = getClipboardCommand('darwin');
-      expect(cmd.copy).toBe('pbcopy');
-      expect(cmd.paste).toBe('pbpaste');
+      expect(cmd).not.toBeNull();
+      expect(cmd!.copy).toBe('pbcopy');
+      expect(cmd!.paste).toBe('pbpaste');
     });
 
     it('returns xclip for linux', () => {
       const cmd = getClipboardCommand('linux');
-      expect(cmd.copy).toBe('xclip -selection clipboard');
-      expect(cmd.paste).toBe('xclip -selection clipboard -o');
+      expect(cmd).not.toBeNull();
+      expect(cmd!.copy).toBe('xclip -selection clipboard');
+      expect(cmd!.paste).toBe('xclip -selection clipboard -o');
     });
 
     it('returns clip/powershell for win32', () => {
       const cmd = getClipboardCommand('win32');
-      expect(cmd.copy).toBe('clip');
-      expect(cmd.paste).toContain('powershell');
+      expect(cmd).not.toBeNull();
+      expect(cmd!.copy).toBe('clip');
+      expect(cmd!.paste).toContain('powershell');
     });
 
     it('returns null for unsupported platforms', () => {

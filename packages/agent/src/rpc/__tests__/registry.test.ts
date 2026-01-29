@@ -13,7 +13,7 @@ import {
   type HandlerContext,
 } from '../registry.js';
 import type { RpcRequest, RpcResponse } from '../types.js';
-import type { Middleware } from '../src/gateway/rpc/middleware/index.js';
+import type { Middleware, MiddlewareNext } from '../middleware/index.js';
 
 describe('MethodRegistry', () => {
   let registry: MethodRegistry;
@@ -100,7 +100,6 @@ describe('MethodRegistry', () => {
       registry.register('system.ping', handler);
 
       const request: RpcRequest = {
-        jsonrpc: '2.0',
         id: '1',
         method: 'system.ping',
       };
@@ -114,7 +113,6 @@ describe('MethodRegistry', () => {
 
     it('should return METHOD_NOT_FOUND for unregistered method', async () => {
       const request: RpcRequest = {
-        jsonrpc: '2.0',
         id: '1',
         method: 'unknown.method',
       };
@@ -132,7 +130,6 @@ describe('MethodRegistry', () => {
       });
 
       const request: RpcRequest = {
-        jsonrpc: '2.0',
         id: '1',
         method: 'session.create',
         params: {}, // Missing workingDirectory
@@ -152,7 +149,6 @@ describe('MethodRegistry', () => {
       });
 
       const request: RpcRequest = {
-        jsonrpc: '2.0',
         id: '1',
         method: 'transcribe.audio',
         params: { audioData: 'base64...' },
@@ -178,7 +174,6 @@ describe('MethodRegistry', () => {
       };
 
       const request: RpcRequest = {
-        jsonrpc: '2.0',
         id: '1',
         method: 'transcribe.audio',
         params: { audioData: 'base64...' },
@@ -195,7 +190,6 @@ describe('MethodRegistry', () => {
       registry.register('session.create', handler);
 
       const request: RpcRequest = {
-        jsonrpc: '2.0',
         id: '1',
         method: 'session.create',
         params: { workingDirectory: '/test' },
@@ -212,7 +206,6 @@ describe('MethodRegistry', () => {
       registry.register('system.ping', handler);
 
       const request: RpcRequest = {
-        jsonrpc: '2.0',
         id: 'my-custom-id-123',
         method: 'system.ping',
       };
@@ -342,14 +335,14 @@ describe('MethodRegistry', () => {
     it('should execute middleware in order', async () => {
       const order: number[] = [];
 
-      const mw1: Middleware = async (req, next) => {
+      const mw1: Middleware = async (req: RpcRequest, next: MiddlewareNext) => {
         order.push(1);
         const res = await next(req);
         order.push(4);
         return res;
       };
 
-      const mw2: Middleware = async (req, next) => {
+      const mw2: Middleware = async (req: RpcRequest, next: MiddlewareNext) => {
         order.push(2);
         const res = await next(req);
         order.push(3);
@@ -361,7 +354,6 @@ describe('MethodRegistry', () => {
       registry.register('system.ping', vi.fn().mockResolvedValue({ pong: true }));
 
       const request: RpcRequest = {
-        jsonrpc: '2.0',
         id: '1',
         method: 'system.ping',
       };
@@ -375,14 +367,13 @@ describe('MethodRegistry', () => {
       const handler: MethodHandler = vi.fn().mockResolvedValue({ pong: true });
       registry.register('system.ping', handler);
 
-      const shortCircuitMw: Middleware = async (req, _next) => {
+      const shortCircuitMw: Middleware = async (req: RpcRequest, _next: MiddlewareNext) => {
         return MethodRegistry.errorResponse(req.id, 'BLOCKED', 'Request blocked');
       };
 
       registry.use(shortCircuitMw);
 
       const request: RpcRequest = {
-        jsonrpc: '2.0',
         id: '1',
         method: 'system.ping',
       };
@@ -399,14 +390,13 @@ describe('MethodRegistry', () => {
       });
       registry.register('system.modified', handler);
 
-      const modifyMw: Middleware = async (req, next) => {
+      const modifyMw: Middleware = async (req: RpcRequest, next: MiddlewareNext) => {
         return next({ ...req, method: 'system.modified' });
       };
 
       registry.use(modifyMw);
 
       const request: RpcRequest = {
-        jsonrpc: '2.0',
         id: '1',
         method: 'system.original',
       };
@@ -419,18 +409,17 @@ describe('MethodRegistry', () => {
     it('should allow middleware to modify response', async () => {
       registry.register('system.ping', vi.fn().mockResolvedValue({ pong: true }));
 
-      const modifyMw: Middleware = async (req, next) => {
+      const modifyMw: Middleware = async (req: RpcRequest, next: MiddlewareNext) => {
         const res = await next(req);
         return {
           ...res,
-          result: { ...res.result, modified: true },
+          result: { ...(res.result as Record<string, unknown>), modified: true },
         };
       };
 
       registry.use(modifyMw);
 
       const request: RpcRequest = {
-        jsonrpc: '2.0',
         id: '1',
         method: 'system.ping',
       };
@@ -444,7 +433,7 @@ describe('MethodRegistry', () => {
       const handler: MethodHandler = vi.fn().mockRejectedValue(new Error('Handler failed'));
       registry.register('system.ping', handler);
 
-      const errorHandlerMw: Middleware = async (req, next) => {
+      const errorHandlerMw: Middleware = async (req: RpcRequest, next: MiddlewareNext) => {
         try {
           return await next(req);
         } catch (error) {
@@ -455,7 +444,6 @@ describe('MethodRegistry', () => {
       registry.use(errorHandlerMw);
 
       const request: RpcRequest = {
-        jsonrpc: '2.0',
         id: '1',
         method: 'system.ping',
       };
@@ -474,7 +462,6 @@ describe('MethodRegistry', () => {
       expect(registry.middlewareCount).toBe(0);
 
       const request: RpcRequest = {
-        jsonrpc: '2.0',
         id: '1',
         method: 'system.ping',
       };

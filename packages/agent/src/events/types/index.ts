@@ -182,6 +182,12 @@ export type {
 export type { TodoItemPayload, TodoWriteEvent } from './todo.js';
 
 // =============================================================================
+// Turn Events
+// =============================================================================
+
+export type { TurnFailedEvent } from './turn.js';
+
+// =============================================================================
 // Union Type
 // =============================================================================
 
@@ -223,6 +229,8 @@ export {
   isSubagentEvent,
   isTodoWriteEvent,
   isTodoEvent,
+  isTurnFailedEvent,
+  isTurnEvent,
 } from './type-guards.js';
 
 // =============================================================================

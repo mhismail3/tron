@@ -60,6 +60,7 @@ describe('RpcHandler - Session Fork', () => {
           forkedFromEventId: 'evt_3',
           forkedFromSessionId: 'sess_test',
         } as SessionForkResult),
+        switchModel: vi.fn().mockResolvedValue({ success: true }),
       },
       agentManager: {
         prompt: vi.fn().mockResolvedValue({ acknowledged: true }),
@@ -227,6 +228,7 @@ describe('RpcHandler - Cross-Interface Session Continuity', () => {
           forkedFromEventId: 'evt_2',
           forkedFromSessionId: 'sess_terminal',
         }),
+        switchModel: vi.fn().mockResolvedValue({ success: true }),
       },
       agentManager: {
         prompt: vi.fn().mockResolvedValue({ acknowledged: true }),

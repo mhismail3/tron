@@ -127,8 +127,8 @@ describe('event fixtures', () => {
         });
 
         expect(event.payload.content).toHaveLength(2);
-        expect(event.payload.content[0].type).toBe('text');
-        expect(event.payload.content[1].type).toBe('tool_use');
+        expect(event.payload.content[0]!.type).toBe('text');
+        expect(event.payload.content[1]!.type).toBe('tool_use');
         expect(event.payload.model).toBe('claude-3');
         expect(event.payload.stopReason).toBe('tool_use');
       });
@@ -140,14 +140,14 @@ describe('event fixtures', () => {
       it('should create a valid tool.call event', () => {
         const event = createToolCallEvent({
           toolCallId: 'call_abc',
-          toolName: 'ReadFile',
-          input: { path: '/test.txt' },
+          name: 'ReadFile',
+          arguments: { path: '/test.txt' },
         });
 
         expect(event.type).toBe('tool.call');
         expect(event.payload.toolCallId).toBe('call_abc');
-        expect(event.payload.toolName).toBe('ReadFile');
-        expect(event.payload.input).toEqual({ path: '/test.txt' });
+        expect(event.payload.name).toBe('ReadFile');
+        expect(event.payload.arguments).toEqual({ path: '/test.txt' });
       });
     });
 
@@ -183,13 +183,13 @@ describe('event fixtures', () => {
         const event = createConfigModelSwitchEvent({
           previousModel: 'claude-2',
           newModel: 'claude-3',
-          provider: 'anthropic',
+          reason: 'user_request',
         });
 
         expect(event.type).toBe('config.model_switch');
         expect(event.payload.previousModel).toBe('claude-2');
         expect(event.payload.newModel).toBe('claude-3');
-        expect(event.payload.provider).toBe('anthropic');
+        expect(event.payload.reason).toBe('user_request');
       });
     });
   });
@@ -218,13 +218,13 @@ describe('event fixtures', () => {
     describe('createCompactBoundaryEvent', () => {
       it('should create a valid compact.boundary event', () => {
         const event = createCompactBoundaryEvent({
-          tokensBefore: 50000,
-          tokensAfter: 5000,
+          originalTokens: 50000,
+          compactedTokens: 5000,
         });
 
         expect(event.type).toBe('compact.boundary');
-        expect(event.payload.tokensBefore).toBe(50000);
-        expect(event.payload.tokensAfter).toBe(5000);
+        expect(event.payload.originalTokens).toBe(50000);
+        expect(event.payload.compactedTokens).toBe(5000);
       });
     });
   });
@@ -234,12 +234,10 @@ describe('event fixtures', () => {
       it('should create a valid stream.turn_start event', () => {
         const event = createStreamTurnStartEvent({
           turn: 5,
-          model: 'claude-3',
         });
 
         expect(event.type).toBe('stream.turn_start');
         expect(event.payload.turn).toBe(5);
-        expect(event.payload.model).toBe('claude-3');
       });
     });
 
@@ -248,13 +246,11 @@ describe('event fixtures', () => {
         const event = createStreamTurnEndEvent({
           turn: 5,
           tokenUsage: { inputTokens: 500, outputTokens: 200 },
-          stopReason: 'end_turn',
         });
 
         expect(event.type).toBe('stream.turn_end');
         expect(event.payload.turn).toBe(5);
         expect(event.payload.tokenUsage).toEqual({ inputTokens: 500, outputTokens: 200 });
-        expect(event.payload.stopReason).toBe('end_turn');
       });
     });
   });
@@ -281,9 +277,9 @@ describe('event fixtures', () => {
 
         const chain = createEventChain(events);
 
-        expect(chain[0].parentId).toBeNull();
-        expect(chain[1].parentId).toBe(chain[0].id);
-        expect(chain[2].parentId).toBe(chain[1].id);
+        expect(chain[0]!.parentId).toBeNull();
+        expect(chain[1]!.parentId).toBe(chain[0]!.id);
+        expect(chain[2]!.parentId).toBe(chain[1]!.id);
       });
 
       it('should set consistent session and workspace IDs', () => {
@@ -298,12 +294,12 @@ describe('event fixtures', () => {
 
         const chain = createEventChain(events);
 
-        expect(chain[0].sessionId).toBe(sessionId);
-        expect(chain[1].sessionId).toBe(sessionId);
-        expect(chain[2].sessionId).toBe(sessionId);
-        expect(chain[0].workspaceId).toBe(workspaceId);
-        expect(chain[1].workspaceId).toBe(workspaceId);
-        expect(chain[2].workspaceId).toBe(workspaceId);
+        expect(chain[0]!.sessionId).toBe(sessionId);
+        expect(chain[1]!.sessionId).toBe(sessionId);
+        expect(chain[2]!.sessionId).toBe(sessionId);
+        expect(chain[0]!.workspaceId).toBe(workspaceId);
+        expect(chain[1]!.workspaceId).toBe(workspaceId);
+        expect(chain[2]!.workspaceId).toBe(workspaceId);
       });
 
       it('should handle empty array', () => {
@@ -320,18 +316,18 @@ describe('event fixtures', () => {
         });
 
         expect(chain).toHaveLength(3);
-        expect(chain[0].type).toBe('session.start');
-        expect(chain[1].type).toBe('message.user');
-        expect(chain[2].type).toBe('message.assistant');
+        expect(chain[0]!.type).toBe('session.start');
+        expect(chain[1]!.type).toBe('message.user');
+        expect(chain[2]!.type).toBe('message.assistant');
 
         // Verify parent links
-        expect(chain[0].parentId).toBeNull();
-        expect(chain[1].parentId).toBe(chain[0].id);
-        expect(chain[2].parentId).toBe(chain[1].id);
+        expect(chain[0]!.parentId).toBeNull();
+        expect(chain[1]!.parentId).toBe(chain[0]!.id);
+        expect(chain[2]!.parentId).toBe(chain[1]!.id);
 
         // Verify content
-        expect((chain[1].payload as any).content).toBe('Hello');
-        expect((chain[2].payload as any).content[0].text).toBe('Hi there!');
+        expect((chain[1]!.payload as any).content).toBe('Hello');
+        expect((chain[2]!.payload as any).content[0].text).toBe('Hi there!');
       });
     });
 
@@ -346,26 +342,26 @@ describe('event fixtures', () => {
         });
 
         expect(chain).toHaveLength(5);
-        expect(chain[0].type).toBe('session.start');
-        expect(chain[1].type).toBe('message.user');
-        expect(chain[2].type).toBe('message.assistant');
-        expect(chain[3].type).toBe('tool.result');
-        expect(chain[4].type).toBe('message.assistant');
+        expect(chain[0]!.type).toBe('session.start');
+        expect(chain[1]!.type).toBe('message.user');
+        expect(chain[2]!.type).toBe('message.assistant');
+        expect(chain[3]!.type).toBe('tool.result');
+        expect(chain[4]!.type).toBe('message.assistant');
 
         // Verify parent links form a chain
-        expect(chain[0].parentId).toBeNull();
-        expect(chain[1].parentId).toBe(chain[0].id);
-        expect(chain[2].parentId).toBe(chain[1].id);
-        expect(chain[3].parentId).toBe(chain[2].id);
-        expect(chain[4].parentId).toBe(chain[3].id);
+        expect(chain[0]!.parentId).toBeNull();
+        expect(chain[1]!.parentId).toBe(chain[0]!.id);
+        expect(chain[2]!.parentId).toBe(chain[1]!.id);
+        expect(chain[3]!.parentId).toBe(chain[2]!.id);
+        expect(chain[4]!.parentId).toBe(chain[3]!.id);
 
         // Verify tool_use block in assistant message
-        const assistantContent = (chain[2].payload as any).content;
+        const assistantContent = (chain[2]!.payload as any).content;
         expect(assistantContent.some((c: any) => c.type === 'tool_use')).toBe(true);
 
         // Verify tool result matches tool call ID
         const toolUseBlock = assistantContent.find((c: any) => c.type === 'tool_use');
-        expect((chain[3].payload as any).toolCallId).toBe(toolUseBlock.id);
+        expect((chain[3]!.payload as any).toolCallId).toBe(toolUseBlock.id);
       });
     });
   });

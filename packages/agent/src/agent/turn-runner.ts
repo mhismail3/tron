@@ -26,6 +26,7 @@ import type { AgentCompactionHandler } from './compaction-handler.js';
 import type { TurnResult } from './types.js';
 import { calculateCost } from '../usage/index.js';
 import { createLogger } from '../logging/index.js';
+import { categorizeError } from '../logging/error-codes.js';
 
 const logger = createLogger('agent:turn');
 
@@ -78,9 +79,23 @@ export class AgentTurnRunner implements ITurnRunner {
     // ==========================================================================
     const preTurnResult = await this.validateAndCompactIfNeeded();
     if (!preTurnResult.canProceed) {
+      const errorMessage = preTurnResult.error ?? 'Context limit exceeded';
+
+      // Emit turn_failed event for context limit exceeded
+      this.eventEmitter.emit({
+        type: 'turn_failed',
+        sessionId: this.sessionId,
+        timestamp: new Date().toISOString(),
+        turn,
+        error: errorMessage,
+        code: 'TLIM_CONTEXT',
+        category: 'TOKEN_LIMIT',
+        recoverable: false,
+      });
+
       return {
         success: false,
-        error: preTurnResult.error ?? 'Context limit exceeded',
+        error: errorMessage,
       };
     }
 
@@ -252,8 +267,24 @@ export class AgentTurnRunner implements ITurnRunner {
         };
       }
 
+      // Categorize the error for structured reporting
+      const structuredError = categorizeError(error, { sessionId: this.sessionId, turn });
+
       logger.error('Turn failed', { error: errorMessage, sessionId: this.sessionId });
       this.logFailedTurn(turn, turnStartTime, errorMessage);
+
+      // Emit turn_failed event for iOS visibility
+      this.eventEmitter.emit({
+        type: 'turn_failed',
+        sessionId: this.sessionId,
+        timestamp: new Date().toISOString(),
+        turn,
+        error: structuredError.message,
+        code: structuredError.code,
+        category: structuredError.category,
+        recoverable: structuredError.retryable,
+        partialContent: this.streamProcessor.getStreamingContent() || undefined,
+      });
 
       return {
         success: false,

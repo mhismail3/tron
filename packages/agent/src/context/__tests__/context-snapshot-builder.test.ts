@@ -140,8 +140,8 @@ describe('ContextSnapshotBuilder', () => {
 
     it('should include tools content', () => {
       const tools: Tool[] = [
-        { name: 'read', description: 'Read a file' },
-        { name: 'write', description: 'Write a file' },
+        { name: 'read', description: 'Read a file', parameters: { type: 'object' } },
+        { name: 'write', description: 'Write a file', parameters: { type: 'object' } },
       ];
       (mockDeps.getTools as ReturnType<typeof vi.fn>).mockReturnValue(tools);
 
@@ -154,7 +154,9 @@ describe('ContextSnapshotBuilder', () => {
     });
 
     it('should handle tools without description', () => {
-      const tools: Tool[] = [{ name: 'bash' }];
+      const tools: Tool[] = [
+        { name: 'bash', description: '', parameters: { type: 'object' } },
+      ];
       (mockDeps.getTools as ReturnType<typeof vi.fn>).mockReturnValue(tools);
 
       const detailed = builder.buildDetailed();
@@ -279,7 +281,7 @@ describe('ContextSnapshotBuilder', () => {
           role: 'user',
           content: [
             { type: 'text', text: 'Look at this image:' },
-            { type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'abc' } },
+            { type: 'image', data: 'abc', mimeType: 'image/png' },
           ],
         },
       ];

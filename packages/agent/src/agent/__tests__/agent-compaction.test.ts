@@ -36,7 +36,7 @@ const createMockTool = (name: string): TronTool => ({
 const createTestConfig = (): AgentConfig => ({
   provider: {
     model: 'claude-sonnet-4-20250514',
-    auth: { apiKey: 'test-key' },
+    auth: { type: 'api_key', apiKey: 'test-key' },
   },
   tools: [createMockTool('test_tool')],
   systemPrompt: 'You are a helpful assistant.',

@@ -5,8 +5,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { AgentCompactionHandler, createCompactionHandler } from '../compaction-handler.js';
 import { createEventEmitter } from '../event-emitter.js';
-import type { ContextManager, CompactionResult } from '../context/context-manager.js';
-import type { Summarizer } from '../context/summarizer.js';
+import type { ContextManager, CompactionResult } from '../../context/context-manager.js';
+import type { Summarizer } from '../../context/summarizer.js';
 
 describe('AgentCompactionHandler', () => {
   let handler: AgentCompactionHandler;

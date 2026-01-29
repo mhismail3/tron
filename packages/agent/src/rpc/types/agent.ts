@@ -98,4 +98,6 @@ export interface AgentGetStateResult {
   currentTurnText?: string;
   /** Tool calls from current in-progress turn (for resume) */
   currentTurnToolCalls?: CurrentTurnToolCall[];
+  /** Whether the session was interrupted */
+  wasInterrupted: boolean;
 }

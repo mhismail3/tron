@@ -214,7 +214,7 @@ describe('Fork Integration - Fork Chains', () => {
         const forkEvents = await eventStore.getEventsBySession(forks[i].session.id);
         const ancestors = await eventStore.getAncestors(forks[i].rootEvent.id);
 
-        const baseInAncestors = ancestors.find(e => e.payload?.content === 'Common base');
+        const baseInAncestors = ancestors.find(e => (e.payload as { content?: string })?.content === 'Common base');
         expect(baseInAncestors).toBeDefined();
       }
 

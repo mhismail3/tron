@@ -44,7 +44,7 @@ describe('Attachment Processing', () => {
 
       expect(blocks).toHaveLength(1);
       expect(blocks[0].type).toBe('image');
-      expect(blocks[0].mimeType).toBe('image/png');
+      expect((blocks[0] as { type: 'image'; mimeType: string }).mimeType).toBe('image/png');
     });
 
     it('converts GIF and WebP image types', () => {
@@ -104,9 +104,9 @@ describe('Attachment Processing', () => {
 
       const blocks = convertAttachmentsToContentBlocks(attachments);
 
-      expect(blocks[0].data).toBe('first');
-      expect(blocks[1].data).toBe('second');
-      expect(blocks[2].data).toBe('third');
+      expect((blocks[0] as { data: string }).data).toBe('first');
+      expect((blocks[1] as { data: string }).data).toBe('second');
+      expect((blocks[2] as { data: string }).data).toBe('third');
     });
 
     it('returns empty array for empty attachments', () => {
@@ -129,8 +129,8 @@ describe('Attachment Processing', () => {
       const blocks = convertAttachmentsToContentBlocks(attachments);
 
       expect(blocks).toHaveLength(2);
-      expect(blocks[0].mimeType).toBe('image/jpeg');
-      expect(blocks[1].mimeType).toBe('application/pdf');
+      expect((blocks[0] as { mimeType: string }).mimeType).toBe('image/jpeg');
+      expect((blocks[1] as { mimeType: string }).mimeType).toBe('application/pdf');
     });
 
     it('converts text/plain attachments to text content blocks', () => {
@@ -253,8 +253,8 @@ describe('Attachment Processing', () => {
       const blocks = convertAttachmentsToContentBlocks(images, attachments);
 
       expect(blocks).toHaveLength(2);
-      expect(blocks[0].data).toBe('legacy-img');
-      expect(blocks[1].data).toBe('new-pdf');
+      expect((blocks[0] as { data: string }).data).toBe('legacy-img');
+      expect((blocks[1] as { data: string }).data).toBe('new-pdf');
     });
 
     it('handles only legacy images array', () => {

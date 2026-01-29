@@ -372,7 +372,7 @@ function createEvent(type: string, payload: Record<string, unknown>): SessionEve
     payload,
     timestamp: new Date().toISOString(),
     parentId: undefined,
-  } as SessionEvent;
+  } as unknown as SessionEvent;
 }
 
 // Helper to create properly structured todo items

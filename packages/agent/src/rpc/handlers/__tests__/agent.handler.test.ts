@@ -12,7 +12,7 @@ import {
   handleAgentGetState,
 } from '../agent.handler.js';
 import type { RpcRequest } from '../../types.js';
-import type { RpcContext } from '../handler.js';
+import type { RpcContext } from '../../handler.js';
 import { MethodRegistry } from '../../registry.js';
 
 describe('Agent Handlers', () => {

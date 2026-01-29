@@ -12,9 +12,11 @@ import {
   createErrorBoundaryMiddleware,
   type Middleware,
 } from '../index.js';
-import type { RpcRequest, RpcResponse } from '../types.js';
+import type { RpcRequest, RpcResponse } from '../../types.js';
 
 describe('Middleware Utilities', () => {
+  const request: RpcRequest = { id: '1', method: 'test.method', params: { original: true } };
+
   describe('buildMiddlewareChain', () => {
     it('should execute handler when no middleware', async () => {
       const handler = vi.fn().mockResolvedValue({
@@ -24,7 +26,6 @@ describe('Middleware Utilities', () => {
       } as RpcResponse);
 
       const chain = buildMiddlewareChain([], handler);
-      const request: RpcRequest = { jsonrpc: '2.0', id: '1', method: 'test' };
 
       const response = await chain(request);
 
@@ -55,7 +56,6 @@ describe('Middleware Utilities', () => {
       });
 
       const chain = buildMiddlewareChain([mw1, mw2], handler);
-      const request: RpcRequest = { jsonrpc: '2.0', id: '1', method: 'test' };
 
       await chain(request);
 
@@ -76,7 +76,6 @@ describe('Middleware Utilities', () => {
       const handler = vi.fn();
 
       const chain = buildMiddlewareChain([shortCircuit], handler);
-      const request: RpcRequest = { jsonrpc: '2.0', id: '1', method: 'test' };
 
       const response = await chain(request);
 
@@ -91,13 +90,11 @@ describe('Middleware Utilities', () => {
 
       const handler = vi.fn();
       const onError = vi.fn().mockReturnValue({
-        jsonrpc: '2.0',
         id: '1',
         error: { code: 'INTERNAL_ERROR', message: 'Handled error' },
       } as RpcResponse);
 
       const chain = buildMiddlewareChain([throwingMiddleware], handler, { onError });
-      const request: RpcRequest = { jsonrpc: '2.0', id: '1', method: 'test' };
 
       const response = await chain(request);
 
@@ -111,13 +108,11 @@ describe('Middleware Utilities', () => {
       };
 
       const handler = vi.fn().mockResolvedValue({
-        jsonrpc: '2.0',
         id: '1',
         result: {},
       } as RpcResponse);
 
       const chain = buildMiddlewareChain([modifyingMiddleware], handler);
-      const request: RpcRequest = { jsonrpc: '2.0', id: '1', method: 'test', params: { original: true } };
 
       await chain(request);
 
@@ -138,13 +133,11 @@ describe('Middleware Utilities', () => {
       };
 
       const handler = vi.fn().mockResolvedValue({
-        jsonrpc: '2.0',
         id: '1',
         result: { original: true },
       } as RpcResponse);
 
       const chain = buildMiddlewareChain([modifyingMiddleware], handler);
-      const request: RpcRequest = { jsonrpc: '2.0', id: '1', method: 'test' };
 
       const response = await chain(request);
 
@@ -160,11 +153,9 @@ describe('Middleware Utilities', () => {
       const handler = vi.fn().mockImplementation(async () => {
         // Simulate some work
         await new Promise((resolve) => setTimeout(resolve, 10));
-        return { jsonrpc: '2.0', id: '1', result: {} } as RpcResponse;
       });
 
       const chain = buildMiddlewareChain([middleware], handler);
-      const request: RpcRequest = { jsonrpc: '2.0', id: '1', method: 'test.method' };
 
       await chain(request);
 
@@ -177,13 +168,11 @@ describe('Middleware Utilities', () => {
       const middleware = createTimingMiddleware();
 
       const handler = vi.fn().mockResolvedValue({
-        jsonrpc: '2.0',
         id: '1',
         result: { ok: true },
       } as RpcResponse);
 
       const chain = buildMiddlewareChain([middleware], handler);
-      const request: RpcRequest = { jsonrpc: '2.0', id: '1', method: 'test' };
 
       const response = await chain(request);
 
@@ -197,13 +186,11 @@ describe('Middleware Utilities', () => {
       const middleware = createLoggingMiddleware(log);
 
       const handler = vi.fn().mockResolvedValue({
-        jsonrpc: '2.0',
         id: '1',
         result: { ok: true },
       } as RpcResponse);
 
       const chain = buildMiddlewareChain([middleware], handler);
-      const request: RpcRequest = { jsonrpc: '2.0', id: '1', method: 'test.method' };
 
       await chain(request);
 
@@ -216,13 +203,11 @@ describe('Middleware Utilities', () => {
       const middleware = createLoggingMiddleware(log);
 
       const handler = vi.fn().mockResolvedValue({
-        jsonrpc: '2.0',
         id: '1',
         error: { code: 'INVALID_PARAMS', message: 'Bad request' },
       } as RpcResponse);
 
       const chain = buildMiddlewareChain([middleware], handler);
-      const request: RpcRequest = { jsonrpc: '2.0', id: '1', method: 'test.method' };
 
       await chain(request);
 
@@ -236,7 +221,6 @@ describe('Middleware Utilities', () => {
       const handler = vi.fn().mockRejectedValue(new Error('Boom'));
 
       const chain = buildMiddlewareChain([middleware], handler);
-      const request: RpcRequest = { jsonrpc: '2.0', id: '1', method: 'test.method' };
 
       await expect(chain(request)).rejects.toThrow('Boom');
 
@@ -250,13 +234,11 @@ describe('Middleware Utilities', () => {
       const middleware = createErrorBoundaryMiddleware(formatError);
 
       const handler = vi.fn().mockResolvedValue({
-        jsonrpc: '2.0',
         id: '1',
         result: { ok: true },
       } as RpcResponse);
 
       const chain = buildMiddlewareChain([middleware], handler);
-      const request: RpcRequest = { jsonrpc: '2.0', id: '1', method: 'test' };
 
       const response = await chain(request);
 
@@ -266,7 +248,6 @@ describe('Middleware Utilities', () => {
 
     it('should catch and format errors', async () => {
       const formatError = vi.fn().mockReturnValue({
-        jsonrpc: '2.0',
         id: '1',
         error: { code: 'INTERNAL_ERROR', message: 'Formatted error' },
       } as RpcResponse);
@@ -276,7 +257,6 @@ describe('Middleware Utilities', () => {
       const handler = vi.fn().mockRejectedValue(new Error('Original error'));
 
       const chain = buildMiddlewareChain([middleware], handler);
-      const request: RpcRequest = { jsonrpc: '2.0', id: '1', method: 'test' };
 
       const response = await chain(request);
 
@@ -286,7 +266,6 @@ describe('Middleware Utilities', () => {
 
     it('should convert non-Error to Error', async () => {
       const formatError = vi.fn().mockReturnValue({
-        jsonrpc: '2.0',
         id: '1',
         error: { code: 'INTERNAL_ERROR', message: 'Error' },
       } as RpcResponse);
@@ -296,7 +275,6 @@ describe('Middleware Utilities', () => {
       const handler = vi.fn().mockRejectedValue('string error');
 
       const chain = buildMiddlewareChain([middleware], handler);
-      const request: RpcRequest = { jsonrpc: '2.0', id: '1', method: 'test' };
 
       await chain(request);
 

@@ -19,9 +19,9 @@ describe('Built-in Commands', () => {
       return null;
     };
 
-    it('should list commands when no args', () => {
+    it('should list commands when no args', async () => {
       const cmd = createHelpCommand(getCommandList, getCommandHelp);
-      const result = cmd.handler('', {});
+      const result = await Promise.resolve(cmd.handler('', {}));
 
       expect(result.success).toBe(true);
       expect(result.output).toContain('/commit');
@@ -29,17 +29,17 @@ describe('Built-in Commands', () => {
       expect(result.requiresAgent).toBe(false);
     });
 
-    it('should show help for specific command', () => {
+    it('should show help for specific command', async () => {
       const cmd = createHelpCommand(getCommandList, getCommandHelp);
-      const result = cmd.handler('commit', {});
+      const result = await Promise.resolve(cmd.handler('commit', {}));
 
       expect(result.success).toBe(true);
       expect(result.output).toContain('Commit changes');
     });
 
-    it('should error for unknown command', () => {
+    it('should error for unknown command', async () => {
       const cmd = createHelpCommand(getCommandList, getCommandHelp);
-      const result = cmd.handler('unknown', {});
+      const result = await Promise.resolve(cmd.handler('unknown', {}));
 
       expect(result.success).toBe(false);
       expect(result.error).toContain('Unknown command');
@@ -47,10 +47,10 @@ describe('Built-in Commands', () => {
   });
 
   describe('createCommandsCommand', () => {
-    it('should list all commands', () => {
+    it('should list all commands', async () => {
       const getCommandList = () => ['commit', 'export', 'help'];
       const cmd = createCommandsCommand(getCommandList);
-      const result = cmd.handler('', {});
+      const result = await Promise.resolve(cmd.handler('', {}));
 
       expect(result.success).toBe(true);
       expect(result.output).toContain('/commit');
@@ -60,9 +60,9 @@ describe('Built-in Commands', () => {
   });
 
   describe('createVersionCommand', () => {
-    it('should show version', () => {
+    it('should show version', async () => {
       const cmd = createVersionCommand('1.2.3');
-      const result = cmd.handler('', {});
+      const result = await Promise.resolve(cmd.handler('', {}));
 
       expect(result.success).toBe(true);
       expect(result.output).toContain('1.2.3');
@@ -70,13 +70,13 @@ describe('Built-in Commands', () => {
   });
 
   describe('createStatusCommand', () => {
-    it('should show session status', () => {
+    it('should show session status', async () => {
       const cmd = createStatusCommand();
-      const result = cmd.handler('', {
+      const result = await Promise.resolve(cmd.handler('', {
         sessionId: 'sess_123',
         workingDirectory: '/home/user/project',
         userId: 'user_456',
-      });
+      }));
 
       expect(result.success).toBe(true);
       expect(result.output).toContain('sess_123');
@@ -84,9 +84,9 @@ describe('Built-in Commands', () => {
       expect(result.output).toContain('user_456');
     });
 
-    it('should handle empty context', () => {
+    it('should handle empty context', async () => {
       const cmd = createStatusCommand();
-      const result = cmd.handler('', {});
+      const result = await Promise.resolve(cmd.handler('', {}));
 
       expect(result.success).toBe(true);
       expect(result.output).toContain('Time:');

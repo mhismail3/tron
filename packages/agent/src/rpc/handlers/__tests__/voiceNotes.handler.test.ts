@@ -11,8 +11,8 @@ import {
   handleVoiceNotesDelete,
   createVoiceNotesHandlers,
 } from '../voiceNotes.handler.js';
-import type { RpcRequest, RpcResponse } from '../../types.js';
-import type { RpcContext } from '../handler.js';
+import type { RpcRequest, RpcResponse, VoiceNotesSaveResult, VoiceNotesListResult } from '../../types.js';
+import type { RpcContext } from '../../handler.js';
 
 // Mock fs module
 vi.mock('fs/promises');
@@ -43,7 +43,6 @@ describe('voiceNotes.handler', () => {
   describe('handleVoiceNotesSave', () => {
     it('should return error when audioBase64 is missing', async () => {
       const request: RpcRequest = {
-        jsonrpc: '2.0',
         id: '1',
         method: 'voiceNotes.save',
         params: {},
@@ -58,7 +57,6 @@ describe('voiceNotes.handler', () => {
 
     it('should return error when transcriptionManager is not available', async () => {
       const request: RpcRequest = {
-        jsonrpc: '2.0',
         id: '1',
         method: 'voiceNotes.save',
         params: { audioBase64: 'base64data' },
@@ -74,7 +72,6 @@ describe('voiceNotes.handler', () => {
 
     it('should save voice note successfully', async () => {
       const request: RpcRequest = {
-        jsonrpc: '2.0',
         id: '1',
         method: 'voiceNotes.save',
         params: {
@@ -86,9 +83,14 @@ describe('voiceNotes.handler', () => {
 
       const transcribeResult = {
         text: 'Hello, this is a test transcription.',
+        rawText: 'Hello, this is a test transcription.',
         durationSeconds: 15.5,
         language: 'en',
         model: 'parakeet-tdt-0.6b-v3',
+        processingTimeMs: 1500,
+        device: 'cpu',
+        computeType: 'cpu',
+        cleanupMode: 'basic',
       };
       vi.mocked(mockContext.transcriptionManager!.transcribeAudio).mockResolvedValue(transcribeResult);
       vi.mocked(fs.mkdir).mockResolvedValue(undefined);
@@ -105,14 +107,14 @@ describe('voiceNotes.handler', () => {
           language: 'en',
         },
       });
-      expect(response.result.filename).toMatch(/^\d{4}-\d{2}-\d{2}-\d{6}-voice-note\.md$/);
+      const result = response.result as VoiceNotesSaveResult;
+      expect(result.filename).toMatch(/^\d{4}-\d{2}-\d{2}-\d{6}-voice-note\.md$/);
       expect(fs.mkdir).toHaveBeenCalledWith('/mock/notes/dir', { recursive: true });
       expect(fs.writeFile).toHaveBeenCalled();
     });
 
     it('should handle transcription errors', async () => {
       const request: RpcRequest = {
-        jsonrpc: '2.0',
         id: '1',
         method: 'voiceNotes.save',
         params: { audioBase64: 'base64data' },
@@ -133,7 +135,6 @@ describe('voiceNotes.handler', () => {
   describe('handleVoiceNotesList', () => {
     it('should return empty list when notes directory does not exist', async () => {
       const request: RpcRequest = {
-        jsonrpc: '2.0',
         id: '1',
         method: 'voiceNotes.list',
         params: {},
@@ -153,7 +154,6 @@ describe('voiceNotes.handler', () => {
 
     it('should list voice notes with pagination', async () => {
       const request: RpcRequest = {
-        jsonrpc: '2.0',
         id: '1',
         method: 'voiceNotes.list',
         params: { limit: 2, offset: 0 },
@@ -185,14 +185,14 @@ This is a test transcription.
       const response = await handleVoiceNotesList(request, mockContext);
 
       expect(response.success).toBe(true);
-      expect(response.result.notes).toHaveLength(2);
-      expect(response.result.totalCount).toBe(3);
-      expect(response.result.hasMore).toBe(true);
+      const result = response.result as VoiceNotesListResult;
+      expect(result.notes).toHaveLength(2);
+      expect(result.totalCount).toBe(3);
+      expect(result.hasMore).toBe(true);
     });
 
     it('should parse voice note metadata correctly', async () => {
       const request: RpcRequest = {
-        jsonrpc: '2.0',
         id: '1',
         method: 'voiceNotes.list',
         params: { limit: 1 },
@@ -218,7 +218,8 @@ Hola, esto es una prueba.
       const response = await handleVoiceNotesList(request, mockContext);
 
       expect(response.success).toBe(true);
-      const note = response.result.notes[0];
+      const result = response.result as VoiceNotesListResult;
+      const note = result.notes[0];
       expect(note.createdAt).toBe('2025-01-15T12:00:00.000Z');
       expect(note.durationSeconds).toBe(45.5);
       expect(note.language).toBe('es');
@@ -228,7 +229,6 @@ Hola, esto es una prueba.
 
     it('should handle read errors gracefully', async () => {
       const request: RpcRequest = {
-        jsonrpc: '2.0',
         id: '1',
         method: 'voiceNotes.list',
         params: {},
@@ -245,7 +245,6 @@ Hola, esto es una prueba.
 
     it('should skip files that cannot be read', async () => {
       const request: RpcRequest = {
-        jsonrpc: '2.0',
         id: '1',
         method: 'voiceNotes.list',
         params: {},
@@ -255,19 +254,23 @@ Hola, esto es una prueba.
       vi.mocked(fs.readdir).mockResolvedValue(['file1.md', 'file2.md'] as any);
       vi.mocked(fs.readFile)
         .mockRejectedValueOnce(new Error('Cannot read'))
-        .mockResolvedValueOnce('---\ncreated: 2025-01-15\n---\n\nContent');
+        .mockResolvedValueOnce(`---
+created: 2025-01-15
+---
+
+Content`);
 
       const response = await handleVoiceNotesList(request, mockContext);
 
       expect(response.success).toBe(true);
-      expect(response.result.notes).toHaveLength(1);
+      const result = response.result as VoiceNotesListResult;
+      expect(result.notes).toHaveLength(1);
     });
   });
 
   describe('handleVoiceNotesDelete', () => {
     it('should return error when filename is missing', async () => {
       const request: RpcRequest = {
-        jsonrpc: '2.0',
         id: '1',
         method: 'voiceNotes.delete',
         params: {},
@@ -282,7 +285,6 @@ Hola, esto es una prueba.
 
     it('should reject directory traversal attempts', async () => {
       const request: RpcRequest = {
-        jsonrpc: '2.0',
         id: '1',
         method: 'voiceNotes.delete',
         params: { filename: '../../../etc/passwd' },
@@ -297,7 +299,6 @@ Hola, esto es una prueba.
 
     it('should return NOT_FOUND when file does not exist', async () => {
       const request: RpcRequest = {
-        jsonrpc: '2.0',
         id: '1',
         method: 'voiceNotes.delete',
         params: { filename: 'nonexistent.md' },
@@ -314,7 +315,6 @@ Hola, esto es una prueba.
 
     it('should delete voice note successfully', async () => {
       const request: RpcRequest = {
-        jsonrpc: '2.0',
         id: '1',
         method: 'voiceNotes.delete',
         params: { filename: '2025-01-15-120000-voice-note.md' },
@@ -335,7 +335,6 @@ Hola, esto es una prueba.
 
     it('should handle delete errors', async () => {
       const request: RpcRequest = {
-        jsonrpc: '2.0',
         id: '1',
         method: 'voiceNotes.delete',
         params: { filename: 'test.md' },
@@ -379,7 +378,6 @@ Hola, esto es una prueba.
       vi.mocked(fs.access).mockRejectedValue(new Error('ENOENT'));
 
       const request: RpcRequest = {
-        jsonrpc: '2.0',
         id: '1',
         method: 'voiceNotes.list',
         params: {},
@@ -399,7 +397,6 @@ Hola, esto es una prueba.
       const saveHandler = registrations.find(r => r.method === 'voiceNotes.save')!.handler;
 
       const request: RpcRequest = {
-        jsonrpc: '2.0',
         id: '1',
         method: 'voiceNotes.save',
         params: {},

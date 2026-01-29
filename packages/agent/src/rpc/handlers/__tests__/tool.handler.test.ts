@@ -8,7 +8,7 @@ import {
   createToolHandlers,
 } from '../tool.handler.js';
 import type { RpcRequest, RpcResponse } from '../../types.js';
-import type { RpcContext } from '../handler.js';
+import type { RpcContext } from '../../handler.js';
 
 describe('tool.handler', () => {
   let mockContext: RpcContext;
@@ -25,7 +25,6 @@ describe('tool.handler', () => {
   describe('handleToolResult', () => {
     it('should return error when toolCallTracker is not available', async () => {
       const request: RpcRequest = {
-        jsonrpc: '2.0',
         id: '1',
         method: 'tool.result',
         params: { sessionId: 'session-123', toolCallId: 'tool-456', result: 'success' },
@@ -41,7 +40,6 @@ describe('tool.handler', () => {
 
     it('should return error when sessionId is missing', async () => {
       const request: RpcRequest = {
-        jsonrpc: '2.0',
         id: '1',
         method: 'tool.result',
         params: { toolCallId: 'tool-456', result: 'success' },
@@ -56,7 +54,6 @@ describe('tool.handler', () => {
 
     it('should return error when toolCallId is missing', async () => {
       const request: RpcRequest = {
-        jsonrpc: '2.0',
         id: '1',
         method: 'tool.result',
         params: { sessionId: 'session-123', result: 'success' },
@@ -71,7 +68,6 @@ describe('tool.handler', () => {
 
     it('should return error when result is missing', async () => {
       const request: RpcRequest = {
-        jsonrpc: '2.0',
         id: '1',
         method: 'tool.result',
         params: { sessionId: 'session-123', toolCallId: 'tool-456' },
@@ -86,7 +82,6 @@ describe('tool.handler', () => {
 
     it('should return error when tool call is not pending', async () => {
       const request: RpcRequest = {
-        jsonrpc: '2.0',
         id: '1',
         method: 'tool.result',
         params: { sessionId: 'session-123', toolCallId: 'tool-456', result: 'success' },
@@ -103,7 +98,6 @@ describe('tool.handler', () => {
 
     it('should return error when resolve fails', async () => {
       const request: RpcRequest = {
-        jsonrpc: '2.0',
         id: '1',
         method: 'tool.result',
         params: { sessionId: 'session-123', toolCallId: 'tool-456', result: 'success' },
@@ -121,7 +115,6 @@ describe('tool.handler', () => {
 
     it('should resolve tool call successfully', async () => {
       const request: RpcRequest = {
-        jsonrpc: '2.0',
         id: '1',
         method: 'tool.result',
         params: { sessionId: 'session-123', toolCallId: 'tool-456', result: { data: 'test output' } },
@@ -143,7 +136,6 @@ describe('tool.handler', () => {
 
     it('should handle string result', async () => {
       const request: RpcRequest = {
-        jsonrpc: '2.0',
         id: '1',
         method: 'tool.result',
         params: { sessionId: 'session-123', toolCallId: 'tool-456', result: 'simple string result' },
@@ -160,7 +152,6 @@ describe('tool.handler', () => {
 
     it('should handle null result', async () => {
       const request: RpcRequest = {
-        jsonrpc: '2.0',
         id: '1',
         method: 'tool.result',
         params: { sessionId: 'session-123', toolCallId: 'tool-456', result: null },
@@ -196,7 +187,6 @@ describe('tool.handler', () => {
       vi.mocked(mockContext.toolCallTracker!.resolve).mockReturnValue(true);
 
       const request: RpcRequest = {
-        jsonrpc: '2.0',
         id: '1',
         method: 'tool.result',
         params: { sessionId: 'session-123', toolCallId: 'tool-456', result: 'done' },
@@ -215,7 +205,6 @@ describe('tool.handler', () => {
       const handler = registrations[0].handler;
 
       const request: RpcRequest = {
-        jsonrpc: '2.0',
         id: '1',
         method: 'tool.result',
         params: {},
@@ -231,7 +220,6 @@ describe('tool.handler', () => {
       vi.mocked(mockContext.toolCallTracker!.hasPending).mockReturnValue(false);
 
       const request: RpcRequest = {
-        jsonrpc: '2.0',
         id: '1',
         method: 'tool.result',
         params: { sessionId: 'session-123', toolCallId: 'tool-456', result: 'done' },

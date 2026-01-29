@@ -9,7 +9,7 @@ import {
   toHTML,
   toJSON,
 } from '../export.js';
-import type { Message, UserMessage, AssistantMessage } from '../types/index.js';
+import type { Message, UserMessage, AssistantMessage } from '../../types/index.js';
 
 describe('Export Module', () => {
   describe('messagesToTranscript', () => {

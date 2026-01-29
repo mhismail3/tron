@@ -621,7 +621,6 @@ describe('SQLiteEventStore', () => {
         workspaceId: workspace2.id,
         workingDirectory: '/other',
         model: 'test',
-        provider: 'test',
       });
 
       const event1: UserMessageEvent = {
@@ -769,7 +768,6 @@ describe('SQLiteEventStore', () => {
         workspaceId,
         workingDirectory: '/test',
         model: 'test',
-        provider: 'test',
       });
       sessionId = session.id;
     });

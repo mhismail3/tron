@@ -41,7 +41,7 @@ describe('Combined Edge Cases - Fork + Switch + Fork', () => {
       const msgA = await eventStore.append({
         sessionId: sessionA.id,
         type: 'message.user',
-        payload: { content: 'Started on Claude' },
+        payload: { content: 'Started on Claude', turn: 1 },
         parentId: rootA.id,
       });
 
@@ -62,7 +62,7 @@ describe('Combined Edge Cases - Fork + Switch + Fork', () => {
       const msgB = await eventStore.append({
         sessionId: forkB.session.id,
         type: 'message.user',
-        payload: { content: 'Now on GPT in B' },
+        payload: { content: 'Now on GPT in B', turn: 2 },
         parentId: switchB.id,
       });
 
@@ -73,7 +73,7 @@ describe('Combined Edge Cases - Fork + Switch + Fork', () => {
       const msgC = await eventStore.append({
         sessionId: forkC.session.id,
         type: 'message.user',
-        payload: { content: 'In C, still on GPT' },
+        payload: { content: 'In C, still on GPT', turn: 3 },
         parentId: forkC.rootEvent.id,
       });
 
@@ -156,7 +156,7 @@ describe('Combined Edge Cases - Fork + Switch + Fork', () => {
       const baseMsg = await eventStore.append({
         sessionId: session.id,
         type: 'message.user',
-        payload: { content: 'Common starting point' },
+        payload: { content: 'Common starting point', turn: 1 },
         parentId: rootEvent.id,
       });
 
@@ -186,14 +186,14 @@ describe('Combined Edge Cases - Fork + Switch + Fork', () => {
       const msgA = await eventStore.append({
         sessionId: forkA.session.id,
         type: 'message.user',
-        payload: { content: 'Running on OpenAI' },
+        payload: { content: 'Running on OpenAI', turn: 2 },
         parentId: switchA.id,
       });
 
       const msgB = await eventStore.append({
         sessionId: forkB.session.id,
         type: 'message.user',
-        payload: { content: 'Running on Google' },
+        payload: { content: 'Running on Google', turn: 2 },
         parentId: switchB.id,
       });
 
@@ -214,8 +214,8 @@ describe('Combined Edge Cases - Fork + Switch + Fork', () => {
       expect(modelB).toBe('gemini-2.5-pro');
 
       // Verify isolation
-      expect(ancestorsA.find(e => e.payload?.content === 'Running on Google')).toBeUndefined();
-      expect(ancestorsB.find(e => e.payload?.content === 'Running on OpenAI')).toBeUndefined();
+      expect(ancestorsA.find(e => e.type === 'message.user' && e.payload.content === 'Running on Google')).toBeUndefined();
+      expect(ancestorsB.find(e => e.type === 'message.user' && e.payload.content === 'Running on OpenAI')).toBeUndefined();
     });
   });
 
@@ -235,9 +235,12 @@ describe('Combined Edge Cases - Fork + Switch + Fork', () => {
         type: 'message.assistant',
         payload: {
           content: [
-            { type: 'tool_use', id: toolId1, name: 'Read', arguments: { file_path: '/a.ts' } },
+            { type: 'tool_use', id: toolId1, name: 'Read', input: { file_path: '/a.ts' } },
           ],
-          usage: { inputTokens: 15, outputTokens: 12 },
+          turn: 1,
+          tokenUsage: { inputTokens: 15, outputTokens: 12 },
+          stopReason: 'tool_use',
+          model: 'claude-sonnet-4-5-20250929',
         },
         parentId: rootEvent.id,
       });
@@ -268,9 +271,12 @@ describe('Combined Edge Cases - Fork + Switch + Fork', () => {
         type: 'message.assistant',
         payload: {
           content: [
-            { type: 'tool_use', id: toolId2, name: 'Write', arguments: { file_path: '/b.ts' } },
+            { type: 'tool_use', id: toolId2, name: 'Write', input: { file_path: '/b.ts' } },
           ],
-          usage: { inputTokens: 20, outputTokens: 15 },
+          turn: 2,
+          tokenUsage: { inputTokens: 20, outputTokens: 15 },
+          stopReason: 'tool_use',
+          model: 'gpt-5.2-codex',
         },
         parentId: switchEvt.id,
       });
@@ -316,7 +322,11 @@ describe('Combined Edge Cases - Fork + Switch + Fork', () => {
             { type: 'thinking', thinking: 'Deep analysis of the problem...' },
             { type: 'text', text: 'Here is my conclusion.' },
           ],
-          usage: { inputTokens: 50, outputTokens: 100 },
+          turn: 1,
+          tokenUsage: { inputTokens: 50, outputTokens: 100 },
+          stopReason: 'end_turn',
+          model: 'claude-opus-4-5-20251101',
+          hasThinking: true,
         },
         parentId: rootEvent.id,
       });
@@ -337,10 +347,12 @@ describe('Combined Edge Cases - Fork + Switch + Fork', () => {
       const assistantMsgs = ancestors.filter(e => e.type === 'message.assistant');
 
       expect(assistantMsgs.length).toBe(1);
-      const content = assistantMsgs[0].payload.content;
-      const thinking = content.find((c: any) => c.type === 'thinking');
+      const assistantPayload = assistantMsgs[0].payload;
+      expect(assistantPayload.content).toBeInstanceOf(Array);
+      const content = assistantPayload.content as Array<{ type: string; thinking?: string }>;
+      const thinking = content.find(c => c.type === 'thinking');
       expect(thinking).toBeDefined();
-      expect(thinking.thinking).toBe('Deep analysis of the problem...');
+      expect(thinking!.thinking).toBe('Deep analysis of the problem...');
     });
 
     it('should preserve image content through fork + switch', async () => {
@@ -357,8 +369,10 @@ describe('Combined Edge Cases - Fork + Switch + Fork', () => {
         payload: {
           content: [
             { type: 'text', text: 'Describe this:' },
-            { type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'abc...' } },
+            { type: 'image', source: { type: 'base64', mediaType: 'image/png', data: 'abc...' } },
           ],
+          turn: 1,
+          imageCount: 1,
         },
         parentId: rootEvent.id,
       });
@@ -379,10 +393,12 @@ describe('Combined Edge Cases - Fork + Switch + Fork', () => {
       const userMsgs = ancestors.filter(e => e.type === 'message.user');
 
       expect(userMsgs.length).toBe(1);
-      const content = userMsgs[0].payload.content;
-      const image = content.find((c: any) => c.type === 'image');
+      const userPayload = userMsgs[0].payload;
+      expect(Array.isArray(userPayload.content)).toBe(true);
+      const content = userPayload.content as Array<{ type: string; source?: { type: string } }>;
+      const image = content.find(c => c.type === 'image');
       expect(image).toBeDefined();
-      expect(image.source.type).toBe('base64');
+      expect(image!.source!.type).toBe('base64');
     });
   });
 
@@ -397,7 +413,7 @@ describe('Combined Edge Cases - Fork + Switch + Fork', () => {
       const msg = await eventStore.append({
         sessionId: session.id,
         type: 'message.user',
-        payload: { content: 'test' },
+        payload: { content: 'test', turn: 1 },
         parentId: rootEvent.id,
       });
 
@@ -413,7 +429,7 @@ describe('Combined Edge Cases - Fork + Switch + Fork', () => {
       const finalMsg = await eventStore.append({
         sessionId: fork.session.id,
         type: 'message.user',
-        payload: { content: 'final' },
+        payload: { content: 'final', turn: 2 },
         parentId: switchEvt.id,
       });
 

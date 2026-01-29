@@ -7,11 +7,25 @@
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { createEventStoreAdapter, getEventSummary, getEventDepth } from '../event-store.adapter.js';
-import type { EventStoreOrchestrator } from '../../../../orchestrator/event-store-orchestrator.js';
+import type { EventStoreOrchestrator } from '../../../../orchestrator/persistence/event-store-orchestrator.js';
+import type { SessionEvent } from '../../../../events/types/union.js';
+import type { SearchResult } from '../../../../events/types/state.js';
 
 describe('EventStoreAdapter', () => {
   let mockOrchestrator: Partial<EventStoreOrchestrator>;
   let mockEventStore: any;
+
+  const createMockEvent = (overrides: Partial<SessionEvent>): SessionEvent => ({
+    id: 'evt-mock' as any,
+    parentId: null,
+    sessionId: 'sess-123' as any,
+    workspaceId: 'ws-123' as any,
+    timestamp: '2024-01-01T00:00:00Z',
+    type: 'message.user',
+    sequence: 1,
+    payload: { content: '', turn: 1 },
+    ...overrides,
+  } as SessionEvent);
 
   beforeEach(() => {
     mockEventStore = {
@@ -27,16 +41,16 @@ describe('EventStoreAdapter', () => {
         getAncestors: vi.fn(),
         search: vi.fn(),
         deleteMessage: vi.fn(),
-      },
+      } as any,
     };
   });
 
   describe('getEventHistory', () => {
     it('should return events in reverse chronological order', async () => {
-      const mockEvents = [
-        { id: 'evt-1', type: 'session.start', timestamp: '2024-01-01T00:00:00Z' },
-        { id: 'evt-2', type: 'message.user', timestamp: '2024-01-01T00:01:00Z' },
-        { id: 'evt-3', type: 'message.assistant', timestamp: '2024-01-01T00:02:00Z' },
+      const mockEvents: SessionEvent[] = [
+        createMockEvent({ id: 'evt-1' as any, type: 'session.start', sequence: 1, payload: { workingDirectory: '', model: '' } }),
+        createMockEvent({ id: 'evt-2' as any, type: 'message.user', sequence: 2, payload: { content: '', turn: 1 } }),
+        createMockEvent({ id: 'evt-3' as any, type: 'message.assistant', sequence: 3, payload: { content: [], turn: 1, tokenUsage: { inputTokens: 10, outputTokens: 20 }, stopReason: 'end_turn', model: 'claude-3-5-sonnet' } }),
       ];
       vi.mocked(mockOrchestrator.events!.getEvents).mockResolvedValue(mockEvents);
 
@@ -49,16 +63,16 @@ describe('EventStoreAdapter', () => {
       expect(mockOrchestrator.events!.getEvents).toHaveBeenCalledWith('sess-123');
       expect(result.events).toHaveLength(3);
       // Should be reversed (most recent first)
-      expect(result.events[0].id).toBe('evt-3');
-      expect(result.events[2].id).toBe('evt-1');
+      expect((result.events[0] as any).id).toBe('evt-3');
+      expect((result.events[2] as any).id).toBe('evt-1');
     });
 
     it('should filter by event types when specified', async () => {
-      const mockEvents = [
-        { id: 'evt-1', type: 'session.start' },
-        { id: 'evt-2', type: 'message.user' },
-        { id: 'evt-3', type: 'message.assistant' },
-        { id: 'evt-4', type: 'tool.call' },
+      const mockEvents: SessionEvent[] = [
+        createMockEvent({ id: 'evt-1' as any, type: 'session.start', sequence: 1, payload: { workingDirectory: '', model: '' } }),
+        createMockEvent({ id: 'evt-2' as any, type: 'message.user', sequence: 2, payload: { content: '', turn: 1 } }),
+        createMockEvent({ id: 'evt-3' as any, type: 'message.assistant', sequence: 3, payload: { content: [], turn: 1, tokenUsage: { inputTokens: 10, outputTokens: 20 }, stopReason: 'end_turn', model: 'claude-3-5-sonnet' } }),
+        createMockEvent({ id: 'evt-4' as any, type: 'tool.call', sequence: 4, payload: { toolCallId: 'tc-1', name: 'read_file', arguments: {}, turn: 1 } }),
       ];
       vi.mocked(mockOrchestrator.events!.getEvents).mockResolvedValue(mockEvents);
 
@@ -75,10 +89,9 @@ describe('EventStoreAdapter', () => {
     });
 
     it('should respect limit parameter', async () => {
-      const mockEvents = Array.from({ length: 200 }, (_, i) => ({
-        id: `evt-${i}`,
-        type: 'message.user',
-      }));
+      const mockEvents: SessionEvent[] = Array.from({ length: 200 }, (_, i) =>
+        createMockEvent({ id: `evt-${i}` as any, type: 'message.user', sequence: i + 1, payload: { content: '', turn: 1 } })
+      );
       vi.mocked(mockOrchestrator.events!.getEvents).mockResolvedValue(mockEvents);
 
       const adapter = createEventStoreAdapter({
@@ -92,9 +105,9 @@ describe('EventStoreAdapter', () => {
     });
 
     it('should return hasMore false when all events fit', async () => {
-      const mockEvents = [
-        { id: 'evt-1', type: 'message.user' },
-        { id: 'evt-2', type: 'message.assistant' },
+      const mockEvents: SessionEvent[] = [
+        createMockEvent({ id: 'evt-1' as any, type: 'message.user', sequence: 1, payload: { content: '', turn: 1 } }),
+        createMockEvent({ id: 'evt-2' as any, type: 'message.assistant', sequence: 2, payload: { content: [], turn: 1, tokenUsage: { inputTokens: 10, outputTokens: 20 }, stopReason: 'end_turn', model: 'claude-3-5-sonnet' } }),
       ];
       vi.mocked(mockOrchestrator.events!.getEvents).mockResolvedValue(mockEvents);
 
@@ -110,10 +123,10 @@ describe('EventStoreAdapter', () => {
 
   describe('getEventsSince', () => {
     it('should return events after specified eventId', async () => {
-      const mockEvents = [
-        { id: 'evt-1', type: 'session.start' },
-        { id: 'evt-2', type: 'message.user' },
-        { id: 'evt-3', type: 'message.assistant' },
+      const mockEvents: SessionEvent[] = [
+        createMockEvent({ id: 'evt-1' as any, type: 'session.start', sequence: 1, payload: { workingDirectory: '', model: '' } }),
+        createMockEvent({ id: 'evt-2' as any, type: 'message.user', sequence: 2, payload: { content: '', turn: 1 } }),
+        createMockEvent({ id: 'evt-3' as any, type: 'message.assistant', sequence: 3, payload: { content: [], turn: 1, tokenUsage: { inputTokens: 10, outputTokens: 20 }, stopReason: 'end_turn', model: 'claude-3-5-sonnet' } }),
       ];
       vi.mocked(mockOrchestrator.events!.getEvents).mockResolvedValue(mockEvents);
 
@@ -127,14 +140,14 @@ describe('EventStoreAdapter', () => {
       });
 
       expect(result.events).toHaveLength(2);
-      expect(result.events[0].id).toBe('evt-2');
+      expect((result.events[0] as any).id).toBe('evt-2');
     });
 
     it('should return events after specified timestamp', async () => {
-      const mockEvents = [
-        { id: 'evt-1', type: 'session.start', timestamp: '2024-01-01T00:00:00Z' },
-        { id: 'evt-2', type: 'message.user', timestamp: '2024-01-01T00:01:00Z' },
-        { id: 'evt-3', type: 'message.assistant', timestamp: '2024-01-01T00:02:00Z' },
+      const mockEvents: SessionEvent[] = [
+        createMockEvent({ id: 'evt-1' as any, type: 'session.start', sequence: 1, timestamp: '2024-01-01T00:00:00Z', payload: { workingDirectory: '', model: '' } }),
+        createMockEvent({ id: 'evt-2' as any, type: 'message.user', sequence: 2, timestamp: '2024-01-01T00:01:00Z', payload: { content: '', turn: 1 } }),
+        createMockEvent({ id: 'evt-3' as any, type: 'message.assistant', sequence: 3, timestamp: '2024-01-01T00:02:00Z', payload: { content: [], turn: 1, tokenUsage: { inputTokens: 10, outputTokens: 20 }, stopReason: 'end_turn', model: 'claude-3-5-sonnet' } }),
       ];
       vi.mocked(mockOrchestrator.events!.getEvents).mockResolvedValue(mockEvents);
 
@@ -205,10 +218,10 @@ describe('EventStoreAdapter', () => {
 
   describe('getTreeVisualization', () => {
     it('should return tree with node metadata', async () => {
-      const mockEvents = [
-        { id: 'evt-1', parentId: null, type: 'session.start', timestamp: '2024-01-01T00:00:00Z' },
-        { id: 'evt-2', parentId: 'evt-1', type: 'message.user', timestamp: '2024-01-01T00:01:00Z', payload: { content: 'Hello' } },
-        { id: 'evt-3', parentId: 'evt-2', type: 'message.assistant', timestamp: '2024-01-01T00:02:00Z' },
+      const mockEvents: SessionEvent[] = [
+        createMockEvent({ id: 'evt-1' as any, parentId: null, type: 'session.start', sequence: 1, payload: { workingDirectory: '', model: '' } }),
+        createMockEvent({ id: 'evt-2' as any, parentId: 'evt-1' as any, type: 'message.user', sequence: 2, payload: { content: 'Hello', turn: 1 } }),
+        createMockEvent({ id: 'evt-3' as any, parentId: 'evt-2' as any, type: 'message.assistant', sequence: 3, payload: { content: [], turn: 1, tokenUsage: { inputTokens: 10, outputTokens: 20 }, stopReason: 'end_turn', model: 'claude-3-5-sonnet' } }),
       ];
       vi.mocked(mockOrchestrator.events!.getEvents).mockResolvedValue(mockEvents);
       mockEventStore.getSession.mockResolvedValue({
@@ -229,17 +242,17 @@ describe('EventStoreAdapter', () => {
       expect(result.totalEvents).toBe(3);
 
       // Check node properties
-      const rootNode = result.nodes.find((n: any) => n.id === 'evt-1');
+      const rootNode = result.nodes.find((n: any) => n.id === 'evt-1') as any;
       expect(rootNode?.depth).toBe(0);
       expect(rootNode?.hasChildren).toBe(true);
     });
 
     it('should filter to messages only when requested', async () => {
-      const mockEvents = [
-        { id: 'evt-1', parentId: null, type: 'session.start', timestamp: '2024-01-01T00:00:00Z' },
-        { id: 'evt-2', parentId: 'evt-1', type: 'message.user', timestamp: '2024-01-01T00:01:00Z' },
-        { id: 'evt-3', parentId: 'evt-2', type: 'tool.call', timestamp: '2024-01-01T00:02:00Z' },
-        { id: 'evt-4', parentId: 'evt-3', type: 'message.assistant', timestamp: '2024-01-01T00:03:00Z' },
+      const mockEvents: SessionEvent[] = [
+        createMockEvent({ id: 'evt-1' as any, parentId: null, type: 'session.start', sequence: 1, payload: { workingDirectory: '', model: '' } }),
+        createMockEvent({ id: 'evt-2' as any, parentId: 'evt-1' as any, type: 'message.user', sequence: 2, payload: { content: '', turn: 1 } }),
+        createMockEvent({ id: 'evt-3' as any, parentId: 'evt-2' as any, type: 'tool.call', sequence: 3, payload: { toolCallId: 'tc-1', name: 'read_file', arguments: {}, turn: 1 } }),
+        createMockEvent({ id: 'evt-4' as any, parentId: 'evt-3' as any, type: 'message.assistant', sequence: 4, payload: { content: [], turn: 1, tokenUsage: { inputTokens: 10, outputTokens: 20 }, stopReason: 'end_turn', model: 'claude-3-5-sonnet' } }),
       ];
       vi.mocked(mockOrchestrator.events!.getEvents).mockResolvedValue(mockEvents);
       mockEventStore.getSession.mockResolvedValue({ rootEventId: 'evt-1', headEventId: 'evt-4' });
@@ -266,10 +279,10 @@ describe('EventStoreAdapter', () => {
 
   describe('getBranches', () => {
     it('should identify branch points with multiple children', async () => {
-      const mockEvents = [
-        { id: 'evt-1', parentId: null, type: 'session.start' },
-        { id: 'evt-2', parentId: 'evt-1', type: 'message.user' },
-        { id: 'evt-3', parentId: 'evt-1', type: 'message.user' }, // Branch!
+      const mockEvents: SessionEvent[] = [
+        createMockEvent({ id: 'evt-1' as any, parentId: null, type: 'session.start', sequence: 1, payload: { workingDirectory: '', model: '' } }),
+        createMockEvent({ id: 'evt-2' as any, parentId: 'evt-1' as any, type: 'message.user', sequence: 2, payload: { content: '', turn: 1 } }),
+        createMockEvent({ id: 'evt-3' as any, parentId: 'evt-1' as any, type: 'message.user', sequence: 3, payload: { content: '', turn: 1 } }),
       ];
       vi.mocked(mockOrchestrator.events!.getEvents).mockResolvedValue(mockEvents);
       mockEventStore.getSession.mockResolvedValue({ headEventId: 'evt-2' });
@@ -285,9 +298,9 @@ describe('EventStoreAdapter', () => {
     });
 
     it('should return single main branch when no forks', async () => {
-      const mockEvents = [
-        { id: 'evt-1', parentId: null, type: 'session.start' },
-        { id: 'evt-2', parentId: 'evt-1', type: 'message.user' },
+      const mockEvents: SessionEvent[] = [
+        createMockEvent({ id: 'evt-1' as any, parentId: null, type: 'session.start', sequence: 1, payload: { workingDirectory: '', model: '' } }),
+        createMockEvent({ id: 'evt-2' as any, parentId: 'evt-1' as any, type: 'message.user', sequence: 2, payload: { content: '', turn: 1 } }),
       ];
       vi.mocked(mockOrchestrator.events!.getEvents).mockResolvedValue(mockEvents);
       mockEventStore.getSession.mockResolvedValue({ headEventId: 'evt-2' });
@@ -299,16 +312,16 @@ describe('EventStoreAdapter', () => {
       const result = await adapter.getBranches('sess-123');
 
       expect(result.mainBranch).toBeDefined();
-      expect(result.mainBranch.isMain).toBe(true);
+      expect((result.mainBranch as any)?.isMain).toBe(true);
       expect(result.forks).toHaveLength(0);
     });
   });
 
   describe('getSubtree', () => {
     it('should return ancestors when direction is ancestors', async () => {
-      const mockAncestors = [
-        { id: 'evt-1', type: 'session.start' },
-        { id: 'evt-2', type: 'message.user' },
+      const mockAncestors: SessionEvent[] = [
+        createMockEvent({ id: 'evt-1' as any, type: 'session.start', sequence: 1, payload: { workingDirectory: '', model: '' } }),
+        createMockEvent({ id: 'evt-2' as any, type: 'message.user', sequence: 2, payload: { content: '', turn: 1 } }),
       ];
       vi.mocked(mockOrchestrator.events!.getAncestors).mockResolvedValue(mockAncestors);
 
@@ -323,7 +336,7 @@ describe('EventStoreAdapter', () => {
     });
 
     it('should return descendants by default', async () => {
-      const mockChildren = [{ id: 'evt-child', type: 'message.user' }];
+      const mockChildren: SessionEvent[] = [createMockEvent({ id: 'evt-child' as any, type: 'message.user', sequence: 1, payload: { content: '', turn: 1 } })];
       mockEventStore.getChildren.mockResolvedValue(mockChildren);
 
       const adapter = createEventStoreAdapter({
@@ -339,9 +352,9 @@ describe('EventStoreAdapter', () => {
 
   describe('getAncestors', () => {
     it('should return ancestor events', async () => {
-      const mockAncestors = [
-        { id: 'evt-1', type: 'session.start' },
-        { id: 'evt-2', type: 'message.user' },
+      const mockAncestors: SessionEvent[] = [
+        createMockEvent({ id: 'evt-1' as any, type: 'session.start', sequence: 1, payload: { workingDirectory: '', model: '' } }),
+        createMockEvent({ id: 'evt-2' as any, type: 'message.user', sequence: 2, payload: { content: '', turn: 1 } }),
       ];
       vi.mocked(mockOrchestrator.events!.getAncestors).mockResolvedValue(mockAncestors);
 
@@ -358,10 +371,17 @@ describe('EventStoreAdapter', () => {
 
   describe('searchContent', () => {
     it('should search events and return results', async () => {
-      const mockResults = [
-        { id: 'evt-1', type: 'message.user', payload: { content: 'Hello world' } },
+      const mockResults: SearchResult[] = [
+        {
+          eventId: 'evt-1' as any,
+          sessionId: 'sess-123' as any,
+          type: 'message.user',
+          timestamp: '2024-01-01T00:00:00Z',
+          snippet: 'Hello world',
+          score: 0.95,
+        },
       ];
-      vi.mocked(mockOrchestrator.events!.search).mockResolvedValue(mockResults);
+      vi.mocked(mockOrchestrator.events!.search).mockResolvedValue(mockResults as any);
 
       const adapter = createEventStoreAdapter({
         orchestrator: mockOrchestrator as EventStoreOrchestrator,
@@ -382,8 +402,13 @@ describe('EventStoreAdapter', () => {
 
   describe('deleteMessage', () => {
     it('should delegate to orchestrator', async () => {
-      const mockResult = { id: 'evt-deleted', payload: { targetEventId: 'evt-1' } };
-      vi.mocked(mockOrchestrator.events!.deleteMessage).mockResolvedValue(mockResult);
+      const mockResult = createMockEvent({
+        id: 'evt-deleted' as any,
+        type: 'message.deleted',
+        sequence: 10,
+        payload: { targetEventId: 'evt-1' as any, targetType: 'message.user' },
+      });
+      vi.mocked(mockOrchestrator.events!.deleteMessage).mockResolvedValue(mockResult as any);
 
       const adapter = createEventStoreAdapter({
         orchestrator: mockOrchestrator as EventStoreOrchestrator,
@@ -398,46 +423,70 @@ describe('EventStoreAdapter', () => {
 });
 
 describe('Helper Functions', () => {
+  const createMockEvent = (overrides: Partial<SessionEvent>): SessionEvent => ({
+    id: 'evt-mock' as any,
+    parentId: null,
+    sessionId: 'sess-123' as any,
+    workspaceId: 'ws-123' as any,
+    timestamp: '2024-01-01T00:00:00Z',
+    type: 'message.user',
+    sequence: 1,
+    payload: { content: '', turn: 1 },
+    ...overrides,
+  } as SessionEvent);
+
   describe('getEventSummary', () => {
     it('should return appropriate summary for session.start', () => {
-      expect(getEventSummary({ type: 'session.start' })).toBe('Session started');
+      const evt = createMockEvent({ type: 'session.start', payload: { workingDirectory: '', model: '' } });
+      expect(getEventSummary(evt)).toBe('Session started');
     });
 
     it('should return appropriate summary for session.end', () => {
-      expect(getEventSummary({ type: 'session.end' })).toBe('Session ended');
+      const evt = createMockEvent({ type: 'session.end', payload: { reason: 'completed' } });
+      expect(getEventSummary(evt)).toBe('Session ended');
     });
 
     it('should return fork name for session.fork', () => {
-      expect(getEventSummary({ type: 'session.fork', payload: { name: 'my-fork' } })).toBe('Forked: my-fork');
+      const evt = createMockEvent({ type: 'session.fork', payload: { sourceSessionId: 'sess-src' as any, sourceEventId: 'evt-src' as any, name: 'my-fork' } });
+      expect(getEventSummary(evt)).toBe('Forked: my-fork');
     });
 
     it('should truncate user message content', () => {
       const longContent = 'A'.repeat(100);
-      expect(getEventSummary({ type: 'message.user', payload: { content: longContent } })).toBe('A'.repeat(50));
+      const evt = createMockEvent({ type: 'message.user', payload: { content: longContent, turn: 1 } });
+      expect(getEventSummary(evt)).toBe('A'.repeat(50));
     });
 
     it('should return tool name for tool.call', () => {
-      expect(getEventSummary({ type: 'tool.call', payload: { name: 'read_file' } })).toBe('Tool: read_file');
+      const evt = createMockEvent({ type: 'tool.call', payload: { toolCallId: 'tc-1', name: 'read_file', arguments: {}, turn: 1 } });
+      expect(getEventSummary(evt)).toBe('Tool: read_file');
     });
 
     it('should return type for unknown events', () => {
-      expect(getEventSummary({ type: 'custom.event' })).toBe('custom.event');
+      const evt = createMockEvent({ type: 'error.agent', payload: { error: 'test', recoverable: false } });
+      expect(getEventSummary(evt)).toBe('error.agent');
     });
   });
 
   describe('getEventDepth', () => {
     it('should return 0 for root event', () => {
-      const events = [{ id: 'evt-1', parentId: null }];
-      expect(getEventDepth(events[0], events)).toBe(0);
+      const evt = createMockEvent({ id: 'evt-1' as any, parentId: null, type: 'session.start', payload: { workingDirectory: '', model: '' } });
+      const events: SessionEvent[] = [evt];
+      const eventOrUndef = events[0];
+      if (eventOrUndef) {
+        expect(getEventDepth(eventOrUndef, events)).toBe(0);
+      }
     });
 
     it('should return correct depth for nested events', () => {
-      const events = [
-        { id: 'evt-1', parentId: null },
-        { id: 'evt-2', parentId: 'evt-1' },
-        { id: 'evt-3', parentId: 'evt-2' },
-      ];
-      expect(getEventDepth(events[2], events)).toBe(2);
+      const evt1 = createMockEvent({ id: 'evt-1' as any, parentId: null, type: 'session.start', sequence: 1, payload: { workingDirectory: '', model: '' } });
+      const evt2 = createMockEvent({ id: 'evt-2' as any, parentId: 'evt-1' as any, type: 'message.user', sequence: 2, payload: { content: '', turn: 1 } });
+      const evt3 = createMockEvent({ id: 'evt-3' as any, parentId: 'evt-2' as any, type: 'message.assistant', sequence: 3, payload: { content: [], turn: 1, tokenUsage: { inputTokens: 10, outputTokens: 20 }, stopReason: 'end_turn', model: 'claude-3-5-sonnet' } });
+      const events: SessionEvent[] = [evt1, evt2, evt3];
+      const eventOrUndef = events[2];
+      if (eventOrUndef) {
+        expect(getEventDepth(eventOrUndef, events)).toBe(2);
+      }
     });
   });
 });

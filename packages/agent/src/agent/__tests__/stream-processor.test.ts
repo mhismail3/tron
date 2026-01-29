@@ -5,7 +5,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { AgentStreamProcessor, createStreamProcessor } from '../stream-processor.js';
 import { createEventEmitter } from '../event-emitter.js';
-import type { StreamEvent, AssistantMessage, ToolCall } from '../types/index.js';
+import type { StreamEvent, AssistantMessage, ToolCall } from '../../types/index.js';
 
 describe('AgentStreamProcessor', () => {
   let processor: AgentStreamProcessor;
@@ -108,7 +108,7 @@ describe('AgentStreamProcessor', () => {
           attempt: 1,
           maxRetries: 3,
           delayMs: 1000,
-          error: { category: 'rate_limit', message: 'Rate limited' },
+          error: { category: 'rate_limit', message: 'Rate limited', isRetryable: true },
         },
         { type: 'text_delta', delta: 'Success' },
         { type: 'done', message: createMockMessage('Success'), stopReason: 'end_turn' },
@@ -414,8 +414,6 @@ function createMockMessage(text: string, toolCalls?: ToolCall[]): AssistantMessa
       outputTokens: 50,
     },
     stopReason: 'end_turn',
-    providerId: 'anthropic',
-    model: 'claude-3-5-sonnet-20241022',
   };
 }
 
@@ -428,7 +426,5 @@ function createEmptyMessage(): AssistantMessage {
       outputTokens: 50,
     },
     stopReason: 'end_turn',
-    providerId: 'anthropic',
-    model: 'claude-3-5-sonnet-20241022',
   };
 }

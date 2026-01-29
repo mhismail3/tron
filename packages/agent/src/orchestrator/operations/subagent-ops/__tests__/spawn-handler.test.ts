@@ -2,7 +2,7 @@
  * @fileoverview Tests for spawn-handler
  */
 import { describe, it, expect, vi, beforeEach, type Mock } from 'vitest';
-import { createSpawnHandler } from '../spawn-handler.js';
+import { createSpawnHandler, type SpawnHandler } from '../spawn-handler.js';
 import type { EventStore } from '../../../../events/event-store.js';
 import type { ActiveSession } from '../../../types.js';
 

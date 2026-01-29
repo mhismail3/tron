@@ -98,7 +98,7 @@ export function createSessionStartEvent(options: SessionStartEventOptions = {}):
 }
 
 export interface SessionEndEventOptions extends BaseEventOptions {
-  reason?: 'user_request' | 'timeout' | 'error' | 'completed';
+  reason?: 'completed' | 'aborted' | 'error' | 'timeout';
 }
 
 export function createSessionEndEvent(options: SessionEndEventOptions = {}): SessionEndEvent {
@@ -111,7 +111,7 @@ export function createSessionEndEvent(options: SessionEndEventOptions = {}): Ses
     type: 'session.end',
     sequence: options.sequence ?? 0,
     payload: {
-      reason: options.reason,
+      reason: options.reason ?? 'completed',
     },
   };
 }
@@ -168,7 +168,8 @@ export interface AssistantMessageEventOptions extends BaseEventOptions {
   content?: ContentBlock[];
   turn?: number;
   model?: string;
-  stopReason?: string;
+  stopReason?: 'end_turn' | 'tool_use' | 'max_tokens' | 'stop_sequence';
+  tokenUsage?: { inputTokens: number; outputTokens: number };
 }
 
 export function createAssistantMessageEvent(options: AssistantMessageEventOptions = {}): AssistantMessageEvent {
@@ -183,8 +184,9 @@ export function createAssistantMessageEvent(options: AssistantMessageEventOption
     payload: {
       content: options.content ?? [{ type: 'text', text: 'Test assistant response' }],
       turn: options.turn ?? 1,
-      model: options.model,
-      stopReason: options.stopReason,
+      model: options.model ?? 'claude-sonnet-4-20250514',
+      stopReason: options.stopReason ?? 'end_turn',
+      tokenUsage: options.tokenUsage ?? { inputTokens: 100, outputTokens: 50 },
     },
   };
 }
@@ -195,8 +197,8 @@ export function createAssistantMessageEvent(options: AssistantMessageEventOption
 
 export interface ToolCallEventOptions extends BaseEventOptions {
   toolCallId?: string;
-  toolName?: string;
-  input?: Record<string, unknown>;
+  name?: string;
+  arguments?: Record<string, unknown>;
   turn?: number;
 }
 
@@ -211,8 +213,8 @@ export function createToolCallEvent(options: ToolCallEventOptions = {}): ToolCal
     sequence: options.sequence ?? 0,
     payload: {
       toolCallId: options.toolCallId ?? `call_${Date.now()}`,
-      toolName: options.toolName ?? 'TestTool',
-      input: options.input ?? {},
+      name: options.name ?? 'TestTool',
+      arguments: options.arguments ?? {},
       turn: options.turn ?? 1,
     },
   };
@@ -220,8 +222,9 @@ export function createToolCallEvent(options: ToolCallEventOptions = {}): ToolCal
 
 export interface ToolResultEventOptions extends BaseEventOptions {
   toolCallId?: string;
-  content?: string | Array<{ type: string; text?: string }>;
+  content?: string;
   isError?: boolean;
+  duration?: number;
 }
 
 export function createToolResultEvent(options: ToolResultEventOptions = {}): ToolResultEvent {
@@ -237,6 +240,7 @@ export function createToolResultEvent(options: ToolResultEventOptions = {}): Too
       toolCallId: options.toolCallId ?? `call_${Date.now()}`,
       content: options.content ?? 'Tool result content',
       isError: options.isError ?? false,
+      duration: options.duration ?? 100,
     },
   };
 }
@@ -248,7 +252,7 @@ export function createToolResultEvent(options: ToolResultEventOptions = {}): Too
 export interface ConfigModelSwitchEventOptions extends BaseEventOptions {
   previousModel?: string;
   newModel?: string;
-  provider?: string;
+  reason?: string;
 }
 
 export function createConfigModelSwitchEvent(options: ConfigModelSwitchEventOptions = {}): ConfigModelSwitchEvent {
@@ -263,7 +267,7 @@ export function createConfigModelSwitchEvent(options: ConfigModelSwitchEventOpti
     payload: {
       previousModel: options.previousModel ?? 'claude-sonnet-4-20250514',
       newModel: options.newModel ?? 'claude-3-5-sonnet-20241022',
-      provider: options.provider,
+      reason: options.reason,
     },
   };
 }
@@ -302,9 +306,10 @@ export function createMessageDeletedEvent(options: MessageDeletedEventOptions = 
 // =============================================================================
 
 export interface CompactBoundaryEventOptions extends BaseEventOptions {
-  boundaryEventId?: EventId;
-  tokensBefore?: number;
-  tokensAfter?: number;
+  rangeFrom?: EventId;
+  rangeTo?: EventId;
+  originalTokens?: number;
+  compactedTokens?: number;
 }
 
 export function createCompactBoundaryEvent(options: CompactBoundaryEventOptions = {}): CompactBoundaryEvent {
@@ -317,9 +322,12 @@ export function createCompactBoundaryEvent(options: CompactBoundaryEventOptions 
     type: 'compact.boundary',
     sequence: options.sequence ?? 0,
     payload: {
-      boundaryEventId: options.boundaryEventId ?? generateEventId(),
-      tokensBefore: options.tokensBefore ?? 10000,
-      tokensAfter: options.tokensAfter ?? 2000,
+      range: {
+        from: options.rangeFrom ?? generateEventId(),
+        to: options.rangeTo ?? generateEventId(),
+      },
+      originalTokens: options.originalTokens ?? 10000,
+      compactedTokens: options.compactedTokens ?? 2000,
     },
   };
 }
@@ -330,7 +338,6 @@ export function createCompactBoundaryEvent(options: CompactBoundaryEventOptions 
 
 export interface StreamTurnStartEventOptions extends BaseEventOptions {
   turn?: number;
-  model?: string;
 }
 
 export function createStreamTurnStartEvent(options: StreamTurnStartEventOptions = {}): StreamTurnStartEvent {
@@ -344,7 +351,6 @@ export function createStreamTurnStartEvent(options: StreamTurnStartEventOptions 
     sequence: options.sequence ?? 0,
     payload: {
       turn: options.turn ?? 1,
-      model: options.model ?? 'claude-sonnet-4-20250514',
     },
   };
 }
@@ -352,7 +358,7 @@ export function createStreamTurnStartEvent(options: StreamTurnStartEventOptions 
 export interface StreamTurnEndEventOptions extends BaseEventOptions {
   turn?: number;
   tokenUsage?: { inputTokens: number; outputTokens: number };
-  stopReason?: string;
+  cost?: number;
 }
 
 export function createStreamTurnEndEvent(options: StreamTurnEndEventOptions = {}): StreamTurnEndEvent {
@@ -367,7 +373,7 @@ export function createStreamTurnEndEvent(options: StreamTurnEndEventOptions = {}
     payload: {
       turn: options.turn ?? 1,
       tokenUsage: options.tokenUsage ?? { inputTokens: 100, outputTokens: 50 },
-      stopReason: options.stopReason ?? 'end_turn',
+      cost: options.cost,
     },
   };
 }
@@ -408,14 +414,17 @@ export function createGenericEvent<T extends SessionEvent['type']>(
 export function createEventChain(events: SessionEvent[]): SessionEvent[] {
   if (events.length === 0) return [];
 
-  const sessionId = events[0].sessionId;
-  const workspaceId = events[0].workspaceId;
+  const firstEvent = events[0];
+  if (!firstEvent) return [];
+
+  const sessionId = firstEvent.sessionId;
+  const workspaceId = firstEvent.workspaceId;
 
   return events.map((event, index) => ({
     ...event,
     sessionId,
     workspaceId,
-    parentId: index === 0 ? null : events[index - 1].id,
+    parentId: index === 0 ? null : (events[index - 1]?.id ?? null),
     sequence: index,
   }));
 }

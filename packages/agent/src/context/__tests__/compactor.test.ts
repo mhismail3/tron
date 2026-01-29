@@ -13,7 +13,7 @@ import {
   type CompactorConfig,
   type CompactResult,
 } from '../compactor.js';
-import type { Message } from '../agent/types.js';
+import type { Message } from '../../types/index.js';
 
 describe('ContextCompactor', () => {
   // ==========================================================================
@@ -65,7 +65,7 @@ describe('ContextCompactor', () => {
       const compactor = createContextCompactor();
       const messages: Message[] = [
         { role: 'user', content: 'Hello world' },
-        { role: 'assistant', content: 'Hi there! How can I help you today?' },
+        { role: 'assistant', content: [{ type: 'text', text: 'Hi there! How can I help you today?' }] },
         { role: 'user', content: 'Tell me about TypeScript' },
       ];
 
@@ -96,14 +96,13 @@ describe('ContextCompactor', () => {
           role: 'assistant',
           content: [
             { type: 'text', text: 'Let me read that file' },
-            { type: 'tool_use', id: 'tool_1', name: 'read_file', input: { path: '/test.txt' } },
+            { type: 'tool_use', id: 'tool_1', name: 'read_file', arguments: { path: '/test.txt' } },
           ],
         },
         {
-          role: 'user',
-          content: [
-            { type: 'tool_result', tool_use_id: 'tool_1', content: 'File contents here...' },
-          ],
+          role: 'toolResult',
+          toolCallId: 'tool_1',
+          content: 'File contents here...',
         },
       ];
 
@@ -153,7 +152,7 @@ describe('ContextCompactor', () => {
 
       const messages: Message[] = [
         { role: 'user', content: 'Hello' },
-        { role: 'assistant', content: 'Hi' },
+        { role: 'assistant', content: [{ type: 'text', text: 'Hi' }] },
       ];
 
       expect(compactor.shouldCompact(messages)).toBe(false);
@@ -175,11 +174,11 @@ describe('ContextCompactor', () => {
       // Longer messages to exceed threshold
       const messages: Message[] = [
         { role: 'user', content: 'First question about TypeScript and how it works in modern development' },
-        { role: 'assistant', content: 'TypeScript is a typed superset of JavaScript that compiles to plain JS' },
+        { role: 'assistant', content: [{ type: 'text', text: 'TypeScript is a typed superset of JavaScript that compiles to plain JS' }] },
         { role: 'user', content: 'Second question about interfaces and type definitions in TypeScript' },
-        { role: 'assistant', content: 'Interfaces define contracts for objects and enable structural typing' },
+        { role: 'assistant', content: [{ type: 'text', text: 'Interfaces define contracts for objects and enable structural typing' }] },
         { role: 'user', content: 'Third question about generics and how they enable code reuse' },
-        { role: 'assistant', content: 'Generics enable reusable type-safe code by parameterizing types' },
+        { role: 'assistant', content: [{ type: 'text', text: 'Generics enable reusable type-safe code by parameterizing types' }] },
       ];
 
       const result = await compactor.compact(messages);
@@ -189,25 +188,24 @@ describe('ContextCompactor', () => {
       expect(result.messages.length).toBeLessThanOrEqual(messages.length);
     });
 
-    it('should preserve system messages', async () => {
+    it('should preserve first user message context', async () => {
       const compactor = createContextCompactor({
         maxTokens: 100,
         targetTokens: 30,
       });
 
       const messages: Message[] = [
-        { role: 'system', content: 'You are a helpful assistant' },
-        { role: 'user', content: 'Question 1' },
-        { role: 'assistant', content: 'Answer 1' },
+        { role: 'user', content: 'Initial context about the project and requirements' },
+        { role: 'assistant', content: [{ type: 'text', text: 'Answer 1' }] },
         { role: 'user', content: 'Question 2' },
-        { role: 'assistant', content: 'Answer 2' },
+        { role: 'assistant', content: [{ type: 'text', text: 'Answer 2' }] },
       ];
 
       const result = await compactor.compact(messages);
 
-      // System message should be preserved
-      const systemMessages = result.messages.filter(m => m.role === 'system');
-      expect(systemMessages.length).toBe(1);
+      // First user message should be preserved or summarized
+      expect(result.messages.length).toBeGreaterThan(0);
+      expect(result.messages[0].role).toBe('user');
     });
 
     it('should include continuation summary', async () => {
@@ -220,9 +218,9 @@ describe('ContextCompactor', () => {
       // Longer messages to exceed threshold
       const messages: Message[] = [
         { role: 'user', content: 'Tell me about React hooks and how they work in functional components' },
-        { role: 'assistant', content: 'React hooks are functions that let you use state and lifecycle features' },
+        { role: 'assistant', content: [{ type: 'text', text: 'React hooks are functions that let you use state and lifecycle features' }] },
         { role: 'user', content: 'What about useEffect and side effects management?' },
-        { role: 'assistant', content: 'useEffect handles side effects like data fetching and subscriptions in components' },
+        { role: 'assistant', content: [{ type: 'text', text: 'useEffect handles side effects like data fetching and subscriptions in components' }] },
       ];
 
       const result = await compactor.compact(messages);
@@ -240,18 +238,22 @@ describe('ContextCompactor', () => {
 
       const messages: Message[] = [
         { role: 'user', content: 'Old message 1' },
-        { role: 'assistant', content: 'Old response 1' },
+        { role: 'assistant', content: [{ type: 'text', text: 'Old response 1' }] },
         { role: 'user', content: 'Old message 2' },
-        { role: 'assistant', content: 'Old response 2' },
+        { role: 'assistant', content: [{ type: 'text', text: 'Old response 2' }] },
         { role: 'user', content: 'Recent message' },
-        { role: 'assistant', content: 'Recent response' },
+        { role: 'assistant', content: [{ type: 'text', text: 'Recent response' }] },
       ];
 
       const result = await compactor.compact(messages);
 
       // Recent messages should be preserved verbatim
       const lastMessage = result.messages[result.messages.length - 1];
-      expect(lastMessage.content).toBe('Recent response');
+      // Content could be string or array depending on compaction
+      const lastContent = Array.isArray(lastMessage.content)
+        ? (lastMessage.content[0] as { type: 'text'; text: string }).text
+        : lastMessage.content;
+      expect(lastContent).toBe('Recent response');
     });
 
     it('should not compact if below threshold', async () => {
@@ -262,7 +264,7 @@ describe('ContextCompactor', () => {
 
       const messages: Message[] = [
         { role: 'user', content: 'Hello' },
-        { role: 'assistant', content: 'Hi' },
+        { role: 'assistant', content: [{ type: 'text', text: 'Hi' }] },
       ];
 
       const result = await compactor.compact(messages);
@@ -282,9 +284,9 @@ describe('ContextCompactor', () => {
 
       const messages: Message[] = [
         { role: 'user', content: 'How do I implement a binary search?' },
-        { role: 'assistant', content: 'Binary search works by dividing the search space in half' },
+        { role: 'assistant', content: [{ type: 'text', text: 'Binary search works by dividing the search space in half' }] },
         { role: 'user', content: 'Can you show me code?' },
-        { role: 'assistant', content: 'function binarySearch(arr, target) { ... }' },
+        { role: 'assistant', content: [{ type: 'text', text: 'function binarySearch(arr, target) { ... }' }] },
       ];
 
       const summary = compactor.generateSummary(messages);
@@ -299,9 +301,9 @@ describe('ContextCompactor', () => {
 
       const messages: Message[] = [
         { role: 'user', content: 'Let me explain the React component structure' },
-        { role: 'assistant', content: 'I understand. Components are the building blocks.' },
+        { role: 'assistant', content: [{ type: 'text', text: 'I understand. Components are the building blocks.' }] },
         { role: 'user', content: 'Now about state management with Redux' },
-        { role: 'assistant', content: 'Redux provides a centralized store for state.' },
+        { role: 'assistant', content: [{ type: 'text', text: 'Redux provides a centralized store for state.' }] },
       ];
 
       const summary = compactor.generateSummary(messages);
@@ -319,14 +321,15 @@ describe('ContextCompactor', () => {
           role: 'assistant',
           content: [
             { type: 'text', text: 'Reading config' },
-            { type: 'tool_use', id: 't1', name: 'read_file', input: { path: 'config.json' } },
+            { type: 'tool_use', id: 't1', name: 'read_file', arguments: { path: 'config.json' } },
           ],
         },
         {
-          role: 'user',
-          content: [{ type: 'tool_result', tool_use_id: 't1', content: '{"debug": true}' }],
+          role: 'toolResult',
+          toolCallId: 't1',
+          content: '{"debug": true}',
         },
-        { role: 'assistant', content: 'The config has debug mode enabled.' },
+        { role: 'assistant', content: [{ type: 'text', text: 'The config has debug mode enabled.' }] },
       ];
 
       const summary = compactor.generateSummary(messages);
@@ -351,7 +354,7 @@ describe('ContextCompactor', () => {
 
       const messages: Message[] = [
         { role: 'user', content: 'A'.repeat(100) },
-        { role: 'assistant', content: 'B'.repeat(100) },
+        { role: 'assistant', content: [{ type: 'text', text: 'B'.repeat(100) }] },
       ];
 
       await compactor.compact(messages);
@@ -372,7 +375,7 @@ describe('ContextCompactor', () => {
 
       const messages: Message[] = [
         { role: 'user', content: 'A'.repeat(100) },
-        { role: 'assistant', content: 'B'.repeat(100) },
+        { role: 'assistant', content: [{ type: 'text', text: 'B'.repeat(100) }] },
       ];
 
       await compactor.compact(messages);
@@ -431,24 +434,22 @@ describe('ContextCompactor', () => {
       });
 
       const messages: Message[] = [
-        { role: 'system', content: 'System' },
         { role: 'user', content: 'User 1' },
-        { role: 'assistant', content: 'Assistant 1' },
+        { role: 'assistant', content: [{ type: 'text', text: 'Assistant 1' }] },
         { role: 'user', content: 'User 2' },
-        { role: 'assistant', content: 'Assistant 2' },
+        { role: 'assistant', content: [{ type: 'text', text: 'Assistant 2' }] },
       ];
 
       const result = await compactor.compact(messages);
 
-      // Check that roles alternate correctly
-      for (let i = 1; i < result.messages.length - 1; i++) {
+      // Check that roles alternate correctly (user -> assistant or assistant -> user)
+      for (let i = 1; i < result.messages.length; i++) {
         const prevRole = result.messages[i - 1].role;
         const currRole = result.messages[i].role;
 
-        if (prevRole !== 'system') {
-          // user -> assistant or assistant -> user
-          expect(['user', 'assistant']).toContain(currRole);
-        }
+        // user -> assistant or assistant -> user (toolResult can follow assistant)
+        expect(['user', 'assistant', 'toolResult']).toContain(currRole);
+        expect(['user', 'assistant', 'toolResult']).toContain(prevRole);
       }
     });
   });

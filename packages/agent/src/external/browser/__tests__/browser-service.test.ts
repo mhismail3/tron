@@ -41,7 +41,7 @@ const mockBrowserManager = {
   getSnapshot: vi.fn(() => Promise.resolve({ tree: 'test', refs: {} })),
   getRefMap: vi.fn(() => ({})),
   isRef: vi.fn(() => false),
-  getLocatorFromRef: vi.fn(() => null),
+  getLocatorFromRef: vi.fn((): typeof mockLocator | null => null),
   startScreencast: vi.fn(),
   stopScreencast: vi.fn(),
 };

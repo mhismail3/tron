@@ -17,6 +17,7 @@ import type { RulesLoadedEvent } from './rules.js';
 import type { PlanModeEnteredEvent, PlanModeExitedEvent, PlanCreatedEvent } from './plan.js';
 import type { SubagentSpawnedEvent, SubagentStatusUpdateEvent, SubagentCompletedEvent, SubagentFailedEvent } from './subagent.js';
 import type { TodoWriteEvent } from './todo.js';
+import type { TurnFailedEvent } from './turn.js';
 
 // =============================================================================
 // Type Guards
@@ -144,4 +145,12 @@ export function isTodoWriteEvent(event: SessionEvent): event is TodoWriteEvent {
 
 export function isTodoEvent(event: SessionEvent): event is TodoWriteEvent {
   return event.type.startsWith('todo.');
+}
+
+export function isTurnFailedEvent(event: SessionEvent): event is TurnFailedEvent {
+  return event.type === 'turn.failed';
+}
+
+export function isTurnEvent(event: SessionEvent): event is TurnFailedEvent {
+  return event.type.startsWith('turn.');
 }

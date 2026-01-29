@@ -4,7 +4,7 @@
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { AgentEventEmitter, createEventEmitter } from '../event-emitter.js';
-import type { TronEvent } from '../types/index.js';
+import type { TronEvent } from '../../types/index.js';
 
 describe('AgentEventEmitter', () => {
   let emitter: AgentEventEmitter;

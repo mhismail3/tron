@@ -35,7 +35,7 @@ function createMockSession(
   mockManager: ReturnType<typeof createMockManager>
 ): BrowserSession {
   return {
-    manager: mockManager as BrowserSession['manager'],
+    manager: mockManager as unknown as BrowserSession['manager'],
     isStreaming: false,
     elementRefs: new Map(),
     lastSnapshot: undefined,

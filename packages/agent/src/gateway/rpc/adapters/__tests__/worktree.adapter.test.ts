@@ -7,7 +7,7 @@
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { createWorktreeAdapter } from '../worktree.adapter.js';
-import type { EventStoreOrchestrator } from '../../../../orchestrator/event-store-orchestrator.js';
+import type { EventStoreOrchestrator } from '../../../../orchestrator/persistence/event-store-orchestrator.js';
 
 describe('WorktreeAdapter', () => {
   let mockOrchestrator: Partial<EventStoreOrchestrator>;

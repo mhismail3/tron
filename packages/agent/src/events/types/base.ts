@@ -72,7 +72,9 @@ export type EventType =
   | 'subagent.completed'
   | 'subagent.failed'
   // Todo tracking
-  | 'todo.write';
+  | 'todo.write'
+  // Turn events
+  | 'turn.failed';
 
 // =============================================================================
 // Base Event Structure

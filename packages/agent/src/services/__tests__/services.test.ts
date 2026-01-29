@@ -16,33 +16,45 @@ import {
 vi.mock('../../orchestrator/operations/context-ops.js', () => ({
   createContextOps: vi.fn(() => ({
     getContextSnapshot: vi.fn().mockReturnValue({
-      sessionId: 'session-123',
-      tokens: { current: 1000, limit: 200000, percentage: 0.5 },
-      thresholds: { compact: 0.8, warning: 0.9, critical: 0.95 },
+      currentTokens: 1000,
+      contextLimit: 200000,
+      usagePercent: 0.5,
+      thresholdLevel: 'normal',
+      breakdown: { systemPrompt: 100, tools: 200, rules: 50, messages: 650 },
     }),
     getDetailedContextSnapshot: vi.fn().mockReturnValue({
-      sessionId: 'session-123',
-      tokens: { current: 1000, limit: 200000, percentage: 0.5 },
-      thresholds: { compact: 0.8, warning: 0.9, critical: 0.95 },
+      currentTokens: 1000,
+      contextLimit: 200000,
+      usagePercent: 0.5,
+      thresholdLevel: 'normal',
+      breakdown: { systemPrompt: 100, tools: 200, rules: 50, messages: 650 },
       messages: [],
+      systemPromptContent: '',
+      toolsContent: [],
     }),
     shouldCompact: vi.fn().mockReturnValue(false),
     previewCompaction: vi.fn().mockResolvedValue({
-      beforeTokens: 1000,
-      afterTokens: 500,
-      reduction: 500,
-      reductionPercent: 50,
+      tokensBefore: 1000,
+      tokensAfter: 500,
+      compressionRatio: 0.5,
+      preservedTurns: 3,
+      summarizedTurns: 5,
       summary: 'Test summary',
     }),
     confirmCompaction: vi.fn().mockResolvedValue({
-      beforeTokens: 1000,
-      afterTokens: 500,
-      reduction: 500,
-      reductionPercent: 50,
+      success: true,
+      tokensBefore: 1000,
+      tokensAfter: 500,
+      compressionRatio: 0.5,
+      summary: 'Test summary',
     }),
     canAcceptTurn: vi.fn().mockReturnValue({
-      canAccept: true,
+      canProceed: true,
       needsCompaction: false,
+      wouldExceedLimit: false,
+      currentTokens: 1000,
+      estimatedAfterTurn: 2000,
+      contextLimit: 200000,
     }),
     clearContext: vi.fn().mockResolvedValue({
       success: true,
@@ -56,11 +68,8 @@ vi.mock('../../orchestrator/operations/context-ops.js', () => ({
 
 describe('ContextService', () => {
   const mockDeps: ContextServiceDeps = {
-    eventStore: {
-      getSession: vi.fn(),
-      getMessagesAt: vi.fn().mockResolvedValue([]),
-    } as any,
     getActiveSession: vi.fn().mockReturnValue(null),
+    emit: vi.fn(),
   };
 
   it('creates context service instance with all methods', () => {
@@ -81,8 +90,8 @@ describe('ContextService', () => {
       const snapshot = service.getSnapshot('session-123');
 
       expect(snapshot).toBeDefined();
-      expect(snapshot.sessionId).toBe('session-123');
-      expect(snapshot.tokens).toBeDefined();
+      expect(snapshot.currentTokens).toBe(1000);
+      expect(snapshot.contextLimit).toBe(200000);
     });
   });
 
@@ -101,8 +110,8 @@ describe('ContextService', () => {
       const preview = await service.previewCompaction('session-123');
 
       expect(preview).toBeDefined();
-      expect(preview.beforeTokens).toBe(1000);
-      expect(preview.afterTokens).toBe(500);
+      expect(preview.tokensBefore).toBe(1000);
+      expect(preview.tokensAfter).toBe(500);
     });
   });
 

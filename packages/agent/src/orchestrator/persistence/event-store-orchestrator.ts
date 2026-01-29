@@ -505,18 +505,17 @@ export class EventStoreOrchestrator extends EventEmitter {
   }
 
   // ===========================================================================
-  // Private Methods
+  // Private Methods (test-exposed via any cast)
   // ===========================================================================
 
   /**
    * Load skill context for a prompt. Delegates to SkillLoader.
-   * @internal Exposed for testing - prefer using runAgent which handles this automatically.
+   * @internal Exposed for testing via (orchestrator as any).loadSkillContextForPrompt
    */
-  // @ts-expect-error - Exposed for testing via (orchestrator as any).loadSkillContextForPrompt
-  private async loadSkillContextForPrompt(
+  ['loadSkillContextForPrompt'] = async (
     active: ActiveSession,
     options: AgentRunOptions
-  ): Promise<string> {
+  ): Promise<string> => {
     return this.skillLoader.loadSkillContextForPrompt(
       {
         sessionId: active.sessionId,
@@ -525,17 +524,16 @@ export class EventStoreOrchestrator extends EventEmitter {
       },
       options
     );
-  }
+  };
 
   /**
    * Track skills for a prompt. Delegates to SkillLoader.
-   * @internal Exposed for testing - prefer using runAgent which handles this automatically.
+   * @internal Exposed for testing via (orchestrator as any).trackSkillsForPrompt
    */
-  // @ts-expect-error - Exposed for testing via (orchestrator as any).trackSkillsForPrompt
-  private async trackSkillsForPrompt(
+  ['trackSkillsForPrompt'] = async (
     active: ActiveSession,
     options: AgentRunOptions
-  ): Promise<void> {
+  ): Promise<void> => {
     return this.skillLoader.trackSkillsForPrompt(
       {
         sessionId: active.sessionId,
@@ -544,7 +542,7 @@ export class EventStoreOrchestrator extends EventEmitter {
       },
       options
     );
-  }
+  };
 
   // ===========================================================================
   // Agent Factory (delegated to AgentFactory)

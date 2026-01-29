@@ -11,7 +11,7 @@ import {
   createFileHandlers,
 } from '../file.handler.js';
 import type { RpcRequest, RpcResponse } from '../../types.js';
-import type { RpcContext } from '../handler.js';
+import type { RpcContext } from '../../handler.js';
 
 // Mock fs module
 vi.mock('fs/promises');
@@ -33,7 +33,6 @@ describe('file.handler', () => {
   describe('handleFileRead', () => {
     it('should return error when path is missing', async () => {
       const request: RpcRequest = {
-        jsonrpc: '2.0',
         id: '1',
         method: 'file.read',
         params: {},
@@ -48,7 +47,6 @@ describe('file.handler', () => {
 
     it('should return error when path is outside home directory', async () => {
       const request: RpcRequest = {
-        jsonrpc: '2.0',
         id: '1',
         method: 'file.read',
         params: { path: '/etc/passwd' },
@@ -64,7 +62,6 @@ describe('file.handler', () => {
     it('should prevent directory traversal attacks', async () => {
       const maliciousPath = path.join(homeDir, '..', 'etc', 'passwd');
       const request: RpcRequest = {
-        jsonrpc: '2.0',
         id: '1',
         method: 'file.read',
         params: { path: maliciousPath },
@@ -83,7 +80,6 @@ describe('file.handler', () => {
       vi.mocked(fs.readFile).mockResolvedValue(fileContent);
 
       const request: RpcRequest = {
-        jsonrpc: '2.0',
         id: '1',
         method: 'file.read',
         params: { path: filePath },
@@ -104,7 +100,6 @@ describe('file.handler', () => {
       vi.mocked(fs.readFile).mockRejectedValue(error);
 
       const request: RpcRequest = {
-        jsonrpc: '2.0',
         id: '1',
         method: 'file.read',
         params: { path: filePath },
@@ -123,7 +118,6 @@ describe('file.handler', () => {
       vi.mocked(fs.readFile).mockRejectedValue(new Error('Permission denied'));
 
       const request: RpcRequest = {
-        jsonrpc: '2.0',
         id: '1',
         method: 'file.read',
         params: { path: filePath },
@@ -144,7 +138,6 @@ describe('file.handler', () => {
       vi.mocked(fs.readFile).mockResolvedValue(fileContent);
 
       const request: RpcRequest = {
-        jsonrpc: '2.0',
         id: '1',
         method: 'file.read',
         params: { path: filePath },
@@ -177,7 +170,6 @@ describe('file.handler', () => {
       vi.mocked(fs.readFile).mockResolvedValue(fileContent);
 
       const request: RpcRequest = {
-        jsonrpc: '2.0',
         id: '1',
         method: 'file.read',
         params: { path: filePath },
@@ -193,7 +185,6 @@ describe('file.handler', () => {
       const handler = registrations[0].handler;
 
       const request: RpcRequest = {
-        jsonrpc: '2.0',
         id: '1',
         method: 'file.read',
         params: {},
@@ -207,7 +198,6 @@ describe('file.handler', () => {
       const handler = registrations[0].handler;
 
       const request: RpcRequest = {
-        jsonrpc: '2.0',
         id: '1',
         method: 'file.read',
         params: { path: '/etc/passwd' },

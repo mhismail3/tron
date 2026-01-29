@@ -258,9 +258,11 @@ describe('Provider Switching - Message Preservation', () => {
       const userMsgEvent = ancestors.find(e => e.type === 'message.user');
 
       expect(userMsgEvent).toBeDefined();
-      expect(Array.isArray(userMsgEvent!.payload.content)).toBe(true);
-      expect(userMsgEvent!.payload.content.length).toBe(2);
-      expect(userMsgEvent!.payload.content[1].type).toBe('image');
+      const content = userMsgEvent!.payload.content;
+      expect(Array.isArray(content)).toBe(true);
+      const contentArray = content as { type: string }[];
+      expect(contentArray.length).toBe(2);
+      expect(contentArray[1].type).toBe('image');
     });
 
     it('should preserve thinking blocks from Claude', async () => {
@@ -309,9 +311,9 @@ describe('Provider Switching - Message Preservation', () => {
       expect(assistantEvents.length).toBe(1);
       const thinkingBlock = assistantEvents[0].payload.content.find(
         (c: { type: string }) => c.type === 'thinking'
-      );
+      ) as { type: 'thinking'; thinking: string } | undefined;
       expect(thinkingBlock).toBeDefined();
-      expect(thinkingBlock.thinking).toBe('Let me think step by step...');
+      expect(thinkingBlock!.thinking).toBe('Let me think step by step...');
     });
   });
 

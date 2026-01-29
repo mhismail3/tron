@@ -12,7 +12,7 @@ import {
   createMockCreateSessionResult,
   type MockEventStoreOptions,
 } from '../event-store.js';
-import type { EventStore } from '../../../events/event-store.js';
+import type { EventStoreMethods } from '../event-store.js';
 import type { SessionEvent, SessionId, EventId, WorkspaceId, Message } from '../../../events/types.js';
 
 describe('event-store mock factories', () => {
@@ -59,9 +59,9 @@ describe('event-store mock factories', () => {
       expect(vi.isMockFunction(mockStore.getSession)).toBe(true);
     });
 
-    it('should be assignable to EventStore type', () => {
+    it('should be assignable to EventStoreMethods type', () => {
       // This test verifies TypeScript compatibility at compile time
-      const mockStore: EventStore = createMockEventStore();
+      const mockStore: EventStoreMethods = createMockEventStore();
 
       expect(mockStore).toBeDefined();
     });
@@ -200,7 +200,7 @@ describe('event-store mock factories', () => {
       expect(session.workspaceId).toMatch(/^ws_/);
       expect(session.workingDirectory).toBeDefined();
       expect(session.latestModel).toBeDefined();
-      expect(session.status).toBe('active');
+      expect(session.isEnded).toBe(false);
       expect(session.eventCount).toBe(0);
       expect(session.messageCount).toBe(0);
     });
@@ -208,13 +208,13 @@ describe('event-store mock factories', () => {
     it('should allow overriding session properties', () => {
       const session = createMockSessionRow({
         id: 'sess_custom' as SessionId,
-        status: 'ended',
+        isEnded: true,
         eventCount: 10,
         latestModel: 'gpt-4',
       });
 
       expect(session.id).toBe('sess_custom');
-      expect(session.status).toBe('ended');
+      expect(session.isEnded).toBe(true);
       expect(session.eventCount).toBe(10);
       expect(session.latestModel).toBe('gpt-4');
     });

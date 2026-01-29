@@ -588,8 +588,8 @@ describe('WorktreeCoordinator - Event Emission', () => {
     );
 
     expect(acquiredCall).toBeDefined();
-    expect(acquiredCall[0].sessionId).toBe(sessionId);
-    expect(acquiredCall[0].payload.path).toBe(testDir);
+    expect(acquiredCall![0].sessionId).toBe(sessionId);
+    expect(acquiredCall![0].payload.path).toBe(testDir);
   });
 
   it('should emit worktree.released on release', async () => {
@@ -621,7 +621,7 @@ describe('WorktreeCoordinator - Event Emission', () => {
     );
 
     expect(commitCall).toBeDefined();
-    expect(commitCall[0].payload.hash).toBeDefined();
+    expect(commitCall![0].payload.hash).toBeDefined();
   });
 
   it('should emit worktree.merged on successful merge', async () => {
@@ -645,6 +645,6 @@ describe('WorktreeCoordinator - Event Emission', () => {
     );
 
     expect(mergeCall).toBeDefined();
-    expect(mergeCall[0].payload.success).toBe(true);
+    expect(mergeCall![0].payload.success).toBe(true);
   });
 });

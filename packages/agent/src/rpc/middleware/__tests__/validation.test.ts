@@ -14,7 +14,7 @@ import {
   type SchemaRegistry,
   type ValidationError,
 } from '../validation.js';
-import type { RpcRequest, RpcResponse } from '../types.js';
+import type { RpcRequest, RpcResponse } from '../../types.js';
 import type { MiddlewareNext } from '../index.js';
 
 describe('Validation Middleware', () => {
@@ -36,7 +36,6 @@ describe('Validation Middleware', () => {
     it('should pass through when no schema is registered for method', async () => {
       const middleware = createValidationMiddleware(schemas);
       const request: RpcRequest = {
-        jsonrpc: '2.0',
         id: '1',
         method: 'unknown.method',
         params: { anything: 'goes' },
@@ -56,7 +55,6 @@ describe('Validation Middleware', () => {
 
       const middleware = createValidationMiddleware(schemas);
       const request: RpcRequest = {
-        jsonrpc: '2.0',
         id: '1',
         method: 'test.method',
         params: { name: 'test', count: 42 },
@@ -75,7 +73,6 @@ describe('Validation Middleware', () => {
 
       const middleware = createValidationMiddleware(schemas);
       const request: RpcRequest = {
-        jsonrpc: '2.0',
         id: '1',
         method: 'test.method',
         params: {},
@@ -96,7 +93,6 @@ describe('Validation Middleware', () => {
 
       const middleware = createValidationMiddleware(schemas);
       const request: RpcRequest = {
-        jsonrpc: '2.0',
         id: '1',
         method: 'test.method',
         params: { count: 'not a number' },
@@ -117,7 +113,6 @@ describe('Validation Middleware', () => {
 
       const middleware = createValidationMiddleware(schemas);
       const request: RpcRequest = {
-        jsonrpc: '2.0',
         id: '1',
         method: 'test.method',
         params: { name: 123, count: 'wrong' },
@@ -136,7 +131,6 @@ describe('Validation Middleware', () => {
 
       const middleware = createValidationMiddleware(schemas);
       const request: RpcRequest = {
-        jsonrpc: '2.0',
         id: '1',
         method: 'test.method',
       };
@@ -154,7 +148,6 @@ describe('Validation Middleware', () => {
 
       const middleware = createValidationMiddleware(schemas);
       const request: RpcRequest = {
-        jsonrpc: '2.0',
         id: '1',
         method: 'test.method',
         params: {},
@@ -185,7 +178,6 @@ describe('Validation Middleware', () => {
       });
 
       const request: RpcRequest = {
-        jsonrpc: '2.0',
         id: '1',
         method: 'test.method',
         params: {},
@@ -204,7 +196,6 @@ describe('Validation Middleware', () => {
 
       const middleware = createValidationMiddleware(schemas);
       const request: RpcRequest = {
-        jsonrpc: '2.0',
         id: 'my-unique-id',
         method: 'test.method',
         params: {},

@@ -6,6 +6,8 @@
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { AgentEventHandler } from '../../turn/agent-event-handler.js';
+import type { SessionId } from '../../../events/types.js';
+import type { TronEvent } from '../../../types/events.js';
 
 describe('AgentEventHandler - UI Render Events', () => {
   let handler: AgentEventHandler;
@@ -40,15 +42,15 @@ describe('AgentEventHandler - UI Render Events', () => {
   describe('ui_render_retry event', () => {
     it('should emit ui_render_retry when tool returns needsRetry', () => {
       // First simulate tool start
-      handler.forwardEvent('test-session', {
+      handler.forwardEvent('test-session' as SessionId, {
         type: 'tool_execution_start',
         toolCallId: 'tc-1',
         toolName: 'RenderAppUI',
         arguments: { canvasId: 'test-canvas' },
-      });
+      } as unknown as TronEvent);
 
       // Then simulate tool end with needsRetry
-      handler.forwardEvent('test-session', {
+      handler.forwardEvent('test-session' as SessionId, {
         type: 'tool_execution_end',
         toolCallId: 'tc-1',
         toolName: 'RenderAppUI',
@@ -61,14 +63,14 @@ describe('AgentEventHandler - UI Render Events', () => {
             attempt: 1,
           },
         },
-      });
+      } as unknown as TronEvent);
 
       // Check that ui_render_retry was emitted
       const retryCall = mockEmit.mock.calls.find(
         (call) => call[0] === 'agent_event' && call[1]?.type === 'agent.ui_render_retry'
       );
       expect(retryCall).toBeDefined();
-      expect(retryCall[1].data).toEqual(
+      expect(retryCall![1].data).toEqual(
         expect.objectContaining({
           canvasId: 'test-canvas',
           attempt: 1,
@@ -77,14 +79,14 @@ describe('AgentEventHandler - UI Render Events', () => {
     });
 
     it('should NOT emit ui_render_complete when needsRetry is true', () => {
-      handler.forwardEvent('test-session', {
+      handler.forwardEvent('test-session' as SessionId, {
         type: 'tool_execution_start',
         toolCallId: 'tc-1',
         toolName: 'RenderAppUI',
         arguments: { canvasId: 'test-canvas' },
-      });
+      } as unknown as TronEvent);
 
-      handler.forwardEvent('test-session', {
+      handler.forwardEvent('test-session' as SessionId, {
         type: 'tool_execution_end',
         toolCallId: 'tc-1',
         toolName: 'RenderAppUI',
@@ -93,7 +95,7 @@ describe('AgentEventHandler - UI Render Events', () => {
           content: 'Validation failed...',
           details: { needsRetry: true, canvasId: 'test' },
         },
-      });
+      } as unknown as TronEvent);
 
       const completeCall = mockEmit.mock.calls.find(
         (call) => call[0] === 'agent_event' && call[1]?.type === 'agent.ui_render_complete'
@@ -102,14 +104,14 @@ describe('AgentEventHandler - UI Render Events', () => {
     });
 
     it('should NOT emit ui_render_error when needsRetry is true', () => {
-      handler.forwardEvent('test-session', {
+      handler.forwardEvent('test-session' as SessionId, {
         type: 'tool_execution_start',
         toolCallId: 'tc-1',
         toolName: 'RenderAppUI',
         arguments: { canvasId: 'test-canvas' },
-      });
+      } as unknown as TronEvent);
 
-      handler.forwardEvent('test-session', {
+      handler.forwardEvent('test-session' as SessionId, {
         type: 'tool_execution_end',
         toolCallId: 'tc-1',
         toolName: 'RenderAppUI',
@@ -118,7 +120,7 @@ describe('AgentEventHandler - UI Render Events', () => {
           content: 'Validation failed...',
           details: { needsRetry: true, canvasId: 'test' },
         },
-      });
+      } as unknown as TronEvent);
 
       const errorCall = mockEmit.mock.calls.find(
         (call) => call[0] === 'agent_event' && call[1]?.type === 'agent.ui_render_error'
@@ -127,15 +129,15 @@ describe('AgentEventHandler - UI Render Events', () => {
     });
 
     it('should include errors from content in retry event', () => {
-      handler.forwardEvent('test-session', {
+      handler.forwardEvent('test-session' as SessionId, {
         type: 'tool_execution_start',
         toolCallId: 'tc-1',
         toolName: 'RenderAppUI',
         arguments: { canvasId: 'canvas-123' },
-      });
+      } as unknown as TronEvent);
 
       const errorContent = 'UI validation failed (attempt 2/3). Fix these errors:\nButton requires label\nButton requires actionId';
-      handler.forwardEvent('test-session', {
+      handler.forwardEvent('test-session' as SessionId, {
         type: 'tool_execution_end',
         toolCallId: 'tc-1',
         toolName: 'RenderAppUI',
@@ -148,26 +150,26 @@ describe('AgentEventHandler - UI Render Events', () => {
             attempt: 2,
           },
         },
-      });
+      } as unknown as TronEvent);
 
       const retryCall = mockEmit.mock.calls.find(
         (call) => call[0] === 'agent_event' && call[1]?.type === 'agent.ui_render_retry'
       );
       expect(retryCall).toBeDefined();
-      expect(retryCall[1].data.errors).toContain('Button requires label');
+      expect(retryCall![1].data.errors).toContain('Button requires label');
     });
   });
 
   describe('ui_render_complete event', () => {
     it('should emit ui_render_complete when validation passes', () => {
-      handler.forwardEvent('test-session', {
+      handler.forwardEvent('test-session' as SessionId, {
         type: 'tool_execution_start',
         toolCallId: 'tc-1',
         toolName: 'RenderAppUI',
         arguments: { canvasId: 'test-canvas' },
-      });
+      } as unknown as TronEvent);
 
-      handler.forwardEvent('test-session', {
+      handler.forwardEvent('test-session' as SessionId, {
         type: 'tool_execution_end',
         toolCallId: 'tc-1',
         toolName: 'RenderAppUI',
@@ -179,13 +181,13 @@ describe('AgentEventHandler - UI Render Events', () => {
             ui: { $tag: 'Text', $children: 'Hello' },
           },
         },
-      });
+      } as unknown as TronEvent);
 
       const completeCall = mockEmit.mock.calls.find(
         (call) => call[0] === 'agent_event' && call[1]?.type === 'agent.ui_render_complete'
       );
       expect(completeCall).toBeDefined();
-      expect(completeCall[1].data).toEqual(
+      expect(completeCall![1].data).toEqual(
         expect.objectContaining({
           canvasId: 'test-canvas',
           ui: { $tag: 'Text', $children: 'Hello' },
@@ -194,14 +196,14 @@ describe('AgentEventHandler - UI Render Events', () => {
     });
 
     it('should include state in complete event when provided', () => {
-      handler.forwardEvent('test-session', {
+      handler.forwardEvent('test-session' as SessionId, {
         type: 'tool_execution_start',
         toolCallId: 'tc-1',
         toolName: 'RenderAppUI',
         arguments: { canvasId: 'test-canvas' },
-      });
+      } as unknown as TronEvent);
 
-      handler.forwardEvent('test-session', {
+      handler.forwardEvent('test-session' as SessionId, {
         type: 'tool_execution_end',
         toolCallId: 'tc-1',
         toolName: 'RenderAppUI',
@@ -214,26 +216,26 @@ describe('AgentEventHandler - UI Render Events', () => {
             state: { toggle1: true },
           },
         },
-      });
+      } as unknown as TronEvent);
 
       const completeCall = mockEmit.mock.calls.find(
         (call) => call[0] === 'agent_event' && call[1]?.type === 'agent.ui_render_complete'
       );
       expect(completeCall).toBeDefined();
-      expect(completeCall[1].data.state).toEqual({ toggle1: true });
+      expect(completeCall![1].data.state).toEqual({ toggle1: true });
     });
   });
 
   describe('ui_render_error event', () => {
     it('should emit ui_render_error when isError is true', () => {
-      handler.forwardEvent('test-session', {
+      handler.forwardEvent('test-session' as SessionId, {
         type: 'tool_execution_start',
         toolCallId: 'tc-1',
         toolName: 'RenderAppUI',
         arguments: { canvasId: 'test-canvas' },
-      });
+      } as unknown as TronEvent);
 
-      handler.forwardEvent('test-session', {
+      handler.forwardEvent('test-session' as SessionId, {
         type: 'tool_execution_end',
         toolCallId: 'tc-1',
         toolName: 'RenderAppUI',
@@ -244,13 +246,13 @@ describe('AgentEventHandler - UI Render Events', () => {
             canvasId: 'test-canvas',
           },
         },
-      });
+      } as unknown as TronEvent);
 
       const errorCall = mockEmit.mock.calls.find(
         (call) => call[0] === 'agent_event' && call[1]?.type === 'agent.ui_render_error'
       );
       expect(errorCall).toBeDefined();
-      expect(errorCall[1].data).toEqual(
+      expect(errorCall![1].data).toEqual(
         expect.objectContaining({
           canvasId: 'test-canvas',
           error: expect.stringContaining('Failed'),
@@ -261,12 +263,12 @@ describe('AgentEventHandler - UI Render Events', () => {
 
   describe('regression tests', () => {
     it('should still emit agent.tool_start for RenderAppUI', () => {
-      handler.forwardEvent('test-session', {
+      handler.forwardEvent('test-session' as SessionId, {
         type: 'tool_execution_start',
         toolCallId: 'tc-1',
         toolName: 'RenderAppUI',
         arguments: { canvasId: 'test-canvas' },
-      });
+      } as unknown as TronEvent);
 
       const toolStartCall = mockEmit.mock.calls.find(
         (call) => call[0] === 'agent_event' && call[1]?.type === 'agent.tool_start'
@@ -275,14 +277,14 @@ describe('AgentEventHandler - UI Render Events', () => {
     });
 
     it('should still emit agent.tool_end for RenderAppUI', () => {
-      handler.forwardEvent('test-session', {
+      handler.forwardEvent('test-session' as SessionId, {
         type: 'tool_execution_start',
         toolCallId: 'tc-1',
         toolName: 'RenderAppUI',
         arguments: { canvasId: 'test-canvas' },
-      });
+      } as unknown as TronEvent);
 
-      handler.forwardEvent('test-session', {
+      handler.forwardEvent('test-session' as SessionId, {
         type: 'tool_execution_end',
         toolCallId: 'tc-1',
         toolName: 'RenderAppUI',
@@ -291,7 +293,7 @@ describe('AgentEventHandler - UI Render Events', () => {
           content: 'UI rendered.',
           details: { canvasId: 'test-canvas', ui: { $tag: 'Text' } },
         },
-      });
+      } as unknown as TronEvent);
 
       const toolEndCall = mockEmit.mock.calls.find(
         (call) => call[0] === 'agent_event' && call[1]?.type === 'agent.tool_end'
@@ -300,14 +302,14 @@ describe('AgentEventHandler - UI Render Events', () => {
     });
 
     it('should still persist tool.result event', () => {
-      handler.forwardEvent('test-session', {
+      handler.forwardEvent('test-session' as SessionId, {
         type: 'tool_execution_start',
         toolCallId: 'tc-1',
         toolName: 'RenderAppUI',
         arguments: { canvasId: 'test-canvas' },
-      });
+      } as unknown as TronEvent);
 
-      handler.forwardEvent('test-session', {
+      handler.forwardEvent('test-session' as SessionId, {
         type: 'tool_execution_end',
         toolCallId: 'tc-1',
         toolName: 'RenderAppUI',
@@ -316,7 +318,7 @@ describe('AgentEventHandler - UI Render Events', () => {
           content: 'UI rendered.',
           details: { canvasId: 'test-canvas', ui: { $tag: 'Text' } },
         },
-      });
+      } as unknown as TronEvent);
 
       const persistCall = mockAppendEventLinearized.mock.calls.find(
         (call) => call[1] === 'tool.result'

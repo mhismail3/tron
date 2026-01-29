@@ -101,6 +101,7 @@ describe('buildSkillContext', () => {
     const skills: SkillMetadata[] = [
       {
         name: 'test-skill',
+        displayName: 'Test Skill',
         content: 'Test skill content',
         description: 'A test skill',
         frontmatter: {},
@@ -129,6 +130,7 @@ describe('buildSkillContext', () => {
     const skills: SkillMetadata[] = [
       {
         name: 'skill-a',
+        displayName: 'Skill A',
         content: 'Content A',
         description: '',
         frontmatter: {},
@@ -140,6 +142,7 @@ describe('buildSkillContext', () => {
       },
       {
         name: 'skill-b',
+        displayName: 'Skill B',
         content: 'Content B',
         description: '',
         frontmatter: {},
@@ -533,6 +536,7 @@ describe('Skill Content Injection Edge Cases', () => {
     const skills: SkillMetadata[] = [
       {
         name: 'special-chars',
+        displayName: 'Special Chars',
         content: 'Content with <xml> & "quotes" and \'apostrophes\'',
         description: '',
         frontmatter: {},
@@ -554,6 +558,7 @@ describe('Skill Content Injection Edge Cases', () => {
     const skills: SkillMetadata[] = [
       {
         name: 'code-skill',
+        displayName: 'Code Skill',
         content: '```typescript\nconst x: number = 1;\n```',
         description: '',
         frontmatter: {},
@@ -576,6 +581,7 @@ describe('Skill Content Injection Edge Cases', () => {
     const skills: SkillMetadata[] = [
       {
         name: 'long-skill',
+        displayName: 'Long Skill',
         content: longContent,
         description: '',
         frontmatter: {},

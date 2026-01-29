@@ -20,6 +20,7 @@ import type { RulesLoadedEvent } from './rules.js';
 import type { PlanModeEnteredEvent, PlanModeExitedEvent, PlanCreatedEvent } from './plan.js';
 import type { SubagentSpawnedEvent, SubagentStatusUpdateEvent, SubagentCompletedEvent, SubagentFailedEvent } from './subagent.js';
 import type { TodoWriteEvent } from './todo.js';
+import type { TurnFailedEvent } from './turn.js';
 
 // =============================================================================
 // Union Type
@@ -82,4 +83,6 @@ export type SessionEvent =
   // Errors
   | ErrorAgentEvent
   | ErrorToolEvent
-  | ErrorProviderEvent;
+  | ErrorProviderEvent
+  // Turn events
+  | TurnFailedEvent;

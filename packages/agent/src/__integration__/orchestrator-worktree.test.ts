@@ -310,7 +310,6 @@ describe('RPC Handler Worktree Support', () => {
   describe('session.create response', () => {
     it('should include worktree status in response', () => {
       const response = {
-        jsonrpc: '2.0',
         id: 1,
         result: {
           sessionId: 'sess_1',
@@ -332,7 +331,6 @@ describe('RPC Handler Worktree Support', () => {
   describe('session.fork response', () => {
     it('should include worktree status for forked session', () => {
       const response = {
-        jsonrpc: '2.0',
         id: 1,
         result: {
           newSessionId: 'sess_fork',
@@ -355,7 +353,6 @@ describe('RPC Handler Worktree Support', () => {
   describe('session.getWorktreeStatus method', () => {
     it('should define new RPC method for worktree status', () => {
       const request = {
-        jsonrpc: '2.0',
         id: 1,
         method: 'session.getWorktreeStatus',
         params: {
@@ -364,7 +361,6 @@ describe('RPC Handler Worktree Support', () => {
       };
 
       const expectedResponse = {
-        jsonrpc: '2.0',
         id: 1,
         result: {
           isolated: true,
@@ -385,7 +381,6 @@ describe('RPC Handler Worktree Support', () => {
   describe('session.commitWorktree method', () => {
     it('should define RPC method for committing worktree changes', () => {
       const request = {
-        jsonrpc: '2.0',
         id: 1,
         method: 'session.commitWorktree',
         params: {
@@ -395,7 +390,6 @@ describe('RPC Handler Worktree Support', () => {
       };
 
       const expectedResponse = {
-        jsonrpc: '2.0',
         id: 1,
         result: {
           success: true,
@@ -412,7 +406,6 @@ describe('RPC Handler Worktree Support', () => {
   describe('session.mergeWorktree method', () => {
     it('should define RPC method for merging worktree to target branch', () => {
       const request = {
-        jsonrpc: '2.0',
         id: 1,
         method: 'session.mergeWorktree',
         params: {
@@ -423,7 +416,6 @@ describe('RPC Handler Worktree Support', () => {
       };
 
       const expectedResponse = {
-        jsonrpc: '2.0',
         id: 1,
         result: {
           success: true,

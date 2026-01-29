@@ -6,8 +6,8 @@
  */
 
 import { createContextManager } from '../context-manager.js';
-import { ContextSimulator } from './context-simulator.js';
-import { createMockSummarizer } from './mock-summarizer.js';
+import { ContextSimulator } from '../__helpers__/context-simulator.js';
+import { createMockSummarizer } from '../__helpers__/mock-summarizer.js';
 
 async function main() {
   console.log('='.repeat(70));

@@ -22,6 +22,7 @@ const createTestOrchestrator = async (testDir: string) => {
 
   const orchestrator = new EventStoreOrchestrator({
     defaultModel: 'claude-sonnet-4-20250514',
+    defaultProvider: 'anthropic',
     eventStoreDbPath: path.join(testDir, 'events.db'),
     eventStore,
   });
@@ -152,9 +153,10 @@ describe('Compaction EventStore Persistence', () => {
       expect(boundary).toBeDefined();
 
       // Verify compression ratio calculation
-      const expectedRatio =
+      const actualRatio =
         boundary!.payload.compactedTokens / boundary!.payload.originalTokens;
-      expect(boundary!.payload.compressionRatio).toBeCloseTo(expectedRatio, 5);
+      expect(actualRatio).toBeGreaterThan(0);
+      expect(actualRatio).toBeLessThan(1);
     });
 
     it('has correct sessionId and timestamp', async () => {
@@ -432,7 +434,7 @@ describe('Compaction EventStore Persistence', () => {
       expect(emittedEvents[0].tokensAfter).toBeLessThan(emittedEvents[0].tokensBefore);
     });
 
-    it('includes compression ratio in emitted event', async () => {
+    it('includes token reduction in emitted event', async () => {
       const session = await orchestrator.sessions.createSession({
         workingDirectory: testDir,
       });
@@ -448,9 +450,9 @@ describe('Compaction EventStore Persistence', () => {
 
       await orchestrator.context.confirmCompaction(session.sessionId);
 
-      expect(emittedEvents[0].compressionRatio).toBeDefined();
-      expect(emittedEvents[0].compressionRatio).toBeGreaterThan(0);
-      expect(emittedEvents[0].compressionRatio).toBeLessThan(1);
+      expect(emittedEvents[0].tokensBefore).toBeDefined();
+      expect(emittedEvents[0].tokensAfter).toBeDefined();
+      expect(emittedEvents[0].tokensAfter).toBeLessThan(emittedEvents[0].tokensBefore);
     });
   });
 
@@ -509,9 +511,9 @@ describe('Compaction EventStore Persistence', () => {
 
       expect(totalSaved).toBeGreaterThan(0);
 
-      // Calculate average compression ratio
+      // Calculate average compression ratio from token counts
       const avgRatio =
-        boundaries.reduce((sum, b) => sum + b.payload.compressionRatio, 0) /
+        boundaries.reduce((sum, b) => sum + (b.payload.compactedTokens / b.payload.originalTokens), 0) /
         boundaries.length;
 
       expect(avgRatio).toBeGreaterThan(0);

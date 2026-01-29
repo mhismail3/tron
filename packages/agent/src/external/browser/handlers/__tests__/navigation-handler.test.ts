@@ -27,7 +27,7 @@ function createMockSession(mockPage: ReturnType<typeof createMockPage>): Browser
   return {
     manager: {
       getPage: () => mockPage,
-    } as BrowserSession['manager'],
+    } as unknown as BrowserSession['manager'],
     isStreaming: false,
     elementRefs: new Map(),
   };

@@ -12,7 +12,7 @@ import {
   handlePlanGetState,
 } from '../plan.handler.js';
 import type { RpcRequest } from '../../types.js';
-import type { RpcContext } from '../handler.js';
+import type { RpcContext } from '../../handler.js';
 import { MethodRegistry } from '../../registry.js';
 import { DEFAULT_PLAN_MODE_BLOCKED_TOOLS } from '../../types.js';
 

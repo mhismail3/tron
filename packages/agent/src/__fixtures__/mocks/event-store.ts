@@ -15,7 +15,7 @@
 
 import { vi, type Mock } from 'vitest';
 import type { EventStore, CreateSessionOptions, CreateSessionResult, AppendEventOptions, ForkResult } from '../../events/event-store.js';
-import type { SessionRow, ListSessionsOptions } from '../../events/sqlite/facade.js';
+import type { SessionRow } from '../../events/sqlite/facade.js';
 import type {
   SessionEvent,
   SessionId,
@@ -24,8 +24,6 @@ import type {
   EventType,
   Message,
   SessionState,
-  SearchResult,
-  Workspace,
   MessageWithEventId,
 } from '../../events/types.js';
 
@@ -54,9 +52,43 @@ export interface MockEventStoreOptions {
 }
 
 /**
+ * Public interface of EventStore methods (for mocking without private members)
+ */
+export interface EventStoreMethods {
+  initialize(): Promise<void>;
+  close(): Promise<void>;
+  isInitialized(): boolean;
+  getDatabase(): import('better-sqlite3').Database;
+  createSession(options: CreateSessionOptions): Promise<CreateSessionResult>;
+  append(options: AppendEventOptions): Promise<SessionEvent>;
+  getEvent(eventId: EventId): Promise<SessionEvent | null>;
+  getEventsBySession(sessionId: SessionId): Promise<SessionEvent[]>;
+  getAncestors(eventId: EventId): Promise<SessionEvent[]>;
+  getChildren(eventId: EventId): Promise<SessionEvent[]>;
+  getMessagesAtHead(sessionId: SessionId): Promise<import('../../events/types.js').Message[]>;
+  getMessagesAt(eventId: EventId): Promise<import('../../events/types.js').Message[]>;
+  getStateAtHead(sessionId: SessionId): Promise<SessionState>;
+  getStateAt(eventId: EventId): Promise<SessionState>;
+  fork(fromEventId: EventId, options?: import('../../events/event-store.js').ForkOptions): Promise<ForkResult>;
+  search(query: string, options?: import('../../events/event-store.js').SearchOptions): Promise<import('../../events/types.js').SearchResult[]>;
+  getSession(sessionId: SessionId): Promise<SessionRow | null>;
+  getSessionsByIds(sessionIds: SessionId[]): Promise<Map<SessionId, SessionRow>>;
+  listSessions(options?: import('../../events/sqlite/facade.js').ListSessionsOptions): Promise<SessionRow[]>;
+  getSessionMessagePreviews(sessionIds: SessionId[]): Promise<Map<SessionId, { lastUserPrompt?: string; lastAssistantResponse?: string }>>;
+  endSession(sessionId: SessionId): Promise<void>;
+  clearSessionEnded(sessionId: SessionId): Promise<void>;
+  updateLatestModel(sessionId: SessionId, model: string): Promise<void>;
+  deleteMessage(sessionId: SessionId, targetEventId: EventId, reason?: 'user_request' | 'content_policy' | 'context_management'): Promise<SessionEvent>;
+  getWorkspaceByPath(path: string): Promise<import('../../events/types.js').Workspace | null>;
+  getDbPath(): string;
+  updateSessionSpawnInfo(sessionId: SessionId, spawningSessionId: SessionId, spawnType: 'subsession' | 'tmux' | 'fork', spawnTask: string): Promise<void>;
+  getLogsForSession(sessionId: SessionId, limit?: number): Promise<Array<{ timestamp: string; level: string; component: string; message: string }>>;
+}
+
+/**
  * Extended EventStore mock with event tracking capabilities
  */
-export interface MockEventStoreWithTracking extends EventStore {
+export interface MockEventStoreWithTracking extends EventStoreMethods {
   /** Array of all appended events (only available when trackEvents: true) */
   events: Array<{ sessionId: string; type: string; payload: unknown }>;
   /** Clear the tracked events array */
@@ -86,26 +118,27 @@ export interface MockSessionRowOptions {
   workingDirectory?: string;
   latestModel?: string;
   title?: string | null;
-  status?: 'active' | 'ended';
+  isEnded?: boolean;
   rootEventId?: EventId | null;
   headEventId?: EventId | null;
   eventCount?: number;
   messageCount?: number;
-  inputTokens?: number;
-  outputTokens?: number;
+  turnCount?: number;
+  totalInputTokens?: number;
+  totalOutputTokens?: number;
   lastTurnInputTokens?: number;
-  cacheReadTokens?: number;
-  cacheCreationTokens?: number;
-  cost?: number;
+  totalCacheReadTokens?: number;
+  totalCacheCreationTokens?: number;
+  totalCost?: number;
   parentSessionId?: SessionId | null;
   forkFromEventId?: EventId | null;
   createdAt?: string;
-  updatedAt?: string;
+  lastActivityAt?: string;
   endedAt?: string | null;
   spawningSessionId?: SessionId | null;
   spawnType?: 'subsession' | 'tmux' | 'fork' | null;
   spawnTask?: string | null;
-  tags?: string[] | null;
+  tags?: string[];
 }
 
 /**
@@ -170,32 +203,35 @@ export function createMockSessionRow(options: MockSessionRowOptions = {}): Sessi
   const id = options.id ?? generateSessionId();
   const workspaceId = options.workspaceId ?? generateWorkspaceId();
 
+  const latestModel = options.latestModel ?? 'claude-sonnet-4-20250514';
   return {
     id,
     workspaceId,
     workingDirectory: options.workingDirectory ?? '/mock/working/directory',
-    latestModel: options.latestModel ?? 'claude-sonnet-4-20250514',
+    latestModel,
+    model: latestModel, // Alias for latestModel
     title: options.title ?? null,
-    status: options.status ?? 'active',
+    isEnded: options.isEnded ?? false,
     rootEventId: options.rootEventId ?? null,
     headEventId: options.headEventId ?? null,
     eventCount: options.eventCount ?? 0,
     messageCount: options.messageCount ?? 0,
-    inputTokens: options.inputTokens ?? 0,
-    outputTokens: options.outputTokens ?? 0,
+    turnCount: options.turnCount ?? 0,
+    totalInputTokens: options.totalInputTokens ?? 0,
+    totalOutputTokens: options.totalOutputTokens ?? 0,
     lastTurnInputTokens: options.lastTurnInputTokens ?? 0,
-    cacheReadTokens: options.cacheReadTokens ?? 0,
-    cacheCreationTokens: options.cacheCreationTokens ?? 0,
-    cost: options.cost ?? 0,
+    totalCacheReadTokens: options.totalCacheReadTokens ?? 0,
+    totalCacheCreationTokens: options.totalCacheCreationTokens ?? 0,
+    totalCost: options.totalCost ?? 0,
     parentSessionId: options.parentSessionId ?? null,
     forkFromEventId: options.forkFromEventId ?? null,
     createdAt: options.createdAt ?? now,
-    updatedAt: options.updatedAt ?? now,
+    lastActivityAt: options.lastActivityAt ?? now,
     endedAt: options.endedAt ?? null,
     spawningSessionId: options.spawningSessionId ?? null,
     spawnType: options.spawnType ?? null,
     spawnTask: options.spawnTask ?? null,
-    tags: options.tags ?? null,
+    tags: options.tags ?? [],
   };
 }
 
@@ -307,8 +343,8 @@ export function createMockForkResult(options: {
  * ```
  */
 export function createMockEventStore(options: MockEventStoreOptions & { trackEvents: true }): MockEventStoreWithTracking;
-export function createMockEventStore(options?: MockEventStoreOptions): EventStore;
-export function createMockEventStore(options: MockEventStoreOptions = {}): EventStore | MockEventStoreWithTracking {
+export function createMockEventStore(options?: MockEventStoreOptions): EventStoreMethods;
+export function createMockEventStore(options: MockEventStoreOptions = {}): EventStoreMethods | MockEventStoreWithTracking {
   const dbPath = options.dbPath ?? ':memory:';
   let initialized = options.initialized ?? true;
   const trackEvents = options.trackEvents ?? false;
@@ -349,13 +385,14 @@ export function createMockEventStore(options: MockEventStoreOptions = {}): Event
         workingDirectory: opts.workingDirectory,
         latestModel: opts.model,
         title: opts.title ?? null,
-        tags: opts.tags ?? null,
+        tags: opts.tags ?? [],
       },
     });
   });
 
   // Create the mock object with all methods
-  const mockStore: EventStore = {
+  // Note: Cast as unknown first because mocks don't have private class members
+  const mockStore = {
     // Lifecycle
     initialize: vi.fn().mockImplementation(async () => {
       initialized = true;
@@ -458,7 +495,7 @@ export function createMockEventStore(options: MockEventStoreOptions = {}): Event
     }) as MockEventStoreWithTracking;
   }
 
-  return mockStore;
+  return mockStore as EventStoreMethods;
 }
 
 /**
@@ -483,11 +520,11 @@ export function createMockMessage(options: {
  * Create a mock MessageWithEventId for testing
  */
 export function createMockMessageWithEventId(options: {
-  eventId?: EventId;
+  eventIds?: (string | undefined)[];
   message?: Partial<Parameters<typeof createMockMessage>[0]>;
 } = {}): MessageWithEventId {
   return {
-    eventId: options.eventId ?? generateEventId(),
+    eventIds: options.eventIds ?? [generateEventId()],
     message: createMockMessage(options.message),
   };
 }

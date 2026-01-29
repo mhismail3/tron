@@ -174,7 +174,7 @@ describe('InterruptHandler', () => {
       expect(events.length).toBe(3);
 
       const assistantEvent = events.find(e => e.type === 'message.assistant');
-      expect(assistantEvent!.payload.content.length).toBe(3);
+      expect((assistantEvent!.payload as { content: unknown[] }).content.length).toBe(3);
     });
 
     it('should preserve tool call metadata in assistant content', () => {
@@ -198,7 +198,8 @@ describe('InterruptHandler', () => {
       const events = handler.buildInterruptEvents(context);
 
       const assistantEvent = events.find(e => e.type === 'message.assistant');
-      expect(assistantEvent!.payload.content[0]._meta).toMatchObject({
+      const payload = assistantEvent!.payload as { content: Array<{ _meta?: unknown }> };
+      expect(payload.content[0]._meta).toMatchObject({
         status: 'running',
         interrupted: true,
       });

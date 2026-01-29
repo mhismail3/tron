@@ -5,15 +5,16 @@
  * and that JSONL file logging has been removed.
  */
 
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach, type MockInstance } from 'vitest';
 import * as loggerModule from '../../logging/index.js';
+import type { UnifiedAuth } from '../../providers/factory.js';
 
 describe('TronAgent Turn Logging', () => {
-  let traceSpy: ReturnType<typeof vi.spyOn>;
+  let traceSpy: MockInstance;
 
   beforeEach(() => {
     // Spy on createLogger to capture trace calls
-    traceSpy = vi.spyOn(loggerModule, 'createLogger');
+    traceSpy = vi.spyOn(loggerModule, 'createLogger') as MockInstance;
   });
 
   afterEach(() => {
@@ -32,9 +33,10 @@ describe('TronAgent Turn Logging', () => {
       const { TronAgent } = await import('../tron-agent.js');
 
       // Create a minimal agent to check it doesn't create logs directory
+      const auth: UnifiedAuth = { type: 'api_key', apiKey: 'test' };
       const agent = new TronAgent(
         {
-          provider: { model: 'test', auth: { apiKey: 'test' } },
+          provider: { model: 'test', auth },
           tools: [],
           systemPrompt: 'test',
         },

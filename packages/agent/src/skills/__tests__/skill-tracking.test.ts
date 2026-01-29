@@ -12,6 +12,11 @@ import {
   type AddedSkillInfo,
 } from '../index.js';
 
+/**
+ * Mock event structure for testing event reconstruction
+ */
+type MockEvent = SkillTrackingEvent;
+
 // =============================================================================
 // SkillTracker Unit Tests
 // =============================================================================

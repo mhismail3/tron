@@ -62,8 +62,8 @@ describe('StreamingEventHandler', () => {
   describe('handleMessageUpdate', () => {
     it('should accumulate text delta in session context', () => {
       const sessionId = 'test-session' as SessionId;
-      const event = { type: 'message_update', content: 'Hello world' };
       const timestamp = new Date().toISOString();
+      const event = { type: 'message_update' as const, content: 'Hello world', sessionId, timestamp };
       const mockActive = createMockActiveSession();
 
       handler.handleMessageUpdate(sessionId, event, timestamp, mockActive);
@@ -73,8 +73,8 @@ describe('StreamingEventHandler', () => {
 
     it('should emit agent.text_delta event', () => {
       const sessionId = 'test-session' as SessionId;
-      const event = { type: 'message_update', content: 'Hello' };
       const timestamp = new Date().toISOString();
+      const event = { type: 'message_update' as const, content: 'Hello', sessionId, timestamp };
 
       handler.handleMessageUpdate(sessionId, event, timestamp, undefined);
 
@@ -88,8 +88,8 @@ describe('StreamingEventHandler', () => {
 
     it('should handle undefined active session', () => {
       const sessionId = 'test-session' as SessionId;
-      const event = { type: 'message_update', content: 'Hello' };
       const timestamp = new Date().toISOString();
+      const event = { type: 'message_update' as const, content: 'Hello', sessionId, timestamp };
 
       handler.handleMessageUpdate(sessionId, event, timestamp, undefined);
 
@@ -97,28 +97,30 @@ describe('StreamingEventHandler', () => {
       expect(deps.emit).toHaveBeenCalled();
     });
 
-    it('should not accumulate non-string content', () => {
+    it('should accumulate all string content deltas', () => {
       const sessionId = 'test-session' as SessionId;
-      const event = { type: 'message_update', content: undefined };
       const timestamp = new Date().toISOString();
+      const event = { type: 'message_update' as const, content: 'Test', sessionId, timestamp };
       const mockActive = createMockActiveSession();
 
       handler.handleMessageUpdate(sessionId, event, timestamp, mockActive);
 
-      expect(mockActive.sessionContext!.addTextDelta).not.toHaveBeenCalled();
+      expect(mockActive.sessionContext!.addTextDelta).toHaveBeenCalledWith('Test');
     });
   });
 
   describe('handleToolCallDelta', () => {
     it('should delegate to UIRenderHandler', () => {
       const sessionId = 'test-session' as SessionId;
+      const timestamp = new Date().toISOString();
       const event = {
-        type: 'toolcall_delta',
+        type: 'toolcall_delta' as const,
         toolCallId: 'call-1',
         toolName: 'RenderAppUI',
         argumentsDelta: '{"html": "<div',
+        sessionId,
+        timestamp,
       };
-      const timestamp = new Date().toISOString();
 
       handler.handleToolCallDelta(sessionId, event, timestamp);
 
@@ -133,12 +135,14 @@ describe('StreamingEventHandler', () => {
 
     it('should handle missing toolName', () => {
       const sessionId = 'test-session' as SessionId;
+      const timestamp = new Date().toISOString();
       const event = {
-        type: 'toolcall_delta',
+        type: 'toolcall_delta' as const,
         toolCallId: 'call-1',
         argumentsDelta: '{}',
+        sessionId,
+        timestamp,
       };
-      const timestamp = new Date().toISOString();
 
       handler.handleToolCallDelta(sessionId, event, timestamp);
 
@@ -170,8 +174,8 @@ describe('StreamingEventHandler', () => {
   describe('handleThinkingDelta', () => {
     it('should accumulate thinking delta in session context', () => {
       const sessionId = 'test-session' as SessionId;
-      const event = { type: 'thinking_delta', delta: 'Let me think...' };
       const timestamp = new Date().toISOString();
+      const event = { type: 'thinking_delta' as const, delta: 'Let me think...', sessionId, timestamp };
       const mockActive = createMockActiveSession();
 
       handler.handleThinkingDelta(sessionId, event, timestamp, mockActive);
@@ -181,8 +185,8 @@ describe('StreamingEventHandler', () => {
 
     it('should emit agent.thinking_delta event', () => {
       const sessionId = 'test-session' as SessionId;
-      const event = { type: 'thinking_delta', delta: 'Analyzing...' };
       const timestamp = new Date().toISOString();
+      const event = { type: 'thinking_delta' as const, delta: 'Analyzing...', sessionId, timestamp };
 
       handler.handleThinkingDelta(sessionId, event, timestamp, undefined);
 
@@ -196,8 +200,8 @@ describe('StreamingEventHandler', () => {
 
     it('should handle undefined active session', () => {
       const sessionId = 'test-session' as SessionId;
-      const event = { type: 'thinking_delta', delta: 'Thinking...' };
       const timestamp = new Date().toISOString();
+      const event = { type: 'thinking_delta' as const, delta: 'Thinking...', sessionId, timestamp };
 
       handler.handleThinkingDelta(sessionId, event, timestamp, undefined);
 
@@ -209,12 +213,14 @@ describe('StreamingEventHandler', () => {
   describe('handleThinkingEnd', () => {
     it('should store signature in session context', () => {
       const sessionId = 'test-session' as SessionId;
+      const timestamp = new Date().toISOString();
       const event = {
-        type: 'thinking_end',
+        type: 'thinking_end' as const,
         thinking: 'Complete analysis...',
         signature: 'sig123',
+        sessionId,
+        timestamp,
       };
-      const timestamp = new Date().toISOString();
       const mockActive = createMockActiveSession();
 
       (deps.getActiveSession as ReturnType<typeof vi.fn>).mockReturnValue(mockActive);
@@ -226,12 +232,14 @@ describe('StreamingEventHandler', () => {
 
     it('should emit agent.thinking_end event with signature', () => {
       const sessionId = 'test-session' as SessionId;
+      const timestamp = new Date().toISOString();
       const event = {
-        type: 'thinking_end',
+        type: 'thinking_end' as const,
         thinking: 'My analysis...',
         signature: 'sig456',
+        sessionId,
+        timestamp,
       };
-      const timestamp = new Date().toISOString();
 
       handler.handleThinkingEnd(sessionId, event, timestamp);
 
@@ -245,8 +253,8 @@ describe('StreamingEventHandler', () => {
 
     it('should handle missing signature', () => {
       const sessionId = 'test-session' as SessionId;
-      const event = { type: 'thinking_end', thinking: 'Done thinking' };
       const timestamp = new Date().toISOString();
+      const event = { type: 'thinking_end' as const, thinking: 'Done thinking', sessionId, timestamp };
       const mockActive = createMockActiveSession();
 
       (deps.getActiveSession as ReturnType<typeof vi.fn>).mockReturnValue(mockActive);
@@ -264,12 +272,14 @@ describe('StreamingEventHandler', () => {
 
     it('should handle no active session', () => {
       const sessionId = 'test-session' as SessionId;
+      const timestamp = new Date().toISOString();
       const event = {
-        type: 'thinking_end',
+        type: 'thinking_end' as const,
         thinking: 'Completed',
         signature: 'sig789',
+        sessionId,
+        timestamp,
       };
-      const timestamp = new Date().toISOString();
 
       (deps.getActiveSession as ReturnType<typeof vi.fn>).mockReturnValue(undefined);
 

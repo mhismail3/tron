@@ -325,23 +325,21 @@ describe('Google Gemini Provider', () => {
         model: 'gemini-2.5-pro',
       });
 
-      const tools = [
-        {
-          name: 'search',
-          description: 'Search the web',
-          parameters: {
-            type: 'object',
-            properties: {
-              query: { type: 'string', description: 'Search query' },
-            },
-            required: ['query'],
-          },
-        },
-      ];
-
       const context = {
         messages: [{ role: 'user' as const, content: 'Search for cats' }],
-        tools,
+        tools: [
+          {
+            name: 'search',
+            description: 'Search the web',
+            parameters: {
+              type: 'object' as const,
+              properties: {
+                query: { type: 'string' as const, description: 'Search query' },
+              },
+              required: ['query'],
+            },
+          },
+        ],
       };
 
       // Should not throw when creating context with tools

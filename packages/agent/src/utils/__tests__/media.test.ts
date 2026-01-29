@@ -5,6 +5,7 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs/promises';
+import type { Stats } from 'fs';
 import * as path from 'path';
 import {
   isImageFile,
@@ -109,7 +110,7 @@ describe('Media Utilities', () => {
     it('returns info for image files', async () => {
       const mockData = Buffer.from('x'.repeat(1024));
       vi.mocked(fs.readFile).mockResolvedValue(mockData);
-      vi.mocked(fs.stat).mockResolvedValue({ size: 1024 } as fs.Stats);
+      vi.mocked(fs.stat).mockResolvedValue({ size: 1024 } as Stats);
 
       const info = await getMediaInfo('/path/to/image.png');
 
@@ -119,7 +120,7 @@ describe('Media Utilities', () => {
     });
 
     it('returns info for PDF files', async () => {
-      vi.mocked(fs.stat).mockResolvedValue({ size: 2048 } as fs.Stats);
+      vi.mocked(fs.stat).mockResolvedValue({ size: 2048 } as Stats);
 
       const info = await getMediaInfo('/path/to/document.pdf');
 

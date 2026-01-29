@@ -14,13 +14,12 @@ import {
   notFoundError,
 } from '../base.js';
 import type { RpcRequest } from '../../types.js';
-import type { RpcContext } from '../handler.js';
+import type { RpcContext } from '../../handler.js';
 
 describe('Base Handler Utilities', () => {
   describe('extractParams', () => {
     it('should extract params from request', () => {
       const request: RpcRequest = {
-        jsonrpc: '2.0',
         id: '1',
         method: 'test.method',
         params: { foo: 'bar', count: 42 },
@@ -33,7 +32,6 @@ describe('Base Handler Utilities', () => {
 
     it('should return undefined when no params', () => {
       const request: RpcRequest = {
-        jsonrpc: '2.0',
         id: '1',
         method: 'test.method',
       };
@@ -47,7 +45,6 @@ describe('Base Handler Utilities', () => {
   describe('extractRequiredParams', () => {
     it('should return success with params when all required fields present', () => {
       const request: RpcRequest = {
-        jsonrpc: '2.0',
         id: '1',
         method: 'session.create',
         params: { workingDirectory: '/test', model: 'claude-3' },
@@ -66,7 +63,6 @@ describe('Base Handler Utilities', () => {
 
     it('should return error response when required field is missing', () => {
       const request: RpcRequest = {
-        jsonrpc: '2.0',
         id: '1',
         method: 'session.create',
         params: { model: 'claude-3' }, // Missing workingDirectory
@@ -86,7 +82,6 @@ describe('Base Handler Utilities', () => {
 
     it('should return error response when params is undefined', () => {
       const request: RpcRequest = {
-        jsonrpc: '2.0',
         id: '1',
         method: 'session.create',
       };
@@ -157,7 +152,7 @@ describe('Base Handler Utilities', () => {
       const handler = vi.fn().mockResolvedValue({ result: 'ok' });
       const wrapped = withErrorHandling(handler);
       const context = {} as RpcContext;
-      const request: RpcRequest = { jsonrpc: '2.0', id: '1', method: 'test' };
+      const request: RpcRequest = { id: '1', method: 'test.method' };
 
       const response = await wrapped({}, context, request);
 
@@ -169,7 +164,7 @@ describe('Base Handler Utilities', () => {
       const handler = vi.fn().mockRejectedValue(new Error('Something broke'));
       const wrapped = withErrorHandling(handler);
       const context = {} as RpcContext;
-      const request: RpcRequest = { jsonrpc: '2.0', id: '1', method: 'test' };
+      const request: RpcRequest = { id: '1', method: 'test.method' };
 
       const response = await wrapped({}, context, request);
 
@@ -181,7 +176,7 @@ describe('Base Handler Utilities', () => {
       const handler = vi.fn().mockRejectedValue(new Error('Session not found: xyz'));
       const wrapped = withErrorHandling(handler);
       const context = {} as RpcContext;
-      const request: RpcRequest = { jsonrpc: '2.0', id: '1', method: 'test' };
+      const request: RpcRequest = { id: '1', method: 'test.method' };
 
       const response = await wrapped({}, context, request);
 
@@ -204,7 +199,6 @@ describe('Base Handler Utilities', () => {
       };
 
       const request: RpcRequest = {
-        jsonrpc: '2.0',
         id: '1',
         method: 'session.create',
         params: { workingDirectory: '/test' },
@@ -234,7 +228,6 @@ describe('Base Handler Utilities', () => {
       };
 
       const request: RpcRequest = {
-        jsonrpc: '2.0',
         id: '1',
         method: 'session.create',
         params: {},
@@ -248,7 +241,7 @@ describe('Base Handler Utilities', () => {
 
     it('should reject when required manager missing', async () => {
       const impl = vi.fn();
-      const handler = createHandler<object, unknown>(
+      const handler = createHandler<Record<string, unknown>, unknown>(
         { requiredManagers: ['transcriptionManager'] },
         impl
       );
@@ -260,7 +253,6 @@ describe('Base Handler Utilities', () => {
       };
 
       const request: RpcRequest = {
-        jsonrpc: '2.0',
         id: '1',
         method: 'transcribe.audio',
         params: {},

@@ -178,14 +178,14 @@ describe('SQLiteEventStore Facade', () => {
         type: 'message.user' as const,
         sequence: 0,
         timestamp: new Date().toISOString(),
-        payload: { content: 'Hello' },
+        payload: { content: 'Hello', turn: 0 },
       };
 
       await store.insertEvent(event);
 
       const found = await store.getEvent(event.id);
       expect(found?.id).toBe(event.id);
-      expect(found?.payload).toEqual({ content: 'Hello' });
+      expect(found?.payload).toEqual({ content: 'Hello', turn: 0 });
     });
 
     it('should get events by session', async () => {
@@ -197,7 +197,7 @@ describe('SQLiteEventStore Facade', () => {
         type: 'message.user' as const,
         sequence: 0,
         timestamp: new Date().toISOString(),
-        payload: { content: 'First' },
+        payload: { content: 'First', turn: 0 },
       };
       const event2 = {
         id: EventId('evt_2'),
@@ -207,7 +207,13 @@ describe('SQLiteEventStore Facade', () => {
         type: 'message.assistant' as const,
         sequence: 1,
         timestamp: new Date().toISOString(),
-        payload: { content: 'Second' },
+        payload: {
+          content: [],
+          turn: 0,
+          tokenUsage: { inputTokens: 0, outputTokens: 0 },
+          stopReason: 'end_turn' as const,
+          model: 'claude-3',
+        },
       };
 
       await store.insertEvent(event1);
@@ -226,7 +232,7 @@ describe('SQLiteEventStore Facade', () => {
         type: 'message.user' as const,
         sequence: 0,
         timestamp: new Date().toISOString(),
-        payload: {},
+        payload: { content: '', turn: 0 },
       };
       const event2 = {
         id: EventId('evt_2'),
@@ -236,7 +242,13 @@ describe('SQLiteEventStore Facade', () => {
         type: 'message.assistant' as const,
         sequence: 1,
         timestamp: new Date().toISOString(),
-        payload: {},
+        payload: {
+          content: [],
+          turn: 0,
+          tokenUsage: { inputTokens: 0, outputTokens: 0 },
+          stopReason: 'end_turn' as const,
+          model: 'claude-3',
+        },
       };
 
       await store.insertEvent(event1);
@@ -256,7 +268,7 @@ describe('SQLiteEventStore Facade', () => {
         type: 'message.user' as const,
         sequence: 0,
         timestamp: new Date().toISOString(),
-        payload: {},
+        payload: { content: '', turn: 0 },
       });
 
       const count = await store.countEvents(sessionId);
@@ -309,7 +321,7 @@ describe('SQLiteEventStore Facade', () => {
         type: 'message.user' as const,
         sequence: 0,
         timestamp: new Date().toISOString(),
-        payload: { content: 'searchable unique content here' },
+        payload: { content: 'searchable unique content here', turn: 0 },
       };
 
       await store.insertEvent(event);
@@ -345,7 +357,7 @@ describe('SQLiteEventStore Facade', () => {
         type: 'message.user' as const,
         sequence: 0,
         timestamp: new Date().toISOString(),
-        payload: {},
+        payload: { content: '', turn: 0 },
       });
     });
 
