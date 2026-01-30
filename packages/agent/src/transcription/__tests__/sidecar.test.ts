@@ -116,6 +116,17 @@ describe('isSidecarReady', () => {
 });
 
 describe('waitForReady', () => {
+  // Disable the 30s initial delay for tests
+  beforeEach(async () => {
+    const { _setReadinessInitialDelay } = await import('../sidecar.js');
+    _setReadinessInitialDelay(0);
+  });
+
+  afterEach(async () => {
+    const { _resetReadinessInitialDelay } = await import('../sidecar.js');
+    _resetReadinessInitialDelay();
+  });
+
   it('returns true immediately if already ready', async () => {
     const mockFetch = vi.fn().mockResolvedValue({ ok: true });
     vi.stubGlobal('fetch', mockFetch);

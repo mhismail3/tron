@@ -34,7 +34,23 @@ const HEALTH_RETRY_DELAY_MS = 300;
 // Readiness constants (model warmup can take 30-120+ seconds)
 const READINESS_TIMEOUT_MS = 180000; // 3 minutes for model loading
 const READINESS_RETRY_DELAY_MS = 500;
-const READINESS_INITIAL_DELAY_MS = 30000; // Wait 30s before starting readiness checks
+let READINESS_INITIAL_DELAY_MS = 30000; // Wait 30s before starting readiness checks
+
+/**
+ * Set the initial delay before readiness checks (for testing only).
+ * @internal
+ */
+export function _setReadinessInitialDelay(ms: number): void {
+  READINESS_INITIAL_DELAY_MS = ms;
+}
+
+/**
+ * Reset the initial delay to default (for testing only).
+ * @internal
+ */
+export function _resetReadinessInitialDelay(): void {
+  READINESS_INITIAL_DELAY_MS = 30000;
+}
 
 // Watchdog constants
 const WATCHDOG_INTERVAL_MS = 30000; // Check every 30s
