@@ -1302,7 +1302,7 @@ cmd_setup() {
 
     # Create directory structure
     print_status "Creating directory structure..."
-    mkdir -p "$TRON_HOME"/{db,mods,notes,plans,rules,skills}
+    mkdir -p "$TRON_HOME"/{db,mods,notes,plans,skills}
     mkdir -p "$TRON_HOME"/mods/apns
     print_success "Created $TRON_HOME directory structure"
 
@@ -1325,22 +1325,6 @@ EOF
         print_warning "settings.json already exists, skipping"
     fi
 
-    if [ ! -f "$TRON_HOME/rules/system.md" ]; then
-        cat > "$TRON_HOME/rules/system.md" << 'EOF'
-You are Tron, an AI coding assistant with full access to the user's file system.
-
-When the user asks you to work with files or code, you can directly read, write, and edit files using the available tools. You are operating on the server machine with full file system access.
-
-Be helpful, accurate, and efficient. When working with code:
-1. Read existing files to understand context before making changes
-2. Make targeted, minimal edits rather than rewriting entire files
-3. Test changes by running appropriate commands when asked
-4. Explain what you're doing and why
-EOF
-        print_success "Created rules/system.md"
-    else
-        print_warning "rules/system.md already exists, skipping"
-    fi
 
     if [ ! -f "$TRON_HOME/auth.json" ]; then
         cat > "$TRON_HOME/auth.json" << 'EOF'
