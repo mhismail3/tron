@@ -85,6 +85,10 @@ export class SpawnHandler {
         tags: ['subagent', 'subsession'],
         // Pass parent session ID for event forwarding
         parentSessionId,
+        // Pass custom system prompt if provided
+        systemPrompt: params.systemPrompt,
+        // Pass tool denials if provided (undefined = all tools, { denyAll: true } = no tools)
+        toolDenials: params.toolDenials,
       });
 
       // Update the session in DB with spawning info
@@ -104,7 +108,8 @@ export class SpawnHandler {
           spawnType: 'subsession',
           task: params.task,
           model: params.model ?? parent.model,
-          tools: params.tools,
+          systemPrompt: params.systemPrompt,
+          toolDenials: params.toolDenials,
           skills: params.skills,
           workingDirectory: params.workingDirectory ?? parent.workingDirectory,
           maxTurns: params.maxTurns ?? 50,
@@ -158,7 +163,50 @@ export class SpawnHandler {
         parentSessionId,
         subagentSessionId: subSession.sessionId,
         task: params.task.slice(0, 100),
+        blocking: params.blocking ?? false,
       });
+
+      // If blocking mode, wait for the subagent to complete
+      if (params.blocking) {
+        const timeout = params.timeout ?? 5 * 60 * 1000; // Default 5 minutes
+        try {
+          logger.debug('Waiting for blocking subagent to complete', {
+            subagentSessionId: subSession.sessionId,
+            timeout,
+          });
+
+          const result = await parent.subagentTracker.waitFor(
+            subSession.sessionId as SessionId,
+            timeout
+          );
+
+          logger.info('Blocking subagent completed', {
+            subagentSessionId: subSession.sessionId,
+            success: result.success,
+            outputLength: result.output?.length ?? 0,
+          });
+
+          return {
+            sessionId: subSession.sessionId,
+            success: result.success,
+            output: result.output,
+            resultSummary: result.summary,
+            tokenUsage: result.tokenUsage,
+            error: result.error,
+          };
+        } catch (waitError) {
+          const err = waitError as Error;
+          logger.error('Blocking subagent wait failed', {
+            subagentSessionId: subSession.sessionId,
+            error: err.message,
+          });
+          return {
+            sessionId: subSession.sessionId,
+            success: false,
+            error: `Subagent wait failed: ${err.message}`,
+          };
+        }
+      }
 
       return { sessionId: subSession.sessionId, success: true };
     } catch (error) {
@@ -236,7 +284,7 @@ export class SpawnHandler {
           spawnType: 'tmux',
           task: params.task,
           model: params.model ?? parent.model,
-          tools: params.tools,
+          toolDenials: params.toolDenials,
           skills: params.skills,
           workingDirectory: workDir,
           tmuxSessionName,

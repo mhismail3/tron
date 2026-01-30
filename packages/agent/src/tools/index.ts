@@ -8,6 +8,7 @@
  * - system/   - System commands (bash)
  * - search/   - Code search (unified text + AST search)
  * - ui/       - User interaction (ask-user-question, todo-write, notify-app, render-app-ui)
+ * - web/      - Web fetching and searching (web-fetch, web-search)
  */
 
 // Filesystem tools
@@ -50,6 +51,14 @@ export {
   type SubagentTrackingEvent,
   type SubagentResult,
   type SubagentCompletionCallback,
+  // Tool denial system
+  checkToolDenial,
+  filterToolsByDenial,
+  mergeToolDenials,
+  type ToolDenialConfig,
+  type ToolDenialRule,
+  type ParameterDenialPattern,
+  type ToolDenialCheckResult,
 } from './subagent/index.js';
 
 // Browser tools
@@ -89,6 +98,36 @@ export {
   RenderAppUITool,
   type RenderAppUIConfig,
 } from './ui/index.js';
+
+// Web tools
+export {
+  WebFetchTool,
+  type WebFetchToolConfig,
+  type WebFetchParams,
+  type WebFetchResult,
+  type SubagentSpawnCallback as WebFetchSubagentCallback,
+  type SubagentSpawnResult as WebFetchSubagentResult,
+  WebSearchTool,
+  type WebSearchToolConfig,
+  type WebSearchParams,
+  type WebSearchResult,
+  type SearchResultItem,
+  // Summarizer
+  createSummarizer,
+  createHaikuSummarizer,
+  type SummarizerConfig,
+  // Utilities
+  validateUrl,
+  UrlValidator,
+  type UrlValidatorConfig,
+  parseHtml,
+  HtmlParser,
+  type HtmlParserConfig,
+  WebCache,
+  type WebCacheConfig,
+  BraveSearchClient,
+  type BraveSearchClientConfig,
+} from './web/index.js';
 
 // Utility functions for token estimation and output truncation
 export {

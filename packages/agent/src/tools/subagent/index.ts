@@ -41,3 +41,13 @@ export {
   type SubagentResult,
   type SubagentCompletionCallback,
 } from './subagent-tracker.js';
+
+export {
+  checkToolDenial,
+  filterToolsByDenial,
+  mergeToolDenials,
+  type ToolDenialConfig,
+  type ToolDenialRule,
+  type ParameterDenialPattern,
+  type ToolDenialCheckResult,
+} from './tool-denial.js';

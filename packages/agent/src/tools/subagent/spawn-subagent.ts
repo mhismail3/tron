@@ -8,6 +8,7 @@
 
 import type { TronTool, TronToolResult } from '../../types/index.js';
 import type { SubAgentTracker } from './subagent-tracker.js';
+import type { ToolDenialConfig } from './tool-denial.js';
 import type { SessionId } from '../../events/types.js';
 import { createLogger } from '../../logging/index.js';
 
@@ -23,8 +24,33 @@ export interface SpawnSubagentParams {
   mode?: 'inProcess' | 'tmux';
   /** Override model for the agent */
   model?: string;
-  /** Specific tools to enable (if not specified, uses default tools) */
-  tools?: string[];
+  /**
+   * Custom system prompt for the subagent.
+   * If not specified, uses the default Tron system prompt.
+   */
+  systemPrompt?: string;
+  /**
+   * Tool denial configuration for this subagent.
+   * Subagent inherits all parent tools minus any specified denials.
+   *
+   * @example
+   * // Deny all tools (text generation only)
+   * { denyAll: true }
+   *
+   * @example
+   * // Deny specific tools
+   * { tools: ['Bash', 'Write', 'SpawnSubagent'] }
+   *
+   * @example
+   * // Granular denial with parameter patterns
+   * {
+   *   rules: [{
+   *     tool: 'Bash',
+   *     denyPatterns: [{ parameter: 'command', patterns: ['rm\\s+-rf', 'sudo'] }]
+   *   }]
+   * }
+   */
+  toolDenials?: ToolDenialConfig;
   /** Skills to load for the agent */
   skills?: string[];
   /** Working directory (defaults to parent session's directory) */
@@ -135,7 +161,8 @@ Parameters:
 - **blocking**: If true (default), waits for completion (inProcess only)
 - **timeout**: Max wait time in ms (default: 30 minutes, inProcess only)
 - **sessionName**: Custom tmux session name (tmux only)
-- **model**, **tools**, **skills**, **workingDirectory**, **maxTurns**: Optional overrides
+- **model**, **systemPrompt**, **toolDenials**, **skills**, **workingDirectory**, **maxTurns**: Optional overrides
+- **toolDenials**: Deny tools/patterns. Use { denyAll: true } for text-only agents
 
 Returns (when mode=inProcess and blocking=true):
 - Full output from the agent
@@ -158,10 +185,17 @@ Returns (when mode=inProcess and blocking=true):
         type: 'string' as const,
         description: 'Override the model for the agent. If not specified, uses the parent session\'s model.',
       },
-      tools: {
-        type: 'array' as const,
-        items: { type: 'string' as const },
-        description: 'Specific tools to enable for the agent. If not specified, uses default tools.',
+      systemPrompt: {
+        type: 'string' as const,
+        description: 'Custom system prompt for the subagent. If not specified, uses the default Tron prompt.',
+      },
+      toolDenials: {
+        type: 'object' as const,
+        description: 'Tool denial configuration. Use { denyAll: true } for text-only agents, or { tools: ["Bash", "Write"] } to deny specific tools.',
+        properties: {
+          denyAll: { type: 'boolean' as const, description: 'Deny all tools (text generation only)' },
+          tools: { type: 'array' as const, items: { type: 'string' as const }, description: 'Tools to deny by name' },
+        },
       },
       skills: {
         type: 'array' as const,
@@ -223,7 +257,8 @@ Returns (when mode=inProcess and blocking=true):
     const task = args.task as string;
     const mode = (args.mode as 'inProcess' | 'tmux') ?? 'inProcess';
     const model = args.model as string | undefined;
-    const tools = args.tools as string[] | undefined;
+    const systemPrompt = args.systemPrompt as string | undefined;
+    const toolDenials = args.toolDenials as ToolDenialConfig | undefined;
     const skills = args.skills as string[] | undefined;
     const workingDirectory = args.workingDirectory as string | undefined;
     const maxTurns = args.maxTurns as number | undefined;
@@ -257,7 +292,8 @@ Returns (when mode=inProcess and blocking=true):
         task,
         mode,
         model: model ?? this.config.model,
-        tools,
+        systemPrompt,
+        toolDenials,
         skills,
         workingDirectory: workingDirectory ?? this.config.workingDirectory,
         maxTurns: maxTurns ?? (mode === 'tmux' ? 100 : 50),

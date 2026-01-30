@@ -131,7 +131,7 @@ describe('SpawnHandler', () => {
       await handler.spawnSubsession('parent_123', {
         task: 'Test task',
         model: 'claude-3-opus',
-        tools: ['Bash'],
+        toolDenials: { tools: ['Bash'] },
         skills: ['git'],
         maxTurns: 30,
       });
@@ -144,7 +144,7 @@ describe('SpawnHandler', () => {
           spawnType: 'subsession',
           task: 'Test task',
           model: 'claude-3-opus',
-          tools: ['Bash'],
+          toolDenials: { tools: ['Bash'] },
           skills: ['git'],
           maxTurns: 30,
         })

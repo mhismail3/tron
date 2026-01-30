@@ -83,6 +83,10 @@ struct ToolResultRouter: View {
             return ("globe", .blue)
         case "openurl":
             return ("safari", .blue)
+        case "webfetch":
+            return ("arrow.down.doc", .tronInfo)
+        case "websearch":
+            return ("magnifyingglass.circle", .tronInfo)
         case "askuserquestion":
             return ("questionmark.circle.fill", .tronAmber)
         default:
@@ -122,6 +126,8 @@ struct ToolResultRouter: View {
         case "glob": return "Glob"
         case "browsetheweb": return "Browse Web"
         case "openurl": return "Open URL"
+        case "webfetch": return "WebFetch"
+        case "websearch": return "WebSearch"
         default: return tool.toolName.capitalized
         }
     }
@@ -157,6 +163,10 @@ struct ToolResultRouter: View {
             return extractBrowserAction(from: args)
         case "openurl":
             return extractOpenBrowserUrl(from: args)
+        case "webfetch":
+            return extractWebFetchDetail(from: args)
+        case "websearch":
+            return extractWebSearchDetail(from: args)
         default:
             return ""
         }
@@ -213,6 +223,18 @@ struct ToolResultRouter: View {
             OpenURLResultViewer(
                 url: extractOpenBrowserUrl(from: tool.arguments),
                 result: result,
+                isExpanded: $isExpanded
+            )
+        case "webfetch":
+            WebFetchResultViewer(
+                result: result,
+                arguments: tool.arguments,
+                isExpanded: $isExpanded
+            )
+        case "websearch":
+            WebSearchResultViewer(
+                result: result,
+                arguments: tool.arguments,
                 isExpanded: $isExpanded
             )
         default:
@@ -336,6 +358,58 @@ struct ToolResultRouter: View {
         }
         return ""
     }
+
+    /// Extract WebFetch detail (domain + truncated prompt)
+    private func extractWebFetchDetail(from args: String) -> String {
+        var url = ""
+        var prompt = ""
+
+        if let match = args.firstMatch(of: /"url"\s*:\s*"([^"]+)"/) {
+            url = String(match.1)
+                .replacingOccurrences(of: "\\/", with: "/")
+                .replacingOccurrences(of: "\\\"", with: "\"")
+        }
+        if let match = args.firstMatch(of: /"prompt"\s*:\s*"([^"]+)"/) {
+            prompt = String(match.1)
+                .replacingOccurrences(of: "\\n", with: " ")
+                .replacingOccurrences(of: "\\\"", with: "\"")
+        }
+
+        if !url.isEmpty {
+            let domain = extractDomainFromUrl(url)
+            if !prompt.isEmpty {
+                let shortPrompt = prompt.count > 25 ? String(prompt.prefix(22)) + "..." : prompt
+                return "\(domain): \(shortPrompt)"
+            }
+            return domain
+        }
+        return prompt.isEmpty ? "" : (prompt.count > 40 ? String(prompt.prefix(37)) + "..." : prompt)
+    }
+
+    /// Extract domain from URL
+    private func extractDomainFromUrl(_ url: String) -> String {
+        if let urlObj = URL(string: url), let host = urlObj.host {
+            return host.hasPrefix("www.") ? String(host.dropFirst(4)) : host
+        }
+        // Fallback: extract domain manually
+        if url.contains("://") {
+            let afterProtocol = url.components(separatedBy: "://").last ?? url
+            let domain = afterProtocol.components(separatedBy: "/").first ?? afterProtocol
+            return domain.hasPrefix("www.") ? String(domain.dropFirst(4)) : domain
+        }
+        return String(url.prefix(30))
+    }
+
+    /// Extract WebSearch detail (quoted query)
+    private func extractWebSearchDetail(from args: String) -> String {
+        if let match = args.firstMatch(of: /"query"\s*:\s*"([^"]+)"/) {
+            let query = String(match.1)
+                .replacingOccurrences(of: "\\\"", with: "\"")
+            let truncated = query.count > 35 ? String(query.prefix(32)) + "..." : query
+            return "\"\(truncated)\""
+        }
+        return ""
+    }
 }
 
 // MARK: - Preview
@@ -441,6 +515,26 @@ struct ToolResultRouter: View {
                 status: .success,
                 result: "Opening https://example.com in Safari",
                 durationMs: 0
+            ))
+
+            // 11. WebFetch - Fetch and summarize web content
+            ToolResultRouter(tool: ToolUseData(
+                toolName: "WebFetch",
+                toolCallId: "webfetch-123",
+                arguments: "{\"url\": \"https://docs.anthropic.com/overview\", \"prompt\": \"What models are available?\"}",
+                status: .success,
+                result: "Claude has three main model families: Claude 3.5 Sonnet, Claude 3.5 Haiku, and Claude 3 Opus.\n\nSource: https://docs.anthropic.com/overview\nTitle: Claude Models Overview",
+                durationMs: 850
+            ))
+
+            // 12. WebSearch - Search the web
+            ToolResultRouter(tool: ToolUseData(
+                toolName: "WebSearch",
+                toolCallId: "websearch-123",
+                arguments: "{\"query\": \"Swift async await tutorial\"}",
+                status: .success,
+                result: "Found 5 results for 'Swift async await tutorial':\n\n1. **Swift Concurrency - Apple Developer**\n   https://developer.apple.com/documentation/swift/concurrency\n   Learn about Swift's modern approach to async code.\n\n2. **Async/Await in Swift**\n   https://www.swiftbysundell.com/articles/async-await-in-swift/\n   A guide to using async/await.",
+                durationMs: 620
             ))
 
             // Also show running and error states

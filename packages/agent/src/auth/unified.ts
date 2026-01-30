@@ -10,7 +10,7 @@ import * as fsPromises from 'fs/promises';
 import * as path from 'path';
 import { createLogger, categorizeError, LogErrorCategory } from '../logging/index.js';
 import { getTronDataDir } from '../settings/index.js';
-import type { AuthStorage, ProviderAuth, ProviderId, OAuthTokens } from './types.js';
+import type { AuthStorage, ProviderAuth, ProviderId, ServiceAuth, ServiceId, OAuthTokens } from './types.js';
 
 const logger = createLogger('unified-auth');
 
@@ -113,6 +113,22 @@ export async function getProviderAuth(provider: ProviderId): Promise<ProviderAut
 export function getProviderAuthSync(provider: ProviderId): ProviderAuth | null {
   const auth = loadAuthStorageSync();
   return auth?.providers[provider] ?? null;
+}
+
+/**
+ * Get authentication for a specific external service
+ */
+export async function getServiceAuth(service: ServiceId): Promise<ServiceAuth | null> {
+  const auth = await loadAuthStorage();
+  return auth?.services?.[service] ?? null;
+}
+
+/**
+ * Synchronously get authentication for a specific external service
+ */
+export function getServiceAuthSync(service: ServiceId): ServiceAuth | null {
+  const auth = loadAuthStorageSync();
+  return auth?.services?.[service] ?? null;
 }
 
 // =============================================================================

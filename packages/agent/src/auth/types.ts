@@ -43,10 +43,22 @@ export interface GoogleProviderAuth extends ProviderAuth {
 }
 
 /**
- * Known provider identifiers
+ * Known provider identifiers (LLM providers only)
  * Extensible - new providers can be added as string keys
  */
 export type ProviderId = 'anthropic' | 'openai-codex' | 'openai' | 'google' | string;
+
+/**
+ * Known service identifiers (external APIs, not LLM providers)
+ */
+export type ServiceId = 'brave' | string;
+
+/**
+ * External service configuration
+ */
+export interface ServiceAuth {
+  apiKey?: string;
+}
 
 /**
  * Unified auth storage schema (v1)
@@ -54,7 +66,10 @@ export type ProviderId = 'anthropic' | 'openai-codex' | 'openai' | 'google' | st
  */
 export interface AuthStorage {
   version: 1;
+  /** LLM provider authentication (Anthropic, OpenAI, Google, etc.) */
   providers: Record<ProviderId, ProviderAuth>;
+  /** External service API keys (Brave Search, etc.) */
+  services?: Record<ServiceId, ServiceAuth>;
   lastUpdated: string; // ISO 8601 timestamp
 }
 

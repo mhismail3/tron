@@ -177,14 +177,6 @@ struct CommandToolTypesTests {
         #expect(config.displayName == "Bash")
     }
 
-    @Test("Registry returns correct config for Grep tool")
-    func testRegistryGrepConfig() {
-        let config = CommandToolRegistry.config(for: "grep")
-
-        #expect(config.icon == "magnifyingglass")
-        #expect(config.displayName == "Grep")
-    }
-
     @Test("Registry returns correct config for Glob tool")
     func testRegistryGlobConfig() {
         let config = CommandToolRegistry.config(for: "glob")
@@ -199,22 +191,6 @@ struct CommandToolTypesTests {
 
         #expect(config.icon == "doc.text.magnifyingglass")
         #expect(config.displayName == "Find")
-    }
-
-    @Test("Registry returns correct config for Ls tool")
-    func testRegistryLsConfig() {
-        let config = CommandToolRegistry.config(for: "ls")
-
-        #expect(config.icon == "folder")
-        #expect(config.displayName == "Ls")
-    }
-
-    @Test("Registry returns correct config for Browser tool")
-    func testRegistryBrowserConfig() {
-        let config = CommandToolRegistry.config(for: "browser")
-
-        #expect(config.icon == "globe")
-        #expect(config.displayName == "Browser")
     }
 
     @Test("Registry returns correct config for Search tool")
@@ -378,24 +354,6 @@ struct CommandToolTypesTests {
         #expect(chipData?.result == "Error: File not found")
     }
 
-    @Test("Factory extracts Grep summary correctly")
-    func testFactoryExtractsGrepSummary() {
-        let toolUse = ToolUseData(
-            toolName: "Grep",
-            toolCallId: "call_grep_1",
-            arguments: "{\"pattern\": \"TODO\", \"path\": \"./src\"}",
-            status: .success,
-            result: "Found 5 matches",
-            durationMs: 100
-        )
-
-        let chipData = CommandToolChipData(from: toolUse)
-
-        #expect(chipData != nil)
-        // Summary should show pattern in path format
-        #expect(chipData?.summary.contains("TODO") == true)
-    }
-
     @Test("Factory extracts Edit summary correctly")
     func testFactoryExtractsEditSummary() {
         let toolUse = ToolUseData(
@@ -449,26 +407,6 @@ struct CommandToolTypesTests {
         #expect(chipData!.summary.hasSuffix("..."))
     }
 
-    @Test("Factory unescapes JSON escaped paths correctly")
-    func testFactoryUnescapesJSONPaths() {
-        // JSON escapes forward slashes as \/
-        let toolUse = ToolUseData(
-            toolName: "Ls",
-            toolCallId: "call_ls_1",
-            arguments: "{\"path\": \"\\/Users\\/moose\\/Downloads\\/test\"}",
-            status: .success,
-            result: "file1.txt\nfile2.txt",
-            durationMs: 44
-        )
-
-        let chipData = CommandToolChipData(from: toolUse)
-
-        #expect(chipData != nil)
-        // Summary should have unescaped slashes
-        #expect(chipData?.summary == "/Users/moose/Downloads/test")
-        #expect(!chipData!.summary.contains("\\/"))
-    }
-
     @Test("Factory unescapes JSON escaped file paths for Read")
     func testFactoryUnescapesReadFilePath() {
         let toolUse = ToolUseData(
@@ -501,7 +439,8 @@ struct CommandToolTypesTests {
         let chipData = CommandToolChipData(from: toolUse)
 
         #expect(chipData != nil)
-        #expect(chipData?.summary == "https://example.com/path/to/page")
+        // Summary shows domain (URL is unescaped internally)
+        #expect(chipData?.summary == "example.com")
         #expect(!chipData!.summary.contains("\\/"))
     }
 }
@@ -726,5 +665,258 @@ struct ResultTruncationTests {
         #expect(chipData != nil)
         #expect(chipData?.isResultTruncated == false)
         #expect(chipData?.result == nil)
+    }
+}
+
+// MARK: - WebFetch Summary Extraction Tests
+
+@Suite("WebFetch Summary Extraction Tests")
+struct WebFetchSummaryTests {
+
+    @Test("Factory extracts WebFetch URL from arguments")
+    func testFactoryExtractsWebFetchUrl() {
+        let toolUse = ToolUseData(
+            toolName: "WebFetch",
+            toolCallId: "call_webfetch_1",
+            arguments: "{\"url\": \"https://docs.anthropic.com/overview\", \"prompt\": \"What models are available?\"}",
+            status: .success,
+            result: "Claude has several models...",
+            durationMs: 500
+        )
+
+        let chipData = CommandToolChipData(from: toolUse)
+
+        #expect(chipData != nil)
+        #expect(chipData?.normalizedName == "webfetch")
+        // Summary should show domain and truncated prompt
+        #expect(chipData?.summary.contains("docs.anthropic.com") == true)
+    }
+
+    @Test("Factory extracts domain from WebFetch URL")
+    func testFactoryExtractsDomainFromUrl() {
+        let toolUse = ToolUseData(
+            toolName: "WebFetch",
+            toolCallId: "call_webfetch_2",
+            arguments: "{\"url\": \"https://www.example.com/path/to/page\", \"prompt\": \"Summarize\"}",
+            status: .success,
+            result: "Summary content...",
+            durationMs: 300
+        )
+
+        let chipData = CommandToolChipData(from: toolUse)
+
+        #expect(chipData != nil)
+        // Should strip www. prefix
+        #expect(chipData?.summary.contains("example.com") == true)
+    }
+
+    @Test("Factory shows prompt in WebFetch summary when URL is present")
+    func testFactoryShowsPromptInSummary() {
+        let toolUse = ToolUseData(
+            toolName: "WebFetch",
+            toolCallId: "call_webfetch_3",
+            arguments: "{\"url\": \"https://example.com\", \"prompt\": \"What are the main features?\"}",
+            status: .success,
+            result: "Features include...",
+            durationMs: 400
+        )
+
+        let chipData = CommandToolChipData(from: toolUse)
+
+        #expect(chipData != nil)
+        // Summary should include part of the prompt
+        #expect(chipData?.summary.contains("What are the main") == true)
+    }
+
+    @Test("Factory truncates long prompts in WebFetch summary")
+    func testFactoryTruncatesLongPrompt() {
+        let longPrompt = "This is a very long prompt that should be truncated for display purposes in the summary"
+        let toolUse = ToolUseData(
+            toolName: "WebFetch",
+            toolCallId: "call_webfetch_4",
+            arguments: "{\"url\": \"https://example.com\", \"prompt\": \"\(longPrompt)\"}",
+            status: .success,
+            result: "Result",
+            durationMs: 200
+        )
+
+        let chipData = CommandToolChipData(from: toolUse)
+
+        #expect(chipData != nil)
+        // Summary should be reasonably short (domain + truncated prompt)
+        #expect(chipData!.summary.count <= 60)
+        #expect(chipData!.summary.contains("..."))
+    }
+
+    @Test("Factory handles WebFetch with escaped JSON URL")
+    func testFactoryHandlesEscapedJsonUrl() {
+        let toolUse = ToolUseData(
+            toolName: "WebFetch",
+            toolCallId: "call_webfetch_5",
+            arguments: "{\"url\": \"https:\\/\\/docs.example.com\\/api\\/reference\", \"prompt\": \"Explain the API\"}",
+            status: .success,
+            result: "The API provides...",
+            durationMs: 350
+        )
+
+        let chipData = CommandToolChipData(from: toolUse)
+
+        #expect(chipData != nil)
+        // Should unescape the URL properly
+        #expect(chipData?.summary.contains("docs.example.com") == true)
+        #expect(chipData?.summary.contains("\\/") == false)
+    }
+
+    @Test("Factory handles WebFetch with missing URL gracefully")
+    func testFactoryHandlesMissingUrl() {
+        let toolUse = ToolUseData(
+            toolName: "WebFetch",
+            toolCallId: "call_webfetch_6",
+            arguments: "{\"prompt\": \"What is this?\"}",
+            status: .error,
+            result: "Error: URL required",
+            durationMs: 5
+        )
+
+        let chipData = CommandToolChipData(from: toolUse)
+
+        #expect(chipData != nil)
+        // Should fall back to showing prompt only
+        #expect(chipData?.summary.contains("What is this") == true)
+    }
+
+    @Test("Factory handles WebFetch with missing prompt gracefully")
+    func testFactoryHandlesMissingPrompt() {
+        let toolUse = ToolUseData(
+            toolName: "WebFetch",
+            toolCallId: "call_webfetch_7",
+            arguments: "{\"url\": \"https://example.com\"}",
+            status: .error,
+            result: "Error: prompt required",
+            durationMs: 5
+        )
+
+        let chipData = CommandToolChipData(from: toolUse)
+
+        #expect(chipData != nil)
+        // Should show URL/domain at minimum
+        #expect(chipData?.summary.contains("example.com") == true)
+    }
+}
+
+// MARK: - WebSearch Summary Extraction Tests
+
+@Suite("WebSearch Summary Extraction Tests")
+struct WebSearchSummaryTests {
+
+    @Test("Factory extracts WebSearch query from arguments")
+    func testFactoryExtractsWebSearchQuery() {
+        let toolUse = ToolUseData(
+            toolName: "WebSearch",
+            toolCallId: "call_websearch_1",
+            arguments: "{\"query\": \"Swift async await tutorial\"}",
+            status: .success,
+            result: "Found 10 results...",
+            durationMs: 800
+        )
+
+        let chipData = CommandToolChipData(from: toolUse)
+
+        #expect(chipData != nil)
+        #expect(chipData?.normalizedName == "websearch")
+        #expect(chipData?.summary.contains("Swift async await tutorial") == true)
+    }
+
+    @Test("Factory shows WebSearch query in quotes")
+    func testFactoryShowsQueryInQuotes() {
+        let toolUse = ToolUseData(
+            toolName: "WebSearch",
+            toolCallId: "call_websearch_2",
+            arguments: "{\"query\": \"TypeScript 5.4 features\"}",
+            status: .success,
+            result: "Results...",
+            durationMs: 600
+        )
+
+        let chipData = CommandToolChipData(from: toolUse)
+
+        #expect(chipData != nil)
+        // Summary should be quoted
+        #expect(chipData?.summary.hasPrefix("\"") == true)
+        #expect(chipData?.summary.hasSuffix("\"") == true)
+    }
+
+    @Test("Factory truncates long WebSearch queries")
+    func testFactoryTruncatesLongQuery() {
+        let longQuery = "This is a very long search query that should be truncated for display in the summary chip"
+        let toolUse = ToolUseData(
+            toolName: "WebSearch",
+            toolCallId: "call_websearch_3",
+            arguments: "{\"query\": \"\(longQuery)\"}",
+            status: .success,
+            result: "Results...",
+            durationMs: 700
+        )
+
+        let chipData = CommandToolChipData(from: toolUse)
+
+        #expect(chipData != nil)
+        // Summary should be truncated (40 chars for query + quotes + ellipsis)
+        #expect(chipData!.summary.count <= 45)
+        #expect(chipData!.summary.contains("..."))
+    }
+
+    @Test("Factory handles WebSearch with escaped JSON query")
+    func testFactoryHandlesEscapedJsonQuery() {
+        let toolUse = ToolUseData(
+            toolName: "WebSearch",
+            toolCallId: "call_websearch_4",
+            arguments: "{\"query\": \"React \\\"hooks\\\" tutorial\"}",
+            status: .success,
+            result: "Results...",
+            durationMs: 500
+        )
+
+        let chipData = CommandToolChipData(from: toolUse)
+
+        #expect(chipData != nil)
+        // Should unescape properly
+        #expect(chipData?.summary.contains("React") == true)
+    }
+
+    @Test("Factory handles WebSearch with missing query gracefully")
+    func testFactoryHandlesMissingQuery() {
+        let toolUse = ToolUseData(
+            toolName: "WebSearch",
+            toolCallId: "call_websearch_5",
+            arguments: "{}",
+            status: .error,
+            result: "Error: query required",
+            durationMs: 5
+        )
+
+        let chipData = CommandToolChipData(from: toolUse)
+
+        #expect(chipData != nil)
+        // Summary should be empty or show placeholder
+        #expect(chipData?.summary.isEmpty == true || chipData?.summary == "\"\"")
+    }
+
+    @Test("Factory handles WebSearch with domain filters")
+    func testFactoryHandlesDomainFilters() {
+        let toolUse = ToolUseData(
+            toolName: "WebSearch",
+            toolCallId: "call_websearch_6",
+            arguments: "{\"query\": \"Swift tutorials\", \"allowedDomains\": [\"apple.com\", \"swift.org\"]}",
+            status: .success,
+            result: "Filtered results...",
+            durationMs: 650
+        )
+
+        let chipData = CommandToolChipData(from: toolUse)
+
+        #expect(chipData != nil)
+        // Should still show the query in summary
+        #expect(chipData?.summary.contains("Swift tutorials") == true)
     }
 }

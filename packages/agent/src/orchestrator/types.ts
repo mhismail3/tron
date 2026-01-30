@@ -35,6 +35,8 @@ export interface EventStoreOrchestratorConfig {
   eventStore?: EventStore;
   /** Browser automation configuration */
   browser?: BrowserConfig;
+  /** Blocked domains for web tools (optional) */
+  blockedWebDomains?: string[];
 }
 
 /**
@@ -209,6 +211,15 @@ export interface CreateSessionOptions {
   forceIsolation?: boolean;
   /** Parent session ID if this is a subagent session (for event forwarding) */
   parentSessionId?: string;
+  /**
+   * Tool denial configuration.
+   * Subagent inherits all parent tools minus any specified denials.
+   * - undefined: all tools available (default for agent type)
+   * - { denyAll: true }: no tools (text generation only)
+   * - { tools: ['Bash', 'Write'] }: deny specific tools
+   * - { rules: [...] }: granular denial with parameter patterns
+   */
+  toolDenials?: import('../tools/subagent/tool-denial.js').ToolDenialConfig;
 }
 
 export interface SessionInfo {

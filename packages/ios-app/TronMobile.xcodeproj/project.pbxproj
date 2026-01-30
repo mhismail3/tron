@@ -7,6 +7,9 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		C53F3FBA121DE1A4630542AB /* WebFetchResultViewer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2231D95EBE5453BC44F4ABF9 /* WebFetchResultViewer.swift */; };
+		BEE64E6747C55D8C11F8F148 /* WebSearchResultViewer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3F1F923576E181FDE597DF04 /* WebSearchResultViewer.swift */; };
+
 		00E83443DF9F3B41C2B0A104 /* SessionClientProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7C07B62292509116F6C16F9A /* SessionClientProtocol.swift */; };
 		029590450DF8FB55EBB86C23 /* ModelNameFormatter.swift in Sources */ = {isa = PBXBuildFile; fileRef = D03A2E1D488FAFF8C0088D61 /* ModelNameFormatter.swift */; };
 		02FE389EB93928871C55206C /* LogViewer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6BCC3CF17E11CB993CBEF33D /* LogViewer.swift */; };
@@ -769,6 +772,9 @@
 		DE88DEE3F08070A2E1884468 /* SubagentSpawnedPlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SubagentSpawnedPlugin.swift; sourceTree = "<group>"; };
 		DF881DA76CF64054893335E0 /* NewSessionFlow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NewSessionFlow.swift; sourceTree = "<group>"; };
 		DF913D046649A2757FEA1FD5 /* GenericToolViewer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GenericToolViewer.swift; sourceTree = "<group>"; };
+		2231D95EBE5453BC44F4ABF9 /* WebFetchResultViewer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebFetchResultViewer.swift; sourceTree = "<group>"; };
+		3F1F923576E181FDE597DF04 /* WebSearchResultViewer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebSearchResultViewer.swift; sourceTree = "<group>"; };
+
 		DFA29BF65193E68C18A29255 /* ThinkingCaption.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThinkingCaption.swift; sourceTree = "<group>"; };
 		DFB67664868C5499732A7C72 /* StructuralComponents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StructuralComponents.swift; sourceTree = "<group>"; };
 		E09F2A8C19FFF23E7F221259 /* CommandToolChip.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = CommandToolChip.swift; sourceTree = "<group>"; };
@@ -1494,6 +1500,9 @@
 				6AC377B44A707E319C9A4C25 /* BrowserToolViewer.swift */,
 				32EDE54E825DED7E7E2FD034 /* FileToolViewer.swift */,
 				DF913D046649A2757FEA1FD5 /* GenericToolViewer.swift */,
+				2231D95EBE5453BC44F4ABF9 /* WebFetchResultViewer.swift */,
+				3F1F923576E181FDE597DF04 /* WebSearchResultViewer.swift */,
+
 				7220DE4D2771C4E883BEFAF9 /* SearchToolViewer.swift */,
 				A7170BDE82B7EED1E313977D /* ToolResultRouter.swift */,
 			);
@@ -2397,6 +2406,9 @@
 				946C51267F3836E6BB6B7115 /* FontSettings.swift in Sources */,
 				FBEF1BB888DC834C87F40F10 /* ForkIndicators.swift in Sources */,
 				0469B9AB3EBA290338B09CAD /* GenericToolViewer.swift in Sources */,
+				C53F3FBA121DE1A4630542AB /* WebFetchResultViewer.swift in Sources */,
+				BEE64E6747C55D8C11F8F148 /* WebSearchResultViewer.swift in Sources */,
+
 				3AFA79F688F367716E2D157E /* GitHubURLParser.swift in Sources */,
 				09B802F7029A8229775A3AE2 /* GlassActionSheet.swift in Sources */,
 				60F22FB87D2B5928A33384DB /* ImageCompressor.swift in Sources */,

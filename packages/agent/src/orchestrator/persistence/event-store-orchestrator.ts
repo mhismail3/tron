@@ -74,6 +74,7 @@ import {
   createWorktreeCoordinator,
 } from '../../session/worktree-coordinator.js';
 import { loadServerAuth } from '../../auth/oauth.js';
+import { getServiceAuthSync } from '../../auth/unified.js';
 import { SubAgentTracker, type SubagentResult } from '../../tools/subagent/subagent-tracker.js';
 import type { TronEvent } from '../../types/events.js';
 import { BrowserService } from '../../external/browser/index.js';
@@ -316,6 +317,9 @@ export class EventStoreOrchestrator extends EventEmitter {
     }
 
     // Initialize AgentFactory (delegated module)
+    // Load external service API keys from ~/.tron/auth.json
+    const braveAuth = getServiceAuthSync('brave');
+
     this.agentFactory = createAgentFactory({
       getAuthForProvider: (model) => this.authProvider.getAuthForProvider(model),
       spawnSubsession: (parentId, params, toolCallId) => this.subagents.spawnSubsession(parentId, params, toolCallId),
@@ -326,6 +330,8 @@ export class EventStoreOrchestrator extends EventEmitter {
       onTodosUpdated: async (sessionId, todos) => this.todos.handleTodosUpdated(sessionId, todos),
       generateTodoId: () => `todo_${crypto.randomUUID().replace(/-/g, '').slice(0, 12)}`,
       dbPath: this.eventStore.dbPath,
+      braveSearchApiKey: braveAuth?.apiKey,
+      blockedWebDomains: config.blockedWebDomains,
       onNotify: this.apnsService ? async (sessionId, notification, toolCallId) => {
         return this.notificationController.sendNotification(sessionId, notification, toolCallId);
       } : undefined,

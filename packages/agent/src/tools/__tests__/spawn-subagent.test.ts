@@ -309,7 +309,7 @@ describe('SpawnSubagentTool', () => {
       await spawnSubagentTool.execute({
         task: 'Test task',
         model: 'claude-opus-4-5',
-        tools: ['read', 'write'],
+        toolDenials: { tools: ['Bash', 'Write'] },
         skills: ['skill1'],
         workingDirectory: '/custom/dir',
         maxTurns: 25,
@@ -321,7 +321,7 @@ describe('SpawnSubagentTool', () => {
         expect.objectContaining({
           task: 'Test task',
           model: 'claude-opus-4-5',
-          tools: ['read', 'write'],
+          toolDenials: { tools: ['Bash', 'Write'] },
           skills: ['skill1'],
           workingDirectory: '/custom/dir',
           maxTurns: 25,

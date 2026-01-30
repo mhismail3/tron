@@ -217,9 +217,9 @@ extension CommandToolChipData {
         case "openurl":
             return extractOpenBrowserUrl(from: args)
         case "webfetch":
-            return extractUrl(from: args)
+            return extractWebFetchSummary(from: args)
         case "websearch":
-            return extractQuery(from: args)
+            return extractWebSearchSummary(from: args)
         case "task":
             return extractTaskDescription(from: args)
         default:
@@ -325,6 +325,72 @@ extension CommandToolChipData {
                 return String(query.prefix(40)) + "..."
             }
             return query
+        }
+        return ""
+    }
+
+    // MARK: - WebFetch Summary
+
+    private static func extractWebFetchSummary(from args: String) -> String {
+        let url = extractWebFetchUrl(from: args)
+        let prompt = extractWebFetchPrompt(from: args)
+
+        if !url.isEmpty {
+            // Show domain + truncated prompt
+            let domain = extractDomain(from: url)
+            if !prompt.isEmpty {
+                let shortPrompt = prompt.count > 30 ? String(prompt.prefix(27)) + "..." : prompt
+                return "\(domain): \(shortPrompt)"
+            }
+            return domain
+        }
+        // Fallback to prompt only if no URL
+        return prompt.isEmpty ? "" : (prompt.count > 40 ? String(prompt.prefix(37)) + "..." : prompt)
+    }
+
+    private static func extractWebFetchUrl(from args: String) -> String {
+        if let match = args.firstMatch(of: /"url"\s*:\s*"([^"]+)"/) {
+            return unescapeJSON(String(match.1))
+        }
+        return ""
+    }
+
+    private static func extractWebFetchPrompt(from args: String) -> String {
+        if let match = args.firstMatch(of: /"prompt"\s*:\s*"([^"]+)"/) {
+            return unescapeJSON(String(match.1))
+        }
+        return ""
+    }
+
+    private static func extractDomain(from url: String) -> String {
+        guard let urlObj = URL(string: url),
+              let host = urlObj.host else {
+            // Fallback: try to extract domain manually
+            if url.contains("://") {
+                let afterProtocol = url.components(separatedBy: "://").last ?? url
+                let domain = afterProtocol.components(separatedBy: "/").first ?? afterProtocol
+                return domain.hasPrefix("www.") ? String(domain.dropFirst(4)) : domain
+            }
+            return String(url.prefix(30))
+        }
+        // Remove www. prefix for cleaner display
+        return host.hasPrefix("www.") ? String(host.dropFirst(4)) : host
+    }
+
+    // MARK: - WebSearch Summary
+
+    private static func extractWebSearchSummary(from args: String) -> String {
+        let query = extractWebSearchQuery(from: args)
+        guard !query.isEmpty else { return "" }
+
+        // Show query in quotes (truncated if long)
+        let truncated = query.count > 40 ? String(query.prefix(37)) + "..." : query
+        return "\"\(truncated)\""
+    }
+
+    private static func extractWebSearchQuery(from args: String) -> String {
+        if let match = args.firstMatch(of: /"query"\s*:\s*"([^"]+)"/) {
+            return unescapeJSON(String(match.1))
         }
         return ""
     }

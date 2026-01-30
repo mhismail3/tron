@@ -28,11 +28,17 @@ import {
   WaitForAgentsTool,
   TodoWriteTool,
   NotifyAppTool,
+  WebFetchTool,
+  WebSearchTool,
+  filterToolsByDenial,
   type BrowserDelegate,
   type SpawnSubagentParams,
   type SubagentQueryType,
   type SubAgentTracker,
   type NotifyAppResult,
+  type ToolDenialConfig,
+  type WebFetchSubagentCallback,
+  type WebFetchSubagentResult,
 } from '../tools/index.js';
 import type { TronTool } from '../types/tools.js';
 import type { SessionId } from '../events/types.js';
@@ -40,6 +46,7 @@ import type { TronEvent } from '../types/events.js';
 import type { TodoItem } from '../todos/types.js';
 import { detectProviderFromModel, getModelCapabilities, type UnifiedAuth } from '../providers/factory.js';
 import type { ServerAuth } from '../auth/types.js';
+import { WEB_CONTENT_SUMMARIZER_PROMPT } from '../context/system-prompts.js';
 import type { GoogleAuth } from '../auth/google-oauth.js';
 
 const logger = createLogger('agent-factory');
@@ -95,6 +102,12 @@ export interface AgentFactoryConfig {
   generateTodoId: () => string;
   /** Path to shared SQLite database (for tmux mode agent spawning) */
   dbPath: string;
+  /** Anthropic API key for WebFetch summarizer (optional - enables WebFetch if provided) */
+  anthropicApiKey?: string;
+  /** Brave Search API key (optional - enables WebSearch if provided) */
+  braveSearchApiKey?: string;
+  /** Blocked domains for web tools (optional) */
+  blockedWebDomains?: string[];
   /** Callback for sending push notifications (optional) */
   onNotify?: (
     sessionId: string,
@@ -139,13 +152,18 @@ export class AgentFactory {
    * @param isSubagent - If true, excludes SpawnSubagent tool to prevent nested subagent spawning.
    *                     Subagents cannot spawn their own subagents to avoid complexity and
    *                     potential infinite recursion. This restriction may be relaxed in the future.
+   * @param toolDenials - Tool denial configuration. Subagent inherits all parent tools minus denials.
+   *                      - undefined: all tools available (default for agent type)
+   *                      - { denyAll: true }: no tools (text generation only)
+   *                      - { tools: ['Bash', 'Write'] }: deny specific tools
    */
   async createAgentForSession(
     sessionId: SessionId,
     workingDirectory: string,
     model: string,
     systemPrompt?: string,
-    isSubagent?: boolean
+    isSubagent?: boolean,
+    toolDenials?: ToolDenialConfig
   ): Promise<TronAgent> {
     // Get auth for the model (handles Codex OAuth vs standard auth)
     const auth = await this.config.getAuthForProvider(model);
@@ -175,7 +193,8 @@ export class AgentFactory {
 
     // AskUserQuestion uses async mode - no delegate needed
     // Questions are presented immediately, user answers as a new prompt
-    const tools: TronTool[] = [
+    // Build ALL tools first, then apply denial filtering at the end
+    let tools: TronTool[] = [
       new ReadTool({ workingDirectory }),
       new WriteTool({ workingDirectory }),
       new EditTool({ workingDirectory }),
@@ -202,37 +221,110 @@ export class AgentFactory {
       );
     }
 
-    // Sub-agent tools: Only add SpawnSubagent for top-level agents.
-    // Subagents cannot spawn their own subagents to prevent complexity and infinite recursion.
-    // QueryAgent and WaitForAgents are also excluded since they only make sense
-    // when spawning is allowed.
-    if (!isSubagent) {
+    // Add WebFetch tool - uses real Tron subagent for summarization
+    // The subagent spawner creates a no-tools Haiku session that persists to the database
+    const webFetchSummarizer: WebFetchSubagentCallback = async (params): Promise<WebFetchSubagentResult> => {
+      try {
+        const result = await this.config.spawnSubsession(sessionId, {
+          task: params.task,
+          model: params.model,
+          systemPrompt: WEB_CONTENT_SUMMARIZER_PROMPT,
+          toolDenials: { denyAll: true }, // No tools - text generation only
+          maxTurns: params.maxTurns,
+          blocking: true,
+          timeout: params.timeout,
+        });
+
+        return {
+          sessionId: result.sessionId || `summarizer-${Date.now()}`,
+          success: result.success !== false,
+          output: result.output || result.resultSummary,
+          error: result.error,
+          tokenUsage: result.tokenUsage,
+        };
+      } catch (error) {
+        const err = error as Error;
+        logger.error('WebFetch subagent spawn failed', { error: err.message });
+        return {
+          sessionId: `summarizer-error-${Date.now()}`,
+          success: false,
+          error: err.message,
+        };
+      }
+    };
+
+    tools.push(
+      new WebFetchTool({
+        workingDirectory,
+        onSpawnSubagent: webFetchSummarizer,
+        cache: { ttl: 15 * 60 * 1000, maxEntries: 100 },
+        urlValidator: { blockedDomains: this.config.blockedWebDomains },
+      })
+    );
+
+    // Add WebSearch tool if Brave Search API key is configured
+    if (this.config.braveSearchApiKey) {
       tools.push(
-        new SpawnSubagentTool({
-          sessionId,
-          workingDirectory,
-          model,
-          dbPath: this.config.dbPath,
-          onSpawn: (parentId: string, params: SpawnSubagentParams, toolCallId: string) =>
-            this.config.spawnSubsession(parentId, params, toolCallId),
-          getSubagentTracker: () => {
-            const tracker = this.config.getSubagentTrackerForSession(sessionId);
-            if (!tracker) {
-              throw new Error(`No subagent tracker for session ${sessionId}`);
-            }
-            return tracker;
-          },
-        }),
-        new QueryAgentTool({
-          onQuery: (sid: string, queryType: SubagentQueryType, limit?: number) =>
-            this.config.querySubagent(sid, queryType, limit),
-        }),
-        new WaitForAgentsTool({
-          onWait: (sessionIds: string[], mode: 'all' | 'any', timeout: number) =>
-            this.config.waitForSubagents(sessionIds, mode, timeout),
-        }),
+        new WebSearchTool({
+          apiKey: this.config.braveSearchApiKey,
+          defaultMaxResults: 10,
+          blockedDomains: this.config.blockedWebDomains,
+        })
       );
     }
+
+    // Add subagent management tools (will be filtered out for subagents via denials)
+    tools.push(
+      new SpawnSubagentTool({
+        sessionId,
+        workingDirectory,
+        model,
+        dbPath: this.config.dbPath,
+        onSpawn: (parentId: string, params: SpawnSubagentParams, toolCallId: string) =>
+          this.config.spawnSubsession(parentId, params, toolCallId),
+        getSubagentTracker: () => {
+          const tracker = this.config.getSubagentTrackerForSession(sessionId);
+          if (!tracker) {
+            throw new Error(`No subagent tracker for session ${sessionId}`);
+          }
+          return tracker;
+        },
+      }),
+      new QueryAgentTool({
+        onQuery: (sid: string, queryType: SubagentQueryType, limit?: number) =>
+          this.config.querySubagent(sid, queryType, limit),
+      }),
+      new WaitForAgentsTool({
+        onWait: (sessionIds: string[], mode: 'all' | 'any', timeout: number) =>
+          this.config.waitForSubagents(sessionIds, mode, timeout),
+      }),
+    );
+
+    // Build effective tool denial config:
+    // 1. Start with explicit toolDenials from caller
+    // 2. If isSubagent, also deny subagent management tools (prevent infinite recursion)
+    let effectiveDenials = toolDenials;
+    if (isSubagent) {
+      const subagentToolsDenial: ToolDenialConfig = {
+        tools: ['SpawnSubagent', 'QueryAgent', 'WaitForAgents'],
+      };
+      // Merge with any existing denials
+      if (effectiveDenials) {
+        effectiveDenials = {
+          denyAll: effectiveDenials.denyAll,
+          tools: [
+            ...(effectiveDenials.tools ?? []),
+            ...(subagentToolsDenial.tools ?? []),
+          ],
+          rules: effectiveDenials.rules,
+        };
+      } else {
+        effectiveDenials = subagentToolsDenial;
+      }
+    }
+
+    // Apply tool denial filtering
+    tools = filterToolsByDenial(tools, effectiveDenials);
 
     // System prompt is now handled by ContextManager based on provider type
     // Only pass custom prompt if explicitly provided - otherwise ContextManager

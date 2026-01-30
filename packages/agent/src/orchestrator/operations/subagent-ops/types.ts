@@ -56,6 +56,15 @@ export interface SpawnSubagentResult {
   error?: string;
   /** Tmux session name (tmux mode only) */
   tmuxSessionName?: string;
+  /** Full output from subagent (blocking mode only) */
+  output?: string;
+  /** Brief summary of result (blocking mode only) */
+  resultSummary?: string;
+  /** Token usage (blocking mode only) */
+  tokenUsage?: {
+    inputTokens: number;
+    outputTokens: number;
+  };
 }
 
 // Legacy type alias for backwards compatibility with tmux-specific result
