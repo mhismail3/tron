@@ -147,7 +147,6 @@ describe('MyFeature', () => {
 |----------|---------|
 | `~/.tron/db/` | SQLite databases |
 | `~/.tron/skills/` | Global skills |
-| `~/.tron/rules/` | Global context rules |
 | `~/.tron/settings.json` | User settings |
 
 ## Debugging

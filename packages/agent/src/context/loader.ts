@@ -2,20 +2,19 @@
  * @fileoverview Hierarchical Context Loader
  *
  * Loads and merges context/rules files (AGENTS.md, agents.md, CLAUDE.md, claude.md)
- * from multiple locations following a hierarchical priority system:
+ * from the project directory following a hierarchical priority system:
  *
- * 1. Global context: ~/.tron/rules/AGENTS.md (or lowercase variants)
- * 2. Project context: ./.agent/AGENTS.md or ./AGENTS.md
- * 3. Directory context: ./subdir/AGENTS.md (closest to working dir)
+ * 1. Project context: .claude/AGENTS.md, .tron/AGENTS.md, or ./AGENTS.md
+ * 2. Directory context: ./subdir/AGENTS.md (closest to working dir)
  *
- * Context files are accumulated from all levels (global → project → directory)
+ * Context files are accumulated from project root to target directory
  * with content merged in order.
  *
  * @example
  * ```typescript
- * const loader = new ContextLoader({ userHome: '~', projectRoot: '/project' });
+ * const loader = new ContextLoader({ projectRoot: '/project' });
  * const context = await loader.load('/project/src/components');
- * // Returns merged context from all levels
+ * // Returns merged context from project and directory levels
  * ```
  */
 import * as fs from 'fs/promises';
@@ -29,8 +28,6 @@ const logger = createLogger('context:loader');
 // =============================================================================
 
 export interface ContextLoaderConfig {
-  /** User home directory (for global context) */
-  userHome?: string;
   /** Project root directory */
   projectRoot?: string;
   /** Context file names to search for (default: AGENTS.md, CLAUDE.md) */
@@ -50,8 +47,8 @@ export interface ContextFile {
   path: string;
   /** File content */
   content: string;
-  /** Source level (global, project, directory) */
-  level: 'global' | 'project' | 'directory';
+  /** Source level (project or directory) */
+  level: 'project' | 'directory';
   /** Depth from project root (0 = root) */
   depth: number;
   /** Last modified timestamp */
@@ -98,7 +95,6 @@ export class ContextLoader {
     }
 
     this.config = {
-      userHome: process.env.HOME ?? '',
       projectRoot: process.cwd(),
       // Support both uppercase and lowercase variants
       contextFileNames: ['AGENTS.md', 'agents.md', 'CLAUDE.md', 'claude.md'],
@@ -129,19 +125,13 @@ export class ContextLoader {
 
     const files: ContextFile[] = [];
 
-    // 1. Load global context
-    const globalContext = await this.loadGlobalContext();
-    if (globalContext) {
-      files.push(globalContext);
-    }
-
-    // 2. Load project context
+    // 1. Load project context
     const projectContext = await this.loadProjectContext();
     if (projectContext) {
       files.push(projectContext);
     }
 
-    // 3. Load directory context (walk from project root to target)
+    // 2. Load directory context (walk from project root to target)
     const dirContexts = await this.loadDirectoryContexts(dir);
     files.push(...dirContexts);
 
@@ -166,35 +156,6 @@ export class ContextLoader {
     });
 
     return result;
-  }
-
-  /**
-   * Load only global context
-   * Looks in ~/.tron/rules/ for global rules files
-   */
-  async loadGlobalContext(): Promise<ContextFile | null> {
-    // Use ~/.tron/rules/ for global context
-    const globalDir = path.join(this.config.userHome, '.tron', 'rules');
-
-    for (const fileName of this.config.contextFileNames) {
-      const filePath = path.join(globalDir, fileName);
-      try {
-        const content = await fs.readFile(filePath, 'utf-8');
-        const stats = await fs.stat(filePath);
-
-        return {
-          path: filePath,
-          content,
-          level: 'global',
-          depth: -1,
-          modifiedAt: stats.mtime,
-        };
-      } catch {
-        // File doesn't exist, continue
-      }
-    }
-
-    return null;
   }
 
   /**
@@ -300,12 +261,8 @@ export class ContextLoader {
       return '';
     }
 
-    // Sort by priority (global first, then by depth)
-    const sorted = [...files].sort((a, b) => {
-      if (a.level === 'global' && b.level !== 'global') return -1;
-      if (a.level !== 'global' && b.level === 'global') return 1;
-      return a.depth - b.depth;
-    });
+    // Sort by depth (project first, then by directory depth)
+    const sorted = [...files].sort((a, b) => a.depth - b.depth);
 
     const sections: string[] = [];
 
@@ -330,7 +287,7 @@ export class ContextLoader {
 
     let currentTitle = '';
     let currentContent: string[] = [];
-    let priority = file.level === 'global' ? 0 : file.level === 'project' ? 10 : 10 + file.depth;
+    let priority = file.level === 'project' ? 10 : 10 + file.depth;
 
     for (const line of lines) {
       // Check for markdown headers
@@ -414,7 +371,6 @@ export class ContextLoader {
     onChange: (context: LoadedContext) => void
   ): Promise<() => void> {
     const paths = [
-      path.join(this.config.userHome, '.tron', 'rules'),  // Global context
       this.config.projectRoot,
       // Also watch agent directories
       ...this.config.agentDirs.map(dir => path.join(this.config.projectRoot, dir)),
@@ -469,10 +425,6 @@ export class ContextLoader {
    */
   async findAllContextFiles(): Promise<ContextFile[]> {
     const files: ContextFile[] = [];
-
-    // Global
-    const global = await this.loadGlobalContext();
-    if (global) files.push(global);
 
     // Recursive search in project
     await this.searchDirectory(this.config.projectRoot, files, 0);
@@ -536,15 +488,11 @@ export class ContextLoader {
   }
 
   private getLevelLabel(level: string, depth: number): string {
-    if (level === 'global') return 'Global';
     if (level === 'project') return 'Project';
     return `Directory (depth ${depth})`;
   }
 
   private getRelativePath(filePath: string): string {
-    if (filePath.startsWith(this.config.userHome)) {
-      return '~' + filePath.slice(this.config.userHome.length);
-    }
     return path.relative(this.config.projectRoot, filePath) || filePath;
   }
 }

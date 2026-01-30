@@ -159,11 +159,12 @@ describe('GuardrailEngine', () => {
       expect(evaluation.triggeredRules.some(r => r.ruleId === 'core.tron-auth-protection')).toBe(true);
     });
 
-    it('should allow writes to ~/.tron/rules directory', async () => {
-      const rulesPath = path.join(os.homedir(), '.tron', 'rules', 'SYSTEM.md');
+    it('should allow writes to project .tron directory', async () => {
+      // Project-level .tron directories are allowed for custom configuration
+      const projectTronPath = '/home/user/project/.tron/SYSTEM.md';
       const context: EvaluationContext = {
         toolName: 'Write',
-        toolArguments: { file_path: rulesPath, content: 'test' },
+        toolArguments: { file_path: projectTronPath, content: 'test' },
       };
 
       const evaluation = await engine.evaluate(context);

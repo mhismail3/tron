@@ -130,15 +130,14 @@ export class ContextManager {
       // Explicit programmatic override takes highest priority
       this.customSystemPrompt = config.systemPrompt;
     } else {
-      // Try loading from SYSTEM.md files
+      // Try loading from project .tron/SYSTEM.md
       const loaded = loadSystemPromptFromFileSync({
         workingDirectory: this.workingDirectory,
-        userHome: config.userHome,
       });
       if (loaded) {
         this.customSystemPrompt = loaded.content;
       } else {
-        // No explicit prompt and no file found - will use TRON_CORE_PROMPT
+        // No explicit prompt and no project SYSTEM.md - will use TRON_CORE_PROMPT
         this.customSystemPrompt = undefined;
       }
     }

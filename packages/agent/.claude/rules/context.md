@@ -22,9 +22,8 @@ Token estimation, context limits, compaction, and system prompt construction.
 
 ## Context Loading Hierarchy
 
-1. Global: `~/.tron/rules/AGENTS.md`
-2. Project: `.claude/AGENTS.md` or `.tron/AGENTS.md`
-3. Subdirectory: `subdir/AGENTS.md` files (path-scoped)
+1. Project: `.claude/AGENTS.md` or `.tron/AGENTS.md`
+2. Subdirectory: `subdir/AGENTS.md` files (path-scoped)
 
 ## Compaction Flow
 

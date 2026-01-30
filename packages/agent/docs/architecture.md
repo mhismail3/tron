@@ -176,9 +176,8 @@ User message → TronAgent.run() → LLM generates response
 
 Hierarchical loading with multi-directory support:
 
-1. Global: `~/.tron/rules/AGENTS.md`
-2. Project: `.claude/AGENTS.md` or `.tron/AGENTS.md`
-3. Subdirectory: `subdir/AGENTS.md` files
+1. Project: `.claude/AGENTS.md` or `.tron/AGENTS.md`
+2. Subdirectory: `subdir/AGENTS.md` files (path-scoped)
 
 ## Providers
 

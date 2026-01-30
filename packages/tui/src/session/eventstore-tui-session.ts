@@ -237,7 +237,6 @@ export class EventStoreTuiSession {
 
     // Initialize context loader
     this.contextLoader = new ContextLoader({
-      userHome: process.env.HOME ?? '',
       projectRoot: this.config.workingDirectory,
       contextFileNames: ['AGENTS.md', 'CLAUDE.md'],
       agentDir: '.tron',

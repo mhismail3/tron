@@ -374,7 +374,7 @@ describe('ContextManager', () => {
       // 75% of 200k = 150k tokens
       const session = simulator.generateAtUtilization(75, 200_000);
 
-      // Use empty systemPrompt to avoid loading real ~/.tron/rules/SYSTEM.md
+      // Use empty systemPrompt to avoid loading from project .tron/SYSTEM.md
       const cm = createContextManager({ model: 'claude-sonnet-4-20250514', systemPrompt: '' });
       setupWithSimulatedSession(cm, session);
 
@@ -393,7 +393,7 @@ describe('ContextManager', () => {
       // 88% of 128k = ~113k tokens (use 88% to stay safely in critical zone)
       const session = simulator.generateAtUtilization(88, 128_000);
 
-      // Use empty systemPrompt to avoid loading real ~/.tron/rules/SYSTEM.md
+      // Use empty systemPrompt to avoid loading from project .tron/SYSTEM.md
       const cm = createContextManager({ model: 'gpt-4o', systemPrompt: '' });
       setupWithSimulatedSession(cm, session);
 
@@ -411,7 +411,7 @@ describe('ContextManager', () => {
       const simulator = createContextSimulator({ targetTokens: 1000 });
       const session = simulator.generateAtUtilization(75, 200_000);
 
-      // Use empty systemPrompt to avoid loading real ~/.tron/rules/SYSTEM.md
+      // Use empty systemPrompt to avoid loading from project .tron/SYSTEM.md
       const cm = createContextManager({ model: 'claude-sonnet-4-20250514', systemPrompt: '' });
       setupWithSimulatedSession(cm, session);
 

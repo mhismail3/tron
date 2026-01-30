@@ -150,7 +150,6 @@ Context rules (AGENTS.md/CLAUDE.md) provide project-specific instructions loaded
 
 | Location | Scope |
 |----------|-------|
-| `~/.tron/rules/AGENTS.md` | Global |
 | `.claude/AGENTS.md` or `.tron/AGENTS.md` | Project |
 | `subdir/AGENTS.md` | Subdirectory (path-scoped) |
 

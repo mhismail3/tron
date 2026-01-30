@@ -9,7 +9,6 @@
  * Phase 5 of orchestrator refactoring.
  */
 import * as path from 'path';
-import * as os from 'os';
 // Direct imports to avoid circular dependencies through index.js
 import { createLogger, categorizeError, LogErrorCategory } from '../../logging/index.js';
 import { EventStore } from '../../events/event-store.js';
@@ -151,7 +150,6 @@ export class SessionManager {
     let rulesHeadEventId = result.rootEvent.id;
     try {
       const contextLoader = new ContextLoader({
-        userHome: os.homedir(),
         projectRoot: workingDir.path,
       });
       const loadedContext = await contextLoader.load(workingDir.path);
@@ -356,7 +354,6 @@ export class SessionManager {
     if (rulesTracker.hasRules()) {
       try {
         const contextLoader = new ContextLoader({
-          userHome: os.homedir(),
           projectRoot: workingDir.path,
         });
         const loadedContext = await contextLoader.load(workingDir.path);

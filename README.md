@@ -382,7 +382,6 @@ Path-scoped instructions loaded into every prompt.
 
 | Location | Scope |
 |----------|-------|
-| `~/.tron/rules/AGENTS.md` | Global |
 | `.claude/AGENTS.md` | Project |
 | `subdir/AGENTS.md` | Subdirectory (loads when working in that path) |
 

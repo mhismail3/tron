@@ -7,7 +7,8 @@
  * Provider canonical prompts (OAuth prefix, Codex instructions) are handled
  * separately by each provider and CANNOT be modified.
  *
- * Individual prompts are defined in ./system-prompts/ directory.
+ * Default prompt is loaded from ./system-prompts/core.md at module init.
+ * Users can override by creating .tron/SYSTEM.md in their project directory.
  */
 
 import * as fs from 'fs';
@@ -37,29 +38,23 @@ const MAX_SYSTEM_PROMPT_FILE_SIZE = 100 * 1024;
 export interface LoadedSystemPrompt {
   /** File content */
   content: string;
-  /** Source of the prompt (global or project) */
-  source: 'global' | 'project';
+  /** Source of the prompt */
+  source: 'project';
 }
 
 /**
- * Load system prompt from filesystem hierarchy (synchronous).
+ * Load system prompt from project directory (synchronous).
  *
- * Priority order:
- * 1. Project: .tron/SYSTEM.md in working directory
- * 2. Global: ~/.tron/rules/SYSTEM.md (or system.md)
- *
- * Returns null if no files exist or if errors occur.
+ * Looks for .tron/SYSTEM.md in the working directory.
+ * If not found, returns null and the caller should use TRON_CORE_PROMPT.
  *
  * @param options - Configuration for file loading
  * @returns Loaded prompt with source, or null if not found
  */
 export function loadSystemPromptFromFileSync(options: {
   workingDirectory: string;
-  userHome?: string;
 }): LoadedSystemPrompt | null {
-  const userHome = options.userHome ?? process.env.HOME ?? '';
-
-  // 1. Try project-level SYSTEM.md first (.tron/SYSTEM.md)
+  // Try project-level SYSTEM.md (.tron/SYSTEM.md)
   const projectPath = path.join(options.workingDirectory, '.tron', 'SYSTEM.md');
   try {
     const stats = fs.statSync(projectPath);
@@ -71,48 +66,16 @@ export function loadSystemPromptFromFileSync(options: {
         size: stats.size,
         limit: MAX_SYSTEM_PROMPT_FILE_SIZE,
       });
-    } else {
-      const content = fs.readFileSync(projectPath, 'utf-8');
-      logger.debug('Loaded system prompt from project', { path: projectPath });
-      return { content, source: 'project' };
+      return null;
     }
-  } catch (err) {
-    // File doesn't exist or is unreadable - continue to global
+
+    const content = fs.readFileSync(projectPath, 'utf-8');
+    logger.debug('Loaded system prompt from project', { path: projectPath });
+    return { content, source: 'project' };
+  } catch {
+    // File doesn't exist or is unreadable
+    return null;
   }
-
-  // 2. Try global SYSTEM.md (~/.tron/rules/SYSTEM.md or system.md)
-  if (userHome) {
-    // Try both uppercase and lowercase variants
-    const globalPaths = [
-      path.join(userHome, '.tron', 'rules', 'SYSTEM.md'),
-      path.join(userHome, '.tron', 'rules', 'system.md'),
-    ];
-
-    for (const globalPath of globalPaths) {
-      try {
-        const stats = fs.statSync(globalPath);
-
-        // Check file size limit
-        if (stats.size > MAX_SYSTEM_PROMPT_FILE_SIZE) {
-          logger.warn('Global system prompt exceeds size limit', {
-            path: globalPath,
-            size: stats.size,
-            limit: MAX_SYSTEM_PROMPT_FILE_SIZE,
-          });
-          continue;
-        }
-
-        const content = fs.readFileSync(globalPath, 'utf-8');
-        logger.debug('Loaded system prompt from global', { path: globalPath });
-        return { content, source: 'global' };
-      } catch {
-        // File doesn't exist or is unreadable, try next
-      }
-    }
-  }
-
-  // No files found
-  return null;
 }
 
 // =============================================================================

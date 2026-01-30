@@ -30,12 +30,10 @@ export const THRESHOLDS = {
 
 export interface ContextManagerConfig {
   model: string;
-  /** Custom system prompt - if not provided, loads from SYSTEM.md or uses TRON_CORE_PROMPT */
+  /** Custom system prompt - if not provided, loads from .tron/SYSTEM.md or uses TRON_CORE_PROMPT */
   systemPrompt?: string;
   /** Working directory for file operations */
   workingDirectory?: string;
-  /** User home directory for loading global SYSTEM.md (defaults to process.env.HOME) */
-  userHome?: string;
   tools?: Tool[];
   /** Rules content from AGENTS.md / CLAUDE.md hierarchy */
   rulesContent?: string;

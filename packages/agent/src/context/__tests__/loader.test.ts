@@ -3,7 +3,7 @@
  *
  * Tests for hierarchical context file loading including:
  * - Configuration options
- * - File loading at different levels (global, project, directory)
+ * - File loading at different levels (project, directory)
  * - Context merging
  * - Caching behavior
  * - Section parsing
@@ -23,17 +23,14 @@ describe('ContextLoader', () => {
   let tempDir: string;
   let projectDir: string;
   let subDir: string;
-  let globalDir: string;
 
   beforeEach(async () => {
     tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'tron-context-'));
     projectDir = path.join(tempDir, 'project');
     subDir = path.join(projectDir, 'src', 'components');
-    globalDir = path.join(tempDir, 'home');
 
     await fs.mkdir(projectDir, { recursive: true });
     await fs.mkdir(subDir, { recursive: true });
-    await fs.mkdir(path.join(globalDir, '.tron', 'rules'), { recursive: true });
   });
 
   afterEach(async () => {
@@ -43,7 +40,6 @@ describe('ContextLoader', () => {
   describe('Configuration', () => {
     it('should accept custom configuration', () => {
       const config: ContextLoaderConfig = {
-        userHome: tempDir,
         projectRoot: projectDir,
         contextFileNames: ['AGENTS.md', 'CLAUDE.md'],
         maxDepth: 5,
@@ -60,7 +56,6 @@ describe('ContextLoader', () => {
 
     it('should use default context file names', () => {
       const loader = new ContextLoader({
-        userHome: globalDir,
         projectRoot: projectDir,
       });
       expect(loader).toBeDefined();
@@ -68,7 +63,6 @@ describe('ContextLoader', () => {
 
     it('should support custom agent directory', () => {
       const loader = new ContextLoader({
-        userHome: globalDir,
         projectRoot: projectDir,
         agentDir: '.custom-agent',
       });
@@ -114,11 +108,6 @@ describe('ContextLoader', () => {
       expect(typeof loader.invalidateCache).toBe('function');
     });
 
-    it('should define loadGlobalContext method', () => {
-      const loader = new ContextLoader({});
-      expect(typeof loader.loadGlobalContext).toBe('function');
-    });
-
     it('should define loadProjectContext method', () => {
       const loader = new ContextLoader({});
       expect(typeof loader.loadProjectContext).toBe('function');
@@ -140,35 +129,6 @@ describe('ContextLoader', () => {
     });
   });
 
-  describe('Global Context Loading', () => {
-    it('should load global context file', async () => {
-      await fs.writeFile(
-        path.join(globalDir, '.tron', 'rules', 'AGENTS.md'),
-        '# Global Rules\n\nGlobal context here.'
-      );
-
-      const loader = new ContextLoader({
-        userHome: globalDir,
-        projectRoot: projectDir,
-      });
-      const context = await loader.loadGlobalContext();
-
-      expect(context).not.toBeNull();
-      expect(context?.level).toBe('global');
-      expect(context?.content).toContain('Global Rules');
-    });
-
-    it('should return null when no global context exists', async () => {
-      const loader = new ContextLoader({
-        userHome: globalDir,
-        projectRoot: projectDir,
-      });
-      const context = await loader.loadGlobalContext();
-
-      expect(context).toBeNull();
-    });
-  });
-
   describe('Project Context Loading', () => {
     it('should load project context file (AGENTS.md)', async () => {
       await fs.writeFile(
@@ -176,8 +136,7 @@ describe('ContextLoader', () => {
         '# Project Context\n\nProject-specific rules.'
       );
 
-      // Use isolated globalDir to avoid loading real ~/.tron/AGENTS.md
-      const loader = new ContextLoader({ projectRoot: projectDir, userHome: globalDir });
+      const loader = new ContextLoader({ projectRoot: projectDir });
       const context = await loader.load(projectDir);
 
       expect(context).toBeDefined();
@@ -214,7 +173,37 @@ describe('ContextLoader', () => {
       expect(projectContext?.content).toContain('AGENTS');
     });
 
-    it('should load from .agent directory first', async () => {
+    it('should load from .claude directory first', async () => {
+      await fs.mkdir(path.join(projectDir, '.claude'), { recursive: true });
+      await fs.writeFile(
+        path.join(projectDir, '.claude', 'AGENTS.md'),
+        '# Claude dir context'
+      );
+      await fs.writeFile(
+        path.join(projectDir, 'AGENTS.md'),
+        '# Root context'
+      );
+
+      const loader = new ContextLoader({ projectRoot: projectDir });
+      const projectContext = await loader.loadProjectContext();
+
+      expect(projectContext?.content).toContain('Claude dir');
+    });
+
+    it('should load from .tron directory', async () => {
+      await fs.mkdir(path.join(projectDir, '.tron'), { recursive: true });
+      await fs.writeFile(
+        path.join(projectDir, '.tron', 'AGENTS.md'),
+        '# Tron dir context'
+      );
+
+      const loader = new ContextLoader({ projectRoot: projectDir });
+      const projectContext = await loader.loadProjectContext();
+
+      expect(projectContext?.content).toContain('Tron dir');
+    });
+
+    it('should load from .agent directory', async () => {
       await fs.mkdir(path.join(projectDir, '.agent'), { recursive: true });
       await fs.writeFile(
         path.join(projectDir, '.agent', 'AGENTS.md'),
@@ -257,10 +246,6 @@ describe('ContextLoader', () => {
     it('should load context files from multiple levels', async () => {
       // Create contexts at different levels
       await fs.writeFile(
-        path.join(globalDir, '.tron', 'rules', 'AGENTS.md'),
-        '# Global\n\nGlobal rules.'
-      );
-      await fs.writeFile(
         path.join(projectDir, 'AGENTS.md'),
         '# Project\n\nProject rules.'
       );
@@ -270,7 +255,6 @@ describe('ContextLoader', () => {
       );
 
       const loader = new ContextLoader({
-        userHome: globalDir,
         projectRoot: projectDir,
       });
       const context = await loader.load(subDir);
@@ -279,34 +263,33 @@ describe('ContextLoader', () => {
       expect(context.files.length).toBeGreaterThanOrEqual(1);
     });
 
-    it('should merge contexts in correct order', async () => {
-      await fs.writeFile(
-        path.join(globalDir, '.tron', 'rules', 'AGENTS.md'),
-        '# Global\n\n1. Global rule'
-      );
+    it('should merge contexts in correct order (project before directory)', async () => {
+      await fs.mkdir(path.join(projectDir, 'src'), { recursive: true });
       await fs.writeFile(
         path.join(projectDir, 'AGENTS.md'),
-        '# Project\n\n2. Project rule'
+        '# Project\n\n1. Project rule'
+      );
+      await fs.writeFile(
+        path.join(projectDir, 'src', 'AGENTS.md'),
+        '# Src\n\n2. Src rule'
       );
 
       const loader = new ContextLoader({
-        userHome: globalDir,
         projectRoot: projectDir,
       });
-      const context = await loader.load(projectDir);
+      const context = await loader.load(path.join(projectDir, 'src'));
 
-      // Global should come before project
-      const globalIndex = context.merged.indexOf('Global rule');
+      // Project should come before directory
       const projectIndex = context.merged.indexOf('Project rule');
+      const srcIndex = context.merged.indexOf('Src rule');
 
-      expect(globalIndex).toBeLessThan(projectIndex);
+      expect(projectIndex).toBeLessThan(srcIndex);
     });
   });
 
   describe('Missing Files', () => {
     it('should handle missing project context gracefully', async () => {
-      // Use isolated globalDir (which has no .tron/AGENTS.md) to avoid loading real global context
-      const loader = new ContextLoader({ projectRoot: projectDir, userHome: globalDir });
+      const loader = new ContextLoader({ projectRoot: projectDir });
       const context = await loader.load(projectDir);
 
       expect(context.merged).toBe('');
@@ -314,10 +297,8 @@ describe('ContextLoader', () => {
     });
 
     it('should handle inaccessible directories', async () => {
-      // Use isolated globalDir to avoid loading real ~/.tron/AGENTS.md
       const loader = new ContextLoader({
         projectRoot: path.join(tempDir, 'nonexistent'),
-        userHome: globalDir,
       });
       const context = await loader.load(path.join(tempDir, 'nonexistent'));
 
@@ -356,6 +337,19 @@ describe('ContextLoader', () => {
       expect(context.files[0]).toHaveProperty('level');
       expect(context.files[0]).toHaveProperty('depth');
       expect(context.files[0]).toHaveProperty('modifiedAt');
+    });
+
+    it('should only have project or directory levels', async () => {
+      await fs.writeFile(
+        path.join(projectDir, 'AGENTS.md'),
+        '# Test'
+      );
+
+      const loader = new ContextLoader({ projectRoot: projectDir });
+      const context = await loader.load(projectDir);
+
+      // Verify level is one of the valid values
+      expect(['project', 'directory']).toContain(context.files[0].level);
     });
   });
 
@@ -461,7 +455,6 @@ describe('ContextLoader', () => {
 
       const loader = new ContextLoader({
         projectRoot: projectDir,
-        userHome: globalDir,
       });
       const files = await loader.findAllContextFiles();
 

@@ -21,7 +21,7 @@
     "dist"
   ],
   "scripts": {
-    "build": "tsc -p tsconfig.build.json && mkdir -p dist/providers && cp -r src/providers/prompts dist/providers/",
+    "build": "tsc -p tsconfig.build.json && mkdir -p dist/providers && cp -r src/providers/prompts dist/providers/ && mkdir -p dist/context/system-prompts && cp src/context/system-prompts/*.md dist/context/system-prompts/",
     "dev": "tsx src/server.ts",
     "dev:watch": "tsc -p tsconfig.build.json --watch",
     "start": "node dist/server.js",
