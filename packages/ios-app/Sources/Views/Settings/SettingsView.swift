@@ -32,7 +32,7 @@ struct SettingsView: View {
     @State private var isArchivingAll = false
 
     // Quick Session settings
-    @AppStorage("quickSessionWorkspace") private var quickSessionWorkspace = "/Users/moose/Downloads"
+    @AppStorage("quickSessionWorkspace") private var quickSessionWorkspace = "/Users/moose/Workspace"
     @State private var showQuickSessionWorkspaceSelector = false
     @State private var availableModels: [ModelInfo] = []
     @State private var isLoadingModels = false
