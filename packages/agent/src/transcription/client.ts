@@ -40,7 +40,7 @@ const TRANSCRIPTION_MODELS: TranscriptionModelProfile[] = [
     modelName: 'mlx-community/parakeet-tdt-0.6b-v3',
     device: 'mlx',
     computeType: 'mlx',
-    endpoint: '/transcribe/faster',
+    endpoint: '/transcribe',
   },
 ];
 
