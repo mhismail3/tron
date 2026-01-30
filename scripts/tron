@@ -345,6 +345,76 @@ run_tests() {
     fi
 }
 
+#-----------------------------------------------------------------------------
+# setup_transcription_sidecar - Set up Python venv for transcription service
+#
+# Creates a Python virtual environment and installs parakeet-mlx dependencies.
+# Only runs if the venv doesn't exist or is missing dependencies.
+#
+# Usage: setup_transcription_sidecar
+# Returns: 0 on success, 1 on failure
+#-----------------------------------------------------------------------------
+setup_transcription_sidecar() {
+    local sidecar_dir="$PROJECT_DIR/services/transcribe"
+    local venv_dir="$sidecar_dir/.venv"
+    local venv_python="$venv_dir/bin/python"
+    local requirements="$sidecar_dir/requirements.txt"
+
+    # Skip if requirements.txt doesn't exist
+    if [ ! -f "$requirements" ]; then
+        print_warning "Transcription requirements.txt not found, skipping sidecar setup"
+        return 0
+    fi
+
+    # Check if venv exists and has parakeet-mlx installed
+    if [ -f "$venv_python" ]; then
+        if "$venv_python" -c "import parakeet_mlx" 2>/dev/null; then
+            print_success "Transcription sidecar already configured"
+            return 0
+        fi
+        print_status "Transcription venv exists but missing dependencies, reinstalling..."
+    else
+        print_status "Setting up transcription sidecar..."
+    fi
+
+    # Find a suitable Python interpreter (3.10+ required for MLX)
+    local python_bin=""
+    for candidate in python3.12 python3.11 python3.10 python3; do
+        if command -v "$candidate" &> /dev/null; then
+            python_bin="$candidate"
+            break
+        fi
+    done
+
+    if [ -z "$python_bin" ]; then
+        print_warning "Python 3.10+ not found, skipping transcription sidecar setup"
+        print_warning "Install Python 3.10+ to enable voice transcription"
+        return 0
+    fi
+
+    # Create venv if it doesn't exist
+    if [ ! -d "$venv_dir" ]; then
+        print_status "Creating Python venv with $python_bin..."
+        "$python_bin" -m venv "$venv_dir"
+        if [ $? -ne 0 ]; then
+            print_error "Failed to create Python venv"
+            return 1
+        fi
+    fi
+
+    # Install dependencies
+    print_status "Installing transcription dependencies (this may take a moment)..."
+    "$venv_python" -m pip install --upgrade pip -q
+    "$venv_python" -m pip install -r "$requirements" -q
+    if [ $? -ne 0 ]; then
+        print_error "Failed to install transcription dependencies"
+        return 1
+    fi
+
+    print_success "Transcription sidecar configured"
+    return 0
+}
+
 #=============================================================================
 # SECTION 4: SERVICE FUNCTIONS
 # launchd management, health checks, port detection
@@ -832,11 +902,15 @@ cmd_dev() {
         fi
     fi
 
+    # Ensure transcription sidecar is set up
+    setup_transcription_sidecar
+
     # Set beta environment
     export TRON_WS_PORT=$BETA_WS_PORT
     export TRON_HEALTH_PORT=$BETA_HEALTH_PORT
     export TRON_BUILD_TIER=beta
     export TRON_EVENT_STORE_DB="$TRON_HOME/db/beta.db"
+    export TRON_REPO_ROOT="$PROJECT_DIR"
     export LOG_LEVEL="${LOG_LEVEL:-trace}"
     export NODE_ENV=development
 
@@ -1272,6 +1346,9 @@ EOF
 
     # Build project
     build_workspace
+
+    # Set up transcription sidecar
+    setup_transcription_sidecar
 
     # Run tests if dev mode
     if [ "$dev_mode" = true ]; then

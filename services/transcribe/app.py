@@ -76,7 +76,10 @@ def _warmup_model() -> None:
 
     Thread-safe: only one warmup will run even if called multiple times.
     """
-    from .engine import _load_model, _CONFIG
+    from .engine import _load_model
+    from .config import load_config
+
+    config = load_config()
 
     # Check if warmup already started (thread-safe)
     with _warmup_lock:
@@ -87,19 +90,19 @@ def _warmup_model() -> None:
         _warmup_state["started_at"] = datetime.now(timezone.utc).isoformat()
 
     print(
-        f"[warmup] Starting model warmup: backend={_CONFIG.backend}, "
-        f"model={_CONFIG.model_name}, device={_CONFIG.device}",
+        f"[warmup] Starting model warmup: backend={config.backend}, "
+        f"model={config.model_name}, device={config.device}",
         flush=True,
     )
 
     try:
         start = time.monotonic()
         _load_model(
-            _CONFIG.backend,
-            _CONFIG.model_name,
-            _CONFIG.device,
-            _CONFIG.compute_type,
-            _CONFIG,
+            config.backend,
+            config.model_name,
+            config.device,
+            config.compute_type,
+            config,
         )
         elapsed_ms = int((time.monotonic() - start) * 1000)
 
@@ -192,22 +195,15 @@ async def warmup(request: Optional[WarmupRequest] = None) -> dict[str, Any]:
     The _load_model function uses double-checked locking internally,
     so concurrent calls are safe and won't load the model twice.
     """
-    from .engine import _load_model, _MODEL_CACHE, _CONFIG
+    from .engine import _load_model, _MODEL_CACHE
+    from .config import load_config
 
-    effective_backend = (request.backend if request else None) or _CONFIG.backend
+    config = load_config()
+    effective_backend = (request.backend if request else None) or config.backend
 
-    # Resolve model parameters for the backend
-    from .engine import _DEFAULT_BACKEND_MODELS, _DEFAULT_BACKEND_DEVICE, _DEFAULT_BACKEND_COMPUTE
-
-    model_name = _DEFAULT_BACKEND_MODELS.get(effective_backend, _CONFIG.model_name)
-    device = _DEFAULT_BACKEND_DEVICE.get(effective_backend, _CONFIG.device)
-    compute_type = _DEFAULT_BACKEND_COMPUTE.get(effective_backend, _CONFIG.compute_type)
-
-    # Use config defaults if backend matches
-    if effective_backend == _CONFIG.backend:
-        model_name = _CONFIG.model_name
-        device = _CONFIG.device
-        compute_type = _CONFIG.compute_type
+    model_name = config.model_name
+    device = config.device
+    compute_type = config.compute_type
 
     key = (effective_backend, model_name, device, compute_type)
 
@@ -216,10 +212,8 @@ async def warmup(request: Optional[WarmupRequest] = None) -> dict[str, Any]:
         return {"status": "ok", "already_loaded": True, "backend": effective_backend}
 
     # Load model (thread-safe via _MODEL_CACHE_LOCK in engine.py)
-    # If background warmup is loading the same model, this will block
-    # until that completes rather than loading twice
     await run_in_threadpool(
-        _load_model, effective_backend, model_name, device, compute_type, _CONFIG
+        _load_model, effective_backend, model_name, device, compute_type, config
     )
 
     return {"status": "ok", "already_loaded": False, "backend": effective_backend}
@@ -228,15 +222,18 @@ async def warmup(request: Optional[WarmupRequest] = None) -> dict[str, Any]:
 @app.get("/status")
 async def status() -> dict[str, Any]:
     """Detailed status endpoint for debugging."""
-    from .engine import _MODEL_CACHE, _CONFIG
+    from .engine import _MODEL_CACHE
+    from .config import load_config
+
+    config = load_config()
 
     return {
         "warmup": get_warmup_state(),
         "config": {
-            "backend": _CONFIG.backend,
-            "model": _CONFIG.model_name,
-            "device": _CONFIG.device,
-            "compute_type": _CONFIG.compute_type,
+            "backend": config.backend,
+            "model": config.model_name,
+            "device": config.device,
+            "compute_type": config.compute_type,
         },
         "models_loaded": [
             {"backend": k[0], "model": k[1], "device": k[2], "compute_type": k[3]}
@@ -271,52 +268,6 @@ async def transcribe(
         model_name=model_name,
         device=device,
         compute_type=compute_type,
-        language=language,
-        task=task,
-        prompt=prompt,
-        cleanup_mode=cleanup_mode,
-        return_segments=return_segments,
-    )
-
-
-@app.post("/transcribe/faster")
-async def transcribe_faster(
-    audio: UploadFile = File(...),
-    language: Optional[str] = Form(default=None),
-    task: Optional[str] = Form(default=None),
-    prompt: Optional[str] = Form(default=None),
-    cleanup_mode: Optional[str] = Form(default=None),
-    return_segments: bool = Form(default=False),
-) -> JSONResponse:
-    return await _handle_transcribe(
-        audio=audio,
-        backend="parakeet-mlx",
-        model_name="mlx-community/parakeet-tdt-0.6b-v3",
-        device="mlx",
-        compute_type="mlx",
-        language=language,
-        task=task,
-        prompt=prompt,
-        cleanup_mode=cleanup_mode,
-        return_segments=return_segments,
-    )
-
-
-@app.post("/transcribe/better")
-async def transcribe_better(
-    audio: UploadFile = File(...),
-    language: Optional[str] = Form(default=None),
-    task: Optional[str] = Form(default=None),
-    prompt: Optional[str] = Form(default=None),
-    cleanup_mode: Optional[str] = Form(default=None),
-    return_segments: bool = Form(default=False),
-) -> JSONResponse:
-    return await _handle_transcribe(
-        audio=audio,
-        backend="faster-whisper",
-        model_name="large-v3",
-        device="cpu",
-        compute_type="int8",
         language=language,
         task=task,
         prompt=prompt,

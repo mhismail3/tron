@@ -137,7 +137,7 @@ class TestWarmupEndpoint:
         """Warmup should accept backend parameter."""
         with patch("services.transcribe.engine._load_model") as mock_load:
             mock_load.return_value = MagicMock()
-            response = client.post("/warmup", json={"backend": "faster-whisper"})
+            response = client.post("/warmup", json={"backend": "parakeet-mlx"})
             assert response.status_code == 200
 
 
