@@ -34,6 +34,7 @@ const HEALTH_RETRY_DELAY_MS = 300;
 // Readiness constants (model warmup can take 30-120+ seconds)
 const READINESS_TIMEOUT_MS = 180000; // 3 minutes for model loading
 const READINESS_RETRY_DELAY_MS = 500;
+const READINESS_INITIAL_DELAY_MS = 30000; // Wait 30s before starting readiness checks
 
 // Watchdog constants
 const WATCHDOG_INTERVAL_MS = 30000; // Check every 30s
@@ -161,10 +162,19 @@ async function waitForHealthy(baseUrl: string, timeoutMs: number): Promise<boole
 /**
  * Wait for sidecar to become ready (model loaded).
  * This may take 30-120+ seconds on first startup while model downloads/loads.
+ * Includes an initial delay to reduce log noise during expected warmup period.
  */
 export async function waitForReady(baseUrl: string, timeoutMs: number): Promise<boolean> {
+  // Wait before starting readiness checks to reduce log noise during warmup
+  logger.debug('Waiting for model warmup before starting readiness checks', {
+    initialDelayMs: READINESS_INITIAL_DELAY_MS,
+  });
+  await delay(READINESS_INITIAL_DELAY_MS);
+
   const start = Date.now();
-  while (Date.now() - start < timeoutMs) {
+  const adjustedTimeout = timeoutMs - READINESS_INITIAL_DELAY_MS;
+
+  while (Date.now() - start < adjustedTimeout) {
     if (await isSidecarReady(baseUrl)) {
       logger.info('Transcription model warmup complete');
       return true;
