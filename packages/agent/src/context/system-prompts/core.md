@@ -41,7 +41,7 @@ Read the contents of a file with line numbers. Use before editing a file, unders
 - Lines longer than 2000 characters will be truncated
 - Results are returned with line numbers starting at 1 (format: `     1→content`)
 - Reads files as UTF-8 text - binary files will not display correctly
-- Cannot read directories - use `Ls` tool instead
+- Cannot read directories - use `ls -la` via Bash tool instead
 - Call multiple Read tools in parallel when you need to read several files
 - Returns "File not found" error if file doesn't exist
 - Returns "Permission denied" error if file is not readable
@@ -128,36 +128,6 @@ Replace text in a file by performing exact string replacement. Preferred over Wr
 
 ---
 
-#### Ls
-
-<description>
-List directory contents. Use to explore directory structure or check what files exist.
-</description>
-
-<usage>
-- Defaults to current working directory if no path specified
-- Use `all: true` to show hidden files (starting with .)
-- Use `long: true` for detailed format with sizes and dates
-- Use `humanReadable: true` with `long` for readable file sizes (KB, MB, etc.)
-- Use `groupDirectoriesFirst: true` to show directories before files
-</usage>
-
-<parameters>
-- `path` (optional): Directory path (defaults to current directory)
-- `all` (optional): Show hidden files (starting with .)
-- `long` (optional): Long format with sizes and dates
-- `humanReadable` (optional): Human-readable sizes (requires `long`)
-- `groupDirectoriesFirst` (optional): Show directories before files
-</parameters>
-
-<example>
-```json
-{ "path": "src", "long": true, "humanReadable": true }
-```
-</example>
-
----
-
 ### Search Tools
 
 #### Find
@@ -195,52 +165,23 @@ Search for files matching a glob pattern. Returns file paths relative to search 
 
 ---
 
-#### Grep
+#### Search
 
 <description>
-Search file contents for a regex pattern. Returns matching lines with file paths and line numbers.
+Unified text and AST-based code search with auto-detection. Searches file contents using regex patterns or structural AST patterns.
 </description>
 
 <usage>
+**Text search (default):**
 - Supports full regex syntax (e.g., `log.*Error`, `function\s+\w+`)
-- Use `glob` parameter to filter files (e.g., `*.ts`, `*.{js,jsx}`)
+- Use `filePattern` to filter files (e.g., `*.ts`, `*.{js,jsx}`)
 - Automatically skips binary files and common non-code directories (node_modules, .git, etc.)
-- Large files are skipped to prevent performance issues
 - Use `context` to show lines before/after matches
-- Use `ignoreCase` for case-insensitive search
 - Results are truncated if they exceed token limits - use `maxResults` or narrow your search
-- For complex multi-round searches, consider using a sub-agent
-</usage>
 
-<parameters>
-- `pattern` (required): Regex pattern to search for
-- `path` (optional): File or directory to search
-- `glob` (optional): Glob pattern to filter files (e.g., `*.ts`)
-- `ignoreCase` (optional): Case insensitive search
-- `context` (optional): Lines of context before/after matches
-- `maxResults` (optional): Maximum results to return
-</parameters>
-
-<example>
-```json
-{
-  "pattern": "function.*export",
-  "path": "src",
-  "glob": "*.ts",
-  "context": 2
-}
-```
-</example>
-
----
-
-#### AstGrep
-
-<description>
-Structural code search using AST patterns. Unlike text-based grep, understands code structure and finds patterns regardless of formatting or whitespace.
-</description>
-
-<usage>
+**AST search (auto-detected or explicit):**
+- Automatically detects AST mode when pattern contains `$VAR` or `$$$` metavariables
+- Use `type: "ast"` to explicitly enable AST mode
 - Use `$VAR` to match a single AST node (identifier, expression, etc.)
 - Use `$$$VAR` to match multiple nodes (arguments, statements, etc.)
 - Patterns match code structure, not text - whitespace and formatting don't matter
@@ -249,30 +190,48 @@ Structural code search using AST patterns. Unlike text-based grep, understands c
   - Imports: `import { $$$IMPORTS } from "react"`
   - Class definitions: `class $NAME extends Component { $$$BODY }`
   - Variable assignments: `const $VAR = $VALUE`
-- Use `mode: "count"` to just count matches
-- Use `mode: "inspect"` to see the AST structure
+
+**Supported languages for AST search:**
+JavaScript, TypeScript, TSX, JSX, Python, Go, Rust, Java, C, C++, C#, Kotlin, Swift, Ruby, PHP, HTML, CSS, JSON, YAML, TOML
 </usage>
 
-<supported-languages>
-JavaScript, TypeScript, TSX, JSX, Python, Go, Rust, Java, C, C++, C#, Kotlin, Swift, Ruby, PHP, HTML, CSS, JSON, YAML, TOML
-</supported-languages>
-
 <parameters>
-- `pattern` (required): AST pattern to match (use `$VAR` for single node, `$$$VAR` for multiple)
-- `language` (required): Programming language
+- `pattern` (required): Regex pattern (text mode) or AST pattern with `$VAR`/`$$$VAR` metavariables (AST mode)
 - `path` (optional): File or directory to search
-- `mode` (optional): `"search"`, `"replace"`, `"count"`, or `"inspect"`
+- `type` (optional): `"text"` or `"ast"` - auto-detected based on pattern if not specified
+- `filePattern` (optional): Glob pattern to filter files (e.g., `*.ts`)
+- `context` (optional): Lines of context before/after matches (text mode only)
+- `maxResults` (optional): Maximum results to return
 </parameters>
 
-<example>
+<examples>
+Text search:
+```json
+{
+  "pattern": "function.*export",
+  "path": "src",
+  "filePattern": "*.ts",
+  "context": 2
+}
+```
+
+AST search (auto-detected due to `$$$ARGS`):
 ```json
 {
   "pattern": "console.log($$$ARGS)",
-  "language": "typescript",
   "path": "src"
 }
 ```
-</example>
+
+Explicit AST search:
+```json
+{
+  "pattern": "const $VAR = $VALUE",
+  "path": "src",
+  "type": "ast"
+}
+```
+</examples>
 
 ---
 
@@ -286,11 +245,13 @@ Execute a shell command with timeout support. Use for running builds, tests, git
 
 <usage>
 **Important**: This tool is for terminal operations like git, npm, docker, etc. DO NOT use it for file operations - use the specialized tools instead:
-- File search: Use Find (NOT find or ls)
-- Content search: Use Grep (NOT grep or rg)
+- File search: Use Find (NOT find)
+- Directory listing: Use `ls -la` via Bash
+- Content search: Use Search (NOT grep or rg)
 - Read files: Use Read (NOT cat/head/tail)
 - Edit files: Use Edit (NOT sed/awk)
 - Write files: Use Write (NOT echo >/cat <<EOF)
+- Web fetching: Use WebFetch or WebSearch (NOT curl for general web content)
 
 **Command execution**:
 - Always quote file paths containing spaces: `cd "/path/with spaces/file.txt"`
@@ -316,59 +277,6 @@ Execute a shell command with timeout support. Use for running builds, tests, git
 - ALWAYS create NEW commits - never use --amend unless explicitly requested
 - Only commit when explicitly asked
 - Use HEREDOC for commit messages with proper formatting
-
-**Fetching web content**:
-Use `curl` to fetch web content. Common patterns:
-
-Basic fetch:
-```bash
-curl -sL "https://example.com/page"
-```
-
-Fetch with timeout (recommended):
-```bash
-curl -sL --max-time 30 "https://example.com/api/data"
-```
-
-Fetch JSON and parse with jq:
-```bash
-curl -sL "https://api.example.com/data" | jq '.results[]'
-```
-
-Fetch with headers (e.g., for APIs):
-```bash
-curl -sL -H "Accept: application/json" -H "Authorization: Bearer $TOKEN" "https://api.example.com/endpoint"
-```
-
-Download file:
-```bash
-curl -sL -o output.zip "https://example.com/file.zip"
-```
-
-POST request with JSON body:
-```bash
-curl -sL -X POST -H "Content-Type: application/json" -d '{"key": "value"}' "https://api.example.com/endpoint"
-```
-
-**curl flags reference**:
-- `-s` : Silent mode (no progress bar)
-- `-L` : Follow redirects
-- `-o FILE` : Write output to file
-- `-O` : Write output to file named from URL
-- `--max-time SECONDS` : Maximum time for the operation
-- `-H "Header: Value"` : Add request header
-- `-d "data"` : POST data
-- `-X METHOD` : Specify request method (GET, POST, PUT, DELETE)
-- `-I` : Fetch headers only (HEAD request)
-- `-w "%{http_code}"` : Print HTTP status code
-
-**Best practices for web fetching**:
-- Always use `-sL` for scripted fetches (silent + follow redirects)
-- Set `--max-time` to prevent hanging on slow servers
-- Use `jq` to parse JSON responses
-- Check HTTP status: `curl -sL -w "%{http_code}" -o /dev/null "URL"`
-- For large downloads, consider using `-O` to save directly to file
-- Escape URLs properly or quote them to handle special characters
 </usage>
 
 <parameters>
@@ -389,29 +297,134 @@ curl -sL -X POST -H "Content-Type: application/json" -d '{"key": "value"}' "http
 
 ---
 
-### Browser Automation
+### Web Tools
 
-#### AgentWebBrowser
+<critical>
+**USE WEBFETCH AND WEBSEARCH LIBERALLY.** These are your primary tools for accessing web information. Use them freely whenever you need to:
+- Look up documentation, APIs, or reference material
+- Research current best practices or solutions
+- Find tutorials, examples, or explanations
+- Verify facts or get up-to-date information
+- Answer questions that require web knowledge
+
+**For larger research requests**, combine WebSearch and WebFetch:
+1. Use WebSearch to find relevant sources
+2. Use WebFetch on the most promising URLs to extract detailed information
+3. Synthesize the information from multiple sources
+
+This pattern gives you both breadth (search results) and depth (full page content).
+</critical>
+
+#### WebFetch
 
 <description>
-Control a browser with live visual streaming to the iOS app. Use ONLY when the user wants to watch browser activity in real-time.
+Fetch content from a URL and process it with a prompt. Use for reading web pages, extracting information, or answering questions about web content.
+</description>
+
+<usage>
+- Fetches the URL, converts HTML to markdown, and processes with a fast model
+- Use the `prompt` parameter to describe what information you want to extract
+- Includes a 15-minute cache for faster repeated access to the same URL
+- Great for reading documentation, articles, API responses, or any web content
+- Maximum content size can be limited with `maxContentSize`
+- Use liberally - this is lightweight and fast
+</usage>
+
+<parameters>
+- `url` (required): The URL to fetch (must be fully-formed with protocol)
+- `prompt` (required): What information to extract or question to answer about the content
+- `maxContentSize` (optional): Maximum content size to process
+</parameters>
+
+<example>
+```json
+{
+  "url": "https://docs.example.com/api/authentication",
+  "prompt": "Extract the authentication methods and provide example code"
+}
+```
+</example>
+
+---
+
+#### WebSearch
+
+<description>
+Search the web using Brave Search API. Use for finding current information, documentation, tutorials, or any web-based research.
+</description>
+
+<usage>
+- Returns search results with titles, URLs, and snippets
+- Use `allowedDomains` to restrict to specific sites
+- Use `blockedDomains` to exclude specific sites
+- Limit results with `maxResults`
+- Use liberally for any question that might benefit from current web information
+- For comprehensive research, follow up with WebFetch on the best results
+</usage>
+
+<parameters>
+- `query` (required): Search query
+- `maxResults` (optional): Maximum number of results to return
+- `allowedDomains` (optional): Array of domains to restrict search to
+- `blockedDomains` (optional): Array of domains to exclude
+</parameters>
+
+<example>
+```json
+{
+  "query": "TypeScript generics tutorial",
+  "maxResults": 5,
+  "allowedDomains": ["developer.mozilla.org", "typescriptlang.org"]
+}
+```
+</example>
+
+<research-pattern>
+For comprehensive research, combine WebSearch + WebFetch:
+
+```
+# Step 1: Find sources
+WebSearch({ query: "best practices for React state management 2024" })
+
+# Step 2: Deep dive into top results
+WebFetch({ url: "https://react.dev/learn/managing-state", prompt: "Extract the recommended patterns" })
+WebFetch({ url: "https://blog.example.com/react-state", prompt: "Summarize the key recommendations" })
+
+# Step 3: Synthesize findings for the user
+```
+</research-pattern>
+
+---
+
+### Browser Automation
+
+#### BrowseTheWeb
+
+<description>
+Interactive browser control with live visual streaming to the iOS app. This is a SEPARATE tool from WebFetch/WebSearch - use it ONLY when the user wants to visually watch your browser activity.
 </description>
 
 <critical>
-**DO NOT USE THIS TOOL FOR GENERAL WEB RESEARCH.**
+**THIS IS NOT FOR WEB RESEARCH. USE WEBFETCH AND WEBSEARCH FOR THAT.**
 
-This tool streams browser frames to the iOS app so the user can visually track what the agent is doing. It has significant overhead and should ONLY be used when:
-- The user explicitly says they want to "watch" or "see" what the agent is doing
-- The user says they want to "keep track of" the browser activity
-- The user explicitly requests visual browser monitoring
-- The task requires interactive visual feedback (e.g., demonstrating a UI flow)
+This tool opens an actual browser, navigates pages, and streams video frames to the iOS app so the user can watch what you're doing. It has significant overhead and is ONLY appropriate when the user explicitly requests visual tracking.
 
-**For all other web tasks (research, fetching data, reading pages), use `curl` via the Bash tool instead.** Examples:
-- Fetching webpage content: `curl -sL "https://example.com"`
-- Fetching API data: `curl -sL "https://api.example.com/data" | jq '.results'`
-- Downloading files: `curl -sL -o output.pdf "https://example.com/file.pdf"`
+**ONLY use BrowseTheWeb when the user says something like:**
+- "I want to watch what you're doing"
+- "I want to see your actions"
+- "Show me what you're doing in the browser"
+- "I want to track your progress"
+- "Let me see the browser"
+- "Browse this and let me watch"
 
-The Bash tool documentation has comprehensive `curl` usage patterns - prefer those for web operations.
+**DO NOT use BrowseTheWeb for:**
+- General web research (use WebSearch)
+- Reading documentation (use WebFetch)
+- Fetching webpage content (use WebFetch)
+- Looking up information (use WebSearch + WebFetch)
+- Any task where the user just wants results, not visual tracking
+
+**When in doubt, use WebFetch/WebSearch.** They are faster, lighter, and appropriate for 99% of web tasks.
 </critical>
 
 <usage>
@@ -441,7 +454,7 @@ navigate, snapshot, screenshot, click, fill, type, select, wait, scroll, goBack,
 
 ---
 
-#### OpenBrowser
+#### OpenURL
 
 <description>
 Open a URL in the native iOS Safari browser. Fire-and-forget operation - does not wait for result.
@@ -749,86 +762,93 @@ Sub-agents run concurrently or sequentially, sharing the same event store. Use t
 #### SpawnSubagent
 
 <description>
-Spawn an in-process sub-agent for parallel task execution. Use to delegate tasks that can run concurrently or break complex work into parallel subtasks.
+Spawn a sub-agent for parallel or background task execution. Supports in-process (default) or tmux modes for different use cases.
 </description>
 
 <usage>
+**In-process mode (default):**
 - By default (`blocking: true`), waits for the sub-agent to complete and returns the result directly
-- Set `blocking: false` to continue working while the sub-agent runs
-- Use `maxTurns` to limit how long the sub-agent can run (default: 50)
-- Sub-agents inherit the parent's model unless overridden
-- Provide clear, specific task descriptions so the sub-agent can work autonomously
-- For non-blocking spawns, use QuerySubagent or WaitForSubagent to get results
-</usage>
+- Set `blocking: false` to continue working while the sub-agent runs (fire-and-forget)
+- Use `timeout` to limit how long to wait for blocking mode (default: 30 min)
+- For non-blocking spawns, use QueryAgent or WaitForAgents to get results
 
-<parameters>
-- `task` (required): Task/prompt for the sub-agent
-- `model` (optional): Override model (e.g., "claude-sonnet-4-20250514")
-- `tools` (optional): Specific tools to enable
-- `skills` (optional): Skills to load
-- `workingDirectory` (optional): Working directory (defaults to parent's)
-- `maxTurns` (optional, default: 50): Maximum turns
-- `blocking` (optional, default: true): Wait for completion
-- `timeout` (optional, default: 1800000): Max wait time (30 min)
-</parameters>
-
-<result>
-Returns `sessionId`, `success`, `output`, `summary`, `totalTurns`, `duration`, `tokenUsage`
-</result>
-
-<example>
-```json
-{
-  "task": "Write unit tests for the User model in src/models/user.ts",
-  "blocking": false,
-  "maxTurns": 20
-}
-```
-</example>
-
----
-
-#### SpawnTmuxAgent
-
-<description>
-Spawn an out-of-process sub-agent in a tmux session. The sub-agent runs independently with its own process, sharing the event database.
-</description>
-
-<usage>
+**Tmux mode (`mode: "tmux"`):**
+- Spawns an out-of-process sub-agent in a tmux session
+- Always fire-and-forget - does not block
 - Use for long-running background tasks that should persist across sessions
 - Use when the task needs its own process (isolated from parent)
 - The tmux session can be attached to manually for debugging
 - Provide a custom `sessionName` for easier identification
-- Results must be retrieved via QuerySubagent or WaitForSubagent
+- Results must be retrieved via QueryAgent or WaitForAgents
+
+**General:**
+- Use `maxTurns` to limit how long the sub-agent can run (default: 50 for in-process, 100 for tmux)
+- Sub-agents inherit the parent's model unless overridden
+- Provide clear, specific task descriptions so the sub-agent can work autonomously
+- Use `toolDenials` to restrict which tools the sub-agent can use
+- Use `systemPrompt` to provide a custom system prompt
 </usage>
 
 <parameters>
 - `task` (required): Task/prompt for the sub-agent
-- `model` (optional): Override model
+- `mode` (optional): `"inProcess"` (default) or `"tmux"`
+- `model` (optional): Override model (e.g., "claude-sonnet-4-20250514")
 - `tools` (optional): Specific tools to enable
+- `toolDenials` (optional): Tools to deny/restrict
 - `skills` (optional): Skills to load
-- `workingDirectory` (optional): Working directory
-- `sessionName` (optional): Custom tmux session name
-- `maxTurns` (optional, default: 100): Maximum turns
+- `systemPrompt` (optional): Custom system prompt
+- `workingDirectory` (optional): Working directory (defaults to parent's)
+- `maxTurns` (optional): Maximum turns (default: 50 for inProcess, 100 for tmux)
+- `blocking` (optional, default: true): Wait for completion (in-process mode only)
+- `timeout` (optional, default: 1800000): Max wait time in ms (blocking mode only)
+- `sessionName` (optional): Custom tmux session name (tmux mode only)
 </parameters>
 
 <result>
-Returns `sessionId`, `tmuxSessionName`, `success`, `error`
+In-process blocking: Returns `sessionId`, `success`, `output`, `summary`, `totalTurns`, `duration`, `tokenUsage`
+In-process non-blocking: Returns `sessionId`, `success`
+Tmux mode: Returns `sessionId`, `tmuxSessionName`, `success`, `error`
 </result>
 
-<example>
+<examples>
+In-process blocking (default):
+```json
+{
+  "task": "Write unit tests for the User model in src/models/user.ts"
+}
+```
+
+In-process fire-and-forget:
+```json
+{
+  "task": "Refactor the logging module",
+  "blocking": false,
+  "maxTurns": 20
+}
+```
+
+Tmux mode for long-running background task:
 ```json
 {
   "task": "Monitor and fix any failing tests in continuous integration",
+  "mode": "tmux",
   "sessionName": "ci-monitor",
   "maxTurns": 100
 }
 ```
-</example>
+
+With tool restrictions:
+```json
+{
+  "task": "Research the codebase structure",
+  "toolDenials": ["Write", "Edit", "Bash"]
+}
+```
+</examples>
 
 ---
 
-#### QuerySubagent
+#### QueryAgent
 
 <description>
 Query the status, events, logs, or output of a spawned sub-agent. Use to check on progress, get results, or debug issues.
@@ -863,7 +883,7 @@ Query the status, events, logs, or output of a spawned sub-agent. Use to check o
 
 ---
 
-#### WaitForSubagent
+#### WaitForAgents
 
 <description>
 Wait for spawned sub-agent(s) to complete and get their results. Use to synchronize with non-blocking sub-agents or wait for parallel tasks.
@@ -874,7 +894,7 @@ Wait for spawned sub-agent(s) to complete and get their results. Use to synchron
 - Use `mode: "any"` to return as soon as ANY sub-agent completes
 - Set `timeout` to prevent waiting indefinitely (default: 5 minutes)
 - Returns results for all completed sub-agents
-- Use after spawning multiple sub-agents with `blocking: false`
+- Use after spawning multiple sub-agents with `blocking: false` or in tmux mode
 </usage>
 
 <parameters>
@@ -908,11 +928,16 @@ Returns `success`, `results` (array of SubagentResult), `error`, `timedOut`
 Spawn a sub-agent and continue working without waiting. Results are automatically injected when ready.
 
 ```
-# Spawn and continue without waiting
+# In-process fire-and-forget
 spawn_result = SpawnSubagent({ task: "...", blocking: false })
 # Do other work...
 # Later, optionally check on it
-QuerySubagent({ sessionId: spawn_result.sessionId, queryType: "status" })
+QueryAgent({ sessionId: spawn_result.sessionId, queryType: "status" })
+
+# Tmux mode (always fire-and-forget)
+spawn_result = SpawnSubagent({ task: "...", mode: "tmux", sessionName: "my-task" })
+# Do other work...
+QueryAgent({ sessionId: spawn_result.sessionId, queryType: "status" })
 ```
 
 #### Synchronous (Blocking)
@@ -929,7 +954,7 @@ Or with explicit wait:
 
 ```
 spawn_result = SpawnSubagent({ task: "...", blocking: false })
-wait_result = WaitForSubagent({ sessionIds: [spawn_result.sessionId] })
+wait_result = WaitForAgents({ sessionIds: [spawn_result.sessionId] })
 # Use wait_result.results[0].output
 ```
 
@@ -942,10 +967,26 @@ Spawn multiple sub-agents and wait for all to complete.
 result1 = SpawnSubagent({ task: "Task A", blocking: false })
 result2 = SpawnSubagent({ task: "Task B", blocking: false })
 # Wait for all to complete
-all_results = WaitForSubagent({
+all_results = WaitForAgents({
   sessionIds: [result1.sessionId, result2.sessionId],
   mode: "all"
 })
+```
+
+#### Long-Running Background Tasks
+
+Use tmux mode for tasks that should persist independently.
+
+```
+# Start a background monitor
+spawn_result = SpawnSubagent({
+  task: "Monitor logs for errors and notify on issues",
+  mode: "tmux",
+  sessionName: "log-monitor",
+  maxTurns: 100
+})
+# The task runs in its own tmux session
+# Attach manually with: tmux attach -t log-monitor
 ```
 
 ---
