@@ -77,11 +77,14 @@ export class TronServer {
     await this.orchestrator.initialize();
 
     // Initialize SQLite log transport for database-backed logging
+    // Persist ALL log levels (trace=10 and above) for comprehensive debugging
     const db = this.orchestrator.getEventStore().getDatabase();
     initializeLogTransport(db, {
-      minLevel: 30, // info and above
+      minLevel: 10, // trace and above - persist EVERYTHING
+      batchSize: 200, // Larger batches for trace/debug volume
+      flushIntervalMs: 2000, // Longer interval for non-critical logs
     });
-    logger.info('SQLite log transport initialized');
+    logger.info('SQLite log transport initialized (all levels)');
 
     // Create RpcContext from modular adapter factory
     const rpcContext: RpcContext = createRpcContext({

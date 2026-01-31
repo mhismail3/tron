@@ -36,6 +36,9 @@ describe('Logging Integration', () => {
         workspace_id TEXT,
         event_id TEXT,
         turn INTEGER,
+        trace_id TEXT,
+        parent_trace_id TEXT,
+        depth INTEGER DEFAULT 0,
         data TEXT,
         error_message TEXT,
         error_stack TEXT
@@ -47,6 +50,8 @@ describe('Logging Integration', () => {
       CREATE INDEX IF NOT EXISTS idx_logs_component_time ON logs(component, timestamp DESC);
       CREATE INDEX IF NOT EXISTS idx_logs_event ON logs(event_id, timestamp);
       CREATE INDEX IF NOT EXISTS idx_logs_workspace_time ON logs(workspace_id, timestamp DESC);
+      CREATE INDEX IF NOT EXISTS idx_logs_trace_id ON logs(trace_id);
+      CREATE INDEX IF NOT EXISTS idx_logs_parent_trace ON logs(parent_trace_id);
 
       CREATE VIRTUAL TABLE IF NOT EXISTS logs_fts USING fts5(
         log_id UNINDEXED,

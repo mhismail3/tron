@@ -27,8 +27,9 @@
  * handles linearization automatically.
  */
 // Direct imports to avoid circular dependencies through index.js
+import { randomUUID } from 'crypto';
 import { createLogger } from '../logging/index.js';
-import { withLoggingContext } from '../logging/log-context.js';
+import { withLoggingContext, getLoggingContext } from '../logging/log-context.js';
 import { normalizeContentBlocks } from '../utils/content-normalizer.js';
 import { PersistenceError } from '../utils/errors.js';
 import type { RunResult } from '../agent/types.js';
@@ -129,9 +130,19 @@ export class AgentRunner {
    * @throws On agent error (after persisting error event)
    */
   async run(active: ActiveSession, options: AgentRunOptions): Promise<RunResult[]> {
-    // Wrap entire agent run with logging context for session correlation
+    // Get parent trace context (exists if this is a subagent run)
+    const parentContext = getLoggingContext();
+    const parentTraceId = parentContext.traceId ?? null;
+    const depth = parentTraceId ? (parentContext.depth ?? 0) + 1 : 0;
+
+    // Wrap entire agent run with logging context for session and trace correlation
     return withLoggingContext(
-      { sessionId: options.sessionId },
+      {
+        sessionId: options.sessionId,
+        traceId: randomUUID(),
+        parentTraceId,
+        depth,
+      },
       async () => this.executeRun(active, options)
     );
   }

@@ -17,6 +17,10 @@ export interface LoggingContext {
   eventId?: string;
   turn?: number;
   traceId?: string;
+  /** Parent trace ID for sub-agent tracking */
+  parentTraceId?: string | null;
+  /** Nesting depth (0 = root, 1 = first sub-agent, etc.) */
+  depth?: number;
 }
 
 // =============================================================================

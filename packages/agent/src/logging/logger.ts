@@ -159,10 +159,11 @@ export class TronLogger {
 
   /**
    * Write to SQLite transport with full context
-   * Uses registry transport if available, falls back to global transport
+   * Uses registry transport if available, falls back to global transport.
+   * On failure, logs structured JSON to stderr as fallback.
    */
   private writeToSqlite(level: LogLevel, msg: string, data?: Record<string, unknown>, err?: Error): void {
-    // Try registry transport first, then global transport for backward compatibility
+    // Use registry transport if available (test isolation), otherwise global transport (production)
     const transport = this.registry?.getTransport() ?? globalSqliteTransport;
     if (!transport) return;
 
@@ -181,13 +182,28 @@ export class TronLogger {
         ...asyncContext,
         // Additional data fields
         ...data,
-        // Error info
-        err,
-      }).catch(() => {
-        // Ignore errors - resilience
+        // Error info (only include if defined, to not override data.err)
+        ...(err !== undefined && { err }),
+      }).catch((transportErr) => {
+        // Log to stderr as fallback with structured JSON
+        console.error('[LOG_TRANSPORT_FALLBACK]', JSON.stringify({
+          ts: new Date().toISOString(),
+          level,
+          msg,
+          component: this.context.component,
+          traceId: asyncContext.traceId,
+          transportError: transportErr instanceof Error ? transportErr.message : String(transportErr),
+        }));
       });
-    } catch {
-      // Ignore errors - logging should never fail
+    } catch (syncErr) {
+      // Log to stderr as fallback with structured JSON
+      console.error('[LOG_TRANSPORT_FALLBACK]', JSON.stringify({
+        ts: new Date().toISOString(),
+        level,
+        msg,
+        component: this.context.component,
+        syncError: syncErr instanceof Error ? syncErr.message : String(syncErr),
+      }));
     }
   }
 

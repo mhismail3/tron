@@ -8,6 +8,9 @@
 import * as fs from 'fs/promises';
 import type { GitExecutor } from './git-executor.js';
 import type { WorktreeInfo } from './types.js';
+import { createLogger, createOperationLogger } from '../../logging/index.js';
+
+const logger = createLogger('worktree:lifecycle');
 
 // =============================================================================
 // Types
@@ -60,29 +63,43 @@ export class WorktreeLifecycle {
     branchName: string,
     baseCommit: string
   ): Promise<void> {
+    const op = createOperationLogger(logger, 'worktree.create', {
+      context: { worktreePath, branchName, baseCommit },
+    });
+
+    op.trace('Starting worktree creation');
+
     // Check if branch exists
     const branchExists = await this.git.branchExists(this.repoRoot, branchName);
+    op.debug('Branch existence check', { branchExists });
 
     if (!branchExists) {
+      op.debug('Creating new branch from base commit');
       // Create branch from base commit
       const branchResult = await this.git.execGit(
         ['branch', branchName, baseCommit],
         this.repoRoot
       );
       if (branchResult.exitCode !== 0) {
+        op.error('Failed to create branch', { stderr: branchResult.stderr });
         throw new Error(`Failed to create branch: ${branchResult.stderr}`);
       }
+      op.debug('Branch created successfully');
     }
 
     // Create worktree
+    op.trace('Creating worktree');
     const result = await this.git.execGit(
       ['worktree', 'add', worktreePath, branchName],
       this.repoRoot
     );
 
     if (result.exitCode !== 0) {
+      op.error('Failed to create worktree', { stderr: result.stderr });
       throw new Error(`Failed to create worktree: ${result.stderr}`);
     }
+
+    op.complete('Worktree created successfully');
   }
 
   /**
@@ -92,12 +109,25 @@ export class WorktreeLifecycle {
     worktreePath: string,
     options: RemoveWorktreeOptions = {}
   ): Promise<void> {
+    const op = createOperationLogger(logger, 'worktree.remove', {
+      context: { worktreePath, ...options },
+    });
+
+    op.trace('Starting worktree removal');
+
     // Check if directory exists
     const dirExists = await this.git.pathExists(worktreePath);
+    op.debug('Directory existence check', { dirExists });
 
     if (!dirExists) {
       // Directory already gone - just prune stale worktree references
-      await this.git.execGit(['worktree', 'prune'], this.repoRoot).catch(() => {});
+      op.debug('Directory does not exist, pruning stale references');
+      await this.git.execGit(['worktree', 'prune'], this.repoRoot).catch((err) => {
+        op.warn('Worktree prune failed (non-critical)', {
+          error: err instanceof Error ? err.message : String(err),
+        });
+      });
+      op.complete('Worktree removal completed (directory was already gone)');
       return;
     }
 
@@ -105,6 +135,7 @@ export class WorktreeLifecycle {
     let branchName: string | undefined;
     if (options.deleteBranch) {
       branchName = await this.git.getCurrentBranch(worktreePath);
+      op.debug('Retrieved branch name for deletion', { branchName });
     }
 
     // Try git worktree remove
@@ -114,27 +145,54 @@ export class WorktreeLifecycle {
       args.push(forceFlag);
     }
 
+    op.trace('Executing git worktree remove');
     const result = await this.git.execGit(args, this.repoRoot);
 
     if (result.exitCode !== 0) {
       // Fallback: remove directory directly and prune
+      op.warn('Git worktree remove failed, using fallback', {
+        exitCode: result.exitCode,
+        stderr: result.stderr,
+      });
       await fs.rm(worktreePath, { recursive: true, force: true });
-      await this.git.execGit(['worktree', 'prune'], this.repoRoot).catch(() => {});
+      op.debug('Directory removed directly');
+
+      await this.git.execGit(['worktree', 'prune'], this.repoRoot).catch((err) => {
+        op.warn('Worktree prune failed after fallback (non-critical)', {
+          error: err instanceof Error ? err.message : String(err),
+        });
+      });
     }
 
     // Delete branch if requested
     if (options.deleteBranch && branchName && branchName !== 'HEAD') {
-      await this.git.execGit(['branch', '-D', branchName], this.repoRoot).catch(() => {});
+      op.debug('Deleting branch', { branchName });
+      await this.git.execGit(['branch', '-D', branchName], this.repoRoot).catch((err) => {
+        op.warn('Branch deletion failed (non-critical)', {
+          branchName,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      });
     }
+
+    op.complete('Worktree removal completed');
   }
 
   /**
    * List all worktrees.
    */
   async listWorktrees(): Promise<WorktreeInfo[]> {
+    const op = createOperationLogger(logger, 'worktree.list', {});
+
+    op.trace('Listing worktrees');
+
     const result = await this.git.execGit(['worktree', 'list', '--porcelain'], this.repoRoot);
 
     if (result.exitCode !== 0) {
+      op.warn('Failed to list worktrees', {
+        exitCode: result.exitCode,
+        stderr: result.stderr,
+      });
       return [];
     }
 
@@ -165,6 +223,7 @@ export class WorktreeLifecycle {
       }
     }
 
+    op.debug('Worktrees found', { count: worktrees.length });
     return worktrees;
   }
 }

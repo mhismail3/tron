@@ -13,6 +13,7 @@ import { migration as v001Initial } from './versions/v001-initial.js';
 import { migration as v002Backlog } from './versions/v002-backlog.js';
 import { migration as v003DeviceTokens } from './versions/v003-device-tokens.js';
 import { migration as v004Indexes } from './versions/v004-indexes.js';
+import { migration as v005TraceColumns } from './versions/v005-trace-columns.js';
 
 /**
  * All registered migrations in order
@@ -22,6 +23,7 @@ export const migrations: Migration[] = [
   v002Backlog,
   v003DeviceTokens,
   v004Indexes,
+  v005TraceColumns,
 ];
 
 /**

@@ -43,7 +43,7 @@ import type {
   UserPromptSubmitHookContext,
   StopHookContext,
 } from '../hooks/types.js';
-import { createLogger } from '../logging/index.js';
+import { createLogger, updateLoggingContext } from '../logging/index.js';
 import type {
   AgentConfig,
   AgentOptions,
@@ -566,6 +566,9 @@ export class TronAgent {
     this.isRunning = true;
     this.currentTurn++;
     this.abortController = new AbortController();
+
+    // Update logging context with current turn number
+    updateLoggingContext({ turn: this.currentTurn });
 
     const result = await this.turnRunner.execute({
       turn: this.currentTurn,

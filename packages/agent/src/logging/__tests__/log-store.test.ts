@@ -24,6 +24,9 @@ describe('LogStore', () => {
         workspace_id TEXT,
         event_id TEXT,
         turn INTEGER,
+        trace_id TEXT,
+        parent_trace_id TEXT,
+        depth INTEGER DEFAULT 0,
         data TEXT,
         error_message TEXT,
         error_stack TEXT
@@ -35,6 +38,8 @@ describe('LogStore', () => {
       CREATE INDEX IF NOT EXISTS idx_logs_component_time ON logs(component, timestamp DESC);
       CREATE INDEX IF NOT EXISTS idx_logs_event ON logs(event_id, timestamp);
       CREATE INDEX IF NOT EXISTS idx_logs_workspace_time ON logs(workspace_id, timestamp DESC);
+      CREATE INDEX IF NOT EXISTS idx_logs_trace_id ON logs(trace_id);
+      CREATE INDEX IF NOT EXISTS idx_logs_parent_trace ON logs(parent_trace_id);
 
       CREATE VIRTUAL TABLE IF NOT EXISTS logs_fts USING fts5(
         log_id UNINDEXED,
@@ -47,14 +52,24 @@ describe('LogStore', () => {
     `);
   }
 
+  // Extended type for insertLog helper with trace fields
+  interface InsertLogParams extends Partial<LogEntry> {
+    message: string;
+    component: string;
+    level: LogLevel;
+    traceId?: string;
+    parentTraceId?: string | null;
+    depth?: number;
+  }
+
   // Helper to insert test logs
-  function insertLog(log: Partial<LogEntry> & { message: string; component: string; level: LogLevel }): number {
+  function insertLog(log: InsertLogParams): number {
     const levelNum = { trace: 10, debug: 20, info: 30, warn: 40, error: 50, fatal: 60 }[log.level];
     const timestamp = log.timestamp ?? new Date().toISOString();
 
     const result = db.prepare(`
-      INSERT INTO logs (timestamp, level, level_num, component, message, session_id, workspace_id, event_id, turn, data, error_message, error_stack)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO logs (timestamp, level, level_num, component, message, session_id, workspace_id, event_id, turn, trace_id, parent_trace_id, depth, data, error_message, error_stack)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       timestamp,
       log.level,
@@ -65,6 +80,9 @@ describe('LogStore', () => {
       log.workspaceId ?? null,
       log.eventId ?? null,
       log.turn ?? null,
+      log.traceId ?? null,
+      log.parentTraceId ?? null,
+      log.depth ?? 0,
       log.data ? JSON.stringify(log.data) : null,
       log.errorMessage ?? null,
       log.errorStack ?? null
@@ -490,6 +508,110 @@ describe('LogStore', () => {
 
       const results = logStore.search('xyz123');
       expect(results).toHaveLength(1);
+    });
+  });
+
+  describe('traceId filtering', () => {
+    beforeEach(() => {
+      // Create a trace hierarchy:
+      // root-trace (depth 0)
+      //   ├── child-trace-1 (depth 1)
+      //   │   └── grandchild-trace (depth 2)
+      //   └── child-trace-2 (depth 1)
+      insertLog({ message: 'root log 1', component: 'root', level: 'info', traceId: 'root-trace', depth: 0 });
+      insertLog({ message: 'root log 2', component: 'root', level: 'info', traceId: 'root-trace', depth: 0 });
+      insertLog({ message: 'child 1 log', component: 'child', level: 'info', traceId: 'child-trace-1', parentTraceId: 'root-trace', depth: 1 });
+      insertLog({ message: 'grandchild log', component: 'grandchild', level: 'info', traceId: 'grandchild-trace', parentTraceId: 'child-trace-1', depth: 2 });
+      insertLog({ message: 'child 2 log', component: 'child', level: 'info', traceId: 'child-trace-2', parentTraceId: 'root-trace', depth: 1 });
+      insertLog({ message: 'unrelated log', component: 'other', level: 'info', traceId: 'unrelated-trace', depth: 0 });
+    });
+
+    it('filters logs by exact traceId', () => {
+      const results = logStore.query({ traceId: 'root-trace' });
+
+      expect(results).toHaveLength(2);
+      expect(results.every(r => r.traceId === 'root-trace')).toBe(true);
+    });
+
+    it('filters logs by parentTraceId (find children)', () => {
+      const results = logStore.query({ parentTraceId: 'root-trace' });
+
+      expect(results).toHaveLength(2);
+      expect(results.map(r => r.traceId).sort()).toEqual(['child-trace-1', 'child-trace-2']);
+    });
+
+    it('filters logs by depth', () => {
+      const results = logStore.query({ depth: 1 });
+
+      expect(results).toHaveLength(2);
+      expect(results.every(r => r.depth === 1)).toBe(true);
+    });
+
+    it('filters logs by minLevel (numeric)', () => {
+      insertLog({ message: 'debug log', component: 'test', level: 'debug', traceId: 'level-test' });
+      insertLog({ message: 'info log', component: 'test', level: 'info', traceId: 'level-test' });
+      insertLog({ message: 'warn log', component: 'test', level: 'warn', traceId: 'level-test' });
+      insertLog({ message: 'error log', component: 'test', level: 'error', traceId: 'level-test' });
+
+      const results = logStore.query({ traceId: 'level-test', minLevel: 40 }); // warn and above
+
+      expect(results).toHaveLength(2);
+      expect(results.map(r => r.level).sort()).toEqual(['error', 'warn']);
+    });
+
+    it('combines traceId with other filters', () => {
+      insertLog({ message: 'error in trace', component: 'test', level: 'error', traceId: 'root-trace', depth: 0 });
+
+      const results = logStore.query({
+        traceId: 'root-trace',
+        levels: ['error'],
+      });
+
+      expect(results).toHaveLength(1);
+      expect(results[0].message).toBe('error in trace');
+    });
+  });
+
+  describe('getTraceTree()', () => {
+    beforeEach(() => {
+      // Create a trace hierarchy
+      insertLog({ message: 'root 1', component: 'root', level: 'info', traceId: 'root-trace', depth: 0, timestamp: '2024-01-01T00:00:01.000Z' });
+      insertLog({ message: 'root 2', component: 'root', level: 'info', traceId: 'root-trace', depth: 0, timestamp: '2024-01-01T00:00:02.000Z' });
+      insertLog({ message: 'child 1', component: 'child', level: 'info', traceId: 'child-trace', parentTraceId: 'root-trace', depth: 1, timestamp: '2024-01-01T00:00:03.000Z' });
+      insertLog({ message: 'grandchild 1', component: 'grandchild', level: 'info', traceId: 'grandchild-trace', parentTraceId: 'child-trace', depth: 2, timestamp: '2024-01-01T00:00:04.000Z' });
+      insertLog({ message: 'unrelated', component: 'other', level: 'info', traceId: 'other-trace', depth: 0, timestamp: '2024-01-01T00:00:05.000Z' });
+    });
+
+    it('retrieves full trace tree recursively', () => {
+      const results = logStore.getTraceTree('root-trace');
+
+      expect(results).toHaveLength(4); // root(2) + child(1) + grandchild(1)
+      expect(results.map(r => r.traceId)).toContain('root-trace');
+      expect(results.map(r => r.traceId)).toContain('child-trace');
+      expect(results.map(r => r.traceId)).toContain('grandchild-trace');
+      expect(results.map(r => r.traceId)).not.toContain('other-trace');
+    });
+
+    it('returns logs in chronological order', () => {
+      const results = logStore.getTraceTree('root-trace');
+
+      // Should be in ascending timestamp order
+      for (let i = 1; i < results.length; i++) {
+        expect(results[i].timestamp >= results[i - 1].timestamp).toBe(true);
+      }
+    });
+
+    it('returns empty array for non-existent trace', () => {
+      const results = logStore.getTraceTree('nonexistent-trace');
+
+      expect(results).toEqual([]);
+    });
+
+    it('handles single-node trace (no children)', () => {
+      const results = logStore.getTraceTree('grandchild-trace');
+
+      expect(results).toHaveLength(1);
+      expect(results[0].traceId).toBe('grandchild-trace');
     });
   });
 });

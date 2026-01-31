@@ -57,6 +57,12 @@ export {
   type LogErrorCode,
 } from './error-codes.js';
 
+export {
+  OperationLogger,
+  createOperationLogger,
+  type OperationLoggerOptions,
+} from './operation-logger.js';
+
 // Export interfaces for dependency injection
 export type {
   ITronLogger,

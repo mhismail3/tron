@@ -158,7 +158,7 @@ export class LoggerRegistry implements ILoggerRegistry {
 }
 
 // =============================================================================
-// Default Registry (Backward Compatibility)
+// Default Registry (Global Singleton)
 // =============================================================================
 
 let defaultRegistry: LoggerRegistry | null = null;

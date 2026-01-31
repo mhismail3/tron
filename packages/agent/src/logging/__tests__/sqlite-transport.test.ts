@@ -24,6 +24,9 @@ describe('SQLiteTransport', () => {
         workspace_id TEXT,
         event_id TEXT,
         turn INTEGER,
+        trace_id TEXT,
+        parent_trace_id TEXT,
+        depth INTEGER DEFAULT 0,
         data TEXT,
         error_message TEXT,
         error_stack TEXT
@@ -37,6 +40,9 @@ describe('SQLiteTransport', () => {
         error_message,
         tokenize='porter unicode61'
       );
+
+      CREATE INDEX IF NOT EXISTS idx_logs_trace_id ON logs(trace_id);
+      CREATE INDEX IF NOT EXISTS idx_logs_parent_trace ON logs(parent_trace_id);
     `);
   }
 
@@ -493,6 +499,207 @@ describe('SQLiteTransport', () => {
       const log = getLastLog();
       expect(log.session_id).toBe('context_session');
       expect(log.workspace_id).toBe('context_workspace');
+    });
+  });
+
+  describe('traceId support', () => {
+    beforeEach(() => {
+      transport = new SQLiteTransport(db, { batchSize: 1, flushIntervalMs: 100 });
+    });
+
+    it('stores traceId from logging context', async () => {
+      setLoggingContext({
+        traceId: 'trace-123-abc',
+      });
+
+      await transport.write({
+        level: 30,
+        time: Date.now(),
+        msg: 'Message with trace',
+        component: 'test',
+      });
+
+      await transport.flush();
+
+      const log = getLastLog();
+      expect(log.trace_id).toBe('trace-123-abc');
+    });
+
+    it('stores parentTraceId from logging context', async () => {
+      setLoggingContext({
+        traceId: 'child-trace',
+        parentTraceId: 'parent-trace-456',
+      });
+
+      await transport.write({
+        level: 30,
+        time: Date.now(),
+        msg: 'Child message',
+        component: 'test',
+      });
+
+      await transport.flush();
+
+      const log = getLastLog();
+      expect(log.trace_id).toBe('child-trace');
+      expect(log.parent_trace_id).toBe('parent-trace-456');
+    });
+
+    it('stores depth from logging context', async () => {
+      setLoggingContext({
+        traceId: 'nested-trace',
+        depth: 3,
+      });
+
+      await transport.write({
+        level: 30,
+        time: Date.now(),
+        msg: 'Nested message',
+        component: 'test',
+      });
+
+      await transport.flush();
+
+      const log = getLastLog();
+      expect(log.depth).toBe(3);
+    });
+
+    it('stores traceId from explicit log fields', async () => {
+      await transport.write({
+        level: 30,
+        time: Date.now(),
+        msg: 'Message with explicit trace',
+        component: 'test',
+        traceId: 'explicit-trace-id',
+      });
+
+      await transport.flush();
+
+      const log = getLastLog();
+      expect(log.trace_id).toBe('explicit-trace-id');
+    });
+
+    it('prefers explicit traceId over context', async () => {
+      setLoggingContext({
+        traceId: 'context-trace',
+      });
+
+      await transport.write({
+        level: 30,
+        time: Date.now(),
+        msg: 'Message with both',
+        component: 'test',
+        traceId: 'explicit-trace', // Should override context
+      });
+
+      await transport.flush();
+
+      const log = getLastLog();
+      expect(log.trace_id).toBe('explicit-trace');
+    });
+
+    it('defaults depth to 0 when not provided', async () => {
+      await transport.write({
+        level: 30,
+        time: Date.now(),
+        msg: 'Message without depth',
+        component: 'test',
+      });
+
+      await transport.flush();
+
+      const log = getLastLog();
+      expect(log.depth).toBe(0);
+    });
+  });
+
+  describe('error resilience with structured logging', () => {
+    it('logs structured JSON to stderr on flush failure', async () => {
+      const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+      // Create transport with broken DB (no schema)
+      const brokenDb = new Database(':memory:');
+      const brokenTransport = new SQLiteTransport(brokenDb, { batchSize: 1, flushIntervalMs: 100 });
+
+      await brokenTransport.write({
+        level: 50, // error level triggers immediate flush
+        time: Date.now(),
+        msg: 'This will fail',
+        component: 'test',
+      });
+
+      // Wait for flush
+      await new Promise(resolve => setTimeout(resolve, 50));
+
+      expect(consoleSpy).toHaveBeenCalled();
+      const errorCall = consoleSpy.mock.calls.find(call =>
+        call.some(arg => typeof arg === 'string' && arg.includes('[LOG_FLUSH_ERROR]'))
+      );
+      expect(errorCall).toBeDefined();
+
+      consoleSpy.mockRestore();
+      brokenTransport.close();
+      brokenDb.close();
+    });
+
+    it('logs structured JSON to stderr on timer flush failure', async () => {
+      const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+      // Create transport with broken DB (no schema)
+      const brokenDb = new Database(':memory:');
+      const brokenTransport = new SQLiteTransport(brokenDb, { batchSize: 100, flushIntervalMs: 50 });
+
+      await brokenTransport.write({
+        level: 30, // info level, will wait for timer
+        time: Date.now(),
+        msg: 'This will fail on timer',
+        component: 'test',
+      });
+
+      // Wait for timer flush
+      await new Promise(resolve => setTimeout(resolve, 100));
+
+      expect(consoleSpy).toHaveBeenCalled();
+
+      consoleSpy.mockRestore();
+      brokenTransport.close();
+      brokenDb.close();
+    });
+
+    it('never throws from write()', async () => {
+      const brokenDb = new Database(':memory:');
+      const brokenTransport = new SQLiteTransport(brokenDb, { batchSize: 1, flushIntervalMs: 100 });
+
+      // Should not throw even with broken DB
+      await expect(
+        brokenTransport.write({
+          level: 50,
+          time: Date.now(),
+          msg: 'Should not throw',
+          component: 'test',
+        })
+      ).resolves.toBeUndefined();
+
+      brokenTransport.close();
+      brokenDb.close();
+    });
+
+    it('never throws from flush()', async () => {
+      const brokenDb = new Database(':memory:');
+      const brokenTransport = new SQLiteTransport(brokenDb, { batchSize: 100, flushIntervalMs: 10000 });
+
+      await brokenTransport.write({
+        level: 30,
+        time: Date.now(),
+        msg: 'Pending log',
+        component: 'test',
+      });
+
+      // Should not throw
+      await expect(brokenTransport.flush()).resolves.toBeUndefined();
+
+      brokenTransport.close();
+      brokenDb.close();
     });
   });
 });

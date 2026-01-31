@@ -33,6 +33,9 @@ export interface PinoLogObject {
   workspaceId?: string;
   eventId?: string;
   turn?: number;
+  traceId?: string;
+  parentTraceId?: string | null;
+  depth?: number;
   err?: Error | { message?: string; stack?: string };
   [key: string]: unknown;
 }
@@ -47,6 +50,9 @@ interface LogEntry {
   workspaceId: string | null;
   eventId: string | null;
   turn: number | null;
+  traceId: string | null;
+  parentTraceId: string | null;
+  depth: number;
   data: string | null;
   errorMessage: string | null;
   errorStack: string | null;
@@ -68,7 +74,8 @@ const LEVEL_NAMES: Record<number, string> = {
 // Standard pino fields to exclude from data
 const STANDARD_FIELDS = new Set([
   'level', 'time', 'msg', 'component', 'sessionId', 'workspaceId',
-  'eventId', 'turn', 'err', 'pid', 'hostname', 'name', 'v',
+  'eventId', 'turn', 'traceId', 'parentTraceId', 'depth',
+  'err', 'pid', 'hostname', 'name', 'v',
 ]);
 
 // =============================================================================
@@ -99,8 +106,8 @@ export class SQLiteTransport {
   private prepareStatements(): void {
     try {
       this.insertLogStmt = this.db.prepare(`
-        INSERT INTO logs (timestamp, level, level_num, component, message, session_id, workspace_id, event_id, turn, data, error_message, error_stack)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO logs (timestamp, level, level_num, component, message, session_id, workspace_id, event_id, turn, trace_id, parent_trace_id, depth, data, error_message, error_stack)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `);
 
       this.insertFtsStmt = this.db.prepare(`
@@ -116,8 +123,13 @@ export class SQLiteTransport {
 
   private startFlushTimer(): void {
     this.flushTimer = setInterval(() => {
-      this.flush().catch(() => {
-        // Ignore errors in timer
+      this.flush().catch((err) => {
+        // Log structured JSON to stderr on timer flush failure
+        console.error('[LOG_FLUSH_TIMER_ERROR]', JSON.stringify({
+          ts: new Date().toISOString(),
+          error: err instanceof Error ? err.message : String(err),
+          batchSize: this.batch.length,
+        }));
       });
     }, this.flushIntervalMs);
 
@@ -185,6 +197,9 @@ export class SQLiteTransport {
             entry.workspaceId,
             entry.eventId,
             entry.turn,
+            entry.traceId,
+            entry.parentTraceId,
+            entry.depth,
             entry.data,
             entry.errorMessage,
             entry.errorStack
@@ -234,6 +249,9 @@ export class SQLiteTransport {
               entry.workspaceId,
               entry.eventId,
               entry.turn,
+              entry.traceId,
+              entry.parentTraceId,
+              entry.depth,
               entry.data,
               entry.errorMessage,
               entry.errorStack
@@ -293,6 +311,9 @@ export class SQLiteTransport {
     const workspaceId = logObj.workspaceId ?? context.workspaceId ?? null;
     const eventId = logObj.eventId ?? context.eventId ?? null;
     const turn = logObj.turn ?? context.turn ?? null;
+    const traceId = logObj.traceId ?? context.traceId ?? null;
+    const parentTraceId = logObj.parentTraceId ?? context.parentTraceId ?? null;
+    const depth = logObj.depth ?? context.depth ?? 0;
 
     return {
       timestamp: new Date(logObj.time).toISOString(),
@@ -304,6 +325,9 @@ export class SQLiteTransport {
       workspaceId,
       eventId,
       turn,
+      traceId,
+      parentTraceId,
+      depth,
       data: hasData ? JSON.stringify(data) : null,
       errorMessage,
       errorStack,

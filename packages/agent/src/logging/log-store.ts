@@ -36,6 +36,9 @@ export interface LogEntry {
   workspaceId?: string;
   eventId?: string;
   turn?: number;
+  traceId?: string;
+  parentTraceId?: string | null;
+  depth?: number;
   data?: Record<string, unknown>;
   errorMessage?: string;
   errorStack?: string;
@@ -53,6 +56,14 @@ export interface LogQueryOptions {
   limit?: number;
   offset?: number;
   order?: 'asc' | 'desc';
+  /** Filter by exact trace ID */
+  traceId?: string;
+  /** Filter by parent trace ID (find children) */
+  parentTraceId?: string | null;
+  /** Filter by nesting depth */
+  depth?: number;
+  /** Minimum log level (numeric: 10=trace, 20=debug, 30=info, 40=warn, 50=error, 60=fatal) */
+  minLevel?: number;
 }
 
 export interface InsertLogOptions {
@@ -64,6 +75,9 @@ export interface InsertLogOptions {
   workspaceId?: string;
   eventId?: string;
   turn?: number;
+  traceId?: string;
+  parentTraceId?: string | null;
+  depth?: number;
   data?: Record<string, unknown>;
   errorMessage?: string;
   errorStack?: string;
@@ -91,8 +105,8 @@ export class LogStore {
   private prepareStatements(): void {
     try {
       this.insertLogStmt = this.db.prepare(`
-        INSERT INTO logs (timestamp, level, level_num, component, message, session_id, workspace_id, event_id, turn, data, error_message, error_stack)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO logs (timestamp, level, level_num, component, message, session_id, workspace_id, event_id, turn, trace_id, parent_trace_id, depth, data, error_message, error_stack)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `);
 
       this.insertFtsStmt = this.db.prepare(`
@@ -127,6 +141,9 @@ export class LogStore {
       log.workspaceId ?? null,
       log.eventId ?? null,
       log.turn ?? null,
+      log.traceId ?? null,
+      log.parentTraceId ?? null,
+      log.depth ?? 0,
       log.data ? JSON.stringify(log.data) : null,
       log.errorMessage ?? null,
       log.errorStack ?? null
@@ -188,6 +205,30 @@ export class LogStore {
       const placeholders = options.components.map(() => '?').join(',');
       conditions.push(`component IN (${placeholders})`);
       params.push(...options.components);
+    }
+
+    if (options.traceId) {
+      conditions.push('trace_id = ?');
+      params.push(options.traceId);
+    }
+
+    if (options.parentTraceId !== undefined) {
+      if (options.parentTraceId === null) {
+        conditions.push('parent_trace_id IS NULL');
+      } else {
+        conditions.push('parent_trace_id = ?');
+        params.push(options.parentTraceId);
+      }
+    }
+
+    if (options.depth !== undefined) {
+      conditions.push('depth = ?');
+      params.push(options.depth);
+    }
+
+    if (options.minLevel !== undefined) {
+      conditions.push('level_num >= ?');
+      params.push(options.minLevel);
     }
 
     const order = options.order === 'asc' ? 'ASC' : 'DESC';
@@ -322,6 +363,33 @@ export class LogStore {
   }
 
   /**
+   * Get all logs in a trace tree (root trace and all descendants)
+   *
+   * This uses a recursive CTE to find all logs that belong to the trace hierarchy.
+   */
+  getTraceTree(traceId: string): LogEntry[] {
+    // Use recursive CTE to find all logs in the trace hierarchy
+    const sql = `
+      WITH RECURSIVE trace_tree AS (
+        -- Base case: logs with the given trace_id
+        SELECT trace_id FROM logs WHERE trace_id = ?
+        UNION
+        -- Recursive case: find children
+        SELECT l.trace_id
+        FROM logs l
+        JOIN trace_tree t ON l.parent_trace_id = t.trace_id
+      )
+      SELECT DISTINCT logs.*
+      FROM logs
+      WHERE logs.trace_id IN (SELECT trace_id FROM trace_tree WHERE trace_id IS NOT NULL)
+      ORDER BY logs.timestamp ASC
+    `;
+
+    const rows = this.db.prepare(sql).all(traceId) as LogRow[];
+    return rows.map(this.rowToLogEntry);
+  }
+
+  /**
    * Delete logs older than the specified date
    */
   pruneOldLogs(olderThan: Date): number {
@@ -395,6 +463,9 @@ export class LogStore {
       workspaceId: row.workspace_id ?? undefined,
       eventId: row.event_id ?? undefined,
       turn: row.turn ?? undefined,
+      traceId: row.trace_id ?? undefined,
+      parentTraceId: row.parent_trace_id,
+      depth: row.depth ?? undefined,
       data: row.data ? JSON.parse(row.data) : undefined,
       errorMessage: row.error_message ?? undefined,
       errorStack: row.error_stack ?? undefined,
@@ -417,6 +488,9 @@ interface LogRow {
   workspace_id: string | null;
   event_id: string | null;
   turn: number | null;
+  trace_id: string | null;
+  parent_trace_id: string | null;
+  depth: number | null;
   data: string | null;
   error_message: string | null;
   error_stack: string | null;
