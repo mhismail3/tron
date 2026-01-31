@@ -21,16 +21,21 @@
  * 2. Conversation history is NOT cached - grows each turn in inputTokens
  * 3. inputTokens = cumulative non-cached content (excludes cached system prompt)
  *
- * Example session:
- *   Turn 1: inputTokens=500,  cache_create=8000 → contextWindow = 8500
- *   Turn 2: inputTokens=600,  cache_read=8000   → contextWindow = 8600, delta = 100
- *   Turn 3: inputTokens=700,  cache_read=8000   → contextWindow = 8700, delta = 100
+ * IMPORTANT: cacheCreationTokens is a BILLING indicator, NOT additional context!
+ * It tells you how many of your inputTokens are being written to cache (costs 25% more).
+ * It does NOT add to the context window size.
  *
- * To get the full context size: inputTokens + cacheRead + cacheCreate
+ * Example session:
+ *   Turn 1: inputTokens=500,  cache_create=8000 → contextWindow = 500 + 0 = 500
+ *           (cache_create=8000 means 8000 tokens are being cached for future reads)
+ *   Turn 2: inputTokens=600,  cache_read=8000   → contextWindow = 600 + 8000 = 8600
+ *   Turn 3: inputTokens=700,  cache_read=8000   → contextWindow = 700 + 8000 = 8700
+ *
+ * To get the full context size: inputTokens + cacheRead (NOT + cacheCreate!)
  * To get per-turn delta: currentContextWindow - previousContextWindow
  *
- * A common bug is using `inputTokens - previousInputTokens` as the delta.
- * This is WRONG because it ignores cache tokens in the context size.
+ * A common bug is including cacheCreationTokens in context window calculation.
+ * This is WRONG because cache_creation is a subset of inputTokens for billing.
  *
  * ============================================================================
  *
@@ -90,10 +95,13 @@ export function normalizeTokenUsage(
   const cacheCreation = raw.cacheCreationTokens ?? 0;
 
   // Calculate contextWindowTokens based on provider
-  // For Anthropic: includes cached tokens
-  // For others: just inputTokens
+  // For Anthropic: inputTokens + cacheRead (NOT + cacheCreation!)
+  //   - inputTokens = non-cached tokens sent to model
+  //   - cacheRead = tokens read from cache (part of context)
+  //   - cacheCreation = billing indicator, NOT additional context
+  // For others: just inputTokens (full context)
   const contextWindowTokens = providerType === 'anthropic'
-    ? raw.inputTokens + cacheRead + cacheCreation
+    ? raw.inputTokens + cacheRead
     : raw.inputTokens;
 
   // Calculate newInputTokens as delta from previous context (ALL providers)

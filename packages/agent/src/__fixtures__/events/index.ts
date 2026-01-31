@@ -30,11 +30,14 @@ import type {
   CompactBoundaryEvent,
   StreamTurnStartEvent,
   StreamTurnEndEvent,
+  HookTriggeredEvent,
+  HookCompletedEvent,
   EventId,
   SessionId,
   WorkspaceId,
   ContentBlock,
 } from '../../events/types.js';
+import type { HookType, HookAction } from '../../hooks/types.js';
 
 // =============================================================================
 // ID Generators
@@ -374,6 +377,68 @@ export function createStreamTurnEndEvent(options: StreamTurnEndEventOptions = {}
       turn: options.turn ?? 1,
       tokenUsage: options.tokenUsage ?? { inputTokens: 100, outputTokens: 50 },
       cost: options.cost,
+    },
+  };
+}
+
+// =============================================================================
+// Hook Events
+// =============================================================================
+
+export interface HookTriggeredEventOptions extends BaseEventOptions {
+  hookNames?: string[];
+  hookEvent?: HookType;
+  toolName?: string;
+  toolCallId?: string;
+}
+
+export function createHookTriggeredEvent(options: HookTriggeredEventOptions = {}): HookTriggeredEvent {
+  return {
+    id: options.id ?? generateEventId(),
+    parentId: options.parentId ?? null,
+    sessionId: options.sessionId ?? generateSessionId(),
+    workspaceId: options.workspaceId ?? generateWorkspaceId(),
+    timestamp: options.timestamp ?? new Date().toISOString(),
+    type: 'hook.triggered',
+    sequence: options.sequence ?? 0,
+    payload: {
+      hookNames: options.hookNames ?? ['test-hook'],
+      hookEvent: options.hookEvent ?? 'PreToolUse',
+      toolName: options.toolName,
+      toolCallId: options.toolCallId,
+      timestamp: options.timestamp ?? new Date().toISOString(),
+    },
+  };
+}
+
+export interface HookCompletedEventOptions extends BaseEventOptions {
+  hookNames?: string[];
+  hookEvent?: HookType;
+  result?: HookAction;
+  duration?: number;
+  reason?: string;
+  toolName?: string;
+  toolCallId?: string;
+}
+
+export function createHookCompletedEvent(options: HookCompletedEventOptions = {}): HookCompletedEvent {
+  return {
+    id: options.id ?? generateEventId(),
+    parentId: options.parentId ?? null,
+    sessionId: options.sessionId ?? generateSessionId(),
+    workspaceId: options.workspaceId ?? generateWorkspaceId(),
+    timestamp: options.timestamp ?? new Date().toISOString(),
+    type: 'hook.completed',
+    sequence: options.sequence ?? 0,
+    payload: {
+      hookNames: options.hookNames ?? ['test-hook'],
+      hookEvent: options.hookEvent ?? 'PreToolUse',
+      result: options.result ?? 'continue',
+      duration: options.duration ?? 42,
+      reason: options.reason,
+      toolName: options.toolName,
+      toolCallId: options.toolCallId,
+      timestamp: options.timestamp ?? new Date().toISOString(),
     },
   };
 }

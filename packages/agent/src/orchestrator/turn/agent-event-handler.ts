@@ -19,6 +19,8 @@
  * | agent_interrupted     | LifecycleEventHandler |
  * | api_retry             | LifecycleEventHandler |
  * | compaction_complete   | CompactionEventHandler |
+ * | hook_triggered        | HookEventHandler       |
+ * | hook_completed        | HookEventHandler       |
  *
  * Subagent events are forwarded via SubagentForwarder before routing.
  */
@@ -37,12 +39,16 @@ import {
   createLifecycleEventHandler,
   createCompactionEventHandler,
   createSubagentForwarder,
+  createHookEventHandler,
   type TurnEventHandler,
   type ToolEventHandler,
   type StreamingEventHandler,
   type LifecycleEventHandler,
   type CompactionEventHandler,
   type SubagentForwarder,
+  type HookEventHandler,
+  type InternalHookTriggeredEvent,
+  type InternalHookCompletedEvent,
 } from './handlers/index.js';
 
 // =============================================================================
@@ -115,6 +121,11 @@ export class AgentEventHandler {
    */
   private subagentForwarder: SubagentForwarder;
 
+  /**
+   * Handles hook lifecycle events (hook_triggered, hook_completed).
+   */
+  private hookHandler: HookEventHandler;
+
   constructor(config: AgentEventHandlerConfig) {
     this.config = config;
     this.uiRenderHandler = createUIRenderHandler(config.emit);
@@ -153,6 +164,12 @@ export class AgentEventHandler {
     });
 
     this.subagentForwarder = createSubagentForwarder({
+      emit: config.emit,
+    });
+
+    this.hookHandler = createHookEventHandler({
+      getActiveSession: config.getActiveSession,
+      appendEventLinearized: config.appendEventLinearized,
       emit: config.emit,
     });
   }
@@ -233,6 +250,14 @@ export class AgentEventHandler {
 
       case 'thinking_end':
         this.streamingHandler.handleThinkingEnd(sessionId, event, timestamp);
+        break;
+
+      case 'hook_triggered':
+        this.hookHandler.handleHookTriggered(event as unknown as InternalHookTriggeredEvent);
+        break;
+
+      case 'hook_completed':
+        this.hookHandler.handleHookCompleted(event as unknown as InternalHookCompletedEvent);
         break;
     }
   }

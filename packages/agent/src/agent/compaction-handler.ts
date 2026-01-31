@@ -8,6 +8,8 @@
 
 import type { ContextManager } from '../context/context-manager.js';
 import type { Summarizer } from '../context/summarizer.js';
+import type { HookEngine } from '../hooks/engine.js';
+import type { PreCompactHookContext } from '../hooks/types.js';
 import type {
   CompactionHandler as ICompactionHandler,
   CompactionHandlerDependencies,
@@ -28,6 +30,7 @@ export class AgentCompactionHandler implements ICompactionHandler {
   private readonly contextManager: ContextManager;
   private readonly eventEmitter: EventEmitter;
   private readonly sessionId: string;
+  private readonly hookEngine: HookEngine | undefined;
 
   private summarizer: Summarizer | null = null;
   private autoCompactionEnabled: boolean = true;
@@ -36,6 +39,7 @@ export class AgentCompactionHandler implements ICompactionHandler {
     this.contextManager = deps.contextManager;
     this.eventEmitter = deps.eventEmitter;
     this.sessionId = deps.sessionId;
+    this.hookEngine = deps.hookEngine;
   }
 
   /**
@@ -72,6 +76,53 @@ export class AgentCompactionHandler implements ICompactionHandler {
   }
 
   /**
+   * Execute PreCompact hook with event emission.
+   */
+  private async executePreCompactHook(tokensBefore: number): Promise<void> {
+    if (!this.hookEngine) return;
+
+    const hooks = this.hookEngine.getHooks('PreCompact');
+    if (hooks.length === 0) return;
+
+    const startTime = Date.now();
+    const contextLimit = this.contextManager.getContextLimit();
+
+    // Emit hook_triggered event
+    this.eventEmitter.emit({
+      type: 'hook_triggered',
+      sessionId: this.sessionId,
+      timestamp: new Date().toISOString(),
+      hookNames: hooks.map(h => h.name),
+      hookEvent: 'PreCompact',
+    });
+
+    // Build PreCompact context
+    const context: PreCompactHookContext = {
+      hookType: 'PreCompact',
+      sessionId: this.sessionId,
+      timestamp: new Date().toISOString(),
+      data: {},
+      currentTokens: tokensBefore,
+      targetTokens: Math.floor(contextLimit * 0.70), // Target ~70% of context limit
+    };
+
+    // Execute with fail-open (HookEngine handles errors)
+    const result = await this.hookEngine.execute('PreCompact', context);
+
+    // Emit hook_completed event
+    this.eventEmitter.emit({
+      type: 'hook_completed',
+      sessionId: this.sessionId,
+      timestamp: new Date().toISOString(),
+      hookNames: hooks.map(h => h.name),
+      hookEvent: 'PreCompact',
+      result: result.action,
+      duration: Date.now() - startTime,
+      reason: result.reason,
+    });
+  }
+
+  /**
    * Attempt compaction if needed
    * @param reason - The reason for compaction (for logging/events)
    */
@@ -84,6 +135,9 @@ export class AgentCompactionHandler implements ICompactionHandler {
     }
 
     const tokensBefore = this.contextManager.getCurrentTokens();
+
+    // Execute PreCompact hook first (before emitting compaction_start)
+    await this.executePreCompactHook(tokensBefore);
 
     logger.info('Attempting auto-compaction', {
       sessionId: this.sessionId,

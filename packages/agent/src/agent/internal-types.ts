@@ -154,6 +154,8 @@ export interface CompactionHandlerDependencies {
   contextManager: ContextManager;
   eventEmitter: EventEmitter;
   sessionId: string;
+  /** Optional hook engine for PreCompact hook execution */
+  hookEngine?: HookEngine;
 }
 
 /**

@@ -55,3 +55,12 @@ export {
   createSubagentForwarder,
   type SubagentForwarderDeps,
 } from './subagent-forwarder.js';
+
+// Hook events
+export {
+  HookEventHandler,
+  createHookEventHandler,
+  type HookEventHandlerDeps,
+  type InternalHookTriggeredEvent,
+  type InternalHookCompletedEvent,
+} from './hook-event-handler.js';

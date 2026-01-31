@@ -33,7 +33,7 @@ import type { GoogleOAuthEndpoint } from '../auth/index.js';
 import { HookEngine } from '../hooks/engine.js';
 import { ContextManager, createContextManager } from '../context/context-manager.js';
 import type { Summarizer } from '../context/summarizer.js';
-import type { HookDefinition } from '../hooks/types.js';
+import type { HookDefinition, HookType, HookResult, AnyHookContext } from '../hooks/types.js';
 import { createLogger } from '../logging/index.js';
 import type {
   AgentConfig,
@@ -146,6 +146,7 @@ export class TronAgent {
       contextManager: this.contextManager,
       eventEmitter: this.eventEmitter,
       sessionId: this.sessionId,
+      hookEngine: this.hookEngine,
     });
 
     this.turnRunner = createTurnRunner({
@@ -415,6 +416,100 @@ export class TronAgent {
     this.hookEngine.register(hook);
   }
 
+  /**
+   * Execute a lifecycle hook with proper event emission.
+   * Follows fail-open pattern - errors are logged but don't stop execution.
+   */
+  private async executeLifecycleHook(
+    hookType: HookType,
+    data: Record<string, unknown>
+  ): Promise<HookResult> {
+    const hooks = this.hookEngine.getHooks(hookType);
+    const startTime = Date.now();
+
+    // Build context based on hook type
+    let context: Record<string, unknown>;
+    switch (hookType) {
+      case 'SessionStart':
+        context = {
+          hookType,
+          sessionId: this.sessionId,
+          timestamp: new Date().toISOString(),
+          data,
+          workingDirectory: data.workingDirectory ?? this.workingDirectory,
+        };
+        break;
+      case 'SessionEnd':
+        context = {
+          hookType,
+          sessionId: this.sessionId,
+          timestamp: new Date().toISOString(),
+          data,
+          messageCount: data.messageCount ?? this.contextManager.getMessages().length,
+          toolCallCount: data.toolCallCount ?? this.currentTurn,
+        };
+        break;
+      case 'UserPromptSubmit':
+        context = {
+          hookType,
+          sessionId: this.sessionId,
+          timestamp: new Date().toISOString(),
+          data,
+          prompt: data.prompt,
+        };
+        break;
+      case 'Stop':
+        context = {
+          hookType,
+          sessionId: this.sessionId,
+          timestamp: new Date().toISOString(),
+          data,
+          stopReason: data.stopReason,
+          finalMessage: data.finalMessage,
+        };
+        break;
+      default:
+        context = {
+          hookType,
+          sessionId: this.sessionId,
+          timestamp: new Date().toISOString(),
+          data,
+        };
+    }
+
+    // Emit triggered event if hooks exist
+    if (hooks.length > 0) {
+      this.emit({
+        type: 'hook_triggered',
+        sessionId: this.sessionId,
+        timestamp: new Date().toISOString(),
+        hookNames: hooks.map(h => h.name),
+        hookEvent: hookType,
+      } as import('../types/index.js').TronEvent);
+    }
+
+    // Execute with fail-open (HookEngine already handles errors)
+    // Cast through unknown to satisfy TypeScript - context structure matches AnyHookContext
+    const result = await this.hookEngine.execute(hookType, context as unknown as AnyHookContext);
+    const duration = Date.now() - startTime;
+
+    // Emit completed event if hooks exist
+    if (hooks.length > 0) {
+      this.emit({
+        type: 'hook_completed',
+        sessionId: this.sessionId,
+        timestamp: new Date().toISOString(),
+        hookNames: hooks.map(h => h.name),
+        hookEvent: hookType,
+        result: result.action,
+        duration,
+        reason: result.reason,
+      } as import('../types/index.js').TronEvent);
+    }
+
+    return result;
+  }
+
   // ===========================================================================
   // Event Management
   // ===========================================================================
@@ -526,8 +621,42 @@ export class TronAgent {
       timestamp: new Date().toISOString(),
     });
 
+    // === SessionStart Hook ===
+    await this.executeLifecycleHook('SessionStart', {
+      workingDirectory: this.workingDirectory,
+    });
+
     // Add user message
     this.addMessage({ role: 'user', content: userContent });
+
+    // === UserPromptSubmit Hook (can block) ===
+    const promptText = typeof userContent === 'string'
+      ? userContent
+      : userContent.map(c => ('text' in c ? c.text : '')).join('\n');
+
+    const promptResult = await this.executeLifecycleHook('UserPromptSubmit', {
+      prompt: promptText,
+    });
+
+    if (promptResult.action === 'block') {
+      await this.executeLifecycleHook('Stop', { stopReason: 'blocked', finalMessage: promptResult.reason });
+      await this.executeLifecycleHook('SessionEnd', { messageCount: 1, toolCallCount: 0 });
+
+      this.emit({
+        type: 'agent_end',
+        sessionId: this.sessionId,
+        timestamp: new Date().toISOString(),
+        error: promptResult.reason ?? 'Prompt blocked by hook',
+      });
+
+      return {
+        success: false,
+        messages: this.contextManager.getMessages(),
+        turns: 0,
+        totalTokenUsage: this.tokenUsage,
+        error: promptResult.reason ?? 'Prompt blocked by hook',
+      };
+    }
 
     const maxTurns = this.config.maxTurns ?? 100;
     let lastResult: TurnResult | undefined;
@@ -537,6 +666,13 @@ export class TronAgent {
 
       if (!lastResult.success) {
         if (lastResult.interrupted) {
+          // === Stop Hook (interrupted) ===
+          await this.executeLifecycleHook('Stop', { stopReason: 'interrupted' });
+          await this.executeLifecycleHook('SessionEnd', {
+            messageCount: this.contextManager.getMessages().length,
+            toolCallCount: this.currentTurn,
+          });
+
           return {
             success: false,
             messages: this.contextManager.getMessages(),
@@ -547,6 +683,16 @@ export class TronAgent {
             partialContent: lastResult.partialContent,
           };
         }
+
+        // === Stop Hook (error) ===
+        await this.executeLifecycleHook('Stop', {
+          stopReason: 'error',
+          finalMessage: lastResult.error,
+        });
+        await this.executeLifecycleHook('SessionEnd', {
+          messageCount: this.contextManager.getMessages().length,
+          toolCallCount: this.currentTurn,
+        });
 
         this.emit({
           type: 'agent_end',
@@ -569,6 +715,16 @@ export class TronAgent {
         break;
       }
     }
+
+    // === Stop Hook (success) ===
+    await this.executeLifecycleHook('Stop', {
+      stopReason: 'completed',
+      stoppedReason: lastResult?.stopReason,
+    });
+    await this.executeLifecycleHook('SessionEnd', {
+      messageCount: this.contextManager.getMessages().length,
+      toolCallCount: this.currentTurn,
+    });
 
     this.emit({
       type: 'agent_end',

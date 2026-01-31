@@ -41,17 +41,19 @@ describe('Token Usage Architecture', () => {
         tracker.onTurnStart(1);
 
         // Simulate response_complete: set token usage BEFORE tools execute
+        // Note: cacheCreationTokens is a billing indicator, NOT additional context
         tracker.setResponseTokenUsage({
           inputTokens: 500,
           outputTokens: 100,
-          cacheCreationTokens: 8000,
+          cacheCreationTokens: 8000, // Being written to cache, but not adding to context
         });
 
         // normalizedUsage should be available immediately
         const normalized = tracker.getLastNormalizedUsage();
         expect(normalized).toBeDefined();
-        expect(normalized?.newInputTokens).toBe(8500); // First turn: all context is new
-        expect(normalized?.contextWindowTokens).toBe(8500); // 500 + 8000
+        // contextWindowTokens = inputTokens + cacheRead (NOT + cacheCreate)
+        expect(normalized?.newInputTokens).toBe(500); // First turn: all context is new
+        expect(normalized?.contextWindowTokens).toBe(500); // Only inputTokens, no cache read yet
         expect(normalized?.outputTokens).toBe(100);
       });
 
@@ -86,25 +88,27 @@ describe('Token Usage Architecture', () => {
       it('should update baseline for subsequent turns', () => {
         tracker.onAgentStart();
 
-        // Turn 1
+        // Turn 1: cacheCreation is just billing info, not additional context
         tracker.onTurnStart(1);
         tracker.setResponseTokenUsage({
           inputTokens: 500,
           outputTokens: 100,
-          cacheCreationTokens: 8000,
+          cacheCreationTokens: 8000, // Being cached for future reads, but context is just 500
         });
         tracker.onTurnEnd(); // This should NOT re-compute (already done)
 
-        // Turn 2
+        // Turn 2: Now reading from cache
         tracker.onTurnStart(2);
         tracker.setResponseTokenUsage({
           inputTokens: 604,
           outputTokens: 50,
-          cacheReadTokens: 8000,
+          cacheReadTokens: 8000, // Cache is now being READ (part of context)
         });
 
         const normalized = tracker.getLastNormalizedUsage();
-        expect(normalized?.newInputTokens).toBe(104); // 8604 - 8500
+        // contextWindowTokens = 604 + 8000 = 8604
+        // Previous was 500 (just inputTokens, cache wasn't read yet)
+        expect(normalized?.newInputTokens).toBe(8104); // 8604 - 500
         expect(normalized?.contextWindowTokens).toBe(8604); // 604 + 8000
       });
     });
@@ -261,25 +265,26 @@ describe('Token Usage Architecture', () => {
         tracker.setProviderType('anthropic');
         tracker.onAgentStart();
 
-        // Turn 1: Initial context
+        // Turn 1: Initial context - cacheCreation is billing info, not context
         tracker.onTurnStart(1);
         tracker.setResponseTokenUsage({
           inputTokens: 500,
           outputTokens: 100,
-          cacheCreationTokens: 8000,
+          cacheCreationTokens: 8000, // Writing to cache, but context is just inputTokens
         });
-        expect(tracker.getLastNormalizedUsage()?.newInputTokens).toBe(8500);
-        expect(tracker.getLastNormalizedUsage()?.contextWindowTokens).toBe(8500);
+        expect(tracker.getLastNormalizedUsage()?.newInputTokens).toBe(500);
+        expect(tracker.getLastNormalizedUsage()?.contextWindowTokens).toBe(500);
         tracker.onTurnEnd();
 
-        // Turn 2: Context grew by user message + assistant response
+        // Turn 2: Context grew - now reading from cache
         tracker.onTurnStart(2);
         tracker.setResponseTokenUsage({
           inputTokens: 800,  // Grew by 300 (user + prev assistant)
           outputTokens: 150,
-          cacheReadTokens: 8000,  // System prompt from cache
+          cacheReadTokens: 8000,  // System prompt from cache (now part of context!)
         });
-        expect(tracker.getLastNormalizedUsage()?.newInputTokens).toBe(300); // 8800 - 8500
+        // contextWindow = 800 + 8000 = 8800, previous was 500
+        expect(tracker.getLastNormalizedUsage()?.newInputTokens).toBe(8300); // 8800 - 500
         expect(tracker.getLastNormalizedUsage()?.contextWindowTokens).toBe(8800);
         tracker.onTurnEnd();
 
@@ -290,6 +295,7 @@ describe('Token Usage Architecture', () => {
           outputTokens: 200,
           cacheReadTokens: 8000,
         });
+        // contextWindow = 1200 + 8000 = 9200, previous was 8800
         expect(tracker.getLastNormalizedUsage()?.newInputTokens).toBe(400); // 9200 - 8800
         expect(tracker.getLastNormalizedUsage()?.contextWindowTokens).toBe(9200);
       });
@@ -362,21 +368,24 @@ describe('Token Usage Architecture', () => {
     });
 
     describe('Anthropic cache handling', () => {
-      it('should add cache tokens to context window', () => {
+      it('should add cacheRead (NOT cacheCreation) to context window', () => {
+        // cacheCreationTokens is billing info (how many inputTokens are being cached)
+        // It does NOT add to context window - it's a subset of inputTokens
         const result = normalizeTokenUsage(
           { inputTokens: 500, outputTokens: 100, cacheReadTokens: 8000, cacheCreationTokens: 200 },
           'anthropic',
           0
         );
 
-        expect(result.contextWindowTokens).toBe(8700); // 500 + 8000 + 200
+        // contextWindowTokens = inputTokens + cacheRead (NOT + cacheCreate)
+        expect(result.contextWindowTokens).toBe(8500); // 500 + 8000
         expect(result.rawInputTokens).toBe(500);
         expect(result.cacheReadTokens).toBe(8000);
-        expect(result.cacheCreationTokens).toBe(200);
+        expect(result.cacheCreationTokens).toBe(200); // Still tracked for billing
       });
 
       it('should calculate delta from contextWindowTokens for Anthropic', () => {
-        // Previous context was 8500 (500 input + 8000 cache)
+        // Previous context was 8500 (500 input + 8000 cache read)
         const result = normalizeTokenUsage(
           { inputTokens: 604, outputTokens: 100, cacheReadTokens: 8000 },
           'anthropic',

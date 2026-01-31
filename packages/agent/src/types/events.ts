@@ -359,15 +359,32 @@ export interface ToolCallArgumentDeltaEvent extends BaseTronEvent {
  */
 export interface HookTriggeredEvent extends BaseTronEvent {
   type: 'hook_triggered';
-  hookName: string;
+  /** Names of hooks being executed */
+  hookNames: string[];
+  /** Hook event type (PreToolUse, SessionStart, etc.) */
   hookEvent: string;
+  /** Tool name for tool-related hooks */
+  toolName?: string;
+  /** Tool call ID for tool-related hooks */
+  toolCallId?: string;
 }
 
 export interface HookCompletedEvent extends BaseTronEvent {
   type: 'hook_completed';
-  hookName: string;
+  /** Names of hooks that were executed */
+  hookNames: string[];
+  /** Hook event type (PreToolUse, SessionStart, etc.) */
   hookEvent: string;
+  /** Result action (continue, block, modify) */
   result: 'continue' | 'block' | 'modify';
+  /** Execution duration in milliseconds */
+  duration?: number;
+  /** Reason for block/modify result */
+  reason?: string;
+  /** Tool name for tool-related hooks */
+  toolName?: string;
+  /** Tool call ID for tool-related hooks */
+  toolCallId?: string;
 }
 
 /**

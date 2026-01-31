@@ -74,7 +74,10 @@ export type EventType =
   // Todo tracking
   | 'todo.write'
   // Turn events
-  | 'turn.failed';
+  | 'turn.failed'
+  // Hook events
+  | 'hook.triggered'
+  | 'hook.completed';
 
 // =============================================================================
 // Base Event Structure

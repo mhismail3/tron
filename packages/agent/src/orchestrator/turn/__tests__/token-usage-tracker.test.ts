@@ -124,17 +124,18 @@ describe('TokenUsageTracker', () => {
       tracker.setProviderType('anthropic');
     });
 
-    it('calculates contextWindowTokens as input + cache for Anthropic', () => {
+    it('calculates contextWindowTokens as input + cacheRead for Anthropic (NOT cacheCreate)', () => {
       tracker.recordTokenUsage({
         inputTokens: 200,
         outputTokens: 100,
         cacheReadTokens: 300,
-        cacheCreationTokens: 50,
+        cacheCreationTokens: 50, // Billing info, NOT additional context
       });
 
       const normalized = tracker.getLastNormalizedUsage();
-      // contextWindowTokens = inputTokens + cacheRead + cacheCreate
-      expect(normalized?.contextWindowTokens).toBe(200 + 300 + 50);
+      // contextWindowTokens = inputTokens + cacheRead (NOT + cacheCreate)
+      // cacheCreationTokens is a subset of inputTokens for billing purposes
+      expect(normalized?.contextWindowTokens).toBe(200 + 300); // 500, not 550
     });
 
     it('handles missing cache tokens for Anthropic', () => {

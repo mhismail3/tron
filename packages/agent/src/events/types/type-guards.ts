@@ -18,6 +18,7 @@ import type { PlanModeEnteredEvent, PlanModeExitedEvent, PlanCreatedEvent } from
 import type { SubagentSpawnedEvent, SubagentStatusUpdateEvent, SubagentCompletedEvent, SubagentFailedEvent } from './subagent.js';
 import type { TodoWriteEvent } from './todo.js';
 import type { TurnFailedEvent } from './turn.js';
+import type { HookTriggeredEvent, HookCompletedEvent } from './hook.js';
 
 // =============================================================================
 // Type Guards
@@ -153,4 +154,16 @@ export function isTurnFailedEvent(event: SessionEvent): event is TurnFailedEvent
 
 export function isTurnEvent(event: SessionEvent): event is TurnFailedEvent {
   return event.type.startsWith('turn.');
+}
+
+export function isHookTriggeredEvent(event: SessionEvent): event is HookTriggeredEvent {
+  return event.type === 'hook.triggered';
+}
+
+export function isHookCompletedEvent(event: SessionEvent): event is HookCompletedEvent {
+  return event.type === 'hook.completed';
+}
+
+export function isHookEvent(event: SessionEvent): event is HookTriggeredEvent | HookCompletedEvent {
+  return event.type.startsWith('hook.');
 }

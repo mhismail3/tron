@@ -260,13 +260,16 @@ export class AgentToolExecutor implements IToolExecutor {
     };
 
     const preHooks = this.hookEngine.getHooks('PreToolUse');
+    const preHookStartTime = Date.now();
     if (preHooks.length > 0) {
       this.eventEmitter.emit({
         type: 'hook_triggered',
         sessionId: this.sessionId,
         timestamp: new Date().toISOString(),
-        hookName: preHooks.map(h => h.name).join(', '),
+        hookNames: preHooks.map(h => h.name),
         hookEvent: 'PreToolUse',
+        toolName: request.toolName,
+        toolCallId: request.toolCallId,
       });
     }
 
@@ -277,9 +280,13 @@ export class AgentToolExecutor implements IToolExecutor {
         type: 'hook_completed',
         sessionId: this.sessionId,
         timestamp: new Date().toISOString(),
-        hookName: preHooks.map(h => h.name).join(', '),
+        hookNames: preHooks.map(h => h.name),
         hookEvent: 'PreToolUse',
         result: preResult.action,
+        duration: Date.now() - preHookStartTime,
+        reason: preResult.reason,
+        toolName: request.toolName,
+        toolCallId: request.toolCallId,
       });
     }
 
@@ -330,13 +337,16 @@ export class AgentToolExecutor implements IToolExecutor {
     };
 
     const postHooks = this.hookEngine.getHooks('PostToolUse');
+    const postHookStartTime = Date.now();
     if (postHooks.length > 0) {
       this.eventEmitter.emit({
         type: 'hook_triggered',
         sessionId: this.sessionId,
         timestamp: new Date().toISOString(),
-        hookName: postHooks.map(h => h.name).join(', '),
+        hookNames: postHooks.map(h => h.name),
         hookEvent: 'PostToolUse',
+        toolName: request.toolName,
+        toolCallId: request.toolCallId,
       });
     }
 
@@ -347,9 +357,13 @@ export class AgentToolExecutor implements IToolExecutor {
         type: 'hook_completed',
         sessionId: this.sessionId,
         timestamp: new Date().toISOString(),
-        hookName: postHooks.map(h => h.name).join(', '),
+        hookNames: postHooks.map(h => h.name),
         hookEvent: 'PostToolUse',
         result: postResult.action,
+        duration: Date.now() - postHookStartTime,
+        reason: postResult.reason,
+        toolName: request.toolName,
+        toolCallId: request.toolCallId,
       });
     }
   }

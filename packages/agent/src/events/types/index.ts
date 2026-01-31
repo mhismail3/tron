@@ -188,6 +188,12 @@ export type { TodoItemPayload, TodoWriteEvent } from './todo.js';
 export type { TurnFailedEvent } from './turn.js';
 
 // =============================================================================
+// Hook Events
+// =============================================================================
+
+export type { HookTriggeredEvent, HookCompletedEvent } from './hook.js';
+
+// =============================================================================
 // Union Type
 // =============================================================================
 
@@ -231,6 +237,9 @@ export {
   isTodoEvent,
   isTurnFailedEvent,
   isTurnEvent,
+  isHookTriggeredEvent,
+  isHookCompletedEvent,
+  isHookEvent,
 } from './type-guards.js';
 
 // =============================================================================

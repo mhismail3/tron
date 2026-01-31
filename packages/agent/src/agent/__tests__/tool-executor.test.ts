@@ -390,6 +390,9 @@ describe('AgentToolExecutor', () => {
         expect.objectContaining({
           type: 'hook_triggered',
           hookEvent: 'PreToolUse',
+          hookNames: ['TestHook'],
+          toolName: 'TestTool',
+          toolCallId: 'call_123',
         })
       );
 
@@ -397,6 +400,9 @@ describe('AgentToolExecutor', () => {
         expect.objectContaining({
           type: 'hook_completed',
           hookEvent: 'PreToolUse',
+          hookNames: ['TestHook'],
+          toolName: 'TestTool',
+          toolCallId: 'call_123',
         })
       );
     });
