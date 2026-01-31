@@ -160,6 +160,30 @@ export const CORE_TRON_AUTH_PROTECTION: PathRule = {
 };
 
 /**
+ * Core rule: Protect Synology Drive cloud storage
+ *
+ * The agent cannot write, edit, or delete any files in Synology Drive.
+ */
+export const CORE_SYNOLOGY_DRIVE_PROTECTION: PathRule = {
+  id: 'core.synology-drive-protection',
+  name: 'Synology Drive Protection',
+  description: 'Protects Synology Drive cloud storage from agent modifications',
+  type: 'path',
+  severity: 'block',
+  scope: 'global',
+  tier: 'core',
+  tools: ['Write', 'Edit', 'Bash'],
+  priority: 1000,
+  enabled: true,
+  tags: ['security', 'cloud-storage-protection'],
+  pathArguments: ['file_path', 'path', 'command'],
+  protectedPaths: [
+    '/Users/moose/Library/CloudStorage/SynologyDrive-SynologyDrive',
+    '/Users/moose/Library/CloudStorage/SynologyDrive-SynologyDrive/**',
+  ],
+};
+
+/**
  * Helper to escape special regex characters in a string
  */
 function escapeRegExp(str: string): string {
@@ -267,6 +291,7 @@ export const DEFAULT_RULES: GuardrailRule[] = [
   CORE_TRON_APP_PROTECTION,
   CORE_TRON_DB_PROTECTION,
   CORE_TRON_AUTH_PROTECTION,
+  CORE_SYNOLOGY_DRIVE_PROTECTION,
   // Standard rules (can be disabled)
   PATH_TRAVERSAL,
   PATH_HIDDEN_MKDIR,
@@ -283,6 +308,7 @@ export const CORE_RULE_IDS = [
   'core.tron-app-protection',
   'core.tron-db-protection',
   'core.tron-auth-protection',
+  'core.synology-drive-protection',
 ];
 
 /**
