@@ -143,9 +143,9 @@ enum CommandToolRegistry {
         case "openurl":
             return ("safari", .blue, "Open URL")
         case "webfetch":
-            return ("arrow.down.doc", .tronInfo, "WebFetch")
+            return ("arrow.down.doc", .tronInfo, "Fetch")
         case "websearch":
-            return ("magnifyingglass.circle", .tronInfo, "WebSearch")
+            return ("magnifyingglass.circle", .tronInfo, "Search")
         case "task":
             return ("arrow.triangle.branch", .tronAmber, "Task")
         default:
