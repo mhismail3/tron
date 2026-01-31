@@ -191,7 +191,12 @@ export type { TurnFailedEvent } from './turn.js';
 // Hook Events
 // =============================================================================
 
-export type { HookTriggeredEvent, HookCompletedEvent } from './hook.js';
+export type {
+  HookTriggeredEvent,
+  HookCompletedEvent,
+  HookBackgroundStartedEvent,
+  HookBackgroundCompletedEvent,
+} from './hook.js';
 
 // =============================================================================
 // Union Type
@@ -239,6 +244,8 @@ export {
   isTurnEvent,
   isHookTriggeredEvent,
   isHookCompletedEvent,
+  isHookBackgroundStartedEvent,
+  isHookBackgroundCompletedEvent,
   isHookEvent,
 } from './type-guards.js';
 

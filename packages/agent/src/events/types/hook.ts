@@ -60,3 +60,49 @@ export interface HookCompletedEvent extends BaseEvent {
     timestamp: string;
   };
 }
+
+// =============================================================================
+// Background Hook Events
+// =============================================================================
+
+/**
+ * Emitted when background hooks start executing.
+ * Background hooks run fire-and-forget - the agent continues immediately.
+ */
+export interface HookBackgroundStartedEvent extends BaseEvent {
+  type: 'hook.background_started';
+  payload: {
+    /** Names of background hooks being executed */
+    hookNames: string[];
+    /** Hook event type (PostToolUse, SessionEnd, etc.) */
+    hookEvent: HookType;
+    /** Unique ID to correlate started/completed events */
+    executionId: string;
+    /** Original timestamp */
+    timestamp: string;
+  };
+}
+
+/**
+ * Emitted when background hook execution completes.
+ * May be emitted after the agent has moved on to other operations.
+ */
+export interface HookBackgroundCompletedEvent extends BaseEvent {
+  type: 'hook.background_completed';
+  payload: {
+    /** Names of background hooks that were executed */
+    hookNames: string[];
+    /** Hook event type (PostToolUse, SessionEnd, etc.) */
+    hookEvent: HookType;
+    /** Unique ID to correlate started/completed events */
+    executionId: string;
+    /** Result: 'continue' if all succeeded, 'error' if any failed */
+    result: 'continue' | 'error';
+    /** Execution duration in milliseconds */
+    duration: number;
+    /** Error message if result is 'error' */
+    error?: string;
+    /** Original timestamp */
+    timestamp: string;
+  };
+}

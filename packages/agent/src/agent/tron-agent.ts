@@ -619,6 +619,7 @@ export class TronAgent {
     if (promptResult.action === 'block') {
       await this.executeLifecycleHook('Stop', { stopReason: 'blocked', finalMessage: promptResult.reason });
       await this.executeLifecycleHook('SessionEnd', { messageCount: 1, toolCallCount: 0 });
+      await this.hookEngine.waitForBackgroundHooks();
 
       this.emit({
         type: 'agent_end',
@@ -650,6 +651,7 @@ export class TronAgent {
             messageCount: this.contextManager.getMessages().length,
             toolCallCount: this.currentTurn,
           });
+          await this.hookEngine.waitForBackgroundHooks();
 
           return {
             success: false,
@@ -671,6 +673,7 @@ export class TronAgent {
           messageCount: this.contextManager.getMessages().length,
           toolCallCount: this.currentTurn,
         });
+        await this.hookEngine.waitForBackgroundHooks();
 
         this.emit({
           type: 'agent_end',
@@ -703,6 +706,7 @@ export class TronAgent {
       messageCount: this.contextManager.getMessages().length,
       toolCallCount: this.currentTurn,
     });
+    await this.hookEngine.waitForBackgroundHooks();
 
     this.emit({
       type: 'agent_end',

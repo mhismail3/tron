@@ -77,7 +77,9 @@ export type EventType =
   | 'turn.failed'
   // Hook events
   | 'hook.triggered'
-  | 'hook.completed';
+  | 'hook.completed'
+  | 'hook.background_started'
+  | 'hook.background_completed';
 
 // =============================================================================
 // Base Event Structure

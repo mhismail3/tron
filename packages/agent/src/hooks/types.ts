@@ -176,6 +176,13 @@ export type HookHandler = (context: AnyHookContext) => Promise<HookResult>;
 export type HookFilter = (context: AnyHookContext) => boolean;
 
 /**
+ * Hook execution mode
+ * - 'blocking': Agent waits for hook to complete (default)
+ * - 'background': Fire-and-forget, agent continues immediately
+ */
+export type HookExecutionMode = 'blocking' | 'background';
+
+/**
  * Hook definition for registration
  */
 export interface HookDefinition {
@@ -184,6 +191,7 @@ export interface HookDefinition {
   description?: string;
   priority?: number;  // Higher runs first (default: 0)
   timeout?: number;   // Max execution time in ms
+  mode?: HookExecutionMode;  // Default: 'blocking'
   filter?: HookFilter;
   handler: HookHandler;
 }
@@ -193,6 +201,7 @@ export interface HookDefinition {
  */
 export interface RegisteredHook extends HookDefinition {
   registeredAt: string;
+  mode: HookExecutionMode;  // Always defined after registration
 }
 
 /**

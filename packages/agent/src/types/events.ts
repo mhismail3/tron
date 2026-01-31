@@ -387,6 +387,32 @@ export interface HookCompletedEvent extends BaseTronEvent {
   toolCallId?: string;
 }
 
+export interface HookBackgroundStartedEvent extends BaseTronEvent {
+  type: 'hook.background_started';
+  /** Names of background hooks being executed */
+  hookNames: string[];
+  /** Hook event type (PostToolUse, SessionEnd, etc.) */
+  hookEvent: string;
+  /** Unique ID to correlate started/completed events */
+  executionId: string;
+}
+
+export interface HookBackgroundCompletedEvent extends BaseTronEvent {
+  type: 'hook.background_completed';
+  /** Names of background hooks that were executed */
+  hookNames: string[];
+  /** Hook event type (PostToolUse, SessionEnd, etc.) */
+  hookEvent: string;
+  /** Unique ID to correlate started/completed events */
+  executionId: string;
+  /** Result: 'continue' if all succeeded, 'error' if any failed */
+  result: 'continue' | 'error';
+  /** Execution duration in milliseconds */
+  duration: number;
+  /** Error message if result is 'error' */
+  error?: string;
+}
+
 /**
  * Session events
  */
@@ -613,6 +639,8 @@ export type TronEvent =
   | ToolCallArgumentDeltaEvent
   | HookTriggeredEvent
   | HookCompletedEvent
+  | HookBackgroundStartedEvent
+  | HookBackgroundCompletedEvent
   | SessionSavedEvent
   | SessionLoadedEvent
   | ContextWarningEvent

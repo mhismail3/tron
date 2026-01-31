@@ -21,7 +21,12 @@ import type { PlanModeEnteredEvent, PlanModeExitedEvent, PlanCreatedEvent } from
 import type { SubagentSpawnedEvent, SubagentStatusUpdateEvent, SubagentCompletedEvent, SubagentFailedEvent } from './subagent.js';
 import type { TodoWriteEvent } from './todo.js';
 import type { TurnFailedEvent } from './turn.js';
-import type { HookTriggeredEvent, HookCompletedEvent } from './hook.js';
+import type {
+  HookTriggeredEvent,
+  HookCompletedEvent,
+  HookBackgroundStartedEvent,
+  HookBackgroundCompletedEvent,
+} from './hook.js';
 
 // =============================================================================
 // Union Type
@@ -89,4 +94,6 @@ export type SessionEvent =
   | TurnFailedEvent
   // Hook events
   | HookTriggeredEvent
-  | HookCompletedEvent;
+  | HookCompletedEvent
+  | HookBackgroundStartedEvent
+  | HookBackgroundCompletedEvent;
