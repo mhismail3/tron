@@ -33,7 +33,16 @@ import type { GoogleOAuthEndpoint } from '../auth/index.js';
 import { HookEngine } from '../hooks/engine.js';
 import { ContextManager, createContextManager } from '../context/context-manager.js';
 import type { Summarizer } from '../context/summarizer.js';
-import type { HookDefinition, HookType, HookResult, AnyHookContext } from '../hooks/types.js';
+import type {
+  HookDefinition,
+  HookType,
+  HookResult,
+  AnyHookContext,
+  SessionStartHookContext,
+  SessionEndHookContext,
+  UserPromptSubmitHookContext,
+  StopHookContext,
+} from '../hooks/types.js';
 import { createLogger } from '../logging/index.js';
 import type {
   AgentConfig,
@@ -418,96 +427,65 @@ export class TronAgent {
 
   /**
    * Execute a lifecycle hook with proper event emission.
-   * Follows fail-open pattern - errors are logged but don't stop execution.
+   * Uses HookEngine.executeWithEvents() for centralized hook lifecycle management.
    */
   private async executeLifecycleHook(
     hookType: HookType,
     data: Record<string, unknown>
   ): Promise<HookResult> {
-    const hooks = this.hookEngine.getHooks(hookType);
-    const startTime = Date.now();
+    const context = this.buildHookContext(hookType, data);
+    return this.hookEngine.executeWithEvents(hookType, context, this.eventEmitter);
+  }
 
-    // Build context based on hook type
-    let context: Record<string, unknown>;
+  /**
+   * Build a typed hook context based on hook type
+   */
+  private buildHookContext(hookType: HookType, data: Record<string, unknown>): AnyHookContext {
+    const base = {
+      sessionId: this.sessionId,
+      timestamp: new Date().toISOString(),
+      data,
+    };
+
     switch (hookType) {
       case 'SessionStart':
-        context = {
-          hookType,
-          sessionId: this.sessionId,
-          timestamp: new Date().toISOString(),
-          data,
-          workingDirectory: data.workingDirectory ?? this.workingDirectory,
-        };
-        break;
+        return {
+          ...base,
+          hookType: 'SessionStart',
+          workingDirectory: (data.workingDirectory as string) ?? this.workingDirectory,
+        } satisfies SessionStartHookContext;
+
       case 'SessionEnd':
-        context = {
-          hookType,
-          sessionId: this.sessionId,
-          timestamp: new Date().toISOString(),
-          data,
-          messageCount: data.messageCount ?? this.contextManager.getMessages().length,
-          toolCallCount: data.toolCallCount ?? this.currentTurn,
-        };
-        break;
+        return {
+          ...base,
+          hookType: 'SessionEnd',
+          messageCount: (data.messageCount as number) ?? this.contextManager.getMessages().length,
+          toolCallCount: (data.toolCallCount as number) ?? this.currentTurn,
+        } satisfies SessionEndHookContext;
+
       case 'UserPromptSubmit':
-        context = {
-          hookType,
-          sessionId: this.sessionId,
-          timestamp: new Date().toISOString(),
-          data,
-          prompt: data.prompt,
-        };
-        break;
+        return {
+          ...base,
+          hookType: 'UserPromptSubmit',
+          prompt: data.prompt as string,
+        } satisfies UserPromptSubmitHookContext;
+
       case 'Stop':
-        context = {
-          hookType,
-          sessionId: this.sessionId,
-          timestamp: new Date().toISOString(),
-          data,
-          stopReason: data.stopReason,
-          finalMessage: data.finalMessage,
-        };
-        break;
+        return {
+          ...base,
+          hookType: 'Stop',
+          stopReason: data.stopReason as string,
+          finalMessage: data.finalMessage as string | undefined,
+        } satisfies StopHookContext;
+
       default:
-        context = {
+        // For other hook types, return base context with hookType
+        // This handles cases where we don't have a specific context builder
+        return {
+          ...base,
           hookType,
-          sessionId: this.sessionId,
-          timestamp: new Date().toISOString(),
-          data,
-        };
+        } as AnyHookContext;
     }
-
-    // Emit triggered event if hooks exist
-    if (hooks.length > 0) {
-      this.emit({
-        type: 'hook_triggered',
-        sessionId: this.sessionId,
-        timestamp: new Date().toISOString(),
-        hookNames: hooks.map(h => h.name),
-        hookEvent: hookType,
-      } as import('../types/index.js').TronEvent);
-    }
-
-    // Execute with fail-open (HookEngine already handles errors)
-    // Cast through unknown to satisfy TypeScript - context structure matches AnyHookContext
-    const result = await this.hookEngine.execute(hookType, context as unknown as AnyHookContext);
-    const duration = Date.now() - startTime;
-
-    // Emit completed event if hooks exist
-    if (hooks.length > 0) {
-      this.emit({
-        type: 'hook_completed',
-        sessionId: this.sessionId,
-        timestamp: new Date().toISOString(),
-        hookNames: hooks.map(h => h.name),
-        hookEvent: hookType,
-        result: result.action,
-        duration,
-        reason: result.reason,
-      } as import('../types/index.js').TronEvent);
-    }
-
-    return result;
   }
 
   // ===========================================================================

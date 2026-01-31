@@ -244,7 +244,7 @@ export class AgentToolExecutor implements IToolExecutor {
   }
 
   /**
-   * Execute pre-tool hooks
+   * Execute pre-tool hooks using centralized executeWithEvents
    */
   private async executePreHooks(
     request: ToolExecutionRequest
@@ -259,36 +259,7 @@ export class AgentToolExecutor implements IToolExecutor {
       toolCallId: request.toolCallId,
     };
 
-    const preHooks = this.hookEngine.getHooks('PreToolUse');
-    const preHookStartTime = Date.now();
-    if (preHooks.length > 0) {
-      this.eventEmitter.emit({
-        type: 'hook_triggered',
-        sessionId: this.sessionId,
-        timestamp: new Date().toISOString(),
-        hookNames: preHooks.map(h => h.name),
-        hookEvent: 'PreToolUse',
-        toolName: request.toolName,
-        toolCallId: request.toolCallId,
-      });
-    }
-
-    const preResult = await this.hookEngine.execute('PreToolUse', preContext);
-
-    if (preHooks.length > 0) {
-      this.eventEmitter.emit({
-        type: 'hook_completed',
-        sessionId: this.sessionId,
-        timestamp: new Date().toISOString(),
-        hookNames: preHooks.map(h => h.name),
-        hookEvent: 'PreToolUse',
-        result: preResult.action,
-        duration: Date.now() - preHookStartTime,
-        reason: preResult.reason,
-        toolName: request.toolName,
-        toolCallId: request.toolCallId,
-      });
-    }
+    const preResult = await this.hookEngine.executeWithEvents('PreToolUse', preContext, this.eventEmitter);
 
     if (preResult.action === 'block') {
       logger.info('Tool blocked by PreToolUse hook', {
@@ -296,7 +267,6 @@ export class AgentToolExecutor implements IToolExecutor {
         toolCallId: request.toolCallId,
         sessionId: this.sessionId,
         reason: preResult.reason,
-        hooks: preHooks.map(h => h.name),
       });
       return { blocked: true, reason: preResult.reason };
     }
@@ -318,7 +288,7 @@ export class AgentToolExecutor implements IToolExecutor {
   }
 
   /**
-   * Execute post-tool hooks
+   * Execute post-tool hooks using centralized executeWithEvents
    */
   private async executePostHooks(
     request: ToolExecutionRequest,
@@ -336,36 +306,7 @@ export class AgentToolExecutor implements IToolExecutor {
       duration,
     };
 
-    const postHooks = this.hookEngine.getHooks('PostToolUse');
-    const postHookStartTime = Date.now();
-    if (postHooks.length > 0) {
-      this.eventEmitter.emit({
-        type: 'hook_triggered',
-        sessionId: this.sessionId,
-        timestamp: new Date().toISOString(),
-        hookNames: postHooks.map(h => h.name),
-        hookEvent: 'PostToolUse',
-        toolName: request.toolName,
-        toolCallId: request.toolCallId,
-      });
-    }
-
-    const postResult = await this.hookEngine.execute('PostToolUse', postContext);
-
-    if (postHooks.length > 0) {
-      this.eventEmitter.emit({
-        type: 'hook_completed',
-        sessionId: this.sessionId,
-        timestamp: new Date().toISOString(),
-        hookNames: postHooks.map(h => h.name),
-        hookEvent: 'PostToolUse',
-        result: postResult.action,
-        duration: Date.now() - postHookStartTime,
-        reason: postResult.reason,
-        toolName: request.toolName,
-        toolCallId: request.toolCallId,
-      });
-    }
+    await this.hookEngine.executeWithEvents('PostToolUse', postContext, this.eventEmitter);
   }
 
   /**

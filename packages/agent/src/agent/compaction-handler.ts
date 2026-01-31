@@ -76,50 +76,23 @@ export class AgentCompactionHandler implements ICompactionHandler {
   }
 
   /**
-   * Execute PreCompact hook with event emission.
+   * Execute PreCompact hook using centralized executeWithEvents
    */
   private async executePreCompactHook(tokensBefore: number): Promise<void> {
     if (!this.hookEngine) return;
 
-    const hooks = this.hookEngine.getHooks('PreCompact');
-    if (hooks.length === 0) return;
-
-    const startTime = Date.now();
     const contextLimit = this.contextManager.getContextLimit();
 
-    // Emit hook_triggered event
-    this.eventEmitter.emit({
-      type: 'hook_triggered',
-      sessionId: this.sessionId,
-      timestamp: new Date().toISOString(),
-      hookNames: hooks.map(h => h.name),
-      hookEvent: 'PreCompact',
-    });
-
-    // Build PreCompact context
     const context: PreCompactHookContext = {
       hookType: 'PreCompact',
       sessionId: this.sessionId,
       timestamp: new Date().toISOString(),
       data: {},
       currentTokens: tokensBefore,
-      targetTokens: Math.floor(contextLimit * 0.70), // Target ~70% of context limit
+      targetTokens: Math.floor(contextLimit * 0.70),
     };
 
-    // Execute with fail-open (HookEngine handles errors)
-    const result = await this.hookEngine.execute('PreCompact', context);
-
-    // Emit hook_completed event
-    this.eventEmitter.emit({
-      type: 'hook_completed',
-      sessionId: this.sessionId,
-      timestamp: new Date().toISOString(),
-      hookNames: hooks.map(h => h.name),
-      hookEvent: 'PreCompact',
-      result: result.action,
-      duration: Date.now() - startTime,
-      reason: result.reason,
-    });
+    await this.hookEngine.executeWithEvents('PreCompact', context, this.eventEmitter);
   }
 
   /**

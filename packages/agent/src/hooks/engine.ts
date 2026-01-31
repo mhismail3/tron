@@ -10,7 +10,10 @@ import type {
   HookDefinition,
   RegisteredHook,
   AnyHookContext,
+  PreToolHookContext,
+  PostToolHookContext,
 } from './types.js';
+import type { TronEvent } from '../types/index.js';
 import { createLogger, categorizeError, LogErrorCategory, LogErrorCodes } from '../logging/index.js';
 import { getSettings } from '../settings/index.js';
 import type { HookSettings } from '../settings/types.js';
@@ -170,6 +173,110 @@ export class HookEngine {
       action: 'continue',
       message: messages.join('\n') || undefined,
     };
+  }
+
+  /**
+   * Execute hooks with automatic event emission.
+   *
+   * This is the preferred method for hook invocation - it handles:
+   * 1. Getting hooks by type (sorted by priority)
+   * 2. Emitting hook_triggered event if hooks exist
+   * 3. Executing all hooks with fail-open error handling
+   * 4. Emitting hook_completed event with duration
+   * 5. Returning the aggregated result
+   *
+   * @param type - Hook type to execute
+   * @param context - Type-safe hook context
+   * @param eventEmitter - Event emitter for hook lifecycle events
+   * @returns HookResult with action and optional modifications
+   */
+  async executeWithEvents(
+    type: HookType,
+    context: AnyHookContext,
+    eventEmitter: { emit: (event: TronEvent) => void }
+  ): Promise<HookResult> {
+    const hooks = this.getHooks(type);
+    const startTime = Date.now();
+    const hookNames = hooks.map(h => h.name);
+
+    // Log hook execution start
+    logger.info('executeWithEvents started', {
+      hookType: type,
+      sessionId: context.sessionId,
+      hookCount: hooks.length,
+      hookNames,
+      ...(this.isToolContext(context) && {
+        toolName: context.toolName,
+        toolCallId: context.toolCallId,
+      }),
+    });
+
+    // Only emit events if hooks are registered
+    if (hooks.length > 0) {
+      // Build event with optional tool context
+      const triggeredEvent: TronEvent = {
+        type: 'hook_triggered',
+        sessionId: context.sessionId,
+        timestamp: new Date().toISOString(),
+        hookNames,
+        hookEvent: type,
+        // Include tool context if present in context
+        ...(this.isToolContext(context) && {
+          toolName: context.toolName,
+          toolCallId: context.toolCallId,
+        }),
+      };
+      eventEmitter.emit(triggeredEvent);
+    }
+
+    // Execute hooks (HookEngine.execute already handles fail-open)
+    const result = await this.execute(type, context);
+    const duration = Date.now() - startTime;
+
+    // Emit completed event with result
+    if (hooks.length > 0) {
+      const completedEvent: TronEvent = {
+        type: 'hook_completed',
+        sessionId: context.sessionId,
+        timestamp: new Date().toISOString(),
+        hookNames,
+        hookEvent: type,
+        result: result.action,
+        duration,
+        reason: result.reason,
+        // Include tool context if present
+        ...(this.isToolContext(context) && {
+          toolName: context.toolName,
+          toolCallId: context.toolCallId,
+        }),
+      };
+      eventEmitter.emit(completedEvent);
+    }
+
+    // Log hook execution complete
+    logger.info('executeWithEvents completed', {
+      hookType: type,
+      sessionId: context.sessionId,
+      hookCount: hooks.length,
+      result: result.action,
+      duration,
+      reason: result.reason,
+      ...(this.isToolContext(context) && {
+        toolName: context.toolName,
+        toolCallId: context.toolCallId,
+      }),
+    });
+
+    return result;
+  }
+
+  /**
+   * Type guard to check if context has tool-related fields
+   */
+  private isToolContext(
+    context: AnyHookContext
+  ): context is PreToolHookContext | PostToolHookContext {
+    return 'toolName' in context && 'toolCallId' in context;
   }
 
   /**
