@@ -319,6 +319,7 @@ export class EventStoreOrchestrator extends EventEmitter {
     // Initialize AgentFactory (delegated module)
     // Load external service API keys from ~/.tron/auth.json
     const braveAuth = getServiceAuthSync('brave');
+    const exaAuth = getServiceAuthSync('exa');
 
     this.agentFactory = createAgentFactory({
       getAuthForProvider: (model) => this.authProvider.getAuthForProvider(model),
@@ -331,6 +332,7 @@ export class EventStoreOrchestrator extends EventEmitter {
       generateTodoId: () => `todo_${crypto.randomUUID().replace(/-/g, '').slice(0, 12)}`,
       dbPath: this.eventStore.dbPath,
       braveSearchApiKey: braveAuth?.apiKey,
+      exaApiKey: exaAuth?.apiKey,
       blockedWebDomains: config.blockedWebDomains,
       onNotify: this.apnsService ? async (sessionId, notification, toolCallId) => {
         return this.notificationController.sendNotification(sessionId, notification, toolCallId);

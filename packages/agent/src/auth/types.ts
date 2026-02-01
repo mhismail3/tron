@@ -51,7 +51,7 @@ export type ProviderId = 'anthropic' | 'openai-codex' | 'openai' | 'google' | st
 /**
  * Known service identifiers (external APIs, not LLM providers)
  */
-export type ServiceId = 'brave' | string;
+export type ServiceId = 'brave' | 'exa' | string;
 
 /**
  * External service configuration

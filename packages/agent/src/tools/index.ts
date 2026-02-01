@@ -107,10 +107,35 @@ export {
   type WebFetchResult,
   type SubagentSpawnCallback as WebFetchSubagentCallback,
   type SubagentSpawnResult as WebFetchSubagentResult,
-  // WebSearch v2 - comprehensive Brave API support
+  // UnifiedSearchTool - multi-provider search (Brave + Exa)
+  UnifiedSearchTool,
+  type UnifiedSearchConfig,
+  type UnifiedSearchParams,
+  // Provider implementations
+  BraveProvider,
+  type BraveProviderConfig,
+  ExaProvider,
+  type ExaProviderConfig,
+  // Provider interface
+  type SearchProvider,
+  type ProviderName,
+  type ContentType,
+  type Freshness,
+  type ProviderCapabilities,
+  type ProviderSearchParams,
+  type UnifiedResult,
+  // Exa API components
+  ExaClient,
+  type ExaSearchParams as ExaApiSearchParams,
+  type ExaSearchResponse,
+  type ExaResult,
+  type ExaClientConfig,
+  type ExaSearchType,
+  type ExaCategory,
+  // WebSearch v2 - Brave-only (legacy, use UnifiedSearchTool)
   WebSearchToolV2,
   type WebSearchV2Config,
-  // Legacy WebSearch - deprecated, use WebSearchToolV2
+  // Legacy WebSearch - deprecated
   WebSearchTool,
   type WebSearchToolConfig,
   type WebSearchParams,

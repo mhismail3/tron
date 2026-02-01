@@ -3,18 +3,43 @@
  *
  * Tools for fetching and searching web content:
  * - WebFetch: Fetch URLs and analyze content with Haiku subagent
- * - WebSearch: Search the web using Brave Search API (v2 with full API support)
+ * - WebSearch: Search the web with multiple providers (Brave + Exa)
  */
 
 // Main tools
 export { WebFetchTool } from './web-fetch.js';
+export { UnifiedSearchTool, type UnifiedSearchConfig, type UnifiedSearchParams } from './unified-search.js';
+// Legacy exports - WebSearchToolV2 for Brave-only, WebSearchTool deprecated
 export { WebSearchToolV2, type WebSearchV2Config } from './web-search-v2.js';
-// Legacy export - deprecated, use WebSearchToolV2
 export { WebSearchTool } from './web-search.js';
 
-// New Brave API components
+// Brave API components
 export { BraveKeyRotator, KeyRotatorError, type KeyRotatorConfig, type RotatorStatus, type PublicKeyState } from './brave-key-rotator.js';
 export { BraveMultiClient, type BraveMultiClientConfig, type BraveSearchParams, type BraveSearchResult } from './brave-multi-client.js';
+
+// Exa API components
+export { ExaClient } from './exa-client.js';
+export type {
+  ExaSearchParams,
+  ExaSearchResponse,
+  ExaResult,
+  ExaClientConfig,
+  ExaSearchType,
+  ExaCategory,
+} from './exa-types.js';
+
+// Unified provider interface
+export type {
+  SearchProvider,
+  ProviderName,
+  ContentType,
+  Freshness,
+  ProviderCapabilities,
+  ProviderSearchParams,
+  UnifiedResult,
+} from './providers/types.js';
+export { BraveProvider, type BraveProviderConfig } from './providers/brave-provider.js';
+export { ExaProvider, type ExaProviderConfig } from './providers/exa-provider.js';
 
 // Brave API types
 export type {

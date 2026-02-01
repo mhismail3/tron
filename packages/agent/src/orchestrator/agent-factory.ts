@@ -29,7 +29,9 @@ import {
   TodoWriteTool,
   NotifyAppTool,
   WebFetchTool,
-  WebSearchToolV2,
+  UnifiedSearchTool,
+  BraveProvider,
+  ExaProvider,
   filterToolsByDenial,
   type BrowserDelegate,
   type SpawnSubagentParams,
@@ -39,6 +41,7 @@ import {
   type ToolDenialConfig,
   type WebFetchSubagentCallback,
   type WebFetchSubagentResult,
+  type SearchProvider,
 } from '../tools/index.js';
 import type { TronTool } from '../types/tools.js';
 import type { SessionId } from '../events/types.js';
@@ -108,6 +111,8 @@ export interface AgentFactoryConfig {
   braveSearchApiKeys?: string[];
   /** @deprecated Use braveSearchApiKeys instead */
   braveSearchApiKey?: string;
+  /** Exa Search API key (optional - enables semantic search, tweets, research) */
+  exaApiKey?: string;
   /** Blocked domains for web tools (optional) */
   blockedWebDomains?: string[];
   /** Callback for sending push notifications (optional) */
@@ -264,7 +269,7 @@ export class AgentFactory {
       })
     );
 
-    // Add WebSearch tool if Brave Search API key(s) are configured
+    // Add WebSearch tool (UnifiedSearchTool with Brave + Exa providers)
     // Support both new braveSearchApiKeys array and legacy braveSearchApiKey
     const braveApiKeys = this.config.braveSearchApiKeys?.length
       ? this.config.braveSearchApiKeys
@@ -272,10 +277,24 @@ export class AgentFactory {
         ? [this.config.braveSearchApiKey]
         : [];
 
+    const exaApiKey = this.config.exaApiKey;
+
+    // Build providers object
+    const searchProviders: { brave?: SearchProvider; exa?: SearchProvider } = {};
+
     if (braveApiKeys.length > 0) {
+      searchProviders.brave = new BraveProvider({ apiKeys: braveApiKeys });
+    }
+
+    if (exaApiKey) {
+      searchProviders.exa = new ExaProvider({ apiKey: exaApiKey });
+    }
+
+    // Add unified search if at least one provider is available
+    if (Object.keys(searchProviders).length > 0) {
       tools.push(
-        new WebSearchToolV2({
-          apiKeys: braveApiKeys,
+        new UnifiedSearchTool({
+          providers: searchProviders,
           blockedDomains: this.config.blockedWebDomains,
         })
       );

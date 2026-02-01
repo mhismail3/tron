@@ -350,34 +350,93 @@ Fetch content from a URL and process it with a prompt. Use for reading web pages
 #### WebSearch
 
 <description>
-Search the web using Brave Search API. Use for finding current information, documentation, tutorials, or any web-based research.
+Multi-provider web search using Brave and Exa. Each provider has unique strengths - use the right one for the task.
 </description>
 
+<providers>
+**Brave** (default): Fast, reliable general web search
+- Best for: general queries, images, videos, documentation
+- Freshness: day/week/month/year (no hour-level)
+
+**Exa**: Semantic/neural search with unique capabilities
+- Best for: recent news (hour-level!), tweets/social, research papers
+- Freshness: hour/day/week/month/year (supports hour-level filtering)
+- Requires specific queries - generic queries return landing pages without dates
+</providers>
+
 <usage>
-- Returns search results with titles, URLs, and snippets
-- Use `allowedDomains` to restrict to specific sites
-- Use `blockedDomains` to exclude specific sites
-- Limit results with `maxResults`
-- Use liberally for any question that might benefit from current web information
-- For comprehensive research, follow up with WebFetch on the best results
+- By default, queries both providers and merges results
+- Use `providers: ["exa"]` for hour-level freshness or social/research content
+- Use `providers: ["brave"]` for images or videos
+- Use `freshness` for time filtering: "hour", "day", "week", "month", "year"
+- Use `contentType` for specialized search: "web", "news", "social", "research", "images", "videos"
+- Use `includeDomains`/`excludeDomains` for domain filtering
 </usage>
 
+<critical>
+**For hour-level news searches (Exa):**
+- Use SPECIFIC queries, not generic ones like "AI news"
+- Generic queries return category landing pages without dates, which get filtered out
+- Good: "OpenAI GPT-5 announcement" or "Tesla earnings report today"
+- Bad: "AI news" or "tech news" (returns landing pages)
+
+**For tweets/social content:**
+- Use `contentType: "social"` with `providers: ["exa"]`
+- Note: Exa's tweet index is NOT real-time - may be days/weeks behind
+- Don't combine with tight freshness filters (hour/day) - use without freshness for best results
+
+**For research papers:**
+- Use `contentType: "research"` with `providers: ["exa"]`
+</critical>
+
 <parameters>
-- `query` (required): Search query
-- `maxResults` (optional): Maximum number of results to return
-- `allowedDomains` (optional): Array of domains to restrict search to
-- `blockedDomains` (optional): Array of domains to exclude
+- `query` (required): Search query - be specific for time-filtered searches
+- `providers` (optional): ["brave", "exa"] - which providers to use
+- `count` (optional): Number of results per provider (default: 10)
+- `freshness` (optional): "hour" | "day" | "week" | "month" | "year"
+- `contentType` (optional): "web" | "news" | "social" | "research" | "images" | "videos"
+- `includeDomains` (optional): Only include these domains
+- `excludeDomains` (optional): Exclude these domains
 </parameters>
 
-<example>
+<examples>
 ```json
+// Recent news (last hour) - use specific query!
+{
+  "query": "OpenAI announces new model",
+  "providers": ["exa"],
+  "freshness": "hour",
+  "contentType": "news"
+}
+
+// What people are saying on Twitter
+{
+  "query": "reactions to Apple Vision Pro",
+  "providers": ["exa"],
+  "contentType": "social"
+}
+
+// Research papers
+{
+  "query": "transformer architecture improvements",
+  "providers": ["exa"],
+  "contentType": "research"
+}
+
+// General web search (both providers)
 {
   "query": "TypeScript generics tutorial",
-  "maxResults": 5,
-  "allowedDomains": ["developer.mozilla.org", "typescriptlang.org"]
+  "count": 5
+}
+
+// Images
+{
+  "query": "React component diagrams",
+  "providers": ["brave"],
+  "contentType": "images"
 }
 ```
-</example>
+</examples>
 
 <research-pattern>
 For comprehensive research, combine WebSearch + WebFetch:
