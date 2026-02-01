@@ -1,0 +1,40 @@
+{
+  "name": "@tron/dashboard",
+  "version": "0.1.0",
+  "description": "Tron Dashboard: Session viewer for browsing agent sessions and events",
+  "type": "module",
+  "scripts": {
+    "build": "vite build",
+    "dev": "concurrently -n api,vite -c blue,green \"tsx server.ts\" \"vite\"",
+    "dev:api": "tsx server.ts",
+    "dev:vite": "vite",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit",
+    "clean": "rm -rf dist .turbo"
+  },
+  "dependencies": {
+    "@tron/agent": "workspace:*",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^16.1.0",
+    "@types/node": "^22.10.1",
+    "@types/react": "^18.3.17",
+    "@types/react-dom": "^18.3.5",
+    "@vitejs/plugin-react": "^4.3.0",
+    "concurrently": "^9.0.0",
+    "jsdom": "^25.0.1",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.2",
+    "vite": "^6.4.0",
+    "vitest": "^3.0.0"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "author": "Tron Agent Project",
+  "license": "MIT"
+}

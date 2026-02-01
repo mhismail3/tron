@@ -121,6 +121,7 @@ export {
 // Uses modular facade architecture
 export {
   SQLiteEventStore,
+  createSQLiteEventStore,
   type SQLiteBackendConfig,
   type CreateWorkspaceOptions,
   type SessionRow,
