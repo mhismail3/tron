@@ -29,7 +29,7 @@ import {
   TodoWriteTool,
   NotifyAppTool,
   WebFetchTool,
-  WebSearchTool,
+  WebSearchToolV2,
   filterToolsByDenial,
   type BrowserDelegate,
   type SpawnSubagentParams,
@@ -104,7 +104,9 @@ export interface AgentFactoryConfig {
   dbPath: string;
   /** Anthropic API key for WebFetch summarizer (optional - enables WebFetch if provided) */
   anthropicApiKey?: string;
-  /** Brave Search API key (optional - enables WebSearch if provided) */
+  /** Brave Search API keys (optional - enables WebSearch if provided) */
+  braveSearchApiKeys?: string[];
+  /** @deprecated Use braveSearchApiKeys instead */
   braveSearchApiKey?: string;
   /** Blocked domains for web tools (optional) */
   blockedWebDomains?: string[];
@@ -262,12 +264,18 @@ export class AgentFactory {
       })
     );
 
-    // Add WebSearch tool if Brave Search API key is configured
-    if (this.config.braveSearchApiKey) {
+    // Add WebSearch tool if Brave Search API key(s) are configured
+    // Support both new braveSearchApiKeys array and legacy braveSearchApiKey
+    const braveApiKeys = this.config.braveSearchApiKeys?.length
+      ? this.config.braveSearchApiKeys
+      : this.config.braveSearchApiKey
+        ? [this.config.braveSearchApiKey]
+        : [];
+
+    if (braveApiKeys.length > 0) {
       tools.push(
-        new WebSearchTool({
-          apiKey: this.config.braveSearchApiKey,
-          defaultMaxResults: 10,
+        new WebSearchToolV2({
+          apiKeys: braveApiKeys,
           blockedDomains: this.config.blockedWebDomains,
         })
       );

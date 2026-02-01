@@ -57,7 +57,10 @@ export type ServiceId = 'brave' | string;
  * External service configuration
  */
 export interface ServiceAuth {
+  /** Single API key (legacy, still supported) */
   apiKey?: string;
+  /** Multiple API keys for rotation (takes precedence over apiKey) */
+  apiKeys?: string[];
 }
 
 /**

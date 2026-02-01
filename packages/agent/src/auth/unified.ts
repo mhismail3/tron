@@ -131,6 +131,56 @@ export function getServiceAuthSync(service: ServiceId): ServiceAuth | null {
   return auth?.services?.[service] ?? null;
 }
 
+/**
+ * Get API keys for a service, supporting both single and multiple key configs.
+ *
+ * If the service has apiKeys[] configured, returns that array.
+ * If only apiKey is configured, returns it as a single-element array.
+ * Returns empty array if no keys are configured.
+ *
+ * @param service - Service identifier (e.g., 'brave')
+ * @returns Array of API keys for the service
+ */
+export function getServiceApiKeys(service: ServiceId): string[] {
+  const serviceAuth = getServiceAuthSync(service);
+  if (!serviceAuth) {
+    return [];
+  }
+
+  // Prefer apiKeys array if present and non-empty
+  if (serviceAuth.apiKeys && serviceAuth.apiKeys.length > 0) {
+    // Filter out empty strings
+    return serviceAuth.apiKeys.filter((k) => k && k.trim() !== '');
+  }
+
+  // Fall back to single apiKey
+  if (serviceAuth.apiKey && serviceAuth.apiKey.trim() !== '') {
+    return [serviceAuth.apiKey];
+  }
+
+  return [];
+}
+
+/**
+ * Async version of getServiceApiKeys
+ */
+export async function getServiceApiKeysAsync(service: ServiceId): Promise<string[]> {
+  const serviceAuth = await getServiceAuth(service);
+  if (!serviceAuth) {
+    return [];
+  }
+
+  if (serviceAuth.apiKeys && serviceAuth.apiKeys.length > 0) {
+    return serviceAuth.apiKeys.filter((k) => k && k.trim() !== '');
+  }
+
+  if (serviceAuth.apiKey && serviceAuth.apiKey.trim() !== '') {
+    return [serviceAuth.apiKey];
+  }
+
+  return [];
+}
+
 // =============================================================================
 // Save Functions
 // =============================================================================

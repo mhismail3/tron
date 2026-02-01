@@ -107,11 +107,40 @@ export {
   type WebFetchResult,
   type SubagentSpawnCallback as WebFetchSubagentCallback,
   type SubagentSpawnResult as WebFetchSubagentResult,
+  // WebSearch v2 - comprehensive Brave API support
+  WebSearchToolV2,
+  type WebSearchV2Config,
+  // Legacy WebSearch - deprecated, use WebSearchToolV2
   WebSearchTool,
   type WebSearchToolConfig,
   type WebSearchParams,
   type WebSearchResult,
   type SearchResultItem,
+  // Brave API components
+  BraveKeyRotator,
+  KeyRotatorError,
+  type KeyRotatorConfig,
+  type RotatorStatus,
+  type PublicKeyState,
+  BraveMultiClient,
+  type BraveMultiClientConfig,
+  type BraveSearchParams as BraveApiSearchParams,
+  type BraveSearchResult as BraveApiSearchResult,
+  // Brave API types
+  type BraveEndpoint,
+  type BraveWebResult,
+  type BraveNewsResult,
+  type BraveImageResult,
+  type BraveVideoResult,
+  type BraveFreshness,
+  type BraveSafesearch,
+  type BraveWebSearchResponse,
+  type BraveNewsSearchResponse,
+  type BraveImageSearchResponse,
+  type BraveVideoSearchResponse,
+  BRAVE_ENDPOINT_PATHS,
+  BRAVE_ENDPOINT_LIMITS,
+  BRAVE_ENDPOINT_CAPABILITIES,
   // Summarizer
   createSummarizer,
   createHaikuSummarizer,
@@ -125,6 +154,7 @@ export {
   type HtmlParserConfig,
   WebCache,
   type WebCacheConfig,
+  // Legacy Brave client - deprecated, use BraveMultiClient
   BraveSearchClient,
   type BraveSearchClientConfig,
 } from './web/index.js';
