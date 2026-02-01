@@ -18,6 +18,8 @@ export interface RpcRequest<TMethod extends string = string, TParams = unknown> 
   method: TMethod;
   /** Method parameters */
   params?: TParams;
+  /** Optional idempotency key for request deduplication */
+  idempotencyKey?: string;
 }
 
 /**
@@ -62,6 +64,8 @@ export interface RpcEvent<TType extends string = string, TData = unknown> {
   timestamp: string;
   /** Event-specific data */
   data: TData;
+  /** Run ID for correlating events to agent runs */
+  runId?: string;
 }
 
 // =============================================================================
@@ -157,4 +161,15 @@ export type RpcMethod =
   // Plan mode operations
   | 'plan.enter'
   | 'plan.exit'
-  | 'plan.getState';
+  | 'plan.getState'
+  // Inter-agent communication
+  | 'communication.send'
+  | 'communication.receive'
+  | 'communication.subscribe'
+  | 'communication.unsubscribe'
+  // Self-deployment operations
+  | 'deployment.trigger'
+  | 'deployment.status'
+  | 'deployment.approve'
+  | 'deployment.rollback'
+  | 'deployment.healthCheck';

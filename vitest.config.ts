@@ -7,6 +7,7 @@ export default defineConfig({
     environment: 'node',
     include: [
       'packages/*/src/**/*.test.ts',      // Co-located tests
+      'packages/*/src/**/__tests__/*.test.ts',  // Tests in __tests__ folders
     ],
     exclude: ['**/node_modules/**', '**/dist/**', 'packages/chat-web/**'],
     coverage: {

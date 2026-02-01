@@ -9,7 +9,7 @@
  */
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { AgentFactory, createAgentFactory, type AgentFactoryConfig } from '../agent-factory.js';
-import { WebFetchTool, WebSearchTool } from '../../tools/index.js';
+import { WebFetchTool, UnifiedSearchTool } from '../../tools/index.js';
 
 // =============================================================================
 // Test Fixtures
@@ -163,11 +163,11 @@ describe('AgentFactory Web Tools', () => {
         'claude-sonnet-4-20250514'
       );
 
-      // Check that WebSearch is in the tools list
+      // Check that WebSearch is in the tools list (now using UnifiedSearchTool)
       const tools = (agent as any).config.tools;
       const webSearchTool = tools.find((t: any) => t.name === 'WebSearch');
       expect(webSearchTool).toBeDefined();
-      expect(webSearchTool).toBeInstanceOf(WebSearchTool);
+      expect(webSearchTool).toBeInstanceOf(UnifiedSearchTool);
     });
 
     it('passes blocked domains to WebSearch', async () => {
@@ -186,12 +186,12 @@ describe('AgentFactory Web Tools', () => {
 
       // Check that WebSearch has the blocked domains configured
       const tools = (agent as any).config.tools;
-      const webSearchTool = tools.find((t: any) => t.name === 'WebSearch') as WebSearchTool;
+      const webSearchTool = tools.find((t: any) => t.name === 'WebSearch') as UnifiedSearchTool;
       expect(webSearchTool).toBeDefined();
 
-      // The tool should have blocked domains configured
-      const toolConfig = (webSearchTool as any).config;
-      expect(toolConfig.blockedDomains).toEqual(blockedDomains);
+      // The tool should have blocked domains configured (stored as configBlockedDomains)
+      const configBlockedDomains = (webSearchTool as any).configBlockedDomains;
+      expect(configBlockedDomains).toEqual(blockedDomains);
     });
   });
 
@@ -235,10 +235,10 @@ describe('AgentFactory Web Tools', () => {
       const webSearchTool = tools.find((t: any) => t.name === 'WebSearch');
 
       const fetchConfig = (webFetchTool as any).config;
-      const searchConfig = (webSearchTool as any).config;
+      const searchBlockedDomains = (webSearchTool as any).configBlockedDomains;
 
       expect(fetchConfig.urlValidator?.blockedDomains).toEqual(blockedDomains);
-      expect(searchConfig.blockedDomains).toEqual(blockedDomains);
+      expect(searchBlockedDomains).toEqual(blockedDomains);
     });
   });
 

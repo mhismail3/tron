@@ -18,13 +18,14 @@ describe('System Prompts', () => {
   describe('TRON_CORE_PROMPT', () => {
     it('contains Tron identity', () => {
       expect(TRON_CORE_PROMPT).toContain('You are Tron');
-      expect(TRON_CORE_PROMPT).toContain('general-purpose computer agent');
+      // Updated to match new core.md content which describes Tron's personality
+      expect(TRON_CORE_PROMPT).toContain('curious');
     });
 
     it('is the default prompt loaded from core.md', () => {
       // TRON_CORE_PROMPT is loaded from core.md at module initialization.
       // Users can override via project .tron/SYSTEM.md
-      expect(TRON_CORE_PROMPT).toContain('provided tools');
+      expect(TRON_CORE_PROMPT).toContain('First principles');
       // Should have tool documentation
       expect(TRON_CORE_PROMPT).toContain('Read');
       expect(TRON_CORE_PROMPT).toContain('Write');
@@ -292,7 +293,8 @@ Follow these guidelines:
 
         const prompt = cm.getSystemPrompt();
         expect(prompt).toContain('You are Tron');
-        expect(prompt).toContain('general-purpose computer agent');
+        // Updated to match new core.md content
+        expect(prompt).toContain('curious');
       });
 
       it('prioritizes programmatic systemPrompt over file-based', () => {

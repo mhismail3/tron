@@ -2,13 +2,15 @@
  * @fileoverview Tools module exports
  *
  * Tools are organized by domain:
- * - fs/       - Filesystem operations (read, write, edit, find)
- * - subagent/ - Subagent management (spawn, query, wait, tracker)
- * - browser/  - Browser automation (open-url, browse-the-web)
- * - system/   - System commands (bash)
- * - search/   - Code search (unified text + AST search)
- * - ui/       - User interaction (ask-user-question, todo-write, notify-app, render-app-ui)
- * - web/      - Web fetching and searching (web-fetch, web-search)
+ * - fs/            - Filesystem operations (read, write, edit, find)
+ * - subagent/      - Subagent management (spawn, query, wait, tracker)
+ * - browser/       - Browser automation (open-url, browse-the-web)
+ * - system/        - System commands (bash)
+ * - search/        - Code search (unified text + AST search)
+ * - ui/            - User interaction (ask-user-question, todo-write, notify-app, render-app-ui)
+ * - web/           - Web fetching and searching (web-fetch, web-search)
+ * - communication/ - Inter-agent messaging (send-message, receive-messages)
+ * - deployment/    - Self-deployment (deploy, check-deployment)
  */
 
 // Filesystem tools
@@ -183,6 +185,31 @@ export {
   BraveSearchClient,
   type BraveSearchClientConfig,
 } from './web/index.js';
+
+// Communication tools
+export {
+  SendMessageTool,
+  type SendMessageToolConfig,
+  ReceiveMessagesTool,
+  type ReceiveMessagesToolConfig,
+  type SendMessageParams,
+  type SendMessageResult,
+  type ReceiveMessagesParams,
+  type ReceiveMessagesResult,
+  type ReceivedMessage,
+} from './communication/index.js';
+
+// Deployment tools
+export {
+  DeployTool,
+  type DeployToolConfig,
+  CheckDeploymentTool,
+  type CheckDeploymentToolConfig,
+  type DeployToolParams,
+  type DeployToolResult,
+  type CheckDeploymentParams,
+  type CheckDeploymentResult,
+} from './deployment/index.js';
 
 // Utility functions for token estimation and output truncation
 export {

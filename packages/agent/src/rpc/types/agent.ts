@@ -56,6 +56,10 @@ export interface AgentPromptParams {
 export interface AgentPromptResult {
   /** Response will be streamed via events */
   acknowledged: boolean;
+  /** Unique run ID for correlating events to this prompt */
+  runId?: string;
+  /** Client-provided request ID echoed back for correlation */
+  clientRequestId?: string;
 }
 
 /** Abort current agent run */
