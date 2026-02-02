@@ -9,6 +9,7 @@ import crypto from 'crypto';
 import { createLogger } from '../logging/index.js';
 import { getSettings } from '../settings/index.js';
 import type { AnthropicApiSettings } from '../settings/types.js';
+import { createTokenExpiration } from './token-expiration.js';
 
 const logger = createLogger('oauth');
 
@@ -215,17 +216,17 @@ export async function exchangeCodeForTokens(
   };
 
   // Calculate expiry with buffer (refresh before actual expiry)
-  const expiresAt = Date.now() + (data.expires_in - expiryBuffer) * 1000;
+  const expiration = createTokenExpiration(data.expires_in, expiryBuffer);
 
   logger.info('Token exchange successful', {
     expiresIn: data.expires_in,
-    expiresAt: new Date(expiresAt).toISOString(),
+    expiresAt: new Date(expiration.expiresAtMs).toISOString(),
   });
 
   return {
     accessToken: data.access_token,
     refreshToken: data.refresh_token,
-    expiresAt,
+    expiresAt: expiration.expiresAtMs,
   };
 }
 
@@ -279,17 +280,17 @@ export async function refreshOAuthToken(refreshToken: string): Promise<OAuthToke
     expires_in: number;
   };
 
-  const expiresAt = Date.now() + (data.expires_in - expiryBuffer) * 1000;
+  const expiration = createTokenExpiration(data.expires_in, expiryBuffer);
 
   logger.info('Token refresh successful', {
     expiresIn: data.expires_in,
-    expiresAt: new Date(expiresAt).toISOString(),
+    expiresAt: new Date(expiration.expiresAtMs).toISOString(),
   });
 
   return {
     accessToken: data.access_token,
     refreshToken: data.refresh_token,
-    expiresAt,
+    expiresAt: expiration.expiresAtMs,
   };
 }
 

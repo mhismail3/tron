@@ -8,6 +8,7 @@
 import { createLogger } from '../logging/index.js';
 import { loadAuthStorage, saveProviderOAuthTokens } from './unified.js';
 import type { ServerAuth } from './types.js';
+import { createTokenExpiration } from './token-expiration.js';
 
 const logger = createLogger('openai-auth');
 
@@ -60,17 +61,18 @@ export async function refreshOpenAIToken(
     expires_in: number;
   };
 
-  const expiresAt = Date.now() + data.expires_in * 1000;
+  // No buffer for OpenAI tokens (they handle expiry differently)
+  const expiration = createTokenExpiration(data.expires_in, 0);
 
   logger.info('OpenAI token refresh successful', {
     expiresIn: data.expires_in,
-    expiresAt: new Date(expiresAt).toISOString(),
+    expiresAt: new Date(expiration.expiresAtMs).toISOString(),
   });
 
   return {
     accessToken: data.access_token,
     refreshToken: data.refresh_token ?? refreshToken,
-    expiresAt,
+    expiresAt: expiration.expiresAtMs,
   };
 }
 

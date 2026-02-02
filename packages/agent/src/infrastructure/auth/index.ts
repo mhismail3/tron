@@ -51,6 +51,12 @@ export {
   refreshOpenAIToken,
 } from './openai-auth.js';
 
+// Token expiration utilities
+export {
+  createTokenExpiration,
+  type TokenExpirationState,
+} from './token-expiration.js';
+
 // Unified auth types
 export type {
   OAuthTokens,
