@@ -5,7 +5,7 @@
  * and body content. Uses a simple YAML parser to avoid external dependencies.
  */
 
-import type { SkillFrontmatter } from './types.js';
+import type { SkillFrontmatter, SkillSubagentMode } from './types.js';
 
 // =============================================================================
 // Types
@@ -95,7 +95,11 @@ function parseSimpleYaml(yaml: string): SkillFrontmatter {
         result.tools = currentArray;
       } else if (key === 'tags') {
         result.tags = currentArray;
+      } else if (key === 'allowedTools') {
+        result.allowedTools = currentArray;
       }
+      // Note: allowedPatterns is complex nested YAML - for now we don't parse it
+      // in this simple parser. It can be added later with a more robust parser.
       continue;
     }
 
@@ -129,6 +133,26 @@ function parseSimpleYaml(yaml: string): SkillFrontmatter {
         // Inline array: tags: [coding, standards]
         if (typeof value === 'string' && value.startsWith('[')) {
           result.tags = parseInlineArray(value);
+        }
+        break;
+      case 'allowedTools':
+        // Inline array: allowedTools: [Read, Glob, Grep]
+        if (typeof value === 'string' && value.startsWith('[')) {
+          result.allowedTools = parseInlineArray(value);
+        }
+        break;
+      case 'subagent':
+        // Subagent mode: 'no' | 'ask' | 'yes'
+        if (value === 'no' || value === 'ask' || value === 'yes') {
+          result.subagent = value as SkillSubagentMode;
+        }
+        break;
+      case 'subagentModel':
+        result.subagentModel = String(value);
+        break;
+      case 'subagentMaxTurns':
+        if (typeof value === 'number') {
+          result.subagentMaxTurns = value;
         }
         break;
     }

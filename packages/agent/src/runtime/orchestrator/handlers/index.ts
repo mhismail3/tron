@@ -7,15 +7,14 @@
  *
  * ## Available Handlers
  *
- * - **PlanModeHandler**: Manages plan mode state (blocked tools)
  * - **InterruptHandler**: Builds events for interrupted sessions
  * - **CompactionHandler**: Builds events for context compaction
  * - **ContextClearHandler**: Builds events for context clearing
  *
  * ## Usage Pattern
  *
- * Each handler is stateless (except PlanModeHandler) and builds events
- * that the caller persists via EventPersister:
+ * Each handler is stateless and builds events that the caller persists
+ * via EventPersister:
  *
  * ```typescript
  * const interruptHandler = createInterruptHandler();
@@ -26,13 +25,6 @@
  * }
  * ```
  */
-
-// Plan Mode Handler
-export {
-  PlanModeHandler,
-  createPlanModeHandler,
-  type PlanModeState,
-} from './plan-mode.js';
 
 // Interrupt Handler
 export {

@@ -104,6 +104,21 @@ export function removeSkillReferences(prompt: string, references: SkillReference
 // =============================================================================
 
 /**
+ * Build a tool preferences block for skills that specify allowedTools.
+ * This provides a strong suggestion to the agent about which tools to prefer.
+ */
+function buildToolPreferences(skill: SkillMetadata): string {
+  const frontmatter = skill.frontmatter;
+
+  if (frontmatter.allowedTools && frontmatter.allowedTools.length > 0) {
+    const toolList = frontmatter.allowedTools.join(', ');
+    return `<skill-tool-preferences>This skill works best with: ${toolList}. Please prefer these tools when executing this skill.</skill-tool-preferences>`;
+  }
+
+  return '';
+}
+
+/**
  * Build the <skills> XML block from a list of skills
  */
 export function buildSkillContext(skills: SkillMetadata[]): string {
@@ -113,6 +128,14 @@ export function buildSkillContext(skills: SkillMetadata[]): string {
 
   for (const skill of skills) {
     parts.push(`<skill name="${escapeXml(skill.name)}">`);
+
+    // Add tool preferences if this skill specifies allowedTools
+    const toolPrefs = buildToolPreferences(skill);
+    if (toolPrefs) {
+      parts.push(toolPrefs);
+      parts.push('');
+    }
+
     parts.push(skill.content);
     parts.push('</skill>');
     parts.push('');

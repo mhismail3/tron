@@ -264,19 +264,6 @@ export type {
   CanvasGetResult,
 } from './canvas.js';
 
-// Plan mode types
-export {
-  DEFAULT_PLAN_MODE_BLOCKED_TOOLS,
-} from './plan-mode.js';
-export type {
-  PlanEnterParams,
-  PlanEnterResult,
-  PlanExitParams,
-  PlanExitResult,
-  PlanGetStateParams,
-  PlanGetStateResult,
-} from './plan-mode.js';
-
 // Todo types
 export type {
   TodoListParams,

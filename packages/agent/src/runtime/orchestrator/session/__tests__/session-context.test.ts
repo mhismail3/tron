@@ -2,14 +2,13 @@
  * @fileoverview SessionContext Unit Tests
  *
  * Tests for the SessionContext class which encapsulates per-session state
- * using the extracted modules (EventPersister, TurnManager, PlanModeHandler).
+ * using the extracted modules (EventPersister, TurnManager).
  *
  * Contract:
  * 1. Manage session lifecycle (create, activate, deactivate)
  * 2. Coordinate event persistence through EventPersister
  * 3. Manage turn lifecycle through TurnManager
- * 4. Track plan mode through PlanModeHandler
- * 5. Provide clean interface for orchestrator operations
+ * 4. Provide clean interface for orchestrator operations
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { EventStore } from '@infrastructure/events/event-store.js';
@@ -64,19 +63,6 @@ describe('SessionContext', () => {
       expect(context.getSessionId()).toBe(sessionId);
       expect(context.getModel()).toBe('claude-sonnet-4-20250514');
       expect(context.isProcessing()).toBe(false);
-    });
-
-    it('should initialize with inactive plan mode', () => {
-      const context = createSessionContext({
-        sessionId,
-        eventStore,
-        initialHeadEventId,
-        model: 'claude-sonnet-4-20250514',
-        workingDirectory: '/test/project',
-      });
-
-      expect(context.isInPlanMode()).toBe(false);
-      expect(context.getBlockedTools()).toEqual([]);
     });
 
     it('should initialize with turn 0', () => {
@@ -219,30 +205,6 @@ describe('SessionContext', () => {
     });
   });
 
-  describe('Plan mode', () => {
-    it('should enter and exit plan mode', () => {
-      const context = createSessionContext({
-        sessionId,
-        eventStore,
-        initialHeadEventId,
-        model: 'claude-sonnet-4-20250514',
-        workingDirectory: '/test/project',
-      });
-
-      context.enterPlanMode('test-skill', ['Edit', 'Write', 'Bash']);
-
-      expect(context.isInPlanMode()).toBe(true);
-      expect(context.getBlockedTools()).toEqual(['Edit', 'Write', 'Bash']);
-      expect(context.isToolBlocked('Edit')).toBe(true);
-      expect(context.isToolBlocked('Read')).toBe(false);
-
-      context.exitPlanMode();
-
-      expect(context.isInPlanMode()).toBe(false);
-      expect(context.isToolBlocked('Edit')).toBe(false);
-    });
-  });
-
   describe('Interrupt handling', () => {
     it('should build interrupted content', () => {
       const context = createSessionContext({
@@ -327,42 +289,6 @@ describe('SessionContext', () => {
       context.onAgentEnd();
 
       expect(context.hasAccumulatedContent()).toBe(false);
-    });
-  });
-
-  describe('State reconstruction', () => {
-    it('should restore state from events', async () => {
-      // Create context and add some events
-      const context1 = createSessionContext({
-        sessionId,
-        eventStore,
-        initialHeadEventId,
-        model: 'claude-sonnet-4-20250514',
-        workingDirectory: '/test/project',
-      });
-
-      // Enter plan mode and persist event
-      context1.enterPlanMode('my-plan', ['Edit']);
-      await context1.appendEvent('plan.mode_entered', {
-        skillName: 'my-plan',
-        blockedTools: ['Edit'],
-      });
-
-      // Create a new context and restore state
-      const events = await eventStore.getAncestors(context1.getPendingHeadEventId()!);
-
-      const context2 = createSessionContext({
-        sessionId,
-        eventStore,
-        initialHeadEventId: context1.getPendingHeadEventId()!,
-        model: 'claude-sonnet-4-20250514',
-        workingDirectory: '/test/project',
-      });
-
-      context2.restoreFromEvents(events);
-
-      expect(context2.isInPlanMode()).toBe(true);
-      expect(context2.getBlockedTools()).toEqual(['Edit']);
     });
   });
 

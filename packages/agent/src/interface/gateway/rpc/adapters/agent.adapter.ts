@@ -60,7 +60,7 @@ export function createAgentAdapter(deps: AdapterDependencies): AgentManagerAdapt
         });
 
         // Load each skill by name
-        const loadedSkills: Array<{ name: string; content: string; frontmatter?: { planMode?: boolean; tools?: string[]; [key: string]: unknown } }> = [];
+        const loadedSkills: Array<{ name: string; content: string; frontmatter?: { allowedTools?: string[]; tools?: string[]; [key: string]: unknown } }> = [];
         for (const name of skillNames) {
           const skill = registry.get(name);
           if (skill) {
@@ -74,7 +74,7 @@ export function createAgentAdapter(deps: AdapterDependencies): AgentManagerAdapt
               contentLength: skill.content.length,
               contentPreview: skill.content.substring(0, 100) + '...',
               hasFrontmatter: !!skill.frontmatter,
-              planMode: skill.frontmatter?.planMode,
+              allowedTools: skill.frontmatter?.allowedTools,
             });
           } else {
             logger.warn('[SKILL-LOADER] Skill not found in registry', {

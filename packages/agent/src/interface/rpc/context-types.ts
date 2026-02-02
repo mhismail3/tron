@@ -69,8 +69,6 @@ export interface RpcContext {
   toolCallTracker?: ToolCallTrackerManager;
   /** Canvas manager for UI artifact persistence (optional) */
   canvasManager?: CanvasRpcManager;
-  /** Plan mode manager for plan mode operations (optional) */
-  planManager?: PlanRpcManager;
   /** Todo manager for task tracking (optional) */
   todoManager?: TodoRpcManager;
   /** Device token manager for push notifications (optional) */
@@ -126,18 +124,6 @@ export interface ContextRpcManager {
   confirmCompaction(sessionId: string, opts?: { editedSummary?: string }): Promise<ContextConfirmCompactionResult>;
   canAcceptTurn(sessionId: string, opts: { estimatedResponseTokens: number }): ContextCanAcceptTurnResult;
   clearContext(sessionId: string): Promise<ContextClearResult>;
-}
-
-/**
- * Plan mode manager interface for RPC operations
- */
-export interface PlanRpcManager {
-  /** Enter plan mode for a session */
-  enterPlanMode(sessionId: string, skillName: string, blockedTools?: string[]): Promise<{ success: boolean; blockedTools: string[] }>;
-  /** Exit plan mode for a session */
-  exitPlanMode(sessionId: string, reason: 'approved' | 'cancelled', planPath?: string): Promise<{ success: boolean }>;
-  /** Get plan mode state for a session */
-  getPlanModeState(sessionId: string): { isActive: boolean; skillName?: string; blockedTools: string[] };
 }
 
 /**

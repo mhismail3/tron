@@ -65,14 +65,6 @@ enum MessageContent: Equatable {
     static func rulesLoaded(count: Int) -> MessageContent {
         .systemEvent(.rulesLoaded(count: count))
     }
-    /// In-chat notification for plan mode entered
-    static func planModeEntered(skillName: String, blockedTools: [String]) -> MessageContent {
-        .systemEvent(.planModeEntered(skillName: skillName, blockedTools: blockedTools))
-    }
-    /// In-chat notification for plan mode exited
-    static func planModeExited(reason: String, planPath: String?) -> MessageContent {
-        .systemEvent(.planModeExited(reason: reason, planPath: planPath))
-    }
     /// In-chat notification for catching up to in-progress session
     static var catchingUp: MessageContent {
         .systemEvent(.catchingUp)

@@ -17,7 +17,6 @@ import type {
   ContextRpcManager,
   BrowserRpcManager,
   SkillRpcManager,
-  PlanRpcManager,
   TodoRpcManager,
 } from '../../rpc/context-types.js';
 
@@ -85,11 +84,6 @@ export type BrowserManagerAdapter = BrowserRpcManager;
  * Skill manager interface - skill loading and management
  */
 export type SkillManagerAdapter = SkillRpcManager;
-
-/**
- * Plan manager interface - plan mode operations
- */
-export type PlanManagerAdapter = PlanRpcManager;
 
 /**
  * Todo manager interface - task tracking operations

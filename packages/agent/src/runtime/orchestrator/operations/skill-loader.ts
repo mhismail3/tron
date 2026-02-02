@@ -11,7 +11,6 @@
 // Direct imports to avoid circular dependencies through index.js
 import { createLogger } from '@infrastructure/logging/index.js';
 import { buildSkillContext } from '@capabilities/extensions/skills/skill-injector.js';
-import { DEFAULT_PLAN_MODE_BLOCKED_TOOLS } from '@interface/rpc/types.js';
 import type {
   SkillSource,
   SkillAddMethod,
@@ -20,7 +19,7 @@ import type {
 import type { SkillTracker } from '@capabilities/extensions/skills/skill-tracker.js';
 import type { UserContent } from '@core/types/messages.js';
 import type { SessionContext } from '../session/session-context.js';
-import type { AgentRunOptions, LoadedSkillContent } from '../types.js';
+import type { AgentRunOptions } from '../types.js';
 
 const logger = createLogger('skill-loader');
 
@@ -36,18 +35,6 @@ export interface SkillLoadContext {
   sessionId: string;
   skillTracker: SkillTracker;
   sessionContext: SessionContext;
-}
-
-/**
- * Callback interface for triggering plan mode from skill loader.
- * Allows the orchestrator to wire up plan mode entry without
- * creating a circular dependency.
- */
-export interface PlanModeCallback {
-  /** Enter plan mode with the given skill name and blocked tools */
-  enterPlanMode: (skillName: string, blockedTools: string[]) => Promise<void>;
-  /** Check if already in plan mode */
-  isInPlanMode: () => boolean;
 }
 
 // =============================================================================
@@ -68,13 +55,15 @@ export class SkillLoader {
    * 3. Tracking new skills (creates events) - but NOT spells
    * 4. Building removed skills/spells instruction
    * 5. Loading skill/spell content via skillLoader callback
-   * 6. Building final skill context string
-   * 7. Detecting planMode skills and triggering plan mode (if callback provided)
+   * 6. Building final skill context string with tool preferences
+   *
+   * Note: Tool restrictions (allowedTools) are now handled as suggestions in
+   * the skill context, not via plan mode. Enforcement only happens when skills
+   * spawn subagents with subagent: 'yes'.
    */
   async loadSkillContextForPrompt(
     context: SkillLoadContext,
-    options: AgentRunOptions,
-    planModeCallback?: PlanModeCallback
+    options: AgentRunOptions
   ): Promise<string> {
     const { sessionId, skillTracker } = context;
 
@@ -221,10 +210,9 @@ The user has explicitly removed these skills and expects you to respond WITHOUT 
       return '';
     }
 
-    // Check for planMode skills and trigger plan mode if needed
-    await this.checkAndEnterPlanMode(sessionId, loadedSkills, planModeCallback);
-
     // Build skill context using buildSkillContext
+    // Note: Tool preferences from allowedTools are included as suggestions
+    // (enforced only in subagent mode)
     // Convert LoadedSkillContent to SkillMetadata format for buildSkillContext
     const skillMetadata: SkillMetadata[] = loadedSkills.map((s) => ({
       name: s.name,
@@ -253,67 +241,6 @@ The user has explicitly removed these skills and expects you to respond WITHOUT 
       return `${removedSkillsInstruction}\n\n${skillContext}`;
     }
     return skillContext;
-  }
-
-  /**
-   * Check loaded skills for planMode flag and enter plan mode if needed.
-   *
-   * Called after skills are loaded. If any skill has planMode: true in its
-   * frontmatter, and we're not already in plan mode, enters plan mode.
-   *
-   * Blocked tools are computed by inverting the skill's tools list (if specified)
-   * or using the default blocked tools (Write, Edit, Bash, NotebookEdit).
-   */
-  private async checkAndEnterPlanMode(
-    sessionId: string,
-    loadedSkills: LoadedSkillContent[],
-    planModeCallback?: PlanModeCallback
-  ): Promise<void> {
-    // No callback means plan mode not supported (e.g., in tests)
-    if (!planModeCallback) {
-      return;
-    }
-
-    // Already in plan mode - don't enter again
-    if (planModeCallback.isInPlanMode()) {
-      logger.debug('[SKILL] Already in plan mode, skipping plan mode check', { sessionId });
-      return;
-    }
-
-    // Find first skill with planMode: true
-    const planModeSkill = loadedSkills.find(skill => skill.frontmatter?.planMode === true);
-
-    if (!planModeSkill) {
-      return;
-    }
-
-    logger.info('[SKILL] Detected planMode skill, entering plan mode', {
-      sessionId,
-      skillName: planModeSkill.name,
-      hasFrontmatter: !!planModeSkill.frontmatter,
-    });
-
-    // Compute blocked tools:
-    // If skill specifies tools, block everything except those tools
-    // Otherwise use default blocked tools
-    let blockedTools = DEFAULT_PLAN_MODE_BLOCKED_TOOLS;
-
-    if (planModeSkill.frontmatter?.tools && planModeSkill.frontmatter.tools.length > 0) {
-      // Skill specifies allowed tools - block everything else
-      // For now, we use default blocked tools and allow what's specified
-      // This is a simplification - in a more complete implementation,
-      // we'd compute the inverse of the allowed tools list
-      const allowedTools = new Set(planModeSkill.frontmatter.tools);
-      blockedTools = DEFAULT_PLAN_MODE_BLOCKED_TOOLS.filter(t => !allowedTools.has(t));
-    }
-
-    await planModeCallback.enterPlanMode(planModeSkill.name, blockedTools);
-
-    logger.info('[SKILL] Plan mode entered via skill', {
-      sessionId,
-      skillName: planModeSkill.name,
-      blockedTools,
-    });
   }
 
   /**

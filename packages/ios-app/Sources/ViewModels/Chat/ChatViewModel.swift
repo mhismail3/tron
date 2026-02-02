@@ -54,8 +54,6 @@ final class ChatViewModel: ChatEventContext {
     let browserState = BrowserState()
     /// AskUserQuestion state (sheet, current data, answers)
     let askUserQuestionState = AskUserQuestionState()
-    /// Plan mode state (active, skill name)
-    let planModeState = PlanModeState()
     /// Context tracking state (tokens, cost, context window)
     let contextState = ContextTrackingState()
     /// Subagent state (tracking spawned subagents for chip UI)

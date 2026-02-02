@@ -87,16 +87,6 @@ extension ChatMessage {
         ChatMessage(role: .system, content: .rulesLoaded(count: count))
     }
 
-    /// In-chat notification for plan mode entering
-    static func planModeEntered(skillName: String, blockedTools: [String]) -> ChatMessage {
-        ChatMessage(role: .system, content: .planModeEntered(skillName: skillName, blockedTools: blockedTools))
-    }
-
-    /// In-chat notification for plan mode exiting
-    static func planModeExited(reason: String, planPath: String?) -> ChatMessage {
-        ChatMessage(role: .system, content: .planModeExited(reason: reason, planPath: planPath))
-    }
-
     /// In-chat notification for catching up to in-progress session
     static func catchingUp() -> ChatMessage {
         ChatMessage(role: .system, content: .catchingUp)

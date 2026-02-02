@@ -34,7 +34,7 @@ import { normalizeContentBlocks } from '@core/utils/content-normalizer.js';
 import { PersistenceError } from '@core/utils/errors.js';
 import type { RunResult } from '../agent/types.js';
 import type { UserContent } from '@core/types/messages.js';
-import type { SkillLoader, PlanModeCallback } from './operations/skill-loader.js';
+import type { SkillLoader } from './operations/skill-loader.js';
 import type {
   ActiveSession,
   AgentRunOptions,
@@ -57,15 +57,6 @@ export interface AgentRunnerConfig {
 
   /** Emit events to orchestrator (agent_turn, agent_event) */
   emit: (event: string, data: unknown) => void;
-
-  /** Enter plan mode for a session */
-  enterPlanMode: (
-    sessionId: string,
-    opts: { skillName: string; blockedTools: string[] }
-  ) => Promise<void>;
-
-  /** Check if session is in plan mode */
-  isInPlanMode: (sessionId: string) => boolean;
 
   /** Build context string from pending subagent results */
   buildSubagentResultsContext: (active: ActiveSession) => string | undefined;
@@ -220,22 +211,13 @@ export class AgentRunner {
     active: ActiveSession,
     options: AgentRunOptions
   ): Promise<void> {
-    // Build plan mode callback to enable skill-triggered plan mode
-    const planModeCallback: PlanModeCallback = {
-      enterPlanMode: async (skillName: string, blockedTools: string[]) => {
-        await this.config.enterPlanMode(active.sessionId, { skillName, blockedTools });
-      },
-      isInPlanMode: () => this.config.isInPlanMode(active.sessionId),
-    };
-
     const skillContext = await this.config.skillLoader.loadSkillContextForPrompt(
       {
         sessionId: active.sessionId,
         skillTracker: active.skillTracker,
         sessionContext: active.sessionContext,
       },
-      options,
-      planModeCallback
+      options
     );
 
     // Set skill context on agent (will be injected into system prompt)

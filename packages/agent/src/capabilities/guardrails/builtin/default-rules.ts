@@ -11,9 +11,7 @@ import type {
   PatternRule,
   PathRule,
   ResourceRule,
-  ContextRule,
   GuardrailRule,
-  EvaluationContext,
 } from '../types.js';
 
 // =============================================================================
@@ -253,30 +251,6 @@ export const BASH_TIMEOUT: ResourceRule = {
   maxValue: 600000, // 10 minutes
 };
 
-/**
- * Standard rule: Plan mode tool restrictions
- */
-export const SESSION_PLAN_MODE: ContextRule = {
-  id: 'session.plan-mode',
-  name: 'Plan Mode Restrictions',
-  description: 'Blocks Write/Edit/Bash tools during plan mode',
-  type: 'context',
-  severity: 'block',
-  scope: 'session',
-  tier: 'standard',
-  priority: 600,
-  enabled: true,
-  tags: ['workflow', 'plan-mode'],
-  condition: (context: EvaluationContext): boolean => {
-    const state = context.sessionState;
-    if (!state?.isPlanMode) return false;
-
-    const blockedTools = state.planModeBlockedTools ?? ['Write', 'Edit', 'Bash'];
-    return blockedTools.includes(context.toolName);
-  },
-  blockMessage: 'Tool blocked during plan mode. Exit plan mode to use this tool.',
-};
-
 // =============================================================================
 // Rule Registry
 // =============================================================================
@@ -296,7 +270,6 @@ export const DEFAULT_RULES: GuardrailRule[] = [
   PATH_TRAVERSAL,
   PATH_HIDDEN_MKDIR,
   BASH_TIMEOUT,
-  SESSION_PLAN_MODE,
 ];
 
 /**

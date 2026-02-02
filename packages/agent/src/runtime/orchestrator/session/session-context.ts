@@ -4,7 +4,6 @@
  * Encapsulates all per-session state using the extracted modules:
  * - EventPersister for linearized event persistence
  * - TurnManager for turn lifecycle and content tracking
- * - PlanModeHandler for plan mode state
  * - SessionReconstructor for state restoration
  *
  * Each active session has its own SessionContext instance.
@@ -34,10 +33,6 @@
  * context.startTurn(1);
  * context.addTextDelta('Response text');
  * const result = context.endTurn();
- *
- * // Plan mode
- * context.enterPlanMode('skill', ['Edit', 'Write']);
- * if (context.isToolBlocked('Edit')) { ... }
  * ```
  */
 // Direct imports to avoid circular dependencies through index.js
@@ -63,11 +58,6 @@ import {
   type EndTurnResult,
   type AssistantContentBlock,
 } from '../turn/turn-manager.js';
-import {
-  PlanModeHandler,
-  createPlanModeHandler,
-  type PlanModeState,
-} from '../handlers/plan-mode.js';
 import {
   SessionReconstructor,
   createSessionReconstructor,
@@ -108,7 +98,6 @@ export interface SessionContextConfig {
  * Uses extracted modules for specific responsibilities:
  * - EventPersister: Event linearization and persistence
  * - TurnManager: Turn lifecycle and content tracking
- * - PlanModeHandler: Plan mode state
  */
 export class SessionContext {
   // Core identity
@@ -120,7 +109,6 @@ export class SessionContext {
   // Extracted modules
   private readonly persister: EventPersister;
   private readonly turnManager: TurnManager;
-  private readonly planModeHandler: PlanModeHandler;
   private readonly reconstructor: SessionReconstructor;
 
   // Processing state
@@ -148,7 +136,6 @@ export class SessionContext {
     });
 
     this.turnManager = createTurnManager();
-    this.planModeHandler = createPlanModeHandler();
     this.reconstructor = createSessionReconstructor();
 
     // Set provider type based on model for token normalization
@@ -465,52 +452,6 @@ export class SessionContext {
   }
 
   // ===========================================================================
-  // Plan Mode (delegated to PlanModeHandler)
-  // ===========================================================================
-
-  /**
-   * Check if plan mode is active.
-   */
-  isInPlanMode(): boolean {
-    return this.planModeHandler.isActive();
-  }
-
-  /**
-   * Get blocked tools list.
-   */
-  getBlockedTools(): string[] {
-    return this.planModeHandler.getBlockedTools();
-  }
-
-  /**
-   * Check if a specific tool is blocked.
-   */
-  isToolBlocked(toolName: string): boolean {
-    return this.planModeHandler.isToolBlocked(toolName);
-  }
-
-  /**
-   * Get full plan mode state.
-   */
-  getPlanModeState(): PlanModeState {
-    return this.planModeHandler.getState();
-  }
-
-  /**
-   * Enter plan mode.
-   */
-  enterPlanMode(skillName: string, blockedTools: string[]): void {
-    this.planModeHandler.enter(skillName, blockedTools);
-  }
-
-  /**
-   * Exit plan mode.
-   */
-  exitPlanMode(): void {
-    this.planModeHandler.exit();
-  }
-
-  // ===========================================================================
   // Processing State
   // ===========================================================================
 
@@ -585,9 +526,6 @@ export class SessionContext {
   restoreFromEvents(events: TronSessionEvent[]): void {
     const state = this.reconstructor.reconstruct(events);
 
-    // Restore plan mode
-    this.planModeHandler.setState(state.planMode);
-
     // Restore reasoning level
     if (state.reasoningLevel) {
       this.reasoningLevel = state.reasoningLevel;
@@ -597,7 +535,6 @@ export class SessionContext {
       sessionId: this.sessionId,
       currentTurn: state.currentTurn,
       wasInterrupted: state.wasInterrupted,
-      planModeActive: state.planMode.isActive,
     });
   }
 }

@@ -154,16 +154,6 @@ export type {
 } from './rules.js';
 
 // =============================================================================
-// Plan Mode Events
-// =============================================================================
-
-export type {
-  PlanModeEnteredEvent,
-  PlanModeExitedEvent,
-  PlanCreatedEvent,
-} from './plan.js';
-
-// =============================================================================
 // Subagent Events
 // =============================================================================
 
@@ -229,10 +219,6 @@ export {
   isConfigReasoningLevelEvent,
   isMessageDeletedEvent,
   isConfigEvent,
-  isPlanModeEnteredEvent,
-  isPlanModeExitedEvent,
-  isPlanCreatedEvent,
-  isPlanEvent,
   isSubagentSpawnedEvent,
   isSubagentStatusUpdateEvent,
   isSubagentCompletedEvent,

@@ -17,7 +17,6 @@ import type { FileReadEvent, FileWriteEvent, FileEditEvent } from './file.js';
 import type { WorktreeAcquiredEvent, WorktreeCommitEvent, WorktreeReleasedEvent, WorktreeMergedEvent } from './worktree.js';
 import type { ErrorAgentEvent, ErrorToolEvent, ErrorProviderEvent } from './error.js';
 import type { RulesLoadedEvent } from './rules.js';
-import type { PlanModeEnteredEvent, PlanModeExitedEvent, PlanCreatedEvent } from './plan.js';
 import type { SubagentSpawnedEvent, SubagentStatusUpdateEvent, SubagentCompletedEvent, SubagentFailedEvent } from './subagent.js';
 import type { TodoWriteEvent } from './todo.js';
 import type { TurnFailedEvent } from './turn.js';
@@ -75,10 +74,6 @@ export type SessionEvent =
   | WorktreeMergedEvent
   // Rules
   | RulesLoadedEvent
-  // Plan mode
-  | PlanModeEnteredEvent
-  | PlanModeExitedEvent
-  | PlanCreatedEvent
   // Subagents
   | SubagentSpawnedEvent
   | SubagentStatusUpdateEvent

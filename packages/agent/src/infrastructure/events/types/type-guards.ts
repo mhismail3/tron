@@ -14,7 +14,6 @@ import type { ContextClearedEvent } from './context.js';
 import type { WorktreeAcquiredEvent, WorktreeCommitEvent, WorktreeReleasedEvent, WorktreeMergedEvent } from './worktree.js';
 import type { ErrorAgentEvent, ErrorToolEvent, ErrorProviderEvent } from './error.js';
 import type { RulesLoadedEvent } from './rules.js';
-import type { PlanModeEnteredEvent, PlanModeExitedEvent, PlanCreatedEvent } from './plan.js';
 import type { SubagentSpawnedEvent, SubagentStatusUpdateEvent, SubagentCompletedEvent, SubagentFailedEvent } from './subagent.js';
 import type { TodoWriteEvent } from './todo.js';
 import type { TurnFailedEvent } from './turn.js';
@@ -107,22 +106,6 @@ export function isMessageDeletedEvent(event: SessionEvent): event is MessageDele
 
 export function isConfigEvent(event: SessionEvent): event is ConfigModelSwitchEvent | ConfigPromptUpdateEvent | ConfigReasoningLevelEvent {
   return event.type.startsWith('config.');
-}
-
-export function isPlanModeEnteredEvent(event: SessionEvent): event is PlanModeEnteredEvent {
-  return event.type === 'plan.mode_entered';
-}
-
-export function isPlanModeExitedEvent(event: SessionEvent): event is PlanModeExitedEvent {
-  return event.type === 'plan.mode_exited';
-}
-
-export function isPlanCreatedEvent(event: SessionEvent): event is PlanCreatedEvent {
-  return event.type === 'plan.created';
-}
-
-export function isPlanEvent(event: SessionEvent): event is PlanModeEnteredEvent | PlanModeExitedEvent | PlanCreatedEvent {
-  return event.type.startsWith('plan.');
 }
 
 export function isSubagentSpawnedEvent(event: SessionEvent): event is SubagentSpawnedEvent {

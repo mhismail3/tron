@@ -22,6 +22,10 @@ export type {
   SkillAddedPayload,
   SkillRemovedPayload,
   AddedSkillInfo,
+  // Subagent mode types
+  SkillSubagentMode,
+  AllowedPatternRule,
+  AllowedPatternConstraint,
 } from './types.js';
 
 // Loader
@@ -51,3 +55,10 @@ export {
 // Tracker
 export { SkillTracker, createSkillTracker } from './skill-tracker.js';
 export type { SkillTrackingEvent } from './skill-tracker.js';
+
+// Skill to Denials Converter
+export {
+  skillAllowedToolsToDenials,
+  getEffectiveAllowedTools,
+  getSkillSubagentMode,
+} from './skill-to-denials.js';

@@ -45,20 +45,6 @@ struct SystemEventView: View {
         case .rulesLoaded(let count):
             RulesLoadedNotificationView(count: count)
 
-        case .planModeEntered(let skillName, let blockedTools):
-            if #available(iOS 26.0, *) {
-                PlanModeEnteredView(skillName: skillName, blockedTools: blockedTools)
-            } else {
-                PlanModeEnteredFallbackView(skillName: skillName)
-            }
-
-        case .planModeExited(let reason, let planPath):
-            if #available(iOS 26.0, *) {
-                PlanModeExitedView(reason: reason, planPath: planPath)
-            } else {
-                PlanModeExitedFallbackView(reason: reason)
-            }
-
         case .catchingUp:
             CatchingUpNotificationView()
 

@@ -23,7 +23,6 @@
  * const evaluation = await engine.evaluate({
  *   toolName: 'Bash',
  *   toolArguments: { command: 'rm -rf /' },
- *   sessionState: { isPlanMode: false },
  * });
  *
  * if (evaluation.blocked) {
@@ -90,5 +89,4 @@ export {
   PATH_TRAVERSAL,
   PATH_HIDDEN_MKDIR,
   BASH_TIMEOUT,
-  SESSION_PLAN_MODE,
 } from './builtin/default-rules.js';

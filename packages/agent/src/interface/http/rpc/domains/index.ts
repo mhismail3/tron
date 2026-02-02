@@ -24,7 +24,6 @@
  * - tree: Session tree visualization
  * - todo: Task management
  * - worktree: Git worktree operations
- * - plan: Plan mode operations
  * - message: Message operations
  * - transcribe: Audio transcription
  * - voice-notes: Voice note management
@@ -59,7 +58,6 @@ export * from './search/index.js';
 export * from './tree/index.js';
 export * from './todo/index.js';
 export * from './worktree/index.js';
-export * from './plan/index.js';
 export * from './message/index.js';
 export * from './transcribe/index.js';
 export * from './voice-notes/index.js';

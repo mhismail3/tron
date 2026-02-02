@@ -4,11 +4,10 @@
  * Tests for session state reconstruction from events.
  *
  * Contract:
- * 1. Reconstruct plan mode state from plan.mode_entered/exited events
- * 2. Determine wasInterrupted from last message.assistant
- * 3. Determine currentTurn from stream.turn_start events
- * 4. Get reasoningLevel from config.reasoning_level events
- * 5. Coordinate with SkillTracker and RulesTracker for full state
+ * 1. Determine wasInterrupted from last message.assistant
+ * 2. Determine currentTurn from stream.turn_start events
+ * 3. Get reasoningLevel from config.reasoning_level events
+ * 4. Coordinate with SkillTracker and RulesTracker for full state
  */
 import { describe, it, expect, beforeEach } from 'vitest';
 import {
@@ -30,53 +29,7 @@ describe('SessionReconstructor', () => {
 
       expect(state.currentTurn).toBe(0);
       expect(state.wasInterrupted).toBe(false);
-      expect(state.planMode.isActive).toBe(false);
-      expect(state.planMode.blockedTools).toEqual([]);
       expect(state.reasoningLevel).toBeUndefined();
-    });
-  });
-
-  describe('Plan mode reconstruction', () => {
-    it('should reconstruct active plan mode', () => {
-      const events = [
-        {
-          id: 'evt_1',
-          type: 'plan.mode_entered',
-          payload: {
-            skillName: 'implementation-plan',
-            blockedTools: ['Edit', 'Write', 'Bash'],
-          },
-        },
-      ];
-
-      const state = reconstructor.reconstruct(events as any);
-
-      expect(state.planMode.isActive).toBe(true);
-      expect(state.planMode.skillName).toBe('implementation-plan');
-      expect(state.planMode.blockedTools).toEqual(['Edit', 'Write', 'Bash']);
-    });
-
-    it('should reconstruct inactive plan mode after exit', () => {
-      const events = [
-        {
-          id: 'evt_1',
-          type: 'plan.mode_entered',
-          payload: {
-            skillName: 'plan',
-            blockedTools: ['Edit'],
-          },
-        },
-        {
-          id: 'evt_2',
-          type: 'plan.mode_exited',
-          payload: { approved: true },
-        },
-      ];
-
-      const state = reconstructor.reconstruct(events as any);
-
-      expect(state.planMode.isActive).toBe(false);
-      expect(state.planMode.blockedTools).toEqual([]);
     });
   });
 
@@ -246,36 +199,29 @@ describe('SessionReconstructor', () => {
     it('should reset state after compaction boundary', () => {
       const events = [
         // Pre-compaction state
+        { id: 'evt_1', type: 'stream.turn_start', payload: { turn: 5 } },
         {
-          id: 'evt_1',
-          type: 'plan.mode_entered',
-          payload: { skillName: 'old', blockedTools: ['Edit'] },
-        },
-        { id: 'evt_2', type: 'stream.turn_start', payload: { turn: 5 } },
-        {
-          id: 'evt_3',
+          id: 'evt_2',
           type: 'config.reasoning_level',
           payload: { newLevel: 'high' },
         },
         // Compaction
         {
-          id: 'evt_4',
+          id: 'evt_3',
           type: 'compact.boundary',
           payload: { originalTokens: 100000, compactedTokens: 20000 },
         },
         {
-          id: 'evt_5',
+          id: 'evt_4',
           type: 'compact.summary',
           payload: { summary: 'Previous work...' },
         },
         // Post-compaction continues
-        { id: 'evt_6', type: 'stream.turn_start', payload: { turn: 1 } },
+        { id: 'evt_5', type: 'stream.turn_start', payload: { turn: 1 } },
       ];
 
       const state = reconstructor.reconstruct(events as any);
 
-      // After compaction, plan mode should be cleared
-      expect(state.planMode.isActive).toBe(false);
       // Turn should be from post-compaction
       expect(state.currentTurn).toBe(1);
       // Reasoning level persists through compaction (it's a config, not content)
@@ -287,14 +233,9 @@ describe('SessionReconstructor', () => {
     it('should reset state after context clear', () => {
       const events = [
         { id: 'evt_1', type: 'stream.turn_start', payload: { turn: 3 } },
-        {
-          id: 'evt_2',
-          type: 'plan.mode_entered',
-          payload: { skillName: 'plan', blockedTools: ['Bash'] },
-        },
         // Context cleared
         {
-          id: 'evt_3',
+          id: 'evt_2',
           type: 'context.cleared',
           payload: { tokensBefore: 50000, tokensAfter: 5000, reason: 'manual' },
         },
@@ -302,8 +243,6 @@ describe('SessionReconstructor', () => {
 
       const state = reconstructor.reconstruct(events as any);
 
-      // Plan mode should be cleared
-      expect(state.planMode.isActive).toBe(false);
       // Turn resets
       expect(state.currentTurn).toBe(0);
     });
@@ -356,8 +295,11 @@ describe('SessionReconstructor', () => {
         { id: 'evt_3', type: 'stream.turn_start', payload: { turn: 1 } },
         {
           id: 'evt_4',
-          type: 'plan.mode_entered',
-          payload: { skillName: 'plan', blockedTools: ['Edit'] },
+          type: 'message.assistant',
+          payload: {
+            content: [{ type: 'text', text: 'Working on it...' }],
+            stopReason: 'end_turn',
+          },
         },
         // Fork point - forked session continues from here
         { id: 'evt_5', type: 'session.start', payload: {} }, // Fork creates new session.start
@@ -366,9 +308,9 @@ describe('SessionReconstructor', () => {
 
       const state = reconstructor.reconstruct(events as any);
 
-      // Should inherit plan mode from parent
-      expect(state.planMode.isActive).toBe(true);
-      expect(state.planMode.blockedTools).toEqual(['Edit']);
+      // Should have inherited turn count
+      expect(state.currentTurn).toBe(1);
+      expect(state.wasInterrupted).toBe(false);
     });
   });
 });

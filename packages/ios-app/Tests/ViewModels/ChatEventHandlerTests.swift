@@ -400,38 +400,6 @@ final class ChatEventHandlerTests: XCTestCase {
         XCTAssertEqual(result.skillName, "web-search")
     }
 
-    // MARK: - Plan Mode Tests
-
-    func testPlanModeEnteredReturnsInfo() async throws {
-        // Given: a plan mode entered plugin result
-        let pluginResult = PlanModeEnteredPlugin.Result(
-            skillName: "architect",
-            blockedTools: ["Edit", "Write"]
-        )
-
-        // When: handling plan mode entered
-        let result = handler.handlePlanModeEntered(pluginResult)
-
-        // Then: plan mode info should be returned
-        XCTAssertEqual(result.skillName, "architect")
-        XCTAssertEqual(result.blockedTools, ["Edit", "Write"])
-    }
-
-    func testPlanModeExitedReturnsInfo() async throws {
-        // Given: a plan mode exited plugin result
-        let pluginResult = PlanModeExitedPlugin.Result(
-            reason: "approved",
-            planPath: "/path/to/plan.md"
-        )
-
-        // When: handling plan mode exited
-        let result = handler.handlePlanModeExited(pluginResult)
-
-        // Then: exit info should be returned
-        XCTAssertEqual(result.reason, "approved")
-        XCTAssertEqual(result.planPath, "/path/to/plan.md")
-    }
-
     // MARK: - Complete Tests
 
     func testCompleteResetsState() async throws {

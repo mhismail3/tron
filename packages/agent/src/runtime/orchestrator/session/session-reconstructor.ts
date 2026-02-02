@@ -6,7 +6,6 @@
  *
  * ## What Gets Reconstructed
  *
- * - **Plan Mode**: Active/inactive, blocked tools
  * - **Interrupt Status**: Whether last assistant message was interrupted
  * - **Current Turn**: Latest turn number from events
  * - **Reasoning Level**: From config.reasoning_level events
@@ -19,8 +18,8 @@
  * ## Reset Points
  *
  * Certain events reset state:
- * - `compact.boundary`: Resets plan mode, turn count (but not config)
- * - `context.cleared`: Resets plan mode, turn count
+ * - `compact.boundary`: Resets turn count (but not config)
+ * - `context.cleared`: Resets turn count
  *
  * ## Usage
  *
@@ -36,7 +35,6 @@
  */
 import { createLogger } from '@infrastructure/logging/index.js';
 import type { SessionEvent as TronSessionEvent } from '@infrastructure/events/types.js';
-import { PlanModeHandler, type PlanModeState } from '../handlers/plan-mode.js';
 
 const logger = createLogger('session-reconstructor');
 
@@ -49,8 +47,6 @@ export interface ReconstructedState {
   currentTurn: number;
   /** Whether the session was interrupted */
   wasInterrupted: boolean;
-  /** Plan mode state */
-  planMode: PlanModeState;
   /** Reasoning level (for extended thinking models) */
   reasoningLevel?: string;
 }
@@ -63,10 +59,8 @@ export interface ReconstructedState {
  * Reconstructs session state from event history.
  */
 export class SessionReconstructor {
-  private planModeHandler: PlanModeHandler;
-
   constructor() {
-    this.planModeHandler = new PlanModeHandler();
+    // No state needed - all reconstruction is done in reconstruct()
   }
 
   /**
@@ -87,10 +81,6 @@ export class SessionReconstructor {
       if (event.type === 'compact.boundary' || event.type === 'context.cleared') {
         // Reset content-related state
         currentTurn = 0;
-        this.planModeHandler.setState({
-          isActive: false,
-          blockedTools: [],
-        });
         // Note: reasoningLevel persists through compaction (it's config, not content)
         continue;
       }
@@ -121,31 +111,17 @@ export class SessionReconstructor {
         const payload = event.payload as { newLevel?: string };
         reasoningLevel = payload.newLevel;
       }
-
-      // Plan mode is handled by the handler
-      if (
-        event.type === 'plan.mode_entered' ||
-        event.type === 'plan.mode_exited'
-      ) {
-        // Process single event through handler
-        this.planModeHandler.reconstructFromEvents([event]);
-      }
     }
-
-    // Get final plan mode state
-    const planMode = this.planModeHandler.getState();
 
     const state: ReconstructedState = {
       currentTurn,
       wasInterrupted: lastAssistantInterrupted,
-      planMode,
       reasoningLevel,
     };
 
     logger.debug('Session state reconstructed', {
       currentTurn: state.currentTurn,
       wasInterrupted: state.wasInterrupted,
-      planModeActive: state.planMode.isActive,
       reasoningLevel: state.reasoningLevel,
     });
 

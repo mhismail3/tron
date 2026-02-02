@@ -79,17 +79,6 @@ final class SessionSwitchingTests: XCTestCase {
         XCTAssertFalse(viewModel.browserState.showBrowserWindow)
     }
 
-    func testNewChatViewModelHasCleanPlanModeState() {
-        // Given: A fresh ChatViewModel
-        let mockURL = URL(string: "ws://localhost:8080/ws")!
-        let rpcClient = RPCClient(serverURL: mockURL)
-        let viewModel = ChatViewModel(rpcClient: rpcClient, sessionId: "test-session")
-
-        // Then: Plan mode state should be inactive
-        XCTAssertFalse(viewModel.planModeState.isActive)
-        XCTAssertNil(viewModel.planModeState.skillName)
-    }
-
     func testNewChatViewModelHasEmptyInputState() {
         // Given: A fresh ChatViewModel
         let mockURL = URL(string: "ws://localhost:8080/ws")!

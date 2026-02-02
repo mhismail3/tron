@@ -52,14 +52,6 @@ protocol EventDispatchContext: AnyObject {
     /// Handle skill removed event
     func handleSkillRemoved(_ result: SkillRemovedPlugin.Result)
 
-    // MARK: - Plan Mode
-
-    /// Handle plan mode entered event
-    func handlePlanModeEntered(_ result: PlanModeEnteredPlugin.Result)
-
-    /// Handle plan mode exited event
-    func handlePlanModeExited(_ result: PlanModeExitedPlugin.Result)
-
     // MARK: - Browser
 
     /// Handle browser frame event

@@ -15,17 +15,16 @@
  *   - Handles interrupted content for persistence
  *
  * - **Handlers**: Encapsulated special case handling
- *   - PlanModeHandler: Plan mode state management
  *   - InterruptHandler: Interrupted session content
  *   - CompactionHandler: Context compaction events
  *   - ContextClearHandler: Context clearing events
  *
  * - **SessionReconstructor**: Session state reconstruction
- *   - Reconstructs plan mode, turn count, interrupt status from events
+ *   - Reconstructs turn count, interrupt status from events
  *   - Handles reset points (compaction, context clear)
  *
  * - **SessionContext**: Per-session state encapsulation
- *   - Wraps EventPersister, TurnManager, PlanModeHandler
+ *   - Wraps EventPersister, TurnManager
  *   - Clean interface for orchestrator operations
  *   - State restoration via SessionReconstructor
  *
@@ -106,10 +105,6 @@ export {
 
 // Handlers (Phase 3)
 export {
-  // Plan Mode
-  PlanModeHandler,
-  createPlanModeHandler,
-  type PlanModeState,
   // Interrupt
   InterruptHandler,
   createInterruptHandler,
@@ -168,15 +163,6 @@ export {
   createModelController,
   type ModelControllerConfig,
   type ModelSwitchResult,
-} from './controllers/index.js';
-
-// Plan mode management
-export {
-  PlanModeController,
-  createPlanModeController,
-  type PlanModeControllerConfig,
-  type EnterPlanModeOptions,
-  type ExitPlanModeOptions,
 } from './controllers/index.js';
 
 // Push notifications

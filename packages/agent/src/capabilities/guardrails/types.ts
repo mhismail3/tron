@@ -123,10 +123,6 @@ export type GuardrailRule =
  * Session state for context-aware rules
  */
 export interface SessionState {
-  /** Is the session in plan mode */
-  isPlanMode?: boolean;
-  /** Tools blocked in plan mode */
-  planModeBlockedTools?: string[];
   /** Current working directory */
   workingDirectory?: string;
   /** Additional session data */

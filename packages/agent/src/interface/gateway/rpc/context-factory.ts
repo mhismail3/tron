@@ -49,7 +49,6 @@ import { createWorktreeAdapter } from './adapters/worktree.adapter.js';
 import { createContextAdapter } from './adapters/context.adapter.js';
 import { createBrowserAdapter } from './adapters/browser.adapter.js';
 import { createSkillAdapter } from './adapters/skill.adapter.js';
-import { createPlanAdapter } from './adapters/plan.adapter.js';
 import { createTodoAdapter } from './adapters/todo.adapter.js';
 import { createDeviceAdapter } from './adapters/device.adapter.js';
 
@@ -124,7 +123,6 @@ export function createRpcContext(
     context.contextManager = createContextAdapter(deps);
     context.browserManager = createBrowserAdapter(deps);
     context.skillManager = createSkillAdapter(deps);
-    context.planManager = createPlanAdapter(deps);
     context.todoManager = createTodoAdapter(deps);
     context.deviceManager = createDeviceAdapter(deps);
 
@@ -160,7 +158,6 @@ export function isFullRpcContext(
     context.contextManager !== undefined &&
     context.browserManager !== undefined &&
     context.skillManager !== undefined &&
-    context.planManager !== undefined &&
     context.deviceManager !== undefined
   );
 }

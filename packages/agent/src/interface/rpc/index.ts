@@ -25,7 +25,6 @@ export {
   type SkillRpcManager,
   type ToolCallTrackerManager,
   type CanvasRpcManager,
-  type PlanRpcManager,
   type TodoRpcManager,
   type RpcTodoItem,
   type RpcBackloggedTask,

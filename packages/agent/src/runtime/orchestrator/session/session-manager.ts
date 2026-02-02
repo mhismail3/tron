@@ -21,8 +21,6 @@ import { createTrackerReconstructor } from './tracker-reconstructor.js';
 import { ContextLoader } from '@context/loader.js';
 import { TronAgent } from '../../agent/tron-agent.js';
 import {
-  isPlanModeEnteredEvent,
-  isPlanModeExitedEvent,
   type SessionId,
   type EventId,
   type EventType,
@@ -340,16 +338,6 @@ export class SessionManager {
       incompleteTasks: todoTracker.hasIncompleteTasks,
     });
 
-    // Reconstruct plan mode state from event history
-    const planMode = this.reconstructPlanModeFromEvents(events as TronSessionEvent[]);
-    if (planMode.isActive) {
-      logger.info('Plan mode reconstructed from events', {
-        sessionId,
-        skillName: planMode.skillName,
-        blockedTools: planMode.blockedTools,
-      });
-    }
-
     // Re-load rules content from disk for the agent
     if (rulesTracker.hasRules()) {
       try {
@@ -386,7 +374,7 @@ export class SessionManager {
       workingDir,
       reasoningLevel,
     });
-    // Restore state from events for SessionContext (plan mode, etc.)
+    // Restore state from events for SessionContext (reasoning level, etc.)
     sessionContext.restoreFromEvents(events as TronSessionEvent[]);
     // Sync message event IDs for context audit (extract from unified messagesWithEventIds)
     sessionContext.setMessagesWithEventIds(sessionState.messagesWithEventIds);
@@ -733,27 +721,6 @@ export class SessionManager {
     };
   }
 
-  private reconstructPlanModeFromEvents(
-    events: TronSessionEvent[]
-  ): { isActive: boolean; skillName?: string; blockedTools: string[] } {
-    let planModeActive = false;
-    let skillName: string | undefined;
-    let blockedTools: string[] = [];
-
-    for (const event of events) {
-      if (isPlanModeEnteredEvent(event)) {
-        planModeActive = true;
-        skillName = event.payload.skillName;
-        blockedTools = event.payload.blockedTools;
-      } else if (isPlanModeExitedEvent(event)) {
-        planModeActive = false;
-        skillName = undefined;
-        blockedTools = [];
-      }
-    }
-
-    return { isActive: planModeActive, skillName, blockedTools };
-  }
 }
 
 // =============================================================================

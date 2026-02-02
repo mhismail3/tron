@@ -88,8 +88,6 @@ function createMockConfig(): AgentRunnerConfig {
   return {
     skillLoader: mockSkillLoader as any,
     emit: vi.fn(),
-    enterPlanMode: vi.fn().mockResolvedValue(undefined),
-    isInPlanMode: vi.fn().mockReturnValue(false),
     buildSubagentResultsContext: vi.fn().mockReturnValue(undefined),
   };
 }

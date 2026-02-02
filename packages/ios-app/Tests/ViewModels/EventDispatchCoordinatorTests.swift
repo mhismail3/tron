@@ -256,38 +256,6 @@ final class EventDispatchCoordinatorTests: XCTestCase {
         XCTAssertEqual(mockContext.handleSkillRemovedCalledWith?.skillName, "commit")
     }
 
-    // MARK: - Plan Mode Event Tests
-
-    func testDispatch_planModeEntered_callsHandlePlanModeEntered() {
-        // Given: A plan mode entered result
-        let result = PlanModeEnteredPlugin.Result(skillName: "plan", blockedTools: ["Write", "Edit"])
-
-        // When: Dispatching
-        coordinator.dispatch(
-            type: PlanModeEnteredPlugin.eventType,
-            transform: { result },
-            context: mockContext
-        )
-
-        // Then: Handler should be called
-        XCTAssertEqual(mockContext.handlePlanModeEnteredCalledWith?.skillName, "plan")
-    }
-
-    func testDispatch_planModeExited_callsHandlePlanModeExited() {
-        // Given: A plan mode exited result
-        let result = PlanModeExitedPlugin.Result(reason: "approved", planPath: "/path/to/plan.md")
-
-        // When: Dispatching
-        coordinator.dispatch(
-            type: PlanModeExitedPlugin.eventType,
-            transform: { result },
-            context: mockContext
-        )
-
-        // Then: Handler should be called
-        XCTAssertEqual(mockContext.handlePlanModeExitedCalledWith?.reason, "approved")
-    }
-
     // MARK: - Browser Event Tests
 
     func testDispatch_browserFrame_callsHandleBrowserFrame() {
@@ -592,10 +560,6 @@ final class MockEventDispatchContext: EventDispatchContext {
     var handleMessageDeletedCalledWith: MessageDeletedPlugin.Result?
     var handleSkillRemovedCalledWith: SkillRemovedPlugin.Result?
 
-    // MARK: - Plan Mode
-    var handlePlanModeEnteredCalledWith: PlanModeEnteredPlugin.Result?
-    var handlePlanModeExitedCalledWith: PlanModeExitedPlugin.Result?
-
     // MARK: - Browser
     var handleBrowserFrameCalledWith: BrowserFramePlugin.Result?
     var handleBrowserClosedCalledWith: String?
@@ -673,14 +637,6 @@ final class MockEventDispatchContext: EventDispatchContext {
 
     func handleSkillRemoved(_ result: SkillRemovedPlugin.Result) {
         handleSkillRemovedCalledWith = result
-    }
-
-    func handlePlanModeEntered(_ result: PlanModeEnteredPlugin.Result) {
-        handlePlanModeEnteredCalledWith = result
-    }
-
-    func handlePlanModeExited(_ result: PlanModeExitedPlugin.Result) {
-        handlePlanModeExitedCalledWith = result
     }
 
     func handleBrowserFrame(_ result: BrowserFramePlugin.Result) {

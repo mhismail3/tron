@@ -62,10 +62,6 @@ export type EventType =
   | 'error.agent'
   | 'error.tool'
   | 'error.provider'
-  // Plan mode events
-  | 'plan.mode_entered'
-  | 'plan.mode_exited'
-  | 'plan.created'
   // Subagent events
   | 'subagent.spawned'
   | 'subagent.status_update'

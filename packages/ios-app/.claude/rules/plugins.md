@@ -94,7 +94,7 @@ final class MyEventState {
 
 ## Plugin Categories
 
-Streaming, Tool, Lifecycle, Session, Subagent, PlanMode, UICanvas, Browser, Todo
+Streaming, Tool, Lifecycle, Session, Subagent, UICanvas, Browser, Todo
 
 ## Common Patterns
 

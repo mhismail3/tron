@@ -85,16 +85,6 @@ final class EventDispatchCoordinator {
                 context.handleSkillRemoved(r)
             }
 
-        case PlanModeEnteredPlugin.eventType:
-            if let r = result as? PlanModeEnteredPlugin.Result {
-                context.handlePlanModeEntered(r)
-            }
-
-        case PlanModeExitedPlugin.eventType:
-            if let r = result as? PlanModeExitedPlugin.Result {
-                context.handlePlanModeExited(r)
-            }
-
         case BrowserFramePlugin.eventType:
             if let r = result as? BrowserFramePlugin.Result {
                 context.handleBrowserFrame(r)

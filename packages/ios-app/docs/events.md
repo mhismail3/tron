@@ -45,7 +45,6 @@ enum MyEventPlugin: EventPlugin {
 | Lifecycle | `Plugins/Lifecycle/` | session_start, session_end |
 | Session | `Plugins/Session/` | fork, status |
 | Subagent | `Plugins/Subagent/` | spawn, progress, complete |
-| PlanMode | `Plugins/PlanMode/` | plan events |
 | UICanvas | `Plugins/UICanvas/` | render_app_ui |
 | Browser | `Plugins/Browser/` | browser events |
 | Todo | `Plugins/Todo/` | todo_write |

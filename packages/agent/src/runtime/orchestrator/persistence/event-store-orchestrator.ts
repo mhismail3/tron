@@ -42,7 +42,6 @@
  * Each active session has a SessionContext that encapsulates:
  * - EventPersister: Handles promise chaining to prevent race conditions
  * - TurnManager: Tracks turn lifecycle and content accumulation
- * - PlanModeHandler: Manages plan mode state
  *
  * The EventPersister ensures linearization by:
  * 1. Chaining events via an internal promise chain (prevents race conditions)
@@ -121,10 +120,6 @@ import {
   type ForkResult,
   type WorktreeInfo,
 } from '../types.js';
-import {
-  PlanModeController,
-  createPlanModeController,
-} from '../controllers/plan-mode-controller.js';
 import {
   TodoController,
   createTodoController,
@@ -216,9 +211,6 @@ export class EventStoreOrchestrator extends EventEmitter {
 
   /** Context management and compaction */
   readonly context: ContextOps;
-
-  /** Plan mode state management */
-  readonly planMode: PlanModeController;
 
   /** Todo and backlog management */
   readonly todos: TodoController;
@@ -353,12 +345,6 @@ export class EventStoreOrchestrator extends EventEmitter {
       this.emit('browser.closed', sessionId);
     });
 
-    // Initialize PlanModeController (delegated module)
-    this.planMode = createPlanModeController({
-      getActiveSession: (sessionId: string) => this.activeSessions.get(sessionId),
-      emit: (event, data) => this.emit(event, data),
-    });
-
     // Initialize TodoController (delegated module)
     this.todos = createTodoController({
       getActiveSession: (sessionId: string) => this.activeSessions.get(sessionId),
@@ -376,8 +362,6 @@ export class EventStoreOrchestrator extends EventEmitter {
     this.agentRunner = createAgentRunner({
       skillLoader: this.skillLoader,
       emit: (event, data) => this.emit(event, data),
-      enterPlanMode: (sessionId, opts) => this.planMode.enterPlanMode(sessionId, opts),
-      isInPlanMode: (sessionId) => this.planMode.isInPlanMode(sessionId),
       buildSubagentResultsContext: (active) => this.subagents.buildSubagentResultsContext(active),
     });
 

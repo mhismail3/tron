@@ -76,10 +76,6 @@ final class EventRegistry: @unchecked Sendable {
         register(SubagentFailedPlugin.self)
         register(SubagentEventPlugin.self)
 
-        // Plan mode events
-        register(PlanModeEnteredPlugin.self)
-        register(PlanModeExitedPlugin.self)
-
         // UI Canvas events
         register(UIRenderStartPlugin.self)
         register(UIRenderChunkPlugin.self)

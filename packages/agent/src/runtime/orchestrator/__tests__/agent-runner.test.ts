@@ -94,8 +94,6 @@ function createMockConfig(overrides: Partial<AgentRunnerConfig> = {}): AgentRunn
   return {
     skillLoader: mockSkillLoader as any,
     emit: vi.fn(),
-    enterPlanMode: vi.fn().mockResolvedValue(undefined),
-    isInPlanMode: vi.fn().mockReturnValue(false),
     buildSubagentResultsContext: vi.fn().mockReturnValue(undefined),
     ...overrides,
   };
@@ -220,11 +218,7 @@ describe('AgentRunner', () => {
           skillTracker: active.skillTracker,
           sessionContext: active.sessionContext,
         }),
-        options,
-        expect.objectContaining({
-          enterPlanMode: expect.any(Function),
-          isInPlanMode: expect.any(Function),
-        })
+        options
       );
     });
 
@@ -677,52 +671,6 @@ describe('AgentRunner', () => {
     });
   });
 
-  describe('run() - Plan Mode Callback', () => {
-    it('provides plan mode callback to skill loader', async () => {
-      const options = createRunOptions({
-        skills: [{ name: 'plan-skill', source: 'global' }],
-      });
-
-      await runner.run(active, options);
-
-      const callArgs = (config.skillLoader.loadSkillContextForPrompt as Mock).mock.calls[0];
-      const planModeCallback = callArgs[2];
-
-      expect(planModeCallback).toHaveProperty('enterPlanMode');
-      expect(planModeCallback).toHaveProperty('isInPlanMode');
-    });
-
-    it('enterPlanMode callback delegates to config', async () => {
-      const options = createRunOptions();
-
-      await runner.run(active, options);
-
-      const callArgs = (config.skillLoader.loadSkillContextForPrompt as Mock).mock.calls[0];
-      const planModeCallback = callArgs[2];
-
-      await planModeCallback.enterPlanMode('test-skill', ['Edit', 'Write']);
-
-      expect(config.enterPlanMode).toHaveBeenCalledWith('sess_test123', {
-        skillName: 'test-skill',
-        blockedTools: ['Edit', 'Write'],
-      });
-    });
-
-    it('isInPlanMode callback delegates to config', async () => {
-      (config.isInPlanMode as Mock).mockReturnValue(true);
-      const options = createRunOptions();
-
-      await runner.run(active, options);
-
-      const callArgs = (config.skillLoader.loadSkillContextForPrompt as Mock).mock.calls[0];
-      const planModeCallback = callArgs[2];
-
-      const result = planModeCallback.isInPlanMode();
-
-      expect(config.isInPlanMode).toHaveBeenCalledWith('sess_test123');
-      expect(result).toBe(true);
-    });
-  });
 });
 
 // =============================================================================

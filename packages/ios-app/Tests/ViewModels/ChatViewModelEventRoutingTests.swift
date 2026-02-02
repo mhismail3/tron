@@ -547,40 +547,6 @@ final class ChatViewModelEventRoutingTests: XCTestCase {
         }
     }
 
-    // MARK: - Plan Mode Routing Tests
-
-    func test_planModeEntered_updatesPlanModeState() {
-        // Given
-        XCTAssertFalse(viewModel.planModeState.isActive)
-
-        // When
-        let result = PlanModeEnteredPlugin.Result(
-            skillName: "frontend-design",
-            blockedTools: ["Edit", "Write"]
-        )
-        viewModel.handlePlanModeEntered(result)
-
-        // Then
-        XCTAssertTrue(viewModel.planModeState.isActive)
-        XCTAssertEqual(viewModel.planModeState.skillName, "frontend-design")
-    }
-
-    func test_planModeExited_clearsPlanModeState() {
-        // Given - enter plan mode first using the proper API
-        viewModel.planModeState.enter(skillName: "test-skill")
-        XCTAssertTrue(viewModel.planModeState.isActive)
-
-        // When
-        let result = PlanModeExitedPlugin.Result(
-            reason: "approved",
-            planPath: nil
-        )
-        viewModel.handlePlanModeExited(result)
-
-        // Then
-        XCTAssertFalse(viewModel.planModeState.isActive)
-    }
-
     // MARK: - Subagent Routing Tests
 
     func test_subagentSpawned_updatesSubagentState() {

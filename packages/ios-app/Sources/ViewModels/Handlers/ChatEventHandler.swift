@@ -80,18 +80,6 @@ struct SkillRemovedResult {
     let skillName: String
 }
 
-/// Result of handling plan mode entered
-struct PlanModeEnteredResult {
-    let skillName: String
-    let blockedTools: [String]
-}
-
-/// Result of handling plan mode exited
-struct PlanModeExitedResult {
-    let reason: String
-    let planPath: String?
-}
-
 /// Result of handling agent complete
 struct CompleteResult {
     let success: Bool
@@ -384,28 +372,6 @@ final class ChatEventHandler {
     /// - Returns: Result with skill name
     func handleSkillRemoved(_ result: SkillRemovedPlugin.Result) -> SkillRemovedResult {
         return SkillRemovedResult(skillName: result.skillName)
-    }
-
-    // MARK: - Plan Mode Handling
-
-    /// Handle plan mode entered event
-    /// - Parameter result: The plugin result with plan mode entered data
-    /// - Returns: Result with skill name and blocked tools
-    func handlePlanModeEntered(_ result: PlanModeEnteredPlugin.Result) -> PlanModeEnteredResult {
-        return PlanModeEnteredResult(
-            skillName: result.skillName,
-            blockedTools: result.blockedTools
-        )
-    }
-
-    /// Handle plan mode exited event
-    /// - Parameter result: The plugin result with plan mode exited data
-    /// - Returns: Result with exit reason and plan path
-    func handlePlanModeExited(_ result: PlanModeExitedPlugin.Result) -> PlanModeExitedResult {
-        return PlanModeExitedResult(
-            reason: result.reason,
-            planPath: result.planPath
-        )
     }
 
     // MARK: - Complete Handling

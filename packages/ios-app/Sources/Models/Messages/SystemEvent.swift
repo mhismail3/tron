@@ -25,10 +25,6 @@ enum SystemEvent: Equatable {
     case skillRemoved(skillName: String)
     /// Rules were loaded on session start
     case rulesLoaded(count: Int)
-    /// Plan mode was entered (read-only enforcement)
-    case planModeEntered(skillName: String, blockedTools: [String])
-    /// Plan mode was exited
-    case planModeExited(reason: String, planPath: String?)
     /// Catching up to in-progress session
     case catchingUp
     /// Turn failed with error
@@ -62,10 +58,6 @@ enum SystemEvent: Equatable {
             return "\(skillName) removed from context"
         case .rulesLoaded(let count):
             return "Loaded \(count) \(count == 1 ? "rule" : "rules")"
-        case .planModeEntered(let skillName, _):
-            return "Plan mode active (\(skillName))"
-        case .planModeExited(let reason, _):
-            return "Plan mode \(reason)"
         case .catchingUp:
             return "Loading latest messages..."
         case .turnFailed(let error, _, _):

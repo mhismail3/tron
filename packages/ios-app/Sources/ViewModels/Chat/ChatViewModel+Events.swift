@@ -214,24 +214,6 @@ extension ChatViewModel {
         }
     }
 
-    func handlePlanModeEntered(_ pluginResult: PlanModeEnteredPlugin.Result) {
-        // Process event through handler
-        let result = eventHandler.handlePlanModeEntered(pluginResult)
-        logger.info("Plan mode entered: skill=\(result.skillName), blocked=\(result.blockedTools.joined(separator: ", "))", category: .events)
-
-        // Update state and add notification to chat
-        enterPlanMode(skillName: result.skillName, blockedTools: result.blockedTools)
-    }
-
-    func handlePlanModeExited(_ pluginResult: PlanModeExitedPlugin.Result) {
-        // Process event through handler
-        let result = eventHandler.handlePlanModeExited(pluginResult)
-        logger.info("Plan mode exited: reason=\(result.reason), planPath=\(result.planPath ?? "none")", category: .events)
-
-        // Update state and add notification to chat
-        exitPlanMode(reason: result.reason, planPath: result.planPath)
-    }
-
     /// Handle errors from the agent streaming (shows error in chat)
     func handleAgentError(_ message: String) {
         // Process through handler (resets handler state)

@@ -15,7 +15,6 @@ paths:
 | State | Purpose |
 |-------|---------|
 | `SubagentState` | Tracks active sub-agents, events |
-| `PlanModeState` | Plan mode lifecycle |
 | `ThinkingState` | Thinking/extended thinking |
 | `TodoState` | Todo list state |
 | `UICanvasState` | Dynamic UI rendering |

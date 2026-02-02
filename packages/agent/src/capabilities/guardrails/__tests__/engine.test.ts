@@ -230,34 +230,6 @@ describe('GuardrailEngine', () => {
     });
   });
 
-  describe('context rule evaluation', () => {
-    it('should block tools in plan mode', async () => {
-      const context: EvaluationContext = {
-        toolName: 'Write',
-        toolArguments: { file_path: '/tmp/test.txt', content: 'test' },
-        sessionState: {
-          isPlanMode: true,
-          planModeBlockedTools: ['Write', 'Edit', 'Bash'],
-        },
-      };
-
-      const evaluation = await engine.evaluate(context);
-      expect(evaluation.blocked).toBe(true);
-      expect(evaluation.triggeredRules.some(r => r.ruleId === 'session.plan-mode')).toBe(true);
-    });
-
-    it('should allow tools when not in plan mode', async () => {
-      const context: EvaluationContext = {
-        toolName: 'Write',
-        toolArguments: { file_path: '/tmp/test.txt', content: 'test' },
-        sessionState: { isPlanMode: false },
-      };
-
-      const evaluation = await engine.evaluate(context);
-      expect(evaluation.triggeredRules.every(r => r.ruleId !== 'session.plan-mode')).toBe(true);
-    });
-  });
-
   describe('rule overrides', () => {
     it('should disable standard rules via overrides', async () => {
       const customEngine = createGuardrailEngine({

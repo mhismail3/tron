@@ -111,8 +111,8 @@ export interface ActiveSession {
   rulesTracker: RulesTracker;
   /**
    * SessionContext for modular state management.
-   * Encapsulates EventPersister, TurnManager, PlanModeHandler.
-   * All turn tracking, event persistence, and plan mode state are managed here.
+   * Encapsulates EventPersister and TurnManager.
+   * All turn tracking and event persistence are managed here.
    */
   sessionContext: SessionContext;
   /**
@@ -162,9 +162,9 @@ export interface LoadedSkillContent {
   name: string;
   /** Full SKILL.md content */
   content: string;
-  /** Parsed frontmatter (optional, for plan mode detection) */
+  /** Parsed frontmatter (optional, for tool preferences) */
   frontmatter?: {
-    planMode?: boolean;
+    allowedTools?: string[];
     tools?: string[];
     [key: string]: unknown;
   };

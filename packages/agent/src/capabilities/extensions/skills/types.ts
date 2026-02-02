@@ -17,6 +17,37 @@
 // =============================================================================
 
 /**
+ * Pattern constraint for a specific parameter of an allowed tool.
+ * Only invocations matching these patterns are permitted.
+ */
+export interface AllowedPatternConstraint {
+  /** Parameter name to check (e.g., 'file_path', 'command') */
+  parameter: string;
+  /** Regex patterns that ARE allowed for this parameter */
+  allow: string[];
+}
+
+/**
+ * Granular pattern rule for an allowed tool.
+ * Restricts which invocations of the tool are permitted.
+ */
+export interface AllowedPatternRule {
+  /** Tool name this rule applies to */
+  tool: string;
+  /** Parameter patterns that define what's allowed */
+  patterns: AllowedPatternConstraint[];
+}
+
+/**
+ * Subagent execution mode for skills.
+ *
+ * - 'no' (default): Inject skill into current agent. AllowedTools are suggestions only.
+ * - 'ask': Prompt user whether to run in current agent or spawn subagent.
+ * - 'yes': Always spawn subagent with enforced tool restrictions.
+ */
+export type SkillSubagentMode = 'no' | 'ask' | 'yes';
+
+/**
  * YAML frontmatter parsed from SKILL.md
  */
 export interface SkillFrontmatter {
@@ -32,12 +63,43 @@ export interface SkillFrontmatter {
   tools?: string[];
   /** Tags for categorization and filtering */
   tags?: string[];
+
+  // ============================================================================
+  // Unified Tool Restriction System
+  // ============================================================================
+
   /**
-   * Enable plan mode when this skill is activated.
-   * Plan mode blocks write operations (Write, Edit, Bash) until the plan is approved.
-   * The agent can only use read-only tools until user approves via AskUserQuestion.
+   * Tools this skill needs (positive permissions).
+   * Enforcement depends on subagent mode:
+   * - subagent: 'no' → Strong suggestion in skill prompt (no enforcement)
+   * - subagent: 'yes' → Enforced via ToolDenialConfig (everything else blocked)
    */
-  planMode?: boolean;
+  allowedTools?: string[];
+
+  /**
+   * Granular pattern constraints on allowed tools.
+   * Only specific invocations matching these patterns are permitted.
+   * Only enforced when subagent: 'yes'.
+   */
+  allowedPatterns?: AllowedPatternRule[];
+
+  /**
+   * Subagent execution mode.
+   * - 'no' (default): Run in current agent (tools are suggestions)
+   * - 'ask': Prompt user for choice
+   * - 'yes': Spawn subagent (tools are enforced)
+   */
+  subagent?: SkillSubagentMode;
+
+  /**
+   * Model to use when spawning subagent (only used when subagent != 'no').
+   */
+  subagentModel?: string;
+
+  /**
+   * Maximum turns for subagent execution (only used when subagent != 'no').
+   */
+  subagentMaxTurns?: number;
 }
 
 // =============================================================================
