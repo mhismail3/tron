@@ -8,6 +8,22 @@
 // Re-export all error utilities from utils
 export * from '../utils/errors.js';
 
+// RPC error types
+export {
+  RpcError,
+  RpcErrorCode,
+  SessionNotFoundError,
+  SessionNotActiveError,
+  ManagerNotAvailableError,
+  InvalidParamsError,
+  FileNotFoundError,
+  InternalError,
+  isRpcError,
+  toRpcErrorResponse,
+  type RpcErrorCodeType,
+  type RpcErrorResponse,
+} from './rpc-errors.js';
+
 // Error codes used across the system
 export const ErrorCodes = {
   // General

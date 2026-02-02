@@ -12,6 +12,7 @@ import {
   createHandler,
   withErrorHandling,
   notFoundError,
+  SessionNotFoundError,
 } from '../base.js';
 import type { RpcRequest } from '../../types.js';
 import type { RpcContext } from '../../handler.js';
@@ -172,8 +173,8 @@ describe('Base Handler Utilities', () => {
       expect(response.error?.message).toContain('Something broke');
     });
 
-    it('should handle not found errors specially', async () => {
-      const handler = vi.fn().mockRejectedValue(new Error('Session not found: xyz'));
+    it('should handle typed RPC errors specially', async () => {
+      const handler = vi.fn().mockRejectedValue(new SessionNotFoundError('xyz'));
       const wrapped = withErrorHandling(handler);
       const context = {} as RpcContext;
       const request: RpcRequest = { id: '1', method: 'test.method' };
@@ -181,6 +182,7 @@ describe('Base Handler Utilities', () => {
       const response = await wrapped({}, context, request);
 
       expect(response.error?.code).toBe('SESSION_NOT_FOUND');
+      expect(response.error?.message).toContain('xyz');
     });
   });
 

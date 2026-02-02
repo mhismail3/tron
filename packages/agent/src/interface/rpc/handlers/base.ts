@@ -11,6 +11,19 @@
 import type { RpcRequest, RpcResponse } from '../types.js';
 import type { RpcContext } from '../context-types.js';
 import { MethodRegistry } from '../registry.js';
+import { RpcErrorCode, isRpcError } from '@core/errors/rpc-errors.js';
+
+// Re-export error types for handler convenience
+export { RpcErrorCode, isRpcError } from '@core/errors/rpc-errors.js';
+export {
+  RpcError,
+  SessionNotFoundError,
+  SessionNotActiveError,
+  ManagerNotAvailableError,
+  InvalidParamsError,
+  FileNotFoundError,
+  InternalError,
+} from '@core/errors/rpc-errors.js';
 
 // =============================================================================
 // Types
@@ -108,15 +121,10 @@ export function requireManager<K extends keyof RpcContext>(
 // =============================================================================
 
 /**
- * Standard error codes
+ * Standard error codes (re-exported from core/errors for backwards compatibility)
+ * @deprecated Use RpcErrorCode from @core/errors/rpc-errors.js instead
  */
-export const ErrorCodes = {
-  INVALID_PARAMS: 'INVALID_PARAMS',
-  SESSION_NOT_FOUND: 'SESSION_NOT_FOUND',
-  NOT_AVAILABLE: 'NOT_AVAILABLE',
-  METHOD_NOT_FOUND: 'METHOD_NOT_FOUND',
-  INTERNAL_ERROR: 'INTERNAL_ERROR',
-} as const;
+export const ErrorCodes = RpcErrorCode;
 
 /**
  * Create an error response for a "not found" scenario
@@ -143,14 +151,15 @@ export function withErrorHandling<TParams, TResult>(
       const result = await handler(params, context, request);
       return MethodRegistry.successResponse(request.id, result);
     } catch (error) {
-      // Handle specific error types
-      if (error instanceof Error) {
-        if (error.message.includes('not found')) {
-          return MethodRegistry.errorResponse(request.id, 'SESSION_NOT_FOUND', error.message);
-        }
-        return MethodRegistry.errorResponse(request.id, 'INTERNAL_ERROR', error.message);
+      // Handle typed RPC errors
+      if (isRpcError(error)) {
+        return MethodRegistry.errorResponse(request.id, error.code, error.message);
       }
-      return MethodRegistry.errorResponse(request.id, 'INTERNAL_ERROR', 'Unknown error');
+      // Handle generic errors
+      if (error instanceof Error) {
+        return MethodRegistry.errorResponse(request.id, RpcErrorCode.INTERNAL_ERROR, error.message);
+      }
+      return MethodRegistry.errorResponse(request.id, RpcErrorCode.INTERNAL_ERROR, 'Unknown error');
     }
   };
 }
@@ -218,13 +227,15 @@ export function createHandler<TParams extends Record<string, unknown>, TResult>(
       const result = await impl(params, context, request);
       return MethodRegistry.successResponse(request.id, result);
     } catch (error) {
-      if (error instanceof Error) {
-        if (error.message.includes('not found')) {
-          return MethodRegistry.errorResponse(request.id, 'SESSION_NOT_FOUND', error.message);
-        }
-        return MethodRegistry.errorResponse(request.id, 'INTERNAL_ERROR', error.message);
+      // Handle typed RPC errors
+      if (isRpcError(error)) {
+        return MethodRegistry.errorResponse(request.id, error.code, error.message);
       }
-      return MethodRegistry.errorResponse(request.id, 'INTERNAL_ERROR', 'Unknown error');
+      // Handle generic errors
+      if (error instanceof Error) {
+        return MethodRegistry.errorResponse(request.id, RpcErrorCode.INTERNAL_ERROR, error.message);
+      }
+      return MethodRegistry.errorResponse(request.id, RpcErrorCode.INTERNAL_ERROR, 'Unknown error');
     }
   };
 }
