@@ -27,6 +27,8 @@
 
 export * from './types.js';
 export { HookEngine, getDefaultHookSettings } from './engine.js';
+export { HookRegistry } from './registry.js';
+export { BackgroundTracker } from './background-tracker.js';
 
 // Discovery module
 export {
