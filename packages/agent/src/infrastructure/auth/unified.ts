@@ -21,6 +21,79 @@ const logger = createLogger('unified-auth');
 const AUTH_FILENAME = 'auth.json';
 
 // =============================================================================
+// Shared Internal Functions
+// =============================================================================
+
+/**
+ * Validate and parse auth storage data.
+ * Shared logic between sync and async load functions.
+ */
+function validateAuthStorage(data: string, authPath: string, sync: boolean): AuthStorage | null {
+  const parsed = JSON.parse(data) as AuthStorage;
+
+  if (parsed.version !== 1 || !parsed.providers) {
+    logger.warn(`auth.json is not in unified format${sync ? ' (sync)' : ''}`, { path: authPath });
+    return null;
+  }
+
+  return parsed;
+}
+
+/**
+ * Handle load error.
+ * Shared error handling between sync and async load functions.
+ */
+function handleLoadError(error: unknown, authPath: string, sync: boolean): null {
+  if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+    const structured = categorizeError(error, {
+      path: authPath,
+      operation: sync ? 'loadAuthStorageSync' : 'loadAuthStorage',
+    });
+    logger.warn(`Failed to load unified auth${sync ? ' (sync)' : ''}`, {
+      code: structured.code,
+      category: LogErrorCategory.PROVIDER_AUTH,
+      error: structured.message,
+      retryable: structured.retryable,
+    });
+  }
+  return null;
+}
+
+/**
+ * Extract API keys from service auth.
+ * Shared logic between sync and async getServiceApiKeys.
+ */
+function extractApiKeys(serviceAuth: ServiceAuth | null): string[] {
+  if (!serviceAuth) {
+    return [];
+  }
+
+  // Prefer apiKeys array if present and non-empty
+  if (serviceAuth.apiKeys && serviceAuth.apiKeys.length > 0) {
+    return serviceAuth.apiKeys.filter((k) => k && k.trim() !== '');
+  }
+
+  // Fall back to single apiKey
+  if (serviceAuth.apiKey && serviceAuth.apiKey.trim() !== '') {
+    return [serviceAuth.apiKey];
+  }
+
+  return [];
+}
+
+/**
+ * Create a new empty auth storage structure.
+ * Shared between sync and async save functions.
+ */
+function createEmptyAuthStorage(): AuthStorage {
+  return {
+    version: 1,
+    providers: {},
+    lastUpdated: new Date().toISOString(),
+  };
+}
+
+// =============================================================================
 // File Path
 // =============================================================================
 
@@ -44,27 +117,9 @@ export async function loadAuthStorage(): Promise<AuthStorage | null> {
 
   try {
     const data = await fsPromises.readFile(authPath, 'utf-8');
-    const parsed = JSON.parse(data) as AuthStorage;
-
-    // Validate it's the unified format
-    if (parsed.version !== 1 || !parsed.providers) {
-      logger.warn('auth.json is not in unified format', { path: authPath });
-      return null;
-    }
-
-    return parsed;
+    return validateAuthStorage(data, authPath, false);
   } catch (error) {
-    // File doesn't exist or is invalid
-    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
-      const structured = categorizeError(error, { path: authPath, operation: 'loadAuthStorage' });
-      logger.warn('Failed to load unified auth', {
-        code: structured.code,
-        category: LogErrorCategory.PROVIDER_AUTH,
-        error: structured.message,
-        retryable: structured.retryable,
-      });
-    }
-    return null;
+    return handleLoadError(error, authPath, false);
   }
 }
 
@@ -77,25 +132,9 @@ export function loadAuthStorageSync(): AuthStorage | null {
 
   try {
     const data = fs.readFileSync(authPath, 'utf-8');
-    const parsed = JSON.parse(data) as AuthStorage;
-
-    if (parsed.version !== 1 || !parsed.providers) {
-      logger.warn('auth.json is not in unified format (sync)', { path: authPath });
-      return null;
-    }
-
-    return parsed;
+    return validateAuthStorage(data, authPath, true);
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
-      const structured = categorizeError(error, { path: authPath, operation: 'loadAuthStorageSync' });
-      logger.warn('Failed to load unified auth (sync)', {
-        code: structured.code,
-        category: LogErrorCategory.PROVIDER_AUTH,
-        error: structured.message,
-        retryable: structured.retryable,
-      });
-    }
-    return null;
+    return handleLoadError(error, authPath, true);
   }
 }
 
@@ -142,43 +181,14 @@ export function getServiceAuthSync(service: ServiceId): ServiceAuth | null {
  * @returns Array of API keys for the service
  */
 export function getServiceApiKeys(service: ServiceId): string[] {
-  const serviceAuth = getServiceAuthSync(service);
-  if (!serviceAuth) {
-    return [];
-  }
-
-  // Prefer apiKeys array if present and non-empty
-  if (serviceAuth.apiKeys && serviceAuth.apiKeys.length > 0) {
-    // Filter out empty strings
-    return serviceAuth.apiKeys.filter((k) => k && k.trim() !== '');
-  }
-
-  // Fall back to single apiKey
-  if (serviceAuth.apiKey && serviceAuth.apiKey.trim() !== '') {
-    return [serviceAuth.apiKey];
-  }
-
-  return [];
+  return extractApiKeys(getServiceAuthSync(service));
 }
 
 /**
  * Async version of getServiceApiKeys
  */
 export async function getServiceApiKeysAsync(service: ServiceId): Promise<string[]> {
-  const serviceAuth = await getServiceAuth(service);
-  if (!serviceAuth) {
-    return [];
-  }
-
-  if (serviceAuth.apiKeys && serviceAuth.apiKeys.length > 0) {
-    return serviceAuth.apiKeys.filter((k) => k && k.trim() !== '');
-  }
-
-  if (serviceAuth.apiKey && serviceAuth.apiKey.trim() !== '') {
-    return [serviceAuth.apiKey];
-  }
-
-  return [];
+  return extractApiKeys(await getServiceAuth(service));
 }
 
 // =============================================================================
@@ -235,19 +245,8 @@ export async function saveProviderAuth(
   provider: ProviderId,
   providerAuth: ProviderAuth
 ): Promise<void> {
-  // Load existing or create new
-  let auth = await loadAuthStorage();
-  if (!auth) {
-    auth = {
-      version: 1,
-      providers: {},
-      lastUpdated: new Date().toISOString(),
-    };
-  }
-
-  // Update provider auth
+  const auth = (await loadAuthStorage()) ?? createEmptyAuthStorage();
   auth.providers[provider] = providerAuth;
-
   await saveAuthStorage(auth);
   logger.info('Saved provider auth', { provider });
 }
@@ -259,15 +258,7 @@ export function saveProviderAuthSync(
   provider: ProviderId,
   providerAuth: ProviderAuth
 ): void {
-  let auth = loadAuthStorageSync();
-  if (!auth) {
-    auth = {
-      version: 1,
-      providers: {},
-      lastUpdated: new Date().toISOString(),
-    };
-  }
-
+  const auth = loadAuthStorageSync() ?? createEmptyAuthStorage();
   auth.providers[provider] = providerAuth;
   saveAuthStorageSync(auth);
   logger.info('Saved provider auth (sync)', { provider });

@@ -19,7 +19,6 @@ import type { ContextManager } from '@context/context-manager.js';
 import type { Summarizer } from '@context/summarizer.js';
 import type { Provider } from '@llm/providers/index.js';
 import type { GuardrailEngine } from '@capabilities/guardrails/engine.js';
-import type { SessionState } from '@capabilities/guardrails/types.js';
 import type { TurnResult, ToolExecutionRequest, ToolExecutionResponse } from './types.js';
 
 // =============================================================================
@@ -62,8 +61,6 @@ export interface ToolExecutorDependencies {
   getAbortSignal: () => AbortSignal | undefined;
   /** Optional guardrail engine for safety checks */
   guardrailEngine?: GuardrailEngine;
-  /** Optional callback to get current session state for guardrails */
-  getSessionState?: () => SessionState | undefined;
 }
 
 /**

@@ -29,6 +29,18 @@ export * from './types.js';
 export { HookEngine, getDefaultHookSettings } from './engine.js';
 export { HookRegistry } from './registry.js';
 export { BackgroundTracker } from './background-tracker.js';
+export {
+  createHookContextFactory,
+  type HookContextFactory,
+  type HookContextFactoryOptions,
+  type PreToolContextOptions,
+  type PostToolContextOptions,
+  type StopContextOptions,
+  type SessionStartContextOptions,
+  type SessionEndContextOptions,
+  type UserPromptSubmitContextOptions,
+  type SubagentStopContextOptions,
+} from './context-factory.js';
 
 // Discovery module
 export {

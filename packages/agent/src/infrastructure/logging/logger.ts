@@ -208,23 +208,46 @@ export class TronLogger {
   }
 
   /**
+   * Normalize log arguments and dispatch to pino and SQLite.
+   * Handles all signature variants: (msg), (msg, data), (data, msg), (msg, error)
+   */
+  private dispatch(
+    level: LogLevel,
+    msgOrData: string | Record<string, unknown>,
+    second?: string | Error | Record<string, unknown>,
+    supportsError = false
+  ): void {
+    const pinoFn = this.pino[level].bind(this.pino);
+
+    if (typeof msgOrData === 'string') {
+      // First arg is string message
+      if (supportsError && second instanceof Error) {
+        // (msg, error) signature
+        pinoFn({ err: second }, msgOrData);
+        this.writeToSqlite(level, msgOrData, undefined, second);
+      } else if (typeof second === 'object' && second !== null) {
+        // (msg, data) signature
+        pinoFn(second as Record<string, unknown>, msgOrData);
+        this.writeToSqlite(level, msgOrData, second as Record<string, unknown>);
+      } else {
+        // (msg) signature only
+        pinoFn(msgOrData);
+        this.writeToSqlite(level, msgOrData);
+      }
+    } else {
+      // First arg is data object: (data, msg) signature
+      const msg = typeof second === 'string' ? second : '';
+      pinoFn(msgOrData, msg);
+      this.writeToSqlite(level, msg, msgOrData);
+    }
+  }
+
+  /**
    * Log at trace level
    * Supports: (msg), (msg, data), and (data, msg) signatures
    */
   trace(msgOrData: string | Record<string, unknown>, msgOrDataSecond?: string | Record<string, unknown>): void {
-    if (typeof msgOrData === 'string') {
-      if (typeof msgOrDataSecond === 'object') {
-        this.pino.trace(msgOrDataSecond, msgOrData);
-        this.writeToSqlite('trace', msgOrData, msgOrDataSecond);
-      } else {
-        this.pino.trace(msgOrData);
-        this.writeToSqlite('trace', msgOrData);
-      }
-    } else {
-      const msg = typeof msgOrDataSecond === 'string' ? msgOrDataSecond : '';
-      this.pino.trace(msgOrData, msg);
-      this.writeToSqlite('trace', msg, msgOrData);
-    }
+    this.dispatch('trace', msgOrData, msgOrDataSecond);
   }
 
   /**
@@ -232,19 +255,7 @@ export class TronLogger {
    * Supports: (msg), (msg, data), and (data, msg) signatures
    */
   debug(msgOrData: string | Record<string, unknown>, msgOrDataSecond?: string | Record<string, unknown>): void {
-    if (typeof msgOrData === 'string') {
-      if (typeof msgOrDataSecond === 'object') {
-        this.pino.debug(msgOrDataSecond, msgOrData);
-        this.writeToSqlite('debug', msgOrData, msgOrDataSecond);
-      } else {
-        this.pino.debug(msgOrData);
-        this.writeToSqlite('debug', msgOrData);
-      }
-    } else {
-      const msg = typeof msgOrDataSecond === 'string' ? msgOrDataSecond : '';
-      this.pino.debug(msgOrData, msg);
-      this.writeToSqlite('debug', msg, msgOrData);
-    }
+    this.dispatch('debug', msgOrData, msgOrDataSecond);
   }
 
   /**
@@ -252,19 +263,7 @@ export class TronLogger {
    * Supports: (msg), (msg, data), and (data, msg) signatures
    */
   info(msgOrData: string | Record<string, unknown>, msgOrDataSecond?: string | Record<string, unknown>): void {
-    if (typeof msgOrData === 'string') {
-      if (typeof msgOrDataSecond === 'object') {
-        this.pino.info(msgOrDataSecond, msgOrData);
-        this.writeToSqlite('info', msgOrData, msgOrDataSecond);
-      } else {
-        this.pino.info(msgOrData);
-        this.writeToSqlite('info', msgOrData);
-      }
-    } else {
-      const msg = typeof msgOrDataSecond === 'string' ? msgOrDataSecond : '';
-      this.pino.info(msgOrData, msg);
-      this.writeToSqlite('info', msg, msgOrData);
-    }
+    this.dispatch('info', msgOrData, msgOrDataSecond);
   }
 
   /**
@@ -272,19 +271,7 @@ export class TronLogger {
    * Supports: (msg), (msg, data), and (data, msg) signatures
    */
   warn(msgOrData: string | Record<string, unknown>, msgOrDataSecond?: string | Record<string, unknown>): void {
-    if (typeof msgOrData === 'string') {
-      if (typeof msgOrDataSecond === 'object') {
-        this.pino.warn(msgOrDataSecond, msgOrData);
-        this.writeToSqlite('warn', msgOrData, msgOrDataSecond);
-      } else {
-        this.pino.warn(msgOrData);
-        this.writeToSqlite('warn', msgOrData);
-      }
-    } else {
-      const msg = typeof msgOrDataSecond === 'string' ? msgOrDataSecond : '';
-      this.pino.warn(msgOrData, msg);
-      this.writeToSqlite('warn', msg, msgOrData);
-    }
+    this.dispatch('warn', msgOrData, msgOrDataSecond);
   }
 
   /**
@@ -292,22 +279,7 @@ export class TronLogger {
    * Supports: (msg), (msg, data), (msg, error), and (data, msg) signatures
    */
   error(msgOrData: string | Record<string, unknown>, msgOrDataOrError?: string | Error | Record<string, unknown>): void {
-    if (typeof msgOrData === 'string') {
-      if (msgOrDataOrError instanceof Error) {
-        this.pino.error({ err: msgOrDataOrError }, msgOrData);
-        this.writeToSqlite('error', msgOrData, undefined, msgOrDataOrError);
-      } else if (typeof msgOrDataOrError === 'object') {
-        this.pino.error(msgOrDataOrError, msgOrData);
-        this.writeToSqlite('error', msgOrData, msgOrDataOrError);
-      } else {
-        this.pino.error(msgOrData);
-        this.writeToSqlite('error', msgOrData);
-      }
-    } else {
-      const msg = typeof msgOrDataOrError === 'string' ? msgOrDataOrError : '';
-      this.pino.error(msgOrData, msg);
-      this.writeToSqlite('error', msg, msgOrData);
-    }
+    this.dispatch('error', msgOrData, msgOrDataOrError, true);
   }
 
   /**
@@ -315,22 +287,7 @@ export class TronLogger {
    * Supports: (msg), (msg, data), (msg, error), and (data, msg) signatures
    */
   fatal(msgOrData: string | Record<string, unknown>, msgOrDataOrError?: string | Error | Record<string, unknown>): void {
-    if (typeof msgOrData === 'string') {
-      if (msgOrDataOrError instanceof Error) {
-        this.pino.fatal({ err: msgOrDataOrError }, msgOrData);
-        this.writeToSqlite('fatal', msgOrData, undefined, msgOrDataOrError);
-      } else if (typeof msgOrDataOrError === 'object') {
-        this.pino.fatal(msgOrDataOrError, msgOrData);
-        this.writeToSqlite('fatal', msgOrData, msgOrDataOrError);
-      } else {
-        this.pino.fatal(msgOrData);
-        this.writeToSqlite('fatal', msgOrData);
-      }
-    } else {
-      const msg = typeof msgOrDataOrError === 'string' ? msgOrDataOrError : '';
-      this.pino.fatal(msgOrData, msg);
-      this.writeToSqlite('fatal', msg, msgOrData);
-    }
+    this.dispatch('fatal', msgOrData, msgOrDataOrError, true);
   }
 
   /**

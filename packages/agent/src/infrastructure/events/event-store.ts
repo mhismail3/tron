@@ -21,6 +21,7 @@ import {
   type SearchResult,
   type TokenUsage,
 } from './types.js';
+import { createEventFactory } from './event-factory.js';
 import { reconstructFromEvents } from './message-reconstructor.js';
 import { calculateCost } from '../usage/index.js';
 import { createLogger } from '../logging/index.js';
@@ -146,24 +147,19 @@ export class EventStore {
       tags: options.tags,
     });
 
-    // Create root event (provider stored in event payload for historical record)
-    const rootEvent: SessionStartEvent = {
-      id: EventId(`evt_${this.generateId()}`),
-      parentId: null,
+    // Create root event using factory (provider stored in event payload for historical record)
+    const factory = createEventFactory({
       sessionId: session.id,
       workspaceId: workspace.id,
-      timestamp: new Date().toISOString(),
-      type: 'session.start',
-      sequence: 0,
-      payload: {
-        workingDirectory: options.workingDirectory,
-        model: options.model,
-        ...(options.provider && { provider: options.provider }),
-        title: options.title,
-        // Include any additional metadata in the payload
-        ...options.metadata,
-      },
-    };
+      idGenerator: () => this.generateId(),
+    });
+    const rootEvent: SessionStartEvent = factory.createSessionStart({
+      workingDirectory: options.workingDirectory,
+      model: options.model,
+      provider: options.provider,
+      title: options.title,
+      metadata: options.metadata,
+    });
 
     await this.backend.insertEvent(rootEvent);
     await this.backend.updateSessionRoot(session.id, rootEvent.id);
@@ -207,17 +203,18 @@ export class EventStore {
       // Get next sequence number (atomic within transaction)
       const sequence = await this.backend.getNextSequence(options.sessionId);
 
-      // Create event
-      const event: SessionEvent = {
-        id: EventId(`evt_${this.generateId()}`),
-        parentId,
+      // Create event using factory
+      const factory = createEventFactory({
         sessionId: options.sessionId,
         workspaceId: session.workspaceId,
-        timestamp: new Date().toISOString(),
+        idGenerator: () => this.generateId(),
+      });
+      const event = factory.createEvent({
         type: options.type,
+        parentId,
         sequence,
         payload: options.payload,
-      } as SessionEvent;
+      });
 
       await this.backend.insertEvent(event);
 
@@ -396,21 +393,18 @@ export class EventStore {
         forkFromEventId: fromEventId,
       });
 
-      // Create fork event
-      const forkEvent: SessionForkEvent = {
-        id: EventId(`evt_${this.generateId()}`),
-        parentId: fromEventId, // Points to the event we forked from
+      // Create fork event using factory
+      const factory = createEventFactory({
         sessionId: forkedSession.id,
         workspaceId: sourceSession.workspaceId,
-        timestamp: new Date().toISOString(),
-        type: 'session.fork',
-        sequence: 0,
-        payload: {
-          sourceSessionId: sourceSession.id,
-          sourceEventId: fromEventId,
-          name: options?.name,
-        },
-      };
+        idGenerator: () => this.generateId(),
+      });
+      const forkEvent: SessionForkEvent = factory.createSessionFork({
+        parentId: fromEventId, // Points to the event we forked from
+        sourceSessionId: sourceSession.id,
+        sourceEventId: fromEventId,
+        name: options?.name,
+      });
 
       await this.backend.insertEvent(forkEvent);
       await this.backend.updateSessionRoot(forkedSession.id, forkEvent.id);

@@ -8,7 +8,7 @@
 import type { TronTool, TronToolResult } from '@core/types/index.js';
 import type { HookEngine } from '@capabilities/extensions/hooks/engine.js';
 import type { ContextManager } from '@context/context-manager.js';
-import type { PreToolHookContext, PostToolHookContext } from '@capabilities/extensions/hooks/types.js';
+import { createHookContextFactory, type HookContextFactory } from '@capabilities/extensions/hooks/index.js';
 import type {
   ToolExecutor as IToolExecutor,
   ToolExecutorDependencies,
@@ -16,7 +16,6 @@ import type {
 } from './internal-types.js';
 import type { ToolExecutionRequest, ToolExecutionResponse } from './types.js';
 import type { GuardrailEngine } from '@capabilities/guardrails/engine.js';
-import type { SessionState } from '@capabilities/guardrails/types.js';
 import { createLogger, categorizeError } from '@infrastructure/logging/index.js';
 
 const logger = createLogger('agent:tools');
@@ -32,7 +31,7 @@ export class AgentToolExecutor implements IToolExecutor {
   private readonly sessionId: string;
   private readonly getAbortSignal: () => AbortSignal | undefined;
   private readonly guardrailEngine: GuardrailEngine | undefined;
-  private readonly getSessionState: (() => SessionState | undefined) | undefined;
+  private readonly hookContextFactory: HookContextFactory;
 
   private activeTool: string | null = null;
 
@@ -44,7 +43,7 @@ export class AgentToolExecutor implements IToolExecutor {
     this.sessionId = deps.sessionId;
     this.getAbortSignal = deps.getAbortSignal;
     this.guardrailEngine = deps.guardrailEngine;
-    this.getSessionState = deps.getSessionState;
+    this.hookContextFactory = createHookContextFactory({ sessionId: deps.sessionId });
   }
 
   /**
@@ -97,11 +96,10 @@ export class AgentToolExecutor implements IToolExecutor {
 
     // Evaluate guardrails FIRST (before hooks)
     if (this.guardrailEngine) {
-      const sessionState = this.getSessionState?.();
       const evaluation = await this.guardrailEngine.evaluate({
         toolName: request.toolName,
         toolArguments: request.arguments,
-        sessionState,
+        sessionState: request.sessionState,
         sessionId: this.sessionId,
         toolCallId: request.toolCallId,
       });
@@ -249,15 +247,11 @@ export class AgentToolExecutor implements IToolExecutor {
   private async executePreHooks(
     request: ToolExecutionRequest
   ): Promise<{ blocked: boolean; reason?: string; modifiedArgs?: Record<string, unknown> }> {
-    const preContext: PreToolHookContext = {
-      hookType: 'PreToolUse',
-      sessionId: this.sessionId,
-      timestamp: new Date().toISOString(),
-      data: {},
+    const preContext = this.hookContextFactory.createPreToolContext({
       toolName: request.toolName,
       toolArguments: request.arguments,
       toolCallId: request.toolCallId,
-    };
+    });
 
     const preResult = await this.hookEngine.executeWithEvents('PreToolUse', preContext, this.eventEmitter);
 
@@ -295,16 +289,12 @@ export class AgentToolExecutor implements IToolExecutor {
     result: TronToolResult,
     duration: number
   ): Promise<void> {
-    const postContext: PostToolHookContext = {
-      hookType: 'PostToolUse',
-      sessionId: this.sessionId,
-      timestamp: new Date().toISOString(),
-      data: {},
+    const postContext = this.hookContextFactory.createPostToolContext({
       toolName: request.toolName,
       toolCallId: request.toolCallId,
       result,
       duration,
-    };
+    });
 
     await this.hookEngine.executeWithEvents('PostToolUse', postContext, this.eventEmitter);
   }

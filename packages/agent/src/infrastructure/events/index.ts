@@ -131,3 +131,13 @@ export {
   type ListSessionsOptions as EventListSessionsOptions,
   type IncrementCountersOptions,
 } from './sqlite/facade.js';
+
+// Event factory for consistent event construction
+export {
+  createEventFactory,
+  type EventFactory,
+  type EventFactoryOptions,
+  type SessionStartOptions,
+  type SessionForkOptions,
+  type GenericEventOptions,
+} from './event-factory.js';

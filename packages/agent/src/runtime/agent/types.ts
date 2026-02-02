@@ -125,6 +125,8 @@ export interface ToolExecutionRequest {
   toolCallId: string;
   toolName: string;
   arguments: Record<string, unknown>;
+  /** Optional session state for guardrail evaluation */
+  sessionState?: import('@capabilities/guardrails/types.js').SessionState;
 }
 
 /**
